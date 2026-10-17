@@ -3099,6 +3099,7 @@ describe('chat interactive runtime', () => {
       await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：yolo）'));
       h.send('\x1b'); await waitForInputTurnReady(h);
       expect(h.output.normalized).toContain('已取消模式切换');
+      expect(JSON.parse(readFileSync(join(configDir, 'cli-permission-mode.json'), 'utf8')).mode).toBe('yolo');
       h.send('/mode plan\r');
       await waitFor(() => expect(h.output.normalized).toContain('权限模式已切换为 plan'));
       await waitForInputTurnReady(h); h.send('/mode\r');
@@ -3106,6 +3107,7 @@ describe('chat interactive runtime', () => {
       h.send('\x1b[A'); h.send('\r');
       await waitForInputTurnReady(h);
       expect(h.output.normalized).toContain('权限模式已切换为 auto');
+      expect(JSON.parse(readFileSync(join(configDir, 'cli-permission-mode.json'), 'utf8')).mode).toBe('auto');
       expectSingleFooter(h.screen.lines());
       h.send('/exit\r'); await pending;
     } finally {

@@ -1019,7 +1019,8 @@ export class InputReader {
                                 else if (action === 'shift-tab') {
                                     if (this.onModeCycle) {
                                         const nextMode = this.onModeCycle();
-                                        stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+                                        if (nextMode)
+                                            stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
                                         needsFinalRedraw = true;
                                     }
                                 }
@@ -1165,7 +1166,8 @@ export class InputReader {
                     if (action === 'shift-tab') {
                         if (this.onModeCycle) {
                             const nextMode = this.onModeCycle();
-                            stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+                            if (nextMode)
+                                stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
                             redraw();
                         }
                         return true;

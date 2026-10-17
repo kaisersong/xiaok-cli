@@ -113,7 +113,7 @@ export declare class InputReader {
         resume(): void;
     };
     setSkills(skills: SkillMeta[]): void;
-    setModeCycleHandler(handler: () => PermissionMode): void;
+    setModeCycleHandler(handler: () => PermissionMode | null): void;
     setTranscriptLogger(logger: TranscriptLogger | undefined): void;
     setStatusLineProvider(provider: (() => string[]) | undefined): void;
     setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => boolean | void) | undefined): void;

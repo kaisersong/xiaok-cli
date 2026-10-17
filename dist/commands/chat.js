@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
+import { isPermissionMode, loadLastPermissionMode, saveLastPermissionMode, resolveInitialPermissionMode } from './chat-permission-mode.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
@@ -187,7 +188,8 @@ async function runChat(initialInput, opts) {
         process.exit(1);
     }
     // 检测 CI 环境
-    const autoMode = opts.auto || opts.yolo || !isTTY();
+    const rememberMode = isTTY() && initialInput === undefined && !opts.print && !opts.json;
+    const initialPermissionMode = resolveInitialPermissionMode({ auto: opts.auto, yolo: opts.yolo, interactive: isTTY() }, rememberMode ? loadLastPermissionMode() : null);
     if (!isTTY() && !opts.auto && !opts.yolo) {
         console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
     }
@@ -743,7 +745,7 @@ async function runChat(initialInput, opts) {
     const persistedPermissionRules = mergeRules(persistedPermissionSettings);
     const permissionManager = new PermissionManager({
         cwd,
-        mode: opts.yolo ? 'yolo' : autoMode ? 'auto' : 'default',
+        mode: initialPermissionMode,
         allowRules: persistedPermissionRules.allowRules,
         denyRules: persistedPermissionRules.denyRules,
     });
@@ -758,8 +760,27 @@ async function runChat(initialInput, opts) {
     if (persistedSandboxAllowedPaths.length > 0) {
         platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
     }
+    const modePreferenceLog = createLogger('cli:permission-mode', { stderr: false });
+    let modeSaveFailed = false;
+    const rememberPermissionMode = (mode) => {
+        try {
+            saveLastPermissionMode(mode);
+            modeSaveFailed = false;
+            return true;
+        }
+        catch {
+            modeSaveFailed = true;
+            modePreferenceLog.warn('permission_mode_save_failed');
+            return false;
+        }
+    };
+    // Explicit interactive startup flags also count as the latest user selection.
+    if (rememberMode && (opts.auto || opts.yolo))
+        rememberPermissionMode(initialPermissionMode);
     inputReader.setModeCycleHandler(() => {
         const nextMode = PermissionManager.nextMode(permissionManager.getMode());
+        if (!rememberPermissionMode(nextMode))
+            return null;
         permissionManager.setMode(nextMode);
         statusBar.updateMode(nextMode);
         return nextMode;
@@ -1042,6 +1063,8 @@ async function runChat(initialInput, opts) {
         const summaryLine = getCurrentIntentSummaryLine();
         const statusLine = statusBar.getStatusLine();
         const lines = [];
+        if (modeSaveFailed)
+            lines.push('权限模式保存失败，请检查配置目录权限。');
         if (summaryLine) {
             lines.push(summaryLine);
         }
@@ -3344,8 +3367,12 @@ async function runChat(initialInput, opts) {
                     }
                     requestedMode = selected;
                 }
-                if (!['default', 'auto', 'plan', 'yolo'].includes(requestedMode)) {
+                if (!isPermissionMode(requestedMode)) {
                     writeCommandOutput(trimmed, '未知权限模式，请执行 /mode 选择。\n\n');
+                    continue;
+                }
+                if (!rememberPermissionMode(requestedMode)) {
+                    writeCommandOutput(trimmed, '权限模式保存失败，本次未切换；请检查配置目录权限。\n\n');
                     continue;
                 }
                 permissionManager.setMode(requestedMode);
@@ -3854,7 +3881,7 @@ export function registerChatCommands(program) {
         .command('chat', { isDefault: true })
         .description('启动 AI skill 任务交付工作台（默认命令）')
         .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
-        .option('--yolo', '跳过所有 CLI 工具审批与命令风险拦截（包括强推和删除），仅本次进程生效')
+        .option('--yolo', '跳过所有 CLI 工具审批与命令风险拦截（包括强推和删除），交互模式下记住本次选择')
         .option('--dry-run', '打印工具调用但不执行')
         .option('-p, --print', '以纯文本模式输出单次结果')
         .option('--json', '以 JSON 模式输出单次结果')

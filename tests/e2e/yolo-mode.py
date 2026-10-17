@@ -77,7 +77,8 @@ def run(entry, activation):
         start()
         if activation == 'slash':
             send('/mode yolo'); wait_for(lambda s: '权限模式已切换为 yolo' in s and helpers.has_ready_input_prompt(s), 'slash-enabled')
-        send('/mode'); wait_for(lambda s: '当前权限模式：yolo' in s, 'mode-status')
+        send('/mode'); wait_for(lambda s: '选择权限模式（当前：yolo）' in s, 'mode-status')
+        tty.send_key('Escape'); wait_for(helpers.has_ready_input_prompt, 'mode-cancel')
         send('Run the synthetic local tag probe')
         wait_for(lambda s: 'YOLO_FORCE_DONE' in s and helpers.has_ready_input_prompt(s), 'force-executed')
         assert git('rev-parse', 'refs/tags/v1.2.3', cwd=remote) == head
@@ -90,7 +91,8 @@ def run(entry, activation):
         assert prompts() == 0
         session_id = exit_session(); tty.extra_args = ['--resume', session_id]
         start(); send('/mode')
-        wait_for(lambda s: '当前权限模式：default' in s, 'resume-default')
+        wait_for(lambda s: '选择权限模式（当前：yolo）' in s, 'resume-remembered-yolo')
+        tty.send_key('Escape'); wait_for(helpers.has_ready_input_prompt, 'resume-menu-cancel')
         send('/mode auto'); wait_for(lambda s: '权限模式已切换为 auto' in s, 'mode-auto')
         send('Run the tag probe with YOLO disabled')
         wait_for(lambda s: '允许一次' in s and '每次都会询问' in s, 'restored-risk-prompt')
@@ -103,7 +105,7 @@ def run(entry, activation):
         exit_session()
         (root / 'result.json').write_text(json.dumps({'passed': True, 'activation': activation, 'entry': str(entry),
             'realLocalRemoteTagUpdated': True, 'noPromptsInYolo': True, 'executorBypass': True,
-            'explicitResume': True, 'implicitResumeDefault': True, 'autoStillConfirms': True}, indent=2))
+            'explicitResume': True, 'implicitResumeRememberedYolo': True, 'autoStillConfirms': True}, indent=2))
         print(f'PASS: {activation}; force push actually executed; no approval; resume and revocation verified')
     finally:
         tty.stop(); server.close(); remaining = list(owned); deadline = time.monotonic() + 5

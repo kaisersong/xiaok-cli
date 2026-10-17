@@ -118,3 +118,21 @@ describe('CSI-u equivalents use existing input actions', () => {
     } finally { abort.abort(); await pending; capture?.stop(); h.restore(); }
   });
 });
+
+
+describe('mode change persistence failure', () => {
+  it('keeps the draft and does not claim a rejected mode switch succeeded', async () => {
+    const h = createTtyHarness();
+    const reader = new InputReader();
+    const cycle = vi.fn(() => null);
+    reader.setModeCycleHandler(cycle);
+    const abort = new AbortController();
+    const pending = reader.read('> ', { signal: abort.signal });
+    try {
+      h.send('draft'); h.send('\x1b[Z');
+      expect(cycle).toHaveBeenCalledOnce();
+      expect(h.output.normalized).not.toContain('权限模式已切换为');
+      h.send('next\r'); expect(await pending).toBe('draftnext');
+    } finally { abort.abort(); await pending; h.restore(); }
+  });
+});

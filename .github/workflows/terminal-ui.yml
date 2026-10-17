@@ -5,6 +5,9 @@ on:
     paths:
       - 'src/ui/**'
       - 'src/commands/chat.ts'
+      - 'src/commands/chat-permission-mode.ts'
+      - 'tests/commands/chat-permission-mode.test.ts'
+      - 'tests/e2e/mode-persistence.py'
       - 'src/commands/registry.ts'
       - 'src/ai/memory/layered-store.ts'
       - 'src/utils/logger.ts'
@@ -25,6 +28,9 @@ on:
     paths:
       - 'src/ui/**'
       - 'src/commands/chat.ts'
+      - 'src/commands/chat-permission-mode.ts'
+      - 'tests/commands/chat-permission-mode.test.ts'
+      - 'tests/e2e/mode-persistence.py'
       - 'src/commands/registry.ts'
       - 'src/ai/memory/layered-store.ts'
       - 'src/utils/logger.ts'
@@ -70,6 +76,7 @@ jobs:
           .test-dist/tests/ui/input-keyboard-protocol.test.js
           .test-dist/tests/ui/input.test.js
           .test-dist/tests/ui/mode-selector.test.js
+          .test-dist/tests/commands/chat-permission-mode.test.js
           .test-dist/tests/ui/repl-renderer.test.js
           .test-dist/tests/ui/keyboard-protocol.test.js
           .test-dist/tests/ui/windows-input-handoff.test.js
@@ -107,6 +114,7 @@ jobs:
           python tests/e2e/footer-return.py
           python tests/e2e/memory-background-footer.py
           python tests/e2e/mode-selector.py
+          python tests/e2e/mode-persistence.py
       - name: Retain synthetic Thinking draft failure evidence
         if: failure() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -117,4 +125,5 @@ jobs:
             /tmp/xiaok-footer-return-*/
             /tmp/xiaok-memory-footer-*/
             /tmp/xiaok-mode-selector-*/
+            /tmp/xiaok-mode-persistence-*/
           retention-days: 7

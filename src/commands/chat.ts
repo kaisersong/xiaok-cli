@@ -9,11 +9,12 @@ import type { ModelAdapter, MessageBlock, UsageStats } from '../types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import type { IntentPlanDraft } from '../ai/intent-delegation/types.js';
 import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
+import { isPermissionMode, loadLastPermissionMode, saveLastPermissionMode, resolveInitialPermissionMode } from './chat-permission-mode.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
 import { createChatAdapterWithLoginBootstrap } from './chat-login-bootstrap.js';
-import { PermissionManager } from '../ai/permissions/manager.js';
+import { PermissionManager, type PermissionMode } from '../ai/permissions/manager.js';
 import { ToolRegistry, type ToolObservation } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
@@ -310,7 +311,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 检测 CI 环境
-  const autoMode = opts.auto || opts.yolo || !isTTY();
+  const rememberMode = isTTY() && initialInput === undefined && !opts.print && !opts.json;
+  const initialPermissionMode = resolveInitialPermissionMode(
+    { auto: opts.auto, yolo: opts.yolo, interactive: isTTY() },
+    rememberMode ? loadLastPermissionMode() : null,
+  );
   if (!isTTY() && !opts.auto && !opts.yolo) {
     console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
   }
@@ -940,7 +945,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const permissionManager = new PermissionManager({
     cwd,
-    mode: opts.yolo ? 'yolo' : autoMode ? 'auto' : 'default',
+    mode: initialPermissionMode,
     allowRules: persistedPermissionRules.allowRules,
     denyRules: persistedPermissionRules.denyRules,
   });
@@ -955,8 +960,24 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   if (persistedSandboxAllowedPaths.length > 0) {
     platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
   }
+  const modePreferenceLog = createLogger('cli:permission-mode', { stderr: false });
+  let modeSaveFailed = false;
+  const rememberPermissionMode = (mode: PermissionMode): boolean => {
+    try {
+      saveLastPermissionMode(mode);
+      modeSaveFailed = false;
+      return true;
+    } catch {
+      modeSaveFailed = true;
+      modePreferenceLog.warn('permission_mode_save_failed');
+      return false;
+    }
+  };
+  // Explicit interactive startup flags also count as the latest user selection.
+  if (rememberMode && (opts.auto || opts.yolo)) rememberPermissionMode(initialPermissionMode);
   inputReader.setModeCycleHandler(() => {
     const nextMode = PermissionManager.nextMode(permissionManager.getMode());
+    if (!rememberPermissionMode(nextMode)) return null;
     permissionManager.setMode(nextMode);
     statusBar.updateMode(nextMode);
     return nextMode;
@@ -1237,6 +1258,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     const summaryLine = getCurrentIntentSummaryLine();
     const statusLine = statusBar.getStatusLine();
     const lines: string[] = [];
+    if (modeSaveFailed) lines.push('权限模式保存失败，请检查配置目录权限。');
     if (summaryLine) {
       lines.push(summaryLine);
     }
@@ -3780,12 +3802,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         requestedMode = selected;
       }
 
-      if (!['default', 'auto', 'plan', 'yolo'].includes(requestedMode)) {
+      if (!isPermissionMode(requestedMode)) {
         writeCommandOutput(trimmed, '未知权限模式，请执行 /mode 选择。\n\n');
         continue;
       }
 
-      permissionManager.setMode(requestedMode as 'default' | 'auto' | 'plan' | 'yolo');
+      if (!rememberPermissionMode(requestedMode)) {
+        writeCommandOutput(trimmed, '权限模式保存失败，本次未切换；请检查配置目录权限。\n\n');
+        continue;
+      }
+      permissionManager.setMode(requestedMode);
       statusBar.updateMode(requestedMode);
       writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
       continue;
@@ -4344,7 +4370,7 @@ export function registerChatCommands(program: Command): void {
     .command('chat', { isDefault: true })
     .description('启动 AI skill 任务交付工作台（默认命令）')
     .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
-    .option('--yolo', '跳过所有 CLI 工具审批与命令风险拦截（包括强推和删除），仅本次进程生效')
+    .option('--yolo', '跳过所有 CLI 工具审批与命令风险拦截（包括强推和删除），交互模式下记住本次选择')
     .option('--dry-run', '打印工具调用但不执行')
     .option('-p, --print', '以纯文本模式输出单次结果')
     .option('--json', '以 JSON 模式输出单次结果')

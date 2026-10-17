@@ -47,12 +47,14 @@ describe('explicit YOLO authority', () => {
     expect(host).toHaveBeenCalledTimes(1);
     await expect(piped.execute({ command: inertBlocked }, { signal: AbortSignal.abort() } as any)).rejects.toThrow();
   });
-  it('does not add YOLO to the ordinary keyboard cycle and exposes explicit slash help', () => {
+  it('keeps the ordinary keyboard cycle and exposes one explicit mode selector', () => {
     expect(PermissionManager.nextMode('default')).toBe('auto');
     expect(PermissionManager.nextMode('auto')).toBe('plan');
     expect(PermissionManager.nextMode('plan')).toBe('default');
     expect(PermissionManager.nextMode('yolo')).toBe('default');
-    expect(getChatSlashCommands().some(c => c.cmd === '/mode yolo')).toBe(true);
-    expect(buildChatHelpText([])).toContain('yolo');
+    expect(getChatSlashCommands().filter(c => c.cmd === '/mode')).toHaveLength(1);
+    expect(getChatSlashCommands().some(c => c.cmd.startsWith('/mode '))).toBe(false);
+    expect(buildChatHelpText([])).toContain('/mode');
+    expect(buildChatHelpText([])).not.toContain('/mode yolo');
   });
 });

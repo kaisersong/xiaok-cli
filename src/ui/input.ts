@@ -304,7 +304,7 @@ export class InputReader {
   private menuIdx = 0;
   private renderedMenuRows = 0;
   private skills: SkillMeta[] = [];
-  private onModeCycle?: () => PermissionMode;
+  private onModeCycle?: () => PermissionMode | null;
   private transcriptLogger?: TranscriptLogger;
   private statusLineProvider?: () => string[];
   private scrollPromptRenderer?: (frame: ScrollPromptRenderFrame) => boolean | void;
@@ -373,7 +373,7 @@ export class InputReader {
     this.skills = skills;
   }
 
-  setModeCycleHandler(handler: () => PermissionMode): void {
+  setModeCycleHandler(handler: () => PermissionMode | null): void {
     this.onModeCycle = handler;
   }
 
@@ -1147,7 +1147,7 @@ export class InputReader {
                 } else if (action === 'shift-tab') {
                   if (this.onModeCycle) {
                     const nextMode = this.onModeCycle();
-                    stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+                    if (nextMode) stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
                     needsFinalRedraw = true;
                   }
                 } else if (action === 'history-prev') {
@@ -1298,7 +1298,7 @@ export class InputReader {
           if (action === 'shift-tab') {
             if (this.onModeCycle) {
               const nextMode = this.onModeCycle();
-              stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+              if (nextMode) stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
               redraw();
             }
             return true;

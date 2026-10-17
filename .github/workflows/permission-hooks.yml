@@ -19,6 +19,9 @@ on:
       - 'tests/e2e/exact-command-approval.py'
       - 'src/commands/chat-permission.ts'
       - 'src/commands/chat.ts'
+      - 'src/commands/chat-permission-mode.ts'
+      - 'tests/commands/chat-permission-mode.test.ts'
+      - 'tests/e2e/mode-persistence.py'
       - 'src/ui/resume-history.ts'
       - 'src/ui/render.ts'
       - 'tests/ui/resume-history.test.ts'
@@ -56,6 +59,9 @@ on:
       - 'tests/e2e/exact-command-approval.py'
       - 'src/commands/chat-permission.ts'
       - 'src/commands/chat.ts'
+      - 'src/commands/chat-permission-mode.ts'
+      - 'tests/commands/chat-permission-mode.test.ts'
+      - 'tests/e2e/mode-persistence.py'
       - 'src/ui/resume-history.ts'
       - 'src/ui/render.ts'
       - 'tests/ui/resume-history.test.ts'
@@ -105,6 +111,7 @@ jobs:
           .test-dist/tests/ai/tools/index.test.js
           .test-dist/tests/ai/permissions
           .test-dist/tests/ui/permission-prompt.test.js
+          .test-dist/tests/commands/chat-permission-mode.test.js
           .test-dist/tests/ui/input.test.js
           .test-dist/tests/ai/tools/bash-sudo.test.js
           .test-dist/tests/commands/chat-permission.test.js
