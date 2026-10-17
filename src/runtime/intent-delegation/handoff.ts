@@ -1,5 +1,6 @@
 import type { IntentLedgerRecord, SessionIntentLedger } from './types.js';
 import { cloneIntentRecord } from './types.js';
+import type {StoredIntentRecordInput,NormalizedStoredIntentRecord} from './stored-intent-clone.js';
 
 /** Only selection/stage/flag DATA consumed by the pending-handoff query. */
 export interface PendingHandoffIntentData {
@@ -54,10 +55,12 @@ export function hasPendingFreshContextHandoff(
   return false;
 }
 
+export function consumeFreshContextHandoff(intent: IntentLedgerRecord, now?: number): IntentLedgerRecord;
+export function consumeFreshContextHandoff(intent: StoredIntentRecordInput, now?: number): NormalizedStoredIntentRecord;
 export function consumeFreshContextHandoff(
-  intent: IntentLedgerRecord,
+  intent: StoredIntentRecordInput,
   now = Date.now(),
-): IntentLedgerRecord {
+): NormalizedStoredIntentRecord {
   const next = cloneIntentRecord(intent);
   const activeStage = next.stages.find((stage) => stage.stageId === next.activeStageId);
   if (!activeStage?.needsFreshContextHandoff) {

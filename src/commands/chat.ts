@@ -2184,7 +2184,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const isTerminalIntentStatus = (
-    status: IntentLedgerRecord['overallStatus'] | undefined,
+    status: unknown,
   ): boolean => status === 'completed' || status === 'failed' || status === 'cancelled';
 
   const refreshIntentLedger = async (): Promise<void> => {
@@ -2248,7 +2248,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     /^(补充|补一下|补一个|再补充|这里还有|答案是|是|不是|可以|不可以|用中文|用英文|好的，继续|继续吧)/u
   ).test(input.trim());
 
-  const getWaitingUserIntentForInput = (input: string): IntentLedgerRecord | undefined => {
+  const getWaitingUserIntentForInput = (input: string): (typeof currentIntentLedger.intents)[number] | undefined => {
     if (!currentIntentLedger.activeIntentId) {
       return undefined;
     }

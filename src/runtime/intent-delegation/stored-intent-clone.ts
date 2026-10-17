@@ -25,6 +25,7 @@ export interface StoredStageInput {
   riskTier?: unknown;
   status?: unknown;
   activeStepId?: unknown;
+  latestArtifactId?: unknown;
   structuralValidation?: unknown;
   semanticValidation?: unknown;
   needsFreshContextHandoff?: unknown;

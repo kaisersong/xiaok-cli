@@ -120,11 +120,13 @@ export function applyIntentStepUpdate(intent:StoredIntentRecordInput,input:Inten
   return next;
 }
 
+export function recordStageArtifact(intent: IntentLedgerRecord, artifact: StageArtifactRecord, now?: number): IntentLedgerRecord;
+export function recordStageArtifact(intent: StoredIntentRecordInput, artifact: StageArtifactRecord, now?: number): NormalizedStoredIntentRecord;
 export function recordStageArtifact(
-  intent: IntentLedgerRecord,
+  intent: StoredIntentRecordInput,
   artifact: StageArtifactRecord,
   now = Date.now(),
-): IntentLedgerRecord {
+): NormalizedStoredIntentRecord {
   const next = cloneIntentRecord(intent);
   const activeStage = next.stages.find((stage) => stage.stageId === artifact.stageId);
   next.artifacts = [...(next.artifacts ?? []), { ...artifact }];
