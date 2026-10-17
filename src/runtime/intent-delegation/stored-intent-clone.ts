@@ -56,6 +56,7 @@ export interface StoredIntentRecordInput {
   segmentationConfidence?: unknown;
   stages?: StoredStageInput[] | null;
   activeStageId?: unknown;
+  producerReports?: unknown;
   executionTerminals?: object[] | null;
   providedSourcePaths?: string[] | null;
   artifacts?: object[] | null;

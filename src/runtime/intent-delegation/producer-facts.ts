@@ -24,11 +24,16 @@ export function captureIntentProducerRequest(raw:IntentProducerActionInput&{leas
  return {input,lease:lease.value as SessionExecutionLease};
 }
 export function intentProducerLedgerHash(ledger:unknown):string{return createHash('sha256').update(json(captureIntentData(ledger))).digest('hex');}
-export function intentProducerRouteVector(ledger:PersistedSessionSnapshot['intentDelegation']):string{
+export interface IntentProducerRouteData {
+ readonly intents:readonly {readonly intentId:string}[];
+ readonly latestPlan?:{readonly intentId:string}|null;
+ readonly activeIntentId?:string;
+}
+export function intentProducerRouteVector(ledger:IntentProducerRouteData|undefined):string{
  if(!ledger)throw Error('intent_producer_session');const ids=new Set(ledger.intents.map(i=>i.intentId));if(ledger.latestPlan)ids.add(ledger.latestPlan.intentId);if(ledger.activeIntentId)ids.add(ledger.activeIntentId);
  return json([...ids].sort().map(ownerId=>({ownerId,route:readInstalledCurrentOwner({ownerKind:'intent',ownerId})})));
 }
-export function assertIntentProducerRoutesCurrent(ledger:PersistedSessionSnapshot['intentDelegation'],original:string):void{if(intentProducerRouteVector(ledger)!==original)throw Error('intent_producer_route_changed');}
+export function assertIntentProducerRoutesCurrent(ledger:IntentProducerRouteData|undefined,original:string):void{if(intentProducerRouteVector(ledger)!==original)throw Error('intent_producer_route_changed');}
 /** Called only by actual SessionStore primitive under its original lease/save lock.
  * These are model reports, never proof of a producer side effect or current business. */
 export function applyIntentProducerAction(previous:PersistedSessionSnapshot,input:IntentProducerActionInput,originalRoutes:string):PersistedSessionSnapshot{

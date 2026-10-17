@@ -1,3 +1,5 @@
+import type { StoredSessionSnapshot } from './stored-snapshot-types.js';
+export type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 import { validateCompoundOperationLedger, mergeCompoundOperationLedgers, type CompoundOperationLedger } from '../../../runtime/sol-pi/compound-operation.js';
 import { isDeepStrictEqual } from 'node:util';
 import { validateSemanticCompactionLedger, mergeSemanticCompactionLedgers, type SemanticCompactionLedger } from '../../../runtime/sol-pi/semantic-compaction-ledger.js';
@@ -61,9 +63,9 @@ export function isKimiK3DurableModel(
   return model === 'k3' || model === 'k3-256k';
 }
 
-export function toDurableSessionSnapshot(
-  snapshot: PersistedSessionSnapshot,
-): PersistedSessionSnapshot {
+export function toDurableSessionSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export function toDurableSessionSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot;
+export function toDurableSessionSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot {
   const messages = structuredClone(snapshot.messages);
   const strictKimiModel = isKimiK3DurableModel(snapshot.model);
 
@@ -99,6 +101,15 @@ export function toDurableSessionSnapshot(
 
 export function assertKimiK3DurableResumeSupported(
   snapshot: PersistedSessionSnapshot,
+): void;
+export function assertKimiK3DurableResumeSupported(
+  snapshot: StoredSessionSnapshot,
+): void;
+export function assertKimiK3DurableResumeSupported(
+  snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>,
+): void;
+export function assertKimiK3DurableResumeSupported(
+  snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>,
 ): void {
   if (
     isKimiK3DurableModel(snapshot.model)
@@ -111,6 +122,18 @@ export function assertKimiK3DurableResumeSupported(
 export function assertKimiK3TargetResumeSupported(
   strictKimiTarget: boolean,
   snapshot: PersistedSessionSnapshot,
+): void;
+export function assertKimiK3TargetResumeSupported(
+  strictKimiTarget: boolean,
+  snapshot: StoredSessionSnapshot,
+): void;
+export function assertKimiK3TargetResumeSupported(
+  strictKimiTarget: boolean,
+  snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>,
+): void;
+export function assertKimiK3TargetResumeSupported(
+  strictKimiTarget: boolean,
+  snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>,
 ): void {
   if (
     (strictKimiTarget || isKimiK3DurableModel(snapshot.model))
@@ -128,10 +151,12 @@ export interface SessionCompareAndSave {
   lease: SessionExecutionLease;
 }
 export interface SessionCommitReceipt { storeRevision: number; historyDigest: string }
-export function computeSessionHistoryDigest(snapshot: Pick<PersistedSessionSnapshot, 'messages'>): string {
+export function computeSessionHistoryDigest(snapshot: Pick<StoredSessionSnapshot, 'messages'>): string {
   return createHash('sha256').update(JSON.stringify(snapshot.messages)).digest('hex');
 }
-export function prepareSessionStoreCommit(previous: PersistedSessionSnapshot | null, next: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: PersistedSessionSnapshot): PersistedSessionSnapshot {
+export function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): PersistedSessionSnapshot;
+export function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): StoredSessionSnapshot;
+export function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): StoredSessionSnapshot {
   const revision = previous?.storeRevision ?? 0;
   if (!Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) throw Error('session_store_revision_invalid');
   if (cas && (cas.expectedStoreRevision !== revision || cas.expectedHistoryDigest !== computeSessionHistoryDigest(previous ?? { messages: [] }))) throw Error('session_store_cas_conflict');

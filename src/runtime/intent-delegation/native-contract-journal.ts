@@ -64,7 +64,8 @@ export function parseIntentNativeContracts(raw:unknown,sessionId:string):IntentN
   return {...value,contract} as IntentNativeContractRecord;
  });return freeze(result);
 }
-export function assertIntentNativeJournalRetained(previous:SessionIntentLedger|undefined,next:SessionIntentLedger|undefined,sessionId:string,nativeMutation=false):void{
+export interface IntentNativeRetentionData {readonly nativeContracts?:unknown}
+export function assertIntentNativeJournalRetained(previous:IntentNativeRetentionData|undefined,next:IntentNativeRetentionData|undefined,sessionId:string,nativeMutation=false):void{
  const before=parseIntentNativeContracts(previous?.nativeContracts,sessionId),after=parseIntentNativeContracts(next?.nativeContracts,sessionId);
  if(!nativeMutation&&!isDeepStrictEqual(before,after))throw Error('intent_native_requires_primitive');
 }
