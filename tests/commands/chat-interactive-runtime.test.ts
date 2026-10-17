@@ -1439,7 +1439,10 @@ describe('chat interactive runtime', () => {
           await waitFor(() => {
             if (startupError) throw startupError;
             expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
-          });
+          // Repeated startup on the minimum Windows Node can outlast the
+          // default 5s budget. Match waitForInputTurnReady's startup budget;
+          // restoring stdin before attachment lets late startup see real EOF.
+          }, { timeoutMs: 3_000 });
           await waitForInputTurnReady(harness);
           harness.send(`session release regression ${cycle}`);
           harness.send('\r');

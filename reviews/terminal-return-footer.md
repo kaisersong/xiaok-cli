@@ -55,3 +55,11 @@ multiline draft and exact next queued input. Owned CLI processes remaining: zero
 The native harness now refuses to create a window while macOS is locked; cleanup
 uses the owned Ghostty window object, as required by its scripting dictionary.
 Previously created probe windows were closed by their recorded IDs only.
+
+Initial CI matrix: five jobs passed; Windows Node 22.14 passed all five new
+rendering regressions but failed the existing repeated slash-exit/resume startup
+wait (zero attached data listeners), followed by a late stdin shutdown. The
+fixture restored its environment while startup was still pending. Give that
+attachment wait the same 3s base budget as the existing input-ready check (15s
+on Windows), without changing assertions or production exit behavior. Both
+repeated exit modes and governance passed locally after the test-only change.
