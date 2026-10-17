@@ -1,26 +1,69 @@
 import type { MessageBlock } from '../types.js';
-import type { IntentLedgerRecord, SessionIntentLedger } from '../runtime/intent-delegation/types.js';
 import { intentHint, intentHintDot } from './render.js';
 
-const TERMINAL_INTENT_STATUSES = new Set<IntentLedgerRecord['overallStatus']>(['completed', 'failed', 'cancelled']);
+/** Only the DATA read by the three stored-intent presenters; never Modern or authority. */
+export interface IntentPresentationRecordData {
+  readonly intentId: unknown;
+  readonly deliverable?: unknown;
+  readonly finalDeliverable?: unknown;
+  readonly overallStatus?: unknown;
+  readonly activeStageId?: unknown;
+  readonly stages?: unknown;
+  readonly steps?: unknown;
+  readonly riskTier?: unknown;
+  readonly providedSourcePaths?: unknown;
+  readonly delegationBoundary?: unknown;
+  readonly explicitConstraints?: unknown;
+  readonly latestBreadcrumb?: unknown;
+}
+export interface IntentPresentationLedgerData {
+  readonly activeIntentId?: unknown;
+  readonly ownership: { readonly ownerInstanceId?: unknown; readonly previousOwnerInstanceId?: unknown };
+  readonly intents: readonly IntentPresentationRecordData[];
+}
+const TERMINAL_INTENT_STATUSES = new Set<unknown>(['completed', 'failed', 'cancelled']);
+
+function presentationFail(field: string): never { throw new TypeError(`intent_presentation:${field}`); }
+function presentationText(value: unknown, field: string): string {
+  if (typeof value !== 'string') return presentationFail(field);
+  return value;
+}
+function presentationNumber(value: unknown, field: string): number {
+  // Preserve original number arithmetic, including fractions and non-finite values.
+  if (typeof value !== 'number') return presentationFail(field);
+  return value;
+}
+function presentationObject(value: unknown, field: string): Record<string, unknown> {
+  if (!isPresentationObject(value)) return presentationFail(field);
+  return value;
+}
+function isPresentationObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function presentationArray(value: unknown, field: string): readonly unknown[] {
+  if (!Array.isArray(value)) return presentationFail(field);
+  return value;
+}
+function presentationStrings(value: unknown, field: string): readonly string[] {
+  return presentationArray(value, field).map(entry => presentationText(entry, field));
+}
+function presentationStage(value: unknown): Record<string, unknown> {
+  return presentationObject(value, 'stage');
+}
 
 export function formatCurrentIntentSummaryLine(
-  ledger: SessionIntentLedger | null | undefined,
+  ledger: IntentPresentationLedgerData | null | undefined,
   instanceId: string,
 ): string {
   const activeIntent = getOwnedActiveIntent(ledger, instanceId);
-  if (!activeIntent) {
-    return '';
-  }
-
+  if (!activeIntent) return '';
   const stages = getIntentStages(activeIntent);
-  const activeStage = stages.find((stage) => stage.stageId === activeIntent.activeStageId) ?? stages[0];
-  const stageLabel = activeStage?.label ?? 'Waiting';
-  const stageProgress = activeStage
-    ? `Stage ${activeStage.order + 1}/${stages.length}`
-    : 'Stage';
+  const activeStage = stages.find(stage => presentationStage(stage).stageId === activeIntent.activeStageId) ?? stages[0];
+  const stage = activeStage === undefined ? undefined : presentationStage(activeStage);
+  const stageLabel = stage ? presentationText(stage.label ?? 'Waiting', 'stage.label') : 'Waiting';
+  const stageProgress = stage ? `Stage ${presentationNumber(stage.order, 'stage.order') + 1}/${stages.length}` : 'Stage';
   return formatIntentSummaryHint(
-    `Intent: ${activeIntent.deliverable} · ${stageProgress} ${stageLabel} · ${humanizeOverallStatus(activeIntent.overallStatus)}`,
+    `Intent: ${presentationText(activeIntent.deliverable, 'deliverable')} · ${stageProgress} ${stageLabel} · ${humanizeOverallStatus(activeIntent.overallStatus)}`,
   );
 }
 
@@ -39,70 +82,41 @@ export function formatCurrentTurnIntentSummaryLine(input: {
 }
 
 export function buildIntentReminderBlock(
-  ledger: SessionIntentLedger | null | undefined,
+  ledger: IntentPresentationLedgerData | null | undefined,
   instanceId: string,
 ): MessageBlock | undefined {
   const activeIntent = getOwnedActiveIntent(ledger, instanceId);
-  if (!activeIntent) {
-    return undefined;
-  }
-
+  if (!activeIntent) return undefined;
   const lines = [
     'Intent run contract:',
-    `Goal chain: ${activeIntent.deliverable}`,
-    `Final deliverable: ${activeIntent.finalDeliverable}`,
+    `Goal chain: ${presentationText(activeIntent.deliverable, 'deliverable')}`,
+    `Final deliverable: ${presentationText(activeIntent.finalDeliverable, 'finalDeliverable')}`,
     `Active stage: ${describeActiveStage(activeIntent)}`,
-    `Risk: ${activeIntent.riskTier}`,
+    `Risk: ${presentationText(activeIntent.riskTier, 'riskTier')}`,
   ];
-
-  const providedSourcePaths = activeIntent.providedSourcePaths ?? [];
-  if (providedSourcePaths.length > 0) {
-    lines.push(`Provided sources: ${providedSourcePaths.join(' | ')}`);
-  }
-
+  const providedSourcePaths = presentationStrings(activeIntent.providedSourcePaths ?? [], 'providedSourcePaths');
+  if (providedSourcePaths.length > 0) lines.push(`Provided sources: ${providedSourcePaths.join(' | ')}`);
   const preferredStageSkills = describePreferredStageSkills(activeIntent);
-  if (preferredStageSkills) {
-    lines.push(`Preferred stage skills: ${preferredStageSkills}`);
-  }
-
-  if (activeIntent.delegationBoundary.length > 0) {
-    lines.push(`Boundary: ${activeIntent.delegationBoundary.join(' | ')}`);
-  }
-  if (activeIntent.latestBreadcrumb) {
-    lines.push(`Latest progress: ${activeIntent.latestBreadcrumb}`);
-  }
-
-  const constraints = activeIntent.explicitConstraints ?? [];
-  if (constraints.length > 0) {
-    lines.push(`Constraints (must follow): ${constraints.join('; ')}`);
-  }
-
-  return {
-    type: 'text',
-    text: `<system-reminder>${lines.join('\n')}</system-reminder>`,
-  };
+  if (preferredStageSkills) lines.push(`Preferred stage skills: ${preferredStageSkills}`);
+  const boundary = presentationStrings(activeIntent.delegationBoundary, 'delegationBoundary');
+  if (boundary.length > 0) lines.push(`Boundary: ${boundary.join(' | ')}`);
+  if (activeIntent.latestBreadcrumb) lines.push(`Latest progress: ${presentationText(activeIntent.latestBreadcrumb, 'latestBreadcrumb')}`);
+  const constraints = presentationStrings(activeIntent.explicitConstraints ?? [], 'explicitConstraints');
+  if (constraints.length > 0) lines.push(`Constraints (must follow): ${constraints.join('; ')}`);
+  return { type: 'text', text: `<system-reminder>${lines.join('\n')}</system-reminder>` };
 }
 
 export function formatIntentCreatedTranscriptBlock(
-  ledger: SessionIntentLedger | null | undefined,
+  ledger: Pick<IntentPresentationLedgerData, 'intents'> | null | undefined,
   intentId: string,
 ): string {
-  const intent = ledger?.intents.find((candidate) => candidate.intentId === intentId);
-  if (!intent) {
-    return '';
-  }
-
+  const intent = ledger?.intents.find(candidate => candidate.intentId === intentId);
+  if (!intent) return '';
   const intentLines = [buildIntentAcknowledgement(intent)];
-
-  const providedSourcePaths = intent.providedSourcePaths ?? [];
-  if (providedSourcePaths.length > 0) {
-    intentLines.push(`来源：${providedSourcePaths.join(' | ')}`);
-  }
-
-  if (intent.delegationBoundary.length > 0) {
-    intentLines.push(`边界：${intent.delegationBoundary.join(' | ')}`);
-  }
-
+  const paths = presentationStrings(intent.providedSourcePaths ?? [], 'providedSourcePaths');
+  if (paths.length > 0) intentLines.push(`来源：${paths.join(' | ')}`);
+  const boundary = presentationStrings(intent.delegationBoundary, 'delegationBoundary');
+  if (boundary.length > 0) intentLines.push(`边界：${boundary.join(' | ')}`);
   return intentHint([...intentLines, ''].join('\n'));
 }
 
@@ -161,9 +175,9 @@ export function formatSalvageTranscriptBlock(summary: string[], reason?: string)
 }
 
 function getOwnedActiveIntent(
-  ledger: SessionIntentLedger | null | undefined,
+  ledger: IntentPresentationLedgerData | null | undefined,
   instanceId: string,
-): IntentLedgerRecord | undefined {
+): IntentPresentationRecordData | undefined {
   if (!ledger?.activeIntentId) {
     return undefined;
   }
@@ -185,42 +199,39 @@ function humanizeStepId(stepId: string): string {
   return humanizeStepKey(stepId.split(':step:')[1] ?? stepId);
 }
 
-function describeActiveStage(intent: IntentLedgerRecord): string {
+function describeActiveStage(intent: IntentPresentationRecordData): string {
   const stages = getIntentStages(intent);
-  const activeStage = stages.find((stage) => stage.stageId === intent.activeStageId) ?? stages[0];
-  if (!activeStage) {
-    return 'Waiting';
-  }
-
-  return `${activeStage.order + 1}/${stages.length} ${activeStage.label}`;
+  const activeStage = stages.find(stage => presentationStage(stage).stageId === intent.activeStageId) ?? stages[0];
+  if (activeStage === undefined) return 'Waiting';
+  const stage = presentationStage(activeStage);
+  return `${presentationNumber(stage.order, 'stage.order') + 1}/${stages.length} ${presentationText(stage.label, 'stage.label')}`;
 }
 
-function getIntentStages(intent: IntentLedgerRecord): Array<{ stageId: string; order: number; label: string; steps: IntentLedgerRecord['steps'] }> {
-  if (Array.isArray(intent.stages) && intent.stages.length > 0) {
-    return intent.stages;
+function getIntentStages(intent: IntentPresentationRecordData): readonly unknown[] {
+  if (intent.stages != null) {
+    const stages = presentationArray(intent.stages, 'stages');
+    if (stages.length > 0) return stages;
   }
-
+  // Retain this existing display-only legacy fallback; never write it into DATA.
   return [{
-    stageId: intent.activeStageId ?? `${intent.intentId}:stage:1`,
+    stageId: intent.activeStageId ?? `${presentationText(intent.intentId, 'intentId')}:stage:1`,
     order: 0,
-    label: `生成${intent.finalDeliverable ?? intent.deliverable}`,
+    label: `生成${presentationText(intent.finalDeliverable ?? intent.deliverable, 'finalDeliverable')}`,
     steps: intent.steps,
   }];
 }
 
-function describePreferredStageSkills(intent: IntentLedgerRecord): string {
-  const preferred = intent.stages
-    .map((stage) => {
-      const skillName = stage.steps
-        .map((step) => step.skillName)
+function describePreferredStageSkills(intent: IntentPresentationRecordData): string {
+  const preferred = presentationArray(intent.stages, 'stages')
+    .map(value => {
+      const stage = presentationStage(value);
+      const skillName = presentationArray(stage.steps, 'stage.steps')
+        .map(step => presentationObject(step, 'step').skillName)
         .find((name): name is string => typeof name === 'string' && !name.startsWith('generic_llm::'));
-      if (!skillName) {
-        return null;
-      }
-      return `${stage.label} -> ${skillName}`;
+      if (!skillName) return null;
+      return `${presentationText(stage.label, 'stage.label')} -> ${skillName}`;
     })
     .filter((value): value is string => Boolean(value));
-
   return preferred.join(' | ');
 }
 
@@ -234,13 +245,12 @@ function formatSkillSummary(skillNames: Array<string | null | undefined>): strin
   return ` · ${normalized.length === 1 ? 'Skill' : 'Skills'}: ${normalized.join(', ')}`;
 }
 
-function buildIntentAcknowledgement(intent: IntentLedgerRecord): string {
+function buildIntentAcknowledgement(intent: IntentPresentationRecordData): string {
   const stages = getIntentStages(intent);
   if (stages.length > 1) {
-    return `🤝 已理解，会先${stages.map((stage) => stage.label).join('，再')}。`;
+    return `🤝 已理解，会先${stages.map(stage => presentationText(presentationStage(stage).label, 'stage.label')).join('，再')}。`;
   }
-
-  const deliverable = intent.finalDeliverable ?? intent.deliverable;
+  const deliverable = presentationText(intent.finalDeliverable ?? intent.deliverable, 'finalDeliverable');
   return `🤝 已理解，会帮你产出${deliverable}。`;
 }
 
@@ -263,8 +273,8 @@ function humanizeStepStatus(status: 'running' | 'blocked' | 'completed' | 'faile
   return 'Failed';
 }
 
-function humanizeOverallStatus(status: IntentLedgerRecord['overallStatus']): string {
-  return status
+function humanizeOverallStatus(status: unknown): string {
+  return presentationText(status, 'overallStatus')
     .split(/[_-]+/g)
     .filter(Boolean)
     .map((part) => part[0]?.toUpperCase() + part.slice(1))
