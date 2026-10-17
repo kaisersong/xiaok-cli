@@ -76,6 +76,8 @@ export declare class ScrollRegionManager {
     private _contentEndRow;
     /** Actual terminal cursor row (1-based), tracked by counting \n writes. */
     private _cursorRow;
+    /** Actual terminal cursor, which usually sits in the editor rather than content. */
+    private _terminalCursorRow;
     /** Actual terminal cursor column (0-based), for wrapping calculation. */
     private _cursorCol;
     /** Internal flag: cursor position may be unreliable (just after screen clear). */

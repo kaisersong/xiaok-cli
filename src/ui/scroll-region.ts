@@ -130,6 +130,8 @@ export class ScrollRegionManager {
   private _contentEndRow = 0;
   /** Actual terminal cursor row (1-based), tracked by counting \n writes. */
   private _cursorRow = 1;
+  /** Actual terminal cursor, which usually sits in the editor rather than content. */
+  private _terminalCursorRow = 1;
   /** Actual terminal cursor column (0-based), for wrapping calculation. */
   private _cursorCol = 0;
   /** Internal flag: cursor position may be unreliable (just after screen clear). */
@@ -310,6 +312,7 @@ export class ScrollRegionManager {
 
   private clearScreenRow(row: number): void {
     this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+    this._terminalCursorRow = row;
   }
 
   private getClearScreenRowSequence(row: number): string {
@@ -341,16 +344,19 @@ export class ScrollRegionManager {
     });
     this.lastActivityRow = firstRow;
     this.lastActivityRows = lines.length;
+    this._terminalCursorRow = activityRow;
     return output;
   }
 
-  private composeActivityClear(rowShift = 0): string {
+  private composeActivityClear(rowShift = 0, maxRow = this.config.rows): string {
     let output = '';
     if (this.lastActivityRow !== null) {
       for (let index = 0; index < this.lastActivityRows; index++) {
         const oldRow = this.lastActivityRow + index;
-        for (const row of new Set([oldRow, oldRow - rowShift])) {
-          if (row >= 1 && row <= this.config.rows) output += `${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}`;
+        const row = oldRow - rowShift;
+        if (row >= 1 && row <= maxRow) {
+          output += `${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}`;
+          this._terminalCursorRow = row;
         }
       }
     }
@@ -366,13 +372,13 @@ export class ScrollRegionManager {
     if (overlapsActivity || resumesAtContentBoundary) this.clearActivity();
   }
 
-  private clearRenderedFooterRows(): void {
+  private clearRenderedFooterRows(rowShift = 0, maxRow = this.config.rows): void {
     const fallbackStart = this.getInputStartRow();
     const fallbackEnd = this.getStatusBarRow();
     const start = this.lastFooterClearStartRow || fallbackStart;
     const end = this.lastFooterClearEndRow || fallbackEnd;
 
-    for (let row = Math.max(1, start); row <= Math.max(start, end); row += 1) {
+    for (let row = Math.max(1, start - rowShift); row <= Math.min(maxRow, Math.max(start, end) - rowShift); row += 1) {
       this.clearScreenRow(row);
     }
   }
@@ -507,28 +513,51 @@ export class ScrollRegionManager {
    */
   updateSize(rows: number, columns: number): void {
     const previousScrollBottom = this.getScrollBottom();
+    const hadChrome = this._footerVisible || this.lastActivityRow !== null || this.hasActiveOverlayPrompt();
+    const pulledHistoryRows = Math.min(Math.max(0, rows - this.config.rows), Math.max(0, this._totalRows - this._cursorRow));
+    // A shrinking terminal keeps the physical cursor in view and may clip the
+    // rows below it. It does not necessarily scroll by the whole height delta.
+    const rowShift = !hadChrome ? 0 : rows < this.config.rows
+      ? Math.max(0, Math.min(this.config.rows, this._terminalCursorRow) - rows)
+      : -pulledHistoryRows;
+    const visiblePreviousBottom = Math.max(1, Math.min(rows, previousScrollBottom - rowShift));
     if (this.active) {
       this.stream.write(RESET_SCROLL_REGION);
-      const rowShift = this.lastActivityRow === null ? 0 : Math.max(0, this.config.rows - rows);
-      this.stream.write(this.composeActivityClear(rowShift));
-      if (rowShift > 0) {
-        for (let row = Math.max(1, this.lastFooterClearStartRow - rowShift); row <= rows; row++) this.clearScreenRow(row);
-      }
-      this.clearRenderedFooterRows();
+      this.stream.write(this.composeActivityClear(rowShift, rows));
+      this.clearRenderedFooterRows(rowShift, rows);
+      // The terminal has already moved its visible rows upward on shrink.
+      // Move content anchors too, including idle input (without activity).
+      this._cursorRow = Math.max(1, this._cursorRow - rowShift);
+      this._contentEndRow = Math.max(0, this._contentEndRow - rowShift);
+      this._streamStartRow = Math.max(1, this._streamStartRow - rowShift);
+      this._terminalCursorRow = Math.max(1, Math.min(rows, this._terminalCursorRow - rowShift));
     }
 
     this.config = { ...this.config, rows, columns };
     if (this.active) {
-      this.reserveTranscriptRows(this.getScrollBottom(), Math.min(rows, previousScrollBottom));
+      this.reserveTranscriptRows(this.getScrollBottom(), visiblePreviousBottom);
       // Reflow can move chrome away from its old absolute rows. Clear the
       // unoccupied tail before restoring it, preserving the transcript cursor.
       const firstEmptyRow = this._cursorRow + (this._cursorCol > 0 ? 1 : 0);
-      for (let row = firstEmptyRow; row <= Math.min(rows, previousScrollBottom); row++) {
+      for (let row = firstEmptyRow; row <= visiblePreviousBottom; row++) {
         this.clearScreenRow(row);
       }
       // Re-apply scroll region with new size
       this.setScrollRegion();
-      this.renderFooter();
+      if (this.hasActiveOverlayPrompt()) {
+        this.renderPromptFrame({
+          inputValue: this.lastInputValue,
+          cursor: this.lastInputCursor,
+          placeholder: this.lastInputPrompt,
+          summaryLine: this.lastSummaryLine,
+          statusLine: this.lastStatusLine,
+          overlayLines: this.lastOverlayLines,
+          overlayKind: this._activeOverlayKind ?? undefined,
+          owner: this._activeOverlayOwner ?? undefined,
+        });
+      } else {
+        this.renderFooter();
+      }
     }
   }
 
@@ -1093,6 +1122,7 @@ export class ScrollRegionManager {
 
   private positionCursorForPermissionOverlay(inputFrameRows: number): void {
     const safeRow = Math.max(1, this.getInputStartRow(inputFrameRows) - 1);
+    this._terminalCursorRow = safeRow;
     this.stream.write(`\x1b[${safeRow};1H`);
   }
 
@@ -1103,6 +1133,7 @@ export class ScrollRegionManager {
     const inputTextStartRow = this.getInputTextStartRow(inputRows);
 
     if (!this.lastInputValue || !inputState) {
+      this._terminalCursorRow = inputTextStartRow;
       this.stream.write(`\x1b[${inputTextStartRow};${this.getCursorBase()}H`);
       return;
     }
@@ -1114,6 +1145,7 @@ export class ScrollRegionManager {
     const cursorRow = inputTextStartRow + cursorVisibleLine;
     const cursorCol = this.getCursorBase() + inputState.cursorColumn;
 
+    this._terminalCursorRow = cursorRow;
     this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
   }
 
@@ -1128,7 +1160,8 @@ export class ScrollRegionManager {
 
   private getInputCursorSequence(): string {
     if (!this.lastInputValue) {
-      return `\x1b[${this.getInputTextStartRow(1)};${this.getCursorBase()}H`;
+      this._terminalCursorRow = this.getInputTextStartRow(1);
+      return `\x1b[${this._terminalCursorRow};${this.getCursorBase()}H`;
     }
 
     const state = this.getFooterInputState(this.lastInputValue, this.lastInputCursor);
@@ -1139,6 +1172,7 @@ export class ScrollRegionManager {
     const cursorRow = this.getInputTextStartRow(state.visibleLines.length) + cursorVisibleLine;
     const cursorCol = this.getCursorBase() + state.cursorColumn;
 
+    this._terminalCursorRow = cursorRow;
     return `\x1b[${cursorRow};${cursorCol}H`;
   }
 
@@ -1196,6 +1230,7 @@ export class ScrollRegionManager {
 
     const targetRow = this.clampCursorRow(this._cursorRow);
     this.clearActivityIfContentWillUseRow(targetRow);
+    this._terminalCursorRow = targetRow;
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
     if (this._cursorCol > 0) {
       this.stream.write(`\x1b[${this._cursorCol + 1}G`);
@@ -1220,6 +1255,7 @@ export class ScrollRegionManager {
     const contentEnd = Math.min(contentRows ?? scrollBottom, scrollBottom);
     const targetRow = Math.min(contentEnd + this.config.gapHeight + 1, scrollBottom);
 
+    this._terminalCursorRow = targetRow;
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
     this.stream.write(RESET_ALL);
   }
@@ -1255,6 +1291,7 @@ export class ScrollRegionManager {
     const scrollBottom = this.getScrollBottom();
     const targetRow = Math.max(1, Math.min(this._cursorRow, scrollBottom));
     this._streamStartRow = targetRow;
+    this._terminalCursorRow = targetRow;
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
     if (this._cursorCol > 0) {
       this.stream.write(`\x1b[${this._cursorCol + 1}G`);
@@ -1412,6 +1449,7 @@ export class ScrollRegionManager {
    */
   private setScrollRegion(scrollEnd = this.getScrollBottom()): void {
     this.stream.write(SET_SCROLL_REGION.replace('%d', String(scrollEnd)));
+    this._terminalCursorRow = 1;
   }
 
   /**
@@ -1439,6 +1477,7 @@ export class ScrollRegionManager {
     this._pastWelcome = true;
     this._totalRows = rows;
     this._cursorRow = this.clampCursorRow(rows + 1);
+    this._terminalCursorRow = this._cursorRow;
     this._cursorCol = 0;
   }
 
@@ -1593,6 +1632,7 @@ export class ScrollRegionManager {
     this._pastWelcome = true;
     this._cursorUncertain = false;
     this.stream.write(text);
+    this._terminalCursorRow = this._cursorRow;
 
     if (shouldRestoreFooter) {
       this.renderFooter({
@@ -1667,6 +1707,7 @@ export class ScrollRegionManager {
     this._totalRows += rows;
     this.absorbRegionScroll(targetRow + rows);
     this._cursorRow = this.clampCursorRow(targetRow + rows);
+    this._terminalCursorRow = this._cursorRow;
     this._contentEndRow = Math.max(this._contentEndRow, this._cursorRow);
     this._pastWelcome = true;
     this._cursorUncertain = false;
@@ -1698,6 +1739,7 @@ export class ScrollRegionManager {
       return;
     }
     const targetRow = this.clampCursorRow(this._cursorRow);
+    this._terminalCursorRow = targetRow;
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
     if (this._cursorCol > 0) {
       this.stream.write(`\x1b[${this._cursorCol + 1}G`);
@@ -1753,6 +1795,7 @@ export class ScrollRegionManager {
       self._cursorRow = self.clampCursorRow(self._cursorRow + 1);
       self._cursorCol = 0;
       self._cursorUncertain = false;
+      self._terminalCursorRow = self._cursorRow;
     };
   }
 
@@ -1778,6 +1821,7 @@ export class ScrollRegionManager {
       self._cursorCol = ((end - 1) % cols) + 1;
       self._contentEndRow = Math.max(self._contentEndRow, self._cursorRow);
       self._cursorUncertain = false;
+      self._terminalCursorRow = self._cursorRow;
     };
   }
 

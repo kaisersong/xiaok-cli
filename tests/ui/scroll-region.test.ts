@@ -215,12 +215,14 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.begin();
       manager.renderPromptFrame({ inputValue: 'KEEP_DRAFT', cursor: 10, placeholder: '', statusLine: 'MODEL' });
       manager.renderActivity('SubAgent Pisces\nSubAgent Libra\nWorking');
+      harness.resize(45, 20);
       manager.updateSize(20, 45);
       expect(harness.screen.text()).toContain('KEEP_DRAFT');
       expect(harness.screen.text()).toContain('SubAgent Pisces');
       manager.renderActivity('Working');
       expect(harness.screen.text()).not.toContain('SubAgent');
       expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      harness.resize(80, 30);
       manager.updateSize(30, 80);
       expect(harness.screen.text()).toContain('Working');
       expect(harness.screen.text()).toContain('KEEP_DRAFT');
@@ -255,6 +257,7 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.writeAtContentCursor(Array.from({ length: 14 }, (_, i) => `LINE_${i}\n`).join(''));
       manager.writeAtContentCursor('FINAL_RESPONSE');
       manager.renderFooter();
+      harness.resize(52, 20);
       manager.updateSize(20, 52);
       expect(harness.screen.text()).toContain('FINAL_RESPONSE');
     } finally { manager.end(); harness.restore(); }

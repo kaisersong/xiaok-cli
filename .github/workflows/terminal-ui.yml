@@ -12,6 +12,7 @@ on:
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
       - 'tests/e2e/thinking-draft-handoff.py'
+      - 'tests/e2e/footer-return.py'
       - '.github/workflows/terminal-ui.yml'
   pull_request:
     paths:
@@ -24,6 +25,7 @@ on:
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
       - 'tests/e2e/thinking-draft-handoff.py'
+      - 'tests/e2e/footer-return.py'
       - '.github/workflows/terminal-ui.yml'
   workflow_dispatch: {}
 permissions:
@@ -58,6 +60,7 @@ jobs:
           .test-dist/tests/ui/inline-image-block.test.js
           .test-dist/tests/ui/image-renderer.test.js
           .test-dist/tests/ui/scroll-region.test.js
+          .test-dist/tests/ui/scroll-region-return.test.js
           .test-dist/tests/ui/ask-question.test.js
           .test-dist/tests/ui/image-input.test.js
           .test-dist/tests/ui/transcript-buffer.test.js
@@ -77,10 +80,13 @@ jobs:
           python tests/e2e/inline-image-scrollback.py
           python tests/e2e/askuser-short-menu.py
           python tests/e2e/thinking-draft-handoff.py
+          python tests/e2e/footer-return.py
       - name: Retain synthetic Thinking draft failure evidence
         if: failure() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: thinking-draft-failure-${{ matrix.node }}
-          path: /tmp/xiaok-thinking-draft-*/
+          path: |
+            /tmp/xiaok-thinking-draft-*/
+            /tmp/xiaok-footer-return-*/
           retention-days: 7
