@@ -39,7 +39,7 @@ import { readNativeSessionIdentity, type NativeSessionIdentity } from './identit
 import type { Message } from '../../../types.js';
 import { getConfigDir } from '../../../utils/config.js';
 import type {
-  PersistedSessionSnapshot,
+  PersistedSessionSnapshot, StoredSessionSnapshot,
   SessionListEntry,
   SessionStore,
 } from './store.js';
@@ -104,15 +104,17 @@ interface OrdinaryReleasePermit {
   sourceBytes: string;
   entered: boolean;
 }
+type OrdinaryFieldKeys<Keys extends string> = Keys extends `${infer Head} ${infer Tail}` ? OrdinaryFieldKeys<Head> | OrdinaryFieldKeys<Tail> : Keys extends '' ? never : Keys;
+type OrdinaryFieldsData<Required extends string, Optional extends string> = { [Key in OrdinaryFieldKeys<Required>]: unknown } & { [Key in OrdinaryFieldKeys<Optional>]?: unknown };
 /** Full field-presence check for the ordinary intent structures. Clone helpers
  * intentionally retain extension fields, so roundtrip equality alone is insufficient. */
-function assertOrdinaryIntentFields(ledger: NonNullable<PersistedSessionSnapshot['intentDelegation']>): void {
-  const fields = (value: unknown, required: string, optional = '') => capturedFields(value, required.split(' '), optional ? optional.split(' ') : []);
+function assertOrdinaryIntentFields(ledger: NonNullable<StoredSessionSnapshot['intentDelegation']>): void {
+  const fields: <Required extends string, Optional extends string = ''>(value: unknown, required: Required, optional?: Optional) => asserts value is OrdinaryFieldsData<Required, Optional> = (value: unknown, required: string, optional: string = '') => capturedFields(value, required.split(' '), optional ? optional.split(' ') : []);
   const strings = (value: unknown) => { if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) throw Error('ordinary_intent_strings'); };
   const text = (value: unknown) => { if (typeof value !== 'string') throw Error('ordinary_intent_text'); };
-  const step = (value: any) => {
+  const step = (value: unknown) => {
     fields(value, 'stepId key order role skillName dependsOn status riskTier');
-    for (const key of ['stepId','key','role','status','riskTier']) text(value[key]);
+    for (const key of ['stepId','key','role','status','riskTier'] as const) text(value[key]);
     if (value.skillName !== null) text(value.skillName);
     strings(value.dependsOn); capturedInteger(value.order);
   };
@@ -307,14 +309,14 @@ export class FileSessionStore implements SessionStore {
     } finally { ordinaryReleasePermits.delete(permit); }
   }
 
-  private assertOrdinaryReleaseOwner(snapshot: PersistedSessionSnapshot, input: IntentOwnershipInput): void {
+  private assertOrdinaryReleaseOwner(snapshot: StoredSessionSnapshot, input: IntentOwnershipInput): void {
     const ledger = snapshot.intentDelegation;
     if (!ledger || ledger.instanceId !== input.instanceId || ledger.ownership.ownerInstanceId !== input.instanceId
-      || !['owned', 'resume', 'takeover'].includes(ledger.ownership.state) || intentNativeLedgerHash(ledger) !== input.expectedLedgerHash
+      || !(['owned', 'resume', 'takeover'] as readonly unknown[]).includes(ledger.ownership.state) || intentNativeLedgerHash(ledger) !== input.expectedLedgerHash
       || input.now < Math.max(snapshot.updatedAt, ledger.updatedAt)) throw Error('ordinary_release_owner_or_cas');
   }
 
-  private readOrdinaryReleaseSource(sessionId: string): { bytes: string; snapshot: PersistedSessionSnapshot } | null {
+  private readOrdinaryReleaseSource(sessionId: string): { bytes: string; snapshot: StoredSessionSnapshot } | null {
     const file = this.getFilePath(sessionId), stat = statIfPresent(file);
     if (!stat) throw Error('ordinary_release_session_missing');
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16 * 1024 * 1024 || lstatSync(this.rootDir).isSymbolicLink()) throw Error('ordinary_release_source_path');
@@ -356,10 +358,10 @@ export class FileSessionStore implements SessionStore {
     assertOrdinarySourceWriterRoute();
   }
 
-  private assertOrdinaryReleaseDelta(previous: PersistedSessionSnapshot, next: PersistedSessionSnapshot, record: OrdinaryReleasePermit): void {
+  private assertOrdinaryReleaseDelta(previous: StoredSessionSnapshot, next: StoredSessionSnapshot, record: OrdinaryReleasePermit): void {
     this.assertOrdinaryReleaseOwner(previous, record.input);
     if (!isDeepStrictEqual(next.intentDelegation?.ownership, { state: 'released', previousOwnerInstanceId: record.input.instanceId, updatedAt: record.input.now })) throw Error('ordinary_release_delta');
-    const restored = JSON.parse(JSON.stringify(next)) as PersistedSessionSnapshot;
+    const restored: StoredSessionSnapshot = JSON.parse(JSON.stringify(next));
     for (const key of ['updatedAt', 'storeRevision', 'historyDigest'] as const) {
       if (Object.hasOwn(previous, key)) (restored as any)[key] = previous[key]; else delete restored[key];
     }
