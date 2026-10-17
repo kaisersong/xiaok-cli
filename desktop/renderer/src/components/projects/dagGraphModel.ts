@@ -426,7 +426,7 @@ function classifyEdgeStyle(
 
 export function layoutWithDagre(graph: DagGraph): { nodes: LayoutedNode[]; edges: LayoutedEdge[] } {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 80, acyclicer: 'greedy' });
+  g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 80, acyclicer: 'greedy' });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of graph.nodes) g.setNode(n.id, { width: 220, height: 76 });
   for (const e of graph.edges) {

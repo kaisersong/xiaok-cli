@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, stat } from 'node:fs/
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
-import { getCommandWriteTargets, requiresCommandConfirmation, exceedsCommandInspectionBudget } from '../../../src/ai/permissions/policy-engine.js';
+import { getCommandWriteTargets, requiresCommandConfirmation, exceedsCommandInspectionBudget, matches } from '../../../src/ai/permissions/policy-engine.js';
 import { addAllowRule, adoptProjectRule, getProjectAdoptionRecord, loadSettings } from '../../../src/ai/permissions/settings.js';
 import { buildPermissionPromptOptions } from '../../../src/ui/permission-prompt.js';
 const forms = [
@@ -80,8 +80,16 @@ it('realistic nested wrappers retain confirmation semantics', async () => {
   }
   expect(requiresCommandConfirmation(commands[1])).toBe(true);
 });
-it('write prompts cannot persist permission; npm test still can', () => {
-  expect(buildPermissionPromptOptions('bash(git *)','bash',{command:'git status > out.txt'}).map(o=>o.choice.action)).toEqual(['allow_once','deny']);
+it('write prompts persist only the exact command; npm test keeps its ordinary scope', () => {
+  const input = { command: 'git status > out.txt' };
+  const options = buildPermissionPromptOptions('bash(git *)', 'bash', input);
+  expect(options.map(option => option.choice.action)).toEqual(['allow_once', 'allow_session', 'allow_project', 'allow_global', 'deny']);
+  const selected = options.find(option => option.choice.action === 'allow_project')!.choice;
+  expect(selected).toHaveProperty('rule', expect.stringMatching(/^bash\(@exact:[a-f0-9]{64}\)$/));
+  if ('rule' in selected) {
+    expect(matches([selected.rule], 'bash', input)).toBe(true);
+    expect(matches([selected.rule], 'bash', { command: 'git status > changed.txt' })).toBe(false);
+  }
   expect(buildPermissionPromptOptions('bash(npm *)','bash',{command:'npm test'}).map(o=>o.choice.action)).toContain('allow_project');
 });
 it('adoption corruption preserves other projects and backs up invalid JSON atomically', async () => {

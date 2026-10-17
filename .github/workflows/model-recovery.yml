@@ -1,0 +1,47 @@
+name: Model request recovery
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/runtime/**'
+      - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/runtime/**'
+      - 'tests/e2e/kimi-error-recovery*'
+      - '.github/workflows/model-recovery.yml'
+  pull_request:
+    paths:
+      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/runtime/**'
+      - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/runtime/**'
+      - 'tests/e2e/kimi-error-recovery*'
+      - '.github/workflows/model-recovery.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  recovery:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:sandbox:build
+      - name: Test Kimi diagnostics, retries, cancellation and completed tools
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ai/runtime/model-stream-recovery.test.js
+          .test-dist/tests/ai/runtime/abort-error-discrimination.test.js
+          .test-dist/tests/ai/runtime/agent-runtime.test.js
+          .test-dist/tests/ai/runtime/provider-request-error.test.js

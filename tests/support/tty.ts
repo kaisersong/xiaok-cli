@@ -8,6 +8,7 @@ export interface TtyHarness {
   output: { raw: string; normalized: string };
   screen: { lines: () => string[]; text: () => string; images: () => TtyImagePlacement[] };
   send: (text: string) => void;
+  resize: (columns: number, rows: number) => void;
   failNextStdoutWrite: (error: Error) => void;
   restore: () => void;
 }
@@ -26,7 +27,7 @@ function replayTerminal(raw: string, maxRows?: number): { lines: string[]; image
   let col = 0;
   let savedRow = 0;
   let savedCol = 0;
-  const viewportRows = maxRows && maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
+  let viewportRows = maxRows && maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
   let mainBuffer: {
     lines: string[]; images: TtyImagePlacement[]; row: number; col: number;
     savedRow: number; savedCol: number; scrollTop: number; scrollBottom: number;
@@ -172,6 +173,19 @@ function replayTerminal(raw: string, maxRows?: number): { lines: string[]; image
       }
       const parts = params.split(';');
       const firstValue = Number.parseInt(parts[0] || '1', 10) || 1;
+      if (cmd === 't' && firstValue === 8) {
+        const nextRows = Math.max(1, Number(parts[1]));
+        // A physical viewport resize precedes SIGWINCH. Keep the current
+        // cursor in bounds; rows below it may be clipped before the host paints.
+        const shift = Number.isFinite(viewportRows) ? Math.max(0, row - nextRows + 1) : 0;
+        lines.splice(0, shift);
+        row = Math.max(0, row - shift);
+        savedRow = Math.max(0, savedRow - shift);
+        images = images.map(image => ({ ...image, row: image.row - shift })).filter(image => image.row > 0);
+        viewportRows = nextRows;
+        lines.length = Math.min(lines.length, nextRows);
+        scrollTop = 0; scrollBottom = nextRows - 1;
+      }
       if (cmd === 'A') row = Math.max(0, row - firstValue);
       if (cmd === 'B') {
         if (viewportRows !== Number.POSITIVE_INFINITY) {
@@ -282,6 +296,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
   const originalResume = process.stdin.resume;
   const originalPause = process.stdin.pause;
   const originalOn = process.stdin.on;
+  const originalOnce = process.stdin.once;
   const originalRemoveListener = process.stdin.removeListener;
   let nextStdoutWriteError: Error | null = null;
 
@@ -297,6 +312,13 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
     emitter.on(event, listener);
     return process.stdin;
   }) as typeof process.stdin.on;
+  // 源码用 stdin.once('end', ...) 注册退出回调。漏接这一路会让监听挂到真实
+  // process.stdin 上，CI 里无 TTY 的 stdin 一 EOF 就触发 shutdownTerminal 并
+  // 调 process.exit，被 vitest 记为 unhandled rejection 而整文件失败。
+  process.stdin.once = ((event: string, listener: (...args: any[]) => void) => {
+    emitter.once(event, listener);
+    return process.stdin;
+  }) as typeof process.stdin.once;
   process.stdin.removeListener = ((event: string, listener: (...args: any[]) => void) => {
     emitter.removeListener(event, listener);
     return process.stdin;
@@ -340,6 +362,11 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
     send(text: string) {
       emitter.emit('data', Buffer.from(text, 'utf8'));
     },
+    resize(columns: number, nextRows: number) {
+      raw += `\x1b[8;${nextRows};${columns}t`;
+      process.stdout.columns = columns;
+      process.stdout.rows = nextRows;
+    },
     failNextStdoutWrite(error: Error) {
       nextStdoutWriteError = error;
     },
@@ -353,6 +380,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
       process.stdin.resume = originalResume;
       process.stdin.pause = originalPause;
       process.stdin.on = originalOn;
+      process.stdin.once = originalOnce;
       process.stdin.removeListener = originalRemoveListener;
       emitter.removeAllListeners();
     },

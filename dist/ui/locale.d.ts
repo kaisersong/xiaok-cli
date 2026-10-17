@@ -2,6 +2,11 @@ export type UiLocale = 'zh-CN' | 'en';
 export declare function getToolActivityLabel(toolName: string, locale?: UiLocale): string;
 export declare function getUiCopy(locale?: UiLocale): {
     readonly approvalTitle: "xiaok 想要执行以下操作";
+    readonly mandatoryReview: "这个操作有风险，每次都会询问";
+    readonly exactCommandScope: "当前执行目录中的这条完整命令";
+    readonly exactCommandApprovalHint: "授权范围：相同执行目录和完整命令；脚本、写入目标或命令改变后会重新询问。";
+    readonly writeTarget: (path: string) => string;
+    readonly autoApprovalReason: (reason: string) => string;
     readonly currentCommandLabel: "本次执行命令";
     readonly commandApprovalScope: (rule: string) => string;
     readonly subAgents: {
@@ -40,11 +45,17 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly file: "文件";
         readonly path: "路径";
         readonly pattern: "模式";
+        readonly url: "URL";
     };
     readonly ranCollapseNotice: "… 更多命令已折叠（完成后按 Ctrl+O 查看）";
     readonly hint: "数字直选  ↑↓ 切换  Enter 确认  Esc 取消";
 } | {
     readonly approvalTitle: "xiaok wants to run";
+    readonly mandatoryReview: "This operation carries risk and requires approval every time";
+    readonly exactCommandScope: "this exact command in the current execution directory";
+    readonly exactCommandApprovalHint: "Scope: the same execution directory and complete command; script, output target or command changes require approval again.";
+    readonly writeTarget: (path: string) => string;
+    readonly autoApprovalReason: (reason: string) => string;
     readonly currentCommandLabel: "Command to run now";
     readonly commandApprovalScope: (rule: string) => string;
     readonly subAgents: {
@@ -83,6 +94,7 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly file: "File";
         readonly path: "Path";
         readonly pattern: "Pattern";
+        readonly url: "URL";
     };
     readonly ranCollapseNotice: "… More commands collapsed (press Ctrl+O after completion to view)";
     readonly hint: "1-5 select  Up/Down navigate  Enter confirm  Esc cancel";

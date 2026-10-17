@@ -1,6 +1,6 @@
 import { createTerminalController } from './terminal-controller.js';
 import { TerminalRenderer } from './terminal-renderer.js';
-import { boldCyan, dim, yellow } from './render.js';
+import { formatPermissionPromptLines } from './permission-prompt.js';
 function getTerminalSize(stream) {
     return {
         columns: stream.columns ?? process.stdout.columns ?? 80,
@@ -12,6 +12,7 @@ export class ReplRenderer {
     controller;
     terminalRenderer;
     scrollRegion = null;
+    inputOverlayKind = 'generic';
     constructor(stream = process.stdout) {
         this.stream = stream;
         this.controller = createTerminalController({ prompt: '' });
@@ -56,16 +57,10 @@ export class ReplRenderer {
         };
     }
     buildPermissionOverlayLines(modal) {
-        return [
-            `${yellow('⚡')} xiaok 想要执行以下操作`,
-            `${'工具'}: ${boldCyan(modal.toolName)}`,
-            ...modal.targetLines,
-            ...modal.options.map((option, index) => {
-                const selected = index === modal.selectedIndex;
-                return selected ? boldCyan(`❯ ${option}`) : dim(`  ${option}`);
-            }),
-            dim('↑↓ 选择  Enter 确认  Esc 取消'),
-        ];
+        const lines = formatPermissionPromptLines(modal.toolName, {}, modal.options.map((label, index) => ({
+            label, selected: index === modal.selectedIndex,
+        })));
+        return [...lines.slice(0, 2), ...modal.targetLines, ...lines.slice(2)];
     }
     render() {
         this.syncTerminalSize();
@@ -77,7 +72,7 @@ export class ReplRenderer {
                 : state.overlay?.type === 'lines'
                     ? state.overlay.lines
                     : [];
-            this.scrollRegion.renderPromptFrame(this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : 'generic'));
+            this.scrollRegion.renderPromptFrame(this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : this.inputOverlayKind));
             return;
         }
         this.terminalRenderer.render(this.controller.getState());
@@ -85,7 +80,8 @@ export class ReplRenderer {
     getState() {
         return this.controller.getState();
     }
-    renderInput(frame) {
+    renderInput(frame, overlayKind = 'generic') {
+        this.inputOverlayKind = overlayKind;
         this.controller.closeModal();
         this.controller.setPrompt(frame.prompt);
         this.controller.replaceInput(frame.input, frame.cursor);
@@ -94,6 +90,7 @@ export class ReplRenderer {
         this.render();
     }
     renderOverlayAtCursor(lines) {
+        this.inputOverlayKind = 'generic';
         this.controller.setOverlayLines(lines);
         this.render();
     }
@@ -106,6 +103,7 @@ export class ReplRenderer {
         this.render();
     }
     clearOverlay() {
+        this.inputOverlayKind = 'generic';
         this.controller.clearOverlay();
         this.render();
     }

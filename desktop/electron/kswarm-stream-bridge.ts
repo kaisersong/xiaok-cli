@@ -11,11 +11,17 @@ interface Subscription {
 }
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
+type Observer<T> = (value: T) => void | Promise<void>;
+
+function notifyObserver<T>(listener: Observer<T>, value: T): void {
+  const failed = (error: unknown) => console.warn('[kswarm-bridge] observer failed:', error instanceof Error ? error.message : 'observer_failed');
+  try { void Promise.resolve(listener(value)).catch(failed); } catch (error) { failed(error); }
+}
 
 export class KSwarmStreamBridge {
   private subscriptions = new Map<number, Subscription>();
-  private eventObservers = new Set<(event: KSwarmStreamEvent) => void>();
-  private connectionObservers = new Set<(status: ConnectionStatus) => void>();
+  private eventObservers = new Set<Observer<KSwarmStreamEvent>>();
+  private connectionObservers = new Set<Observer<ConnectionStatus>>();
   private connectionStatus: ConnectionStatus = 'disconnected';
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -46,13 +52,13 @@ export class KSwarmStreamBridge {
     this.subscriptions.delete(event.sender.id);
   }
 
-  observeEvents(listener: (event: KSwarmStreamEvent) => void): () => void {
+  observeEvents(listener: Observer<KSwarmStreamEvent>): () => void {
     this.eventObservers.add(listener);
     return () => this.eventObservers.delete(listener);
   }
 
-  observeConnection(listener: (status: ConnectionStatus) => void): () => void {
-    this.connectionObservers.add(listener); listener(this.connectionStatus);
+  observeConnection(listener: Observer<ConnectionStatus>): () => void {
+    this.connectionObservers.add(listener); notifyObserver(listener, this.connectionStatus);
     return () => this.connectionObservers.delete(listener);
   }
 
@@ -144,7 +150,7 @@ export class KSwarmStreamBridge {
   }
 
   private dispatchEvent(payload: KSwarmStreamEvent): void {
-    for (const listener of this.eventObservers) { try { listener(payload); } catch { /* Background consumers cannot break UI delivery. */ } }
+    for (const listener of this.eventObservers) notifyObserver(listener, payload);
     for (const [id, sub] of this.subscriptions) {
       if (sub.webContents.isDestroyed()) {
         this.subscriptions.delete(id);
@@ -159,7 +165,7 @@ export class KSwarmStreamBridge {
     if (this.connectionStatus === status) return;
     this.connectionStatus = status;
     for (const listener of this.connectionObservers) {
-      try { listener(status); } catch (error) { console.warn('[kswarm-bridge] observer failed:', error instanceof Error ? error.message : 'observer_failed'); }
+      notifyObserver(listener, status);
     }
     for (const [id, sub] of this.subscriptions) {
       if (sub.webContents.isDestroyed()) {

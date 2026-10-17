@@ -1,4 +1,4 @@
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 export function getSchemaVersion(db) {
     const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_meta'").get();
     if (!hasTable)
@@ -110,10 +110,45 @@ function migrateV2toV3(db) {
     }
     setSchemaVersion(db, 3);
 }
+function migrateV3toV4(db) {
+    db.transaction(() => {
+        for (const table of ['memory_l2_scenario', 'memory_l3_persona']) {
+            db.exec(`ALTER TABLE ${table} ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'`);
+            db.exec(`ALTER TABLE ${table} ADD COLUMN cwd TEXT`);
+        }
+        // Existing derived rows had no scope. Infer it only from complete, consistent lineage.
+        for (const [table, sources] of [
+            ['memory_l2_scenario', 'memory_l1_extracted'],
+            ['memory_l3_persona', 'memory_l2_scenario'],
+        ]) {
+            const rows = db.prepare(`SELECT id, source_ids FROM ${table}`).all();
+            for (const row of rows) {
+                let scope = 'unresolved';
+                let cwd = null;
+                try {
+                    const ids = JSON.parse(row.source_ids);
+                    if (Array.isArray(ids) && ids.length && ids.every(id => typeof id === 'string')) {
+                        const lineage = ids.map(id => db.prepare(`SELECT scope, cwd FROM ${sources} WHERE id=?`).get(id));
+                        const first = lineage[0];
+                        if (first && (first.scope === 'global' || (first.scope === 'project' && first.cwd))
+                            && lineage.every(source => source && source.scope === first.scope && source.cwd === first.cwd)) {
+                            scope = first.scope;
+                            cwd = first.cwd;
+                        }
+                    }
+                }
+                catch { /* Incomplete legacy lineage stays private until explicitly re-distilled. */ }
+                db.prepare(`UPDATE ${table} SET scope=?, cwd=? WHERE id=?`).run(scope, cwd, row.id);
+            }
+        }
+        setSchemaVersion(db, 4);
+    })();
+}
 const MIGRATIONS = {
     1: migrateV0toV1,
     2: migrateV1toV2,
     3: migrateV2toV3,
+    4: migrateV3toV4,
 };
 export function runMigrations(db) {
     const current = getSchemaVersion(db);

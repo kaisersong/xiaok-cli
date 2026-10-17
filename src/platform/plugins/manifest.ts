@@ -1,10 +1,17 @@
-import { resolve } from 'path';
+import { resolve, posix, win32 } from 'path';
 import type { HookEventName, HookType } from '../../runtime/hooks-runner.js';
 import type {
   McpProtocolPolicy,
   McpTimeoutConfig,
   PluginManifestMcpServer,
 } from '../mcp/types.js';
+
+function resolvePluginMcpArgument(arg: string, pluginDir: string): string {
+  if (arg.startsWith('-') || posix.isAbsolute(arg) || win32.isAbsolute(arg)
+    || /^[a-z][a-z0-9+.-]*:/i.test(arg) || arg.startsWith('~')) return arg;
+  const relativeFile = /[\\/]/.test(arg) || /\.(?:[cm]?js|py)$/i.test(arg);
+  return relativeFile ? resolve(pluginDir, arg) : arg;
+}
 
 export interface PluginManifestServer {
   name: string;
@@ -111,8 +118,9 @@ export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: str
         const buildBase = (): PluginManifestMcpServer => {
           if (type === 'stdio') {
             const rawArgs = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === 'string') : undefined;
-            // Resolve relative paths in args against the plugin directory
-            const resolvedArgs = rawArgs?.map((arg) => arg.startsWith('/') || arg.startsWith('-') ? arg : resolve(pluginDir, arg));
+            // Bare subcommands/values are not files. Keep bundled script paths
+            // relative to the plugin while preserving flags, URIs and absolute paths.
+            const resolvedArgs = rawArgs?.map((arg) => resolvePluginMcpArgument(arg, pluginDir));
             return {
               name,
               type: 'stdio',

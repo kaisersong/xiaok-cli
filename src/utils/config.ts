@@ -63,7 +63,8 @@ export async function loadConfig(): Promise<Config> {
   return loadConfigSync();
 }
 
-function loadConfigSync(): Config {
+/** Shared normalized read for synchronous Store construction and async callers. */
+export function loadConfigSync(): Config {
   const path = getConfigPath();
   // 老版本写出的是 644：不管 config.json 是否存在，都顺手收紧它和 .bak，老用户升级后自动修复。
   tightenBestEffort(path);

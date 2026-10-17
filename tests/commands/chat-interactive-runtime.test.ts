@@ -50,7 +50,7 @@ function loadReportIntentFixture(name: (typeof reportIntentFixtureNames)[number]
 
 const denseSlowCommand = process.platform === 'win32'
   ? 'ping -n 7 127.0.0.1'
-  : 'node -e "setTimeout(() => {}, 6000)"';
+  : 'sleep 6';
 
 const denseCommandSequence = [
   'printf "cat /Users/song/.xiaok/skills/kai-report-creator/SKILL.md"',
@@ -928,16 +928,20 @@ function countOccurrences(text: string, needle: string): number {
 
 async function removeTempDirWithRetry(dir: string): Promise<void> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       rmSync(dir, { recursive: true, force: true });
       return;
     } catch (error) {
       lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(100 * (attempt + 1), 1_000)));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(200 * (attempt + 1), 1_000)));
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  // POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
+  // 持有会话文件句柄时临时目录删不掉，rmSync 报 EPERM（Windows job 上 66 个用例
+  // 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，
+  // 由 CI 机器回收。
+  process.stderr.write(`[chat-interactive-runtime] 未能清理临时目录 ${dir}: ${String(lastError)}\n`);
 }
 
 function normalizeAssistantLine(line: string): string {
@@ -1202,7 +1206,54 @@ describe('chat interactive runtime', () => {
     resetAdapterState();
   });
 
-  it.each([24, 12])('keeps pasted images within the actual chat content margin on a %s-row terminal', async rows => {
+  it.each([false, true])('starts directly without adopting project rules (shared global settings=%s)', async shared => {
+    const root = join(tmpdir(), `xiaok-quiet-startup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(root);
+    const projectDir = join(root, 'project');
+    const configDir = shared ? join(projectDir, '.xiaok') : join(root, 'config');
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(join(projectDir, '.xiaok'), { recursive: true });
+    const rules = Array.from({ length: 10 }, (_, index) => `bash(echo startup-${index} *)`);
+    writeFileSync(join(projectDir, '.xiaok', 'settings.json'), JSON.stringify({ permissions: { allow: rules } }));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } }, defaultMode: 'interactive', contextBudget: 4000, channels: {} }));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const loader = await import('../../src/runtime/conversation-activity/cli-loader.js');
+    const attachSpy = vi.spyOn(loader, 'attachCliConversationActivitiesWithinBudget').mockResolvedValue(undefined);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const { loadSettings, mergeRules } = await import('../../src/ai/permissions/settings.js');
+    const stdoutIsTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+    try {
+      for (let session = 0; session < 2; session++) {
+        const harness = createTtyHarness(100, 24);
+        const sigints = process.listeners('SIGINT');
+        const resizes = process.stdout.listeners('resize');
+        try {
+          const program = new Command();
+          registerChatCommands(program);
+          const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+          await waitForInputTurnReady(harness);
+          expect(harness.output.normalized).not.toMatch(/这个项目自带了|逐条确认|\[y\/N\]|已开启后台任务跟进/);
+          expect(readdirSync(configDir)).not.toContain('project-rule-adoptions.json');
+          const settings = await loadSettings(projectDir);
+          expect(settings.approvedProjectAllow).toEqual([]);
+          expect(mergeRules(settings).allowRules).toEqual(shared ? rules : []);
+          harness.send('/exit\r');
+          await pending;
+        } finally {
+          for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
+          for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) {
+            if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
+            process.stdout.removeListener('resize', listener);
+          }
+          harness.restore();
+        }
+      }
+    } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
+  }, 15000);
+
+  it.each([[24, 'ghostty'], [12, 'ghostty'], [24, 'wezterm'], [12, 'wezterm']] as const)('keeps pasted images within the actual chat content margin on a %s-row %s terminal', async (rows, terminal) => {
     const root = join(tmpdir(), `xiaok-image-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(root);
     const configDir = join(root, 'config'); const projectDir = join(root, 'project');
@@ -1212,7 +1263,7 @@ describe('chat interactive runtime', () => {
     const file = join(projectDir, 'screen.png'); writeFileSync(file, png);
     process.env.XIAOK_CONFIG_DIR = configDir; cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
     const originalEnv = { TMUX: process.env.TMUX, TERM: process.env.TERM, TERM_PROGRAM: process.env.TERM_PROGRAM };
-    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = 'ghostty';
+    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = terminal;
     const { createAdapter } = await import('../../src/ai/models.js');
     const adapter = createFakeAdapter('gpt-4o');
     const originalStream = adapter.stream.bind(adapter);
@@ -1237,13 +1288,24 @@ describe('chat interactive runtime', () => {
       await waitFor(() => expect(observedImages).toHaveLength(1), { timeoutMs: 3000 });
       await waitForInputTurnReady(harness);
       expect(observedImages[0]).toMatchObject({ source: { data: png.toString('base64') } });
-      expect(harness.screen.images()).toHaveLength(1);
-      const placed = harness.screen.images()[0];
       const margin = [...harness.output.raw.matchAll(/\x1b\[1;(\d+)r/g)].at(-1);
       expect(margin).toBeDefined();
-      expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
-      const promptRow = findReadyPromptIndex(harness.screen.lines());
-      expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      if (terminal === 'ghostty') {
+        const header = harness.output.raw.match(/\x1b_G(a=T[^;]+);/);
+        expect(header?.[1]).toContain('U=1');
+        const height = Number(header?.[1].match(/,r=(\d+)/)?.[1]);
+        const width = Number(header?.[1].match(/,c=(\d+)/)?.[1]);
+        expect(height + 2).toBeLessThan(Number(margin![1]));
+        expect(Array.from(harness.output.raw).filter(ch => ch === '\u{10eeee}')).toHaveLength(height * width);
+        expect(harness.output.normalized).not.toContain('[xiaok] UI 已降级');
+      } else {
+        expect(harness.screen.images()).toHaveLength(1);
+        const placed = harness.screen.images()[0];
+        expect(placed.column).toBe(3);
+        expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
+        const promptRow = findReadyPromptIndex(harness.screen.lines());
+        expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      }
       harness.send('/exit'); harness.send('\r'); await pending;
     } finally {
       process.stdout.isTTY = stdoutIsTTY;
@@ -1381,7 +1443,10 @@ describe('chat interactive runtime', () => {
           await waitFor(() => {
             if (startupError) throw startupError;
             expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
-          });
+          // Repeated startup on the minimum Windows Node can outlast the
+          // default 5s budget. Match waitForInputTurnReady's startup budget;
+          // restoring stdin before attachment lets late startup see real EOF.
+          }, { timeoutMs: 3_000 });
           await waitForInputTurnReady(harness);
           harness.send(`session release regression ${cycle}`);
           harness.send('\r');
@@ -1876,6 +1941,84 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it.each(['allow', 'deny'] as const)('restores the busy draft after a permission %s while Thinking continues', async (decision) => {
+    const rootDir = join(tmpdir(), `xiaok-chat-permission-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } },
+      defaultMode: 'interactive', contextBudget: 4000, channels: {},
+      memory: { enabled: false }, automations: { enabled: false }, intentBoundary: { enabled: false },
+    }));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    let releaseTool!: () => void;
+    let releaseAnswer!: () => void;
+    const toolGate = new Promise<void>(resolve => { releaseTool = resolve; });
+    const answerGate = new Promise<void>(resolve => { releaseAnswer = resolve; });
+    let streamStarted = false;
+    let resumedAfterTool = false;
+    const adapter = createFakeAdapter();
+    adapter.stream = async function* (messages): AsyncIterable<StreamChunk> {
+      if (!extractLastToolResult(messages)) {
+        streamStarted = true;
+        await toolGate;
+        yield { type: 'tool_use', id: 'permission_draft_probe', name: 'write',
+          input: { file_path: join(projectDir, 'synthetic.txt'), content: 'synthetic' } };
+      } else {
+        resumedAfterTool = true;
+        await answerGate;
+        yield { type: 'text', delta: 'PERMISSION_DRAFT_DONE' };
+      }
+      yield { type: 'done' };
+    };
+    const { createAdapter } = await import('../../src/ai/models.js');
+    vi.mocked(createAdapter).mockImplementation(() => adapter);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(80, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const resizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<unknown> | undefined;
+    try {
+      const program = new Command(); registerChatCommands(program);
+      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      await waitForInputTurnReady(harness);
+      harness.send('Check permission draft handoff'); harness.send('\r');
+      await waitFor(() => { expect(streamStarted).toBe(true); });
+      harness.send('retained draft');
+      expect(harness.screen.text()).toContain('retained draft');
+      releaseTool();
+      await waitFor(() => { expect(harness.screen.text()).toContain('允许一次'); });
+      // Soft assertions keep the scenario running to normal cleanup on old code.
+      expect.soft(harness.emitter.listenerCount('data')).toBe(1);
+      harness.send(decision === 'allow' ? '1' : '5');
+      await waitFor(() => { expect(resumedAfterTool).toBe(true); });
+      expect.soft(harness.screen.text()).toContain('retained draft');
+      expect.soft(harness.screen.text()).not.toContain('retained draft1');
+      harness.send(' edited');
+      expect.soft(harness.screen.text()).toContain('retained draft edited');
+      expect.soft(harness.screen.text()).not.toContain('PERMISSION_DRAFT_DONE');
+      releaseAnswer();
+      await waitFor(() => { expect(harness.screen.text()).toContain('PERMISSION_DRAFT_DONE'); });
+      await waitForInputTurnReady(harness);
+      expect.soft(harness.screen.text()).toContain('retained draft edited');
+      harness.send('\x15'); harness.send('/exit'); harness.send('\r');
+      await pending; pending = undefined;
+    } finally {
+      releaseTool(); releaseAnswer();
+      vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
+      for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) {
+            if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
+            process.stdout.removeListener('resize', listener);
+          }
+      harness.restore();
+    }
+  }, 10_000);
+
   it('queues input typed during a busy turn and submits it on the next loop', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-queued-input-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -2075,6 +2218,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_EXTERNAL_FILE_A = externalFileA;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -2940,6 +3086,48 @@ describe('chat interactive runtime', () => {
       harness.restore();
     }
   }, 10_000);
+
+  it('sets permission mode through the single /mode selector and preserves cancel and typed compatibility', async () => {
+    const root = join(tmpdir(), `xiaok-mode-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(root, 'config'); const projectDir = join(root, 'project');
+    tempDirs.push(root); mkdirSync(configDir, { recursive: true }); mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } }, defaultMode: 'interactive', contextBudget: 4000, channels: {} }));
+    process.env.XIAOK_CONFIG_DIR = configDir; cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const h = createTtyHarness(110, 30);
+    const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
+    try {
+      const program = new Command(); registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      await waitForInputTurnReady(h);
+      h.send('/mode\r');
+      await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：auto）'));
+      h.send('\x1b[B'); h.send('\x1b[B'); h.send('\r');
+      await waitFor(() => expect(h.output.normalized).toContain('权限模式已切换为 yolo'));
+      await waitForInputTurnReady(h); h.send('/mode\r');
+      await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：yolo）'));
+      h.send('\x1b'); await waitForInputTurnReady(h);
+      expect(h.output.normalized).toContain('已取消模式切换');
+      expect(JSON.parse(readFileSync(join(configDir, 'cli-permission-mode.json'), 'utf8')).mode).toBe('yolo');
+      h.send('/mode plan\r');
+      await waitFor(() => expect(h.output.normalized).toContain('权限模式已切换为 plan'));
+      await waitForInputTurnReady(h); h.send('/mode\r');
+      await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：plan）'));
+      h.send('\x1b[A'); h.send('\r');
+      await waitForInputTurnReady(h);
+      expect(h.output.normalized).toContain('权限模式已切换为 auto');
+      expect(JSON.parse(readFileSync(join(configDir, 'cli-permission-mode.json'), 'utf8')).mode).toBe('auto');
+      expectSingleFooter(h.screen.lines());
+      h.send('/exit\r'); await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) {
+            if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
+            process.stdout.removeListener('resize', listener);
+          }
+      h.restore();
+    }
+  }, 20_000);
 
   it('routes a slash-selected /models command to the model selector instead of the /mode branch and keeps the footer singular', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-models-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3850,8 +4038,11 @@ describe('chat interactive runtime', () => {
       harness.send('/mode');
       harness.send('\r');
       await waitFor(() => {
-        expect(harness.output.normalized).toContain('当前权限模式：auto');
+        expect(harness.screen.text()).toContain('选择权限模式（当前：auto）');
       }, { timeoutMs: 3_000 });
+      harness.send('\x1b');
+      await waitForInputTurnReady(harness);
+      expect(harness.output.normalized).toContain('已取消模式切换');
 
       harness.send('请先问我一句');
       harness.send('\r');
@@ -4404,6 +4595,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_CONFIG_DIR = configDir;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4530,6 +4724,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(60, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4664,6 +4861,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_CONFIG_DIR = configDir;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4767,6 +4967,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(60, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -5315,6 +5518,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -5560,6 +5766,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -6191,3 +6400,8 @@ describe('chat interactive runtime', () => {
     }
   }, 15_000);
 });
+
+// EventEmitter returns real functions; guard the public callback shape without wrapping identity.
+function isResizeListener(value: unknown): value is (...args: unknown[]) => void {
+  return typeof value === 'function';
+}

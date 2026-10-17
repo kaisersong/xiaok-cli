@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -129,7 +129,28 @@ describe('LayeredMemoryStore', () => {
     };
 
     await expect(createLLMFromAdapter(adapter)('extract memory')).rejects.toBe(sentinel);
-    expect(argumentCount).toBe(3);
-    expect(capturedOptions).toBeUndefined();
+    expect(argumentCount).toBe(4);
+    expect(capturedOptions).toEqual({ maxOutputTokens: 8192, reasoningMode: 'disabled', signal: expect.any(AbortSignal) });
+  });
+});
+
+
+describe('memory side-call termination', () => {
+  it('rejects valid JSON without a terminal done chunk', async () => {
+    const adapter: ModelAdapter = { getModelName: () => 'fixture', stream: async function* () { yield { type: 'text', delta: '{"scenarios":[]}' }; } };
+    await expect(createLLMFromAdapter(adapter)('p')).rejects.toThrow('memory_output_incomplete');
+  });
+  it('aborts the whole side-call at its deadline and removes its timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter: ModelAdapter = { getModelName: () => 'fixture', stream: async function* (_m, _t, _s, options) {
+        await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true }));
+        yield { type: 'done' };
+      } };
+      const pending = createLLMFromAdapter(adapter)('p');
+      const rejection = expect(pending).rejects.toThrow('memory_compaction_timeout');
+      await vi.advanceTimersByTimeAsync(120_000); await rejection;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 });

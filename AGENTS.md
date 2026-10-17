@@ -8,6 +8,16 @@
 - 纯文案、格式、注释和不改变产品行为的指令整理，做对应检查即可。运行与改动相关的测试和构建；通过后，只有新改动、失败或未解风险才扩大或重复验证。测试调用真实生产入口，不在测试中重实现被测逻辑。
 - 保留其他任务的改动；协作时先确认工作归属。worktree 只用于隔离实现，不将 feature worktree `npm link` 到全局；需要验证本地 xiaok 命令时先确认主 checkout 和实际入口。worktree 是否活跃以 `git worktree list` 为准，集成后再清理本任务 worktree。
 
+## GitHub 提交、PR 与发布要求
+
+- 任何改动都不得直推 `master`，包括终端显示等小修。先开工作分支，再提 PR；PR 说明写清改了什么、为什么改。
+- 提交前先看 `git diff --stat`，核对改动文件与 PR 描述一致；精确暂存本任务文件，再检查 `git diff --cached --stat`。禁止在 build 之后用 `git commit -a`，避免把重建的 `dist/` 和 build-info 混入提交。
+- 每个 PR 附回归测试证据，写出实际执行的命令及结果。没跑过的明确写「未跑」，不得用「应该没问题」代替证据。
+- 涉及授权、权限、环境变量、配置文件或安全的改动按 P0/P1 处理，编码与评审必须使用两个不同模型（例如 Codex 编码、GLM 评审）；PR 写明模型身份和评审结论。不同会话、工具或客户端不等于不同模型，未完成评审不得写成已通过。
+- 写「现在没有行为 / 不生效 / 不存在」类结论，必须附写者自己读到的 `文件:行号` 或运行结果；转引注明「转引、未核实」。
+- 合并前由质量在 PR 最终完整 HEAD 上验证，PR 写完整提交 SHA；HEAD 更新后重新确认验证覆盖该 SHA。创始人决定合并，Agent 不自行合并。
+- 发布时 Desktop tag 与 CLI 打包必须使用同一个完整提交 SHA。CLI 依次执行 `npm run build`、`npm run pack:cli`、`npm run verify:pack-dist`，各步成功且最终验证退出码为 0 才发布；记录完整 SHA、命令与结果。
+
 ## 架构与不可省略的边界
 
 - 术语定义与 Avoid 反例统一见 [CONTEXT.md](CONTEXT.md)。开工运行 `npm run hygiene:check`；修改代码后运行 `npm run governance:check`，架构增量查看用 `npm run architecture:check -- --changed`。正常检查不更新存量 baseline。
@@ -50,3 +60,33 @@
 | TypeSafe / Jev 相关方案、集成或验证 | [.agents/skills/typesafe-ai/SKILL.md](.agents/skills/typesafe-ai/SKILL.md)：使用该技能，按任务读取官方实时文档与相关 cookbook，并遵守本项目的基线、评审和验证要求 |
 
 性能/token 优化先测真实基线，收益不足 5% 不做（安全动机除外）。检索改动先用真实语料量噪声与失败案例、冻结判定规则和查询分桶，再比较 Hit@K/MRR/NDCG 与无答案误召；保留原验收条件，不能通过缩范围把它们裁掉。
+
+## 开工前读台账
+
+- 开工前读工程经验台账：`kaisersong/mydocs` 仓库的 `xiaok-cli/quality/lessons-ledger.md`（<https://github.com/kaisersong/mydocs/blob/master/xiaok-cli/quality/lessons-ledger.md>）。台账以该文件为准，下面只摘录与本仓库直接相关的规则。
+- 派子任务给其他 agent/subagent 时，把台账中相关条目写进任务说明；子任务的个人记忆互相看不到，共用文档才是共同来源。
+- 缺陷关闭或发版复盘后，如有新经验，补进台账。每条必须挂「执行机制」（CI 检查、自动化测试、发版清单里的一行、PR 模板里的一项、或本文件里的一条规则），机制为空不算记录完成。
+
+台账中与本仓库相关的规则（摘自台账，修改以台账为准）：
+
+- 「CI 是绿的」不能当证据：发版前相关测试必须在 CI 里真跑过并通过；发版门槛要在已发布的安装包和 tgz 上复验，不按源码推断。
+- CI 矩阵必须包含 `engines` 声明的最低版本。
+- 发版范围由质量对着「发版门槛」逐项确认；提前发版时当场出「已知未覆盖项」。
+- tmux 只用独立 socket（`tmux -L <自己的名字>`），只关自己的会话，不用 `tmux kill-server`。
+- 测试收尾必须回收自己起的后台进程并报数量。
+- 权限收紧只作用于自己创建的专用子目录，不递归改共享目录权限，不跟随链接。
+- 模型调用异常先直接调接口看错误码和返回原文再定性；额度类错误码要立刻提示并切换模型，不无限重试。
+- 汇报「已完成」「文件已放好」「评论已发」之前，先核对结果真的存在。
+- 修改定时任务前先取到完整原文并留档；读取和修改不放在同一批并行调用里。
+- 报告里的每个数字必须对应一份原始日志；机器恢复后不能用对话摘要当证据，要重测。
+- 只按自己记录的 pid 或自己的工作目录路径清理进程，不按命令名批量杀；起进程时把 pid 记到自己的文件里。
+- 凡写「现在没有行为 / 不生效 / 不存在」类结论，必须附写者自己读到的 `文件:行号` 或运行结果；转引他人结论要标「转引、未核实」，不能当事实往下传。
+
+<!-- CODEGRAPH_START -->
+## CodeGraph 代码定位
+
+- 本机已建索引时，已知符号用 `codegraph query <symbol> --limit 5`；追调用关系用 `codegraph callers <symbol> --limit 5`，先取位置与签名。
+- 结构问题可用 `codegraph context "<symbols>" --max-nodes 3 --no-code`；需要源码再按返回位置用 `codegraph node --file <path> --offset <line> --limit 60`。MCP `codegraph_explore` / CLI `explore` 首次限制 `maxFiles=1` / `--max-files 1`。
+- 精确文本与文件查找仍用 `rg` / `rg --files`。中文描述、泛词或图查询无结果时用 `rg` 补查，不能据此断言代码不存在。
+- 首次使用检查 `codegraph status --json`；有 pending changes 用 `codegraph sync`，提示 `reindexRecommended` 时备份本地缓存后 `codegraph index`。不要将索引、备份或本机路径提交 Git。
+<!-- CODEGRAPH_END -->

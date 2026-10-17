@@ -6,7 +6,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   Client,
@@ -211,16 +212,22 @@ export function resolveStdioCommand(
   command: string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = homedir(),
 ): string {
+  let resolved = command;
   if ((command === 'python' || command === 'python3') && env.XIAOK_PYTHON_CMD) {
-    return env.XIAOK_PYTHON_CMD;
+    resolved = env.XIAOK_PYTHON_CMD;
+  } else if (platform === 'win32' && command === 'python3') {
+    resolved = 'python';
   }
 
-  if (platform === 'win32' && command === 'python3') {
-    return 'python';
+  // stdio spawn bypasses the shell: expand only the current-user home prefix.
+  if (resolved === '~') return homeDir;
+  if (resolved.startsWith('~/') || (platform === 'win32' && resolved.startsWith('~\\'))) {
+    return (platform === 'win32' ? win32 : posix).join(homeDir, resolved.slice(2));
   }
 
-  return command;
+  return resolved;
 }
 
 /**

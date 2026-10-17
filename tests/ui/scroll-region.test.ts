@@ -213,12 +213,14 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.begin();
       manager.renderPromptFrame({ inputValue: 'KEEP_DRAFT', cursor: 10, placeholder: '', statusLine: 'MODEL' });
       manager.renderActivity('SubAgent Pisces\nSubAgent Libra\nWorking');
+      harness.resize(45, 20);
       manager.updateSize(20, 45);
       expect(harness.screen.text()).toContain('KEEP_DRAFT');
       expect(harness.screen.text()).toContain('SubAgent Pisces');
       manager.renderActivity('Working');
       expect(harness.screen.text()).not.toContain('SubAgent');
       expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      harness.resize(80, 30);
       manager.updateSize(30, 80);
       expect(harness.screen.text()).toContain('Working');
       expect(harness.screen.text()).toContain('KEEP_DRAFT');
@@ -253,6 +255,7 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.writeAtContentCursor(Array.from({ length: 14 }, (_, i) => `LINE_${i}\n`).join(''));
       manager.writeAtContentCursor('FINAL_RESPONSE');
       manager.renderFooter();
+      harness.resize(52, 20);
       manager.updateSize(20, 52);
       expect(harness.screen.text()).toContain('FINAL_RESPONSE');
     } finally { manager.end(); harness.restore(); }
@@ -1259,6 +1262,36 @@ describe('scroll-region prompt frame ownership', () => {
     } finally {
       harness.restore();
     }
+  });
+
+  it.each([16, 10])('keeps the selected question option visible in a %s-row terminal', rows => {
+    const harness = createTtyHarness(36, rows);
+    const manager = new ScrollRegionManager(process.stdout);
+    const render = (selected: number) => manager.renderPromptFrame({
+      inputValue: '', cursor: 0, placeholder: 'AskUserQuestion', statusLine: 'status',
+      overlayKind: 'question',
+      overlayLines: [
+        'QUESTION_TO_KEEP',
+        ...Array.from({ length: 6 }, (_, index) => `  ${index === selected ? '\x1b[36m❯\x1b[0m' : ' '} ${index + 1}. CHOICE_${index + 1}${index === 0 ? ' ❯ label' : ''}`),
+        '  1-6 select   ↑↓   Enter',
+      ],
+    });
+    try {
+      manager.begin();
+      render(0);
+      expect(harness.screen.text()).toContain('QUESTION_TO_KEEP');
+      expect(harness.screen.text()).toContain('❯ 1. CHOICE_1');
+      render(5);
+      const text = harness.screen.text();
+      expect(text).toContain('QUESTION_TO_KEEP');
+      expect(text).toContain('❯ 6. CHOICE_6');
+      if (rows === 16) expect(text.match(/1-6 select/g)).toHaveLength(1);
+      expect(text).toContain('❯ AskUserQuestion');
+      manager.renderPromptFrame({ inputValue: '', cursor: 0, placeholder: 'NEXT_INPUT', statusLine: 'status', overlayLines: [] });
+      expect(harness.screen.text()).not.toContain('CHOICE_6');
+      expect(harness.screen.text()).not.toContain('1-6 select');
+      expect(harness.screen.text()).toContain('NEXT_INPUT');
+    } finally { manager.end(); harness.restore(); }
   });
 
   it('clears stale overlay rows when the input shrinks while the overlay stays open', () => {

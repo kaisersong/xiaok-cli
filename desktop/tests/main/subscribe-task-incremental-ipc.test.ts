@@ -119,4 +119,6 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     await h.handlers.get('desktop:unsubscribeTask')!({}, { taskId: 'task', subscriptionId: 'second' });
     expect(signals[1].aborted).toBe(true);
   });
+
+
 });

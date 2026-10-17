@@ -663,6 +663,7 @@ export function ChatView({
           background: 'linear-gradient(to bottom, transparent 0%, var(--c-bg-page) 24px)',
         }}
       >
+        {activityContent}
         <ChatInput
           value={prompt}
           onChange={onPromptChange}

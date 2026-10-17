@@ -57,7 +57,13 @@ export type BashTool = Omit<Tool, 'execute'> & {
   execute(input: Record<string, unknown>, context?: BashToolExecutionContext): Promise<string>;
 };
 
-export const bashTool: BashTool = {
+export interface BashApprovalOptions {
+  /** Live host mode callback; never model input. */
+  isYolo?: () => boolean;
+}
+
+export function createBashTool(options: BashApprovalOptions = {}): BashTool {
+  return {
   permission: 'bash',
   definition: {
     name: 'bash',
@@ -93,7 +99,7 @@ export const bashTool: BashTool = {
       return `Error: 命令被安全策略拦截: ${risk.reason}`;
     }
 
-    if (/\bsudo\b/.test(command)) { await context?.compoundPhase?.rejected?.({ toolName: 'bash', reason: 'interactive_sudo' }); return 'Error: sudo 需要主 CLI 的本地交互终端；请交由主会话执行，或在终端使用 !sudo 命令。'; }
+    if (/\bsudo\b/.test(command)) { await context?.compoundPhase?.rejected?.({ toolName: 'bash', reason: 'interactive_sudo' }); return 'Error: sudo 需要主 CLI 的本地交互终端；请交由主会话执行，或在 xiaok 交互输入框使用 !sudo 命令；在系统终端直接执行 sudo 命令（不加 !）。'; }
 
     await context?.compoundPhase?.beforeCommandStart?.({ command, workdir });
     context?.signal?.throwIfAborted(); context?.assertPermissionApproval?.();
@@ -247,14 +253,18 @@ export const bashTool: BashTool = {
       if (context?.signal?.aborted) onAbort();
     });
   },
-};
+  };
+}
+
+export const bashTool: BashTool = createBashTool();
 
 /** Installed only by the interactive CLI host, before sandbox wrapping. */
-export function createInteractiveBashTool(run: Tool['execute']): Tool {
-  return { ...bashTool, async execute(input, context) {
+export function createInteractiveBashTool(run: Tool['execute'], options: BashApprovalOptions = {}): Tool {
+  const tool = createBashTool(options);
+  return { ...tool, async execute(input, context) {
     context?.signal?.throwIfAborted();
     const command = String(input.command ?? '');
-    if (!/\bsudo\b/.test(command)) return bashTool.execute(input, context);
+    if (!/\bsudo\b/.test(command)) return tool.execute(input, context);
     const risk = classifyBashCommand(command);
     if (risk.level === 'block') return `Error: 命令被安全策略拦截: ${risk.reason}`;
     return run(input, context);

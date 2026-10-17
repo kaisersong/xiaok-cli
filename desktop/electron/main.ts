@@ -68,6 +68,7 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
+import { createOnceNotice } from './activity-owner-startup.js';
 import { resolveKSwarmServiceLogRoot, type KSwarmService } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
@@ -838,17 +839,24 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   desktopIngressOwners.push(services.goalShutdown.ingress);
   desktopDurableStores.push(services.goalShutdown.durable);
   if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
+  const activityOwnerNoticeOnce = createOnceNotice(text => {
+    void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
+  });
   kswarmStartPromise = startDesktopKSwarmService(desktopShutdownGate, kswarmService,
     process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+    error => {
+      const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
+      console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
+      activityOwnerNoticeOnce(code);
+    },
   ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
+  registerLifetimeDisposerStep('local-memory', async () => { getDesktopMemoryStore(dataRoot).close?.(); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
-    if (event.type === 'project_activity' && typeof event.projectId === 'string') void services.conversationActivity?.projectChanged(event.projectId);
+    if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
   });
   registerLifetimeDisposerStep('activity-project-events', async () => stopActivityProjectEvents());
-  const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => {
-    void services.conversationActivity?.projectConnectionChanged(status).catch(error => console.warn('[conversation-activity] source connection failed:', error instanceof Error ? error.message : 'connection_failed'));
-  });
+  const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => services.conversationActivity?.projectConnectionChanged(status));
   registerLifetimeDisposerStep('activity-project-connection', async () => stopActivityProjectConnection());
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);

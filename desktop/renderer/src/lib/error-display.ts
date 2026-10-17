@@ -1,7 +1,10 @@
+// 待设计师确认：缺少模型 Key 的保守文案，设置入口暂以文字呈现。
+const MODEL_KEY_MISSING_MESSAGE = '没有找到模型 API Key，任务没法开始。请到 设置 → 模型设置 里添加你的 API Key。'
 const MODEL_AUTH_ERROR_MESSAGE = '模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。'
 const MODEL_SERVICE_ERROR_MESSAGE = '模型服务请求失败，请检查模型配置或稍后重试。'
 
 interface UserFacingErrorOptions {
+  modelKeyMissing?: string
   providerAuth?: string
   providerService?: string
   modelConnectionFailed?: string
@@ -13,6 +16,14 @@ function errorText(error: unknown): string {
   if (error instanceof Error) return error.message
   if (error === null || typeof error === 'undefined') return ''
   return String(error)
+}
+
+export function isModelKeyMissingError(text: string): boolean {
+  const keyOrProvider = '(?:api[\\s_-]*key|model\\s+provider)'
+  return /\brequires\s+api[\s_-]*key\b/i.test(text)
+    || /\bLLM\s+config\s+must\s+include\s+(?:a\s+)?["']provider["']/i.test(text)
+    || new RegExp(`\\b(?:no|missing)\\s+(?:model\\s+)?${keyOrProvider}\\b`, 'i').test(text)
+    || new RegExp(`\\b${keyOrProvider}\\s+(?:(?:is|was|has\\s+been)\\s+)?(?:missing|not\\s+(?:configured|set|provided|found))\\b`, 'i').test(text)
 }
 
 function isProviderAuthError(text: string): boolean {
@@ -52,6 +63,10 @@ export function sanitizeUserFacingErrorMessage(
 ): string {
   const text = errorText(error).trim()
   if (!text) return fallbackMessage
+  if (isModelKeyMissingError(text)) {
+    console.error('[error-display] missing model configuration (raw):', text)
+    return options?.modelKeyMissing ?? MODEL_KEY_MISSING_MESSAGE
+  }
   if (isProviderAuthError(text)) return options?.providerAuth ?? MODEL_AUTH_ERROR_MESSAGE
   if (isModelUsageLimitError(text) && options?.modelUsageLimitReached) {
     return options.modelUsageLimitReached(extractResetAt(text))

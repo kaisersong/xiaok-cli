@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync as readFileSyncRaw } from 'node:fs';
 import { join } from 'node:path';
+
+// Source-text assertions compare against LF literals, so normalize the CRLF
+// Windows checkout instead of duplicating \r in every expected snippet.
+const readFileSync = (path: string, encoding: 'utf8'): string =>
+  readFileSyncRaw(path, encoding).replace(/\r\n/g, '\n');
 
 describe('chat terminal layout', () => {
   it('returns the stable K3 durable-resume error without writing a crash report', () => {
@@ -490,7 +495,7 @@ describe('chat terminal layout', () => {
     const progressStart = source.indexOf('function writeProgressTranscriptNote(');
     const progressEnd = source.indexOf('const maybeWriteThinkingOnlyToolNotice = (): void => {', progressStart);
     const progressSource = source.slice(progressStart, progressEnd);
-    const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): void => {');
+    const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): boolean => {');
     const orchestrationEnd = source.indexOf('const persistSessionBody = async', orchestrationStart);
     const orchestrationSource = source.slice(orchestrationStart, orchestrationEnd);
 

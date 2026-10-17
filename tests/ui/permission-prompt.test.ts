@@ -98,9 +98,11 @@ describe('permission-prompt', () => {
       expect(commandLine).toBeDefined();
       expect(strip(commandLine!)).toContain('本次执行命令:');
       expect(stripAll(lines).join('\n')).not.toContain('始终允许的范围:');
-      expect(buildPermissionPromptOptions('bash(python3 *)', 'bash', {
+      const remembered = buildPermissionPromptOptions('bash(python3 *)', 'bash', {
         command: "python3 - <<'PY'\nimport importlib\nprint('ok')\nPY",
-      }).map(option => option.choice.action)).toEqual(['allow_once', 'deny']);
+      });
+      expect(remembered.map(option => option.choice.action)).toEqual(['allow_once', 'allow_session', 'allow_project', 'allow_global', 'deny']);
+      expect(remembered[1].choice).toHaveProperty('rule', expect.stringMatching(/^bash\(@exact:[a-f0-9]{64}\)$/));
       expect(commandLine).toContain("python3 - <<'PY' import importlib print('ok') PY");
       expect(commandLine?.includes('\n')).toBe(false);
     });
@@ -236,7 +238,8 @@ describe('permission-prompt', () => {
       harness.send('\x1b[B');
       harness.send('\r');
 
-      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+      await expect(pending).resolves.toEqual({ action: 'allow_project',
+        rule: expect.stringMatching(/^bash\(@exact:[a-f0-9]{64}\)$/) });
 
       const normalized = harness.output.normalized;
       const titleCount = normalized.split('xiaok 想要执行以下操作').length - 1;
@@ -246,7 +249,26 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
-    it('falls back to plain-text approval rendering when the shared renderer throws', async () => {
+    it('re-renders the multiline printf/sleep approval block without duplicate rows while navigating', async () => {
+      const harness = createTtyHarness();
+
+      const pending = showPermissionPrompt('bash', { command: 'printf ok\nsleep 0' });
+      harness.send('\x1b[B');
+      harness.send('\x1b[B');
+      harness.send('\r');
+
+      await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(printf *)',
+        rules: ['bash(printf *)', 'bash(sleep *)'] });
+
+      const normalized = harness.output.normalized;
+      const titleCount = normalized.split('xiaok 想要执行以下操作').length - 1;
+      expect(titleCount).toBe(3);
+      expect(normalized).not.toContain('命令: printf ok\nsleep 0');
+
+      harness.restore();
+    });
+
+    it('denies approval without plain-text fallback when the shared renderer throws', async () => {
       const harness = createTtyHarness();
       const failingRenderer = {
         hasActiveScrollRegion: () => true,
@@ -304,6 +326,27 @@ describe('permission-prompt', () => {
       expect(events.some((event) => event.type === 'permission_prompt_decision' && event.action === 'allow_session')).toBe(true);
 
       harness.restore();
+    });
+
+    it.each(['string', 'buffer'] as const)('handles coalesced approval navigation and Enter as %s', async (inputType) => {
+      const harness = createTtyHarness();
+      try {
+        const pending = showPermissionPrompt('bash', { command: 'ls' });
+        const keys = '\x1b[B\x1b[B\r';
+        harness.emitter.emit('data', inputType === 'buffer' ? Buffer.from(keys) : keys);
+        // Complete a broken implementation without leaving an unresolved prompt.
+        harness.send('\x1b');
+        await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(ls *)' });
+      } finally { harness.restore(); }
+    });
+
+    it('stops a coalesced approval batch immediately after cancellation', async () => {
+      const harness = createTtyHarness();
+      try {
+        const pending = showPermissionPrompt('bash', { command: 'ls' });
+        harness.send('\x1b\x1b[B\r'); harness.send('\x1b');
+        await expect(pending).resolves.toEqual({ action: 'deny' });
+      } finally { harness.restore(); }
     });
 
     it('re-renders the approval block in place when used with the shared repl renderer', async () => {
@@ -459,7 +502,7 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
-    it('keeps the latest tool transcript rows visible above the renderer permission menu', async () => {
+    it('preserves transcript rows across a temporary full-input permission screen', async () => {
       const harness = createTtyHarness(120, 24, { captureStderr: true });
       const renderer = new ReplRenderer(process.stdout);
       const scrollRegion = new ScrollRegionManager(process.stdout);

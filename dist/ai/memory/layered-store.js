@@ -8,7 +8,15 @@ import { EmbeddingClient } from './embedding.js';
 import { hybridSearch } from './retrieval.js';
 import { compactL0toL1, compactL1toL2, compactL2toL3 } from './compaction.js';
 import { createLogger } from '../../utils/logger.js';
-const logger = createLogger('memory:layered-store');
+// Timer/embedding callbacks run while the terminal cursor may be in the editor.
+// A normal warn logger also writes stderr, so these diagnostics must be file-only.
+const logger = createLogger('memory:layered-store', { stderr: false });
+const compactionErrorCodes = new Set([
+    'memory_output_incomplete', 'memory_compaction_timeout',
+    'memory_compaction_invalid_response', 'memory_inputs_changed',
+    'memory_store_closed', 'memory_model_unavailable',
+    'memory_compaction_busy', 'memory_compaction_forbidden',
+]);
 import { segmentChinese } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
 import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
@@ -28,7 +36,7 @@ export function resolveLayeredConfig(config) {
         },
         compaction: {
             l0MinMessages: c.compaction?.l0MinMessages ?? 5,
-            autoCompact: c.compaction?.autoCompact ?? false,
+            autoCompact: c.compaction?.autoCompact ?? true,
             compactIntervalMs: c.compaction?.compactIntervalMs ?? 60000,
             maxPromptTokens: c.compaction?.maxPromptTokens ?? 8000,
         },
@@ -43,17 +51,33 @@ export function createLLMFromAdapter(adapter) {
             { role: 'user', content: [{ type: 'text', text: prompt }] },
         ];
         const chunks = [];
-        for await (const chunk of streamStatelessSideCallProviderConversation({
-            adapter,
-            messages,
-            tools: [],
-            systemPrompt: '只输出JSON结果，不要其他内容。不要调用任何工具。',
-            invocationId: `inv_${crypto.randomUUID()}`,
-        })) {
-            if (chunk.type === 'text')
-                chunks.push(chunk.delta);
+        let done = false;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(new DOMException('memory_compaction_timeout', 'AbortError')), 120_000);
+        timer.unref?.();
+        try {
+            for await (const chunk of streamStatelessSideCallProviderConversation({
+                adapter,
+                messages,
+                tools: [],
+                systemPrompt: '只输出JSON结果，不要其他内容。不要调用任何工具。',
+                invocationId: `inv_${crypto.randomUUID()}`,
+                options: { maxOutputTokens: 8192, reasoningMode: 'disabled', signal: controller.signal },
+            })) {
+                controller.signal.throwIfAborted();
+                if (chunk.type === 'text')
+                    chunks.push(chunk.delta);
+                if (chunk.type === 'done')
+                    done = true;
+            }
+            controller.signal.throwIfAborted();
+            if (!done)
+                throw new Error('memory_output_incomplete');
+            return chunks.join('');
         }
-        return chunks.join('');
+        finally {
+            clearTimeout(timer);
+        }
     };
 }
 export class LayeredMemoryStore {
@@ -64,6 +88,7 @@ export class LayeredMemoryStore {
     compactionConfig;
     compactTimer;
     compacting = false;
+    closed = false;
     constructor(config) {
         this.dbPath = config.dbPath;
         const dir = path.dirname(config.dbPath);
@@ -81,16 +106,15 @@ export class LayeredMemoryStore {
         this.embeddingClient = new EmbeddingClient(this.db, embeddingConfig);
         this.compactionConfig = {
             l0MinMessages: config.compaction?.l0MinMessages ?? 5,
-            autoCompact: config.compaction?.autoCompact ?? false,
+            autoCompact: config.compaction?.autoCompact ?? true,
             compactIntervalMs: config.compaction?.compactIntervalMs ?? 60000,
             maxPromptTokens: config.compaction?.maxPromptTokens ?? 8000,
         };
-        if (this.compactionConfig.autoCompact) {
-            this.startAutoCompact();
-        }
     }
     setLLMFn(fn) {
         this.llmFn = fn;
+        if (this.compactionConfig.autoCompact && !this.compactTimer && !this.closed)
+            this.startAutoCompact();
     }
     async save(record) {
         const id = record.id || crypto.randomUUID();
@@ -111,7 +135,7 @@ export class LayeredMemoryStore {
         return results
             .map(r => this.searchResultToRecord(r))
             .filter(r => {
-            if (r.scope === 'project' && r.cwd !== input.cwd)
+            if (r.scope !== 'global' && r.cwd !== input.cwd)
                 return false;
             if (input.typeFilter && r.type !== input.typeFilter)
                 return false;
@@ -147,26 +171,35 @@ export class LayeredMemoryStore {
         const segmented = segmentChinese(content);
         this.db.prepare(`INSERT INTO memory_l0_raw (id, session_id, role, content, segmented_content) VALUES (?, ?, ?, ?, ?)`).run(id, sessionId, role, content, segmented);
     }
-    async compact() {
+    async compact(request) {
+        if (!request || (request.requestSource !== 'user' && request.requestSource !== 'scheduler')
+            || (request.requestSource === 'scheduler' && request.force))
+            throw new Error('memory_compaction_forbidden');
+        if (this.closed)
+            throw new Error('memory_store_closed');
         if (this.compacting)
-            return;
-        if (!this.llmFn) {
-            console.warn('[memory] compaction skipped: no LLM function configured. Call setLLMFn() first.');
-            return;
-        }
+            throw new Error('memory_compaction_busy');
+        if (!this.llmFn)
+            throw new Error('memory_model_unavailable');
         this.compacting = true;
+        const before = this.getStats();
+        const assertOpen = () => { if (this.closed)
+            throw new Error('memory_store_closed'); };
         try {
-            const llm = this.llmFn;
-            const r1 = await compactL0toL1(this.db, llm, {
-                minMessages: this.compactionConfig.l0MinMessages,
+            const options = { force: request.force, assertOpen };
+            const r1 = await compactL0toL1(this.db, this.llmFn, {
+                ...options, force: false, minMessages: this.compactionConfig.l0MinMessages,
                 maxPromptTokens: this.compactionConfig.maxPromptTokens,
             });
-            if (r1.extracted > 0) {
-                const r2 = await compactL1toL2(this.db, llm);
-                if (r2.scenarios > 0) {
-                    await compactL2toL3(this.db, llm);
-                }
-            }
+            const r2 = await compactL1toL2(this.db, this.llmFn, options);
+            const r3 = await compactL2toL3(this.db, this.llmFn, options);
+            const counts = { l1: r1.extracted, l2: r2.scenarios, l3: r3.traits };
+            const result = {
+                status: Object.values(counts).some(count => count > 0)
+                    || before.l2 !== this.getLayerCount(2) || before.l3 !== this.getLayerCount(3) ? 'completed' : 'unchanged', ...counts,
+            };
+            logger.info('memory distillation finished', { requestSource: request.requestSource, force: !!request.force, ...result });
+            return result;
         }
         finally {
             this.compacting = false;
@@ -191,7 +224,7 @@ export class LayeredMemoryStore {
         return (r1.changes + r0.changes) > 0;
     }
     getPersonaTraits() {
-        const rows = this.db.prepare('SELECT trait, confidence FROM memory_l3_persona ORDER BY confidence DESC').all();
+        const rows = this.db.prepare("SELECT trait, confidence FROM memory_l3_persona WHERE scope='global' ORDER BY confidence DESC").all();
         return rows.map(r => ({ trait: r.trait, confidence: r.confidence }));
     }
     getStats() {
@@ -269,6 +302,7 @@ export class LayeredMemoryStore {
       DELETE FROM memory_l2_scenario;
       DELETE FROM memory_l3_persona;
       DELETE FROM memory_embeddings;
+      DELETE FROM memory_meta WHERE key LIKE 'compaction_l%';
     `);
     }
     listUserMemories(limit = 200) {
@@ -316,6 +350,9 @@ export class LayeredMemoryStore {
         return (del0 + del1) > 0;
     }
     close() {
+        if (this.closed)
+            return;
+        this.closed = true;
         if (this.compactTimer) {
             clearInterval(this.compactTimer);
         }
@@ -353,10 +390,15 @@ export class LayeredMemoryStore {
     }
     startAutoCompact() {
         this.compactTimer = setInterval(() => {
-            this.compact().catch(err => {
-                console.error('[memory] auto-compaction failed:', err.message);
+            if (this.compacting || this.closed)
+                return;
+            this.compact({ requestSource: 'scheduler' }).catch(err => {
+                const code = err instanceof Error && compactionErrorCodes.has(err.message)
+                    ? err.message : 'memory_compaction_failed';
+                logger.error('auto-compaction failed', { code });
             });
         }, this.compactionConfig.compactIntervalMs);
+        this.compactTimer.unref?.();
     }
 }
 function parseMemoryProvenance(raw) {

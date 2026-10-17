@@ -209,6 +209,7 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
     const checked = new Set<number>();
     let renderedRowCount = 0;
     let externallyRendered = false;
+    let directPromptStarted = false;
     let settled = false;
 
     function clearFrame() {
@@ -249,6 +250,10 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
         }
       }
       externallyRendered = false;
+      if (!directPromptStarted) {
+        stdout.write('\n');
+        directPromptStarted = true;
+      }
       // Write lines without trailing newline — cursor stays on last line
       stdout.write(frameLines.join('\n'));
     }
@@ -301,7 +306,8 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
       const raw = typeof data === 'string' ? data : data.toString('utf8');
       // stdin may coalesce numeric choices, arrows and Enter. Keep escape
       // parameters and CRLF atomic, and preserve buffered-number validation.
-      const keys = raw.match(/\x1b(?:\[[0-?]*[ -/]*(?:[@-~]|$)|O[0-?]*[ -/]*(?:[@-~]|$))|\r\n|\d+|[\s\S]/g) ?? [];
+      const keys = raw.match(/\x1b(?:\[[0-?]*[ -/]*(?:[@-~]|$)|O[0-?]*[ -/]*(?:[@-~]|$))|\r\n|\d+|[ \r\n\x1b\x03\x7f\x08]/g) ?? [];
+      if (keys.join('') !== raw) return;
       const UP    = '\x1b[A';
       const DOWN  = '\x1b[B';
       const ENTER = '\r';

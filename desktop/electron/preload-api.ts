@@ -36,6 +36,7 @@ import type { DesktopGoalNativeMutationProjection } from '../shared/host-observa
 export type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
 import type { GoalCompletionObservation } from '../shared/host-observation-types.js';
 import type { ConversationActivity, WorkWatch, WorkProjection, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
+import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -1380,7 +1381,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   deleteMemory(id: string): Promise<boolean>;
   importMemories(raw: string): Promise<MemoryImportIpcResult>;
   memoryStats(): Promise<MemoryStatsIpcSnapshot | null>;
-  memoryCompact(): Promise<boolean>;
+  memoryCompact(): Promise<MemoryCompactionResult>;
   memoryPersonaTraits(): Promise<MemoryPersonaIpcTrait[]>;
   memoryListLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
@@ -1939,7 +1940,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<boolean>,
     importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<MemoryImportIpcResult>,
     memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<MemoryStatsIpcSnapshot | null>,
-    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<boolean>,
+    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<MemoryCompactionResult>,
     memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<MemoryPersonaIpcTrait[]>,
     memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,

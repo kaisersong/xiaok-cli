@@ -5,10 +5,14 @@
  * 使用 @modelcontextprotocol/client v2 提供的 transport classes
  */
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, SSEClientTransport, StreamableHTTPClientTransport, } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { createTaskSessionFromClient, createTaskSessionEndpointId } from '@modelcontextprotocol/ext-tasks/client';
+import { deferMcpTaskInput } from './task-input.js';
+import { McpTaskRequestCoordinator } from './task-request-coordinator.js';
 import { ControlledStdioClientTransport, } from './controlled-stdio-transport.js';
 import { WebSocket } from 'ws';
 const MCP_STDERR_TAIL = Symbol('mcpStderrTail');
@@ -100,14 +104,21 @@ export function createMcpClientOptions(probeTimeoutMs = resolveMcpStartupTimeout
 export function createMcpSdkClient(probeTimeoutMs = resolveMcpStartupTimeoutMs(), protocol = { mode: 'auto' }, clientName = 'xiaok-cli') {
     return new Client({ name: clientName, version: resolveMcpClientVersion() }, createMcpClientOptions(probeTimeoutMs, protocol));
 }
-export function resolveStdioCommand(command, platform = process.platform, env = process.env) {
+export function resolveStdioCommand(command, platform = process.platform, env = process.env, homeDir = homedir()) {
+    let resolved = command;
     if ((command === 'python' || command === 'python3') && env.XIAOK_PYTHON_CMD) {
-        return env.XIAOK_PYTHON_CMD;
+        resolved = env.XIAOK_PYTHON_CMD;
     }
-    if (platform === 'win32' && command === 'python3') {
-        return 'python';
+    else if (platform === 'win32' && command === 'python3') {
+        resolved = 'python';
     }
-    return command;
+    // stdio spawn bypasses the shell: expand only the current-user home prefix.
+    if (resolved === '~')
+        return homeDir;
+    if (resolved.startsWith('~/') || (platform === 'win32' && resolved.startsWith('~\\'))) {
+        return (platform === 'win32' ? win32 : posix).join(homeDir, resolved.slice(2));
+    }
+    return resolved;
 }
 /**
  * 创建 MCP client 连接（统一入口）
@@ -116,6 +127,9 @@ export async function createMcpClientConnection(serverName, config, options = {}
     const startupTimeoutMs = config.timeout?.startup ?? resolveMcpStartupTimeoutMs();
     const createdTransport = await createTransport(config, options);
     const client = createMcpSdkClient(startupTimeoutMs, config.protocol, options.clientName);
+    let negotiatedVersion;
+    const setVersion = createdTransport.transport.setProtocolVersion?.bind(createdTransport.transport);
+    createdTransport.transport.setProtocolVersion = version => { negotiatedVersion = version; setVersion?.(version); };
     try {
         await client.connect(createdTransport.transport, {
             timeout: startupTimeoutMs,
@@ -150,7 +164,17 @@ export async function createMcpClientConnection(serverName, config, options = {}
     const childPid = createdTransport.getChildPid();
     let disposed = false;
     let closing = null;
+    const taskCoordinator = new McpTaskRequestCoordinator(createdTransport.transport);
+    const endpointId = await createTaskSessionEndpointId('xiaok-mcp', { serverName, config });
+    const taskOptions = { endpointId, maxInputRounds: 32, onInputRequest: deferMcpTaskInput };
+    const tasks = protocolEra === 'modern'
+        ? createTaskSessionFromClient(client, { ...taskOptions, rawDispatch: taskCoordinator.dispatch,
+            v2RequestFraming: { protocolVersion: negotiatedVersion ?? '2026-07-28',
+                clientInfo: { name: options.clientName ?? 'xiaok-cli', version: resolveMcpClientVersion() }, clientCapabilities: {} } })
+        : createTaskSessionFromClient(client, taskOptions);
     const closeFully = async () => {
+        await tasks.close();
+        taskCoordinator.dispose();
         createdTransport.disposeObservability();
         await client.close().catch(() => undefined);
         if (childPid !== null) {
@@ -159,11 +183,17 @@ export async function createMcpClientConnection(serverName, config, options = {}
     };
     return {
         client,
+        activityEndpoint: { name: serverName, config: structuredClone(config), cwd: options.cwd },
+        tasks,
+        listenTaskEvents: taskCoordinator.listenTasks.bind(taskCoordinator),
+        observeTaskStatus: taskCoordinator.observeTaskStatus.bind(taskCoordinator),
         protocolEra,
         getStderrTail: createdTransport.getStderrTail,
         getChildPid: () => childPid,
         close: () => {
             disposed = true;
+            void tasks.close().catch(() => undefined);
+            taskCoordinator.dispose();
             closing ??= closeFully();
             return closing;
         },

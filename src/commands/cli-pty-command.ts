@@ -36,7 +36,7 @@ export async function runPtyCommand(command: string, options: PtyCommandOptions)
     });
     throw new Error(
       `交互终端组件 node-pty 加载失败，命令尚未执行。请检查可选依赖是否安装及原生模块是否兼容当前 Node。\n`
-      + `请在你自己的终端执行该命令，或在 CLI 中手动输入 !<command>；不要在对话中发送密码。\n`
+      + `请在系统终端直接执行该命令（不加 !），或在 xiaok 交互输入框手动输入 !<command>；不要在对话中发送密码。\n`
       + `若 npm 阻止了安装脚本，可一次性授权：npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode\n`
       + ((options.platform ?? process.platform) === 'linux'
         ? `Linux 缺少 pty.node 时需要 Python、make 和 C++ 工具链；确认脚本策略允许后，可在 node-pty 包目录使用 node-gyp rebuild（或 node <npm 自带的 node-gyp.js 路径> rebuild）。\n` : '')

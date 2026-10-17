@@ -102,11 +102,11 @@ function bm25Search(db, ftsQuery, segmentedQuery, layers) {
     if (layers.includes(1) && likeTerms.length > 0) {
         const conditions = likeTerms.map(() => `(summary LIKE ? OR tags LIKE ?)`).join(' AND ');
         const params = likeTerms.flatMap(t => [`%${t}%`, `%${t}%`]);
-        const rows = db.prepare(`SELECT id, summary, tags, created_at FROM memory_l1_extracted WHERE ${conditions} LIMIT 50`).all(...params);
+        const rows = db.prepare(`SELECT id, summary, tags, scope, cwd, mem_type, created_at FROM memory_l1_extracted WHERE ${conditions} LIMIT 50`).all(...params);
         for (const row of rows) {
             results.push({
                 id: row.id, layer: 1, content: row.summary,
-                metadata: { tags: JSON.parse(row.tags || '[]'), createdAt: row.created_at },
+                metadata: { scope: row.scope, cwd: row.cwd, mem_type: row.mem_type, tags: JSON.parse(row.tags || '[]'), createdAt: row.created_at },
                 rank: ++rank,
             });
         }
@@ -114,11 +114,11 @@ function bm25Search(db, ftsQuery, segmentedQuery, layers) {
     if (layers.includes(2) && likeTerms.length > 0) {
         const conditions = likeTerms.map(() => `(scenario LIKE ? OR key_facts LIKE ?)`).join(' AND ');
         const params = likeTerms.flatMap(t => [`%${t}%`, `%${t}%`]);
-        const rows = db.prepare(`SELECT id, scenario, key_facts, created_at FROM memory_l2_scenario WHERE ${conditions} LIMIT 50`).all(...params);
+        const rows = db.prepare(`SELECT id, scenario, key_facts, scope, cwd, created_at FROM memory_l2_scenario WHERE ${conditions} LIMIT 50`).all(...params);
         for (const row of rows) {
             results.push({
                 id: row.id, layer: 2, content: row.scenario,
-                metadata: { keyFacts: JSON.parse(row.key_facts || '[]'), createdAt: row.created_at },
+                metadata: { scope: row.scope, cwd: row.cwd, keyFacts: JSON.parse(row.key_facts || '[]'), createdAt: row.created_at },
                 rank: ++rank,
             });
         }
@@ -126,11 +126,11 @@ function bm25Search(db, ftsQuery, segmentedQuery, layers) {
     if (layers.includes(3) && likeTerms.length > 0) {
         const conditions = likeTerms.map(() => `(trait LIKE ? OR evidence LIKE ?)`).join(' AND ');
         const params = likeTerms.flatMap(t => [`%${t}%`, `%${t}%`]);
-        const rows = db.prepare(`SELECT id, trait, evidence, confidence, created_at FROM memory_l3_persona WHERE ${conditions} LIMIT 50`).all(...params);
+        const rows = db.prepare(`SELECT id, trait, evidence, confidence, scope, cwd, created_at FROM memory_l3_persona WHERE ${conditions} LIMIT 50`).all(...params);
         for (const row of rows) {
             results.push({
                 id: row.id, layer: 3, content: row.trait,
-                metadata: { evidence: JSON.parse(row.evidence || '[]'), confidence: row.confidence, createdAt: row.created_at },
+                metadata: { scope: row.scope, cwd: row.cwd, evidence: JSON.parse(row.evidence || '[]'), confidence: row.confidence, createdAt: row.created_at },
                 rank: ++rank,
             });
         }
@@ -183,8 +183,8 @@ function getLayerContent(db, id, layer) {
     const tableMap = {
         0: { table: 'memory_l0_raw', textCol: 'content', metaCols: ['session_id', 'role', 'created_at'] },
         1: { table: 'memory_l1_extracted', textCol: 'summary', metaCols: ['tags', 'scope', 'mem_type', 'cwd', 'created_at'] },
-        2: { table: 'memory_l2_scenario', textCol: 'scenario', metaCols: ['key_facts', 'created_at'] },
-        3: { table: 'memory_l3_persona', textCol: 'trait', metaCols: ['evidence', 'confidence', 'created_at'] },
+        2: { table: 'memory_l2_scenario', textCol: 'scenario', metaCols: ['key_facts', 'scope', 'cwd', 'created_at'] },
+        3: { table: 'memory_l3_persona', textCol: 'trait', metaCols: ['evidence', 'confidence', 'scope', 'cwd', 'created_at'] },
     };
     const spec = tableMap[layer];
     if (!spec)

@@ -70,6 +70,7 @@ export class ReplRenderer {
     try { this.stream.write('\x1b[0m\x1b[?1049l\x1b[?25h'); }
     finally { release?.(); }
   }
+  private inputOverlayKind: 'generic' | 'question' = 'generic';
 
   constructor(private readonly stream: NodeJS.WriteStream = process.stdout) {
     this.controller = createTerminalController({ prompt: '' });
@@ -150,7 +151,7 @@ export class ReplRenderer {
           ? state.overlay.lines
           : [];
       this.scrollRegion.renderPromptFrame(
-        this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : 'generic'),
+        this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : this.inputOverlayKind),
       );
       return;
     }
@@ -161,7 +162,8 @@ export class ReplRenderer {
     return this.controller.getState();
   }
 
-  renderInput(frame: ReplInputFrame): void {
+  renderInput(frame: ReplInputFrame, overlayKind: 'generic' | 'question' = 'generic'): void {
+    this.inputOverlayKind = overlayKind;
     this.invalidatePermissionScreen();
     this.controller.closeModal();
     this.controller.setPrompt(frame.prompt);
@@ -172,6 +174,7 @@ export class ReplRenderer {
   }
 
   renderOverlayAtCursor(lines: string[]): void {
+    this.inputOverlayKind = 'generic';
     this.invalidatePermissionScreen();
     this.controller.setOverlayLines(lines);
     this.render();
@@ -219,6 +222,7 @@ export class ReplRenderer {
   }
 
   clearOverlay(): void {
+    this.inputOverlayKind = 'generic';
     this.invalidatePermissionScreen();
     this.controller.clearOverlay();
     this.render();

@@ -12,6 +12,17 @@ async function withMenu(params: AskQuestionParams, check: (harness: TtyHarness, 
 
 // We test renderFrame logic and key handling separately from the interactive loop
 describe('ask-question', () => {
+  it.each(['string', 'buffer'])('applies coalesced arrows before Enter from a %s stdin chunk', async kind => {
+    await withMenu({ question: 'Batch selection', options: [
+      { label: 'Choice 1' }, { label: 'Choice 2' }, { label: 'Choice 3' },
+      { label: 'Choice 4' }, { label: 'Choice 5' }, { label: 'Other' },
+    ] }, async (harness, pending) => {
+      const input = '\x1b[B'.repeat(10) + '\r';
+      harness.emitter.emit('data', kind === 'buffer' ? Buffer.from(input) : input);
+      await expect(Promise.race([pending, new Promise(resolve => setTimeout(() => resolve('unhandled batch'), 100))])).resolves.toEqual({ selected: [4], labels: ['Choice 5'] });
+    });
+  });
+
   describe('renderFrame basic structure', () => {
     it('produces correct line count for simple options', async () => {
       // Import dynamically to avoid side effects
@@ -28,6 +39,28 @@ describe('ask-question', () => {
       const lines = MarkdownRenderer.renderToLines('');
       expect(lines).toEqual(['']);
     });
+  });
+
+  it('separates the direct question menu from prior output without accumulating gaps', async () => {
+    const harness = createTtyHarness(100, 24);
+    process.stdout.write('PREVIOUS_TOOL_OUTPUT\n');
+    const pending = askQuestion({ question: 'PROMPT_SPACING_QUESTION', options: [{label: 'Yes'}, {label: 'No'}] });
+    try {
+      const lines = harness.screen.lines();
+      const previous = lines.findIndex(line => line.includes('PREVIOUS_TOOL_OUTPUT'));
+      const question = lines.findIndex(line => line.includes('PROMPT_SPACING_QUESTION'));
+      expect(question).toBe(previous + 2);
+      expect(lines[previous + 1].trim()).toBe('');
+      harness.send('\x1b[B');
+      expect(harness.screen.lines().findIndex(line => line.includes('PROMPT_SPACING_QUESTION'))).toBe(question);
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({labels: ['No']});
+      expect(harness.screen.text()).toContain('PREVIOUS_TOOL_OUTPUT');
+    } finally {
+      harness.send('\x1b');
+      await pending;
+      harness.restore();
+    }
   });
 
   describe('key handling', () => {

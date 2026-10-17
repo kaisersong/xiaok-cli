@@ -126,7 +126,7 @@ The CLI can ask about material delegation choices when interactive input is avai
 
 ### Requirements
 
-- **CLI:** Node.js **22 or later**.
+- **CLI:** Node.js **22.14 or later**.
 - **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
 - **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
 - Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.
@@ -307,7 +307,7 @@ xiaok yzjchannel serve             # Optional Yunzhijia gateway
 /clear                        Clear screen and redisplay the welcome page
 /compact                      Compact earlier conversation context
 /context                      Show loaded repository context
-/mode [default|auto|plan]     Inspect or change permission mode
+/mode                         Select permission mode
 /models                       Switch model
 /goal <objective>              Start a persistent goal
 /goal status|pause|cancel      Inspect, pause, or cancel the goal
@@ -322,6 +322,8 @@ xiaok yzjchannel serve             # Optional Yunzhijia gateway
 /help                         Show help
 /<skill-name> [args]          Invoke a skill
 ```
+
+Use `/mode` to select `default`, `auto`, `plan`, or `yolo`. The interactive CLI remembers the last selection, including YOLO, across exit, new chats and resume. Shift+Tab changes are also remembered. Explicit `--auto` or `--yolo` takes priority and becomes the last interactive choice. Piped and single-shot commands keep their existing defaults and do not inherit or change this preference. YOLO skips CLI tool approval rules and command risk blocks, including force pushes and deletion; `auto` only approves low-risk operations. OS authentication and configured execution hooks still apply.
 
 Permission mode is separate from user intent: `auto` does not answer an unresolved question or override “ask before delegating.”
 

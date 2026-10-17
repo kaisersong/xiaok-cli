@@ -10,6 +10,7 @@ import type { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
 type Request = Omit<Parameters<typeof streamDesktopTaskRecovery>[0], 'adapter' | 'onRecovery'> & {
   adapter?: Pick<ModelAdapter, 'stream'>;
+  beforeRequest?: () => Promise<void>;
   // Selected-model fallback keeps its original notification contract.
   onRecovery?: Parameters<typeof streamDesktopSummaryRecovery>[0]['onRecovery'];
 };

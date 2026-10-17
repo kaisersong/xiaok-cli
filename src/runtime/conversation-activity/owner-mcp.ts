@@ -1,4 +1,6 @@
 import { ownPendingClose, type PendingCloseOwner } from './pending-close-owner.js';
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { readFileSync, existsSync, statSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -34,7 +36,7 @@ export class ActivityOwnerMcp {
       const name = error instanceof Error ? error.name : 'UnknownError';
       process.stderr.write(`activity_mcp_observation_failed:${/^[A-Za-z]+$/.test(name) ? name : 'Error'}\n`);
     } });
-    const path = join(options.root, 'activity-mcp-endpoints.json');
+    const path = join(options.root, ACTIVITY_STORAGE_NAMES.endpoints);
     if (existsSync(path)) {
       const state = statSync(path);
       if (state.size > 192 * 1024 || process.platform !== 'win32' && (state.uid !== process.getuid?.() || (state.mode & 0o077) !== 0)) throw new Error('activity_mcp_config_not_private');
@@ -57,9 +59,9 @@ export class ActivityOwnerMcp {
     if (this.disposed) throw new Error('activity_mcp_closing');
     if (this.endpoints.size >= 64 && !this.endpoints.has(endpoint.endpointId)) throw new Error('activity_mcp_endpoint_capacity');
     this.endpoints.set(endpoint.endpointId, endpoint);
-    const file = join(this.options.root, 'activity-mcp-endpoints.json'), tmp = `${file}.${process.pid}.tmp`, encoded = JSON.stringify([...this.endpoints.values()]);
+    const file = join(this.options.root, ACTIVITY_STORAGE_NAMES.endpoints), tmp = `${file}.${process.pid}.tmp`, encoded = JSON.stringify([...this.endpoints.values()]);
     if (Buffer.byteLength(encoded) > 192 * 1024) throw new Error('activity_mcp_config_capacity');
-    writeFileSync(tmp, encoded, { mode: 0o600 }); renameSync(tmp, file);
+    writeFileSync(tmp, encoded, { mode: 0o600 }); chmodPrivateActivityFile(tmp); renameSync(tmp, file);
     await this.connect(endpoint);
   }
   async restore(): Promise<void> {

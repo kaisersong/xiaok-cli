@@ -387,76 +387,13 @@ describe('formatHistoryBlock', () => {
     expect(formatHistoryBlock(longThinking)).toBe('');
   });
 
-  it('formats tool_use blocks with the shared rail instead of the legacy arrow', () => {
-    const block: HistoryMessageBlock = {
-      type: 'tool_use',
-      id: 'tool-123',
-      name: 'write',
-      input: { file_path: '/tmp/test.md' },
-    };
-    const output = formatHistoryBlock(block);
-
-    expect(output).toMatch(/^  │ /);
-    expect(output).not.toContain('↳');
-    expect(output).not.toContain('│ •');
-    expect(output).toContain('test.md');
-  });
-
-  it('formats tool_result blocks as truncated summary', () => {
-    const shortResult: HistoryMessageBlock = {
-      type: 'tool_result',
-      tool_use_id: 'tool-123',
-      content: 'Success',
-    };
-    const shortOutput = formatHistoryBlock(shortResult);
-
-    expect(shortOutput).toContain('Tool result');
-    expect(shortOutput).toContain('Success');
-    expect(shortOutput).not.toContain('error');
-
-    const errorResult: HistoryMessageBlock = {
-      type: 'tool_result',
-      tool_use_id: 'tool-123',
-      content: 'Failed',
-      is_error: true,
-    };
-    const errorOutput = formatHistoryBlock(errorResult);
-
-    expect(errorOutput).toContain('error');
-
-    const longResult: HistoryMessageBlock = {
-      type: 'tool_result',
-      tool_use_id: 'tool-123',
-      content: 'This is a very long tool result that should be truncated to 100 characters maximum because we want to keep the history display concise and readable without overwhelming the user with too much output content from previous tool executions.',
-    };
-    const longOutput = formatHistoryBlock(longResult);
-
-    expect(longOutput.replace(/\n  │ /g, '')).toContain('...');
-    // Should be truncated around 100 chars + prefix
-    expect(longOutput.length).toBeLessThan(200);
-  });
-
-  it('keeps every visual line of a multiline tool result inside the rail', () => {
-    const originalColumns = process.stdout.columns;
-    process.stdout.columns = 42;
-
-    try {
-      const block: HistoryMessageBlock = {
-        type: 'tool_result',
-        tool_use_id: 'tool-diff',
-        content: 'diff --git a/cli.py b/cli.py\n--- a/cli.py\n+++ b/cli.py\n@@ -8,2 +8,3 @@\n-old\n+new',
-      };
-      const output = formatHistoryBlock(block);
-      const visualLines = output.trimEnd().split('\n');
-
-      expect(output).not.toContain('↳');
-      expect(output).not.toContain('\n---');
-      expect(output).not.toContain('\n+++');
-      expect(visualLines.length).toBeGreaterThan(1);
-      expect(visualLines.every((line) => line.startsWith('  │ '))).toBe(true);
-    } finally {
-      process.stdout.columns = originalColumns;
-    }
+  it('keeps tool calls and raw results out of default resume output', () => {
+    const blocks: HistoryMessageBlock[] = [
+      { type: 'tool_use', id: 'tool-test', name: 'bash', input: { command: 'echo synthetic' } },
+      { type: 'tool_result', tool_use_id: 'tool-test', content: 'RAW_RESULT_CANARY' },
+      { type: 'tool_result', tool_use_id: 'tool-test', content: 'ERROR_CANARY', is_error: true },
+    ];
+    for (const block of blocks) expect(formatHistoryBlock(block)).toBe('');
   });
 
   it('formats image blocks as placeholder', () => {

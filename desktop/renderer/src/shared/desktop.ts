@@ -1,5 +1,6 @@
 import type { UpdateInstallDto } from '../../../shared/updater-ipc-contract.js';
 import type { MemoryLayerIpcEntry } from '../../../shared/memory-ipc-types.js';
+import type { MemoryCompactionResult } from '../../../shared/memory-distillation-contract.js';
 import type { FullDesktopApi } from '../../../electron/preload-api.js';
 
 export type ConnectionMode = 'local' | 'saas' | 'self-hosted';
@@ -81,7 +82,7 @@ export interface DesktopMemoryApi {
   add(content: string, category?: string): Promise<unknown>;
   delete(id: string): Promise<unknown>;
   stats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
-  compact(): Promise<boolean>;
+  compact(): Promise<MemoryCompactionResult>;
   personaTraits(): Promise<{ trait: string; confidence: number }[]>;
   listLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   deleteEntry(id: string, layer: number): Promise<boolean>;
@@ -183,7 +184,7 @@ export function getDesktopApi(): ExtendedDesktopApi | null {
       return raw.memoryStats() as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>
     },
     async compact() {
-      return raw.memoryCompact() as Promise<boolean>
+      return raw.memoryCompact() as Promise<MemoryCompactionResult>
     },
     async personaTraits() {
       return raw.memoryPersonaTraits() as Promise<{ trait: string; confidence: number }[]>

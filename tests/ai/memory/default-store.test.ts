@@ -79,13 +79,12 @@ describe('createMemoryStoreAsync - default store', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('should have working compact (no-op without LLM)', async () => {
+  it('should reject compaction without a configured LLM', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-defstore3-'));
     const dbPath = path.join(tmpDir, 'memory.db');
     const store = await createMemoryStoreAsync({ dbPath });
 
-    // Should not throw even without LLM function
-    await store.compact!();
+    await expect(store.compact!({ requestSource: 'user' })).rejects.toThrow('memory_model_unavailable');
 
     store.close?.();
     fs.rmSync(tmpDir, { recursive: true, force: true });

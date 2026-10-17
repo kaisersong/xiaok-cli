@@ -24,7 +24,7 @@ import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { createReadTool, type WorkspaceToolOptions } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
-import { bashTool } from './bash.js';
+import { bashTool, createBashTool, type BashApprovalOptions } from './bash.js';
 import { grepTool } from './grep.js';
 import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
@@ -57,13 +57,14 @@ export function buildToolList(
   workspace?: WorkspaceToolOptions,
   extraTools: Tool[] = [],
   metadataSink?:Map<Tool,ToolDescriptionMetadata>,
+  bashApproval?: BashApprovalOptions,
 ): Tool[] {
   const readTool=createReadTool(workspace);metadataSink?.set(readTool,BUILTIN_READ_DESCRIPTION);
   const tools: Tool[] = [
     readTool,
     createWriteTool(workspace),
     createEditTool(workspace),
-    bashTool,
+    createBashTool(bashApproval),
     grepTool,
     globTool,
     webFetchTool,
@@ -230,7 +231,7 @@ export class ToolRegistry {
     if (this.options.hookInputMode === 'direct-callback' && !this.#nativeReadonlyOnly && !this.options.compoundExecution) {
       this.#acceptedHookCalls = new AcceptedHookCalls();
     }
-    if(!tools){const sink=new Map<Tool,ToolDescriptionMetadata>();tools=buildToolList(undefined,undefined,[],sink);metadata=sink;if(this.#nativeReadonlyOnly)tools=tools.filter(tool=>this.admitsNativeReadonly(tool));}
+    if(!tools){const sink=new Map<Tool,ToolDescriptionMetadata>();tools=buildToolList(undefined,undefined,[],sink,{ isYolo: () => this.permissionManager.getMode() === 'yolo' });metadata=sink;if(this.#nativeReadonlyOnly)tools=tools.filter(tool=>this.admitsNativeReadonly(tool));}
     for (const tool of tools) {
       this.registerTool(tool,metadata?.get(tool));
     }

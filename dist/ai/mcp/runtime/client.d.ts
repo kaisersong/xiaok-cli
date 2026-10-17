@@ -1,8 +1,10 @@
 import type { McpToolSchema } from '../client.js';
+import type { ToolExecutionContext } from '../../../types.js';
 /** Per-invocation cancellation; never owns the shared MCP connection. */
 export type McpInvocationOptions = Readonly<{
     signal?: AbortSignal;
     onProgress?: () => void;
+    executionContext?: ToolExecutionContext;
 }>;
 export interface McpRuntimeRequest {
     jsonrpc: '2.0';

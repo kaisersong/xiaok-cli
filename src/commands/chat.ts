@@ -1,5 +1,6 @@
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
 import { confirmChatPermission } from './chat-permission.js';
+import { getResumeHistoryMessages } from '../ui/resume-history.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import {parseIntentReceiverCommand,intentReceiverHelp} from './chat-intent-receiver.js';
 import {createIntentReceiverPublicationHost} from '../runtime/intent-delegation/receiver-publication-host.js';
@@ -41,11 +42,12 @@ import type { ModelAdapter, MessageBlock, UsageStats } from '../types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import type { IntentPlanDraft } from '../ai/intent-delegation/types.js';
 import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
+import { isPermissionMode, loadLastPermissionMode, saveLastPermissionMode, resolveInitialPermissionMode } from './chat-permission-mode.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
 import { createChatAdapterWithLoginBootstrap } from './chat-login-bootstrap.js';
-import { PermissionManager } from '../ai/permissions/manager.js';
+import { PermissionManager, type PermissionMode } from '../ai/permissions/manager.js';
 import { ToolRegistry, type ToolObservation } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
@@ -54,7 +56,8 @@ import { createGoalTools } from '../ai/tools/goal.js';
 import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput, type DebugEvent, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
-import { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
+import type { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
+import { attachCliConversationActivitiesWithinBudget, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -119,6 +122,7 @@ import { ToolExplorer } from '../ui/tool-explorer.js';
 import { TurnLayout } from '../ui/turn-layout.js';
 import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
+import { selectPermissionMode } from '../ui/mode-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand, type ShellCommandResult, type ShellEscapeExecutor } from './chat-shell-escape.js';
@@ -132,8 +136,9 @@ import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
 import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
 import { openTranscriptPager, spawnPagerProcess, type TranscriptPagerStatus } from '../ui/transcript-pager.js';
-import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
+import { detectImageProtocol, readImageDimensions, renderInlineImageBlock, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
+import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
 import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
@@ -251,6 +256,7 @@ interface ChatOptions {
   goalVerification?: string;
   intentVerification?: string;
   auto: boolean;
+  yolo?: boolean;
   dryRun: boolean;
   print?: boolean;
   json?: boolean;
@@ -503,8 +509,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 检测 CI 环境
-  const autoMode = opts.auto || !isTTY();
-  if (!isTTY() && !opts.auto) {
+  const rememberMode = isTTY() && initialInput === undefined && !opts.print && !opts.json;
+  const initialPermissionMode = resolveInitialPermissionMode(
+    { auto: opts.auto, yolo: opts.yolo, interactive: isTTY() },
+    rememberMode ? loadLastPermissionMode() : null,
+  );
+  if (!isTTY() && !opts.auto && !opts.yolo) {
     console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
   }
 
@@ -622,7 +632,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
-  let nextInlineImageId = 1;
   let terminalUiSuspended = false;
   let terminalUiFailureNoted = false;
   let terminalUiFallbackStream: 'stdout' | 'stderr' | null = null;
@@ -1270,7 +1279,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const permissionManager = new PermissionManager({
     cwd,
-    mode: autoMode ? 'auto' : 'default',
+    mode: initialPermissionMode,
     allowRules: persistedPermissionRules.allowRules,
     denyRules: persistedPermissionRules.denyRules,
   });
@@ -1285,8 +1294,24 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   if (persistedSandboxAllowedPaths.length > 0) {
     platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
   }
+  const modePreferenceLog = createLogger('cli:permission-mode', { stderr: false });
+  let modeSaveFailed = false;
+  const rememberPermissionMode = (mode: PermissionMode): boolean => {
+    try {
+      saveLastPermissionMode(mode);
+      modeSaveFailed = false;
+      return true;
+    } catch {
+      modeSaveFailed = true;
+      modePreferenceLog.warn('permission_mode_save_failed');
+      return false;
+    }
+  };
+  // Explicit interactive startup flags also count as the latest user selection.
+  if (rememberMode && (opts.auto || opts.yolo)) rememberPermissionMode(initialPermissionMode);
   inputReader.setModeCycleHandler(() => {
     const nextMode = PermissionManager.nextMode(permissionManager.getMode());
+    if (!rememberPermissionMode(nextMode)) return null;
     permissionManager.setMode(nextMode);
     statusBar.updateMode(nextMode);
     return nextMode;
@@ -1711,10 +1736,51 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
   }
 
-  if (!opts.print && isTTY() && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0') {
-    try { cliActivities = await CliConversationActivities.attach({ cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform, changed: () => flushSubAgentNotices(),
-      onError: error => log.debug('cli_activity_unavailable', String(error)) }); }
-    catch (error) { log.debug('cli_activity_owner_unavailable', String(error)); }
+  const activityStartupNotices = createActivityStartupNotices({
+    configDir: getConfigDir(),
+    onDebug: (event, detail) => log.debug(event, detail),
+  });
+  let activityStartupDeferred = false;
+  let finishActivityStartup!: () => void;
+  let failActivityStartup!: (error: unknown) => void;
+  let lateActivityClose: Promise<unknown> | undefined;
+  void trackOwnedWrite(new Promise<void>((resolve, reject) => {
+    finishActivityStartup = resolve; failActivityStartup = reject;
+  }));
+  const acceptActivityOwner = (instance: CliConversationActivities): void => {
+    if (modelIngressClosed) lateActivityClose = Promise.resolve().then(() => instance.close());
+    else cliActivities = instance;
+  };
+  const settleActivityStartup = (): void => {
+    if (lateActivityClose) void lateActivityClose.then(() => finishActivityStartup(), failActivityStartup);
+    else finishActivityStartup();
+  };
+  try {
+    const attachedActivities = await attachCliConversationActivitiesWithinBudget({
+      startupNotices: activityStartupNotices,
+      print: Boolean(opts.print),
+      isTTY: isTTY(),
+      conversationActivity: process.env.XIAOK_CONVERSATION_ACTIVITY,
+      attachOptions: { cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform,
+        changed: () => flushSubAgentNotices(),
+        onError: error => log.debug('cli_activity_unavailable', String(error)) },
+      onDebug: (event, detail) => {
+        if (event === 'cli_activity_startup_deferred') activityStartupDeferred = true;
+        try { log.debug(event, detail); } catch { /* Diagnostics cannot abandon the pending activity owner. */ }
+      },
+    }, {
+      onLate: acceptActivityOwner,
+      onSettled: () => {
+        settleActivityStartup();
+        try { flushSubAgentNotices(); } catch (error) { finalizationErrors.push(error); }
+      },
+    });
+    // A late owner may already have arrived before the budget's undefined return.
+    if (attachedActivities) acceptActivityOwner(attachedActivities);
+    if (!activityStartupDeferred) settleActivityStartup();
+  } catch (error) {
+    failActivityStartup(error);
+    throw error;
   }
 
   // 触发 SessionStart hook
@@ -1732,6 +1798,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     const summaryLine = getCurrentIntentSummaryLine();
     const statusLine = statusBar.getStatusLine();
     const lines: string[] = [];
+    if (modeSaveFailed) lines.push('权限模式保存失败，请检查配置目录权限。');
     if (summaryLine) {
       lines.push(summaryLine);
     }
@@ -2691,9 +2758,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     await persistSession();
   };
 
-  const writeOrchestrationBlock = (block: string): void => {
+  const writeOrchestrationBlock = (block: string): boolean => {
     if (!block) {
-      return;
+      return false;
     }
 
     endStreamingPhaseForInterrupt();
@@ -2706,15 +2773,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         scrollRegion.writeAtContentCursor(separatedBlock);
       } catch (error) {
         suspendInteractiveUi('write_orchestration_block', error);
+        return false;
       }
       mdRenderer.beginNewSegment();
       resetStreamingSegment();
-      return;
+      return true;
     }
 
     process.stdout.write(separatedBlock);
     mdRenderer.beginNewSegment();
     resetStreamingSegment();
+    return true;
   };
 
   flushSubAgentNotices = (): void => {
@@ -2722,7 +2791,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
       && !scrollRegion.isContentStreaming();
     subAgentNotices.flush(canWrite, writeOrchestrationBlock);
-    cliActivities?.flush(canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready', writeOrchestrationBlock);
+    const activityCanWrite = canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready';
+    cliActivities?.flush(activityCanWrite, writeOrchestrationBlock);
+    if (activityCanWrite) {
+      const notice = activityStartupNotices.take();
+      if (notice) {
+        if (writeOrchestrationBlock(notice.text)) notice.markShown();
+      }
+    }
   };
 
   const persistSessionBody = async (options: {
@@ -3351,7 +3427,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       model: getActiveProviderLabel(),
       cwd: process.cwd(),
       sessionId,
-      mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+      mode: opts.dryRun ? 'dry-run' : permissionManager.getMode(),
       version: cliVersion,
     });
 
@@ -3440,7 +3516,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       };
 
       writeHistoryChunk('\n');
-      for (const msg of historyMessages) {
+      for (const msg of getResumeHistoryMessages(historyMessages, persistedSession?.compactions)) {
         if (msg.role === 'user') {
           for (const block of msg.content) {
             recordHistoryBlockInBuffer('user', block);
@@ -3514,19 +3590,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
         if (terminalUiSuspended) continue;
 
-        const rendered = renderImageLines({
+        const rendered = renderInlineImageBlock({
           data,
           mediaType: block.source.media_type,
           protocol,
           columns: process.stdout.columns ?? 80,
-          maxRows: Math.min(12, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
-          imageId: nextInlineImageId++,
+          maxRows: Math.min(14, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
         });
         const placeholder = formatImageFallbackLine(dims);
 
         try {
           if (rendered.protocol === null) {
-            const line = `${rendered.lines[0]}\n`;
+            const line = rendered.text;
             if (scrollRegion.isActive()) {
               scrollRegion.writeAtContentCursor(line);
             } else {
@@ -3534,9 +3609,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             }
             continue;
           }
-          const stationary = rendered.protocol === 'kitty';
-          scrollRegion.writeRawBlock(stationary ? rendered.lines[0] : `${rendered.lines.join('\n')}\n`, rendered.rows, {
-            cursorStationary: stationary,
+          scrollRegion.writeRawBlock(rendered.text, rendered.rows, {
+            cursorStationary: rendered.cursorStationary,
             logger: transcriptLogger,
             placeholder,
           });
@@ -4221,7 +4295,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         model: getActiveProviderLabel(),
         cwd: process.cwd(),
         sessionId,
-        mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+        mode: opts.dryRun ? 'dry-run' : permissionManager.getMode(),
         version: cliVersion,
       });
       scrollRegion.setWelcomeRows(contentRows);
@@ -4487,18 +4561,30 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
-      const [, requestedMode] = trimmed.split(/\s+/, 2);
+      let [, requestedMode] = trimmed.split(/\s+/, 2);
       if (!requestedMode) {
-        writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
+        if (scrollRegion.isActive() && !terminalUiSuspended) {
+          scrollRegion.clearOverlayPromptState();
+          replRenderer.prepareForInput();
+        }
+        const selected = await selectPermissionMode(permissionManager.getMode(), { renderer: replRenderer });
+        if (!selected) {
+          writeCommandOutput(trimmed, '已取消模式切换。\n\n');
+          return 'continue';
+        }
+        requestedMode = selected;
+      }
+
+      if (!isPermissionMode(requestedMode)) {
+        writeCommandOutput(trimmed, '未知权限模式，请执行 /mode 选择。\n\n');
         return 'continue';
       }
 
-      if (!['default', 'auto', 'plan'].includes(requestedMode)) {
-        writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
+      if (!rememberPermissionMode(requestedMode)) {
+        writeCommandOutput(trimmed, '权限模式保存失败，本次未切换；请检查配置目录权限。\n\n');
         return 'continue';
       }
-
-      permissionManager.setMode(requestedMode as 'default' | 'auto' | 'plan');
+      permissionManager.setMode(requestedMode);
       statusBar.updateMode(requestedMode);
       writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
       return 'continue';
@@ -5059,6 +5145,7 @@ export function registerChatCommands(program: Command): void {
     .command('chat', { isDefault: true })
     .description('启动 AI skill 任务交付工作台（默认命令）')
     .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
+    .option('--yolo', '自动批准 CLI 工具调用；仍保留显式拒绝、安全硬阻断和敏感范围限制，交互模式下记住本次选择')
     .option('--dry-run', '打印工具调用但不执行')
     .option('--observation-policy <file>', '按显式用户策略启用本次观察归档与召回（新会话）')
     .option('--intent-verification <file>', '冻结 Intent 原始验收 JSON；/intent native 管理登记；/intent publish draft|approve <JSON>|parent|status|recover|retry <候选ID> 管理候选；/intent verify help 配置独立验证；/intent receiver help 原发布与阶段投影（不自动启动模型）')
@@ -5074,6 +5161,11 @@ export function registerChatCommands(program: Command): void {
     .option('--skill-debug', '显示 skill 执行详情（stage、context 检查、耗时）')
     .argument('[input]', '单次任务描述（省略则进入交互模式）')
     .action(async (input: string | undefined, opts: ChatOptions) => {
+      if (shouldBlockChatOnOldNode({ platform: process.platform, version: process.version, print: Boolean(opts.print), json: Boolean(opts.json) })) {
+        process.stderr.write(oldNodeMessage(process.version) + '\n');
+        process.exitCode = 1;
+        return;
+      }
       setCrashContext({ command: 'chat', args: process.argv.slice(2), cwd: process.cwd() });
       try {
         await runChat(input, opts);

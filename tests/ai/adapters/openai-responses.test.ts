@@ -306,3 +306,16 @@ it('keeps actual Responses request tools identical with registration description
   expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).tools).toEqual(before);
  }finally{registry.dispose();vi.unstubAllGlobals();}
 });
+
+describe('Responses memory output budget', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('maps max_output_tokens and rejects incomplete responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 'incomplete', output: [{ type: 'message', content: [{ type: 'output_text', text: '{"traits":[]}' }] }] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { OpenAIResponsesAdapter } = await import('../../../src/ai/adapters/openai-responses.js');
+    const adapter = new OpenAIResponsesAdapter('fixture', 'gpt-5', 'https://api.openai.com/v1');
+    const consume = async () => { for await (const _ of adapter.stream([], [], 'system', { maxOutputTokens: 4096 })) { /* consume */ } };
+    await expect(consume()).rejects.toThrow('memory_output_incomplete');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toHaveProperty('max_output_tokens', 4096);
+  });
+});

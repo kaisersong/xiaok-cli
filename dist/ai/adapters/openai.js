@@ -5,6 +5,7 @@ import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProvi
 import OpenAI from 'openai';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import { buildOpenAIHarnessContext, isOwnedStrictOpenAIHarnessContext, observeReasoningDialect, } from '../providers/model-harness-profile.js';
@@ -28,6 +29,8 @@ function isRetryableError(error) {
         if (error.name === 'TimeoutError')
             return true;
         const record = error;
+        if (record.retryable === false)
+            return false;
         if (record.retryable === true)
             return true;
         const status = record.status;
@@ -214,10 +217,8 @@ async function runProviderOperation(strictKimiK3, operation) {
         if (!strictKimiK3) {
             throw error;
         }
-        const sanitized = new Error('KIMI_K3_PROVIDER_REQUEST_FAILED');
-        sanitized.name = 'KimiK3ProviderRequestError';
-        sanitized.code = 'KIMI_K3_PROVIDER_REQUEST_FAILED';
-        sanitized.retryable = isRetryableError(error);
+        const sanitized = createKimiProviderRequestError(error, isRetryableError(error));
+        usageLogger.info('kimiProviderRequestFailed', getKimiProviderRequestDiagnostic(sanitized));
         throw sanitized;
     }
 }
@@ -692,7 +693,7 @@ export class OpenAIAdapter {
                 })),
             ];
             const imageBlocks = m.content.filter((block) => block.type === 'image');
-            if (imageBlocks.length > 0) {
+            if (imageBlocks.length > 0 && this.getCapabilities().supportsImageInput) {
                 const contentParts = [
                     ...textBlocks.map((block) => ({
                         type: 'text',
@@ -710,10 +711,13 @@ export class OpenAIAdapter {
                     content: contentParts,
                 });
             }
-            else if (textBlocks.length > 0) {
+            else if (textBlocks.length > 0 || imageBlocks.length > 0) {
                 openaiMessages.push({
                     role: 'user',
-                    content: textBlocks.map((block) => block.text).join(''),
+                    content: [
+                        ...textBlocks.map((block) => block.text),
+                        ...imageBlocks.map((block) => `\n[Image omitted from this request (${block.source.media_type}): current model does not support image input. Original image retained in session history.]\n`),
+                    ].join(''),
                 });
             }
         }
@@ -736,6 +740,16 @@ export class OpenAIAdapter {
             }
             request.max_tokens = maximum;
         }
+        if (options?.maxOutputTokens !== undefined) {
+            const official = new URL(this.harnessContext.identity.canonicalBaseUrl ?? 'https://api.openai.com/v1').hostname === 'api.openai.com';
+            Object.assign(request, official ? { max_completion_tokens: options.maxOutputTokens } : { max_tokens: options.maxOutputTokens });
+        }
+        const endpoint = new URL(this.harnessContext.identity.canonicalBaseUrl ?? 'https://api.openai.com/v1');
+        const memoryThinkingDisabled = options?.reasoningMode === 'disabled'
+            && this.harnessContext.profile.id === 'generic-openai'
+            && endpoint.protocol === 'https:' && endpoint.hostname === 'api.deepseek.com';
+        if (memoryThinkingDisabled)
+            Object.assign(request, { thinking: { type: 'disabled' } });
         const cacheKey = options?.cacheKey;
         if (this.harnessContext.flags.promptCacheKey
             && this.harnessContext.profile.encodeCacheKey
@@ -747,7 +761,7 @@ export class OpenAIAdapter {
         const supportedEfforts = getSupportedModelReasoningEfforts({ ...identity, baseUrl: identity.canonicalBaseUrl });
         const selectedEffort = this.harnessContext.runtimeOptions?.reasoningEffort
             ?? getDefaultModelReasoningEffort(supportedEfforts);
-        if (selectedEffort && supportedEfforts.includes(selectedEffort)) {
+        if (!memoryThinkingDisabled && selectedEffort && supportedEfforts.includes(selectedEffort)) {
             Object.assign(request, { reasoning_effort: selectedEffort });
         }
         return request;
@@ -880,6 +894,10 @@ export class OpenAIAdapter {
                 }
             }
             if (choice?.finish_reason) {
+                if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
+                    await streamIterator.return?.();
+                    throw new Error('memory_output_incomplete');
+                }
                 if (strictKimiK3 && !officialReasoningSeen) {
                     throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
                 }

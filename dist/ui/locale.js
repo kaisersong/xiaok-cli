@@ -1,3 +1,14 @@
+const AUTO_APPROVAL_REASONS_ZH = {
+    'recursive force delete': '递归强制删除',
+    'PowerShell recursive force delete': 'PowerShell 递归强制删除',
+    'Windows recursive directory delete': 'Windows 递归删除目录',
+    'Windows recursive file delete': 'Windows 递归删除文件',
+    'git reset --hard': 'git reset --hard 丢弃改动',
+    'git push --force': 'git push --force 覆盖远端历史',
+    'git push -f': 'git push -f 覆盖远端历史',
+    'git clean -f': 'git clean -f 删除未跟踪文件',
+    'DROP TABLE/DATABASE': 'DROP TABLE/DATABASE 删除数据',
+};
 const TOOL_LABELS = {
     'zh-CN': {
         bash: '执行命令',
@@ -31,6 +42,11 @@ const TOOL_LABELS = {
 const UI_COPY = {
     'zh-CN': {
         approvalTitle: 'xiaok 想要执行以下操作',
+        mandatoryReview: '这个操作有风险，每次都会询问',
+        exactCommandScope: '当前执行目录中的这条完整命令',
+        exactCommandApprovalHint: '授权范围：相同执行目录和完整命令；脚本、写入目标或命令改变后会重新询问。',
+        writeTarget: (path) => `写入文件：${path}`,
+        autoApprovalReason: (reason) => `确认原因: auto 模式仍需确认：${AUTO_APPROVAL_REASONS_ZH[reason] ?? reason}`,
         currentCommandLabel: '本次执行命令',
         commandApprovalScope: (rule) => `始终允许的范围: ${rule}（* 表示任意参数，参数变化无需重复确认）`,
         subAgents: {
@@ -48,12 +64,18 @@ const UI_COPY = {
             file: '文件',
             path: '路径',
             pattern: '模式',
+            url: 'URL',
         },
         ranCollapseNotice: '… 更多命令已折叠（完成后按 Ctrl+O 查看）',
         hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
     },
     en: {
         approvalTitle: 'xiaok wants to run',
+        mandatoryReview: 'This operation carries risk and requires approval every time',
+        exactCommandScope: 'this exact command in the current execution directory',
+        exactCommandApprovalHint: 'Scope: the same execution directory and complete command; script, output target or command changes require approval again.',
+        writeTarget: (path) => `Write file: ${path}`,
+        autoApprovalReason: (reason) => `Approval reason: auto mode still confirms data-loss commands: ${reason}`,
         currentCommandLabel: 'Command to run now',
         commandApprovalScope: (rule) => `Always-allow scope: ${rule} (* means any arguments; argument changes need no new approval)`,
         subAgents: {
@@ -71,6 +93,7 @@ const UI_COPY = {
             file: 'File',
             path: 'Path',
             pattern: 'Pattern',
+            url: 'URL',
         },
         ranCollapseNotice: '… More commands collapsed (press Ctrl+O after completion to view)',
         hint: '1-5 select  Up/Down navigate  Enter confirm  Esc cancel',

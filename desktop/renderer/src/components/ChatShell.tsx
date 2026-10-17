@@ -658,6 +658,7 @@ export function ChatShell() {
         const partialText = streamRef.current.trim();
         const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
           providerAuth: t.chatShell.modelAuthFailed,
+          modelKeyMissing: t.chatShell.modelKeyMissing,
           providerService: t.chatShell.modelServiceFailed,
               modelConnectionFailed: t.chatShell.modelConnectionFailed,
           modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
@@ -1045,6 +1046,7 @@ export function ChatShell() {
           if (rawMessage !== lastErrorMessage) {
             const reason = sanitizeUserFacingErrorMessage(rawMessage, t.chatShell.taskCreateFailed, {
               providerAuth: t.chatShell.modelAuthFailed,
+              modelKeyMissing: t.chatShell.modelKeyMissing,
               providerService: t.chatShell.modelServiceFailed,
               modelConnectionFailed: t.chatShell.modelConnectionFailed,
               modelUsageLimitReached: t.chatShell.modelUsageLimitReached,

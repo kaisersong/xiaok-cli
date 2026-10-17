@@ -31,6 +31,9 @@ vi.mock('../../renderer/src/api/bridge', () => ({
   },
 }));
 
+vi.mock('../../renderer/src/components/settings/LocalMemoryStatsCard', () => ({ LocalMemoryStatsCard: () => null }));
+vi.mock('../../renderer/src/components/settings/MemoryModelSettings', () => ({ MemoryModelSettings: () => null }));
+
 function connectorsSnapshot() {
   return {
     config: {
@@ -72,8 +75,8 @@ function renderSettings() {
 }
 
 async function openToolsPane() {
-  fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
-  await screen.findByText('搜索 Provider');
+  fireEvent.click(await screen.findByRole('button', { name: '记忆管理' }));
+  fireEvent.click(await screen.findByRole('tab', { name: '记忆配置' }));
   await screen.findByText('SystemOne 辅助决策模型');
 }
 
@@ -108,6 +111,15 @@ describe('DesktopSettings SystemOne (Jev) section', () => {
     delete (globalThis as Record<string, unknown>).__APP_BUILD__;
   });
 
+  it('defaults to content and does not expose SystemOne in the tools pane', async () => {
+    renderSettings();
+    fireEvent.click(await screen.findByRole('button', {name:'记忆管理'}));
+    expect(await screen.findByRole('tab', {name:'记忆内容'})).toHaveAttribute('aria-selected','true');
+    expect(screen.queryByText('SystemOne 辅助决策模型')).toBeNull();
+    fireEvent.click(screen.getByRole('button', {name:'工具管理'}));
+    expect(await screen.findByText('搜索 Provider')).toBeInTheDocument();
+    expect(screen.queryByText('SystemOne 辅助决策模型')).toBeNull();
+  });
   it('renders the SystemOne section with Jev instructions inside the tools pane', async () => {
     renderSettings();
 

@@ -1,3 +1,5 @@
+import { createYZJInboundProcessor } from '../channels/yzj-inbound.js';
+import { SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -144,6 +146,9 @@ async function runYZJServe(options) {
     if (yzjConfig.inboundMode === 'webhook' && !enableWebhook) {
         throw new Error('inboundMode=webhook 时不能关闭 webhook server');
     }
+    if (!yzjConfig.allowedSenders?.length)
+        console.warn(SENDER_ALLOWLIST_MIGRATION);
+    // serve 审批按 sessionId 隔离（sessionKey=channel:chatId:userId），跨用户无法批准他人审批单；D3 initiator 语义由此覆盖，无需再挂 ALS。
     const transport = new YZJTransport({
         webhookUrl: yzjConfig.webhookUrl,
         logger: console,
@@ -253,6 +258,7 @@ async function runYZJServe(options) {
                 const persistedPermissionSettings = await loadSettings(cwd);
                 const persistedPermissionRules = mergeRules(persistedPermissionSettings);
                 const permissionManager = new PermissionManager({
+                    cwd,
                     mode: 'default',
                     allowRules: persistedPermissionRules.allowRules,
                     denyRules: persistedPermissionRules.denyRules,
@@ -338,11 +344,7 @@ async function runYZJServe(options) {
             },
         });
     }
-    const processInboundMessage = async (rawMessage, source) => {
-        if (!dedupeStore.markSeen(rawMessage.msgId)) {
-            console.info(`[yzj] duplicate inbound dropped from ${source}: ${rawMessage.msgId}`);
-            return;
-        }
+    const executeInboundMessage = async (rawMessage, source) => {
         const request = parseYZJMessage(rawMessage);
         const inboundStartedAt = Date.now();
         const result = await handleChannelRequest(request, sessionStore, {
@@ -454,6 +456,13 @@ async function runYZJServe(options) {
         latestReplyTargets.set(result.sessionId, request.replyTarget);
         console.info(`[yzj] session ${result.sessionId} handled ${source} message ${rawMessage.msgId} totalMs=${Date.now() - inboundStartedAt}`);
     };
+    const processInboundMessage = createYZJInboundProcessor({
+        allowedSenders: yzjConfig.allowedSenders,
+        markSeen: messageId => dedupeStore.markSeen(messageId),
+        deliver: message => deliverText(message.target, message.text, 'status'),
+        execute: executeInboundMessage,
+        log: message => console.warn(message),
+    });
     const shutdown = new AbortController();
     const onSignal = () => {
         shutdown.abort();

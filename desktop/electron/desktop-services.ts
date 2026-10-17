@@ -14,6 +14,8 @@ import { MODEL_PROVIDER_ID_SCHEMA, SAVE_MODEL_CONFIG_SCHEMA, UPDATE_MODEL_RUNTIM
 import {createNativeWorkflowRestrictionCheckpoint,bindNativeWorkflowRestrictionCheckpoint,assertNativeRegistryCheckpointCurrent,type NativeWorkflowRestrictionCheckpoint} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
 import { getBuiltinToolIdentity } from '../../src/ai/tools/native-tool-identity.js';
 import type { ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
+import { createDesktopMemoryLlm, getActiveMemoryEmbeddingModel } from './memory-distillation.js';
+import { MODEL_REGISTRY } from '../../src/ai/memory/model-registry.js';
 import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
 import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
 import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
@@ -120,7 +122,7 @@ import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillBy
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { SKILL_DEBUG_CONFIG_SCHEMA, KSWARM_CONCURRENCY_CONFIG_SCHEMA } from '../shared/desktop-small-config-ipc-contract.js';
-import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
+import { getConfigDir, getConfigPath, loadConfig, loadConfigSync, saveConfig } from '../../src/utils/config.js';
 import { resolveSystemOneConfig, setSystemOneConfig } from '../../src/ai/providers/system-one-config.js';
 import type { SystemOneConfig } from '../../src/types.js';
 import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
@@ -319,15 +321,27 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     return _desktopMemoryStore;
   }
 
+  _desktopMemoryStore?.close?.();
+  _desktopMemoryStore = null;
   let store: MemoryStore;
+  let layeredCandidate: MemoryStore | undefined;
 
   try {
     if (!_LayeredMemoryStoreClass || !_resolveLayeredConfigFn) {
       throw new Error('layered-store module not available');
     }
     const dbPath = join(dataRoot, 'memory.db');
-    const config = _resolveLayeredConfigFn({ dbPath });
+    const currentConfig = loadConfigSync();
+    const config = _resolveLayeredConfigFn({
+      ...currentConfig.memory,
+      embedding: {
+        ...currentConfig.memory?.embedding,
+        model: getActiveMemoryEmbeddingModel(currentConfig, MODEL_REGISTRY.map(model => model.id)),
+      },
+      dbPath,
+    });
     const layeredStore = new _LayeredMemoryStoreClass(config);
+    layeredCandidate = layeredStore;
     _desktopMemoryStoreBackend = 'layered';
 
     // Migrate from legacy user-memories.json if present
@@ -370,8 +384,11 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
       }
     }
 
+    layeredStore.setLLMFn(createDesktopMemoryLlm());
     store = layeredStore;
+    layeredCandidate = undefined;
   } catch (err) {
+    layeredCandidate?.close?.();
     console.warn('[memory] LayeredMemoryStore unavailable (native module issue), using fallback:', (err as Error).message);
     store = createFallbackMemoryStore(dataRoot);
     _desktopMemoryStoreBackend = 'fallback';
@@ -940,12 +957,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const activityMcpConnections = new Set<McpClientConnection>();
   let unsubscribeActivityGroups: (() => void) | undefined;
   let activityAttachment: Promise<void> | undefined;
+  /** Set while the last attach attempt failed. A failed attempt is never cached: the next
+   * attachConversationActivityOwner() call starts a fresh one. Consumers see one stable,
+   * user-safe code instead of the owner's internal error (e.g. a config digest mismatch). */
+  let activityAttachFailure: unknown;
+  const awaitActivityAttachment = async (): Promise<void> => {
+    if (activityAttachment) { try { await activityAttachment; } catch { /* surfaced below as one stable code */ } }
+    if (activityAttachFailure !== undefined) throw new Error('activity_owner_unavailable');
+  };
   let activityRoomClient: ConversationProjectRoomClient | undefined;
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
+    readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),
     ...(activityEnabled ? { activityHooks: {
       prepare: async input => {
-        await activityAttachment;
+        await awaitActivityAttachment();
         if (!activityService) throw new Error('activity_unavailable');
         await activityService.prepareAssociation(input, { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
       },
@@ -1943,8 +1969,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         prepared = await host.prepareTask(input);
       }
       if (currentExecutionLane() === 'foreground') {
-        await conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
-        conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+        try {
+          const actualPrepared = await host.inspectTask(prepared.taskId);
+          if (!actualPrepared || actualPrepared.taskId !== prepared.taskId || actualPrepared.prompt !== input.prompt) throw Error('conversation_user_preparation_mismatch');
+          conversationProjects.recordPreparedUserTask(actualPrepared, {requestSource: 'user'});
+          await conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+          conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+        } catch (error) {
+          try { await host.cancelTask(prepared.taskId, 'conversation_user_admission_failed'); }
+          catch (cleanupError) { throw new AggregateError([error, cleanupError], 'conversation_user_admission_and_cancel_failed', {cause:error}); }
+          throw error;
+        }
       }
       return prepared;
     },
@@ -1982,7 +2017,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     unsubscribeActivityGroups = multiAgentStore.subscribe(event => {
         const group = multiAgentStore.requireGroup(event.groupId);
         void (async () => {
-          await activityAttachment;
+          await awaitActivityAttachment();
           for (const run of multiAgentStore.getActivityRuns(event.groupId)) {
             const members = multiAgentStore.getActivityMembers(run.runId);
             if (!members.some(member => member.agentId !== `root_${event.groupId}`)) continue;
@@ -2066,7 +2101,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const backgroundTaskIdentity=createBackgroundTaskIdentityController({host,assertAdmission:()=>goalCoordinator.assertBackgroundAdmission(),captureAdmission:()=>goalCoordinator.captureBackgroundAdmission(),
     create:(input,reservation,guard)=>withExecutionLane('background',()=>afterLocalRecovery(()=>goalCoordinator.admitReservedBackgroundTask(input,reservation,guard)))});
   const originalGoalStop=goalShutdownBase.ingress.stopAccepting.bind(goalShutdownBase.ingress);
-  const stopBackgroundAndGoal=()=>{backgroundTaskIdentity.close();originalGoalStop();};
+  const stopBackgroundAndGoal=()=>{conversationProjects.sealUserTaskFacts();backgroundTaskIdentity.close();originalGoalStop();};
   const goalShutdown=Object.freeze({...goalShutdownBase,ingress:Object.freeze({...goalShutdownBase.ingress,stopAccepting:stopBackgroundAndGoal,abortAllActive:stopBackgroundAndGoal})});
   const unsubscribeMultiAgentGoal = multiAgentStore?.subscribe(event => {
     if (!['status', 'result', 'message_consumed'].includes(event.kind)) return;
@@ -3625,7 +3660,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
       if (!activityEnabled || !multiAgentStore) return;
       if (activityAttachment) return activityAttachment;
-      activityAttachment = (async () => {
+      const attempt: Promise<void> = (async () => {
         await multiAgentReady;
         // Stop all in-process writers and source owners before acquiring the
         // daemon lock. Native executors keep their original ownership.
@@ -3653,22 +3688,39 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         for (const connection of activityMcpConnections) activityMcp.register(connection);
         installActivityGroupSubscription();
       })();
-      return activityAttachment;
+      activityAttachment = attempt;
+      attempt.then(() => { activityAttachFailure = undefined; }, error => {
+        // Do not cache the failure: allow a later retry. The in-process writers were disposed
+        // before the owner was contacted, so drop them rather than keep dead handles.
+        if (activityAttachment === attempt) activityAttachment = undefined;
+        activityAttachFailure = error ?? new Error('activity_owner_unavailable');
+        activityMcp = undefined; activitySources = undefined; activityService = undefined; activityStore = undefined;
+        console.warn('[conversation-activity] owner attach failed:', error instanceof Error ? error.message : 'activity_owner_attach_failed');
+      });
+      return attempt;
     },
     conversationActivity: activityEnabled && multiAgentStore ? {
       mcpInputs: async (watchId: string, actor: ActivityActor) => { await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
-      mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
-      mcpCancel: async (watchId: string, actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
+      mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
+      mcpCancel: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
       unread: (actor: ActivityActor) => activityService!.unreadThreads(actor),
       read: (threadId: string, through: number, actor: ActivityActor) => activityService!.markRead(threadId, through, actor),
       overview: (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => activityService!.subscribeOverview(actor, callback),
       getWork: (watchId: string, actor: ActivityActor) => activityService!.getWork(watchId, actor),
-      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
-      subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
+      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
+      subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
       reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
       stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
-      projectChanged: (projectId: string) => activitySources!.refreshProject(projectId, true),
-      projectConnectionChanged: (status: 'connected' | 'disconnected' | 'reconnecting') => activitySources!.projectConnectionChanged(status),
+      projectChanged: async (projectId: string) => {
+        await awaitActivityAttachment();
+        if (!activitySources) throw new Error('activity_owner_unavailable');
+        await activitySources.refreshProject(projectId, true);
+      },
+      projectConnectionChanged: async (status: 'connected' | 'disconnected' | 'reconnecting') => {
+        await awaitActivityAttachment();
+        if (!activitySources) throw new Error('activity_owner_unavailable');
+        await activitySources.projectConnectionChanged(status);
+      },
     } : null,
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
     // Main composition only; never exported through preload or an agent tool.
@@ -7174,7 +7226,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后建立真实 Xiaok 项目，默认规划完成后自动激活并派发，不要求用户创建或操作协作空间，无需再次确认或手工点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
+      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后建立真实 Xiaok 项目，默认规划完成后自动激活并派发，不要求用户创建或操作协作空间，无需再次确认或手工点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。用户顶层要求设计工作流并交付报告时属于创建并执行请求，先获得真实 projectId 后提交工作流，不需要再次确认。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -7388,6 +7440,7 @@ function normalizeCreateProjectKeyPart(value: unknown): string {
 function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requirements?: string }): string {
   const text = `${input.goal || ''}\n${input.requirements || ''}`;
   const formatRequests = text
+    .replace(/\.report\.md\b/gi, '')
     .replace(/markdown\s*(?:不算(?:交付)?(?:完成)?|不是(?:最终)?交付物|不是(?:最终)?报告)/gi, '')
     .replace(/(?:不要|不接受|不得|严禁|不能(?:只)?(?:用)?|不允许|not\s+|no\s+)\s*(?:普通)?\s*markdown/gi, '');
   const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(formatRequests);

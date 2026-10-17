@@ -350,6 +350,7 @@ export function createHooksRunner(config = {}) {
     }
     async function executeHooks(eventName, payload, signal, ownRaw) {
         const merged = { ok: true };
+        let permissionHookFailed = false;
         if (!isKnownHookEvent(eventName)) {
             console.warn(`[hooks-runner] runHooks called with unknown event "${eventName}"; ignoring.`);
             return merged;
@@ -396,7 +397,7 @@ export function createHooksRunner(config = {}) {
                     result = await ownRaw(executeCommand(hook, timeout, payloadJson, signal, extraEnv));
                 }
                 const interpreted = interpretExitCode(result, eventName);
-                if (interpreted.ok === false) {
+                if (interpreted.ok === false || (eventName === 'PermissionRequest' && interpreted.decision === 'deny')) {
                     // Blocking result — return immediately
                     return {
                         ok: false,
@@ -405,6 +406,8 @@ export function createHooksRunner(config = {}) {
                         decision: interpreted.decision,
                     };
                 }
+                if (eventName === 'PermissionRequest' && result.exitCode !== 0)
+                    permissionHookFailed = true;
                 if (interpreted.updatedInput)
                     merged.updatedInput = { ...(merged.updatedInput ?? {}), ...interpreted.updatedInput };
                 if (interpreted.preventContinuation)
@@ -420,7 +423,12 @@ export function createHooksRunner(config = {}) {
                     merged.message = interpreted.message;
             }
             catch (error) {
-                if (BLOCKING_EVENTS.has(eventName)) {
+                if (eventName === 'PermissionRequest') {
+                    // A failed approval bridge has no decision. The registry must still
+                    // ask locally; keep running later hooks so an explicit deny wins.
+                    permissionHookFailed = true;
+                }
+                else if (BLOCKING_EVENTS.has(eventName)) {
                     return { ok: false, message: String(error) };
                 }
                 merged.message = merged.message
@@ -428,6 +436,10 @@ export function createHooksRunner(config = {}) {
                     : String(error);
             }
         }
+        // Never use an allow from another hook to bypass local confirmation when
+        // part of the approval chain failed. Explicit denies already returned.
+        if (permissionHookFailed)
+            delete merged.decision;
         return merged;
     }
     const runner = {

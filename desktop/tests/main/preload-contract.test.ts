@@ -42,6 +42,7 @@ import { registerThreadMetadataIpc } from '../../electron/thread-metadata-typed-
 import { registerDesktopSmallConfigIpc } from '../../electron/desktop-small-config-typed-ipc.js';
 import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
 import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
+import { registerMemoryDistillationIpc } from '../../electron/memory-distillation.js';
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
@@ -1085,6 +1086,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   // registrar instead of duplicating its command table in this source scanner.
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
+  registerMemoryDistillationIpc({ handle: channel => { channels.add(channel); } }, {}, () => false);
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerSemanticDesktopIpc({handle:channel=>{channels.add(channel);}}, {assistant:{} as never,kswarm:{} as never,authorizeAssistant:()=>false});
   registerLoopPublicationIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);

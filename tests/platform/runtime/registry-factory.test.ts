@@ -112,7 +112,7 @@ describe('registry-factory sandbox auto mode', () => {
     vi.clearAllMocks();
   });
 
-  it('auto-expands sandbox denials in auto mode without prompting', async () => {
+  it.each(['auto', 'yolo'] as const)('auto-expands sandbox denials in %s mode without prompting', async mode => {
     const expandAllowedPaths = vi.fn();
     const onSandboxDenied = vi.fn(async () => ({ shouldProceed: false }));
     const factory = createPlatformRegistryFactory({
@@ -120,7 +120,7 @@ describe('registry-factory sandbox auto mode', () => {
       source: 'chat',
       sessionId: 'test-session',
       adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
-      permissionManager: new PermissionManager({ mode: 'auto' }),
+      permissionManager: new PermissionManager({ mode }),
       onSandboxDenied,
       buildSystemPrompt: async () => 'prompt',
     });
@@ -147,10 +147,46 @@ describe('registry-factory sandbox auto mode', () => {
 
     expect(vi.mocked(buildToolList)).toHaveBeenCalledWith(
       undefined,
-      { cwd: '/test/cwd', allowOutsideCwd: true },
+      { cwd: '/test/cwd', allowOutsideCwd: true, outsideCwdGuard: expect.any(Function) },
       expect.any(Array),
       expect.any(Map),
+      { isYolo: expect.any(Function) },
     );
+  });
+
+  it('shares live YOLO authority with newly created child executors and revokes it on exit', () => {
+    const manager = new PermissionManager({ mode: 'yolo' });
+    const factory = createPlatformRegistryFactory({
+      platform: makeMockPlatform(), source: 'chat', sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: manager, buildSystemPrompt: async () => 'prompt',
+    });
+    factory.createRegistry('/test/cwd');
+    factory.createRegistry('/test/cwd', undefined, 'child');
+    const authorities = vi.mocked(buildToolList).mock.calls.slice(-2).map(args => args[4]);
+    expect(authorities).toHaveLength(2);
+    for (const authority of authorities) expect(authority?.isYolo?.()).toBe(true);
+    manager.setMode('auto');
+    for (const authority of authorities) expect(authority?.isYolo?.()).toBe(false);
+  });
+
+  it('routes outside-cwd tool paths through the sandbox policy check', () => {
+    const checkPath = vi.fn(() => ({ allowed: false, reason: 'path is outside allowlist' }));
+    const platform = makeMockPlatform();
+    (platform as unknown as { sandboxPolicy: Record<string, unknown> }).sandboxPolicy.checkPath = checkPath;
+    const factory = createPlatformRegistryFactory({
+      platform,
+      source: 'chat',
+      sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    factory.createRegistry('/test/cwd');
+    const toolOptions = vi.mocked(buildToolList).mock.calls.at(-1)?.[1] as { outsideCwdGuard?: (p: string) => { allowed: boolean } };
+    expect(toolOptions.outsideCwdGuard?.('/elsewhere/file.md')).toEqual({ allowed: false, reason: 'path is outside allowlist' });
+    expect(checkPath).toHaveBeenCalledWith('/elsewhere/file.md');
   });
 
   it('delegates sandbox denials outside auto mode', async () => {

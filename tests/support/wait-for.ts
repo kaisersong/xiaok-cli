@@ -3,7 +3,10 @@ export async function waitFor(
   options: { timeoutMs?: number; intervalMs?: number } | number = {},
 ): Promise<void> {
   const normalized = typeof options === 'number' ? { timeoutMs: options } : options;
-  const timeoutMs = normalized.timeoutMs ?? 1_000;
+  // Windows CI 上进程启动与文件系统操作明显更慢，显式等待需要相应放宽，
+  // 否则平台性变慢会被误判成断言失败（terminal-ui 的 windows job）。
+  const platformFactor = process.platform === 'win32' ? 5 : 1;
+  const timeoutMs = (normalized.timeoutMs ?? 1_000) * platformFactor;
   const intervalMs = normalized.intervalMs ?? 10;
   const startedAt = Date.now();
   let lastError: unknown;

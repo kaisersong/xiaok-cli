@@ -41,15 +41,25 @@ export function startDesktopKSwarmService(
   gate: DesktopShutdownGate,
   service: KSwarmService,
   attachOwner?: (config: Awaited<ReturnType<NonNullable<KSwarmService['activityOwnerConfig']>>>) => Promise<void>,
+  onOwnerUnavailable?: (error: unknown) => void,
 ): Promise<void> {
   return withDesktopBootstrapWriter(gate, async () => {
     const fresh = () => { if (!gate.isOpen) throw new ShuttingDownError('kswarm-activity-startup'); };
     fresh();
     if (attachOwner && service.activityOwnerConfig) {
-      const config = await service.activityOwnerConfig();
-      fresh();
-      await attachOwner(config);
-      fresh();
+      try {
+        const config = await service.activityOwnerConfig();
+        fresh();
+        await attachOwner(config);
+        fresh();
+      } catch (error) {
+        // Shutdown is never converted to fallback or a new background start.
+        fresh();
+        if (!onOwnerUnavailable) throw error;
+        service.releaseActivityOwnerDelegation?.();
+        onOwnerUnavailable(error);
+        fresh();
+      }
     }
     await service.start();
   });

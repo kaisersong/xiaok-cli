@@ -69,6 +69,11 @@ export function estimateRequestOverheadTokens(
   return Math.ceil(chars / 4);
 }
 
+/** Occupancy of the most recent request; completion/reasoning tokens are billing, not input. */
+export function getContextTokens(usage: Pick<UsageStats, 'inputTokens'>): number {
+  return Number.isFinite(usage.inputTokens) ? Math.max(0, usage.inputTokens) : 0;
+}
+
 export function shouldCompact(estimatedTokens: number, contextLimit: number, threshold = 0.85): boolean {
   return estimatedTokens > contextLimit * threshold;
 }

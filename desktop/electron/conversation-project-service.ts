@@ -1,16 +1,21 @@
+import { writeFileAtomicallySync } from '../../src/utils/atomic-file.js';
+import { assertCapturedJsonUniqueKeys } from '../../src/runtime/verification/captured-source-json.js';
 import { compactProjectCreationResponse } from '../../src/runtime/task-host/tool-result-response.js';
 import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { KSwarmService } from './kswarm-service.js';
 
 type Source = 'user' | 'agent' | 'scheduler';
 type RecordValue = Record<string, unknown>;
 interface UserRequest { prompt: string; permissionMode?: string; threadId?: string }
 interface Operation {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3 | 4;
+  currentUserSessionId?: string;
+  confirmedFromSessionId?: string;
+  confirmedFromTaskId?: string;
   originThreadId?: string;
   activityOperationId?: string;
   taskId: string;
@@ -37,6 +42,11 @@ function text(value: unknown): string { return typeof value === 'string' ? value
 // Conservative admission of a top-level user command. Quoted material,
 // questions, diagnosis, and negated requests do not create a durable project.
 function requestsCreation(prompt: string): boolean {
+  // Delivery-oriented workflow requests are executable work, while pure
+  // design/preview requests do not grant durable project creation authority.
+  if (/^(?:(?:请(?:你)?|帮我)\s*)?设计.{0,20}工作流/u.test(prompt.trim())
+    && /交付[^\n。；]{0,80}报告/u.test(prompt)
+    && !/[?？]|只(?:设计|输出|生成|要|规划)|(?:不要|不用|不需要|别|不|暂不|先不).{0,12}(?:执行|启动|创建|建立)/u.test(prompt)) return true;
   const clause = prompt.trim().split(/[，。；\n]/, 1)[0] ?? '';
   if (/(?:不要|别|不需要|不用|先不|暂不).{0,8}(?:创建|新建|建立|建项目)/.test(clause)) return false;
   if (/(?:项目(?:的)?(?:流程|方法|步骤)|项目.{0,8}(?:是什么|如何|怎么|了吗|是否))/u.test(clause)) return false;
@@ -44,16 +54,50 @@ function requestsCreation(prompt: string): boolean {
     || /^(?:please\s+)?(?:create|set up|make)\s+(?:a\s+|an\s+)?(?:xiaok\s+)?project\b/i.test(clause);
 }
 
+function confirmsCreation(prompt: string): boolean {
+  return /^(?:同意|确认|可以|好的|开始吧|执行吧|yes|confirm)(?:[。！!\s]*$|[，,]\s*(?:报告)?主题(?:是|为|[：:]))/i.test(prompt.trim())
+    && !/[?？]|不同意|(?:不要|不用|不需要|别|不|先不|暂不).{0,12}(?:创建|新建|建立|启动|执行)|只(?:规划|计划)/u.test(prompt);
+}
+
+function hasPendingCreation(snapshot: TaskSnapshot | null, threadId: string): boolean {
+  if (!snapshot || snapshot.context?.threadId !== threadId || snapshot.status !== 'completed'
+    || !/^(?:请|帮我)?\s*设计.{0,20}工作流/u.test(snapshot.prompt)
+    || !/是否确认.{0,30}创建.{0,12}启动.{0,8}项目[?？]/u.test(snapshot.result?.summary ?? '')) return false;
+  let proposal = false;
+  for (const event of snapshot.events) {
+    if (event.type !== 'canvas_tool_result' || event.toolName !== 'create_project' || !event.ok) continue;
+    try {
+      const result = JSON.parse(event.response);
+      if (result.projectId || result.project?.id) return false;
+      if (result.ok === true && result.proposal?.kind === 'project_proposal') proposal = true;
+    } catch { return false; }
+  }
+  return proposal;
+}
+
+interface PreparedUserTaskFact {
+  schemaVersion: 1; requestSource: 'user'; profileId: string;
+  taskId: string; sessionId: string; threadId: string; promptSha256: string;
+  permissionMode?: string;
+}
+const promptDigest = (prompt: string) => createHash('sha256').update(prompt).digest('hex');
+
 /** Main owns authorization and side-effect receipts; model input cannot grant access. */
 export class ConversationProjectService {
   private readonly admission = new AsyncLocalStorage<UserRequest>();
   private readonly inflight = new Map<string, Promise<RecordValue>>();
   private readonly directory: string;
   private roomClient?: ConversationProjectRoomClient;
+  private readonly userFactDirectory: string;
+  private readonly userFactProfileId: string;
+  private readonly userFactDirectoryIdentity: {dev:number;ino:number};
+  private userFactsSealed = false;
+  private userFactWriteFailure?: { error: unknown };
 
   constructor(private readonly options: {
     dataRoot: string;
     kswarmService: Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
+    readPreviousUserTask?: (threadId: string, taskId: string) => Promise<TaskSnapshot | null>;
     activityHooks?: {
       prepare(input: { threadId: string; operationId: string; creationIdempotencyKey: string }): Promise<void>;
       created(input: { threadId: string; operationId: string; projectId: string; roomId?: string; project: RecordValue }): Promise<RecordValue>;
@@ -61,6 +105,12 @@ export class ConversationProjectService {
   }) {
     this.directory = join(options.dataRoot, 'conversation-projects');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    this.userFactDirectory = join(this.directory, 'user-inputs');
+    this.userFactProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
+    mkdirSync(this.userFactDirectory, { recursive: true, mode: 0o700 });
+    const directory = lstatSync(this.userFactDirectory);
+    this.userFactDirectoryIdentity = {dev:directory.dev,ino:directory.ino};
+    this.assertUserFactDirectory();
   }
 
   bindRoomClient(client: ConversationProjectRoomClient): void { this.roomClient = client; }
@@ -70,6 +120,74 @@ export class ConversationProjectService {
     return this.admission.run({ ...input }, action);
   }
 
+  /** Main-only: caller passes host.inspectTask(actualPrepared.taskId), never a DTO.
+   * The existing ALS supplies origin; this fact alone never authorizes creation. */
+  recordPreparedUserTask(snapshot: TaskSnapshot, context: { requestSource: Source }): boolean {
+    const admitted = this.admission.getStore();
+    if (context.requestSource !== 'user' || !admitted || admitted.prompt !== snapshot.prompt
+      || snapshot.executionScope && (snapshot.executionScope.kind !== 'goal_turn' || snapshot.executionScope.origin !== 'user')) return false;
+    const threadId = snapshot.context?.threadId;
+    if (!threadId || admitted.threadId && admitted.threadId !== threadId) return false;
+    this.assertUserFactWriter();
+    if (admitted.permissionMode !== undefined && !['auto','plan','default'].includes(admitted.permissionMode)) throw Error('conversation_user_fact_mode');
+    if (snapshot.status !== 'understanding' || !text(snapshot.taskId) || !text(snapshot.sessionId)) throw Error('conversation_user_preparation_mismatch');
+    const fact: PreparedUserTaskFact = { schemaVersion: 1, requestSource: 'user', profileId: this.userFactProfileId,
+      taskId: snapshot.taskId, sessionId: snapshot.sessionId, threadId, promptSha256: promptDigest(snapshot.prompt),
+      ...(admitted.permissionMode === undefined ? {} : {permissionMode: admitted.permissionMode}) };
+    const previous = this.readUserTaskFact(snapshot.taskId);
+    if (previous && JSON.stringify(previous) !== JSON.stringify(fact)) throw Error('conversation_user_preparation_conflict');
+    try {
+      // Reuse ordinary Main journal IO: fsync temp, atomic rename, directory sync
+      // under the existing helper's platform policy. There is no async write tail.
+      this.assertUserFactDirectory();
+      writeFileAtomicallySync(this.userFactPath(snapshot.taskId), JSON.stringify(fact));
+      this.assertUserFactDirectory();
+    } catch (error) {
+      this.userFactWriteFailure = {error};
+      throw error; // Preserve the actual IO rejection identity.
+    }
+    return true; // Including plan: source fact is NOT creation authorization.
+  }
+
+  /** Called by the real Main ingress stop; all accepted async prep is still
+   * drained by the existing Goal coordinator, and synchronous IO has returned. */
+  sealUserTaskFacts(): void { this.userFactsSealed = true; }
+
+  private assertUserFactWriter(): void {
+    if (this.userFactsSealed) throw Error('conversation_user_admission_closed');
+    if (this.userFactWriteFailure) throw Error('conversation_user_admission_write_unconfirmed', {cause:this.userFactWriteFailure.error});
+  }
+
+  private userFactPath(taskId: string): string {
+    return join(this.userFactDirectory, createHash('sha256').update(taskId).digest('hex') + '.json');
+  }
+
+  private assertUserFactDirectory(): void {
+    const directory = lstatSync(this.userFactDirectory);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.dev !== this.userFactDirectoryIdentity.dev
+      || directory.ino !== this.userFactDirectoryIdentity.ino || process.platform !== 'win32'
+        && ((directory.mode & 0o077) !== 0 || directory.uid !== process.getuid?.())) throw Error('conversation_user_fact_directory_changed');
+  }
+
+  private readUserTaskFact(taskId: string): PreparedUserTaskFact | undefined {
+    this.assertUserFactDirectory();
+    const path = this.userFactPath(taskId);
+    if (!existsSync(path)) return undefined;
+    const directory = lstatSync(this.userFactDirectory), file = lstatSync(path);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink() || file.nlink !== 1 || file.size > 8192
+      || process.platform !== 'win32' && ((directory.mode & 0o077) !== 0 || (file.mode & 0o077) !== 0 || directory.uid !== process.getuid?.() || file.uid !== process.getuid?.())) throw Error('conversation_user_fact_storage');
+    const raw = readFileSync(path, 'utf8');
+    assertCapturedJsonUniqueKeys(raw, 'conversation_user_fact_invalid');
+    const value: unknown = JSON.parse(raw);
+    if (!record(value) || Object.keys(value).some(key => !['schemaVersion','requestSource','profileId','taskId','sessionId','threadId','promptSha256','permissionMode'].includes(key))
+      || value.schemaVersion !== 1 || value.requestSource !== 'user' || value.profileId !== this.userFactProfileId || value.taskId !== taskId
+      || !text(value.sessionId) || !text(value.threadId) || typeof value.promptSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.promptSha256)
+      || value.permissionMode !== undefined && !['auto','plan','default'].includes(String(value.permissionMode))) throw Error('conversation_user_fact_invalid');
+    return {schemaVersion:1,requestSource:'user',profileId:this.userFactProfileId,taskId,
+      sessionId:text(value.sessionId),threadId:text(value.threadId),promptSha256:value.promptSha256,
+      ...(value.permissionMode === undefined ? {} : {permissionMode:String(value.permissionMode)})};
+  }
+
   bindPreparedTask(input: {
     taskId: string; prompt: string; permissionMode?: string;
     executionScope?: { kind: string; origin?: string };
@@ -77,8 +195,27 @@ export class ConversationProjectService {
     const admitted = this.admission.getStore();
     if (context.requestSource !== 'user' || !admitted || admitted.prompt !== input.prompt
       || admitted.permissionMode === 'plan' || input.permissionMode === 'plan'
-      || input.executionScope && (input.executionScope.kind !== 'goal_turn' || input.executionScope.origin !== 'user')
-      || !requestsCreation(admitted.prompt)) return false;
+      || input.executionScope && (input.executionScope.kind !== 'goal_turn' || input.executionScope.origin !== 'user')) return false;
+    this.assertUserFactWriter();
+    if (!requestsCreation(admitted.prompt)) {
+      if (!admitted.threadId || !confirmsCreation(admitted.prompt) || !this.options.readPreviousUserTask) return false;
+      const currentFact = this.readUserTaskFact(input.taskId);
+      if (!currentFact || currentFact.threadId !== admitted.threadId || currentFact.promptSha256 !== promptDigest(input.prompt)
+        || currentFact.permissionMode === 'plan') return false;
+      return this.options.readPreviousUserTask(admitted.threadId, input.taskId).then(previous => {
+        this.assertUserFactWriter();
+        if (!previous || !hasPendingCreation(previous, admitted.threadId!)) return false;
+        const priorFact = this.readUserTaskFact(previous.taskId), current = this.readUserTaskFact(input.taskId);
+        if (!priorFact || !current || JSON.stringify(current) !== JSON.stringify(currentFact)
+          || priorFact.threadId !== admitted.threadId || priorFact.sessionId !== previous.sessionId
+          || priorFact.promptSha256 !== promptDigest(previous.prompt)) return false;
+        return this.bindAuthorizedTask(input, admitted, previous.taskId, currentFact.sessionId, priorFact.sessionId);
+      });
+    }
+    return this.bindAuthorizedTask(input, admitted);
+  }
+
+  private bindAuthorizedTask(input: { taskId: string; prompt: string }, admitted: UserRequest, confirmedFromTaskId?: string, currentUserSessionId?: string, confirmedFromSessionId?: string): boolean | Promise<boolean> {
     const prior = this.read(input.taskId);
     if (prior) {
       if (prior.originThreadId && admitted.threadId && prior.originThreadId !== admitted.threadId) throw new Error('conversation_project_origin_conflict');
@@ -90,7 +227,7 @@ export class ConversationProjectService {
     const startPolicy = /只(?:要|出)?(?:计划|规划)|先只?规划|不要(?:开始)?执行|暂不执行|先不(?:执行|启动)|不要启动|等我确认|让我审批/.test(input.prompt)
       ? 'plan_only' : 'activate_and_dispatch_after_plan';
     const key = `conversation-project:${createHash('sha256').update(input.taskId).digest('hex')}`;
-    const operation: Operation = { schemaVersion: 2, taskId: input.taskId, prompt: input.prompt, startPolicy,
+    const operation: Operation = { schemaVersion: confirmedFromTaskId ? 4 : 2, ...(confirmedFromTaskId ? { confirmedFromTaskId, currentUserSessionId, confirmedFromSessionId } : {}), taskId: input.taskId, prompt: input.prompt, startPolicy,
       clientRequestKey: key, ...(admitted.threadId ? { originThreadId: admitted.threadId, activityOperationId: key } : {}) };
     // Journal the trusted creation intent first. If the independent activity
     // database commit is interrupted, startup can reconstruct that association
@@ -167,7 +304,18 @@ export class ConversationProjectService {
     if (!filename || !existsSync(filename)) return undefined;
     try {
       const value = JSON.parse(readFileSync(filename, 'utf8')) as Operation;
-      return [1, 2].includes(value.schemaVersion) && value.taskId === taskId && requestsCreation(value.prompt) ? value : undefined;
+      const direct = [1, 2].includes(value.schemaVersion) && requestsCreation(value.prompt);
+      const current = value.schemaVersion === 4 ? this.readUserTaskFact(taskId) : undefined;
+      const previous = value.schemaVersion === 4 && value.confirmedFromTaskId ? this.readUserTaskFact(value.confirmedFromTaskId) : undefined;
+      const confirmed = value.schemaVersion === 4 && confirmsCreation(value.prompt) && current && previous
+        && current.threadId === value.originThreadId && previous.threadId === value.originThreadId
+        && current.sessionId === value.currentUserSessionId && previous.sessionId === value.confirmedFromSessionId
+        && current.promptSha256 === promptDigest(value.prompt) && current.permissionMode !== 'plan';
+      // Old completed receipts remain historical facts; an unqualified schema3
+      // pending intent cannot acquire new creation authority on upgrade.
+      const historicalReceipt = value.schemaVersion === 3 && record(value.result)
+        && (text(value.result.projectId) || record(value.result.project) && text(value.result.project.id));
+      return value.taskId === taskId && (direct || confirmed || historicalReceipt) ? value : undefined;
     } catch { return undefined; }
   }
   private save(operation: Operation): void {

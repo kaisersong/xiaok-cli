@@ -1279,6 +1279,11 @@ export interface LocaleStrings {
     appInfoDataPath: string;
     avatarTooLarge: string;
     memoryPaneTitle: string;
+    memoryContentTab: string;
+    memoryConfigurationTab: string;
+    memoryEmbeddingCurrent: string;
+    memoryModelConfigFailed: string;
+
     memoryPaneDesc: string;
     // voice settings
     voiceTitle: string;
@@ -1491,6 +1496,7 @@ export interface LocaleStrings {
     memoryLocalTitle: string;
     memoryCompact: string;
     memoryCompactDone: string;
+    memoryCompactFailed: string;
     memoryClear: string;
     memoryClearConfirmTitle: string;
     memoryClearConfirmDesc: string;
@@ -3072,10 +3078,11 @@ export interface LocaleStrings {
 
   // chatView
   conversationActivity: {
+    expand: string; collapse: string; summaryDetails: string; workCount: (count: number) => string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
-    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string;
-    report: (state: string, time: string) => string;
+    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;
+    report: (state: string, ago: string) => string; noReport: string;
     unread: (count: number) => string;
     sources: Record<'kswarm' | 'task_host' | 'agent_group' | 'mcp', string>;
     states: Record<'accepted' | 'queued' | 'running' | 'blocked' | 'input_required' | 'completed' | 'failed' | 'cancelled', string>;
@@ -3207,6 +3214,7 @@ export interface LocaleStrings {
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
+    modelKeyMissing: string;
     modelAuthFailed: string;
     modelServiceFailed: string;
     modelConnectionFailed: string;

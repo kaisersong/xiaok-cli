@@ -148,10 +148,12 @@ export interface Credentials {
 }
 export type YZJInboundMode = 'webhook' | 'websocket';
 export interface YZJNamedChannel {
+    allowedSenders?: string[];
     name: string;
     robotId: string;
 }
 export interface YZJChannelConfig {
+    allowedSenders?: string[];
     enabled?: boolean;
     webhookUrl?: string;
     inboundMode?: YZJInboundMode;
@@ -281,12 +283,25 @@ export type PermissionChoice = {
 } | {
     action: 'allow_session';
     rule: string;
+    rules?: string[];
 } | {
     action: 'allow_project';
     rule: string;
+    rules?: string[];
 } | {
     action: 'allow_global';
     rule: string;
+    rules?: string[];
 } | {
     action: 'deny';
 };
+export interface MemoryCompactionRequest {
+    requestSource: 'user' | 'scheduler' | 'agent';
+    force?: boolean;
+}
+export interface MemoryCompactionResult {
+    status: 'completed' | 'unchanged';
+    l1: number;
+    l2: number;
+    l3: number;
+}

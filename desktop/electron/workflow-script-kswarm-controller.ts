@@ -418,7 +418,12 @@ async function waitForWorkflowNodeOutput({
 
 async function requestKSwarmJson(kswarmService: KSwarmService, path: string, init?: RequestInit): Promise<unknown> {
   if (!kswarmService) throw workflowScriptKSwarmError('kswarm_service_missing', 'KSwarm service is missing');
-  const response = await kswarmService.request(path, init);
+  const headers = new Headers(init?.headers);
+  if ((init?.method ?? 'GET').toUpperCase() !== 'GET') {
+    const token = kswarmService.getDesktopMutationToken?.();
+    if (token) headers.set('x-kswarm-mutation-token', token);
+  }
+  const response = await kswarmService.request(path, { ...init, headers });
   let body: unknown = null;
   try {
     body = await response.json();

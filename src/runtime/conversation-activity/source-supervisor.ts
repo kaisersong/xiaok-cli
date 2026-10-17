@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync, existsSync, openSync, closeSync, statSync } from 'node:fs';
@@ -53,7 +55,7 @@ export class ActivitySourceSupervisor {
   }
 
   constructor(private readonly root: string, readonly ownerEpoch: string) {
-    const ledger = join(root, 'activity-source-supervision.json');
+    const ledger = join(root, ACTIVITY_STORAGE_NAMES.supervision);
     if (existsSync(ledger)) {
       const state = statSync(ledger);
       if (state.size > 16_384 || process.platform !== 'win32' && (state.uid !== process.getuid?.() || (state.mode & 0o077) !== 0)) throw new Error('activity_source_ledger_not_private');
@@ -62,8 +64,8 @@ export class ActivitySourceSupervisor {
     }
   }
   private save(): void {
-    const file = join(this.root, 'activity-source-supervision.json'), temporary = `${file}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify({ version: 1, sources: [...this.receipts.values()] }), { mode: 0o600 }); renameSync(temporary, file);
+    const file = join(this.root, ACTIVITY_STORAGE_NAMES.supervision), temporary = `${file}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify({ version: 1, sources: [...this.receipts.values()] }), { mode: 0o600 }); chmodPrivateActivityFile(temporary); renameSync(temporary, file);
   }
   private async healthy(source: ActivityManagedSource, pid?: number): Promise<boolean> {
     try {
@@ -104,9 +106,11 @@ export class ActivitySourceSupervisor {
       const receipt = { name: source.name, pid: 0, birth: '', entryHash, ownerEpoch: this.ownerEpoch, external: true };
       this.receipts.set(source.name, receipt); this.save(); return receipt;
     }
-    const log = openSync(join(this.root, `activity-${source.name}.log`), 'a', 0o600);
+    const logPath = join(this.root, source.name === 'kswarm' ? ACTIVITY_STORAGE_NAMES.kswarmLog : ACTIVITY_STORAGE_NAMES.brokerLog);
+    const log = openSync(logPath, 'a', 0o600);
     let child: ChildProcess;
     try {
+      chmodPrivateActivityFile(logPath);
       child = spawn(source.executable, source.args ?? [source.entryPath], { cwd: source.cwd, env: { ...process.env, ...source.env }, detached: true,
         stdio: ['ignore', log, log], windowsHide: true });
       this.trackChildClose(child);
@@ -131,7 +135,7 @@ export class ActivitySourceSupervisor {
   }
   private async stopOwnedSource(name: string, expectedOwnerEpoch: string): Promise<void> {
     if (expectedOwnerEpoch !== this.ownerEpoch) throw new Error('activity_source_stale_lease');
-    const ledger = JSON.parse(readFileSync(join(this.root, 'activity-source-supervision.json'), 'utf8')) as { sources: SourceReceipt[] };
+    const ledger = JSON.parse(readFileSync(join(this.root, ACTIVITY_STORAGE_NAMES.supervision), 'utf8')) as { sources: SourceReceipt[] };
     if (ledger.sources.find(item => item.name === name)?.ownerEpoch !== this.ownerEpoch) throw new Error('activity_source_stale_lease');
     const receipt = this.receipts.get(name);
     if (!receipt || receipt.external) throw new Error('activity_source_stop_unconfirmed');

@@ -3,6 +3,20 @@ import { isAbortError } from '../../../src/ai/runtime/abort-utils.js';
 import { normalizeRuntimeError } from '../../../src/ai/runtime/runtime-errors.js';
 
 describe('abort error discrimination', () => {
+  it.each([true, false])('classifies a Kimi request as a model failure (retryable=%s)', retryable => {
+    const error = Object.assign(new Error('KIMI_K3_PROVIDER_REQUEST_FAILED'), {
+      code: 'KIMI_K3_PROVIDER_REQUEST_FAILED', retryable,
+    });
+    expect(normalizeRuntimeError(error)).toMatchObject({ code: 'model_failed', retryable });
+  });
+  it('does not let a provider retryable marker override permanent HTTP or abort', () => {
+    expect(normalizeRuntimeError(Object.assign(new Error('KIMI_K3_PROVIDER_REQUEST_FAILED'), {
+      code: 'KIMI_K3_PROVIDER_REQUEST_FAILED', status: 401, retryable: true,
+    }))).toMatchObject({ code: 'model_failed', retryable: false });
+    expect(normalizeRuntimeError(Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError', code: 'KIMI_K3_PROVIDER_REQUEST_FAILED', retryable: true,
+    }))).toMatchObject({ code: 'runtime_aborted', retryable: false });
+  });
   it('recognizes DOMException and Error AbortError by name', () => {
     expect(isAbortError(new DOMException('agent aborted', 'AbortError'))).toBe(true);
     expect(isAbortError(Object.assign(new Error('agent aborted'), { name: 'AbortError' }))).toBe(true);

@@ -102,7 +102,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     deniedPath: string,
     toolName: string,
   ): Promise<{ shouldProceed: boolean }> => {
-    if (options.permissionManager?.getMode() === 'auto') {
+    if (['auto', 'yolo'].includes(options.permissionManager?.getMode() ?? '')) {
       options.platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
       return { shouldProceed: true };
     }
@@ -252,14 +252,22 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     const descriptions=new Map<Tool,ToolDescriptionMetadata>();
     const baseTools = buildToolList(
       options.skillTool,
-      { cwd, allowOutsideCwd: Boolean(options.platform.sandboxEnforcer) },
+      {
+        cwd,
+        allowOutsideCwd: Boolean(options.platform.sandboxEnforcer),
+        // 工具内部再按沙箱策略检查一次（规范化 + 真实路径），不在沙箱包装里的工具（如 render_ui）也受约束
+        ...(options.platform.sandboxEnforcer
+          ? { outsideCwdGuard: (resolvedPath: string) => options.platform.sandboxPolicy?.checkPath(resolvedPath) ?? { allowed: false, reason: 'sandbox policy unavailable' } }
+          : {}),
+      },
       extraTools,
       descriptions,
+      { isYolo: () => options.permissionManager?.getMode() === 'yolo' },
     );
 
     // 应用 sandbox
     const executionTools = options.source === 'chat' && agentId === 'main' && options.runInteractiveBash
-      ? baseTools.map(tool => tool.definition.name === 'bash' ? createInteractiveBashTool(options.runInteractiveBash!) : tool)
+      ? baseTools.map(tool => tool.definition.name === 'bash' ? createInteractiveBashTool(options.runInteractiveBash!, { isYolo: () => options.permissionManager?.getMode() === 'yolo' }) : tool)
       : baseTools;
     const sandboxedTools = applySandboxToTools(executionTools, options.platform.sandboxEnforcer, {
       onSandboxDenied: handleSandboxDenied,

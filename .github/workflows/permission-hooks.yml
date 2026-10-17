@@ -1,0 +1,156 @@
+name: Session resume
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/runtime/hooks-runner.ts'
+      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/tools/index.ts'
+      - 'src/ai/tools/bash.ts'
+      - 'src/platform/runtime/registry-factory.ts'
+      - 'src/commands/registry.ts'
+      - 'tests/platform/runtime/registry-factory.test.ts'
+      - 'tests/e2e/yolo-mode.py'
+      - 'vitest.yolo.config.mjs'
+      - 'src/ui/permission-prompt.ts'
+      - 'src/ui/locale.ts'
+      - 'src/ai/permissions/**'
+      - 'tests/ai/permissions/**'
+      - 'tests/e2e/exact-command-approval.py'
+      - 'src/commands/chat-permission.ts'
+      - 'src/commands/chat.ts'
+      - 'src/commands/chat-permission-mode.ts'
+      - 'tests/commands/chat-permission-mode.test.ts'
+      - 'tests/e2e/mode-persistence.py'
+      - 'src/ui/resume-history.ts'
+      - 'src/ui/render.ts'
+      - 'tests/ui/resume-history.test.ts'
+      - 'tests/ui/render.test.ts'
+      - 'tests/ai/runtime/usage.test.ts'
+      - 'tests/ai/runtime/session*.test.ts'
+      - 'src/ai/runtime/usage.ts'
+      - 'src/ai/runtime/session*.ts'
+      - 'tests/e2e/resume-history-visibility.py'
+      - 'src/types.ts'
+      - 'tests/runtime/*hook*.test.ts'
+      - 'tests/ai/tools/index.test.ts'
+      - 'tests/e2e/permission-hook-fallback.py'
+      - 'tests/ai/adapters/openai-history-images.test.ts'
+      - 'tests/e2e/text-model-resume.py'
+      - 'tests/e2e/persistent-command-approval.py'
+      - 'tests/commands/chat-permission*.test.ts'
+      - 'tests/ui/permission-prompt.test.ts'
+      - '.github/workflows/permission-hooks.yml'
+  pull_request:
+    paths:
+      - 'src/runtime/hooks-runner.ts'
+      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/tools/index.ts'
+      - 'src/ai/tools/bash.ts'
+      - 'src/platform/runtime/registry-factory.ts'
+      - 'src/commands/registry.ts'
+      - 'tests/platform/runtime/registry-factory.test.ts'
+      - 'tests/e2e/yolo-mode.py'
+      - 'vitest.yolo.config.mjs'
+      - 'src/ui/permission-prompt.ts'
+      - 'src/ui/locale.ts'
+      - 'src/ai/permissions/**'
+      - 'tests/ai/permissions/**'
+      - 'tests/e2e/exact-command-approval.py'
+      - 'src/commands/chat-permission.ts'
+      - 'src/commands/chat.ts'
+      - 'src/commands/chat-permission-mode.ts'
+      - 'tests/commands/chat-permission-mode.test.ts'
+      - 'tests/e2e/mode-persistence.py'
+      - 'src/ui/resume-history.ts'
+      - 'src/ui/render.ts'
+      - 'tests/ui/resume-history.test.ts'
+      - 'tests/ui/render.test.ts'
+      - 'tests/ai/runtime/usage.test.ts'
+      - 'tests/ai/runtime/session*.test.ts'
+      - 'src/ai/runtime/usage.ts'
+      - 'src/ai/runtime/session*.ts'
+      - 'tests/e2e/resume-history-visibility.py'
+      - 'src/types.ts'
+      - 'tests/runtime/*hook*.test.ts'
+      - 'tests/ai/tools/index.test.ts'
+      - 'tests/e2e/permission-hook-fallback.py'
+      - 'tests/ai/adapters/openai-history-images.test.ts'
+      - 'tests/e2e/text-model-resume.py'
+      - 'tests/e2e/persistent-command-approval.py'
+      - 'tests/commands/chat-permission*.test.ts'
+      - 'tests/ui/permission-prompt.test.ts'
+      - '.github/workflows/permission-hooks.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  permission-hooks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3 node-pty
+      - run: npm run build:release
+      - run: npm run test:sandbox:build
+      - name: Exercise real hooks, registry and permission UI
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/runtime/hooks-runner.test.js
+          .test-dist/tests/runtime/permission-hook-fallback.test.js
+          .test-dist/tests/ai/tools/index.test.js
+          .test-dist/tests/ai/permissions
+          .test-dist/tests/ui/permission-prompt.test.js
+          .test-dist/tests/commands/chat-permission-mode.test.js
+          .test-dist/tests/ui/input.test.js
+          .test-dist/tests/ai/tools/bash-sudo.test.js
+          .test-dist/tests/commands/chat-permission.test.js
+          .test-dist/tests/commands/chat-permission-persistence.test.js
+          .test-dist/tests/ai/adapters/openai-history-images.test.js
+          .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ui/resume-history.test.js
+          .test-dist/tests/ui/render.test.js
+          .test-dist/tests/ui/transcript-buffer.test.js
+          .test-dist/tests/ui/transcript-pager.test.js
+          .test-dist/tests/ai/runtime/session.test.js
+          .test-dist/tests/ai/runtime/session-graph.test.js
+          .test-dist/tests/ai/runtime/usage.test.js
+      - name: Verify live YOLO authority in registry factory
+        run: node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.yolo.config.mjs --configLoader runner
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.13'
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Verify local rejection, approval and next turn in a real TTY
+        if: runner.os == 'Linux'
+        run: |
+          python tests/e2e/permission-hook-fallback.py
+          python tests/e2e/text-model-resume.py
+          python tests/e2e/resume-history-visibility.py
+          python tests/e2e/persistent-command-approval.py
+          python tests/e2e/exact-command-approval.py
+          python tests/e2e/yolo-mode.py
+      - name: Retain synthetic TTY failure evidence
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-tty-failure-${{ matrix.node }}
+          path: |
+            /tmp/xiaok-remember-*/
+            /tmp/xiaok-exact-*/
+            /tmp/xiaok-yolo-*/
+            /tmp/xiaok-resume-visibility-*/
+          retention-days: 7

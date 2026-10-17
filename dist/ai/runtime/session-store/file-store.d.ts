@@ -1,8 +1,8 @@
+export { parseFileSessionSnapshot, readCapturedFileSession, readCapturedSessionDocument, parseSessionDeletionJournal } from './file-session-parser.js';
 import { type IntentParentCandidateWrite } from '../../../runtime/intent-delegation/publication-host.js';
 import { type IntentReceiverWriteInput } from '../../../runtime/intent-delegation/receiver-publication-host.js';
 import { type RecordIntentVerificationOperationInput, type ObserveIntentVerificationInput, type ClaimIntentVerificationInput, type ReserveIntentVerificationInput, type IntentVerificationExecution } from '../../../runtime/intent-delegation/verification-execution-journal.js';
 import { type RetryIntentPublicationInput, type ObserveIntentPublicationInput, type ClaimIntentPublicationInput, type ReserveIntentPublicationInput, type IntentPublicationCandidate } from '../../../runtime/intent-delegation/publication-candidate-journal.js';
-import { type IntentHostSubject } from '../../../runtime/verification/intent-host-subject.js';
 import { type ReserveIntentNativeInput, type AdvanceIntentNativeInput, type RetryIntentNativeInput, type IntentOwnershipInput, type IntentNativeContractRecord } from '../../../runtime/intent-delegation/native-contract-journal.js';
 import { type IntentProducerActionInput } from '../../../runtime/intent-delegation/producer-facts.js';
 import { type IntentExecutionTerminalInput } from '../../../runtime/intent-delegation/intent-commit-boundary.js';
@@ -10,7 +10,8 @@ import { type SessionAliasBinding } from './aliases.js';
 import { type SessionMigrationInput, type SessionMigrationMarker } from './migration.js';
 import { type SessionExecutionContext, type SessionExecutionLease } from './execution-authority.js';
 import { type SessionCompareAndSave, type SessionCommitReceipt } from './store.js';
-import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
+import { type NativeSessionIdentity } from './identity.js';
+import type { PersistedSessionSnapshot, StoredSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 import { type AtomicWriteFile } from '../../../utils/atomic-file.js';
 export interface SessionDeletionReceiptPort {
     begin(input: {
@@ -20,15 +21,6 @@ export interface SessionDeletionReceiptPort {
         deletedAt: number;
     }): string;
     complete(id: string): void;
-}
-interface SessionDeletionJournal {
-    version: 1;
-    sessionId: string;
-    operationId: string;
-    deletedAt: number;
-    state: 'pending' | 'committed';
-    snapshotHash: string;
-    closure: NonNullable<PersistedSessionSnapshot['protectedObservationClosure']>;
 }
 type ObservedMutationMethod = 'save' | 'compareAndSave';
 /** Only a fact about this exact original method invocation, never execution authority. */
@@ -44,14 +36,18 @@ export interface OrdinarySessionOwnershipRelease {
 export declare class FileSessionStore implements SessionStore {
     private readonly rootDir;
     private readonly atomicWrite;
+    private readonly reader;
     constructor(rootDir?: string, atomicWrite?: AtomicWriteFile);
+    /** User-only ordinary admission metadata; no all-writer/physical-close grant. */
+    fenceKnownWriter(requestSource: 'user' | 'agent' | 'scheduler'): Promise<void>;
+    private assertKnownWriterAdmission;
     private readonly commitNotifications;
-    onCommit(listener: (snapshot: PersistedSessionSnapshot) => void): () => void;
+    onCommit(listener: (snapshot: StoredSessionSnapshot) => void): () => void;
     createSessionId(): string;
     /** Rejects foreign root/source leases before any external recovery side effect. */
     assertIntentNativeLease(sessionId: string, requestSource: 'user' | 'scheduler', lease: SessionExecutionLease): void;
-    getIntentNativeLedger(sessionId: string): Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined>;
-    getIntentNativeLedgerSync(sessionId: string): import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined;
+    getIntentNativeLedger(sessionId: string): Promise<StoredSessionSnapshot['intentDelegation']>;
+    getIntentNativeLedgerSync(sessionId: string): StoredSessionSnapshot['intentDelegation'];
     recordIntentReceiverPublication(raw: IntentReceiverWriteInput): Promise<IntentPublicationCandidate>;
     recordIntentVerificationOperation(raw: RecordIntentVerificationOperationInput & {
         lease: SessionExecutionLease;
@@ -104,7 +100,7 @@ export declare class FileSessionStore implements SessionStore {
         lease: SessionExecutionLease;
     }): Promise<void>;
     private observedMutation;
-    save(snapshot: PersistedSessionSnapshot, options?: {
+    save(snapshot: StoredSessionSnapshot, options?: {
         lease?: SessionExecutionLease;
     }): Promise<void>;
     compareAndSave(input: SessionCompareAndSave): Promise<SessionCommitReceipt>;
@@ -116,14 +112,14 @@ export declare class FileSessionStore implements SessionStore {
         holderId: string;
     }): Promise<{
         binding: SessionAliasBinding;
-        snapshot: PersistedSessionSnapshot;
+        snapshot: StoredSessionSnapshot;
     } | null>;
     loadSessionAliasSync(holder: {
         holderRoot: string;
         holderId: string;
     }): {
         binding: SessionAliasBinding;
-        snapshot: PersistedSessionSnapshot;
+        snapshot: StoredSessionSnapshot;
     } | null;
     getSessionAliases(sessionId: string): Promise<import("./aliases.js").SessionAliasRow[]>;
     registerSessionAlias(input: SessionAliasBinding & {
@@ -151,7 +147,7 @@ export declare class FileSessionStore implements SessionStore {
         sessionId: string;
         lease: SessionExecutionLease;
     }): Promise<{
-        snapshot: PersistedSessionSnapshot;
+        snapshot: StoredSessionSnapshot;
         snapshotHash: string;
         storeRevision: number;
         historyDigest: string;
@@ -165,13 +161,15 @@ export declare class FileSessionStore implements SessionStore {
     private deletionDirectory;
     private readDeletionJournal;
     private writeDeletionJournal;
-    loadLast(): Promise<PersistedSessionSnapshot | null>;
-    load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
+    loadLast(): Promise<StoredSessionSnapshot | null>;
+    load(sessionId: string): Promise<StoredSessionSnapshot | null>;
     /** Main admission fences may need a canonical read without yielding between
      * their final permission check and a native request. Same parser as load. */
-    loadSync(sessionId: string): PersistedSessionSnapshot | null;
+    loadSync(sessionId: string): StoredSessionSnapshot | null;
+    readIdentity(sessionId: string): NativeSessionIdentity | null;
     list(): Promise<SessionListEntry[]>;
-    fork(sessionId: string): Promise<PersistedSessionSnapshot>;
+    fork(sessionId: string): Promise<StoredSessionSnapshot>;
+    private forkAccepted;
     private readSnapshot;
     private getFilePath;
     private ensureRoot;
@@ -179,60 +177,3 @@ export declare class FileSessionStore implements SessionStore {
 }
 export declare function createFileSessionStore(rootDir?: string): FileSessionStore;
 /** Original file JSON normalization, shared with captured declaration reads. */
-export declare function parseFileSessionSnapshot(raw: string, sessionId: string, preserveIntent?: boolean): PersistedSessionSnapshot;
-/** Statements contained in one captured file; the full collector must verify
- * their native registrations and references before forming any attribution. */
-export declare function readCapturedFileSession(raw: string, sessionId: string): Readonly<{
-    kind: "captured-source-declarations";
-    containerSessionId: string;
-    sessionReferences: {
-        relation: string;
-        recordId: string;
-        sessionIdentity: string;
-        childStoreRoot?: string;
-    }[];
-    typedReferences: {
-        namespace: string;
-        identity: string;
-    }[];
-    publicationDeclarations: {
-        nativeContracts: IntentNativeContractRecord[];
-        candidates: IntentPublicationCandidate[];
-        verificationExecutions: IntentVerificationExecution[];
-    };
-    storedSessionIdentity: "present" | "null" | "absent";
-    lineageReferences: readonly string[];
-    forkReference: string | null;
-    intentSubjects: readonly Readonly<IntentHostSubject>[];
-    observationReferences: readonly import("../protected-observation-closure.js").ProtectedObservationReference[];
-}>;
-/** Common serialized snapshot declarations. SQLite callers validate their
- * original JSON columns before passing the original normalized document here;
- * only the File wrapper applies its physical filename identity restriction. */
-export declare function readCapturedSessionDocument(raw: string, sessionId: string): Readonly<{
-    kind: "captured-source-declarations";
-    containerSessionId: string;
-    sessionReferences: {
-        relation: string;
-        recordId: string;
-        sessionIdentity: string;
-        childStoreRoot?: string;
-    }[];
-    typedReferences: {
-        namespace: string;
-        identity: string;
-    }[];
-    publicationDeclarations: {
-        nativeContracts: IntentNativeContractRecord[];
-        candidates: IntentPublicationCandidate[];
-        verificationExecutions: IntentVerificationExecution[];
-    };
-    storedSessionIdentity: "present" | "null" | "absent";
-    lineageReferences: readonly string[];
-    forkReference: string | null;
-    intentSubjects: readonly Readonly<IntentHostSubject>[];
-    observationReferences: readonly import("../protected-observation-closure.js").ProtectedObservationReference[];
-}>;
-/** Original deletion body validator; raw-byte hash linkage is checked by its caller. */
-export declare function parseSessionDeletionJournal(raw: unknown, sessionId: string): SessionDeletionJournal;
-export {};

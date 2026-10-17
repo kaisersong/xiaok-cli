@@ -17,7 +17,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 function createMockService(responses: Response[]): { service: KSwarmService; requests: Array<{ path: string; body: unknown; method: string }> } {
   const requests: Array<{ path: string; body: unknown; method: string }> = [];
   const service = {
+    getDesktopMutationToken: () => 'main-owned-test-token',
     async request(path: string, init?: RequestInit): Promise<Response> {
+      expect(new Headers(init?.headers).get('x-kswarm-mutation-token')).toBe((init?.method || 'GET') === 'GET' ? null : 'main-owned-test-token');
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       requests.push({ path, body, method: init?.method || 'GET' });
       const response = responses.shift();
@@ -29,6 +31,20 @@ function createMockService(responses: Response[]): { service: KSwarmService; req
 }
 
 describe('workflow script KSwarm controller', () => {
+  it('authenticates every workflow mutation with the trusted main credential', async () => {
+    const { service } = createMockService([
+      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-auth' } }),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-auth' } }),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-auth', status: 'completed' } }),
+    ]);
+    service.getDesktopMutationToken = () => 'main-owned-test-token';
+    const original = service.request.bind(service);
+    service.request = async (path, init) => new Headers(init?.headers).get('x-kswarm-mutation-token') !== 'main-owned-test-token'
+      ? jsonResponse({ error: 'mutation_credential_required' }, 401) : original(path, init);
+    const result = await createKSwarmScriptWorkflowRun({ kswarmService: service, projectId: 'proj-auth', preview: { ok: true } });
+    expect(result.workflowRun.id).toBe('run-auth');
+    await expect(completeKSwarmScriptWorkflowRun({ kswarmService: service, projectId: 'proj-auth', workflowRunId: 'run-auth', result: {} })).resolves.toBeDefined();
+  });
   it('creates, starts, and completes a script-generated workflow run through KSwarm HTTP', async () => {
     const { service, requests } = createMockService([
       jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),

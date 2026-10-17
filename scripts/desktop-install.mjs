@@ -47,6 +47,14 @@ function installMac() {
     rmSync(legacyTargetAppPath, { recursive: true, force: true });
   }
 
+  // 替换已存在的 .app 后，LaunchServices 可能仍持有旧 bundle 的注册信息，
+  // 直接 `open` 会导致 renderer 在 V8 snapshot 反序列化处挂起（白屏）。
+  // 重新注册目标路径可消除该状态。
+  const lsregister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
+  if (existsSync(lsregister)) {
+    spawnSync(lsregister, ['-f', targetAppPath], { stdio: 'ignore' });
+  }
+
   console.log(`Installed xiaok to ${targetAppPath}`);
 }
 

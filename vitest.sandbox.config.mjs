@@ -16,6 +16,9 @@ export default {
       '.test-dist/tests/scripts/check-repo-hygiene.test.js',
       '.test-dist/tests/scripts/new-worktree.test.js',
     ],
+    setupFiles: ['./.test-dist/tests/support/setup-host-env.js'],
+    // afterEach 清理临时目录在 Windows 上会因文件句柄重试而超过默认 10s。
+    hookTimeout: 30_000,
     fileParallelism: false,
     pool: 'threads',
   },

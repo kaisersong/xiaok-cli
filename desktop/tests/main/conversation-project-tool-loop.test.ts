@@ -16,6 +16,12 @@ function tool() {
 }
 
 describe('conversation project host receipt', () => {
+  it('keeps report.md IR intermediate material from overriding final HTML delivery', async () => {
+    const output = JSON.parse(String(await tool().execute({ name: 'xiaok介绍报告', goal: '最终交付为 HTML 报告 artifact',
+      requirements: '报告撰写（生成 .report.md IR）、三路评审、修复后渲染为 HTML 报告 artifact；最终交付物为 HTML 文件' })));
+    expect(output.proposal.planningGuidance).toContain('report renderer HTML');
+    expect(output.proposal.planningGuidance).not.toContain('用户明确要求报告交付 Markdown');
+  });
   it('persists and sends the real creation receipt to the model from the actual tool loop', async () => {
     const root = mkdtempSync(join(tmpdir(), 'project-receipt-')); roots.push(root);
     const registry = new ToolRegistry({ autoMode: true }, [tool()]);

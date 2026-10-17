@@ -1,10 +1,12 @@
+import { type ToolDescriptionMetadata, type ToolDiscovery } from '../../shared/tool-description-metadata.js';
 import type { Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import { type HooksRunner } from '../../runtime/hooks-runner.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { type WorkspaceToolOptions } from './read.js';
-export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
+import { type BashApprovalOptions } from './bash.js';
+export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[], metadataSink?: Map<Tool, ToolDescriptionMetadata>, bashApproval?: BashApprovalOptions): Tool[];
 /** Host-owned routing boundary. It is not a model parameter or permission grant. */
 export interface CompoundRegistryExecutionPort {
     publishCurrentHistory?(): Promise<void>;
@@ -23,6 +25,8 @@ export interface CompoundRegistryExecutionPort {
     }): Promise<string>;
 }
 export interface RegistryOptions {
+    /** Host-only review role; native object identity is the sole admission authority. */
+    nativeReadonlyOnly?: boolean;
     compoundExecution?: CompoundRegistryExecutionPort;
     toolIdleTimeoutMs?: number;
     capabilityRegistry?: CapabilityRegistry;
@@ -35,6 +39,7 @@ export interface RegistryOptions {
         tool: Tool;
         context?: ToolExecutionContext;
     }) => Promise<boolean | ToolPermissionGrant>;
+    hookInputMode?: 'configured';
     hooksRunner?: HooksRunner;
     agentId?: string;
     onToolObserved?: (event: ToolObservation) => Promise<void> | void;
@@ -46,6 +51,18 @@ export interface RegistryOptions {
         onDecision?: (decision: GuardDecision) => Promise<void> | void;
     };
 }
+/** Dispatch data only: never producer/permission/physical-release proof. */
+export interface DirectHookCallbacks {
+    runPreHooks: HooksRunner['runPreHooks'];
+    runPostHooks: HooksRunner['runPostHooks'];
+    runHooks?: HooksRunner['runHooks'];
+}
+/** New input shape; the original receiver remains in hooksRunner. */
+export interface DirectCallbackRegistryOptions extends Omit<RegistryOptions, 'hooksRunner' | 'hookInputMode'> {
+    hookInputMode: 'direct-callback';
+    hooksRunner?: DirectHookCallbacks;
+}
+export type ToolRegistryOptions = RegistryOptions | DirectCallbackRegistryOptions;
 export interface ToolObservation {
     phase: 'after';
     agentId: string;
@@ -68,11 +85,17 @@ export type ToolPreparationResult = {
     readonly message: string;
 };
 export declare class ToolRegistry {
+    #private;
+    get isNativeReadonlyOnly(): boolean;
+    private admitsNativeReadonly;
+    private assertNativeReadonlyTree;
     private executionBoundaryUsed;
     private compoundInstallationPending;
     private readonly preparedInvocations;
     private tools;
     private deferredTools;
+    private descriptions;
+    private deferredDescriptions;
     private canonicalToolNames;
     private permissionManager;
     private options;
@@ -83,7 +106,7 @@ export declare class ToolRegistry {
     private readonly toolGenerations;
     private readonly toolIdleTimeoutMs;
     setAllowedTools(names: string[] | null): void;
-    constructor(options: RegistryOptions, tools?: Tool[]);
+    constructor(options: ToolRegistryOptions, tools?: Tool[], metadata?: ReadonlyMap<Tool, ToolDescriptionMetadata>);
     /** Main/CLI bootstrap only; never a model tool. No owner swap after preparation. */
     installCompoundExecutionPort<T extends CompoundRegistryExecutionPort>(factory: (tools: readonly Tool[]) => T): T;
     publishCompoundHistory(): Promise<void>;
@@ -107,13 +130,24 @@ export declare class ToolRegistry {
     }): ToolRegistry;
     private createObservationFork;
     getToolDefinitions(): ToolDefinition[];
-    registerTool(tool: Tool): void;
-    registerDeferredTool(definition: ToolDefinition): void;
+    /** Subclasses must run complete readonly admission before publishing any state. */
+    protected preflightToolRegistration(tool: Tool): void;
+    registerTool(tool: Tool, description?: ToolDescriptionMetadata): void;
+    registerDeferredTool(definition: ToolDefinition, description?: ToolDescriptionMetadata): void;
+    /** Accepted direct-hook JS calls only; never a physical-release acknowledgement. */
+    waitForAcceptedHookCalls(): Promise<void>;
     dispose(): void;
     getRegisteredTool(name: string): Tool | undefined;
     unregisterTool(name: string, expected?: Tool): void;
     registerDeferredTools(definitions: ToolDefinition[]): void;
+    getToolDiscoveries(): ToolDiscovery[];
+    /** Host-only description refresh; cannot replace an execution or its authority. */
+    updateToolDescription(tool: Tool, description?: ToolDescriptionMetadata): void;
+    private deferredDiscoveries;
+    private selectDiscoveries;
+    searchDeferredToolDiscoveries(query: string): ToolDiscovery[];
     searchDeferredTools(query: string): ToolDefinition[];
+    searchToolDiscoveries(query: string): ToolDiscovery[];
     searchTools(query: string): ToolDefinition[];
     executeTool(name: string, rawInput: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
     private executeThroughCompoundPort;

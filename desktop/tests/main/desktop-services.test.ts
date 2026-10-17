@@ -1,3 +1,5 @@
+import { ConversationProjectService } from '../../electron/conversation-project-service.js';
+import * as atomicUserFile from '../../../src/utils/atomic-file.js';
 import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
 import { types } from 'node:util';
 import { openOwnedWorkflowNormalCase } from '../support/owned-workflow-normal-case.js';
@@ -6003,3 +6005,51 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+describe('A1 actual Main prepared-user admission entry',()=>{
+  it('commits an actual Host task/session source before the ordinary user runner starts',async()=>{
+    const root=join(tmpdir(),`main-user-source-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
+    const dataRoot=join(root,'data');let observed=false;
+    const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
+    const services=createDesktopServices({dataRoot,kswarmService:mockKSwarmService(),runner:async input=>{
+      const path=join(dataRoot,'conversation-projects','user-inputs',createHash('sha256').update(input.taskId).digest('hex')+'.json');
+      const fact=JSON.parse(readFileSync(path,'utf8'));
+      expect(fact).toMatchObject({taskId:input.taskId,sessionId:input.sessionId,threadId:'thread-a1-main',requestSource:'user'});
+      expect(fact.promptSha256).toBe(createHash('sha256').update(input.prompt).digest('hex'));observed=true;
+      await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:input.taskId,intentId:'analysis',stepId:'done',note:'已完成分析。'});
+    }});
+    try{
+      const task=await services.createTask({prompt:'请分析当前说明',materials:[],context:{threadId:'thread-a1-main'}});
+      for await(const event of services.subscribeTask(task.taskId)){if(event.type==='task_terminal')break;}
+      expect(observed).toBe(true);expect(record).toHaveBeenCalledOnce();
+      expect(record.mock.calls[0][0]).toMatchObject({taskId:task.taskId,status:'understanding'});
+    }finally{
+      record.mockRestore();services.goalShutdown.ingress.stopAccepting();
+      await services.closeTaskSourceWritersForMigration();await services.disposeMultiAgent();await services.goalShutdown.durable.close();
+      if(oldConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=oldConfig;
+      rmSync(root,{recursive:true,force:true});
+    }
+  });
+  it('preserves actual atomic-write failure through Main and never invokes the prepared runner',async()=>{
+    const root=join(tmpdir(),`main-user-source-fail-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
+    const runner=vi.fn(async()=>{}),failure=new Error('main-user-source-IO-failed'),actual=atomicUserFile.writeFileAtomicallySync;
+    const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:mockKSwarmService(),runner});
+    const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
+    const writer=vi.spyOn(atomicUserFile,'writeFileAtomicallySync').mockImplementation((path,...args)=>{
+      if(path.includes('user-inputs'))throw failure;return actual(path,...args);
+    });
+    try{
+      await expect(services.createTask({prompt:'创建一个项目',materials:[],context:{threadId:'thread-a1-failure'}})).rejects.toBe(failure);
+      expect(runner).not.toHaveBeenCalled();expect(record).toHaveBeenCalledOnce();
+      const actualTaskId=record.mock.calls[0][0].taskId;
+      expect((await services.recoverTask(actualTaskId)).snapshot.status).toBe('cancelled');
+    }finally{
+      writer.mockRestore();record.mockRestore();services.goalShutdown.ingress.stopAccepting();
+      await services.closeTaskSourceWritersForMigration();await services.disposeMultiAgent();await services.goalShutdown.durable.close();
+      if(oldConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=oldConfig;
+      rmSync(root,{recursive:true,force:true});
+    }
+  });
+});

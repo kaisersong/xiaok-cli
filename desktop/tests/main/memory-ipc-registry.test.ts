@@ -43,6 +43,7 @@ function validOutput(name: string): unknown {
   if (name === 'listMemories') return [memoryRow];
   if (name === 'createMemory' || name === 'updateMemory') return memoryRow;
   if (name === 'importMemories') return { imported: 1, deduped: 0, parseErrors: [] };
+  if (name === 'memoryCompact') return { status: 'completed', l1: 1, l2: 1, l3: 0 };
   if (name === 'memoryStats') return { l0: 1, l1: 1, l2: 0, l3: 0, dbSizeBytes: 100 };
   if (name === 'memoryPersonaTraits') return [{ trait: 'patient', confidence: .5 }];
   if (name === 'memoryListLayer') return [layerRow];
@@ -55,11 +56,12 @@ function validOutput(name: string): unknown {
 describe('complete16 Memory domain through real registration and preload', () => {
   let root: string, priorConfig: string | undefined, store: MemoryStore & Required<Pick<MemoryStore, 'delete' | 'listLayer' | 'getStats' | 'getPersonaTraits'>>, gate: DesktopShutdownGate;
   let handlers: Map<string, (...args: any[]) => unknown>;
-  const event = { sender: { id: 1 } }, window = { id: 1, isDestroyed: () => false, webContents: { id: 1, send: vi.fn() }, once: vi.fn() };
+  const webContents = { id: 1, send: vi.fn() };
+  const event = { sender: webContents }, window = { id: 1, isDestroyed: () => false, webContents, once: vi.fn() };
   const addedMethods: string[] = [];
   const invoke = (name: string, ...args: unknown[]) => Promise.resolve(handlers.get(`desktop:${name}`)!(event, ...args));
   const optionalMethod = (name: 'listLayer' | 'getPersonaTraits' | 'compact') => {
-    if (!store[name]) { Object.defineProperty(store, name, { value: () => name === 'compact' ? Promise.resolve() : [], writable: true, configurable: true }); addedMethods.push(name); }
+    if (!store[name]) { Object.defineProperty(store, name, { value: () => name === 'compact' ? Promise.resolve({status: 'unchanged', l1: 0, l2: 0, l3: 0}) : [], writable: true, configurable: true }); addedMethods.push(name); }
   };
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'xiaok-memory-ipc-')); native.appPath = root;
@@ -81,7 +83,7 @@ describe('complete16 Memory domain through real registration and preload', () =>
   });
   it('registers exactly complete16 at round4 and preserves old28 single metadata', () => {
     expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === 4).map(row => row.channel).sort()).toEqual(cases.map(([name]) => `desktop:${name}`).sort());
-    for (const [name, , riskTags] of cases) expect(IPC_SCHEMA_REGISTRY.get(`desktop:${name}`)).toMatchObject({ sourceFile: 'desktop/electron/ipc.ts', riskTags, payloadMode: ['memoryListLayer', 'memoryDeleteEntry'].includes(name) ? 'tuple' : 'single' });
+    for (const [name, , riskTags] of cases) expect(IPC_SCHEMA_REGISTRY.get(`desktop:${name}`)).toMatchObject({ sourceFile: 'desktop/electron/ipc.ts', riskTags, payloadMode: ['memoryListLayer', 'memoryDeleteEntry', 'memoryCompact'].includes(name) ? 'tuple' : 'single' });
     for (const [round, count] of [[1, 8], [2, 2], [3, 18]]) expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === round)).toHaveLength(count);
   });
   it.each(cases)('has a complete typed output schema for %s', name => {
@@ -123,7 +125,14 @@ describe('complete16 Memory domain through real registration and preload', () =>
     expect(list).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
   });
   it.each(noArguments)('preserves the old ignored-payload ABI of %s', async name => {
-    await expect(invoke(name, { payloadMode: 'tuple', forged: true }, 'ignored')).resolves.toEqual(await invoke(name));
+    if (name === 'memoryCompact') {
+      // Master now admits an explicit user compaction with no arguments.
+      const compact = vi.spyOn(store, 'compact').mockResolvedValue({status: 'completed', l1: 1, l2: 1, l3: 0});
+      await expect(invoke(name, { payloadMode: 'tuple', forged: true }, 'ignored')).rejects.toThrow();
+      expect(compact).not.toHaveBeenCalled();
+    } else {
+      await expect(invoke(name, { payloadMode: 'tuple', forged: true }, 'ignored')).resolves.toEqual(await invoke(name));
+    }
   });
   it('covers all four real producer metadata shapes, nullable SQLite type and optional createdAt', async () => {
     optionalMethod('listLayer'); const rows = [
@@ -171,6 +180,8 @@ describe('complete16 Memory domain through real registration and preload', () =>
     const imported = await invoke('importMemories', '- imported real producer') as { imported: number }; expect(imported.imported).toBe(1);
   });
   it('connects all16 typed/CJS consumer methods to their actual listeners without model downloads', async () => {
+    optionalMethod('compact');
+    const compact = vi.spyOn(store, 'compact').mockResolvedValue({status: 'unchanged', l1: 0, l2: 0, l3: 0});
     const ipcRenderer = { invoke: (channel: string, ...args: unknown[]) => Promise.resolve(handlers.get(channel)!(event, ...args)), on: vi.fn(), removeListener: vi.fn() };
     const typed = createPreloadApi(ipcRenderer as never); let sandbox: typeof typed | undefined;
     runInNewContext(readFileSync(join(import.meta.dirname, '../../electron/preload.cjs'), 'utf8'), { require: (name: string) => name === 'os' ? { userInfo: () => ({ username: 'fixture' }) } : { contextBridge: { exposeInMainWorld: (_name: unknown, api: typeof typed) => { sandbox = api; } }, ipcRenderer } });
@@ -179,6 +190,7 @@ describe('complete16 Memory domain through real registration and preload', () =>
       const value = await (api[name] as (...args: any[]) => Promise<unknown>)(...args);
       const entry = IPC_SCHEMA_REGISTRY.get(`desktop:${name}`); expect(entry).toBeDefined(); expect(entry!.output.safeParse(value).success).toBe(true);
     }
+    expect(compact).toHaveBeenCalledWith({requestSource: 'user', force: true});
     expect(modelRegistry.downloadModel).toHaveBeenCalledWith('all-MiniLM-L6-v2'); expect(gate.outstanding).toBe(0);
   });
   it('keeps shutdown ahead of tuple parsing and releases every token', async () => {

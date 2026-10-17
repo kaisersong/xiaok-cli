@@ -94,7 +94,7 @@ export function createEditTool(options = {}) {
         },
         async execute(input, context) {
             const { file_path, old_string, new_string } = input;
-            const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd);
+            const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard);
             let content;
             try {
                 content = readFileSync(resolvedPath, 'utf-8');

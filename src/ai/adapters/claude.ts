@@ -1,5 +1,6 @@
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
 import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
+import { setTimeout as delay } from 'node:timers/promises';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
@@ -49,8 +50,9 @@ function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal) await delay(ms, undefined, { signal });
+  else await new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
 export class ClaudeAdapter implements ModelAdapter {
@@ -133,6 +135,7 @@ export class ClaudeAdapter implements ModelAdapter {
     try {
     let attempt = 0;
     while (true) {
+      options?.signal?.throwIfAborted();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
       const signal = options?.signal
@@ -149,11 +152,11 @@ export class ClaudeAdapter implements ModelAdapter {
         if (disclosure !== undefined) assertProviderDisclosureActive(disclosure);
         clearTimeout(timer);
         // 一旦本次尝试已产出 chunk（消费端已实时落地/上屏），重试会重复输出，必须放弃重试
-        if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
+        if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
           throw error;
         }
         const delayMs = Math.min(1000 * 2 ** attempt, 16000);
-        await sleep(delayMs);
+        await sleep(delayMs, options?.signal);
         attempt += 1;
       } finally {
         clearTimeout(timer);
@@ -235,7 +238,7 @@ export class ClaudeAdapter implements ModelAdapter {
       : sharedClient;
     const stream = client.messages.stream({
       model: this.model,
-      max_tokens: CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
+      max_tokens: options?.maxOutputTokens ?? CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
       system: (options?.promptCache?.systemPrompt ?? systemPrompt) as string | SystemPromptBlock[],
       messages: anthropicMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
@@ -297,6 +300,7 @@ export class ClaudeAdapter implements ModelAdapter {
             },
           };
         }
+        if (options?.maxOutputTokens !== undefined && ['max_tokens', 'model_context_window_exceeded'].includes(String(event.delta.stop_reason))) throw new Error('memory_output_incomplete');
       } else if (event.type === 'message_stop') {
         yield { type: 'done' };
       }

@@ -1,4 +1,5 @@
 import { isAbortError } from './abort-utils.js';
+import { formatKimiProviderRequestError, getKimiProviderRequestDiagnostic } from './provider-request-error.js';
 export function normalizeRuntimeError(error) {
     if (isAbortError(error)) {
         const message = error instanceof Error ? error.message : 'aborted';
@@ -17,6 +18,10 @@ export function normalizeRuntimeError(error) {
             message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
             retryable: false,
         };
+    }
+    const providerDiagnostic = getKimiProviderRequestDiagnostic(error);
+    if (providerDiagnostic) {
+        return { code: 'model_failed', message: formatKimiProviderRequestError(providerDiagnostic), retryable: providerDiagnostic.retryable };
     }
     const transportCode = typeof errorCode === 'string' ? errorCode : '';
     if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(transportCode)

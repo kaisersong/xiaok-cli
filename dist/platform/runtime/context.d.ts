@@ -1,4 +1,6 @@
-import type { Tool } from '../../types.js';
+import type { Tool, ToolExecutionContext } from '../../types.js';
+import type { McpClientConnection } from '../mcp/transport.js';
+import { type McpTaskObserver } from '../mcp/tasks.js';
 import { type CustomAgentDef } from '../../ai/agents/loader.js';
 import { createBackgroundRunner, type BackgroundJobRecord } from '../agents/background-runner.js';
 import { createLspManager } from '../lsp/manager.js';
@@ -24,6 +26,10 @@ export interface LspClientLike {
     dispose(): void;
 }
 export interface PlatformRuntimeContext {
+    setMcpActivityHooks(hooks: {
+        connected(connection: McpClientConnection): void;
+        observer(context: ToolExecutionContext, connection: McpClientConnection): Promise<McpTaskObserver | undefined>;
+    }): void;
     pluginRuntime: PlatformPluginRuntimeState;
     customAgents: CustomAgentDef[];
     lspManager: ReturnType<typeof createLspManager>;

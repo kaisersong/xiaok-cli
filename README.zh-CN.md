@@ -126,7 +126,7 @@ CLI 记忆区分 `user`、`feedback`、`project`、`reference`。Desktop 还提�
 
 ### 环境要求
 
-- **CLI**：Node.js **22 或更高版本**。
+- **CLI**：Node.js **22.14 或更高版本**。
 - **完整源码栈**：Node.js **22.22 或更高版本**，满足 KSwarm 的 engine 要求。
 - **已发布 Desktop 安装包**：macOS Apple Silicon 与 Windows x64。正常使用安装版无需单独安装 Node.js。
 - Computer Use 需要 macOS 及对应辅助功能/屏幕权限。模型和外部服务凭据按实际使用能力配置。
@@ -307,7 +307,7 @@ xiaok yzjchannel serve             # 可选云之家网关
 /clear                        清屏并重新显示欢迎页
 /compact                      压缩较早对话上下文
 /context                      查看已加载的仓库上下文
-/mode [default|auto|plan]     查看或切换权限模式
+/mode                         选择权限模式
 /models                       切换模型
 /goal <objective>              创建持久目标
 /goal status|pause|cancel      查看、暂停或取消目标
@@ -322,6 +322,8 @@ xiaok yzjchannel serve             # 可选云之家网关
 /help                         查看帮助
 /<skill-name> [args]          调用技能
 ```
+
+输入 `/mode`，直接选择 `default`、`auto`、`plan` 或 `yolo`。交互式 CLI 会记住最后一次选择（包括 YOLO），退出后新建会话或 resume 都会恢复；Shift+Tab 切换也会保存。显式 `--auto`、`--yolo` 优先，并成为最近一次交互选择。管道和单次命令保留原有默认行为，不读取或覆盖这份偏好。YOLO 跳过 CLI 工具审批规则与命令风险拦截，包括强推和删除；`auto` 仍只自动放行低风险操作。系统认证和已配置的执行 hook 仍按原规则运行。
 
 权限模式与用户意图分开：`auto` 不替用户回答待定问题，也不覆盖“分派前先问我”。
 

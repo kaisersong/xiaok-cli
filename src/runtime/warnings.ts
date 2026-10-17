@@ -18,6 +18,10 @@ export function shouldSuppressWarning(warning: unknown, args: unknown[] = []): b
     ? warning.code
     : normalizeWarningCode(args);
 
+  const experimental = args[0] === 'ExperimentalWarning'
+    || (warning instanceof Error && warning.name === 'ExperimentalWarning');
+  if (experimental && message.startsWith('SQLite is an experimental feature')) return true;
+
   return code === 'DEP0040' && message.includes('`punycode` module is deprecated');
 }
 

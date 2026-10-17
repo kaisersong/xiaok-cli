@@ -1,6 +1,11 @@
+import { captureDirectHookSlot, assertDirectHookReturn } from './direct-hook-promise-boundary.js';
+import { AcceptedHookCalls } from './accepted-hook-calls.js';
+import { assertNativeRegistryCheckpointCurrent } from '../../runtime/task-host/workflow-restriction-checkpoint.js';
+import { createNativeReadonlyExecutionContext } from './native-readonly-context.js';
+import { captureToolDescriptionMetadata, BUILTIN_READ_DESCRIPTION } from '../../shared/tool-description-metadata.js';
 import { isIntentProducerTool } from './intent-delegation.js';
 import { isObservationDelegationTool } from '../../runtime/sol-pi/delegation-tool-brand.js';
-import { registerBuiltinToolIdentity, inheritBuiltinToolIdentity } from './native-tool-identity.js';
+import { registerBuiltinToolIdentity, inheritBuiltinToolIdentity, getBuiltinToolIdentity, isNativeReadonlyExecutionEligible } from './native-tool-identity.js';
 import { getCompoundSandboxPreparation, inheritCompoundSandboxPreparation } from '../../platform/sandbox/tool-wrappers.js';
 import { IntersectedPermissionManager } from '../permissions/intersection.js';
 import { measureToolResult, observationMetricsEnabled } from '../../runtime/trace/observation-metrics.js';
@@ -16,7 +21,7 @@ import { evaluateProtectedOutputGuard } from '../../runtime/guards/protected-out
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
-import { bashTool } from './bash.js';
+import { bashTool, createBashTool } from './bash.js';
 import { grepTool } from './grep.js';
 import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
@@ -27,18 +32,20 @@ import { uninstallSkillTool } from './uninstall-skill.js';
 import { validateSkillTool } from './validate-skill.js';
 import { createRenderUiTool } from './render-ui.js';
 import { sanitizeToolOutput } from '../../shared/stream-safety/redact.js';
-import { buildCapabilityToolDefinition, buildToolSearchEntry, dedupeToolSearchEntries, getCanonicalToolId, selectToolEntries, } from './tool-identity.js';
+import { buildCapabilityToolDefinition, buildToolSearchEntry, dedupeToolSearchCandidates, selectToolSearchCandidates, getCanonicalToolId, } from './tool-identity.js';
 // Capture singleton implementations at module initialization; a later factory call
 // cannot re-brand an in-place replacement as an audited native implementation.
 registerBuiltinToolIdentity(bashTool, 'command');
 registerBuiltinToolIdentity(grepTool, 'readonly');
 registerBuiltinToolIdentity(globTool, 'readonly');
-export function buildToolList(skillTool, workspace, extraTools = []) {
+export function buildToolList(skillTool, workspace, extraTools = [], metadataSink, bashApproval) {
+    const readTool = createReadTool(workspace);
+    metadataSink?.set(readTool, BUILTIN_READ_DESCRIPTION);
     const tools = [
-        createReadTool(workspace),
+        readTool,
         createWriteTool(workspace),
         createEditTool(workspace),
-        bashTool,
+        createBashTool(bashApproval),
         grepTool,
         globTool,
         webFetchTool,
@@ -67,16 +74,41 @@ function freezeObservationDefinition(value) {
 }
 const observationPermissionAuthorities = new WeakMap();
 export class ToolRegistry {
+    #nativeReadonlyOnly;
+    get isNativeReadonlyOnly() { return this.#nativeReadonlyOnly; }
+    admitsNativeReadonly(tool) {
+        if (!this.#nativeReadonlyOnly)
+            return Boolean(tool);
+        if (!tool)
+            return false;
+        try {
+            return getBuiltinToolIdentity(tool) === 'readonly' && isNativeReadonlyExecutionEligible(tool);
+        }
+        catch {
+            return false;
+        }
+    }
+    assertNativeReadonlyTree(tool, seen = new Set()) {
+        if (seen.has(tool) || !this.admitsNativeReadonly(tool))
+            throw Error('native_readonly_tool_required');
+        seen.add(tool);
+        for (const companion of tool.companionTools ?? [])
+            this.assertNativeReadonlyTree(companion, seen);
+        seen.delete(tool);
+    }
     executionBoundaryUsed = false;
     compoundInstallationPending = false;
     preparedInvocations = new WeakMap();
     tools = new Map();
     deferredTools = new Map();
+    descriptions = new Map();
+    deferredDescriptions = new Map();
     canonicalToolNames = new Map();
     permissionManager;
     options;
     allowedToolsFilter = null;
     disposed = false;
+    #acceptedHookCalls;
     parentAuthorityChanged;
     filterGeneration = 0;
     toolGenerations = new Map();
@@ -85,9 +117,22 @@ export class ToolRegistry {
         this.filterGeneration++;
         this.allowedToolsFilter = names ? new Set(names.map((name) => getCanonicalToolId(name))) : null;
     }
-    constructor(options, tools) {
+    constructor(options, tools, metadata) {
+        this.#nativeReadonlyOnly = options.nativeReadonlyOnly === true;
+        Object.defineProperty(this, 'isNativeReadonlyOnly', { get: () => this.#nativeReadonlyOnly, configurable: false });
+        if (this.#nativeReadonlyOnly) {
+            if (options.compoundExecution || options.onToolObserved || options.protectedOutputGuard || options.onPrompt)
+                throw Error('native_readonly_external_callback_denied');
+            if (options.hooksRunner && (options.hookInputMode === 'direct-callback' || !isEmptyConfiguredHooksRunner(options.hooksRunner)))
+                throw Error('native_readonly_external_callback_denied');
+            options = { ...options, hooksRunner: undefined };
+            // Validate the complete constructor population before publishing any binding.
+            if (tools)
+                for (const tool of tools)
+                    this.assertNativeReadonlyTree(tool);
+        }
         if (options.compoundExecution && options.hooksRunner) {
-            if (!isEmptyConfiguredHooksRunner(options.hooksRunner))
+            if (options.hookInputMode === 'direct-callback' || !isEmptyConfiguredHooksRunner(options.hooksRunner))
                 throw Error('compound_unsupervised_hooks');
             // Do not execute even mutable no-op methods: the factory proved absence of hooks.
             options = { ...options, hooksRunner: undefined };
@@ -105,16 +150,32 @@ export class ToolRegistry {
             onPrompt: options.onPrompt ?? (async () => false),
             permissionManager: this.permissionManager,
         };
-        for (const tool of tools ?? buildToolList()) {
-            this.registerTool(tool);
+        if (this.#nativeReadonlyOnly)
+            Object.defineProperty(this, 'options', { value: Object.freeze(this.options), writable: false, configurable: false });
+        // Requires R16/R17 explicit direct-callback input contract; configured owners are unchanged.
+        if (this.options.hookInputMode === 'direct-callback' && !this.#nativeReadonlyOnly && !this.options.compoundExecution) {
+            this.#acceptedHookCalls = new AcceptedHookCalls();
         }
-        this.registerTool(createToolSearchTool(this));
+        if (!tools) {
+            const sink = new Map();
+            tools = buildToolList(undefined, undefined, [], sink, { isYolo: () => this.permissionManager.getMode() === 'yolo' });
+            metadata = sink;
+            if (this.#nativeReadonlyOnly)
+                tools = tools.filter(tool => this.admitsNativeReadonly(tool));
+        }
+        for (const tool of tools) {
+            this.registerTool(tool, metadata?.get(tool));
+        }
+        if (!this.#nativeReadonlyOnly)
+            this.registerTool(createToolSearchTool(this));
     }
     /** Main/CLI bootstrap only; never a model tool. No owner swap after preparation. */
     installCompoundExecutionPort(factory) {
+        if (this.#nativeReadonlyOnly)
+            throw Error('native_readonly_compound_port_denied');
         if (this.disposed || this.executionBoundaryUsed || this.options.compoundExecution)
             throw Error('compound_registry_not_fresh');
-        if (this.options.hooksRunner && !isEmptyConfiguredHooksRunner(this.options.hooksRunner))
+        if (this.options.hooksRunner && (this.options.hookInputMode === 'direct-callback' || !isEmptyConfiguredHooksRunner(this.options.hooksRunner)))
             throw Error('compound_unsupervised_hooks');
         const port = factory(Object.freeze([...this.tools.values()]));
         if (!port || typeof port.execute !== 'function')
@@ -162,6 +223,8 @@ export class ToolRegistry {
     createObservationFork(extraTools, nativeNames, task, pendingCompound) {
         if (this.disposed)
             throw new Error('tool registry is disposed');
+        if (this.#nativeReadonlyOnly && (pendingCompound || task?.onPrompt))
+            throw Error('native_readonly_external_callback_denied');
         const audited = new Set(['read', 'bash', 'edit', 'write', 'glob', 'grep', 'ls']);
         if (nativeNames.some(name => !audited.has(name)) || extraTools.some(tool => tool.definition.name !== 'observation_read' && !isObservationDelegationTool(tool) && !(pendingCompound && isIntentProducerTool(tool))))
             throw new Error('observation registry tool not admitted');
@@ -176,15 +239,19 @@ export class ToolRegistry {
             return { registeredName, tool, execute: tool.execute, permission: tool.permission,
                 generation: this.toolGenerations.get(registeredName), schema: cloneToolInput(tool.definition.inputSchema) };
         });
-        const fork = new ToolRegistry({ ...this.options, ...(pendingCompound ? { compoundExecution: undefined } : {}), capabilityRegistry: undefined, capabilitySearch: false,
+        const forkDescriptions = new Map();
+        const fork = new ToolRegistry({ ...this.options, ...(this.#nativeReadonlyOnly ? { onPrompt: undefined, onToolObserved: undefined, protectedOutputGuard: undefined } : {}), ...(pendingCompound ? { compoundExecution: undefined } : {}), capabilityRegistry: undefined, capabilitySearch: false,
             ...(task ? { onPrompt: task.onPrompt } : {}),
             permissionManager: task ? new IntersectedPermissionManager(this.permissionManager, task.mode) : this.permissionManager }, [...originals.map(entry => {
                 const cloned = { ...entry.tool,
                     companionTools: undefined, definition: freezeObservationDefinition({ ...entry.tool.definition, inputSchema: cloneToolInput(entry.schema) }) };
                 inheritCompoundSandboxPreparation(entry.tool, cloned);
                 inheritBuiltinToolIdentity(entry.tool, cloned);
+                const metadata = this.descriptions.get(entry.registeredName);
+                if (metadata)
+                    forkDescriptions.set(cloned, metadata);
                 return cloned;
-            }), ...extraTools]);
+            }), ...extraTools], forkDescriptions);
         fork.compoundInstallationPending = pendingCompound;
         fork.unregisterTool('tool_search');
         fork.setAllowedTools([...nativeNames, ...extraTools.map(tool => tool.definition.name)]);
@@ -194,13 +261,24 @@ export class ToolRegistry {
         return fork;
     }
     getToolDefinitions() {
-        return [...this.tools.values()].map((tool) => this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition);
+        return [...this.tools.values()].filter(tool => this.admitsNativeReadonly(tool)).map((tool) => this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition);
     }
-    registerTool(tool) {
+    /** Subclasses must run complete readonly admission before publishing any state. */
+    preflightToolRegistration(tool) {
+        if (this.#nativeReadonlyOnly) {
+            if (this.disposed)
+                throw new Error('tool registry is disposed');
+            this.assertNativeReadonlyTree(tool);
+        }
+    }
+    registerTool(tool, description) {
+        this.preflightToolRegistration(tool);
+        const metadata = captureToolDescriptionMetadata(description);
         if (this.disposed)
             throw new Error('tool registry is disposed');
         this.toolGenerations.set(tool.definition.name, (this.toolGenerations.get(tool.definition.name) ?? 0) + 1);
         this.tools.set(tool.definition.name, tool);
+        this.descriptions.set(tool.definition.name, metadata);
         this.canonicalToolNames.set(getCanonicalToolId(tool.definition.name), tool.definition.name);
         this.options.capabilityRegistry?.register({
             kind: 'tool',
@@ -208,26 +286,37 @@ export class ToolRegistry {
             description: tool.definition.description,
             inputSchema: tool.definition.inputSchema,
             execute: async (input) => this.executeTool(tool.definition.name, input),
-        }, this);
+        }, this, metadata);
         for (const companion of tool.companionTools ?? []) {
             if (!this.tools.has(companion.definition.name)) {
                 this.registerTool(companion);
             }
         }
     }
-    registerDeferredTool(definition) {
+    registerDeferredTool(definition, description) {
+        if (this.#nativeReadonlyOnly)
+            throw Error('native_readonly_tool_required');
+        const metadata = captureToolDescriptionMetadata(description);
         if (this.disposed)
             throw new Error('tool registry is disposed');
         this.filterGeneration++;
         this.deferredTools.set(definition.name, definition);
+        this.deferredDescriptions.set(definition.name, metadata);
         this.options.capabilityRegistry?.register({
             kind: 'tool',
             name: definition.name,
             description: definition.description,
             inputSchema: definition.inputSchema,
-        }, this);
+        }, this, metadata);
+    }
+    /** Accepted direct-hook JS calls only; never a physical-release acknowledgement. */
+    waitForAcceptedHookCalls() {
+        if (!this.#acceptedHookCalls)
+            throw new Error('hook_callback_join_unavailable');
+        return this.#acceptedHookCalls.waitForAcceptedCalls();
     }
     dispose() {
+        this.#acceptedHookCalls?.sealIngress();
         if (this.disposed)
             return;
         this.disposed = true;
@@ -235,11 +324,14 @@ export class ToolRegistry {
         this.options.capabilityRegistry?.unregisterOwner(this);
         this.tools.clear();
         this.deferredTools.clear();
+        this.descriptions.clear();
+        this.deferredDescriptions.clear();
         this.canonicalToolNames.clear();
         this.allowedToolsFilter = null;
     }
     getRegisteredTool(name) {
-        return this.tools.get(name);
+        const tool = this.tools.get(name);
+        return this.admitsNativeReadonly(tool) ? tool : undefined;
     }
     unregisterTool(name, expected) {
         if (expected && this.tools.get(name) !== expected)
@@ -247,6 +339,8 @@ export class ToolRegistry {
         this.toolGenerations.set(name, (this.toolGenerations.get(name) ?? 0) + 1);
         this.tools.delete(name);
         this.deferredTools.delete(name);
+        this.descriptions.delete(name);
+        this.deferredDescriptions.delete(name);
         this.options.capabilityRegistry?.unregister(name, this);
         const canonical = getCanonicalToolId(name);
         if (this.canonicalToolNames.get(canonical) === name) {
@@ -262,65 +356,44 @@ export class ToolRegistry {
             this.registerDeferredTool(definition);
         }
     }
-    searchDeferredTools(query) {
-        const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
-        if (query.startsWith('select:')) {
-            const names = query
-                .slice('select:'.length)
-                .split(',')
-                .map((value) => value.trim())
-                .filter(Boolean);
-            return selectToolEntries(deferredEntries, names);
-        }
-        const normalizedQuery = query.trim().toLowerCase();
-        if (!normalizedQuery) {
-            return dedupeToolSearchEntries(deferredEntries);
-        }
-        return dedupeToolSearchEntries(deferredEntries.filter((entry) => {
-            const tool = entry.definition;
-            return (tool.name.toLowerCase().includes(normalizedQuery) ||
-                tool.description.toLowerCase().includes(normalizedQuery));
-        }));
+    getToolDiscoveries() {
+        return [...this.tools.entries()].filter(([, tool]) => this.admitsNativeReadonly(tool)).map(([name, tool]) => { const coreDefinition = this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition, metadata = this.descriptions.get(name); return Object.freeze(metadata ? { coreDefinition, metadata } : { coreDefinition }); });
     }
-    searchTools(query) {
+    /** Host-only description refresh; cannot replace an execution or its authority. */
+    updateToolDescription(tool, description) {
+        const metadata = captureToolDescriptionMetadata(description);
+        if (this.disposed || this.tools.get(tool.definition.name) !== tool)
+            throw Error('tool_description_registration_mismatch');
+        this.descriptions.set(tool.definition.name, metadata);
+    }
+    deferredDiscoveries() { return [...this.deferredTools.entries()].map(([name, coreDefinition]) => { const metadata = this.deferredDescriptions.get(name); return Object.freeze(metadata ? { coreDefinition, metadata } : { coreDefinition }); }); }
+    selectDiscoveries(discoveries, query) {
+        const entries = discoveries.map(discovery => ({ ...buildToolSearchEntry(discovery.coreDefinition), discovery }));
+        if (query.startsWith('select:'))
+            return selectToolSearchCandidates(entries, query.slice(7).split(',').map(name => name.trim()).filter(Boolean)).map(entry => entry.discovery);
+        const normalized = query.trim().toLowerCase();
+        return dedupeToolSearchCandidates(entries.filter(({ definition }) => !normalized || definition.name.toLowerCase().includes(normalized) || definition.description.toLowerCase().includes(normalized))).map(entry => entry.discovery);
+    }
+    searchDeferredToolDiscoveries(query) { return this.selectDiscoveries(this.deferredDiscoveries(), query); }
+    searchDeferredTools(query) { return this.searchDeferredToolDiscoveries(query).map(entry => entry.coreDefinition); }
+    searchToolDiscoveries(query) {
         if (this.disposed)
             return [];
-        const activeTools = this.getToolDefinitions();
-        const activeEntries = activeTools.map((tool) => buildToolSearchEntry(tool));
-        const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
-        const capabilityEntries = (this.options.capabilitySearch === false ? []
-            : this.options.capabilityRegistry?.search(query.startsWith('select:') ? '' : query) ?? [])
-            .map((capability) => buildToolSearchEntry(buildCapabilityToolDefinition(capability)));
-        if (query.startsWith('select:')) {
-            const names = query
-                .slice('select:'.length)
-                .split(',')
-                .map((value) => value.trim())
-                .filter(Boolean);
-            return selectToolEntries([...activeEntries, ...deferredEntries, ...capabilityEntries], names);
-        }
-        const normalizedQuery = query.trim().toLowerCase();
-        const matches = normalizedQuery
-            ? activeEntries.filter((entry) => {
-                const tool = entry.definition;
-                return (tool.name.toLowerCase().includes(normalizedQuery) ||
-                    tool.description.toLowerCase().includes(normalizedQuery));
-            })
-            : activeEntries;
-        const deferredMatches = normalizedQuery
-            ? deferredEntries.filter((entry) => {
-                const tool = entry.definition;
-                return (tool.name.toLowerCase().includes(normalizedQuery) ||
-                    tool.description.toLowerCase().includes(normalizedQuery));
-            })
-            : deferredEntries;
-        return dedupeToolSearchEntries([...matches, ...deferredMatches, ...capabilityEntries]);
+        const capabilities = this.#nativeReadonlyOnly || this.options.capabilitySearch === false ? [] : this.options.capabilityRegistry?.searchDiscoveries(query.startsWith('select:') ? '' : query) ?? [];
+        return this.selectDiscoveries([...this.getToolDiscoveries(), ...this.deferredDiscoveries(), ...capabilities.map(({ coreRecord, metadata }) => { const coreDefinition = buildCapabilityToolDefinition(coreRecord); return Object.freeze(metadata ? { coreDefinition, metadata } : { coreDefinition }); })], query);
     }
+    searchTools(query) { return this.searchToolDiscoveries(query).map(entry => entry.coreDefinition); }
     async executeTool(name, rawInput, context) {
+        await assertNativeRegistryCheckpointCurrent(this);
         if (this.compoundInstallationPending)
             throw Error('compound_child_installation_required');
         this.executionBoundaryUsed = true;
         try {
+            if (this.#nativeReadonlyOnly) {
+                const registeredName = this.canonicalToolNames.get(getCanonicalToolId(name)) ?? name;
+                if (!this.admitsNativeReadonly(this.tools.get(registeredName)))
+                    return 'Error: native_readonly_tool_required';
+            }
             if (this.options.compoundExecution)
                 return await this.executeThroughCompoundPort(name, rawInput, context);
             const prepared = await this.prepareToolInvocation(name, rawInput, context);
@@ -398,6 +471,7 @@ export class ToolRegistry {
         }
     }
     async executePreparedTool(prepared) {
+        await assertNativeRegistryCheckpointCurrent(this);
         if (this.compoundInstallationPending)
             throw Error('compound_child_installation_required');
         if (this.options.compoundExecution)
@@ -405,6 +479,7 @@ export class ToolRegistry {
         return this.consumePreparedTool(prepared);
     }
     async consumePreparedTool(prepared, projectResult) {
+        await assertNativeRegistryCheckpointCurrent(this);
         const record = this.preparedInvocations.get(prepared);
         if (!record)
             throw new Error('prepared_tool_invocation_invalid_or_consumed');
@@ -420,6 +495,7 @@ export class ToolRegistry {
         return result.kind === 'prepared' ? result.invocation : result.message;
     }
     async prepareToolInvocationDetailed(name, rawInput, context) {
+        await assertNativeRegistryCheckpointCurrent(this);
         if (this.compoundInstallationPending)
             throw Error('compound_child_installation_required');
         this.executionBoundaryUsed = true;
@@ -455,6 +531,8 @@ export class ToolRegistry {
         const tool = this.tools.get(registeredName);
         if (!tool)
             return stop(`Error: 未知工具: ${name}`, 'invalid');
+        if (!this.admitsNativeReadonly(tool))
+            return stop('Error: native_readonly_tool_required', 'denied');
         const execute = tool.execute;
         const compoundPreparation = this.options.compoundExecution ? getCompoundSandboxPreparation(tool) : undefined;
         const permission = tool.permission;
@@ -467,7 +545,7 @@ export class ToolRegistry {
         }
         const toolGeneration = this.toolGenerations.get(registeredName);
         const filterGeneration = this.filterGeneration;
-        const authorityChanged = () => this.parentAuthorityChanged?.() === true || this.disposed
+        const authorityChanged = () => !this.admitsNativeReadonly(tool) || this.parentAuthorityChanged?.() === true || this.disposed
             || this.filterGeneration !== filterGeneration
             || this.toolGenerations.get(registeredName) !== toolGeneration
             || this.tools.get(registeredName) !== tool
@@ -492,28 +570,145 @@ export class ToolRegistry {
         if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision())
             return stop(changedError, 'invalidated');
         if (decision === 'deny') {
-            await this.options.hooksRunner?.runHooks('PermissionDenied', {
-                tool_name: tool.definition.name,
-                input,
-                reason: 'policy_denied',
-            });
+            if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+                const hookReceiver = this.options.hooksRunner;
+                const hookFunction = captureDirectHookSlot(hookReceiver, 'runHooks', true);
+                if (hookFunction) {
+                    const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'generic');
+                    let hookReturnCaptured = false;
+                    let hookReturnConfirmed = false;
+                    try {
+                        const rawHookReturn = hookReceiver.runHooks('PermissionDenied', {
+                            tool_name: tool.definition.name,
+                            input,
+                            reason: 'policy_denied',
+                        });
+                        this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                        hookReturnCaptured = true;
+                        assertDirectHookReturn(rawHookReturn);
+                        hookReturnConfirmed = true;
+                        await rawHookReturn;
+                        this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                    }
+                    catch (error) {
+                        if (hookReturnCaptured && !hookReturnConfirmed) {
+                            this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                        }
+                        else {
+                            this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                        }
+                        throw error;
+                    }
+                }
+                else {
+                    await undefined;
+                }
+            }
+            else if (this.options.hookInputMode !== 'direct-callback') {
+                await this.options.hooksRunner?.runHooks('PermissionDenied', {
+                    tool_name: tool.definition.name,
+                    input,
+                    reason: 'policy_denied',
+                });
+            }
+            else {
+                await undefined;
+            }
             context?.signal?.throwIfAborted();
             return stop(`Error: 权限不足: ${name}`, 'denied');
         }
         if (decision === 'prompt' && permission !== 'safe') {
-            const permissionRequest = await this.options.hooksRunner?.runHooks('PermissionRequest', {
-                tool_name: tool.definition.name,
-                input: cloneToolInput(input),
-            });
+            let permissionRequest;
+            if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+                const hookReceiver = this.options.hooksRunner;
+                const hookFunction = captureDirectHookSlot(hookReceiver, 'runHooks', true);
+                if (hookFunction) {
+                    const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'generic');
+                    let hookReturnCaptured = false;
+                    let hookReturnConfirmed = false;
+                    try {
+                        const rawHookReturn = hookReceiver.runHooks('PermissionRequest', {
+                            tool_name: tool.definition.name,
+                            input: cloneToolInput(input),
+                        });
+                        this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                        hookReturnCaptured = true;
+                        assertDirectHookReturn(rawHookReturn);
+                        hookReturnConfirmed = true;
+                        permissionRequest = await rawHookReturn;
+                        this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                    }
+                    catch (error) {
+                        if (hookReturnCaptured && !hookReturnConfirmed) {
+                            this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                        }
+                        else {
+                            this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                        }
+                        throw error;
+                    }
+                }
+                else {
+                    permissionRequest = await undefined;
+                }
+            }
+            else if (this.options.hookInputMode !== 'direct-callback') {
+                permissionRequest = await this.options.hooksRunner?.runHooks('PermissionRequest', {
+                    tool_name: tool.definition.name,
+                    input: cloneToolInput(input),
+                });
+            }
+            else {
+                permissionRequest = await undefined;
+            }
             context?.signal?.throwIfAborted();
             if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision())
                 return stop(changedError, 'invalidated');
             if (permissionRequest?.decision === 'deny' || permissionRequest?.ok === false) {
-                await this.options.hooksRunner?.runHooks('PermissionDenied', {
-                    tool_name: tool.definition.name,
-                    input,
-                    reason: permissionRequest?.message ?? 'denied_by_permission_hook',
-                });
+                if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+                    const hookReceiver = this.options.hooksRunner;
+                    const hookFunction = captureDirectHookSlot(hookReceiver, 'runHooks', true);
+                    if (hookFunction) {
+                        const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'generic');
+                        let hookReturnCaptured = false;
+                        let hookReturnConfirmed = false;
+                        try {
+                            const rawHookReturn = hookReceiver.runHooks('PermissionDenied', {
+                                tool_name: tool.definition.name,
+                                input,
+                                reason: permissionRequest?.message ?? 'denied_by_permission_hook',
+                            });
+                            this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                            hookReturnCaptured = true;
+                            assertDirectHookReturn(rawHookReturn);
+                            hookReturnConfirmed = true;
+                            await rawHookReturn;
+                            this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                        }
+                        catch (error) {
+                            if (hookReturnCaptured && !hookReturnConfirmed) {
+                                this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                            }
+                            else {
+                                this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                            }
+                            throw error;
+                        }
+                    }
+                    else {
+                        await undefined;
+                    }
+                }
+                else if (this.options.hookInputMode !== 'direct-callback') {
+                    await this.options.hooksRunner?.runHooks('PermissionDenied', {
+                        tool_name: tool.definition.name,
+                        input,
+                        reason: permissionRequest?.message ?? 'denied_by_permission_hook',
+                    });
+                }
+                else {
+                    await undefined;
+                }
                 context?.signal?.throwIfAborted();
                 return stop(`Error: ${permissionRequest?.message ?? `权限不足: ${name}`}`, 'denied');
             }
@@ -525,17 +720,89 @@ export class ToolRegistry {
                 return stop(changedError, 'invalidated');
             permissionGrant = snapshotToolPermissionGrant(approved);
             if (approved !== true && !permissionGrant) {
-                await this.options.hooksRunner?.runHooks('PermissionDenied', {
-                    tool_name: tool.definition.name,
-                    input,
-                    reason: 'prompt_declined',
-                });
+                if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+                    const hookReceiver = this.options.hooksRunner;
+                    const hookFunction = captureDirectHookSlot(hookReceiver, 'runHooks', true);
+                    if (hookFunction) {
+                        const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'generic');
+                        let hookReturnCaptured = false;
+                        let hookReturnConfirmed = false;
+                        try {
+                            const rawHookReturn = hookReceiver.runHooks('PermissionDenied', {
+                                tool_name: tool.definition.name,
+                                input,
+                                reason: 'prompt_declined',
+                            });
+                            this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                            hookReturnCaptured = true;
+                            assertDirectHookReturn(rawHookReturn);
+                            hookReturnConfirmed = true;
+                            await rawHookReturn;
+                            this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                        }
+                        catch (error) {
+                            if (hookReturnCaptured && !hookReturnConfirmed) {
+                                this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                            }
+                            else {
+                                this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                            }
+                            throw error;
+                        }
+                    }
+                    else {
+                        await undefined;
+                    }
+                }
+                else if (this.options.hookInputMode !== 'direct-callback') {
+                    await this.options.hooksRunner?.runHooks('PermissionDenied', {
+                        tool_name: tool.definition.name,
+                        input,
+                        reason: 'prompt_declined',
+                    });
+                }
+                else {
+                    await undefined;
+                }
                 context?.signal?.throwIfAborted();
                 return stop(`${TOOL_CANCELLED_PREFIX}${name}）`, 'cancelled');
             }
             approvedInput = cloneToolInput(input);
         }
-        const preHookResult = await this.options.hooksRunner?.runPreHooks(registeredName, cloneToolInput(input));
+        let preHookResult;
+        if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+            const hookReceiver = this.options.hooksRunner;
+            const hookFunction = captureDirectHookSlot(hookReceiver, 'runPreHooks', false);
+            if (hookFunction) {
+                const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'pre');
+                let hookReturnCaptured = false;
+                let hookReturnConfirmed = false;
+                try {
+                    const rawHookReturn = hookReceiver.runPreHooks(registeredName, cloneToolInput(input));
+                    this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                    hookReturnCaptured = true;
+                    assertDirectHookReturn(rawHookReturn);
+                    hookReturnConfirmed = true;
+                    preHookResult = await rawHookReturn;
+                    this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                }
+                catch (error) {
+                    if (hookReturnCaptured && !hookReturnConfirmed) {
+                        this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                    }
+                    else {
+                        this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                    }
+                    throw error;
+                }
+            }
+            else {
+                preHookResult = await undefined;
+            }
+        }
+        else {
+            preHookResult = await this.options.hooksRunner?.runPreHooks(registeredName, cloneToolInput(input));
+        }
         context?.signal?.throwIfAborted();
         if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision())
             return stop(changedError, 'invalidated');
@@ -588,11 +855,50 @@ export class ToolRegistry {
             if (isAbortError(e) || (e instanceof Error && e.message.startsWith('TOOL_IDLE_TIMEOUT')))
                 throw e;
             const errorMessage = formatErrorText(String(e));
-            await this.options.hooksRunner?.runHooks('PostToolUseFailure', {
-                tool_name: tool.definition.name,
-                tool_input: input,
-                error: errorMessage,
-            });
+            if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+                const hookReceiver = this.options.hooksRunner;
+                const hookFunction = captureDirectHookSlot(hookReceiver, 'runHooks', true);
+                if (hookFunction) {
+                    const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'generic');
+                    let hookReturnCaptured = false;
+                    let hookReturnConfirmed = false;
+                    try {
+                        const rawHookReturn = hookReceiver.runHooks('PostToolUseFailure', {
+                            tool_name: tool.definition.name,
+                            tool_input: input,
+                            error: errorMessage,
+                        });
+                        this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                        hookReturnCaptured = true;
+                        assertDirectHookReturn(rawHookReturn);
+                        hookReturnConfirmed = true;
+                        await rawHookReturn;
+                        this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                    }
+                    catch (error) {
+                        if (hookReturnCaptured && !hookReturnConfirmed) {
+                            this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                        }
+                        else {
+                            this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                        }
+                        throw error;
+                    }
+                }
+                else {
+                    await undefined;
+                }
+            }
+            else if (this.options.hookInputMode !== 'direct-callback') {
+                await this.options.hooksRunner?.runHooks('PostToolUseFailure', {
+                    tool_name: tool.definition.name,
+                    tool_input: input,
+                    error: errorMessage,
+                });
+            }
+            else {
+                await undefined;
+            }
             context?.signal?.throwIfAborted();
             return `Error: ${errorMessage}`;
         };
@@ -651,10 +957,11 @@ export class ToolRegistry {
                     let rawResult = await runMonitoredTool({ name, context: invocationContext,
                         idleMs: tool.executionPolicy?.idleTimeoutMs ?? this.toolIdleTimeoutMs,
                         waitsForUser: tool.executionPolicy?.waitsForUser,
-                        run: ctx => {
+                        run: async (ctx) => {
+                            await assertNativeRegistryCheckpointCurrent(this);
                             ctx?.signal?.throwIfAborted();
                             assertInvocationCurrent();
-                            return execute.call(tool, input, ctx);
+                            return execute.call(tool, input, this.#nativeReadonlyOnly ? createNativeReadonlyExecutionContext(ctx) : ctx);
                         },
                     });
                     context?.signal?.throwIfAborted();
@@ -703,7 +1010,40 @@ export class ToolRegistry {
                         ok: isSuccessfulToolResult(observedResult),
                     });
                     context?.signal?.throwIfAborted();
-                    const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
+                    let warnings;
+                    if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
+                        const hookReceiver = this.options.hooksRunner;
+                        const hookFunction = captureDirectHookSlot(hookReceiver, 'runPostHooks', false);
+                        if (hookFunction) {
+                            const acceptedCall = this.#acceptedHookCalls.reserveOriginalCall(hookReceiver, hookFunction, 'post');
+                            let hookReturnCaptured = false;
+                            let hookReturnConfirmed = false;
+                            try {
+                                const rawHookReturn = hookReceiver.runPostHooks(tool.definition.name, input);
+                                this.#acceptedHookCalls.captureOriginalReturn(acceptedCall, rawHookReturn);
+                                hookReturnCaptured = true;
+                                assertDirectHookReturn(rawHookReturn);
+                                hookReturnConfirmed = true;
+                                warnings = await rawHookReturn ?? [];
+                                this.#acceptedHookCalls.recordOriginalResolution(acceptedCall);
+                            }
+                            catch (error) {
+                                if (hookReturnCaptured && !hookReturnConfirmed) {
+                                    this.#acceptedHookCalls.recordUnconfirmedReturn(acceptedCall, error);
+                                }
+                                else {
+                                    this.#acceptedHookCalls.recordOriginalRejection(acceptedCall, error);
+                                }
+                                throw error;
+                            }
+                        }
+                        else {
+                            warnings = await undefined ?? [];
+                        }
+                    }
+                    else {
+                        warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
+                    }
                     context?.signal?.throwIfAborted();
                     if (observationMetricsEnabled()) {
                         measureToolResult('registry_visible', context?.toolInvocationId, tool.definition.name, sanitizeToolOutput(result, { cap: false }).text);

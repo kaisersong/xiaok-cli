@@ -8,13 +8,17 @@ export interface L2CompactionResult {
 export interface L3CompactionResult {
     traits: number;
 }
-export interface CompactL0Options {
+export interface CompactionOptions {
+    force?: boolean;
+    assertOpen?: () => void;
+}
+export interface CompactL0Options extends CompactionOptions {
     sessionId?: string;
     minMessages?: number;
     maxPromptTokens?: number;
 }
 type LLMFn = (prompt: string) => Promise<string>;
 export declare function compactL0toL1(db: Database.Database, llm: LLMFn, options?: CompactL0Options): Promise<L1CompactionResult>;
-export declare function compactL1toL2(db: Database.Database, llm: LLMFn): Promise<L2CompactionResult>;
-export declare function compactL2toL3(db: Database.Database, llm: LLMFn): Promise<L3CompactionResult>;
+export declare function compactL1toL2(db: Database.Database, llm: LLMFn, options?: CompactionOptions): Promise<L2CompactionResult>;
+export declare function compactL2toL3(db: Database.Database, llm: LLMFn, options?: CompactionOptions): Promise<L3CompactionResult>;
 export {};

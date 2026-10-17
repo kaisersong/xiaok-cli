@@ -33,7 +33,7 @@ export function MemoryModelSettings() {
   }
 
   function handleRowClick(model: ModelEntry) {
-    if (model.active) return
+    if (model.active && model.downloaded) return
     setConfirmModel(model)
   }
 
@@ -77,6 +77,7 @@ export function MemoryModelSettings() {
                 role="button"
                 tabIndex={isDownloading ? -1 : 0}
                 aria-label={model.name}
+                aria-pressed={model.active}
                 onClick={() => !isDownloading && handleRowClick(model)}
                 onKeyDown={(e) => { if (!isDownloading && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(model); } }}
                 className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
@@ -102,6 +103,7 @@ export function MemoryModelSettings() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--c-text-primary)]">{model.name}</span>
+                    {model.active && <span className="text-[10px] text-[var(--c-accent)]">{ds.memoryEmbeddingCurrent}</span>}
                     <span className="text-[10px] text-[var(--c-text-muted)]">{model.size} · {ds.embeddingModelDims(model.dims)}</span>
                   </div>
                   <div className="text-xs text-[var(--c-text-muted)]">{model.languages}</div>

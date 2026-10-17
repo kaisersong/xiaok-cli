@@ -15,7 +15,7 @@ const COMPACT_MEMORY_REMINDER_SUFFIX = '\n</system-reminder>';
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
 import { resolveRegisteredStrictKimiK3Profile, requiresKimiK3HistoryMigration } from './model-harness-identity.js';
 import { InvocationToolImages } from './tool-image-channel.js';
-import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { estimateRequestOverheadTokens, estimateTokens, getContextTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { decideCompactionCandidate } from '../../runtime/sol-pi/compaction-policy.js';
 import { CompactRunner } from './compact-runner.js';
 import { executePortableCompaction } from './portable-compaction-executor.js';
@@ -222,8 +222,8 @@ export class AgentRuntime {
                 }
                 if (!stageViewActive && !autoCompactionBlocked
                     && decideCompactionCandidate({ trigger: 'threshold' }).action === 'delegate-existing-threshold'
-                    && shouldCompact(estimateTokens(this.session.getMessages())
-                        + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()), this.contextLimit, this.compactThreshold)) {
+                    && shouldCompact(Math.max(estimateTokens(this.session.getMessages())
+                        + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()), getContextTokens(this.session.getUsage())), this.contextLimit, this.compactThreshold)) {
                     const plan = this.session.planCompaction();
                     if (plan.sourceRevision === noReplacementRevision) {
                         // The same frozen history still has no replaceable prefix.
@@ -255,6 +255,15 @@ export class AgentRuntime {
                                 runId: run.runId,
                                 summary: outcome.record.summary,
                                 compactionId: outcome.record.id,
+                            });
+                            onEvent({
+                                type: 'usage_updated',
+                                runId: run.runId,
+                                usage: {
+                                    ...this.session.getUsage(),
+                                    inputTokens: estimateTokens(this.session.getMessages())
+                                        + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
+                                },
                             });
                             try {
                                 await this.injectMemoryAfterCompact();

@@ -1,9 +1,13 @@
+import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches, getExactCommandApprovalRule, isExactCommandApprovalRule } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
 import { getUiCopy } from './locale.js';
+import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
+import { pauseInputForHandoff } from './input-mode.js';
 function singleLine(text) {
-    return text.replace(/\s+/g, ' ').trim();
+    const line = text.replace(/\s+/g, ' ').trim();
+    return line.length > 200 ? `${line.slice(0, 197)}...` : line;
 }
 /** 从工具输入中提取关键参数用于展示 */
 function extractTarget(input, locale = 'zh-CN') {
@@ -16,6 +20,8 @@ function extractTarget(input, locale = 'zh-CN') {
         return { key: labels.path, value: singleLine(input.path) };
     if (typeof input.pattern === 'string')
         return { key: labels.pattern, value: singleLine(input.pattern) };
+    if (typeof input.url === 'string')
+        return { key: labels.url, value: singleLine(input.url) };
     return null;
 }
 /** 从工具输入推导 glob 规则 */
@@ -69,30 +75,71 @@ function compactRuleForOption(rule, maxLength = 72) {
     const tailLength = Math.floor(availableInner / 2);
     return `${prefix}${inner.slice(0, headLength)}...${inner.slice(-tailLength)}${suffix}`;
 }
-export function buildPermissionPromptOptions(rule) {
-    const displayRule = compactRuleForOption(rule);
+function isMandatoryReview(toolName, input) {
+    return toolName === 'bash' && typeof input.command === 'string'
+        && (classifyBashCommand(input.command).level !== 'safe' || requiresCommandConfirmation(input.command) || getCommandWriteTargets(input.command).length > 0);
+}
+function rememberedRules(toolName, input, rule) {
+    if (toolName !== 'bash' || typeof input.command !== 'string')
+        return [rule];
+    const exact = () => { const rule = getExactCommandApprovalRule(input); return rule ? [rule] : []; };
+    if (isMandatoryReview(toolName, input))
+        return exact();
+    const parsed = parseCommandSegments(input.command);
+    if (!parsed.valid)
+        return exact();
+    const rules = [...new Set(parsed.segments.map(command => deriveRule(toolName, { command })))];
+    // Use the execution policy itself to verify that these scopes cover the full
+    // command. An unrepresentable command must not offer ineffective persistence.
+    return matches(rules, toolName, input) ? rules : [];
+}
+export function buildPermissionPromptOptions(rule, toolName = '', input = {}) {
+    const rules = rememberedRules(toolName, input, rule);
+    if (rules.length === 0)
+        return [
+            { label: '允许一次', choice: { action: 'allow_once' } },
+            { label: '拒绝', choice: { action: 'deny' } },
+        ];
+    const displayRule = isExactCommandApprovalRule(rules[0])
+        ? getUiCopy('zh-CN').exactCommandScope
+        : compactRuleForOption(rules.join(' + '));
+    const scopes = rules.length > 1 ? { rules } : {};
     return [
         { label: '允许一次', choice: { action: 'allow_once' } },
-        { label: `本次会话始终允许 ${displayRule}`, choice: { action: 'allow_session', rule } },
-        { label: `始终允许 ${displayRule} (保存到项目)`, choice: { action: 'allow_project', rule } },
-        { label: `始终允许 ${displayRule} (保存到全局)`, choice: { action: 'allow_global', rule } },
+        { label: `本次会话始终允许 ${displayRule}`, choice: { action: 'allow_session', rule: rules[0], ...scopes } },
+        { label: `始终允许 ${displayRule} (保存到项目)`, choice: { action: 'allow_project', rule: rules[0], ...scopes } },
+        { label: `始终允许 ${displayRule} (保存到全局)`, choice: { action: 'allow_global', rule: rules[0], ...scopes } },
         { label: '拒绝', choice: { action: 'deny' } },
     ];
 }
-export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN') {
+export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN', permissionMode) {
     const copy = getUiCopy(locale);
     const target = extractTarget(input, locale);
+    const rules = rememberedRules(toolName, input, deriveRule(toolName, input));
     const lines = [
         `${yellow('⚡')} ${copy.approvalTitle}`,
         `${copy.toolLabel}: ${boldCyan(toolName)}`,
     ];
+    if (permissionMode === 'auto' && toolName === 'bash' && typeof input.command === 'string') {
+        const risk = requiresAutoPromptForBashCommand(input.command);
+        if (risk?.reason)
+            lines.push(dim(copy.autoApprovalReason(risk.reason)));
+    }
     if (target) {
         lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
     }
+    if (toolName === 'bash' && typeof input.command === 'string') {
+        if (rules.length === 0)
+            lines.push(dim(copy.mandatoryReview));
+        for (const path of getCommandWriteTargets(input.command))
+            lines.push(dim(copy.writeTarget(escapeProjectRuleDisplay(path))));
+    }
     if (typeof input.command === 'string') {
-        const rule = deriveRule(toolName, input);
-        if (rule.endsWith(' *)'))
-            lines.push(dim(copy.commandApprovalScope(rule)));
+        if (rules.some(isExactCommandApprovalRule))
+            lines.push(dim(copy.exactCommandApprovalHint));
+        for (const rule of rules)
+            if (rule.endsWith(' *)'))
+                lines.push(dim(copy.commandApprovalScope(rule)));
     }
     for (let i = 0; i < options.length; i++) {
         const option = options[i];
@@ -107,6 +154,8 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
  * 显示工具信息 + 箭头键可选的多行选项列表。
  */
 export async function showPermissionPrompt(toolName, input, config) {
+    if (config?.signal?.aborted)
+        return { action: 'deny' };
     const rule = deriveRule(toolName, input);
     const transcriptLogger = config?.transcriptLogger;
     const renderer = config?.renderer;
@@ -114,7 +163,7 @@ export async function showPermissionPrompt(toolName, input, config) {
         (renderer.hasActiveScrollRegion() ||
             renderer.getState().prompt !== '' ||
             renderer.getState().input.value !== ''));
-    const promptOptions = buildPermissionPromptOptions(rule);
+    const promptOptions = buildPermissionPromptOptions(rule, toolName, input);
     // 非 TTY 环境下默认拒绝
     if (!stdin.isTTY) {
         return { action: 'deny' };
@@ -123,6 +172,7 @@ export async function showPermissionPrompt(toolName, input, config) {
     return new Promise((resolve) => {
         let resolved = false;
         let renderWithRenderer = useRenderer;
+        let directPromptStarted = false;
         transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
         const degradeRenderer = (context, _error) => {
             renderWithRenderer = false;
@@ -132,7 +182,7 @@ export async function showPermissionPrompt(toolName, input, config) {
             catch { }
         };
         const renderAll = () => {
-            const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })));
+            const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })), 'zh-CN', config?.permissionMode);
             if (renderWithRenderer && renderer) {
                 try {
                     if (renderer.hasActiveScrollRegion()) {
@@ -158,6 +208,10 @@ export async function showPermissionPrompt(toolName, input, config) {
                 catch (error) {
                     degradeRenderer('permission_prompt_renderer', error);
                 }
+            }
+            if (!directPromptStarted) {
+                stdout.write('\n');
+                directPromptStarted = true;
             }
             for (const line of lines) {
                 stdout.write(line + '\n');
@@ -190,7 +244,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                     degradeRenderer('permission_prompt_clear', error);
                 }
             }
-            const totalLines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx }))).length;
+            const totalLines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })), 'zh-CN', config?.permissionMode).length;
             stdout.write('\x1b7'); // save cursor
             for (let i = 0; i < totalLines; i++) {
                 stdout.write('\x1b[2K');
@@ -204,18 +258,18 @@ export async function showPermissionPrompt(toolName, input, config) {
             if (resolved)
                 return;
             resolved = true;
+            config?.signal?.removeEventListener('abort', onAbort);
             clearAll();
-            stdin.removeListener('data', onData);
-            stdin.setRawMode(false);
-            stdin.pause();
+            stopPermissionInput(onData);
             const summary = formatPermissionDecisionSummary(choice);
             if (summary) {
                 stdout.write(`${dim(summary)}\n`);
             }
             resolve(choice);
         };
-        const onData = (data) => {
-            const key = data.toString('utf8');
+        const handleKey = (key) => {
+            if (resolved)
+                return;
             // Ctrl-C / Esc → 拒绝
             if (key === '\x03' || key === '\x1b') {
                 done({ action: 'deny' });
@@ -232,7 +286,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                 return;
             }
             // Number keys → 直接选择对应项
-            const num = parseInt(key, 10);
+            const num = /^[1-9]$/.test(key) ? Number(key) : 0;
             if (num >= 1 && num <= promptOptions.length) {
                 transcriptLogger?.record({
                     type: 'permission_prompt_decision',
@@ -283,9 +337,83 @@ export async function showPermissionPrompt(toolName, input, config) {
                 return;
             }
         };
+        const onData = (data) => {
+            const input = data.toString();
+            // stdin batches can contain multiple complete keys. Unknown/pasted text
+            // remains ignored as a whole; multi-digit numbers stay a single token.
+            const keys = input.match(/\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
+            if (keys.join('') !== input)
+                return;
+            for (const key of keys) {
+                if (resolved)
+                    break;
+                handleKey(key);
+            }
+        };
+        const onAbort = () => done({ action: 'deny' });
         renderAll();
-        stdin.setRawMode(true);
-        stdin.resume();
-        stdin.on('data', onData);
+        startPermissionInput(onData);
+        config?.signal?.addEventListener('abort', onAbort, { once: true });
+        if (config?.signal?.aborted)
+            onAbort();
     });
+}
+/** Escape repository text without changing its stored identity. */
+export function escapeProjectRuleDisplay(rule) {
+    return rule.replace(/[\x00-\x1f\x7f-\x9f]|\p{Cf}/gu, char => {
+        const hex = char.codePointAt(0).toString(16).padStart(4, '0');
+        return /\p{Cf}/u.test(char) ? `\\u{${hex}}` : `\\u${hex}`;
+    });
+}
+function describeProjectRule(rule) {
+    const match = /^([^()]+)\(([\s\S]*)\)$/.exec(rule);
+    const tool = match?.[1] ?? rule;
+    const pattern = match?.[2] ?? '*';
+    if (tool === 'bash') {
+        if (pattern === '*')
+            return '以后运行任何命令都不再询问';
+        if (pattern.endsWith(' *'))
+            return `以后运行以 \`${pattern.slice(0, -2)}\` 开头的命令不再询问`;
+        return `以后运行 \`${pattern}\` 不再询问`;
+    }
+    const actions = { write: '写入', edit: '修改', read: '读取' };
+    if (Object.hasOwn(actions, tool))
+        return `以后${actions[tool]} \`${pattern}\` 不再询问`;
+    return `以后使用 ${tool} 匹配 \`${pattern}\` 时不再询问`;
+}
+/** Use the permission input handoff before the REPL starts; Enter defaults to refusal. */
+export async function promptProjectRuleAdoption(rule, index = 1, total = 1) {
+    if (!stdin.isTTY || !stdout.isTTY)
+        return false;
+    stdout.write(`(${index}/${total}) ${escapeProjectRuleDisplay(describeProjectRule(rule))}\n${escapeProjectRuleDisplay(rule)} [y/N] `);
+    return new Promise(resolve => {
+        const finish = (adopt) => {
+            stopPermissionInput(onData, onEnd);
+            stdout.write('\n');
+            resolve(adopt);
+        };
+        const onData = (data) => {
+            const key = data.toString();
+            if (/^[yY]$/.test(key))
+                finish(true);
+            else if (/^[nN\r\n]$/.test(key) || key === '\x03' || key === '\x1b')
+                finish(false);
+        };
+        const onEnd = () => finish(false);
+        startPermissionInput(onData, onEnd);
+    });
+}
+/** Shared raw input ownership and handoff for permission prompts. */
+function startPermissionInput(onData, onEnd) {
+    stdin.on('data', onData);
+    if (onEnd)
+        stdin.once('end', onEnd);
+    stdin.setRawMode(true);
+    stdin.resume();
+}
+function stopPermissionInput(onData, onEnd) {
+    stdin.removeListener('data', onData);
+    if (onEnd)
+        stdin.removeListener('end', onEnd);
+    pauseInputForHandoff();
 }

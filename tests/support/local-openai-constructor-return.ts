@@ -63,7 +63,7 @@ export function createLocalChatCompletionFactory(sdk: PublicOpenAIConstructors) 
     );
     // Read-only TEST introspection returns actual objects, never a cloned brand/approval DTO.
     lastTokens.set(receiver, result);
-    // Exact21 callers supply trusted local async arrows. Not a generic untrusted-producer boundary.
+    // Exact named TEST callbacks supply trusted local async arrows. Not an untrusted-producer boundary.
     const originalResult = produce();
     const settlement = originalResult.then(
       value => {

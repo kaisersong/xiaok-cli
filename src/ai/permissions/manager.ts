@@ -1,7 +1,7 @@
 import { posix, win32 } from 'node:path';
-export type PermissionMode = 'default' | 'auto' | 'plan';
+export type PermissionMode = 'default' | 'auto' | 'plan' | 'yolo';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
-import { PermissionPolicyEngine, matches, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation } from './policy-engine.js';
+import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation, getExactCommandApprovalRule, isExactCommandApprovalRule } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 
@@ -87,6 +87,7 @@ export class PermissionManager {
 
   async check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision> {
     const policy = new PermissionPolicyEngine({
+      cwd: this.cwd,
       globalAllow: this.allowRules,
       globalDeny: this.denyRules,
       projectAllow: [],
@@ -118,8 +119,14 @@ export class PermissionManager {
       return 'deny';
     }
 
+    if (this.mode === 'yolo') return 'allow';
+
     if (toolName === 'bash') {
       const command = readBashCommand(input);
+      if (evaluation.action === 'allow' && this.allowRules.some(isExactCommandApprovalRule)) {
+        const exact = getExactCommandApprovalRule(input, this.cwd);
+        if (exact && this.allowRules.includes(exact)) return 'allow';
+      }
       const conservative = this.mode !== 'auto' || hasMatchingCommandAllowRule(this.allowRules, command);
       if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command)) return 'prompt';
       if (conservative) {
@@ -155,39 +162,9 @@ export class PermissionManager {
 
     return 'prompt';
   }
-
-  private matches(rules: string[], toolName: string, input: Record<string, unknown>): boolean {
-    return matches(rules, toolName, input);
-  }
-
-  private buildRuleRegex(pattern: string): RegExp {
-    if (pattern.endsWith(' *')) {
-      const prefix = pattern.slice(0, -2);
-      return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}(?: [\\s\\S]*)?$`);
-    }
-
-    return new RegExp(
-      `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}$`,
-    );
-  }
-
-  private getRuleTarget(input: Record<string, unknown>): string {
-    if (typeof input.command === 'string') {
-      return input.command;
-    }
-
-    if (typeof input.file_path === 'string') {
-      return input.file_path;
-    }
-
-    if (typeof input.path === 'string') {
-      return input.path;
-    }
-
-    return '';
-  }
 }
 
+/** Resolve lexical paths conservatively across POSIX, drive and UNC forms. */
 function isOutsideWorkspace(target: string, cwd: string, effectiveDir = cwd): boolean {
   if (/^[~]|[$`]/.test(target)) return true;
   const windows = /^[a-z]:|^\\\\|^\/\//i;

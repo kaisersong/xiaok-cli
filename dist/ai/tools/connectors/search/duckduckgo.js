@@ -9,16 +9,41 @@ function decodeHtml(text) {
         .replace(/\s+/g, ' ')
         .trim();
 }
+function readAttribute(attributes, name) {
+    const matches = attributes.matchAll(/([^\s=]+)\s*=\s*(["'])(.*?)\2/g);
+    for (const match of matches)
+        if (match[1].toLowerCase() === name)
+            return decodeHtml(match[3]);
+    return '';
+}
+function normalizeResultUrl(raw) {
+    try {
+        let url = new URL(raw, 'https://duckduckgo.com');
+        if ((url.hostname === 'duckduckgo.com' || url.hostname.endsWith('.duckduckgo.com')) && url.pathname === '/l/') {
+            const target = url.searchParams.get('uddg');
+            if (!target)
+                return null;
+            url = new URL(target);
+        }
+        return /^https?:$/.test(url.protocol) ? url.href : null;
+    }
+    catch {
+        return null;
+    }
+}
 function parseDuckDuckGoResults(html) {
     const results = [];
-    const regex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>|<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>)([\s\S]*?)<\/(?:a|div)>/gi;
-    for (const match of html.matchAll(regex)) {
-        const [, url, title, snippet] = match;
-        results.push({
-            title: decodeHtml(title.replace(/<[^>]+>/g, ' ')),
-            url: decodeHtml(url),
-            snippet: decodeHtml(snippet.replace(/<[^>]+>/g, ' ')),
-        });
+    const anchors = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)];
+    for (const anchor of anchors) {
+        if (!readAttribute(anchor[1], 'class').split(/\s+/).includes('result__a'))
+            continue;
+        const url = normalizeResultUrl(readAttribute(anchor[1], 'href'));
+        if (!url)
+            continue;
+        const tail = html.slice((anchor.index ?? 0) + anchor[0].length);
+        const snippet = tail.match(/<(?:a|div)\b([^>]*)>([\s\S]*?)<\/(?:a|div)>/gi)?.find(block => /class\s*=\s*["'][^"']*result__snippet/.test(block));
+        const content = snippet?.replace(/^<[^>]+>|<\/[^>]+>$/g, '') || '';
+        results.push({ title: decodeHtml(anchor[2].replace(/<[^>]+>/g, ' ')), url, snippet: decodeHtml(content.replace(/<[^>]+>/g, ' ')) });
     }
     return results;
 }
@@ -50,6 +75,9 @@ export function createDuckDuckGoSearchProvider(options = {}) {
                 });
             }
             const html = await response.text();
+            if (/<form\b[^>]*(?:id=["'](?:challenge|img)-form|action=["'][^"']*anomaly\.js)|class=["'][^"']*anomaly-modal/i.test(html)) {
+                throw new SearchProviderError('DuckDuckGo bot challenge; search results unavailable', { kind: 'rate_limit' });
+            }
             const results = parseDuckDuckGoResults(html).slice(0, Math.max(1, input.count));
             return results;
         },

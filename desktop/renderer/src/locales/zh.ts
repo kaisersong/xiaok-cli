@@ -1350,6 +1350,11 @@ export const zh: LocaleStrings = {
     appInfoDataPath: "数据路径: ~/.xiaok/config.json",
     avatarTooLarge: "头像文件过大，请选择更小的图片",
     memoryPaneTitle: "记忆管理",
+    memoryContentTab: "记忆内容",
+    memoryConfigurationTab: "记忆配置",
+    memoryEmbeddingCurrent: "当前配置",
+    memoryModelConfigFailed: "模型配置读取或保存失败，请重试。",
+
     memoryPaneDesc: "管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。",
     // Voice settings
     voiceTitle: "语音输入",
@@ -1561,7 +1566,8 @@ export const zh: LocaleStrings = {
     memoryDeleteConfirm: "删除这条记忆？",
     // Local layered memory
     memoryLocalTitle: "本地记忆",
-    memoryCompact: "压缩",
+    memoryCompact: "提炼",
+    memoryCompactFailed: "提炼失败，原有记忆已保留。请检查模型后重试。",
     memoryCompactDone: "完成",
     memoryClear: "清除",
     memoryClearConfirmTitle: "清除所有记忆",
@@ -3165,14 +3171,15 @@ export const zh: LocaleStrings = {
 
   // chatView
   conversationActivity: {
+    expand: '展开跟进详情', collapse: '收起跟进详情', summaryDetails: '查看完整内容', workCount: (count) => `${count} 项工作`,
     submitInput: '提交', declineInput: '拒绝提供', cancelWork: '取消工作', cancelRequested: '已请求取消，等待来源确认', unsupportedInput: '此类输入需通过原服务处理。',
     projectClosed: '已关闭（未确认交付）',
     historyGap: '部分历史进展已合并或过期；当前状态按来源确认',
     lastProgress: '最近进展',
     title: '工作跟进', stopped: '已停止跟进', unavailable: '状态暂不可确认', details: '查看项目', lastUpdate: '最近同步', nextReport: '下次汇报',
-    frequency: '汇报频率', normal: '每五分钟及关键变化', criticalOnly: '只报关键变化', quiet: '静默', stop: '停止跟进', stopHint: '只停止汇报，不取消工作', noProgress: '暂无', error: '跟进更新失败，请稍后重试。',
+    frequency: '汇报频率', normal: '每五分钟及关键变化', criticalOnly: '只报关键变化', quiet: '静默', stop: '停止跟进', stopHint: '只停止汇报，不取消工作', noProgress: '暂无', error: '跟进更新失败，请稍后重试。', ownerUnavailable: 'xiaoK 的后台组件和当前版本不一致，部分功能暂时无法启动。请退出所有 xiaok 窗口后重新打开。',
     unread: (count) => `${count} 条未读工作更新`,
-    report: (state, time) => `状态汇报 ${time}：${state}。`,
+    report: (state, ago) => `最近汇报：${state} · ${ago}`, noReport: '还没有汇报',
     sources: { kswarm: '项目', task_host: '后台任务', agent_group: 'Agent 协作', mcp: '插件任务' },
     states: { accepted: '已创建', queued: '等待执行', running: '执行中', blocked: '已阻塞', input_required: '等待处理', completed: '已完成', failed: '执行失败', cancelled: '已取消' },
   },
@@ -3303,6 +3310,8 @@ export const zh: LocaleStrings = {
     goalAttachmentQuerying: "任务附着结果尚未确认，正在只读核对。",
     goalAttachmentUnknown: "任务附着结果尚未确认；可能已经开始，请勿重复提交。可重新打开会话查看已保存状态。",
     taskExecutionFailed: (reason) => `任务执行失败：${reason}`,
+    // 待设计师确认：缺少模型 Key 的保守文案。
+    modelKeyMissing: "没有找到模型 API Key，任务没法开始。请到 设置 → 模型设置 里添加你的 API Key。",
     modelAuthFailed: "模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。",
     modelServiceFailed: "模型服务请求失败，请检查模型配置或稍后重试。",
     modelConnectionFailed: "模型连接中断，未能完成自动恢复。已保留对话与完成的执行记录；请在下方回复继续，或切换模型后重试。",

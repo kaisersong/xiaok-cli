@@ -35,6 +35,7 @@ import { registerModelProviderIpc } from './model-provider-typed-ipc.js';
 import { registerLoopManagementIpc } from './loop-management-typed-ipc.js';
 import { MEMORY_IPC_CONTRACTS, type MemoryIpcOperation } from './memory-ipc-contract.js';
 import { ARTIFACT_WORKSPACE_OUTPUT_SCHEMAS, ARTIFACT_WORKSPACE_RISK_TAGS } from './artifact-workspace-ipc-contract.js';
+import { registerMemoryDistillationIpc, getActiveMemoryEmbeddingModel, selectMemoryEmbeddingModel } from './memory-distillation.js';
 import { registerConversationActivityIpc } from './conversation-activity-ipc.js';
 import {z, type ZodSchema} from 'zod';
 import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
@@ -1392,6 +1393,16 @@ export async function registerDesktopIpc(
       registrar: ipcMain, channel: `desktop:${operation}`, output: contract.output,
       sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 4 as const,
       riskTags: contract.riskTags, inputError: contract.inputError, outputError: contract.outputError,
+      ...(operation === 'memoryCompact' ? {
+        beforeInput: (event: IpcMainInvokeEvent): undefined => {
+          if (event.sender !== primaryWindow().webContents) throw Error('memory_compaction_forbidden');
+          return undefined;
+        },
+        beforeOutput: (event: IpcMainInvokeEvent): undefined => {
+          if (event.sender !== primaryWindow().webContents) throw Error('memory_compaction_forbidden');
+          return undefined;
+        },
+      } : {}),
     };
     if (contract.payloadMode === 'tuple') {
       registerIpcHandler({ ...common, payloadMode: 'tuple', input: contract.input as ZodSchema<unknown[]>, handler: async (args, event) => listener(event, ...args) });
@@ -1461,10 +1472,12 @@ export async function registerDesktopIpc(
     try { return memoryStore.getStats?.() ?? null; }
     catch (e) { log('error', 'memoryStats failed', e); return null; }
   });
-  memoryHandler('memoryCompact', async () => {
-    try { await memoryStore.compact?.(); return true; }
-    catch (e) { log('error', 'memoryCompact failed', e); return false; }
-  });
+  registerMemoryDistillationIpc<IpcMainInvokeEvent>({
+    handle(channel, listener) {
+      if (channel !== 'desktop:memoryCompact') throw Error('memory_compaction_channel');
+      memoryHandler('memoryCompact', listener);
+    },
+  }, memoryStore, event => event.sender === primaryWindow().webContents);
   memoryHandler('memoryPersonaTraits', async () => {
     try { return memoryStore.getPersonaTraits?.() ?? []; }
     catch (e) { log('error', 'memoryPersonaTraits failed', e); return []; }
@@ -1503,7 +1516,7 @@ export async function registerDesktopIpc(
       const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint } = await import('../../src/ai/memory/model-registry.js');
       const { loadConfig } = await import('../../src/utils/config.js');
       const config = await loadConfig();
-      const activeModelId = config.memory?.modelId ?? 'all-MiniLM-L6-v2';
+      const activeModelId = getActiveMemoryEmbeddingModel(config, MODEL_REGISTRY.map(model => model.id));
       return MODEL_REGISTRY.map(m => ({
         id: m.id,
         name: m.name,
@@ -1526,11 +1539,10 @@ export async function registerDesktopIpc(
     try {
       const { loadConfig, saveConfig: saveConfigFn, getConfigDir } = await import('../../src/utils/config.js');
       const config = await loadConfig();
-      const prevModelId = config.memory?.modelId;
-      if (!config.memory) config.memory = {};
-      config.memory.modelId = modelId;
-      await saveConfigFn(config);
-      if (prevModelId !== modelId) {
+      const { MODEL_REGISTRY } = await import('../../src/ai/memory/model-registry.js');
+      const selected = selectMemoryEmbeddingModel(config, modelId, MODEL_REGISTRY.map(model => model.id));
+      await saveConfigFn(selected.config);
+      if (selected.changed) {
         try {
           const Database = (await import('better-sqlite3')).default;
           const path = await import('node:path');
@@ -1538,7 +1550,7 @@ export async function registerDesktopIpc(
           const db = new Database(dbPath);
           db.prepare('DELETE FROM memory_embeddings').run();
           db.close();
-          log('info', 'Cleared memory_embeddings after model switch', { from: prevModelId, to: modelId });
+          log('info', 'Cleared memory_embeddings after model switch', { from: selected.previousModelId, to: modelId });
         } catch (e) { log('warn', 'Failed to clear embeddings on model switch', e); }
       }
     } catch (e) { log('error', 'setEmbeddingModel failed', e); throw e; }

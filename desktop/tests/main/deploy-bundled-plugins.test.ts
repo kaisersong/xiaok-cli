@@ -411,6 +411,11 @@ describe('deploy-bundled-plugins', () => {
       mkdirSync(bundledWheelsDir, { recursive: true });
       writeFileSync(join(bundledWheelsDir, compatibleNativeWheel), '');
       writeFileSync(join(bundledWheelsDir, compatibleRpdsWheel), '');
+      if (process.platform === 'win32') {
+        // Windows wheelhouse also requires pywin32/colorama to be seen as compatible.
+        writeFileSync(join(bundledWheelsDir, 'pywin32-311-cp314-cp314-win_amd64.whl'), '');
+        writeFileSync(join(bundledWheelsDir, 'colorama-0.4.6-py3-none-any.whl'), '');
+      }
 
       ensureSlideRendererWheelhouseCompat(installedPluginDir, bundledPluginDir);
 

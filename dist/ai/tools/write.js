@@ -10,7 +10,7 @@ export function createWriteTool(options = {}) {
     return {
         permission: 'write',
         compoundFilePrecondition(input) {
-            const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd);
+            const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd, options.outsideCwdGuard);
             let beforeHash = null;
             try {
                 beforeHash = createHash('sha256').update(readFileSync(filePath)).digest('hex');
@@ -35,7 +35,7 @@ export function createWriteTool(options = {}) {
         },
         async execute(input, context) {
             const { file_path, content } = input;
-            const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd);
+            const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard);
             if (context?.compoundPhase) {
                 let beforeHash = null;
                 try {
