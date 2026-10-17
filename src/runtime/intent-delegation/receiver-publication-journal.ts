@@ -19,7 +19,8 @@ export interface IntentReceiverMutation {publicationAction:'receiver';sessionId:
 const shape=(v:unknown,keys:string)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!==keys.split(' ').sort().join(','))throw Error('intent_receiver_shape');};
 const id=(v:unknown)=>typeof v==='string'&&!!v&&Buffer.byteLength(v)<=160&&!/[\x00-\x1f\x7f]/.test(v);
 const edges:Record<IntentReceiverAttempt['status'],readonly IntentReceiverAttempt['status'][]>=Object.freeze({preparing:['prepared','pending','committed','cancelled','not_prepared','not_approved'],prepared:['authorizing','pending','committed','cancelled','not_approved'],authorizing:['pending','committed','cancelled','not_approved'],pending:['pending','committed','cancelled'],committed:[],cancelled:[],not_prepared:[],not_approved:[]});
-export function parseIntentReceiverAttempts(raw:unknown,candidate:IntentPublicationCandidate):IntentReceiverAttempt[]{
+export type IntentReceiverCandidateFactsData = Pick<IntentPublicationCandidate, 'id' | 'bindingHash' | 'sourceHash' | 'createdAt' | 'applicationAttempts'>;
+export function parseIntentReceiverAttempts(raw:unknown,candidate:IntentReceiverCandidateFactsData):IntentReceiverAttempt[]{
  const values=captureIntentData(raw===undefined?[]:raw) as IntentReceiverAttempt[];if(!Array.isArray(values)||values.length>32)throw Error('intent_receiver_limit');const ids=new Set<string>();
  for(let index=0;index<values.length;index++){
   const r=values[index],prior=values[index-1];shape(r,'requestId candidateId applicationRequestId bindingHash sourceHash route originalSource ordinal revision status challenge observation retirement createdAt updatedAt');

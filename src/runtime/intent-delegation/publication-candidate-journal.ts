@@ -252,9 +252,13 @@ export function captureIntentPublicationRetry(raw: RetryIntentPublicationInput &
     return { input: { ...input, publicationAction: 'retry' as const }, lease: lease.value as SessionExecutionLease };
 }
 export interface IntentPublicationTargetData {readonly sessionId:string;readonly nativeContracts?:unknown}
+export interface IntentPublicationTargetRowData {
+    readonly id: unknown; readonly intentId: string; readonly stageId: unknown;
+    readonly candidateRevision: unknown; readonly contractHash: unknown; readonly body: unknown;
+}
 export function intentPublicationTarget(ledger: SessionIntentLedger, row: IntentPublicationCandidate): ReturnType<typeof createIntentApplicationBinding>;
-export function intentPublicationTarget(ledger: IntentPublicationTargetData, row: IntentPublicationCandidate): ReturnType<typeof createIntentApplicationBinding>;
-export function intentPublicationTarget(ledger: IntentPublicationTargetData, row: IntentPublicationCandidate) {
+export function intentPublicationTarget(ledger: IntentPublicationTargetData, row: IntentPublicationTargetRowData): ReturnType<typeof createIntentApplicationBinding>;
+export function intentPublicationTarget(ledger: IntentPublicationTargetData, row: IntentPublicationTargetRowData) {
     const native = parseIntentNativeContracts(ledger.nativeContracts, ledger.sessionId).find(n => n.intentId === row.intentId);
     if (!native || native.contractHash !== row.contractHash)
         throw Error('intent_candidate_contract');
@@ -267,22 +271,57 @@ function parseOriginalApplicationRoute(text:string,target:ReturnType<typeof inte
     if(!['migrated','protected-unregistered'].includes(route.kind)||!id(route.authorityId)||!id(route.owner.profileId)||route.owner.ownerKind!==expected.ownerKind||route.owner.ownerId!==expected.ownerId)throw Error('intent_candidate_route');
     if(route.kind==='migrated'){const marker=parseMigrationMarker(route.marker);if(marker.state!=='migrated'||marker.authorityId!==route.authorityId||json({profileId:marker.profileId,ownerKind:marker.ownerKind,ownerId:marker.ownerId})!==json(route.owner))throw Error('intent_candidate_route');}
 }
-export function parseIntentPublicationCandidates(ledger: SessionIntentLedger | undefined): IntentPublicationCandidate[] {
-    if (!ledger || ledger.publicationCandidates === undefined)
-        return [];
-    const raw = captureIntentData(ledger.publicationCandidates);
-    if (!Array.isArray(raw))
-        throw Error('intent_candidate_journal');
-    const ids = new Set<string>(), subjects = new Set<string>(), requests = new Set<string>();
-    for (const row of raw) {
-        shape(row, 'version id intentId stageId candidateRevision contractHash body bodyHash bindingHash sourceHash fileObservations createdAt applicationAttempts'+(Object.hasOwn(row,'receiverAttempts')?' receiverAttempts':'')+(Object.hasOwn(row,'businessProjection')?' businessProjection':''));
+/** Read-only stored DATA. This is neither a Modern ledger nor an execution port. */
+export interface IntentPublicationRecordFactsData {
+    readonly intentId: string;
+    readonly stages?: unknown;
+    readonly overallStatus?: unknown;
+    readonly producerReports?: unknown;
+    readonly executionTerminals?: unknown;
+    readonly artifacts?: unknown;
+}
+export interface IntentPublicationReaderLedgerData {
+    readonly sessionId: string;
+    readonly nativeContracts?: unknown;
+    readonly publicationCandidates?: unknown;
+    readonly intents: readonly IntentPublicationRecordFactsData[];
+}
+/** Prefix fields are validated with the original candidate/binding/attempt parsers.
+ * Source projections and receiver history remain unknown until their real parser runs. */
+export type IntentPublicationRowFactsData = Omit<IntentPublicationCandidate, 'receiverAttempts' | 'businessProjection'> & {
+    readonly receiverAttempts?: unknown;
+    readonly businessProjection?: unknown;
+};
+export function intentPublicationFactObject(value: unknown, code: string): Record<string, unknown> {
+    if (!isIntentPublicationFactObject(value)) throw Error(code);
+    return value;
+}
+function isIntentPublicationFactObject(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+export function intentPublicationFactArray(value: unknown, code: string): readonly unknown[] {
+    if (!Array.isArray(value)) throw Error(code);
+    return value;
+}
+function readIntentPublicationRowCore(
+    ledger: IntentPublicationReaderLedgerData, input: unknown,
+    ids: Set<string>, subjects: Set<string>, requests: Set<string>, checkParentSource: boolean,
+): IntentPublicationRowFactsData {
+    // Explicit DATA error replaces the original Object.hasOwn null/primitive error.
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw Error('intent_candidate_shape');
+    const rowInput = input;
+    shape(rowInput, 'version id intentId stageId candidateRevision contractHash body bodyHash bindingHash sourceHash fileObservations createdAt applicationAttempts'+(Object.hasOwn(rowInput,'receiverAttempts')?' receiverAttempts':'')+(Object.hasOwn(rowInput,'businessProjection')?' businessProjection':''));
+    const row = rowInput;
         if (row.version !== 1 || !id(row.id) || !id(row.intentId) || (row.stageId!==null&&!id(row.stageId)) || ids.has(row.id) || subjects.has(json([row.intentId, row.stageId])) || row.candidateRevision !== 1 || ![row.contractHash, row.bodyHash, row.bindingHash, row.sourceHash].every(digest) || !Number.isSafeInteger(row.createdAt) || row.createdAt < 0)
             throw Error('intent_candidate_journal');
         ids.add(row.id);
         subjects.add(json([row.intentId, row.stageId]));
         files(row.fileObservations);
-        const target = intentPublicationTarget(ledger, row);
-        if(row.stageId===null&&(row.body.kind!=='intent-parent'||json(deriveIntentParentBody(ledger,row.intentId,row.body.stages))!==json(row.body)))throw Error('intent_parent_source');
+        const target = intentPublicationTarget(ledger, {
+            id: row.id, intentId: row.intentId, stageId: row.stageId,
+            candidateRevision: row.candidateRevision, contractHash: row.contractHash, body: row.body,
+        });
+        if(checkParentSource&&row.stageId===null&&(row.body.kind!=='intent-parent'||json(deriveIntentParentBody(ledger,row.intentId,row.body.stages))!==json(row.body)))throw Error('intent_parent_source');
         if (hash(row.body) !== row.bodyHash || intentApplicationBindingHash(target) !== row.bindingHash || row.sourceHash !== hash({ contract: target.contract, body: target.body, fileObservations: row.fileObservations }))
             throw Error('intent_candidate_hash');
         if (!Array.isArray(row.applicationAttempts) || row.applicationAttempts.length < 1 || row.applicationAttempts.length > 32)
@@ -332,8 +371,47 @@ export function parseIntentPublicationCandidates(ledger: SessionIntentLedger | u
             if(a.route!==null)parseOriginalApplicationRoute(a.route,target);
             requests.add(a.requestId);
         }
-        parseIntentBusinessProjection(row.businessProjection,row,ledger);
-        for(const attempt of parseIntentReceiverAttempts(row.receiverAttempts,row)){if(requests.has(attempt.requestId))throw Error('intent_receiver_identity');requests.add(attempt.requestId);}
+    // A selected typed view must not silently replace a nonidentical raw body.
+    // This is an explicit NEW rejection policy, not an equality assertion/cast.
+    if (json(target.body) !== json(row.body)) throw Error('intent_candidate_body_data');
+    return {
+        version: 1, id: row.id, intentId: row.intentId, stageId: row.stageId,
+        candidateRevision: 1, contractHash: row.contractHash, body: target.body,
+        bodyHash: row.bodyHash, bindingHash: row.bindingHash, sourceHash: row.sourceHash,
+        fileObservations: row.fileObservations, createdAt: row.createdAt,
+        applicationAttempts: row.applicationAttempts,
+        ...(Object.hasOwn(row, 'receiverAttempts') ? { receiverAttempts: row.receiverAttempts } : {}),
+        ...(Object.hasOwn(row, 'businessProjection') ? { businessProjection: row.businessProjection } : {}),
+    };
+}
+/** Selects one original row, never replaces the ledger, history or hash input.
+ * This validates the existing row prefix, not full projection/receiver source or authority. */
+export function readIntentPublicationRowFacts(
+    ledger: IntentPublicationReaderLedgerData, intentId: string, stageId: unknown,
+): IntentPublicationRowFactsData | undefined {
+    if (ledger.publicationCandidates === undefined) return undefined;
+    const rows = intentPublicationFactArray(ledger.publicationCandidates, 'intent_candidate_journal');
+    const selected = rows.find(value => {
+        const row = intentPublicationFactObject(value, 'intent_candidate_shape');
+        return row.intentId === intentId && row.stageId === stageId;
+    });
+    if (selected === undefined) return undefined;
+    return readIntentPublicationRowCore(ledger, captureIntentData(selected), new Set(), new Set(), new Set(), false);
+}
+export function parseIntentPublicationCandidates(ledger: SessionIntentLedger | undefined): IntentPublicationCandidate[];
+export function parseIntentPublicationCandidates(ledger: IntentPublicationReaderLedgerData | undefined): IntentPublicationCandidate[];
+export function parseIntentPublicationCandidates(ledger: IntentPublicationReaderLedgerData | undefined): IntentPublicationCandidate[] {
+    if (!ledger || ledger.publicationCandidates === undefined) return [];
+    const raw = captureIntentData(ledger.publicationCandidates);
+    if (!Array.isArray(raw)) throw Error('intent_candidate_journal');
+    const ids = new Set<string>(), subjects = new Set<string>(), requests = new Set<string>();
+    for (const row of raw) {
+        const facts = readIntentPublicationRowCore(ledger, row, ids, subjects, requests, true);
+        parseIntentBusinessProjection(row.businessProjection, facts, ledger);
+        for (const attempt of parseIntentReceiverAttempts(row.receiverAttempts, facts)) {
+            if (requests.has(attempt.requestId)) throw Error('intent_receiver_identity');
+            requests.add(attempt.requestId);
+        }
     }
     return freeze(raw);
 }

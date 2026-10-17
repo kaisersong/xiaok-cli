@@ -3,7 +3,8 @@ import type {IntentStageContext} from './stage-context.js';
 import {isDeepStrictEqual} from 'node:util';
 import {captureIntentData} from './data.js';
 import {applyIntentStepUpdate} from './dispatcher.js';
-import {intentPublicationTarget,applyIntentPublicationCapture,type IntentPublicationCandidate} from './publication-candidate-journal.js';
+import {intentPublicationTarget,applyIntentPublicationCapture,readIntentPublicationRowFacts,intentPublicationFactArray,intentPublicationFactObject,type IntentPublicationCandidate,type IntentPublicationReaderLedgerData,type IntentPublicationRowFactsData} from './publication-candidate-journal.js';
+import {parseIntentReceiverAttempts} from './receiver-publication-journal.js';
 import {intentNativeLedgerHash} from './native-contract-journal.js';
 import {intentHostSubjectOwner} from '../verification/intent-host-subject.js';
 import {canonicalVerificationJson as json} from '../verification/protocol.js';
@@ -18,16 +19,16 @@ export interface IntentBusinessProjection {
 const shape=(v:unknown,keys:string)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!==keys.split(' ').sort().join(','))throw Error('intent_projection_shape');};
 const id=(v:unknown)=>typeof v==='string'&&!!v&&Buffer.byteLength(v)<=160&&!/[\x00-\x1f\x7f]/.test(v);
 const hash=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
-export function parseIntentBusinessProjection(raw:unknown,candidate:IntentPublicationCandidate,ledger:SessionIntentLedger):IntentBusinessProjection|undefined{
+export function parseIntentBusinessProjection(raw:unknown,candidate:IntentPublicationRowFactsData,ledger:IntentPublicationReaderLedgerData):IntentBusinessProjection|undefined{
  if(raw===undefined)return undefined;const row=captureIntentData(raw) as IntentBusinessProjection;shape(row,'version candidateId receiverRequestId appliedAt clock publications'+(Object.hasOwn(row,'nextStageContext')?' nextStageContext':''));
  if(row.nextStageContext!==undefined&&row.nextStageContext!==null){shape(row.nextStageContext,'stageId messageCount messagesHash');if(!id(row.nextStageContext.stageId)||!Number.isSafeInteger(row.nextStageContext.messageCount)||row.nextStageContext.messageCount<0||!hash(row.nextStageContext.messagesHash))throw Error('intent_stage_context_shape');}
- const receiver=candidate.receiverAttempts?.find(r=>r.requestId===row.receiverRequestId),binding=intentPublicationTarget(ledger,candidate),stage=binding.contract.stages.find(s=>s.stageId===candidate.stageId)!;
+ const receiver=parseIntentReceiverAttempts(candidate.receiverAttempts,candidate).find(r=>r.requestId===row.receiverRequestId),binding=intentPublicationTarget(ledger,candidate),stage=binding.contract.stages.find(s=>s.stageId===candidate.stageId)!;
  if(row.version!==1||row.candidateId!==candidate.id||!receiver||receiver.status!=='committed'||!receiver.observation||!Number.isSafeInteger(row.appliedAt)||row.appliedAt<receiver.updatedAt)throw Error('intent_projection_original');
  shape(row.clock,'domainId qualificationEpoch lowerBound upperBound evidenceHash');if(!id(row.clock.domainId)||!hash(row.clock.evidenceHash)||![row.clock.qualificationEpoch,row.clock.lowerBound,row.clock.upperBound].every(v=>Number.isSafeInteger(v)&&v>=0)||row.clock.upperBound<row.clock.lowerBound)throw Error('intent_projection_clock');
  const ids=[candidate.stageId,...(candidate.stageId===null?binding.contract.stages.map(s=>s.stageId):stage.dependsOnStageIds)];if(!Array.isArray(row.publications)||row.publications.length!==ids.length)throw Error('intent_projection_inventory');
- row.publications.forEach((p,i)=>{shape(p,'owner operationId fullTupleHash businessRevision payloadHash bindingHash applicationRevision candidateRevision registrationHash');shape(p.owner,'profileId ownerKind ownerId');const local=i===0?candidate:ledger.publicationCandidates?.find(c=>c.intentId===candidate.intentId&&c.stageId===ids[i]),application=local?.applicationAttempts.at(-1),route=application?.route&&JSON.parse(application.route);
+ row.publications.forEach((p,i)=>{shape(p,'owner operationId fullTupleHash businessRevision payloadHash bindingHash applicationRevision candidateRevision registrationHash');shape(p.owner,'profileId ownerKind ownerId');const local=i===0?candidate:readIntentPublicationRowFacts(ledger,candidate.intentId,ids[i]),application=local?.applicationAttempts.at(-1),route=application?.route&&JSON.parse(application.route);
   if(!local||!route||application?.phase!=='ready'||json(p.owner)!==json({...intentHostSubjectOwner({...binding.subject,stageId:ids[i]}),profileId:route.owner.profileId})||!id(p.operationId)||![p.fullTupleHash,p.payloadHash,p.bindingHash,p.registrationHash].every(hash)||![p.businessRevision,p.applicationRevision,p.candidateRevision].every(v=>Number.isSafeInteger(v)&&v>=1)||p.bindingHash!==local.bindingHash||p.candidateRevision!==local.candidateRevision||p.applicationRevision!==application.observation?.current?.revision||p.registrationHash!==application.observation.registrationHash)throw Error('intent_projection_binding');
-  const fact=i===0?receiver.observation:local.receiverAttempts?.find(r=>r.status==='committed')?.observation;if(!fact||p.operationId!==fact.operationId||p.fullTupleHash!==fact.fullTupleHash||p.businessRevision!==fact.businessRevision||i>0&&!local.businessProjection)throw Error('intent_projection_receiver');
+  const fact=i===0?receiver.observation:parseIntentReceiverAttempts(local.receiverAttempts,local).find(r=>r.status==='committed')?.observation;if(!fact||p.operationId!==fact.operationId||p.fullTupleHash!==fact.fullTupleHash||p.businessRevision!==fact.businessRevision||i>0&&!local.businessProjection)throw Error('intent_projection_receiver');
  });if(candidate.businessProjection)assertIntentCandidateFactSource(ledger,candidate);return row;
 }
 /** Unique deterministic cache projection. Actual write authority remains the fixed host's private ticket. */
@@ -54,12 +55,17 @@ export function assertIntentBusinessProjectionTransition(before:SessionIntentLed
 }
 
 /** Pure comparison of historical producer facts; no status or permission is granted. */
-export function assertIntentCandidateFactSource(ledger:SessionIntentLedger,candidate:IntentPublicationCandidate){
- const record=ledger.intents.find(r=>r.intentId===candidate.intentId),stage=record?.stages.find(s=>s.stageId===candidate.stageId),body=candidate.body;
+export function assertIntentCandidateFactSource(ledger:IntentPublicationReaderLedgerData,candidate:IntentPublicationRowFactsData){
+ const record=ledger.intents.find(r=>r.intentId===candidate.intentId);
+ const selected=record?intentPublicationFactArray(record.stages,'intent_projection_source').find(value=>intentPublicationFactObject(value,'intent_projection_source').stageId===candidate.stageId):undefined;
+ const stage=selected===undefined?undefined:intentPublicationFactObject(selected,'intent_projection_source'),body=candidate.body;
  if(candidate.stageId===null){if(body.kind!=='intent-parent'||json(deriveIntentParentBody(ledger,candidate.intentId,body.stages))!==json(body)||candidate.businessProjection&&record?.overallStatus!=='completed')throw Error('intent_projection_source');return;}
  if(!record||!stage||body.kind!=='intent-stage')throw Error('intent_projection_source');
- const reports=(record.producerReports??[]).filter(r=>r.action.kind==='artifact-report'?r.action.stageId===stage.stageId:stage.steps.some(s=>s.stepId===(r.action as {stepId:string}).stepId)),terminals=(record.executionTerminals??[]).filter(r=>r.kind==='step'&&stage.steps.some(s=>s.stepId===r.identity)),artifacts=(record.artifacts??[]).filter(a=>a.stageId===stage.stageId);
+ const stepHas=(identity:unknown)=>intentPublicationFactArray(stage.steps,'intent_projection_source').some(value=>intentPublicationFactObject(value,'intent_projection_source').stepId===identity);
+ const reports=intentPublicationFactArray(record.producerReports??[],'intent_projection_source').filter(value=>{const report=intentPublicationFactObject(value,'intent_projection_source'),action=intentPublicationFactObject(report.action,'intent_projection_source');return action.kind==='artifact-report'?action.stageId===stage.stageId:stepHas(action.stepId);});
+ const terminals=intentPublicationFactArray(record.executionTerminals??[],'intent_projection_source').filter(value=>{const terminal=intentPublicationFactObject(value,'intent_projection_source');return terminal.kind==='step'&&stepHas(terminal.identity);});
+ const artifacts=intentPublicationFactArray(record.artifacts??[],'intent_projection_source').filter(value=>intentPublicationFactObject(value,'intent_projection_source').stageId===stage.stageId);
  if(json(reports)!==json(body.producerReports??[])||json(terminals)!==json(body.executionReports)||artifacts.length!==body.artifacts.length)throw Error('intent_projection_source');
- artifacts.forEach((a,i)=>{const b=body.artifacts[i];if(a.artifactId!==b.artifactId||a.stageId!==b.stageId||a.kind!==b.kind||a.label!==b.label||(a.summary??null)!==b.summary||a.createdAt!==b.createdAt||json(a.storage==='inline'?{kind:'inline',text:a.inlineValue??''}:{kind:'file',originalPath:a.path})!==json(b.content))throw Error('intent_projection_source');});
- if(candidate.businessProjection){const semantic=stage.steps.some(s=>s.key==='validate')?'passed':'pending';if(stage.status!=='completed'||stage.steps.some(s=>s.status!=='completed')||stage.structuralValidation!=='passed'||stage.semanticValidation!==semantic||artifacts.some(a=>a.structuralValidation!=='passed'||a.semanticValidation!==semantic))throw Error('intent_projection_overlay');}
+ artifacts.forEach((value,i)=>{const a=intentPublicationFactObject(value,'intent_projection_source'),b=body.artifacts[i];if(!b||a.artifactId!==b.artifactId||a.stageId!==b.stageId||a.kind!==b.kind||a.label!==b.label||(a.summary??null)!==b.summary||a.createdAt!==b.createdAt||json(a.storage==='inline'?{kind:'inline',text:a.inlineValue??''}:{kind:'file',originalPath:a.path})!==json(b.content))throw Error('intent_projection_source');});
+ if(candidate.businessProjection){const steps=intentPublicationFactArray(stage.steps,'intent_projection_overlay'),semantic=steps.some(value=>intentPublicationFactObject(value,'intent_projection_overlay').key==='validate')?'passed':'pending';if(stage.status!=='completed'||steps.some(value=>intentPublicationFactObject(value,'intent_projection_overlay').status!=='completed')||stage.structuralValidation!=='passed'||stage.semanticValidation!==semantic||artifacts.some(value=>{const a=intentPublicationFactObject(value,'intent_projection_overlay');return a.structuralValidation!=='passed'||a.semanticValidation!==semantic;}))throw Error('intent_projection_overlay');}
 }
