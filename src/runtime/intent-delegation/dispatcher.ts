@@ -1,27 +1,42 @@
 import type {
   IntentLedgerRecord,
-  IntentStageRecord,
-  PlannedStep,
   StageArtifactRecord,
   StepStatus,
 } from './types.js';
 import { cloneIntentRecord, createIntentLedgerRecord as createIntentLedgerRecordFromPlan } from './types.js';
+import type {StoredIntentRecordInput,NormalizedStoredIntentRecord,StoredStageInput,StoredStepInput} from './stored-intent-clone.js';
 
-const ACTIVE_STATUSES = new Set<StepStatus>(['running']);
-const TERMINAL_STATUSES = new Set<StepStatus>(['completed', 'failed', 'skipped']);
+const ACTIVE_STATUSES:ReadonlySet<unknown> = new Set<StepStatus>(['running']);
+const TERMINAL_STATUSES:ReadonlySet<unknown> = new Set<StepStatus>(['completed', 'failed', 'skipped']);
+
+type IntentStepUpdateDataInput={stepId:string;status:Extract<StepStatus,'running'|'blocked'|'completed'|'failed'>;now?:number};
+function dispatchSteps(value:StoredStepInput[]):StoredStepInput[]{
+ if(!Array.isArray(value))throw Error('intent_dispatch_steps_data');return value;
+}
+function dispatchStages(value:StoredStageInput[]):StoredStageInput[]{
+ if(!Array.isArray(value))throw Error('intent_dispatch_stages_data');return value;
+}
+function dispatchDependencies(value:string[]):string[]{
+ if(!Array.isArray(value))throw Error('intent_dispatch_dependencies_data');return value;
+}
+function dispatchOrder(value:unknown):number{
+ if(typeof value!=='number')throw Error('intent_dispatch_order_data');return value;
+}
 
 export function createIntentLedgerRecord(plan: Parameters<typeof createIntentLedgerRecordFromPlan>[0], now?: number): IntentLedgerRecord {
   return createIntentLedgerRecordFromPlan(plan, now);
 }
 
-export function activateIntentStep(intent: IntentLedgerRecord, stepId: string, now = Date.now()): IntentLedgerRecord {
+export function activateIntentStep(intent:IntentLedgerRecord,stepId:string,now?:number):IntentLedgerRecord;
+export function activateIntentStep(intent:StoredIntentRecordInput,stepId:string,now?:number):NormalizedStoredIntentRecord;
+export function activateIntentStep(intent:StoredIntentRecordInput,stepId:string,now=Date.now()):NormalizedStoredIntentRecord {
   if (stepId !== intent.activeStepId) {
     throw new Error(`step activation out of order: expected activeStepId ${intent.activeStepId}, got ${stepId}`);
   }
 
   const next = cloneIntentRecord(intent);
   const activeStage = requireActiveStage(next);
-  const running = activeStage.steps.find((step) => ACTIVE_STATUSES.has(step.status));
+  const running = dispatchSteps(activeStage.steps).find((step) => ACTIVE_STATUSES.has(step.status));
   if (running) {
     throw new Error(`cannot activate step while another step is running: ${running.stepId}`);
   }
@@ -38,14 +53,9 @@ export function activateIntentStep(intent: IntentLedgerRecord, stepId: string, n
   return next;
 }
 
-export function applyIntentStepUpdate(
-  intent: IntentLedgerRecord,
-  input: {
-    stepId: string;
-    status: Extract<StepStatus, 'running' | 'blocked' | 'completed' | 'failed'>;
-    now?: number;
-  },
-): IntentLedgerRecord {
+export function applyIntentStepUpdate(intent:IntentLedgerRecord,input:IntentStepUpdateDataInput):IntentLedgerRecord;
+export function applyIntentStepUpdate(intent:StoredIntentRecordInput,input:IntentStepUpdateDataInput):NormalizedStoredIntentRecord;
+export function applyIntentStepUpdate(intent:StoredIntentRecordInput,input:IntentStepUpdateDataInput):NormalizedStoredIntentRecord {
   if (input.stepId !== intent.activeStepId) {
     throw new Error(`step update rejected for non-active step: activeStepId is ${intent.activeStepId}`);
   }
@@ -58,7 +68,7 @@ export function applyIntentStepUpdate(
   const next = cloneIntentRecord(intent);
   const activeStage = requireActiveStage(next);
   const step = requireStep(activeStage.steps, input.stepId);
-  const currentRunning = activeStage.steps.find((candidate) => ACTIVE_STATUSES.has(candidate.status));
+  const currentRunning = dispatchSteps(activeStage.steps).find((candidate) => ACTIVE_STATUSES.has(candidate.status));
   if (currentRunning && currentRunning.stepId !== input.stepId) {
     throw new Error(`step update rejected while ${currentRunning.stepId} is running`);
   }
@@ -92,6 +102,7 @@ export function applyIntentStepUpdate(
 
   activeStage.status = 'completed';
   activeStage.structuralValidation = 'passed';
+  dispatchSteps(activeStage.steps);
   activeStage.semanticValidation = activeStage.steps.some((candidate) => candidate.key === 'validate') ? 'passed' : 'pending';
 
   const nextStage = findNextStage(next.stages, activeStage.stageId);
@@ -126,24 +137,24 @@ export function recordStageArtifact(
   return next;
 }
 
-function requireActiveStage(intent: IntentLedgerRecord): IntentStageRecord {
-  const stage = intent.stages.find((candidate) => candidate.stageId === intent.activeStageId);
+function requireActiveStage(intent:NormalizedStoredIntentRecord):StoredStageInput {
+  const stage = dispatchStages(intent.stages).find((candidate) => candidate.stageId === intent.activeStageId);
   if (!stage) {
     throw new Error(`active stage not found: ${intent.activeStageId}`);
   }
   return stage;
 }
 
-function requireStep(steps: PlannedStep[], stepId: string): PlannedStep {
-  const step = steps.find((candidate) => candidate.stepId === stepId);
+function requireStep(steps:StoredStepInput[],stepId:unknown):StoredStepInput {
+  const step = dispatchSteps(steps).find((candidate) => candidate.stepId === stepId);
   if (!step) {
     throw new Error(`unknown step: ${stepId}`);
   }
   return step;
 }
 
-function assertDependenciesCompleted(steps: PlannedStep[], step: PlannedStep): void {
-  const missingDependency = step.dependsOn.find((dependencyId) => {
+function assertDependenciesCompleted(steps:StoredStepInput[],step:StoredStepInput):void {
+  const missingDependency = dispatchDependencies(step.dependsOn).find((dependencyId) => {
     const dependency = steps.find((candidate) => candidate.stepId === dependencyId);
     return !dependency || dependency.status !== 'completed';
   });
@@ -153,32 +164,33 @@ function assertDependenciesCompleted(steps: PlannedStep[], step: PlannedStep): v
   }
 }
 
-function findNextStep(steps: PlannedStep[], completedStepId: string): PlannedStep | undefined {
+function findNextStep(steps:StoredStepInput[],completedStepId:unknown):StoredStepInput|undefined {
   const current = requireStep(steps, completedStepId);
   return [...steps]
-    .filter((step) => step.order > current.order && !TERMINAL_STATUSES.has(step.status))
-    .sort((left, right) => left.order - right.order)
-    .find((step) => step.dependsOn.every((dependencyId) => {
+    .filter((step) => dispatchOrder(step.order) > dispatchOrder(current.order) && !TERMINAL_STATUSES.has(step.status))
+    .sort((left, right) => dispatchOrder(left.order) - dispatchOrder(right.order))
+    .find((step) => dispatchDependencies(step.dependsOn).every((dependencyId) => {
       const dependency = steps.find((candidate) => candidate.stepId === dependencyId);
       return dependency?.status === 'completed';
     }));
 }
 
-function findNextStage(stages: IntentStageRecord[], completedStageId: string): IntentStageRecord | undefined {
-  const current = stages.find((stage) => stage.stageId === completedStageId);
+function findNextStage(stages:StoredStageInput[],completedStageId:unknown):StoredStageInput|undefined {
+  const current = dispatchStages(stages).find((stage) => stage.stageId === completedStageId);
   if (!current) {
     return undefined;
   }
 
   return [...stages]
-    .filter((stage) => stage.order > current.order && stage.dependsOnStageIds.every((dependencyId) => {
+    .filter((stage) => dispatchOrder(stage.order) > dispatchOrder(current.order) && dispatchDependencies(stage.dependsOnStageIds).every((dependencyId) => {
       const dependency = stages.find((candidate) => candidate.stageId === dependencyId);
       return dependency?.status === 'completed';
     }))
-    .sort((left, right) => left.order - right.order)[0];
+    .sort((left, right) => dispatchOrder(left.order) - dispatchOrder(right.order))[0];
 }
 
-function mirrorStageToIntent(intent: IntentLedgerRecord, activeStage: IntentStageRecord): void {
+function mirrorStageToIntent(intent:NormalizedStoredIntentRecord,activeStage:StoredStageInput):void {
+  dispatchSteps(activeStage.steps);
   intent.steps = activeStage.steps.map((step) => ({
     ...step,
     dependsOn: [...step.dependsOn],

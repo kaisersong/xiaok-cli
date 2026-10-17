@@ -16,6 +16,8 @@ import { createIntentApplicationBinding, intentApplicationBindingHash, type Inte
 import { parseIntentNativeContracts, intentNativeLedgerHash } from './native-contract-journal.js';
 import { assertSessionWriteOwnership } from './ownership.js';
 import type { SessionIntentLedger } from './types.js';
+import type {StoredSessionIntentLedgerInput,StoredIntentRecordInput,StoredStageInput,StoredStepInput} from './stored-intent-clone.js';
+import type {StoredSessionSnapshot} from '../../ai/runtime/session-store/stored-snapshot-types.js';
 import type { PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 export interface IntentArtifactSelection {
@@ -197,7 +199,7 @@ export function captureIntentPublicationObservation(raw: ObserveIntentPublicatio
         throw Error('intent_candidate_input');
     return { input: { ...input, publicationAction: 'observe' as const }, lease: lease.value as SessionExecutionLease };
 }
-function observationFact(raw: unknown, ledger: SessionIntentLedger, row: IntentPublicationCandidate): IntentApplicationObservationFact {
+function observationFact(raw: unknown, ledger: IntentPublicationTargetData, row: IntentPublicationCandidate): IntentApplicationObservationFact {
     const v = captureIntentData(raw) as any, target = intentPublicationTarget(ledger, row);
     json(raw);
     if (v?.state === 'not_prepared') {
@@ -424,24 +426,51 @@ export function applyIntentPublicationMutation(previous: PersistedSessionSnapsho
 
 /** Snapshot fields consumed by the existing capture branches; not a full durable snapshot. */
 export type IntentPublicationCaptureSnapshot = Pick<PersistedSessionSnapshot, 'sessionId' | 'intentDelegation' | 'updatedAt'>;
+/** Actual storage DATA consumed by capture; the Modern view above is compatibility only. */
+export type StoredIntentPublicationCaptureSnapshot = Pick<StoredSessionSnapshot, 'sessionId' | 'intentDelegation' | 'updatedAt'>;
 export type IntentPublicationCaptureMutation = Exclude<IntentPublicationMutation, IntentReceiverMutation | IntentVerificationMutation>;
+
+interface CaptureRecordData extends StoredIntentRecordInput {producerReports?:unknown}
+function captureRecords(value:StoredIntentRecordInput[]):CaptureRecordData[]{
+ if(!Array.isArray(value))throw Error('intent_candidate_records_data');return value;
+}
+function captureStages(value:StoredStageInput[]|null|undefined):StoredStageInput[]{
+ if(!Array.isArray(value))throw Error('intent_candidate_stages_data');return value;
+}
+function captureSteps(value:StoredStepInput[]):StoredStepInput[]{
+ if(!Array.isArray(value))throw Error('intent_candidate_steps_data');return value;
+}
+function captureRows(value:unknown):readonly unknown[]{
+ return intentPublicationFactArray(value,'intent_candidate_rows_data');
+}
+function captureFact(value:unknown):Record<string,unknown>{
+ return intentPublicationFactObject(value,'intent_candidate_fact_data');
+}
+function captureText(value:unknown):string{
+ if(typeof value!=='string')throw Error('intent_candidate_text_data');return value;
+}
+function assertCaptureSummaryData(value:unknown):asserts value is {readonly breadcrumb?:unknown}|null|undefined{
+ if(value!==null&&value!==undefined)captureFact(value);
+}
 
 /** Plain DATA capture only. Existing owner/hash/journal/route checks remain in the body. */
 export function applyIntentPublicationCapture(previous: PersistedSessionSnapshot, input: IntentPublicationCaptureMutation): PersistedSessionSnapshot;
+export function applyIntentPublicationCapture(previous: StoredSessionSnapshot, input: IntentPublicationCaptureMutation): StoredSessionSnapshot;
 export function applyIntentPublicationCapture(previous: IntentPublicationCaptureSnapshot, input: IntentPublicationCaptureMutation): IntentPublicationCaptureSnapshot;
-export function applyIntentPublicationCapture(previous: IntentPublicationCaptureSnapshot, input: IntentPublicationCaptureMutation): IntentPublicationCaptureSnapshot {
+export function applyIntentPublicationCapture(previous: StoredIntentPublicationCaptureSnapshot, input: IntentPublicationCaptureMutation): StoredIntentPublicationCaptureSnapshot;
+export function applyIntentPublicationCapture(previous: StoredIntentPublicationCaptureSnapshot, input: IntentPublicationCaptureMutation): StoredIntentPublicationCaptureSnapshot {
     const next = captureIntentData(previous), ledger = next.intentDelegation;
     if (!ledger || next.sessionId !== input.sessionId)
         throw Error('intent_candidate_session');
     assertSessionWriteOwnership(ledger, input.instanceId, 'capture intent application candidate');
     if (intentNativeLedgerHash(ledger) !== input.expectedLedgerHash)
         throw Error('intent_candidate_stale');
-    const rows = parseIntentPublicationCandidates(ledger), record = ledger.intents.find(r => r.intentId === ledger.activeIntentId), stage = record?.stages.find(s => s.stageId === record.activeStageId), native = parseIntentNativeContracts(ledger.nativeContracts, input.sessionId).find(n => n.intentId === record?.intentId);
+    const rows = parseIntentPublicationCandidates(ledger), record = captureRecords(ledger.intents).find(r => r.intentId === ledger.activeIntentId), stage = record===null||record===undefined?undefined:captureStages(record.stages).find(s => s.stageId === record.activeStageId), native = parseIntentNativeContracts(ledger.nativeContracts, input.sessionId).find(n => n.intentId === record?.intentId);
     if (input.publicationAction === 'observe') {
         const index = rows.findIndex(r => r.id === input.candidateId), row = rows[index], attempt = row?.applicationAttempts.at(-1);
         if (!row || !attempt || attempt.phase !== 'preparing' || attempt.requestId !== input.expectedRequestId || attempt.revision !== input.expectedRevision || input.now < attempt.updatedAt)
             throw Error('intent_candidate_stale');
-        const fact = input.observation === null && input.sourceChanged ? null : observationFact(input.observation, ledger, row), changed = captureIntentData(row), active = record?.intentId === row.intentId && record.overallStatus === 'publication_pending' && (row.stageId===null?record.stages.every(s=>s.status==='completed'):stage?.stageId===row.stageId&&stage.status==='publication_pending');
+        const fact = input.observation === null && input.sourceChanged ? null : observationFact(input.observation, ledger, row), changed = captureIntentData(row), active = record?.intentId === row.intentId && record.overallStatus === 'publication_pending' && (row.stageId===null?captureStages(record.stages).every(s=>s.status==='completed'):stage!==undefined&&stage.stageId===row.stageId&&stage.status==='publication_pending');
         const routeChanged = intentPublicationRouteVector(ledger, row.id) !== attempt.route;
         const disposition = applicationDisposition(fact, input.sourceChanged || !active || routeChanged, row.bindingHash);
         changed.applicationAttempts[changed.applicationAttempts.length - 1] = { ...attempt, revision: attempt.revision + 1, ...disposition, observation: fact, updatedAt: input.now };
@@ -451,7 +480,7 @@ export function applyIntentPublicationCapture(previous: IntentPublicationCapture
         return next;
     }
     const parentAction=input.publicationAction==='reserve-parent'||('candidateId'in input&&rows.find(r=>r.id===input.candidateId)?.stageId===null);
-    if (!record || !stage || !native || record.overallStatus !== 'publication_pending' || (parentAction?record.stages.some(s=>s.status!=='completed'):stage.status !== 'publication_pending') || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || input.now < ledger.updatedAt)
+    if (!record || !stage || !native || record.overallStatus !== 'publication_pending' || (parentAction?captureStages(record.stages).some(s=>s.status!=='completed'):stage.status !== 'publication_pending') || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || input.now < ledger.updatedAt)
         throw Error('intent_candidate_current');
     if (input.publicationAction === 'claim' || input.publicationAction === 'retry') {
         const index = rows.findIndex(r => r.id === input.candidateId), original = rows[index];
@@ -486,15 +515,16 @@ export function applyIntentPublicationCapture(previous: IntentPublicationCapture
         const row:IntentPublicationCandidate={version:1,id:candidateId,intentId:record.intentId,stageId:null,candidateRevision:1,contractHash:native.contractHash,body:binding.body,bodyHash:hash(binding.body),bindingHash:intentApplicationBindingHash(binding),sourceHash,fileObservations:input.fileObservations,createdAt:input.now,applicationAttempts:[{requestId:randomUUID(),revision:1,phase:'reserved',route:null,observation:null,retirementReason:null,createdAt:input.now,updatedAt:input.now}]};
         ledger.publicationCandidates=[...rows,row];ledger.updatedAt=input.now;next.updatedAt=Math.max(next.updatedAt,input.now);parseIntentPublicationCandidates(ledger);return next;
     }
-    const originals = (record.artifacts ?? []).filter(a => a.stageId === stage.stageId);
-    if (originals.length !== input.artifactSelections.length || input.fileObservations.length !== originals.filter(a => a.storage === 'file_ref').length)
+    const originals = captureRows(record.artifacts ?? []).filter(a => captureFact(a).stageId === stage.stageId);
+    if (originals.length !== input.artifactSelections.length || input.fileObservations.length !== originals.filter(a => captureFact(a).storage === 'file_ref').length)
         throw Error('intent_candidate_selection');
-    const reports = (record.producerReports ?? []).filter(r => { const a = r.action; return a.kind === 'artifact-report' ? a.stageId === stage.stageId : stage.steps.some(s => s.stepId === a.stepId); });
-    const artifacts = originals.map(a => { const selection = input.artifactSelections.find(s => s.artifactId === a.artifactId); if (!selection)
+    const reports = captureRows(record.producerReports ?? []).filter(value => { const r=captureFact(value),a=captureFact(r.action); return a.kind === 'artifact-report' ? a.stageId === stage.stageId : captureSteps(stage.steps).some(s => s.stepId === a.stepId); });
+    const artifacts = originals.map(value => { const a=captureFact(value),selection = input.artifactSelections.find(s => s.artifactId === a.artifactId); if (!selection)
         throw Error('intent_candidate_selection'); const obligation = native.contract.stages.find(s => s.stageId === stage.stageId)!.verification.obligations.find(o => o.obligationId === selection.obligationId), recipe = obligation?.recipe, paths = recipe?.kind === 'artifact-content' ? recipe.checks.map(c => c.path) : recipe?.kind === 'blackbox' ? ['verification-report.json'] : recipe?.kind === 'diagnostic-coverage' ? ('sources' in recipe ? recipe.sources : [recipe]).map(s => s.diagnosisPath) : []; if (!paths.includes(selection.path))
-        throw Error('intent_candidate_selection'); const file = input.fileObservations.find(f => f.artifactId === a.artifactId), bytes = a.storage === 'inline' ? Buffer.from(a.inlineValue ?? '', 'utf8') : null; if (a.storage === 'file_ref' && !file)
+        throw Error('intent_candidate_selection'); const file = input.fileObservations.find(f => f.artifactId === a.artifactId), bytes = a.storage === 'inline' ? Buffer.from(captureText(a.inlineValue ?? ''), 'utf8') : null; if (a.storage === 'file_ref' && !file)
         throw Error('intent_candidate_files'); return { artifactId: a.artifactId, stageId: a.stageId, kind: a.kind, label: a.label, summary: a.summary ?? null, createdAt: a.createdAt, content: a.storage === 'inline' ? { kind: 'inline', text: a.inlineValue ?? '' } : { kind: 'file', originalPath: a.path }, selection: { kind: 'local', obligationId: selection.obligationId, path: selection.path }, sha256: bytes ? createHash('sha256').update(bytes).digest('hex') : file!.sha256, size: bytes ? bytes.length : file!.size }; });
-    const prior = rows.find(r => r.intentId === record.intentId && r.stageId === stage.stageId), candidateId = prior?.id ?? randomUUID(), body = { kind: 'intent-stage', stageId: stage.stageId, summary: [...reports].reverse().find(r => r.action.kind === 'step-report')?.action as any, executionReports: (record.executionTerminals ?? []).filter(t => t.kind === 'step' && stage.steps.some(s => s.stepId === t.identity)), producerReports: reports, artifacts };
+    const prior = rows.find(r => r.intentId === record.intentId && r.stageId === stage.stageId), candidateId = prior?.id ?? randomUUID(), summaryReport=[...reports].reverse().find(r => captureFact(captureFact(r).action).kind === 'step-report'), body = { kind: 'intent-stage', stageId: stage.stageId, summary: summaryReport===undefined?undefined:captureFact(summaryReport).action, executionReports: captureRows(record.executionTerminals ?? []).filter(value => {const t=captureFact(value);return t.kind === 'step' && captureSteps(stage.steps).some(s => s.stepId === t.identity);}), producerReports: reports, artifacts };
+    assertCaptureSummaryData(body.summary);
     body.summary = body.summary?.breadcrumb ?? stage.deliverable;
     const binding = createIntentApplicationBinding({ version: 1, kind: 'intent', subject: { version: 1, sessionId: input.sessionId, intentId: record.intentId, stageId: stage.stageId }, candidateId, candidateRevision: 1, contract: native.contract, body });
     // Full ASCII binding plus worst legal review metadata overhead, without truncation.
@@ -508,6 +538,7 @@ export function applyIntentPublicationCapture(previous: IntentPublicationCapture
             throw Error('intent_candidate_conflict');
         return next;
     }
+    if(!id(stage.stageId))throw Error('intent_candidate_stage_data');
     const row: IntentPublicationCandidate = { version: 1, id: candidateId, intentId: record.intentId, stageId: stage.stageId, candidateRevision: 1, contractHash: native.contractHash, body: binding.body, bodyHash: hash(binding.body), bindingHash: intentApplicationBindingHash(binding), sourceHash, fileObservations: input.fileObservations, createdAt: input.now, applicationAttempts: [{ requestId: randomUUID(), revision: 1, phase: 'reserved', route: null, observation: null, retirementReason: null, createdAt: input.now, updatedAt: input.now }] };
     ledger.publicationCandidates = [...rows, row];
     ledger.updatedAt = input.now;
@@ -515,7 +546,9 @@ export function applyIntentPublicationCapture(previous: IntentPublicationCapture
     parseIntentPublicationCandidates(ledger);
     return next;
 }
-export function assertIntentPublicationRetained(previous: SessionIntentLedger | undefined, next: SessionIntentLedger | undefined, primitive: boolean|'receiver'|'projection' = false): void {
+export function assertIntentPublicationRetained(previous:SessionIntentLedger|undefined,next:SessionIntentLedger|undefined,primitive?:boolean|'receiver'|'projection'):void;
+export function assertIntentPublicationRetained(previous:StoredSessionIntentLedgerInput|undefined,next:StoredSessionIntentLedgerInput|undefined,primitive?:boolean|'receiver'|'projection'):void;
+export function assertIntentPublicationRetained(previous:StoredSessionIntentLedgerInput|undefined,next:StoredSessionIntentLedgerInput|undefined,primitive:boolean|'receiver'|'projection'=false):void {
     const before = parseIntentPublicationCandidates(previous), after = parseIntentPublicationCandidates(next);
     if(primitive==='projection'){assertIntentBusinessProjectionTransition(previous,next);return;}
     if (!primitive) {
@@ -523,7 +556,7 @@ export function assertIntentPublicationRetained(previous: SessionIntentLedger | 
             throw Error('intent_candidate_requires_primitive');
         return;
     }
-    const stripped = (v: SessionIntentLedger | undefined) => { const value = captureIntentData(v ?? null) as any; if (value) {
+    const stripped = (v:StoredSessionIntentLedgerInput|undefined) => { const value:(Omit<StoredSessionIntentLedgerInput,'updatedAt'>&{updatedAt?:number})|null = captureIntentData(v ?? null); if (value) {
         delete value.publicationCandidates;
         delete value.updatedAt;
     } return value; };
@@ -544,9 +577,11 @@ export function assertIntentPublicationRetained(previous: SessionIntentLedger | 
     }) || after.length > before.length + 1)
         throw Error('intent_candidate_original_changed');
 }
-export function intentPublicationRouteVector(ledger: SessionIntentLedger | undefined, candidateId?: string): string {
+export function intentPublicationRouteVector(ledger:SessionIntentLedger|undefined,candidateId?:string):string;
+export function intentPublicationRouteVector(ledger:StoredSessionIntentLedgerInput|undefined,candidateId?:string):string;
+export function intentPublicationRouteVector(ledger:StoredSessionIntentLedgerInput|undefined,candidateId?:string):string {
     const candidate = candidateId === undefined ? undefined : parseIntentPublicationCandidates(ledger!).find(row => row.id === candidateId);
-    const record = ledger?.intents.find(r => r.intentId === (candidate?.intentId ?? ledger.activeIntentId));
+    const record = ledger===undefined||ledger===null?undefined:captureRecords(ledger.intents).find(r => r.intentId === (candidate?.intentId ?? ledger.activeIntentId));
     if (!ledger || !record || candidateId !== undefined && !candidate)
         throw Error('intent_candidate_current');
     const route = readInstalledCurrentOwner(intentHostSubjectOwner({ version: 1, sessionId: ledger.sessionId, intentId: record.intentId, stageId: candidate?candidate.stageId:record.activeStageId }));
