@@ -1,3 +1,4 @@
+import type {StoredSessionSnapshot} from '../../ai/runtime/session-store/stored-snapshot-types.js';
 import {desktopObservationSessionId,assertInitializedSnapshot,readDesktopTaskProtection} from './protected-observation-reader.js';
 import { assertCompoundHostStorage, type CompoundHostStorage } from '../sol-pi/compound-host-storage.js';
 import { getCompoundExecutionDomainBinding, type openCompoundExecutionDomain } from '../sol-pi/compound-execution-domain.js';
@@ -88,7 +89,7 @@ export class DesktopTaskObservationStore {
   }
   /** Main-only complete durable view, including registered canonical aliases.
    * It returns no writer and never derives a root from an untrusted marker. */
-  async loadSessionSnapshot(taskId:string):Promise<PersistedSessionSnapshot|null>{
+  async loadSessionSnapshot(taskId:string):Promise<StoredSessionSnapshot|null>{
     return this.alias(taskId)?.snapshot??await this.sessions.load(desktopObservationSessionId(taskId));
   }
   readProtection(taskId: string): Promise<{closure?: ProtectedObservationClosure; executionProtected?: true}> {
