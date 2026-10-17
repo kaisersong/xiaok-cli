@@ -7,7 +7,7 @@ import {isDeepStrictEqual} from 'node:util';
 import type {SessionExecutionLease} from '../../ai/runtime/session-store/execution-authority.js';
 import {assertSessionExecutionLease} from '../../ai/runtime/session-store/execution-authority.js';
 import {readCompoundDeletionBytes} from '../../ai/runtime/session-store/compound-deletion-census.js';
-import {toDurableSessionSnapshot,computeSessionHistoryDigest,type PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
+import {toDurableSessionSnapshot,computeSessionHistoryDigest,type StoredSessionSnapshot} from '../../ai/runtime/session-store/store.js';
 import {readSessionAliases} from '../../ai/runtime/session-store/aliases.js';
 import {inspectCompoundSourceInventory,assertCompoundSourceInventoryCurrent} from './compound-source-inventory.js';
 import {getCompoundExecutionDomainBinding} from './compound-execution-domain.js';
@@ -16,18 +16,18 @@ import type {CompoundTreeOwner} from './compound-child-installation.js';
 function fail(reason:string):never{throw Error(`compound_live_tree_${reason}`);}
 /** Synchronous canonical census under the shared root lease. The callback must
  * authenticate actual private issuers; disk "live" fields alone are not enough. */
-export function inspectCompoundLiveTree(input:{treeRoot:CompoundTreeOwner;lease:SessionExecutionLease;candidate?:PersistedSessionSnapshot;semanticScope?:SemanticSummaryProviderScope;assertLive(snapshot:PersistedSessionSnapshot):void}){
+export function inspectCompoundLiveTree(input:{treeRoot:CompoundTreeOwner;lease:SessionExecutionLease;candidate?:StoredSessionSnapshot;semanticScope?:SemanticSummaryProviderScope;assertLive(snapshot:StoredSessionSnapshot):void}){
  const {treeRoot,lease}=input,root=realpathSync(treeRoot.root);assertSessionExecutionLease(lease,treeRoot);
  const retired=new Set<string>();
  if(treeRoot.domain){const binding=getCompoundExecutionDomainBinding(treeRoot.domain);if(binding.canonicalSessionId!==treeRoot.sessionIdentity||binding.storeRoot!==root)fail('domain');for(const id of treeRoot.domain.retiredSessionIdentities(lease))retired.add(id);}
- const inventory=inspectCompoundSourceInventory([root]),facts=assertCompoundSourceInventoryCurrent(inventory),snapshots=new Map<string,PersistedSessionSnapshot>();let remaining=16*1024*1024;
+ const inventory=inspectCompoundSourceInventory([root]),facts=assertCompoundSourceInventoryCurrent(inventory),snapshots=new Map<string,StoredSessionSnapshot>();let remaining=16*1024*1024;
  const source=new Map(facts.snapshots.map(row=>[row.sessionId,row]));
  const load=(id:string)=>{
   if(snapshots.has(id)||!/^[A-Za-z0-9_-]{1,160}$/.test(id)||snapshots.size>=256||retired.has(id))fail('identity');
   const original=source.get(id);if(!original)fail('missing');
   const bytes=readCompoundDeletionBytes(join(root,`${id}.json`),remaining);remaining-=bytes.length;
   const {schemaVersion,...document}=JSON.parse(bytes.toString('utf8'));if(schemaVersion!==1)fail('schema');
-  let snapshot=toDurableSessionSnapshot(document);
+  let snapshot:StoredSessionSnapshot=toDurableSessionSnapshot(document);
   if(input.candidate?.sessionId===id){
    const candidate=toDurableSessionSnapshot(input.candidate),before=validateCompoundOperationLedger(snapshot.compoundOperations??createCompoundOperationLedger()),after=validateCompoundOperationLedger(candidate.compoundOperations??createCompoundOperationLedger());
    const priorSnapshot={...candidate};if(Object.hasOwn(snapshot,'compoundOperations'))priorSnapshot.compoundOperations=snapshot.compoundOperations;else delete priorSnapshot.compoundOperations;

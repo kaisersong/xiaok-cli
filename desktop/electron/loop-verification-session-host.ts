@@ -6,7 +6,7 @@ import { parseMaterialRequestObservation, type MaterialRequestObservation } from
 import { lstatSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { FileSessionStore } from '../../src/ai/runtime/session-store/file-store.js';
-import { computeSessionHistoryDigest, type PersistedSessionSnapshot } from '../../src/ai/runtime/session-store/store.js';
+import { computeSessionHistoryDigest, type PersistedSessionSnapshot, type StoredSessionSnapshot } from '../../src/ai/runtime/session-store/store.js';
 import { createSessionExecutionAuthority, createSessionExecutionContext, type SessionExecutionLease } from '../../src/ai/runtime/session-store/execution-authority.js';
 import { canonicalVerificationJson as json } from '../../src/runtime/verification/protocol.js';
 import { createInstalledVerificationClient } from '../../src/runtime/verification/controller-client.js';
@@ -58,7 +58,7 @@ export function createLoopVerificationSessionHost(options: {
       lineage: [row.sessionId], messages: [{ role: 'user', content: [{ type: 'text', text }] }],
       usage: { inputTokens: 0, outputTokens: 0 }, compactions: [], memoryRefs: [], approvalRefs: [], backgroundJobRefs: [] };
   }
-  function assertOriginal(actual: PersistedSessionSnapshot, expected: PersistedSessionSnapshot) {
+  function assertOriginal(actual: StoredSessionSnapshot, expected: PersistedSessionSnapshot) {
     const exact = { ...expected, executionProtected: true, storeRevision: 1, historyDigest: computeSessionHistoryDigest(expected) };
     if (json(captureLoopProducerValue(actual)) !== json(exact)) throw Error('loop_verification_session_snapshot_changed');
   }

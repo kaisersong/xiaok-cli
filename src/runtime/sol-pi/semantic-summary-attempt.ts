@@ -166,7 +166,7 @@ export function reserveActiveSemanticSummaryProviderScope(facts:{sessionIdentity
 export function inspectSemanticSummaryProviderLease(scope:SemanticSummaryProviderScope,visit:(lease:SessionExecutionLease)=>void):void{
  const {value}=activeScope(scope);const result:unknown=visit(value.input.lease);if(result!==undefined){if(result&&typeof (result as PromiseLike<unknown>).then==='function')void Promise.resolve(result).catch(()=>{});denied('PROVIDER_SCOPE_ASYNC_VISITOR');}activeScope(scope);
 }
-export function matchesSemanticSummaryProviderReservation(scope:SemanticSummaryProviderScope,snapshot:PersistedSessionSnapshot,reservation:SemanticReservation,lease:SessionExecutionLease):boolean{
+export function matchesSemanticSummaryProviderReservation(scope:SemanticSummaryProviderScope,snapshot:Pick<PersistedSessionSnapshot,'sessionId'>,reservation:SemanticReservation,lease:SessionExecutionLease):boolean{
  const {value}=activeScope(scope);return value.input.lease===lease&&snapshot.sessionId===value.input.sessionId&&reservation.status==='dispatched'&&isDeepStrictEqual(reservation,value.reservation);
 }
 export function consumeSemanticSummaryProviderScope(scope:SemanticSummaryProviderScope):void{

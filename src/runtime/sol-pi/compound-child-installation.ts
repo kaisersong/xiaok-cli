@@ -7,7 +7,7 @@ import {getManagedCompoundAdmissionBinding,type ManagedCompoundAdmission} from '
 import type {Tool} from '../../types.js';
 import type {ToolRegistry} from '../../ai/tools/index.js';
 import type {AgentSessionState} from '../../ai/runtime/session.js';
-import {computeSessionHistoryDigest,type SessionStore} from '../../ai/runtime/session-store/store.js';
+import {computeSessionHistoryDigest,type SessionStore,type StoredSessionSnapshot} from '../../ai/runtime/session-store/store.js';
 import {createSessionExecutionAuthority,createSessionExecutionContext,type SessionExecutionLease,type SessionExecutionAuthority} from '../../ai/runtime/session-store/execution-authority.js';
 import {createSessionExecutionChain,acquireSessionExecutionFactChain,getSessionExecutionAncestorLease,type SessionExecutionChain} from '../../ai/runtime/session-store/execution-chain.js';
 import {createCompoundSessionJournal} from './compound-session-journal.js';
@@ -20,6 +20,7 @@ import type {ProductCompoundCoordinator} from './product-compound-coordinator.js
 
 export interface CompoundTreeOwner {root:string;sessionIdentity:string;authority:SessionExecutionAuthority;journal:ReturnType<typeof createCompoundSessionJournal>;domain?:ReturnType<typeof import('./compound-execution-domain.js').openCompoundExecutionDomain>}
 export interface CompoundParentAdmission {root:string;sessionIdentity:string;operationId:string;generation:number;store:SessionStore}
+type CompoundTurnSnapshotData=Readonly<Pick<StoredSessionSnapshot,'compoundOperations'>>;
 export interface BoundCompoundCoordinatorInput {
  owner:ObservationSessionOwner;recallTool:Tool;authority:SessionExecutionAuthority;executionSignal:AbortSignal;
  session:AgentSessionState;store:SessionStore;root:string;registry:ToolRegistry;journal:ReturnType<typeof createCompoundSessionJournal>;
@@ -27,7 +28,7 @@ export interface BoundCompoundCoordinatorInput {
  executionChain?:SessionExecutionChain;validationBackend?:CompoundValidationBackend;treeRoot?:CompoundTreeOwner;ancestors?:readonly CompoundParentAdmission[];
  providerAdmission?:ProviderAncestorAdmission;
  getActiveTurnOrigin?():Readonly<{session:AgentSessionState;nativeInvocationId:string}>|undefined;
- assertTurnCurrent?(snapshot:import('../../ai/runtime/session-store/store.js').PersistedSessionSnapshot):void;
+ assertTurnCurrent?(snapshot:CompoundTurnSnapshotData):void;
 }
 /** Host-only common installation. It accepts an already durable exact parent
  * admission and authenticates the actual D1 owner/session; no tool context can
@@ -51,7 +52,7 @@ export function createCompoundChildInstallation(input:{
      let activeTurnOrigin:Readonly<{session:AgentSessionState;nativeInvocationId:string}>|undefined;
      let turnRecord:ManagedTurnRecord|undefined,installingProvider=true,activation:Promise<void>|undefined;
      const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-     const assertTurnCurrent=(snapshot:import('../../ai/runtime/session-store/store.js').PersistedSessionSnapshot)=>{if(!input.managedTurn)return;const row=snapshot.compoundOperations?.managedTurns?.records.at(-1);if(!turnRecord||turnRecord.state!=='active'||!isDeepStrictEqual(row,turnRecord))throw Error('compound_managed_turn_not_active');input.managedTurn.assertResourceCurrent();};
+     const assertTurnCurrent=(snapshot:CompoundTurnSnapshotData)=>{if(!input.managedTurn)return;const row=snapshot.compoundOperations?.managedTurns?.records.at(-1);if(!turnRecord||turnRecord.state!=='active'||!isDeepStrictEqual(row,turnRecord))throw Error('compound_managed_turn_not_active');input.managedTurn.assertResourceCurrent();};
      const childSignal=AbortSignal.any([signal,executionSignal,lifetime.signal]);
      const childAssert=()=>{childSignal.throwIfAborted();child.owner.assertSession(childSession);};assertInstalledLive=childAssert;
      const checkParent=async(requireActiveTurn=true)=>{const snapshot=await store.load(sessionIdentity),edge=snapshot?.compoundOperations?.directOperations?.find(r=>r.id===record.id);if(edge?.stage!=='started'||edge.delegation?.state!=='live'||edge.delegation.generation!==1||edge.delegation.childPhase!=='running'||edge.delegation.childSessionIdentity!==childIdentity)throw Error('compound_parent_admission_not_current');if(requireActiveTurn&&input.managedTurn&&!installingProvider){const own=await store.load(childIdentity);if(!own)throw Error('compound_managed_turn_missing');assertTurnCurrent(own);}};

@@ -5,7 +5,7 @@ import type {CompoundOperationRecord} from './compound-operation.js';
 import {assertManagedFollowupInvocationCurrent} from './compound-managed-message.js';
 import {inspectCompoundLiveTree} from './compound-live-tree.js';
 import {assertCompoundProviderLiveReservations} from './compound-provider-admission.js';
-import type {PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
+import type {StoredSessionSnapshot} from '../../ai/runtime/session-store/store.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
@@ -45,7 +45,7 @@ interface State {
  readonly record:DirectOperationRecord;readonly admission:ManagedCompoundAdmission;readonly installation:Installation;readonly adapter:Readonly<ManagedCompoundSpawnAdapter>;
  readonly toolUseId:string;ackReady:boolean;prefixLength?:number;prefixDigest?:string;resourceDigest?:string;
 }
-const treeSupervision=new WeakMap<CompoundTreeOwner,Map<string,(snapshot:PersistedSessionSnapshot,descendant?:string,metadataOrigin?:Readonly<{session:AgentSessionState;nativeInvocationId:string}>,candidate?:PersistedSessionSnapshot,issued?:Readonly<{sessionIdentity:string;record:DirectOperationRecord|CompoundOperationRecord}>)=>void>>();
+const treeSupervision=new WeakMap<CompoundTreeOwner,Map<string,(snapshot:StoredSessionSnapshot,descendant?:string,metadataOrigin?:Readonly<{session:AgentSessionState;nativeInvocationId:string}>,candidate?:StoredSessionSnapshot,issued?:Readonly<{sessionIdentity:string;record:DirectOperationRecord|CompoundOperationRecord}>)=>void>>();
 const turnOrigins=new WeakMap<CompoundTreeOwner,Map<string,()=>Readonly<{session:AgentSessionState;nativeInvocationId:string}>|undefined>>();
 const publicationOwners=new WeakMap<ObservationSessionOwner,Readonly<{session:AgentSessionState;tree:CompoundTreeOwner;providerAdmission?:import('./compound-provider-admission.js').ProviderAncestorAdmission;assertCurrent():void}>>();
 /** Issued only by the actual coordinator lifecycle, never from an owner-shaped
@@ -59,7 +59,7 @@ export function assertManagedCompoundBranchesCurrent(tree:CompoundTreeOwner,leas
  * metadata invocation before allowing that one row in the complete census. */
 export function captureCompoundFollowupPreparationSupervision(tree:CompoundTreeOwner,lease:SessionExecutionLease,origin?:Readonly<{session:AgentSessionState;nativeInvocationId:string}>):()=>void{return captureBranches(tree,lease,new Map(),origin);}
 
-export function captureCompoundExistingBranchSupervision(tree:CompoundTreeOwner,chain:SessionExecutionChain,leafLease:SessionExecutionLease,candidate?:PersistedSessionSnapshot,record?:DirectOperationRecord|CompoundOperationRecord):()=>void{
+export function captureCompoundExistingBranchSupervision(tree:CompoundTreeOwner,chain:SessionExecutionChain,leafLease:SessionExecutionLease,candidate?:StoredSessionSnapshot,record?:DirectOperationRecord|CompoundOperationRecord):()=>void{
  const path=getHeldSessionExecutionChainPath(chain,leafLease),descendants=new Map<string,string>();
  if(path[0]?.root!==tree.root||path[0]?.sessionIdentity!==tree.sessionIdentity)throw Error('compound_tree_chain_root');
  for(let i=0;i<path.length-1;i++)descendants.set(path[i].sessionIdentity,path[i+1].sessionIdentity);
@@ -70,7 +70,7 @@ export function captureCompoundExistingBranchSupervision(tree:CompoundTreeOwner,
  return ()=>{if(!turnOrigin&&windowOrigin&&getCompoundPublicationWindowOrigin(tree)!==windowOrigin)throw Error('compound_publication_window_origin_expired');check();};
 }
 export function captureCompoundSemanticSupervision(tree:CompoundTreeOwner,lease:SessionExecutionLease,semanticScope:SemanticSummaryProviderScope):()=>void{return captureBranches(tree,lease,new Map(),undefined,undefined,undefined,semanticScope);}
-function captureBranches(tree:CompoundTreeOwner,lease:SessionExecutionLease,descendants:ReadonlyMap<string,string>,origin?:Readonly<{session:AgentSessionState;nativeInvocationId:string}>,candidate?:PersistedSessionSnapshot,issued?:Readonly<{sessionIdentity:string;record:DirectOperationRecord|CompoundOperationRecord}>,semanticScope?:SemanticSummaryProviderScope):()=>void{
+function captureBranches(tree:CompoundTreeOwner,lease:SessionExecutionLease,descendants:ReadonlyMap<string,string>,origin?:Readonly<{session:AgentSessionState;nativeInvocationId:string}>,candidate?:StoredSessionSnapshot,issued?:Readonly<{sessionIdentity:string;record:DirectOperationRecord|CompoundOperationRecord}>,semanticScope?:SemanticSummaryProviderScope):()=>void{
  const members=treeSupervision.get(tree);if(!members)throw Error('compound_tree_supervision_missing');
  const rechecks:Array<()=>void>=[];
  inspectCompoundLiveTree({treeRoot:tree,lease,candidate,semanticScope,assertLive(snapshot){const check=members.get(snapshot.sessionId);if(!check)throw Error('compound_tree_live_issuer_missing');check(snapshot,descendants.get(snapshot.sessionId),origin,candidate,issued);rechecks.push(()=>{if(members.get(snapshot.sessionId)!==check)throw Error('compound_tree_live_issuer_changed');check(snapshot,descendants.get(snapshot.sessionId),origin,candidate,issued);});}});
