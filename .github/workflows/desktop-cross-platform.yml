@@ -75,6 +75,13 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Compile Windows verification namespace helper
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" x64
+          node scripts/verification/build-windows-absence.mjs --target x64
+          node scripts/verification/test-windows-absence.mjs
+
       - name: Install root dependencies
         run: npm ci
 
@@ -132,6 +139,14 @@ jobs:
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
+
+      - name: Prepare verified artifact export helper
+        env:
+          XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
+        run: |
+          node scripts/verification/prepare-artifact-export-toolchain.mjs
+          node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
+          cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
       - name: Build desktop
         run: cd desktop && npm run build

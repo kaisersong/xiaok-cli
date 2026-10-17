@@ -14,3 +14,7 @@
 .chat-right-backdrop { position:absolute; inset:0; background:#0004; z-index:50; }
 .chat-right-panel--drawer { position:absolute; z-index:51; right:0; top:0; margin:8px; height:calc(100% - 16px); width:min(360px, calc(100% - 16px)) !important; min-width:0; max-width:calc(100% - 16px); }
 .chat-right-panel button:focus-visible, .chat-right-entry:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+
+/* One guarded approval subtree, shared by all tabs and inside the drawer focus owner. */
+.chat-right-approvals { flex:0 1 auto; min-height:0; max-height:50%; overflow:auto; padding:12px; border-bottom:1px solid var(--c-border); }
+.chat-right-approvals:empty { display:none; }

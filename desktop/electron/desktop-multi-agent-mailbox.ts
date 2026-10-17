@@ -1,5 +1,5 @@
 import type { DesktopMailboxPort, MultiAgentDrainedBatch } from '../shared/multi-agent-types.js';
-import type { DesktopMultiAgentStore } from './desktop-multi-agent-store.js';
+import type { DesktopMultiAgentStore, DesktopMultiAgentMutationPort } from './desktop-multi-agent-store.js';
 
 /** One group, one short command queue. Execution and cleanup promises never own it. */
 export class MultiAgentCommandSequencer {
@@ -34,6 +34,19 @@ export class MultiAgentCommandSequencer {
 
 type SealOutcome = 'completed' | 'failed' | 'interrupted';
 type SealResult = Awaited<ReturnType<DesktopMailboxPort['trySealTurn']>>;
+const semanticMailboxes = new WeakMap<object, () => Promise<(() => void) | undefined>>();
+/** Private main composition: copying a port never copies the actual mailbox owner. */
+export function bindDesktopMailboxSemanticAlias(alias: DesktopMailboxPort, original: DesktopMultiAgentTurnMailbox): void {
+  const capture = semanticMailboxes.get(original);
+  if (!capture || !(original instanceof DesktopMultiAgentTurnMailbox)) throw new Error('semantic_mailbox_untrusted');
+  if (semanticMailboxes.has(alias)) throw new Error('semantic_mailbox_already_bound');
+  semanticMailboxes.set(alias, capture);
+}
+export async function captureDesktopMailboxSemanticBoundary(mailbox: DesktopMailboxPort): Promise<(() => void) | undefined> {
+  const capture = semanticMailboxes.get(mailbox);
+  if (!capture) throw new Error('semantic_mailbox_untrusted');
+  return capture();
+}
 
 /** Durable input owner shared by root and child Desktop loops. No second inbox. */
 export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
@@ -42,9 +55,17 @@ export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
     store: DesktopMultiAgentStore; groupId: string; agentId: string; turnId: string;
     commands: MultiAgentCommandSequencer;
     assertCurrent(): void;
+    assertSemanticCurrent?(): void;
     beforeSeal?(): void;
-    onSeal(outcome: SealOutcome): void;
-  }) {}
+    onSeal(outcome: SealOutcome, acceptedPort: DesktopMultiAgentMutationPort): void;
+  }) {
+    semanticMailboxes.set(this, () => this.options.commands.run(() => {
+      this.assertActive();
+      this.options.assertSemanticCurrent?.();
+      const boundary = this.options.store.captureSemanticInputBoundary(this.options.groupId, this.options.agentId);
+      return boundary && (() => { this.assertActive(); this.options.assertSemanticCurrent?.(); boundary(); });
+    }));
+  }
 
   drainInput(): Promise<MultiAgentDrainedBatch> {
     return this.options.commands.run(() => {
@@ -73,7 +94,7 @@ export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
       if (outcome === 'completed' && unread && !input.limitReached) return { kind: 'continue' };
       const limited = outcome === 'completed' && unread && Boolean(input.limitReached);
       this.options.beforeSeal?.();
-      this.options.store.transaction(() => this.options.onSeal(limited ? 'failed' : outcome));
+      this.options.store.transaction((acceptedPort) => this.options.onSeal(limited ? 'failed' : outcome, acceptedPort));
       this.sealed = { kind: limited ? 'limit_reached' : 'sealed' };
       return this.sealed;
     });

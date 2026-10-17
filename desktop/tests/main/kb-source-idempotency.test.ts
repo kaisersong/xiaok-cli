@@ -39,7 +39,7 @@ describe('Knowledge source import idempotency', () => {
   }
 
   it('reuses the canonical source when the same file is imported with the same title', async () => {
-    const collection = store.createCollection({ name: 'Idempotent', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Idempotent', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'identity.md');
     writeFileSync(filePath, '# 身份\n同一个文件不能重复污染知识库。');
     const addSource = addSourceTool();
@@ -66,7 +66,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('does not let a changed file title bypass content idempotency', async () => {
-    const collection = store.createCollection({ name: 'Retitled', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Retitled', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'same.md');
     writeFileSync(filePath, '相同正文');
     const addSource = addSourceTool();
@@ -78,7 +78,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('reuses the same logical body across file and paste ingress paths', async () => {
-    const collection = store.createCollection({ name: 'Cross ingress', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Cross ingress', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'cross.md');
     writeFileSync(filePath, '跨入口也不能重复。');
     const addSource = addSourceTool();
@@ -90,8 +90,8 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('keeps the same content isolated between collections', async () => {
-    const firstCollection = store.createCollection({ name: 'First', embeddingModelId: 'm', embeddingDim: 384 });
-    const secondCollection = store.createCollection({ name: 'Second', embeddingModelId: 'm', embeddingDim: 384 });
+    const firstCollection = store.createCollection({ name: 'First', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
+    const secondCollection = store.createCollection({ name: 'Second', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const addSource = addSourceTool();
 
     await addSource.execute({ collection_id: firstCollection.id, title: 'A', kind: 'paste', text: 'collection 隔离正文' });
@@ -102,7 +102,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('creates a new source version when the logical body changes', async () => {
-    const collection = store.createCollection({ name: 'Versions', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Versions', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'versioned.md');
     const addSource = addSourceTool();
 
@@ -117,7 +117,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('normalizes BOM and line endings before computing the logical body hash', async () => {
-    const collection = store.createCollection({ name: 'Canonical text', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Canonical text', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const addSource = addSourceTool();
 
     await addSource.execute({ collection_id: collection.id, title: 'Windows', kind: 'paste', text: '\uFEFF第一行\r\n第二行' });
@@ -127,7 +127,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('serializes concurrent imports of the same logical body to one source', async () => {
-    const collection = store.createCollection({ name: 'Concurrent', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Concurrent', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'concurrent.md');
     writeFileSync(filePath, '并发导入正文');
     const addSource = addSourceTool();
@@ -143,7 +143,7 @@ describe('Knowledge source import idempotency', () => {
 
   it('enforces the content identity across independent database connections', () => {
     const dbPath = join(rootDir, 'knowledge.db');
-    const collection = store.createCollection({ name: 'Two connections', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Two connections', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const otherStore = createKbStoreSqlite(dbPath);
     const first = store.addSource({ collectionId: collection.id, kind: 'paste', title: '连接一' }, 'user');
     const second = otherStore.addSource({ collectionId: collection.id, kind: 'paste', title: '连接二' }, 'user');
@@ -162,7 +162,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('rejects an agent claim against a user-owned pending source', () => {
-    const collection = store.createCollection({ name: 'Authority', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Authority', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const source = store.addSource({ collectionId: collection.id, kind: 'paste', title: '用户正文' }, 'user');
     const claim = (store as unknown as { claimSourceContentHash?: ContentHashClaim }).claimSourceContentHash;
 
@@ -172,7 +172,7 @@ describe('Knowledge source import idempotency', () => {
   });
 
   it('requires a content hash before a non-meeting source can become parsed', () => {
-    const collection = store.createCollection({ name: 'Hash gate', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Hash gate', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const source = store.addSource({ collectionId: collection.id, kind: 'paste', title: '无 hash' }, 'user');
 
     expect(() => store.updateSourceParseResult(source.id, { parseStatus: 'parsed' }, 'user')).toThrow(/hash/i);
@@ -192,15 +192,15 @@ describe('Knowledge source import idempotency', () => {
     const dbPath = join(rootDir, 'legacy.db');
     store.close();
     store = createKbStoreSqlite(dbPath);
-    const collection = store.createCollection({ name: 'Legacy', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Legacy', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const first = store.addSource({ collectionId: collection.id, kind: 'file', title: '旧文件一', filePath: '/legacy/same.md' }, 'user');
     const duplicate = store.addSource({ collectionId: collection.id, kind: 'file', title: '旧文件二', filePath: '/legacy/same.md' }, 'user');
     const overlapping = [
       { idx: 0, text: 'abcde', charStart: 0, charEnd: 5 },
       { idx: 1, text: 'defgh', charStart: 3, charEnd: 8 },
     ];
-    store.insertChunks(first.id, overlapping);
-    store.insertChunks(duplicate.id, overlapping);
+    store.insertChunks(first.id, overlapping, 'user');
+    store.insertChunks(duplicate.id, overlapping, 'user');
     const expectedCanonicalId = [first, duplicate]
       .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))[0].id;
     const rawDb = (store as unknown as { _db: { prepare(sql: string): { run(...args: unknown[]): unknown } } })._db;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { askQuestion, type AskQuestionParams, type AskQuestionResult } from '../../src/ui/ask-question.js';
 import { createTtyHarness, type TtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
@@ -64,6 +64,98 @@ describe('ask-question', () => {
   });
 
   describe('key handling', () => {
+
+    it.each(['buffer', 'string', 'split'] as const)('accepts numeric multi-select and Enter in mixed %s chunks', async mode => {
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true}, async (h,pending) => {
+        if (mode === 'buffer') h.send('12\r');
+        else if (mode === 'string') h.emitter.emit('data','12\r');
+        else { h.send('1'); h.send('2\r'); }
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[0,1],labels:['桌面','手机']});
+      });
+    });
+    it('submits a complete multi-digit number with Enter in the same chunk', async () => {
+      await withMenu({question:'编号',options:Array.from({length:10},(_,i)=>({label:`方案${i+1}`}))}, async (h,pending) => {
+        h.send('10\r');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[9],labels:['方案10']});
+      });
+    });
+    it('does not replay a settled single-choice chunk into a new listener', async () => {
+      await withMenu({question:'单选',options:[{label:'桌面'},{label:'手机'}]}, async (h,pending) => {
+        h.send('2\r1');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        const next=vi.fn(); h.emitter.on('data',next);
+        await expect(pending).resolves.toEqual({selected:[1],labels:['手机']});
+        await Promise.resolve(); expect(next).not.toHaveBeenCalled(); h.emitter.removeListener('data',next);
+      });
+    });
+    it('keeps Other free text owned by the host reader after a mixed chunk settles', async () => {
+      const readText=vi.fn(async()=> '原reader输入');
+      await withMenu({question:'补充',options:[{label:'桌面'},{label:'手机'}],readText}, async (h,pending) => {
+        h.send('3\r123');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[],labels:[],otherText:'原reader输入'});
+        expect(readText).toHaveBeenCalledOnce();
+      });
+    });
+    it('keeps full arrow sequences atomic between a digit, space and Enter', async () => {
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true}, async (h,pending) => {
+        h.send('1\x1b[B \r');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[0,1],labels:['桌面','手机']});
+      });
+    });
+    it.each(['\x1b[12~','\x1bO2A'])('ignores numeric parameters in an unknown escape sequence %j', async sequence => {
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true}, async (h,pending) => {
+        h.send(sequence+'2\r');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[1],labels:['手机']});
+      });
+    });
+    it.each(['\x03','\x1b'])('cancels within a mixed block and stops processing its remainder %j', async cancel => {
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true}, async (h,pending) => {
+        h.send('1'+cancel+'2\r');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[],labels:[]});
+      });
+    });
+    it('treats a coalesced CRLF as one confirmation in a large multi-select', async () => {
+      await withMenu({question:'编号',options:Array.from({length:10},(_,i)=>({label:`方案${i+1}`})),multiSelect:true}, async (h,pending) => {
+        h.send('10\r\n');
+        expect(h.emitter.listenerCount('data')).toBe(1);
+        expect(h.screen.text()).toContain('✓ 方案10');
+        h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[9],labels:['方案10']});
+      });
+    });
+    it('preserves rejection of a too-long coalesced number', async () => {
+      await withMenu({question:'编号',options:Array.from({length:10},(_,i)=>({label:`方案${i+1}`}))}, async (h,pending) => {
+        h.send('100\r'); expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[0],labels:['方案1']});
+      });
+    });
+    it('releases listeners when mixed input rendering fails', async () => {
+      let draws=0; const fault=Error('actual frame failure');
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true,renderFrame:()=>{if(++draws===2)throw fault;return false;}}, async (h,pending) => {
+        const outcome=pending.then(value=>({value,error:undefined}),error=>({value:undefined,error}));
+        h.send('12\r');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        expect((await outcome).error).toBe(fault);
+      });
+    });
+    it('rejects once and releases listeners when mixed input cleanup fails', async () => {
+      await withMenu({question:'单选',options:[{label:'桌面'},{label:'手机'}]}, async (h,pending) => {
+        const fault=Error('actual handoff failure');
+        const pause=vi.spyOn(process.stdin,'pause').mockImplementation(()=>{throw fault;});
+        try {
+          const outcome=pending.then(value=>({value,error:undefined}),error=>({value:undefined,error}));
+          h.send('2\r');
+          expect(h.emitter.listenerCount('data')).toBe(0);
+          expect((await outcome).error).toBe(fault);
+        } finally { pause.mockRestore(); }
+      });
+    });
 
     it('shows option numbers and submits the corresponding single choice without Enter', async () => {
       await withMenu({question:'选择环境',options:[{label:'桌面'},{label:'手机'}]}, async (h,pending) => {

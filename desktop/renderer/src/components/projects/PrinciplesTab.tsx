@@ -1,3 +1,5 @@
+import type { ProxyHttpBody, ProjectPrinciple } from '../../api/types';
+import { principlesErrorMessage } from '../../lib/principles-error';
 /**
  * PrinciplesTab — project knowledge documents and concrete quality rules.
  */
@@ -13,16 +15,6 @@ import type { PrincipleFormData, RuleFormData } from './PrincipleEditModal';
 type PrincipleScenario = 'planning' | 'execution' | 'review' | 'delivery';
 type MainTab = 'knowledge' | 'rules';
 
-interface ProjectPrinciple {
-  id: string;
-  content: string;
-  scenarios: PrincipleScenario[];
-  source: 'manual' | 'memory';
-  kind?: 'knowledge' | 'rule';
-  enabled: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
 
 interface KnowledgeDocumentView {
   id: string;
@@ -91,17 +83,20 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocumentView | null>(null);
   const [extraction, setExtraction] = useState<ExtractionState | null>(null);
+  const [principleError, setPrincipleError] = useState('');
+  const errorMessage = useCallback((error: unknown) => principlesErrorMessage(error, { operationUnknown: t.projectsPrinciplesOperationUnknown, inputInvalid: t.projectsPrinciplesInputInvalid, projectionUnavailable: t.projectsPrinciplesProjectionUnavailable }) || (error instanceof Error ? error.message : t.projectsKnowledgeSaveFailed), [t]);
 
   const loadPrinciples = useCallback(async () => {
     try {
-      const api = getDesktopApi() as any;
-      if (!api?.listPrinciples) return;
+      const api = getDesktopApi();
+      if (!api?.listPrinciples) throw Error('principles_runtime_unavailable');
       const list = await api.listPrinciples();
-      setPrinciples(Array.isArray(list) ? list : []);
-    } catch {
-      setPrinciples([]);
+      setPrinciples(list);
+      setPrincipleError('');
+    } catch (error) {
+      setPrincipleError(errorMessage(error));
     }
-  }, []);
+  }, [errorMessage]);
 
   const loadQualityKnowledge = useCallback(async () => {
     try {
@@ -109,12 +104,12 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
       const raw = api?.kswarmProxyGet ? await api.kswarmProxyGet('/quality/knowledge') : null;
       const data = isRecord(raw) ? raw : null;
       if (!data) return;
-      const builtinPacks = Array.isArray(data.builtinPacks) ? data.builtinPacks as QualityPackView[] : [];
+      const builtinPacks = Array.isArray(data.builtinPacks) ? data.builtinPacks as unknown as QualityPackView[] : [];
       setQualityKnowledge({
         knowledgeDocuments: normalizeKnowledgeDocuments(data.knowledgeDocuments, builtinPacks),
         builtinPacks,
-        userOverlays: Array.isArray(data.userOverlays) ? data.userOverlays as QualityRuleView[] : [],
-        workspaceOverlays: Array.isArray(data.workspaceOverlays) ? data.workspaceOverlays as QualityRuleView[] : [],
+        userOverlays: Array.isArray(data.userOverlays) ? data.userOverlays as unknown as QualityRuleView[] : [],
+        workspaceOverlays: Array.isArray(data.workspaceOverlays) ? data.workspaceOverlays as unknown as QualityRuleView[] : [],
         conflicts: Array.isArray(data.conflicts) ? data.conflicts as QualityConflictView[] : [],
       });
     } catch {
@@ -158,11 +153,13 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
     || manualRulePrinciples.length > 0;
 
   const handleSaveKnowledge = async (principle: PrincipleFormData) => {
-    const api = getDesktopApi() as any;
-    if (!api?.savePrinciple) return;
-    const result = await api.savePrinciple(principle);
-    if (result?.success === false) throw new Error(result.error || t.projectsKnowledgeSaveFailed);
-    await loadPrinciples();
+    try {
+      const api = getDesktopApi();
+      if (!api?.savePrinciple) throw Error('principles_runtime_unavailable');
+      const result = await api.savePrinciple(principle);
+      if (!result.success) throw new Error(result.error || t.projectsKnowledgeSaveFailed);
+      await loadPrinciples();
+    } catch (error) { throw new Error(errorMessage(error)); }
   };
 
   const handleSaveRule = async (rule: RuleFormData) => {
@@ -192,31 +189,33 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
   };
 
   const handleDelete = async (id: string) => {
-    const api = getDesktopApi() as any;
-    if (!api?.deletePrinciple) return;
-    await api.deletePrinciple(id);
-    setConfirmDeleteId(null);
-    await loadPrinciples();
+    try {
+      const api = getDesktopApi();
+      if (!api?.deletePrinciple) throw Error('principles_runtime_unavailable');
+      const result = await api.deletePrinciple(id);
+      if (!result.success) throw Error('principles_operation_unknown');
+      setConfirmDeleteId(null);
+      await loadPrinciples();
+    } catch (error) { setPrincipleError(errorMessage(error)); }
   };
 
   const handleToggle = async (id: string, enabled: boolean) => {
     const p = principles.find(x => x.id === id);
     if (!p) return;
-    await handleSaveKnowledge({ ...p, enabled, updatedAt: Date.now() });
+    try { await handleSaveKnowledge({ ...p, enabled, updatedAt: Date.now() }); }
+    catch (error) { setPrincipleError(errorMessage(error)); }
   };
 
   const handleReclassify = async (id: string, kind: 'knowledge' | 'rule') => {
-    const api = getDesktopApi() as any;
-    if (!api?.savePrinciple) return;
     const p = principles.find(x => x.id === id);
     if (!p) return;
-    await api.savePrinciple({ ...p, kind, updatedAt: Date.now() });
-    await loadPrinciples();
+    try { await handleSaveKnowledge({ ...p, kind, updatedAt: Date.now() }); }
+    catch (error) { setPrincipleError(errorMessage(error)); }
   };
 
   const handleImport = async (entries: Array<{ id: string; content: string }>) => {
-    const api = getDesktopApi() as any;
-    if (!api?.savePrinciple) return;
+    const api = getDesktopApi();
+    if (!api?.savePrinciple) throw Error(errorMessage(Error('principles_runtime_unavailable')));
     const now = Date.now();
     for (const entry of entries) {
       const principle: ProjectPrinciple = {
@@ -228,7 +227,10 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
         createdAt: now,
         updatedAt: now,
       };
-      await api.savePrinciple(principle);
+      try {
+        const result = await api.savePrinciple(principle);
+        if (!result.success) throw Error(result.error || t.projectsKnowledgeSaveFailed);
+      } catch (error) { throw Error(errorMessage(error)); }
     }
     await loadPrinciples();
   };
@@ -282,6 +284,20 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
     }
   };
 
+  const failureNotice = principleError ? (
+    <div role="alert" className="m-6 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-status-error-text)]">
+      <p>{principleError}</p>
+      <button type="button" onClick={() => { void loadPrinciples(); }} className="mt-2 rounded-md border border-[var(--c-border-subtle)] px-2 py-1 text-xs">{t.projectsPrinciplesRefresh}</button>
+    </div>
+  ) : null;
+  if (!hasKnowledge && !hasRules && principleError) return (
+    <>
+      {failureNotice}
+      <PrincipleEditModal key="principle-edit" open={showEdit} principle={editingPrinciple} initialMode={editMode} onClose={() => setShowEdit(false)} onSave={handleSaveKnowledge} onSaveRule={handleSaveRule} />
+      <ImportMemoryModal key="principle-import" open={showImport} onClose={() => setShowImport(false)} onImport={handleImport} />
+    </>
+  );
+
   if (!hasKnowledge && !hasRules) {
     return (
       <>
@@ -313,14 +329,15 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
           </div>
         </div>
 
-        <PrincipleEditModal open={showEdit} principle={editingPrinciple} initialMode={editMode} onClose={() => setShowEdit(false)} onSave={handleSaveKnowledge} onSaveRule={handleSaveRule} />
-        <ImportMemoryModal open={showImport} onClose={() => setShowImport(false)} onImport={handleImport} />
+        <PrincipleEditModal key="principle-edit" open={showEdit} principle={editingPrinciple} initialMode={editMode} onClose={() => setShowEdit(false)} onSave={handleSaveKnowledge} onSaveRule={handleSaveRule} />
+        <ImportMemoryModal key="principle-import" open={showImport} onClose={() => setShowImport(false)} onImport={handleImport} />
       </>
     );
   }
 
   return (
     <>
+      {failureNotice}
       <div className="p-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex rounded-lg bg-[var(--c-bg-deep)] p-1">
@@ -410,8 +427,8 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
       {selectedDoc && renderKnowledgeDocumentModal(selectedDoc)}
       {extraction && renderExtractionModal(extraction)}
 
-      <PrincipleEditModal open={showEdit} principle={editingPrinciple} initialMode={editMode} onClose={() => setShowEdit(false)} onSave={handleSaveKnowledge} onSaveRule={handleSaveRule} />
-      <ImportMemoryModal open={showImport} onClose={() => setShowImport(false)} onImport={handleImport} />
+      <PrincipleEditModal key="principle-edit" open={showEdit} principle={editingPrinciple} initialMode={editMode} onClose={() => setShowEdit(false)} onSave={handleSaveKnowledge} onSaveRule={handleSaveRule} />
+      <ImportMemoryModal key="principle-import" open={showImport} onClose={() => setShowImport(false)} onImport={handleImport} />
     </>
   );
 
@@ -798,7 +815,7 @@ function deriveKnowledgeTitle(content: string): string {
 async function postQuality(path: string, body: unknown): Promise<any> {
   const api = getDesktopApi();
   if (!api?.kswarmProxyPost) throw new Error('IPC unavailable');
-  const data = await api.kswarmProxyPost(path, body);
+  const data = await api.kswarmProxyPost(path, body as ProxyHttpBody);
   const response = isRecord(data) ? data : null;
   if (data === null || data === undefined || response?.ok === false) {
     const errors = Array.isArray(response?.errors) ? response.errors.map((item) => String(item)).join(', ') : '';

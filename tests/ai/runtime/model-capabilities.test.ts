@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_CAPABILITIES,
   buildPromptCacheSegments,
   resolveModelCapabilities,
+  type CapabilityAwareAdapter,
 } from '../../../src/ai/runtime/model-capabilities.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
 
@@ -43,7 +44,7 @@ describe('model capabilities', () => {
       stream: async function* () {
         yield { type: 'done' } as const;
       },
-    });
+    } satisfies CapabilityAwareAdapter as CapabilityAwareAdapter);
 
     expect(capabilities.contextLimit).toBe(4096);
     expect(capabilities.compactThreshold).toBe(0.5);

@@ -1,3 +1,12 @@
+import type {ScheduledActionDto,ScheduledBindingDto,ScheduledLoopCreateDto} from '../../../shared/scheduled-timed-action-ipc-contract.js';
+export type { ScheduledTaskDto, ScheduledCreateDto, ScheduledUpdateDto, ScheduledUpdateResultDto, ScheduledActionDto, ScheduledRunDto, ScheduledBindingDto, ScheduledLoopCreateDto, ScheduledReminderDto, ScheduledReminderStatusDto } from '../../../shared/scheduled-timed-action-ipc-contract.js';
+export type { KnowledgeCollectionDto, KnowledgeSourceDto, KnowledgeCreateCollectionInput, KnowledgeAddSourceInput, KnowledgeCollectionStateDto, KnowledgeSourceContentInput, KnowledgeSourceContentDto, KnowledgeSearchInput, KnowledgeSearchResultDto } from '../../../shared/knowledge-ipc-contract.js';
+export type { ProjectPrincipleDto as ProjectPrinciple, PrincipleSaveInput, PrincipleSaveResult, PrincipleDeleteResult } from '../../../shared/principles-ipc-contract.js';
+import type { LoopCreateTemplateDto, LoopTemplatePatchDto, LoopDefinitionDto, UserLoopTemplateDto, CreateLoopTemplateResultDto, LoopConstraintDto, LoopAnomalyDto, LoopManagementRunResultDto } from '../../../shared/loop-management-ipc-contract.js';
+export type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../../../shared/collaboration-room-ipc-contract.js';
+export type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
+import type {LoopCompletionObservation} from '../../../shared/loop-current-view-types';
+export type {LoopPublicationActionDto as LoopPublicationAction,LoopPublicationActionResultDto as LoopPublicationActionResult,LoopPublicationStateDto as LoopPublicationStateView,StoredLoopPublicationConfigurationDto as StoredLoopPublicationConfiguration} from '../../../shared/loop-publication-ipc-contract.js';
 export type { GoalAttachmentRequest, GoalAttachmentSource } from '../../../shared/goal-attachment';
 export type {
   ArtifactWorkspaceEventName,
@@ -160,32 +169,10 @@ export interface CaptchaConfig { enabled: boolean; }
 export interface MemoryConfig { enabled: boolean; }
 export type ConnectorsSearchProvider = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
 export type ConnectorsFetchProvider = 'basic' | 'jina' | 'firecrawl';
-export interface ConnectorsConfig {
-  search: {
-    provider: ConnectorsSearchProvider;
-    tavilyApiKey?: string;
-    braveApiKey?: string;
-    firecrawlApiKey?: string;
-    searxngBaseUrl?: string;
-  };
-  fetch: {
-    provider: ConnectorsFetchProvider;
-    jinaApiKey?: string;
-    firecrawlApiKey?: string;
-    firecrawlBaseUrl?: string;
-  };
-}
+export type ConnectorsConfig = import('../../../shared/connectors-ipc-contract.js').ConnectorsConfigDto;
 export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
-export interface ConnectorsProviderRuntime {
-  provider_name: string;
-  runtime_state: 'ready' | 'missing_config' | 'invalid_config' | 'inactive' | 'not_implemented';
-  runtime_reason?: string;
-}
-export interface ConnectorsConfigSnapshot {
-  config: ConnectorsConfig;
-  loadStatus: ConnectorsLoadStatus;
-  providers: ConnectorsProviderRuntime[];
-}
+export type ConnectorsProviderRuntime = import('../../../shared/connectors-ipc-contract.js').ConnectorsRuntimeDto;
+export type ConnectorsConfigSnapshot = import('../../../shared/connectors-ipc-contract.js').ConnectorsSnapshotDto;
 export interface CreditsBalance { balance: number; }
 
 // Channel types
@@ -242,215 +229,50 @@ export type LoopDefinitionOrigin = 'built_in' | 'user_template';
 export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 export type EvidenceAnomalyStatus = 'open' | 'resolved' | 'ignored';
 
-export interface LoopDefinitionView {
-  id: string;
-  title: string;
-  description: string;
-  status: LoopDefinitionStatus;
-  origin?: LoopDefinitionOrigin;
-  activeRunId?: string;
-  deletedAt?: number;
-  deleteReason?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type LoopDefinitionView = LoopDefinitionDto;
 
 export type UserLoopTemplateKind = 'markdown_file' | 'task_completion';
 
-export interface UserLoopTemplateView {
-  loopId: string;
-  kind: UserLoopTemplateKind;
-  prompt: string;
-  outputDirectory: string;
-  outputFileName: string;
-  scheduleActionId?: string;
-  scheduleEnabled?: boolean;
-  scheduleTrigger?: Record<string, unknown>;
-  autoRunApproved?: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
+export type UserLoopTemplateView = UserLoopTemplateDto;
 
-export interface CreateUserLoopTemplateInputView {
-  loopId: string;
-  title: string;
-  description?: string;
-  kind: UserLoopTemplateKind;
-  prompt: string;
-  outputDirectory?: string;
-  outputFileName?: string;
-}
+export type CreateUserLoopTemplateInputView = LoopCreateTemplateDto;
 
-export interface CreateUserLoopTemplateResultView {
-  template: UserLoopTemplateView;
-  ignoredLegacyScheduleFields?: string[];
-}
+export type CreateUserLoopTemplateResultView = CreateLoopTemplateResultDto;
 
-export interface CreateLoopScheduleInputView {
-  id?: string;
-  loopId: string;
-  title: string;
-  description?: string;
-  trigger: Record<string, unknown>;
-}
+export type CreateLoopScheduleInputView = ScheduledLoopCreateDto;
 
-export interface LoopScheduleBindingView {
-  loopId: string;
-  kind: 'single' | 'multiple';
-  count: number;
-  activeCount: number;
-  actionIds: string[];
-  primaryActionId?: string;
-  schedules: Array<{
-    id: string;
-    title: string;
-    status: 'active' | 'paused';
-    trigger: Record<string, unknown>;
-    nextDueAt?: number;
-    updatedAt: number;
-  }>;
-}
+export type LoopScheduleBindingView = ScheduledBindingDto;
 
-export interface TimedActionView {
-  id: string;
-  title: string;
-  description?: string;
-  status: string;
-  trigger: Record<string, unknown>;
-  executor: Record<string, unknown>;
-  nextDueAt?: number;
-  createdAt: number;
-  updatedAt: number;
-}
+export type TimedActionView = ScheduledActionDto;
 
-export interface AutomationsConfigView {
-  globalBackgroundAutoRunEnabled: boolean;
-}
+export type AutomationsConfigView = import('../../../shared/automation-config-ipc-contract.js').AutomationConfigDto;
+export type AutomationOverviewSnapshotView = import('../../../shared/automation-config-ipc-contract.js').AutomationOverviewDto;
+export type AutomationRecentFailureItemView = AutomationOverviewSnapshotView['recentFailures'][number];
+export type AutomationRecentFailureSourceView = AutomationRecentFailureItemView['source'];
 
-export type AutomationRecentFailureSourceView = 'loop_run' | 'timed_action_run';
+export type AutomationRunHistoryItemView = import('../../../shared/loop-current-view-ipc-contract.js').AutomationRunHistoryDto;
 
-export interface AutomationRecentFailureItemView {
-  id: string;
-  source: AutomationRecentFailureSourceView;
-  ownerId: string;
-  title: string;
-  status: string;
-  message?: string;
-  occurredAt: number;
-  loopId?: string;
-  loopOrigin?: 'built_in' | 'user_template';
-  actionId?: string;
-  actionAvailableInSchedules?: boolean;
-}
+export type {LoopOutputActionResultView,LoopOutputPreviewView,LoopTaskResultView} from '../../../shared/loop-output-ipc-contract.js';
 
-export interface AutomationOverviewSnapshotView {
-  generatedAt: number;
-  sourceVersions: {
-    loopStore: number;
-    timedActionStore: number;
-  };
-  globalBackgroundAutoRunEnabled: boolean;
-  totals: {
-    loops: number;
-    userLoops: number;
-    schedules: number;
-    activeSchedules: number;
-    diagnostics: number;
-    recentFailures: number;
-  };
-  recentFailures: AutomationRecentFailureItemView[];
-}
+export type LoopRunView = import('../../../shared/loop-current-view-ipc-contract.js').LoopRunObservationDto;
 
-export interface AutomationRunHistoryItemView {
-  id: string;
-  automationKind: 'loop' | 'notify' | 'agent_task';
-  scheduleRunId?: string;
-  loopRunId?: string;
-  actionId?: string;
-  loopId?: string;
-  title: string;
-  startedAt: number;
-  finishedAt?: number;
-  status: 'success' | 'failed' | 'blocked' | 'skipped' | 'running';
-  schedulerStatus?: string;
-  loopStatus?: LoopRunStatus;
-  failureKind?: string;
-  message?: string;
-  outputPreviewAvailable?: boolean;
-}
+export type EvidenceAnomalyView = LoopAnomalyDto;
 
-export type LoopOutputActionResultView =
-  | { ok: true; loopId: string; pathLabel: string }
-  | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
-
-export type LoopOutputPreviewView =
-  | { ok: true; loopId: string; pathLabel: string; content: string; sizeBytes: number; truncated: boolean }
-  | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
-
-export type LoopTaskResultView =
-  | { ok: true; loopId: string; runId: string; content: string; taskId?: string }
-  | { ok: false; loopId: string; error: string; message?: string; runId?: string; taskId?: string };
-
-export interface LoopRunView {
-  id: string;
-  loopId: string;
-  status: LoopRunStatus;
-  trigger: { kind: string; [key: string]: unknown };
-  evidenceIds: string[];
-  startedAt: number;
-  finishedAt?: number;
-  updatedAt: number;
-  failureKind?: string;
-  message?: string;
-  summary?: string;
-  nextActionKind?: string;
-  nextActionSummary?: string;
-}
-
-export interface EvidenceAnomalyView {
-  id: string;
-  loopId: string;
-  ownerKind: string;
-  ownerId: string;
-  kind: string;
-  status: EvidenceAnomalyStatus;
-  firstSeenAt: number;
-  lastSeenAt: number;
-  lastResolvedAt?: number;
-  seenCount: number;
-  ignoredUntil?: number;
-  message: string;
-  evidenceIds: string[];
-  metadata: Record<string, unknown>;
-}
-
-export type RunLoopNowResultView =
-  | { status: 'success'; run: LoopRunView }
-  | { status: 'blocked'; run: LoopRunView }
-  | { status: 'failed'; run: LoopRunView }
-  | { status: 'already_running'; activeRunId: string }
-  | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
+export type RunLoopNowResultView = LoopManagementRunResultDto;
 
 export interface UploadedThreadAttachment { id: string; fileName: string; fileSize: number }
 
 export type LearnedConstraintSourceView = 'llm_extraction' | 'rule_extraction' | 'user_manual';
 export type LearnedConstraintDeactivationReasonView = 'user' | 'stale' | 'ineffective' | 'overflow' | 'superseded';
 
-export interface LearnedConstraintView {
-  id: string;
-  loopId: string;
-  source: LearnedConstraintSourceView;
-  rule: string;
-  sourceRunId: string;
-  failureKind: string | null;
-  failureReason: string | null;
-  active: boolean;
-  hitCount: number;
-  consecutiveIneffectiveCount: number;
-  createdAt: number;
-  updatedAt: number;
-  lastHitAt: number | null;
-  supersededBy: string | null;
-  deactivationReason: LearnedConstraintDeactivationReasonView | null;
-  extractionContext: string | null;
-}
+export type LearnedConstraintView = LoopConstraintDto;
+
+export type { AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../../../shared/assistant-ipc-contract';
+
+export type { ProjectTeamPlanItemDto, ProjectTeamPlanDto, ProjectTeamOperationDto } from '../../../shared/kswarm-team-ipc-contract';
+
+export type { KSwarmProjectFactDto, KSwarmProjectModeResultDto, KSwarmProjectDeleteResultDto, KSwarmAgentFactDto, KSwarmProbeFactDto, KSwarmProjectCreateDto, KSwarmAgentCreateDto } from '../../../shared/kswarm-project-agent-ipc-contract';
+
+export type { ProxyJsonResult, ProxyTextResult, ProxyDeleteResult, ProxyHttpBody, ProxyStreamResult, ProxyStatusResult, ProxyHealthResult } from '../../../shared/kswarm-proxy-ipc-contract';
+
+export type { ModelConfigResult, SaveModelConfigInput, UpdateModelRuntimeInput, SystemOneConfigResult, SystemOneConfigPatch, ManagedAgentInput, ManagedAgentResult, ProviderConnectionInput, ProviderConnectionResult, AvailableModelResult } from '../../../shared/model-provider-ipc-contract.js';

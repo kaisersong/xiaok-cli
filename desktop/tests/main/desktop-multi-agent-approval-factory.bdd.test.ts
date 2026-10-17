@@ -10,26 +10,34 @@ import type { MultiAgentGroupSnapshot } from '../../shared/multi-agent-types.js'
 import type { MultiAgentCommandSequencer } from '../../electron/desktop-multi-agent-mailbox.js';
 import { DesktopMultiAgentWorktrees } from '../../electron/desktop-multi-agent-worktrees.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
 
 // Source-mode Vitest has no fixed .js artifact. Only resolve that URL to the
 // compiled production entry; native execution, timeout and exit remain real.
-const nativeWorker = vi.hoisted(() => ({ output: '', root: '', starts: 0, exits: 0 }));
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
   return { ...actual, Worker: class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
+      const protectionMapped = String(filename) === protectionSource;
       if (mapped && !nativeWorker.output) throw new Error('compiled production Worker is not ready');
-      super(mapped ? nativeWorker.output : filename, options);
-      if (mapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
+      if (protectionMapped && !nativeWorker.protectionOutput) throw Error('fresh compiled protection Worker is required');
+      super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
+      if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
   } };
 });
-beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); });
+beforeAll(async () => {
+  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+});
 afterAll(() => {
   try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
-  finally { if (nativeWorker.root) rmSync(nativeWorker.root, { recursive: true, force: true, maxRetries: 3 }); }
+  finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
 });
 
 type Approval = { approvalId: string; agentId: string; turnId: string; status: string; persistenceState: string; canDecide: boolean };
@@ -111,6 +119,9 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
     expect(readFileSync(effect, 'utf8')).toBe('SAME');
     await vi.waitFor(() => expect(requests).toBe(4));
     await f.services.cancelTask(task.taskId, 'test-cleanup');
+    release.resolve();
+    await vi.waitFor(async () => expect((await snapshot()).agents.find(agent => agent.id === `root_${initial.group!.groupId}`))
+      .toMatchObject({ executionActive: false, resourcesReleased: true, cleanupPending: false }));
     const next = await f.services.createTask({ prompt: 'New task with the same operation.', permissionMode: 'default', materials: [], context: { threadId: 'approval-thread' } });
     await vi.waitFor(async () => expect((await snapshot()).pendingApprovalCount).toBe(1));
     expect(requests).toBe(5);

@@ -1,3 +1,4 @@
+import type { ProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 export type OpenAIResponseInputItem = Readonly<Record<string, unknown>>;
 export type OpenAIResponseTool = Readonly<Record<string, unknown>>;
 export interface OpenAINativeUsage {
@@ -14,6 +15,7 @@ export interface OpenAINativeResponseResult {
     elapsedMs: number;
 }
 interface OpenAINativeRequestParams {
+    providerDisclosure?: ProviderDisclosureContext;
     apiKey: string;
     baseUrl: string;
     model: string;

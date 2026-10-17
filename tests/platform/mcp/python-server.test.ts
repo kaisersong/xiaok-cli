@@ -45,6 +45,7 @@ describe('built-in slide renderer Python runtime', () => {
       canImportMcpV2: async () => true,
     });
 
+    if (resolved.type !== 'stdio') throw new Error('expected_stdio_slide_renderer_config');
     expect(resolved.command).toBe('C:\\Users\\test\\.xiaok\\runtime\\python-env\\Scripts\\python.exe');
   });
 

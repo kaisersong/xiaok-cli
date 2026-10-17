@@ -262,7 +262,7 @@ describe('config commands', () => {
       // K2.6 有自己的官方窗口（262,144，与 K3 恰好相同），所以不能只看 contextLimit；
       // 区分点是 K3 独有的 reasoning 策略与 constraints。
       expect(entry.runtimeOptions?.reasoningEffort).toBeUndefined();
-      expect(entry.runtimeConstraints).toBeUndefined();
+      expect('runtimeConstraints' in entry ? entry.runtimeConstraints : undefined).toBeUndefined();
     });
 
     it('creates model from provider/model syntax', async () => {

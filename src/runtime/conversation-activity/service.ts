@@ -14,6 +14,20 @@ export class ConversationActivityService {
   private readonly subscribers = new Set<{ threadId: string | null; actor: ActivityActor; handler: (change: ActivityChange) => void }>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private disposed = false;
+  private closing?: Promise<void>;
+  private readonly drainWork = new Set<Promise<void>>();
+  /** Reserve ownership before any synchronous producer prefix can reenter close. */
+  private own(begin: () => Promise<void>): Promise<void> {
+    let completed!: () => void, failed!: (error: unknown) => void;
+    const reservation = new Promise<void>((resolve, reject) => { completed = resolve; failed = reject; });
+    this.drainWork.add(reservation);
+    void reservation.then(() => { this.drainWork.delete(reservation); }, () => {
+      this.drainWork.delete(reservation);
+    });
+    try { const raw = begin(); void raw.then(completed, failed); return raw; }
+    catch (error) { failed(error); return reservation; }
+  }
+
   private reporting: Promise<void> | undefined;
   private notifying: Promise<void> | undefined;
   private retentionTicks = 0;
@@ -254,8 +268,10 @@ export class ConversationActivityService {
   reportDue(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (this.reporting) return this.reporting;
-    const pending = this.generateReports().finally(() => { if (this.reporting === pending) this.reporting = undefined; });
-    this.reporting = pending; return pending;
+    return this.own(() => {
+      const pending = this.generateReports().finally(() => { if (this.reporting === pending) this.reporting = undefined; });
+      this.reporting = pending; return pending;
+    });
   }
 
   private async generateReports(): Promise<void> {
@@ -278,8 +294,10 @@ export class ConversationActivityService {
   notifyPending(): Promise<void> {
     if (this.disposed || !this.options.notify) return Promise.resolve();
     if (this.notifying) return this.notifying;
-    const pending = this.deliverNotifications().finally(() => { if (this.notifying === pending) this.notifying = undefined; });
-    this.notifying = pending; return pending;
+    return this.own(() => {
+      const pending = this.deliverNotifications().finally(() => { if (this.notifying === pending) this.notifying = undefined; });
+      this.notifying = pending; return pending;
+    });
   }
 
   private async deliverNotifications(): Promise<void> {
@@ -320,6 +338,22 @@ export class ConversationActivityService {
     this.timer.unref?.();
   }
 
+  /** Seals scheduling synchronously and waits actual owned work; never fabricates a drain ACK. */
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    let completed!: () => void, failed!: (error: unknown) => void;
+    this.closing = new Promise<void>((resolve, reject) => { completed = resolve; failed = reject; });
+    const sealFailures: unknown[] = [];
+    try { this.dispose(); } catch (error) { sealFailures.push(error); }
+    const active = [...this.drainWork];
+    void Promise.allSettled(active).then(outcomes => {
+      const failures = [...sealFailures,
+        ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+      if (failures.length) failed(new AggregateError([...new Set(failures)], 'activity_service_drain_failed'));
+      else completed();
+    }, failed);
+    return this.closing;
+  }
   dispose(): void {
     this.disposed = true;
     if (this.timer) clearInterval(this.timer);

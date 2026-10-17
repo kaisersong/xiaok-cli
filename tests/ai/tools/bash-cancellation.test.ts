@@ -25,6 +25,7 @@ describe('bash cancellation', () => {
     const pending = bashTool.execute({ command: 'echo running' }, { signal: controller.signal } as never);
     const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     void pending.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(setImmediate); // let execute() spawn and register the abort listener
     controller.abort();
     killer.emit('error', Object.assign(new Error('denied'), { code: 'EPERM' }));
     child.emit('error', Object.assign(new Error('kill denied'), { code: 'EPERM' }));
@@ -44,7 +45,9 @@ describe('bash cancellation', () => {
     void pending.then(() => { settled = true; });
     if (reason === 'elevation') child.stdout.write('requires administrator privileges');
     else await new Promise((resolve) => setTimeout(resolve, 10));
-    await Promise.resolve();
+    // execute() awaits compoundPhase.beforeCommandStart before attaching stream
+    // listeners; give the coroutine a macrotask to reach the spawned-pending state.
+    await new Promise(setImmediate);
     expect(settled).toBe(false);
     child.emit('close', null);
     expect(await pending).toContain(reason === 'timeout' ? '超时' : '管理员权限');
@@ -68,6 +71,7 @@ describe('bash cancellation', () => {
     const pending = bashTool.execute({ command: 'echo running' }, { signal: controller.signal } as never);
     const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     void pending.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(setImmediate); // let execute() spawn and register the abort listener
     controller.abort();
     await Promise.resolve();
     expect(settled).toBe(false);

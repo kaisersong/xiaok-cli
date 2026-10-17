@@ -1,5 +1,5 @@
 import { getSupportedModelReasoningEfforts } from './model-reasoning-effort.js';
-import type { Config, LegacyConfig } from '../../types.js';
+import type { ConfigInput } from '../../types.js';
 import { normalizeConfig } from './normalize.js';
 import { findCatalogModel, getProviderProfile } from './registry.js';
 import type { ModelRuntimeOptions, ProtocolId } from './types.js';
@@ -39,7 +39,7 @@ export class MissingProviderApiKeyError extends Error {
   }
 }
 
-export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, requestedModelId?: string): ResolvedModelBinding {
+export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedModelId?: string): ResolvedModelBinding {
   const config = normalizeConfig(rawConfig);
   const { modelId, providerId, modelEntry, providerConfig } = resolveConfiguredModelBinding(config, requestedModelId);
   const providerProfile = getProviderProfile(providerId);

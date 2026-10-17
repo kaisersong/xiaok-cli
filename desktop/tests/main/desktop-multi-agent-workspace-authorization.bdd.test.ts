@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -114,11 +114,16 @@ describe('BDD W9/W12/W16: real factory workspace authority and reload recovery',
   });
 
   it.each(['committed-deny', 'uncommitted-deny', 'retired-receipt'] as const)('W9/W16 Given the actual previous owner exits without dispose (%s), Then boot fencing reads only retained durable facts and never replays an old operation', async mode => {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-auth-crash-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-auth-crash-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const loader = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
-    const child = await promisify(execFile)(process.execPath, ['--import', loader,
-      fileURLToPath(new URL('../fixtures/multi-agent-authorization-crash.mts', import.meta.url)), root, mode], { timeout: 20_000, maxBuffer: 256 * 1024 });
+    const accountRoot:unknown=inject('profileTestAccountRoot' as never);if(typeof accountRoot!=='string')throw Error('test_profile_account_root_required');
+    const childHome=realpathSync(mkdtempSync(join(accountRoot,'account-'))),preload=fileURLToPath(new URL('../fixtures/authorization-test-account-preload.mjs',import.meta.url));
+    const child = await promisify(execFile)(process.execPath, ['--import', preload, '--import', loader,
+      fileURLToPath(new URL('../fixtures/multi-agent-authorization-crash.mts', import.meta.url)), root, mode, accountRoot, childHome], { timeout: 20_000, maxBuffer: 256 * 1024 });
+    const accountLine=child.stdout.split('\n').find(value=>value.startsWith('FIXTURE_ACCOUNT '));expect(accountLine).toBeTruthy();
+    const account=JSON.parse(accountLine!.slice('FIXTURE_ACCOUNT '.length));expect(account).toMatchObject({home:childHome,accountRoot,nativeIdentityPreserved:true,realRegistryUnchanged:true});expect(account.realBeforeDigest).toBe(account.realAfterDigest);expect(account.childRegistry).toEqual(expect.arrayContaining([expect.objectContaining({kind:'file'})]));
+
     const line = child.stdout.split('\n').find(value => value.startsWith('FIXTURE_RESULT '));
     expect(line).toBeTruthy();
     const old = JSON.parse(line!.slice('FIXTURE_RESULT '.length)) as {

@@ -1,50 +1,48 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocale } from '../../contexts/LocaleContext'
 import { SettingsSection } from './_SettingsSection'
 
-interface PluginMcpServer {
-  name: string
-  pluginName: string
-  toolCount: number
-  connected: boolean
-  enabled: boolean
-}
-
-interface AvailablePlugin {
-  name: string
-  display_name: string
-  description: string
-  version: string
-  installed: boolean
-}
+import type { PluginMcpServerDto, AvailablePluginDto } from '../../../../shared/plugin-catalog-ipc-contract';
 
 export function PluginsSettings() {
   const { t } = useLocale()
   const ds = t.desktopSettings
-  const [servers, setServers] = useState<PluginMcpServer[]>([])
-  const [available, setAvailable] = useState<AvailablePlugin[]>([])
+  const [servers, setServers] = useState<PluginMcpServerDto[]>([])
+  const [available, setAvailable] = useState<AvailablePluginDto[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [installing, setInstalling] = useState<string | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
 
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false)
+  const readGeneration = useRef(0)
+  const pendingRead = useRef<number | null>(null)
+  const manualReread = useRef(false)
   const loadData = useCallback(async () => {
+    if (pendingRead.current !== null) { manualReread.current = true; return }
+    const generation = ++readGeneration.current
+    pendingRead.current = generation
     try {
-      const [serversList, availableList] = await Promise.all([
+      const [serversList, availableList] = await Promise.allSettled([
         window.xiaokDesktop.listPluginMcpServers(),
         window.xiaokDesktop.listAvailablePlugins(),
       ])
-      setServers(serversList)
-      setAvailable(availableList)
-    } catch {
-      setServers([])
-      setAvailable([])
+      if (generation !== readGeneration.current) return
+      if (serversList.status === 'fulfilled') setServers(serversList.value)
+      if (availableList.status === 'fulfilled') setAvailable(availableList.value)
+      setCatalogUnavailable(serversList.status === 'rejected' || availableList.status === 'rejected')
     } finally {
-      setLoading(false)
+      if (pendingRead.current === generation) {
+        pendingRead.current = null; setLoading(false)
+        if (manualReread.current) { manualReread.current = false; void loadData() }
+      }
     }
   }, [])
 
-  useEffect(() => { void loadData() }, [loadData])
+  useEffect(() => {
+    void loadData()
+    return () => { readGeneration.current += 1; pendingRead.current = null; manualReread.current = false }
+  }, [loadData])
 
   const handleInstall = useCallback(async (name: string) => {
     setInstalling(name)
@@ -69,13 +67,14 @@ export function PluginsSettings() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12 text-sm text-[var(--c-text-secondary)]">
-        Loading...
+        {ds.pluginsCatalogLoading}
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
+      {catalogUnavailable && <div role="alert" className="text-xs text-red-500"><p>{ds.pluginsCatalogUnavailable}</p><button type="button" onClick={() => void loadData()}>{ds.pluginsCatalogRetry}</button></div>}
       <SettingsSection title={ds.pluginsInstalledTitle}>
         {servers.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-sm text-[var(--c-text-secondary)]">
@@ -89,14 +88,14 @@ export function PluginsSettings() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--c-text-heading)]">{server.name}</span>
                     {server.connected && (
-                      <span className="inline-block size-2 rounded-full bg-green-500" title="Connected" />
+                      <span className="inline-block size-2 rounded-full bg-green-500" title={ds.mcpConnected} />
                     )}
                     {!server.connected && server.enabled && (
-                      <span className="inline-block size-2 rounded-full bg-yellow-500" title="Not connected" />
+                      <span className="inline-block size-2 rounded-full bg-yellow-500" title={ds.mcpDisconnected} />
                     )}
                   </div>
                   <span className="text-xs text-[var(--c-text-tertiary)]">
-                    {server.pluginName} · {server.toolCount} tools
+                    {server.pluginName} · {ds.pluginsCatalogToolCount(server.toolCount)}
                   </span>
                 </div>
                 {/* Design v58 §7.2: the old toggle only mutated a view model — there was
@@ -111,7 +110,7 @@ export function PluginsSettings() {
                       : 'bg-[var(--c-bg-deep)] text-[var(--c-text-tertiary)]'
                   }`}
                 >
-                  {server.connected ? 'connected' : 'unavailable'}
+                  {server.connected ? ds.mcpConnected : ds.mcpDisconnected}
                 </span>
               </div>
             ))}

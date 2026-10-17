@@ -1,3 +1,4 @@
+import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
 import fg from 'fast-glob';
 import { readFileSync, statSync } from 'fs';
@@ -139,7 +140,7 @@ export const grepTool: Tool = {
       required: ['pattern'],
     },
   },
-  async execute(input) {
+  async execute(input, toolContext) {
     const {
       pattern,
       path: searchPath = process.cwd(),
@@ -175,8 +176,9 @@ export const grepTool: Tool = {
         ...(output_mode === 'count' ? ['-c'] : []),
         ...(type ? ['-t', type] : []),
         ...(fileGlob ? ['-g', fileGlob] : []),
-        pattern,
-        searchPath,
+        ...(isNativeReadonlyExecutionContext(toolContext) ? ['--no-config', '--no-pre'] : []),
+        '-e', pattern,
+        '--', searchPath,
       ]
       : hasGrep
         ? [
@@ -184,9 +186,9 @@ export const grepTool: Tool = {
         ...(context > 0 ? ['-C', String(context)] : []),
         ...(output_mode === 'files' ? ['-l'] : []),
         ...(output_mode === 'count' ? ['-c'] : []),
-        pattern,
         ...(fileGlob ? ['--include', fileGlob] : []),
-        searchPath,
+        '-e', pattern,
+        '--', searchPath,
       ]
         : [];
 

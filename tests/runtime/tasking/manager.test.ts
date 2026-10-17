@@ -36,7 +36,7 @@ describe('runtime task manager', () => {
       prompt: input.prompt,
     }));
 
-    const manager = new SerialTaskManager({
+    const manager = new SerialTaskManager<DemoRequest, DemoTask, { sessionId: string; prompt: string }>({
       store,
       createTaskInput: (request, sessionId) => ({
         sessionId,
@@ -97,7 +97,7 @@ describe('runtime task manager', () => {
       prompt: input.prompt,
     }));
 
-    const manager = new SerialTaskManager({
+    const manager = new SerialTaskManager<DemoRequest, DemoTask, { sessionId: string; prompt: string }>({
       store,
       createTaskInput: (request, sessionId) => ({
         sessionId,

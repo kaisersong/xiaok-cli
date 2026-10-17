@@ -1,3 +1,4 @@
+import {types} from 'node:util';
 import { resolve, win32 } from 'node:path';
 import { resolveRealPath } from '../../ai/permissions/workspace.js';
 
@@ -70,6 +71,25 @@ export function extractSandboxAllowedPaths(rules: string[]): string[] {
   return prefixes;
 }
 
+const readonlyPolicyProofs=new WeakMap<object,()=>boolean>();
+const arrayPrototype=Array.prototype, some=arrayPrototype.some, includes=arrayPrototype.includes, push=arrayPrototype.push;
+const stringReplace=String.prototype.replace;
+function safeRuleArray(value:unknown):boolean{
+ if(!value||typeof value!=='object'||types.isProxy(value)||!Array.isArray(value)||Object.getPrototypeOf(value)!==arrayPrototype)return false;
+ if(arrayPrototype.some!==some||arrayPrototype.includes!==includes||arrayPrototype.push!==push||String.prototype.replace!==stringReplace)return false;
+ const descriptors=Object.getOwnPropertyDescriptors(value);
+ return Reflect.ownKeys(descriptors).every(key=>key==='length'||typeof key==='string'&&/^(0|[1-9][0-9]*)$/.test(key)&&'value' in descriptors[key]&&typeof descriptors[key].value==='string');
+}
+function safeNetworkOption(options:object):boolean{
+ if(types.isProxy(options)||![Object.prototype,null].includes(Object.getPrototypeOf(options)))return false;
+ const descriptor=Object.getOwnPropertyDescriptor(options,'network');
+ if(!descriptor)return Object.getOwnPropertyDescriptor(Object.prototype,'network')===undefined;
+ return 'value' in descriptor&&[undefined,'allow','deny'].includes(descriptor.value);
+}
+export function isReadonlySandboxPolicy(policy:unknown):boolean{
+ if(!policy||typeof policy!=='object')return false;
+ const proof=readonlyPolicyProofs.get(policy);return proof?.()===true;
+}
 export function createSandboxPolicy(options: SandboxPolicyOptions) {
   const legacyAllowlist = options.allowedPaths
     ? Array.from(options.allowedPaths)
@@ -78,7 +98,7 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
   const denylist = options.pathDenylist ?? [];
   const allowedEnv = new Set(options.allowedEnv ?? []);
 
-  return {
+  const policy = {
     checkPath(path: string): SandboxDecision {
       try {
         if (matchesPrefix(denylist, path)) {
@@ -112,4 +132,11 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
       }
     },
   };
+  const functions=Object.getOwnPropertyDescriptors(policy), prototype=Object.getPrototypeOf(policy);
+  readonlyPolicyProofs.set(policy,()=>{
+    if(Object.getPrototypeOf(policy)!==prototype||Reflect.ownKeys(policy).length!==Reflect.ownKeys(functions).length)return false;
+    for(const key of Object.keys(functions)){const current=Object.getOwnPropertyDescriptor(policy,key);if(!current||!('value' in current)||current.value!==functions[key].value)return false;}
+    return safeRuleArray(allowlist)&&safeRuleArray(denylist)&&safeNetworkOption(options);
+  });
+  return policy;
 }

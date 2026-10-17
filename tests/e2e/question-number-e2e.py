@@ -5,7 +5,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import shutil
 import tempfile
 
 spec = importlib.util.spec_from_file_location('terminal_e2e', Path(__file__).with_name('tmux-e2e.py'))
@@ -15,7 +14,7 @@ spec.loader.exec_module(e2e)
 
 def main(cli_entry=None):
     repo = Path(__file__).resolve().parents[2]
-    root = Path(tempfile.mkdtemp(prefix='xiaok-question-number-e2e-'))
+    root = Path(tempfile.mkdtemp(prefix='xiaok-question-number-e2e-')).resolve()
     project, config, home = (root / name for name in ('project', 'config', 'home'))
     project.mkdir(); home.mkdir()
     options = [{'label': '桌面环境'}, {'label': '手机环境'}]
@@ -77,7 +76,10 @@ def main(cli_entry=None):
         print(tty.capture())
         raise
     finally:
-        tty.stop(); server.close(); shutil.rmtree(root)
+        tty.stop(); server.close()
+        # Killing tmux does not confirm that every child writer has exited.
+        # Preserve this owned fixture so teardown cannot hide the test failure.
+        print(f'Fixture retained: {root}')
 
 
 if __name__ == '__main__':

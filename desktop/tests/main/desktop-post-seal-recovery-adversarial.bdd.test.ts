@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopMultiAgentService } from '../../electron/desktop-multi-agent-service.js';
@@ -23,8 +23,8 @@ let seed: Seed;
 const fixtures: Array<{ close(): Promise<void> }> = [];
 
 async function crashSeed(): Promise<Seed> {
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-recovery-adversarial-seed-'));
-  const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, 'snapshot'], {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-recovery-adversarial-seed-')));
+  const child = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, 'snapshot', inject('profileTestAccountRoot'), userInfo().homedir], {
     cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -57,7 +57,7 @@ async function crashSeed(): Promise<Seed> {
 }
 
 function open() {
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-recovery-adversarial-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-recovery-adversarial-')));
   cpSync(seed.root, root, { recursive: true });
   const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
   const snapshots = new FileTaskSnapshotStore(join(root, 'tasks'));

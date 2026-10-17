@@ -268,7 +268,7 @@ describe('CUA activation ABI verification', () => {
     const catalog = realisticCatalog().filter((op) => op.name !== 'set_value');
     const result = verifyBackendAbi(catalog);
     expect(result.ok).toBe(false);
-    expect((result as { problems: string[] }).problems.join(' ')).toContain('missing backend operation set_value');
+    expect((result as { problems: readonly string[] }).problems.join(' ')).toContain('missing backend operation set_value');
   });
 
   it('fails activation when a required set drifts', () => {
@@ -276,7 +276,7 @@ describe('CUA activation ABI verification', () => {
       op.name === 'double_click' ? { ...op, required: [] } : op
     ));
     const result = verifyBackendAbi(catalog);
-    expect((result as { problems: string[] }).problems.join(' ')).toContain('double_click required set');
+    expect((result as { problems: readonly string[] }).problems.join(' ')).toContain('double_click required set');
   });
 
   it('fails activation when the backend-only click action gains an enum', () => {
@@ -286,13 +286,13 @@ describe('CUA activation ABI verification', () => {
         : op
     ));
     const result = verifyBackendAbi(catalog);
-    expect((result as { problems: string[] }).problems.join(' ')).toContain('enum-free string');
+    expect((result as { problems: readonly string[] }).problems.join(' ')).toContain('enum-free string');
   });
 
   it('fails activation if the catalog ever grows a standalone screenshot op', () => {
     const catalog = [...realisticCatalog(), { name: 'screenshot', required: [], properties: {} }];
     const result = verifyBackendAbi(catalog);
-    expect((result as { problems: string[] }).problems.join(' ')).toContain('unexpectedly exposes screenshot');
+    expect((result as { problems: readonly string[] }).problems.join(' ')).toContain('unexpectedly exposes screenshot');
   });
 
   it('covers all thirteen public actions', () => {

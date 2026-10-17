@@ -59,7 +59,8 @@ describe('skill eval runtime sync', () => {
     };
     hooks.emit({ type: 'tool_started', sessionId: 'sess_eval_sync', turnId: 'turn_1', toolName: 'intent_create', toolInput: createdInput });
     const created = JSON.parse(await tools.get('intent_create')!.execute(createdInput)) as { intentId: string; activeStepId: string };
-    hooks.emit({ type: 'tool_finished', sessionId: 'sess_eval_sync', turnId: 'turn_1', toolName: 'intent_create', ok: true });
+    // Hand-authored event IDs do not attest to AgentRuntime or SDK invocations.
+    hooks.emit({ type: 'tool_finished', sessionId: 'sess_eval_sync', turnId: 'turn_1', invocationId: 'fixture_skill_eval_create', toolName: 'intent_create', ok: true });
     await flush();
 
     hooks.emit({
@@ -81,7 +82,7 @@ describe('skill eval runtime sync', () => {
     };
     hooks.emit({ type: 'tool_started', sessionId: 'sess_eval_sync', turnId: 'turn_1', toolName: 'intent_step_update', toolInput: runningInput });
     await tools.get('intent_step_update')!.execute(runningInput);
-    hooks.emit({ type: 'tool_finished', sessionId: 'sess_eval_sync', turnId: 'turn_1', toolName: 'intent_step_update', ok: true });
+    hooks.emit({ type: 'tool_finished', sessionId: 'sess_eval_sync', turnId: 'turn_1', invocationId: 'fixture_skill_eval_running', toolName: 'intent_step_update', ok: true });
     await flush();
 
     const completedInput = {
@@ -94,7 +95,7 @@ describe('skill eval runtime sync', () => {
     };
     hooks.emit({ type: 'tool_started', sessionId: 'sess_eval_sync', turnId: 'turn_1', toolName: 'intent_step_update', toolInput: completedInput });
     await tools.get('intent_step_update')!.execute(completedInput);
-    hooks.emit({ type: 'tool_finished', sessionId: 'sess_eval_sync', turnId: 'turn_1', toolName: 'intent_step_update', ok: true });
+    hooks.emit({ type: 'tool_finished', sessionId: 'sess_eval_sync', turnId: 'turn_1', invocationId: 'fixture_skill_eval_completed', toolName: 'intent_step_update', ok: true });
     await flush();
 
     const state = await skillEvalStore.load('sess_eval_sync');

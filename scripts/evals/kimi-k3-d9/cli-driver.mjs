@@ -309,7 +309,9 @@ export function createCliProductLaunch(input) {
     cwd: input.workspace,
     env: {
       HOME: input.homeDir,
+      USERPROFILE: input.homeDir,
       XIAOK_CONFIG_DIR: input.configDir,
+      XIAOK_TEST_ACCOUNT_HOME: input.homeDir,
       XIAOK_TRACE_DIR: input.traceDir,
       XIAOK_D9_RUNTIME_GUARD_POLICY: canonicalize({
         closureRoot: input.frozenClosure.closureRoot,

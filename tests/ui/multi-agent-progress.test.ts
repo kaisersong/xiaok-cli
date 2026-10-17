@@ -3,8 +3,9 @@ import { MultiAgentProgressView } from '../../src/ui/multi-agent-progress.js';
 import type { MultiAgentEvent } from '../../src/ai/agents/multi-agent-coordinator.js';
 
 function event(id: string, taskName: string, status = 'running'): MultiAgentEvent {
+  // Synthetic renderer input for a resident child; no coordinator or session is instantiated.
   return { kind: 'status', timestamp: 1_000, agent: { id, taskName, canonicalName: `/root/${taskName}`, parentId: 'main', depth: 1,
-    status: status as 'running', unreadMessages: 0, turn: 1, startedAt: 1_000, lastActivityAt: 2_000, phase: 'tool', currentTool: 'read', executionActive: status === 'running', resourcesReleased: false } };
+    status: status as 'running', unreadMessages: 0, turn: 1, startedAt: 1_000, lastActivityAt: 2_000, phase: 'tool', currentTool: 'read', executionActive: status === 'running', resourcesReleased: false, runtimeResident: true } };
 }
 
 describe('multi-agent progress view', () => {
@@ -37,6 +38,7 @@ describe('multi-agent progress view', () => {
     expect(view.summary(12_000, 35).length).toBeLessThanOrEqual(35);
     update.agent.resourcesReleased = true;
     update.agent.executionActive = false;
+    update.agent.runtimeResident = false;
     view.update(update);
     expect(view.summary(12_000, 80)).not.toContain('清理中');
   });

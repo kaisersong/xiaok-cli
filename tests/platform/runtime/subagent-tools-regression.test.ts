@@ -19,7 +19,7 @@ function fixture() {
   const file = join(cwd, 'evidence.txt'); writeFileSync(file, 'REGISTRY_EVIDENCE\n');
   const seen: string[][] = []; const events: any[] = [];
   let refresh!: (tools: Tool[]) => void;
-  const adapter: ModelAdapter = { async *stream(messages, tools) {
+  const adapter: ModelAdapter = { getModelName: () => '', async *stream(messages, tools) {
     seen.push(tools.map(tool => tool.name));
     if (!messages.at(-1)?.content.some(block => block.type === 'tool_result')) {
       yield { type: 'tool_use', id: 'read-evidence', name: 'read', input: { file_path: file } };

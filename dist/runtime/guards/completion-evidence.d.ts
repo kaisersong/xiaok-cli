@@ -1,3 +1,5 @@
+import { type InstalledCompletionObservation } from '../verification/installed-completion-observation.js';
+import { completionConsumerOwner } from '../verification/completion-consumer-owner.js';
 import { validateArtifactStructure } from '../../quality/artifact-structure.js';
 export type CompletionKind = 'answer' | 'file_artifact' | 'command_action' | 'project_update' | 'log_diagnostic' | 'blocked';
 export interface CompletionExpectation {
@@ -15,7 +17,7 @@ export interface CompletionEvidenceRecord {
     uri?: string;
     metadata?: Record<string, unknown>;
 }
-export type EvidenceValidationFailure = 'evidence_missing' | 'evidence_kind_mismatch' | 'validation_failed';
+export type EvidenceValidationFailure = 'verification_unavailable' | 'verification_required' | 'evidence_missing' | 'evidence_kind_mismatch' | 'validation_failed';
 export interface EvidenceValidationResult {
     ok: boolean;
     failureKind?: EvidenceValidationFailure;
@@ -32,6 +34,9 @@ export declare function completionEvidenceFlow(input: {
 }): EvidenceFlow;
 export type CompletionEvidenceInput = Parameters<typeof completionEvidenceFlow>[0];
 export type EvidenceEffect = {
+    kind: 'current-completion';
+    owner: ReturnType<typeof completionConsumerOwner>;
+} | {
     kind: 'exists' | 'realpath' | 'lstat';
     path: string;
 } | {
@@ -39,7 +44,7 @@ export type EvidenceEffect = {
     path: string;
     structuralKind: 'pdf' | 'pptx';
 };
-export type EvidenceEffectResult = boolean | string | {
+export type EvidenceEffectResult = InstalledCompletionObservation | boolean | string | {
     isSymbolicLink(): boolean;
 } | ReturnType<typeof validateArtifactStructure>;
 type EvidenceFlow = Generator<EvidenceEffect, EvidenceValidationResult, EvidenceEffectResult>;

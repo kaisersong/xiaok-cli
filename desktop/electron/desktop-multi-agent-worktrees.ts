@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { createWorktreeManager, type WorktreeLeaseRecord } from '../../src/platform/worktrees/manager.js';
 import type { MultiAgentManagedResource } from '../shared/multi-agent-types.js';
-import { DesktopMultiAgentStore, truncateMultiAgentText } from './desktop-multi-agent-store.js';
+import { DesktopMultiAgentStore, type DesktopMultiAgentMutationPort, truncateMultiAgentText } from './desktop-multi-agent-store.js';
 
 const execFileAsync = promisify(execFile);
 const DIRECTORY = '.xiaok-desktop-worktrees';
@@ -69,11 +69,11 @@ export class DesktopMultiAgentWorktrees {
   }
 
   beforeOpaqueInvocation(groupId: string, agentId: string, cwd?: string): void {
-    this.options.store.transaction(() => {
-      for (const resource of this.options.store.resources(groupId)) if ((resource.agentId === agentId || cwd && within(resource.canonicalPath, cwd))
+    this.options.store.transaction((acceptedPort) => {
+      for (const resource of acceptedPort.resources(groupId)) if ((resource.agentId === agentId || cwd && within(resource.canonicalPath, cwd))
         && !['released', 'retained_by_policy'].includes(resource.state)) {
         if (this.releasing.has(resource.resourceId) || this.allocating.has(resource.resourceId) || resource.state !== 'allocated') throw new Error('worktree_cleanup_in_progress');
-        if (resource.cleanupEligibility !== 'manual') this.put({ ...resource, cleanupEligibility: 'manual' }, true);
+        if (resource.cleanupEligibility !== 'manual') this.put({ ...resource, cleanupEligibility: 'manual' }, true, acceptedPort);
       }
     });
   }
@@ -167,8 +167,8 @@ export class DesktopMultiAgentWorktrees {
     });
   }
 
-  private put(resource: MultiAgentManagedResource, control = false): void {
-    try { this.options.store.putResource(resource, control); }
+  private put(resource: MultiAgentManagedResource, control = false, acceptedPort?: DesktopMultiAgentMutationPort): void {
+    try { (acceptedPort ?? this.options.store).putResource(resource, control); }
     catch (error) { throw new DesktopWorktreeJournalError(error); }
   }
 

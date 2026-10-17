@@ -20,6 +20,8 @@ export interface PluginManifestServer {
 
 /** Structured hook entry in plugin.json */
 export interface PluginManifestHook {
+  /** Strict synchronous JSON control output, opt in only. */
+  outputFormat?: 'json';
   /** Hook type: 'command' (default), 'http', or 'prompt' */
   type?: HookType;
   /** Shell command (type=command) or URL (type=http) or LLM prompt (type=prompt) */
@@ -76,6 +78,10 @@ export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: str
       if (entry && typeof entry === 'object') {
         const e = entry as Record<string, unknown>;
         const hook: PluginManifestHook = { command: String(e['command'] ?? '') };
+        if (e['outputFormat'] !== undefined) {
+          if (e['outputFormat'] !== 'json') throw new Error('hook_output_format_invalid');
+          hook.outputFormat = 'json';
+        }
         if (typeof e['type'] === 'string') hook.type = e['type'] as HookType;
         if (typeof e['url'] === 'string') hook.url = e['url'];
         if (typeof e['prompt'] === 'string') hook.prompt = e['prompt'];

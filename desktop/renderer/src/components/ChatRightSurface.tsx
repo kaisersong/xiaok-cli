@@ -8,6 +8,7 @@ const views = ['task', 'agents', 'files', 'instructions', 'canvas'] as const;
 interface Props {
   threadId: string; agentCount: number; taskContent?: ReactNode; agentsContent: ReactNode; canvasContent?: ReactNode;
   filesContent?: ReactNode; instructionsContent?: ReactNode;
+  approvalContent?: ReactNode;
   viewRequest?: { view: 'task' | 'files' | 'instructions'; requestId: number };
   hasAgentHistory?: boolean; needsRecovery?: boolean; historicalSelection?: boolean; deleted?: boolean;
   pendingApprovalCount?: number;
@@ -188,6 +189,7 @@ export function ChatRightSurface(props: Props) {
           onClick={() => select(view)}>{names[view]}{view === 'agents' && pending > 0 ? <span aria-label={labels.approvals.pending(pending)}> · {pending}</span> : null}</button>)}
         <button ref={closeButton} type="button" className="chat-right-close" aria-label={labels.closePanel} onClick={close}>×</button>
       </div>
+      {props.approvalContent ? <div className="chat-right-approvals">{props.approvalContent}</div> : null}
       {views.map(view => <div key={view} role="tabpanel" id={`right-${props.threadId}-${view}`}
         aria-labelledby={`right-${props.threadId}-${view}-tab`} className="chat-right-body" hidden={active !== view} inert={active !== view}>
         {view === 'task' ? props.taskContent : view === 'agents' ? props.agentsContent : view === 'files' ? props.filesContent : view === 'instructions' ? props.instructionsContent : props.canvasContent}

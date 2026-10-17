@@ -74,7 +74,7 @@ describe('Knowledge Office ingestion', () => {
   });
 
   it('makes kb_add_source a write tool and parses Office content instead of decoding it as UTF-8', async () => {
-    const collection = store.createCollection({ name: 'Office', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Office', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'board.doc');
     writeFileSync(filePath, Buffer.from([0xd0, 0xcf, 0x11, 0xe0]));
     const extractor = createSourceExtractor({
@@ -113,7 +113,7 @@ describe('Knowledge Office ingestion', () => {
   });
 
   it('persists stable Office parser failures without creating chunks', async () => {
-    const collection = store.createCollection({ name: 'Failures', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Failures', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const filePath = join(rootDir, 'encrypted.doc');
     writeFileSync(filePath, 'encrypted office');
     const extractor = createSourceExtractor({
@@ -140,7 +140,7 @@ describe('Knowledge Office ingestion', () => {
   });
 
   it('finishes a 39,444-character kb_add_source import with a finite tail chunk', async () => {
-    const collection = store.createCollection({ name: 'Large Markdown', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Large Markdown', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const retriever = createKbRetriever({ db: (store as unknown as { _db: never })._db, embedFn: () => null });
     const addSource = createKbTools(store, retriever)
       .find(tool => tool.definition.name === 'kb_add_source')!;

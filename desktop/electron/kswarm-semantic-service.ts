@@ -1,3 +1,5 @@
+import type { KSwarmProjectFactDto, KSwarmProjectModeResultDto, KSwarmProjectDeleteResultDto, KSwarmAgentFactDto, KSwarmProbeFactDto } from '../shared/kswarm-project-agent-ipc-contract.js';
+import type { ProjectTeamPlanDto, ProjectTeamOperationDto } from '../shared/kswarm-team-ipc-contract.js';
 import { loadConfig } from '../../src/utils/config.js';
 import type { Config } from '../../src/types.js';
 import { validateProjectAgentModelSelection } from './project-agent-model.js';
@@ -12,18 +14,18 @@ import type {
 type Gateway = Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
 
 export interface KSwarmSemanticService {
-  planProjectTeam(input: { projectId: string }): Promise<unknown>;
-  applyProjectTeamPlan(input: { projectId: string; planId: string; projectRevision: number }): Promise<unknown>;
-  getProjectTeamOperation(input: { projectId: string }): Promise<unknown>;
-  createKSwarmProject(input: Record<string, unknown>): Promise<unknown>;
-  updateKSwarmProjectExecutionMode(input: { projectId: string; executionMode: 'direct' | 'auto' | 'workflow_preferred' }): Promise<unknown>;
-  deleteKSwarmProject(input: { projectId: string }): Promise<unknown>;
-  createKSwarmAgent(input: Record<string, unknown>, context?: MutationContext): Promise<unknown>;
-  updateKSwarmAgent(input: { id: string; changes: Record<string, unknown> }, context?: MutationContext): Promise<unknown>;
+  planProjectTeam(input: { projectId: string }): Promise<ProjectTeamPlanDto>;
+  applyProjectTeamPlan(input: { projectId: string; planId: string; projectRevision: number }): Promise<ProjectTeamOperationDto>;
+  getProjectTeamOperation(input: { projectId: string }): Promise<ProjectTeamOperationDto | null>;
+  createKSwarmProject(input: Record<string, unknown>): Promise<KSwarmProjectFactDto>;
+  updateKSwarmProjectExecutionMode(input: { projectId: string; executionMode: 'direct' | 'auto' | 'workflow_preferred' }): Promise<KSwarmProjectModeResultDto>;
+  deleteKSwarmProject(input: { projectId: string }): Promise<KSwarmProjectDeleteResultDto>;
+  createKSwarmAgent(input: Record<string, unknown>, context?: MutationContext): Promise<KSwarmAgentFactDto>;
+  updateKSwarmAgent(input: { id: string; changes: Record<string, unknown> }, context?: MutationContext): Promise<KSwarmAgentFactDto>;
   archiveKSwarmAgent(input: { id: string }): Promise<boolean>;
   startKSwarmAgent(input: { id: string }): Promise<boolean>;
   stopKSwarmAgent(input: { id: string }): Promise<boolean>;
-  probeKSwarmAgent(input: { id: string }): Promise<unknown>;
+  probeKSwarmAgent(input: { id: string }): Promise<KSwarmProbeFactDto>;
 }
 
 export function createProjectCapabilityNeedsProposalPort(
@@ -98,16 +100,16 @@ export function createKSwarmSemanticService(options: {
     },
     async createKSwarmProject(input) {
       const payload = pickProjectPayload(input);
-      return unwrapRecord(await request('/projects', 'POST', payload), 'project');
+      return unwrapRecord(await request('/projects', 'POST', payload), 'project') as KSwarmProjectFactDto;
     },
     async updateKSwarmProjectExecutionMode(input) {
       return request(`/projects/${encodeSegment(input.projectId)}/execution-mode`, 'PATCH', {
         executionMode: input.executionMode,
         updatedBy: 'human',
-      });
+      }) as Promise<KSwarmProjectModeResultDto>;
     },
     async deleteKSwarmProject(input) {
-      return request(`/projects/${encodeSegment(input.projectId)}`, 'DELETE');
+      return request(`/projects/${encodeSegment(input.projectId)}`, 'DELETE') as Promise<KSwarmProjectDeleteResultDto>;
     },
     async createKSwarmAgent(input, context) {
       assertAgentPayload(input);
@@ -123,7 +125,7 @@ export function createKSwarmSemanticService(options: {
         taskCapabilities: readStringArray(input.taskCapabilities),
       };
       if (runtimeType === 'xiaok') payload.runtimeSource = 'desktop-agent-runtime';
-      return unwrapRecord(await request('/agents', 'POST', payload), 'agent');
+      return unwrapRecord(await request('/agents', 'POST', payload), 'agent') as KSwarmAgentFactDto;
     },
     async updateKSwarmAgent(input, context) {
       assertAgentPayload(input.changes);
@@ -132,7 +134,7 @@ export function createKSwarmSemanticService(options: {
         const current = unwrapRecord(await request(`/agents/${encodeSegment(input.id)}`, 'GET'), 'agent');
         validateProjectAgentModelSelection(input.changes.desktopModelId, current.runtimeType, await (options.loadModelConfig ?? loadConfig)(), context.requestSource);
       }
-      return unwrapRecord(await request(`/agents/${encodeSegment(input.id)}`, 'PUT', pickAgentPayload(input.changes)), 'agent');
+      return unwrapRecord(await request(`/agents/${encodeSegment(input.id)}`, 'PUT', pickAgentPayload(input.changes)), 'agent') as KSwarmAgentFactDto;
     },
     async archiveKSwarmAgent(input) {
       await request(`/agents/${encodeSegment(input.id)}`, 'DELETE');
@@ -147,18 +149,18 @@ export function createKSwarmSemanticService(options: {
       return true;
     },
     async probeKSwarmAgent(input) {
-      return request(`/agents/${encodeSegment(input.id)}/probe`, 'GET');
+      return request(`/agents/${encodeSegment(input.id)}/probe`, 'GET') as Promise<KSwarmProbeFactDto>;
     },
   };
 }
 
-function mapTeamPlan(plan: Record<string, unknown>): Record<string, unknown> {
+function mapTeamPlan(plan: Record<string, unknown>): ProjectTeamPlanDto {
   const roles = Array.isArray(plan.roles) ? plan.roles.filter(isRecord) : [];
   return {
     planId: String(plan.planDigest ?? ''),
     projectId: String(plan.projectId ?? ''),
     projectRevision: Number(plan.projectRevision),
-    outcome: plan.outcome,
+    outcome: plan.outcome as ProjectTeamPlanDto['outcome'],
     summary: roles.length === 0 ? 'No team changes are needed.' : `${roles.length} team role(s) analyzed.`,
     items: roles.map(role => ({
       desiredAgentId: String(role.preferredExistingAgentId ?? `${plan.planDigest}:${role.roleKey}`),
@@ -170,7 +172,7 @@ function mapTeamPlan(plan: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
-function mapTeamOperation(operation: Record<string, unknown>): Record<string, unknown> {
+function mapTeamOperation(operation: Record<string, unknown>): ProjectTeamOperationDto {
   const status = operation.status === 'applied'
     ? 'completed'
     : operation.status === 'failed'

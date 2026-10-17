@@ -62,7 +62,7 @@ function createHarness(invocation: SkillInvocationState | undefined) {
     updatedAt: 1,
   };
   const continuationRunner = {
-    runContinuation: vi.fn<Parameters<(input: string) => Promise<string>>, ReturnType<(input: string) => Promise<string>>>(),
+    runContinuation: vi.fn<(input: string) => Promise<string>>(),
   };
   const adherenceStore = {
     record: vi.fn(),

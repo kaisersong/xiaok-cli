@@ -25,7 +25,7 @@ describe('Meeting assistant phase-one e2e', () => {
   });
 
   it('transcribes a WAV recording, summarizes it, and persists searchable KB chunks with timestamps', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const audioFilePath = join(rootDir, 'weekly-sync.wav');
     writePcm16WavFile(audioFilePath, { samples: new Int16Array(16_000), sampleRate: 16_000, channels: 1 });
 
@@ -95,7 +95,7 @@ describe('Meeting assistant phase-one e2e', () => {
   });
 
   it('imports an existing transcript with WAV metadata into the knowledge base', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const audioFilePath = join(rootDir, 'imported-sync.wav');
     writePcm16WavFile(audioFilePath, { samples: new Int16Array(8_000), sampleRate: 8_000, channels: 1 });
     const service = createMeetingService({ store, now: () => 2_000 });
@@ -126,7 +126,7 @@ describe('Meeting assistant phase-one e2e', () => {
   });
 
   it('drafts a summary for recorded audio without persisting it before user confirmation', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const audioFilePath = join(rootDir, 'draft-sync.wav');
     writePcm16WavFile(audioFilePath, { samples: new Int16Array(8_000), sampleRate: 8_000, channels: 1 });
     const service = createMeetingService({
@@ -242,7 +242,7 @@ describe('Meeting assistant phase-one e2e', () => {
   });
 
   it('processes recordings with punctuated transcript before writing KB chunks', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const audioFilePath = join(rootDir, 'punctuated-process.wav');
     writePcm16WavFile(audioFilePath, { samples: new Int16Array(8_000), sampleRate: 8_000, channels: 1 });
     let summaryTranscript = '';
@@ -379,7 +379,7 @@ describe('Meeting assistant phase-one e2e', () => {
   });
 
   it('drafts from live transcript without re-running full-file transcription', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const audioFilePath = join(rootDir, 'live-preview-sync.wav');
     writePcm16WavFile(audioFilePath, { samples: new Int16Array(8_000), sampleRate: 8_000, channels: 1 });
     const transcriber = {
@@ -420,7 +420,7 @@ describe('Meeting assistant phase-one e2e', () => {
   });
 
   it('runs the default local transcription and summary path into searchable KB chunks', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const audioFilePath = join(rootDir, 'local-sync.wav');
     writePcm16WavFile(audioFilePath, { samples: new Int16Array(8_000), sampleRate: 8_000, channels: 1 });
     const exec = async () => ({

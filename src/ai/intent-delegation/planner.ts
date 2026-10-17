@@ -5,6 +5,7 @@ import {
   stripProvidedSourcePaths,
 } from './path-contract.js';
 import type {
+  DelegationTemplate,
   IntentMode,
   IntentPlanDraft,
   IntentStageDraft,
@@ -24,6 +25,8 @@ export interface ActiveIntentContext {
 }
 
 export interface CreateIntentPlanInput {
+  /** Fixed product host identity, allocated before construction; never an approval. */
+  newIntentId?: string;
   instanceId: string;
   sessionId: string;
   input: string;
@@ -35,6 +38,33 @@ export interface CreateIntentPlanInput {
     stageRole: StepRole;
     deliverable: string;
   }) => number;
+}
+
+export interface ActiveIntentPlanningData {
+  intentId: string;
+  deliverable: string;
+  intentType?: unknown;
+  templateId?: unknown;
+}
+export interface CreateIntentPlanDataInput extends Omit<CreateIntentPlanInput, 'activeIntent'> {
+  activeIntent?: ActiveIntentPlanningData;
+}
+
+interface IntentTemplateLookupWitness {readonly template:DelegationTemplate;readonly intentType:IntentType}
+function retainedIntentTemplateWitness(template:DelegationTemplate|undefined,witness:IntentTemplateLookupWitness|undefined):IntentTemplateLookupWitness|undefined {
+  return template && witness?.template === template ? witness : undefined;
+}
+function findIntentTemplateWitness(intentType:unknown):IntentTemplateLookupWitness|undefined {
+  let witness:IntentTemplateLookupWitness|undefined;
+  const template = DELEGATION_TEMPLATES.find((candidate) => {
+    const candidateIntentType = candidate.intentType;
+    if (candidateIntentType === intentType) {
+      witness = {template:candidate,intentType:candidateIntentType};
+      return true;
+    }
+    return false;
+  });
+  return retainedIntentTemplateWitness(template,witness);
 }
 
 export type IntentPlannerResult =
@@ -96,7 +126,11 @@ const INFORMATIONAL_QUERY_PATTERNS = [
   /\b(what|which|how|when|where|current)\b/iu,
 ];
 
-export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerResult {
+export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerResult;
+export function createIntentPlan(input: CreateIntentPlanDataInput): IntentPlannerResult;
+export function createIntentPlan(input: CreateIntentPlanDataInput): IntentPlannerResult {
+  const identity = Object.getOwnPropertyDescriptor(input, 'newIntentId');
+  if (identity && (!('value' in identity) || typeof identity.value !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(identity.value))) throw Error('intent_planner_identity');
   const rawIntent = input.input.trim();
   if (isControlCommand(rawIntent)) {
     return { kind: 'non_intent', reason: 'control_command' };
@@ -127,14 +161,15 @@ export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerRes
   }
   const continuationMode = detectContinuationMode(rawIntent, extracted.finalDeliverable, input.activeIntent);
   const topLevelIntentType = resolveTopLevelIntentType(rawIntent, extracted.stageSpecs, input.activeIntent, continuationMode);
-  const topLevelTemplate = DELEGATION_TEMPLATES.find((candidate) => candidate.intentType === topLevelIntentType);
-  if (!topLevelTemplate) {
+  const topLevelLookup = findIntentTemplateWitness(topLevelIntentType);
+  if (!topLevelLookup) {
     return { kind: 'non_intent', reason: 'non_substantial' };
   }
+  const {template:topLevelTemplate,intentType:matchedIntentType} = topLevelLookup;
 
-  const intentId = buildStableId('intent', normalizedIntent, input.sessionId);
+  const intentId = continuationMode === 'new_intent' && identity ? identity.value as string : buildStableId('intent', normalizedIntent, input.sessionId);
   const instancePlanId = buildStableId('plan', normalizedIntent, input.instanceId);
-  const riskTier = deriveRiskTier(topLevelIntentType, continuationMode, extracted.intentMode);
+  const riskTier = deriveRiskTier(matchedIntentType, continuationMode, extracted.intentMode);
   const stages = buildStages({
     intentId,
     rawIntent,
@@ -154,7 +189,7 @@ export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerRes
       rawIntent,
       normalizedIntent,
       providedSourcePaths,
-      intentType: topLevelIntentType,
+      intentType: matchedIntentType,
       deliverable: extracted.deliverable,
       finalDeliverable: extracted.finalDeliverable,
       explicitConstraints: extracted.constraints,
@@ -222,7 +257,7 @@ function normalizeIntent(input: string): string {
     .trim();
 }
 
-function isNonSubstantial(input: string, activeIntent?: ActiveIntentContext): boolean {
+function isNonSubstantial(input: string, activeIntent?: ActiveIntentPlanningData): boolean {
   if (input.length <= 2) {
     return true;
   }
@@ -249,7 +284,7 @@ function looksLikeDelegatedWorkRequest(
     deliverable: string;
     finalDeliverable: string;
   },
-  activeIntent: ActiveIntentContext | undefined,
+  activeIntent: ActiveIntentPlanningData | undefined,
   workRequestCue: boolean,
 ): boolean {
   if (providedSourcePaths.length > 0 && hasSourceTaskCue(rawIntent)) {
@@ -278,7 +313,7 @@ function looksLikeDelegatedWorkRequest(
 function detectContinuationMode(
   rawIntent: string,
   finalDeliverable: string,
-  activeIntent?: ActiveIntentContext,
+  activeIntent?: ActiveIntentPlanningData,
 ): IntentPlanDraft['continuationMode'] {
   if (!activeIntent) {
     return 'new_intent';
@@ -304,9 +339,9 @@ function detectContinuationMode(
 function resolveTopLevelIntentType(
   rawIntent: string,
   stageSpecs: StageIntentSpec[],
-  activeIntent: ActiveIntentContext | undefined,
+  activeIntent: ActiveIntentPlanningData | undefined,
   continuationMode: IntentPlanDraft['continuationMode'],
-): IntentType {
+): unknown {
   if (continuationMode === 'continue_active' && isSupplementOrClarification(rawIntent) && activeIntent) {
     return activeIntent.intentType;
   }
@@ -331,7 +366,7 @@ function containsAny(input: string, hints: string[]): boolean {
 function extractIntentShape(
   rawIntent: string,
   providedSourcePaths: string[],
-  activeIntent?: ActiveIntentContext,
+  activeIntent?: ActiveIntentPlanningData,
   allowActiveIntentFallback = false,
 ): {
   deliverable: string;

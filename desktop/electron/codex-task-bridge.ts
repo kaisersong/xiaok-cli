@@ -1,10 +1,11 @@
+import {assertOrdinarySourceWriterRoute,observeOrdinarySQLiteWriter} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import type { NativeEvent } from './codex-native-transport.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CodexNativeService, type NativeActor, type NativeServiceOptions } from './codex-native-service.js';
-import { InProcessTaskRuntimeHost, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
+import { InProcessTaskRuntimeHost, type TaskRunnerInput, type createTaskSourceWriterPopulation } from '../../src/runtime/task-host/task-runtime-host.js';
 import type { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import type { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import type { TaskCreateInput, UserAnswer } from '../../src/runtime/task-host/types.js';
@@ -18,12 +19,19 @@ export class CodexTaskBridge {
   private runs = new Map<string,string>();
   private nativeEvents = new Map<string,(event:NativeEvent)=>void>();
   private closing=false;
-  constructor(private options:{dataRoot:string;profileId:string;cwd:string;materialRegistry:MaterialRegistry;snapshotStore:FileTaskSnapshotStore;admitThread?:(id:string)=>Promise<void|(()=>void)>;createClient?:NativeServiceOptions['createClient']}) {
+  constructor(private options:{dataRoot:string;profileId:string;cwd:string;materialRegistry:MaterialRegistry;snapshotStore:FileTaskSnapshotStore;sourcePopulation?:ReturnType<typeof createTaskSourceWriterPopulation>;admitThread?:(id:string)=>Promise<void|(()=>void)>;createClient?:NativeServiceOptions['createClient']}) {
+    assertOrdinarySourceWriterRoute();
+    options.sourcePopulation?.assertAccepting();
     mkdirSync(options.dataRoot,{recursive:true});this.actor={requestSource:'user',actorId:options.profileId};
     this.db=new DatabaseSync(join(options.dataRoot,'codex-task-routes.sqlite'));
+    let native:CodexNativeService|undefined;
+    try {
+    observeOrdinarySQLiteWriter(join(options.dataRoot,'codex-task-routes.sqlite'),'codex-routes-sqlite-v1');
     this.db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT); CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY,native_id TEXT); CREATE TABLE IF NOT EXISTS routes(task_id TEXT PRIMARY KEY,thread_id TEXT NOT NULL)');
-    this.native=new CodexNativeService({dbPath:join(options.dataRoot,'codex-native.sqlite'),profileId:options.profileId,createClient:options.createClient,onChanged:id=>this.observers.get(id)?.(),onEvent:(id,event)=>this.nativeEvents.get(id)?.(event)});
-    this.host=new InProcessTaskRuntimeHost({materialRegistry:options.materialRegistry,snapshotStore:options.snapshotStore,runner:input=>this.run(input),createTaskId:()=>`task_codex_${randomUUID()}`,aheGuards:{artifactEvidence:true,recoveryContinuity:true}});
+    this.native=native=new CodexNativeService({dbPath:join(options.dataRoot,'codex-native.sqlite'),profileId:options.profileId,createClient:options.createClient,onChanged:id=>this.observers.get(id)?.(),onEvent:(id,event)=>this.nativeEvents.get(id)?.(event)});
+    const hostOptions={materialRegistry:options.materialRegistry,snapshotStore:options.snapshotStore,runner:(input:TaskRunnerInput)=>this.run(input),createTaskId:()=>`task_codex_${randomUUID()}`,aheGuards:{artifactEvidence:true,recoveryContinuity:true}};
+    this.host=options.sourcePopulation ? options.sourcePopulation.createHost(hostOptions) : new InProcessTaskRuntimeHost(hostOptions);
+    }catch(error){try{native?.closeBeforeUse();}catch{/* Preserve initialization failure. */}try{this.db.close();}catch{/* Preserve initialization failure. */}throw error;}
   }
   selected(){return this.db.prepare('SELECT value FROM settings WHERE key=?').get('selected')?.value==='true';}
   select(value:boolean){this.db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run('selected',String(value));}

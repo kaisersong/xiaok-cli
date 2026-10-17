@@ -233,6 +233,25 @@ describe('permission-prompt', () => {
     it('re-renders the same approval block instead of accumulating duplicate rows while navigating', async () => {
       const harness = createTtyHarness();
 
+      const pending = showPermissionPrompt('bash', { command: "python3 - <<'PY'\nimport importlib\nPY" });
+      harness.send('\x1b[B');
+      harness.send('\x1b[B');
+      harness.send('\r');
+
+      await expect(pending).resolves.toEqual({ action: 'allow_project',
+        rule: expect.stringMatching(/^bash\(@exact:[a-f0-9]{64}\)$/) });
+
+      const normalized = harness.output.normalized;
+      const titleCount = normalized.split('xiaok 想要执行以下操作').length - 1;
+      expect(titleCount).toBe(3);
+      expect(normalized).not.toContain("命令: python3 - <<'PY'\nimport importlib\nPY");
+
+      harness.restore();
+    });
+
+    it('re-renders the multiline printf/sleep approval block without duplicate rows while navigating', async () => {
+      const harness = createTtyHarness();
+
       const pending = showPermissionPrompt('bash', { command: 'printf ok\nsleep 0' });
       harness.send('\x1b[B');
       harness.send('\x1b[B');
@@ -249,7 +268,7 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
-    it('falls back to plain-text approval rendering when the shared renderer throws', async () => {
+    it('denies approval without plain-text fallback when the shared renderer throws', async () => {
       const harness = createTtyHarness();
       const failingRenderer = {
         hasActiveScrollRegion: () => true,
@@ -277,9 +296,9 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
 
-      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+      await expect(pending).resolves.toEqual({ action: 'deny' });
       expect(harness.output.normalized).toContain('[xiaok] UI 已降级：permission_prompt_renderer');
-      expect(harness.output.normalized).toContain('xiaok 想要执行以下操作');
+      expect(harness.output.normalized).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });
@@ -294,6 +313,7 @@ describe('permission-prompt', () => {
         recordOutput() {},
         beginSuppress() {},
         endSuppress() {},
+        close() {},
       };
 
       const pending = showPermissionPrompt('bash', { command: 'ls' }, { transcriptLogger: logger });
@@ -418,7 +438,10 @@ describe('permission-prompt', () => {
       expect(titleIndex).toBeGreaterThanOrEqual(0);
       expect(footerIndex).toBeGreaterThan(titleIndex);
       expect(beforeDecision).not.toContain('Waiting for command output');
-      expect(beforeDecision).toContain('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      // The manager fact is current; this dedicated permission paint retains
+      // its opening footer snapshot until its own repaint or real completion.
+      expect(scrollRegion.getPromptFrameState().statusLine).toBe('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      expect(beforeDecision).toContain('kimi-for-coding · 3% · master · D:\\projects\\xiaok-cli');
 
       harness.send('\x1b[B');
       const afterNavigate = harness.screen.text();
@@ -427,6 +450,13 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_session', rule: 'bash(cmd *)' });
+
+      // Read the actual main buffer restored by production completion. No
+      // manual redraw/status injection is permitted before this assertion.
+      expect(renderer.getState().modal).toBeFalsy();
+      const afterDecision = harness.screen.text();
+      expect(afterDecision).toContain('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });
@@ -472,7 +502,7 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
-    it('keeps the latest tool transcript rows visible above the renderer permission menu', async () => {
+    it('preserves transcript rows across a temporary full-input permission screen', async () => {
       const harness = createTtyHarness(120, 24, { captureStderr: true });
       const renderer = new ReplRenderer(process.stdout);
       const scrollRegion = new ScrollRegionManager(process.stdout);
@@ -492,6 +522,11 @@ describe('permission-prompt', () => {
         statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
       });
 
+      const beforeOpen = harness.screen.text();
+      expect(beforeOpen).toContain('tool-row-1');
+      expect(beforeOpen).toContain('tool-row-2');
+      const contentCursorBefore = scrollRegion.getContentCursor();
+
       const pending = showPermissionPrompt(
         'bash',
         { command: 'git status --short' },
@@ -499,8 +534,14 @@ describe('permission-prompt', () => {
       );
 
       const openScreen = harness.screen.text();
-      expect(openScreen).toContain('tool-row-1');
-      expect(openScreen).toContain('tool-row-2');
+      // DEC1049 temporarily hides the saved main transcript. Its owner cursor
+      // and current footer facts must survive while this menu remains intact.
+      expect(scrollRegion.getContentCursor()).toBe(contentCursorBefore);
+      expect(scrollRegion.getPromptFrameState().statusLine).toBe('kimi-for-coding · 3% · master · xiaok-cli');
+      expect(openScreen).toContain('❯ 1. 允许一次');
+      expect(openScreen).toContain('数字直选');
+      expect(openScreen).not.toContain('tool-row-1');
+      expect(openScreen).not.toContain('tool-row-2');
       expect(openScreen).toContain('xiaok 想要执行以下操作');
       expect(openScreen).toContain('命令: git status --short');
       const openLines = harness.screen.lines();
@@ -509,6 +550,14 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_once' });
+
+      // Preserve the original row values after the real decision closes the
+      // temporary screen; do not reprint the rows or force a footer repaint.
+      expect(renderer.getState().modal).toBeFalsy();
+      const afterDecision = harness.screen.text();
+      expect(afterDecision).toContain('tool-row-1');
+      expect(afterDecision).toContain('tool-row-2');
+      expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });

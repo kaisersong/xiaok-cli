@@ -11,8 +11,8 @@
  *     comes from the zh/en locale contract.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const { mockGetRoom, mockListRooms, mockSend, mockMarkSeen, mockArchive, mockUpdateMembers, mockCreateProject, mockProxyGetText, mockKbListCollections, mockKbAddSource, mockOnRoomEvent, roomEventHarness } = vi.hoisted(() => ({
   mockGetRoom: vi.fn(),
@@ -456,6 +456,25 @@ describe('CollaborationRoomView states', () => {
     expect(await screen.findByTitle('report.html')).toBeDefined();
   });
 
+  it('keeps historical artifact cards with nullable metadata and previews by filename', async () => {
+    mockProxyGetText.mockResolvedValue('<!doctype html><html><body>Historical artifact</body></html>');
+    mockGetRoom.mockResolvedValue({
+      ...activeSnapshot,
+      messages: [{
+        messageId: 'historical-artifact', kind: 'project_event',
+        sender: { kind: 'system', service: 'kswarm' },
+        sourceRef: {
+          projectId: 'project-1', eventType: 'artifact.registered', artifactId: 'historical-report',
+          artifact: { filename: 'report.html', kind: null, mimeType: null },
+        },
+      }],
+    });
+    renderView();
+    fireEvent.click(await screen.findByTestId('room-artifact-report.html'));
+    await waitFor(() => expect(mockProxyGetText).toHaveBeenCalledWith('/projects/project-1/artifacts/report.html'));
+    expect(await screen.findByTitle('report.html')).toBeDefined();
+  });
+
   it('does not turn incomplete or non-project file references into artifact cards', async () => {
     mockGetRoom.mockResolvedValue({
       ...activeSnapshot,
@@ -615,4 +634,43 @@ it('folds scheduled instructions and historical replies while preserving ordinar
   expect(cards[1].querySelector('details')).toHaveAttribute('open');
   expect(screen.getByText(/完整执行记录/)).toBeVisible();
   expect(screen.getByTestId('room-message-actions-report')).toBeInTheDocument();
+});
+
+
+it('shows explicit projection_unavailable through the actual Room view without cursor writes', async () => {
+  mockGetRoom.mockResolvedValue({ok:false,code:'room_projection_unavailable'});
+  renderView();
+  expect(await screen.findByTestId('room-view-error')).toBeVisible();
+  expect(mockGetRoom).toHaveBeenCalledTimes(1);
+  expect(mockMarkSeen).not.toHaveBeenCalled();
+});
+it('shows operation_unknown after archive once and retains the current snapshot without mutation retry', async () => {
+  mockGetRoom.mockResolvedValue(activeSnapshot);
+  mockArchive.mockResolvedValue({ok:false,code:'room_operation_unknown'});
+  renderView();
+  fireEvent.click(await screen.findByRole('button',{name:'归档'}));
+  expect(await screen.findByText('操作失败，请重试')).toBeVisible();
+  expect(screen.getByText('hello')).toBeVisible();
+  expect(mockArchive).toHaveBeenCalledTimes(1);
+  expect(mockGetRoom).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTestId('room-view-archived')).toBeNull();
+});
+it('keeps selected project data/dialog after operation_unknown with no navigation or retry', async () => {
+  mockGetRoom.mockResolvedValue(activeSnapshot);
+  mockCreateProject.mockResolvedValue({ok:false,code:'room_operation_unknown'});
+  function CurrentLocation(){return <output data-testid="unknown-room-location">{useLocation().pathname}</output>;}
+  render(<MemoryRouter><LocaleProvider><CollaborationRoomView roomId="room-1" availableAgents={[{id:'agent-a',name:'Agent A'}]}/><CurrentLocation/></LocaleProvider></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button',{name:'选入项目背景'}));
+  fireEvent.click(screen.getByRole('button',{name:'基于已选内容创建项目'}));
+  const dialog=screen.getByRole('dialog',{name:'基于已选内容创建项目'});
+  fireEvent.change(within(dialog).getByLabelText('项目名称'),{target:{value:'Retained'}});
+  fireEvent.change(within(dialog).getByLabelText('项目目标'),{target:{value:'Retained goal'}});
+  fireEvent.click(within(dialog).getByRole('button',{name:'基于已选内容创建项目'}));
+  expect(await screen.findByText('操作失败，请重试')).toBeVisible();
+  expect(screen.getByRole('dialog',{name:'基于已选内容创建项目'})).toBeVisible();
+  expect(within(dialog).getByLabelText('项目名称')).toHaveValue('Retained');
+  expect(screen.getByRole('button',{name:'移出项目背景'})).toBeVisible();
+  expect(screen.getByTestId('unknown-room-location')).toHaveTextContent('/');
+  expect(mockCreateProject).toHaveBeenCalledTimes(1);
+  expect(mockGetRoom).toHaveBeenCalledTimes(1);
 });

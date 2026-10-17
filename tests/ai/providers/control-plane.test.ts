@@ -1,6 +1,6 @@
 import { OLD_MODEL_EFFORT_CONFIGS } from '../../support/model-effort-compatibility.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Config, LegacyConfig } from '../../../src/types.js';
+import type { ConfigV2Input, LegacyConfig } from '../../../src/types.js';
 import type { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
 import {
@@ -8,6 +8,7 @@ import {
   resolveRuntimeModelBinding,
 } from '../../../src/ai/providers/control-plane.js';
 import { resolveModelCapabilities } from '../../../src/ai/runtime/model-capabilities.js';
+import type { CapabilityAwareAdapter } from '../../../src/ai/runtime/model-capabilities.js';
 
 describe('resolveRuntimeModelBinding', () => {
   const OLD_ENV = process.env;
@@ -23,7 +24,7 @@ describe('resolveRuntimeModelBinding', () => {
       contextLimit?: number;
       reasoningEffort?: 'low' | 'high' | 'max';
     };
-  }): Config {
+  }): ConfigV2Input {
     return {
       schemaVersion: 2,
       defaultProvider: input.providerId,
@@ -103,7 +104,7 @@ describe('resolveRuntimeModelBinding', () => {
   it('resolves one configured model id into one runtime binding with merged transport settings', () => {
     process.env.XIAOK_OPENAI_API_KEY = 'sk-env-openai';
 
-    const config: Config = {
+    const config: ConfigV2Input = {
       schemaVersion: 2,
       defaultProvider: 'openai',
       defaultModelId: 'openai-project',
@@ -149,7 +150,7 @@ describe('resolveRuntimeModelBinding', () => {
   });
 
   it('falls back to provider profile defaults before adapter construction', () => {
-    const config: Config = {
+    const config: ConfigV2Input = {
       schemaVersion: 2,
       defaultProvider: 'gemini',
       defaultModelId: 'gemini-thinking',
@@ -188,7 +189,7 @@ describe('resolveRuntimeModelBinding', () => {
     // 官方三处独立说明不支持图片输入；Responses API 文档还写明 `input_image`
     // 「不会报错，但会被替换成占位文本」。标成支持 = 用户粘了图、模型没看到、
     // 也没人告诉他，比直接不给粘更糟。
-    const config: Config = {
+    const config: ConfigV2Input = {
       schemaVersion: 2,
       defaultProvider: 'deepseek',
       defaultModelId: 'deepseek-default',
@@ -614,7 +615,7 @@ describe('contextLimit reaches every protocol, not just openai_legacy', () => {
     // reasoningEffort 是 OpenAI-compatible 的请求字段；Claude 用 thinking.type、
     // Gemini 用别的机制，透传过去没有接收方。
     for (const protocol of ['anthropic', 'openai_responses'] as const) {
-      const adapter = bind({
+      const adapter: CapabilityAwareAdapter = bind({
         providerId: protocol === 'anthropic' ? 'anthropic' : 'gemini',
         protocol,
         wireModel: protocol === 'anthropic' ? 'claude-sonnet-4-6' : 'gemini-2.5-pro',

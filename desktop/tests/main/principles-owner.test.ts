@@ -1,0 +1,8 @@
+// @vitest-environment node
+import {beforeAll,expect,it} from 'vitest';import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';
+let facts:{compat:{capacityDenied:{success:boolean;error?:string};invalidJsonReadEmpty:boolean};normal:Array<{name:string;ok?:boolean;result?:{success:boolean;error?:string}}>;controls:Array<{name:string;pass:boolean}>};
+beforeAll(async()=>{const require=createRequire(import.meta.url);const {stdout}=await promisify(execFile)(process.execPath,['--import',require.resolve('tsx'),fileURLToPath(new URL('../fixtures/principles-owned-child/principles-child.mts',import.meta.url))],{timeout:12000});const line=stdout.split('\n').find(x=>x.startsWith('PRINCIPLES_FACTS:'));expect(line).toBeDefined();facts=JSON.parse(line!.slice('PRINCIPLES_FACTS:'.length));},15000);
+it('preserves original actual Main delegates full normal three and five business refusal results',()=>{expect(facts.normal).toHaveLength(9);expect(facts.normal.slice(0,4).every(x=>x.ok)).toBe(true);expect(facts.normal.slice(4).every(x=>x.result?.success===false&&typeof x.result.error==='string')).toBe(true);});
+it.each(Array.from({length:22},(_,i)=>i))('enforces actual owner/registration control %i',i=>{expect(facts.controls[i]).toMatchObject({pass:true});});
+
+it('retains capacity business refusal, update-at-capacity and invalid JSON empty read compatibility',()=>{expect(facts.compat.capacityDenied).toEqual({success:false,error:'原则数量已达上限 (50)'});expect(facts.compat.invalidJsonReadEmpty).toBe(true);});

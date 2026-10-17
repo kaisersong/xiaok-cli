@@ -21,12 +21,14 @@ export class PermissionManager {
   private readonly cwd: string;
   private allowRules: string[];
   private denyRules: string[];
+  private revision = 0;
+  private readonly revisionListeners = new Set<(revision: number) => void>();
 
   constructor(options: PermissionManagerOptions) {
     this.mode = options.mode;
     this.cwd = options.cwd ?? process.cwd();
-    this.allowRules = options.allowRules ?? [];
-    this.denyRules = options.denyRules ?? [];
+    this.allowRules = [...(options.allowRules ?? [])];
+    this.denyRules = [...(options.denyRules ?? [])];
   }
 
   getMode(): PermissionMode {
@@ -34,18 +36,46 @@ export class PermissionManager {
   }
 
   setMode(mode: PermissionMode): void {
+    if (this.mode === mode) return;
     this.mode = mode;
+    this.advanceRevision();
+  }
+
+  getRevision(): number { return this.revision; }
+
+  /** Host lifecycle hook: revoke already in-flight disclosures in the same turn. */
+  onRevisionChanged(listener: (revision: number) => void): () => void {
+    if (typeof listener !== 'function') throw new Error('invalid_permission_revision_listener');
+    this.revisionListeners.add(listener);
+    return () => { this.revisionListeners.delete(listener); };
+  }
+
+  private advanceRevision(): void {
+    this.revision++;
+    const failures: unknown[] = [];
+    for (const listener of [...this.revisionListeners]) {
+      try {
+        const result: unknown = listener(this.revision);
+        if (result !== undefined) {
+          if (result && typeof (result as PromiseLike<unknown>).then === 'function') void Promise.resolve(result).catch(() => {});
+          throw new Error('permission_revision_listener_must_be_synchronous');
+        }
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, 'permission_revision_listener_failed');
   }
 
   addSessionRule(rule: string): void {
     if (!this.allowRules.includes(rule)) {
       this.allowRules.push(rule);
+      this.advanceRevision();
     }
   }
 
   addSessionDenyRule(rule: string): void {
     if (!this.denyRules.includes(rule)) {
       this.denyRules.push(rule);
+      this.advanceRevision();
     }
   }
 
@@ -56,7 +86,6 @@ export class PermissionManager {
   }
 
   async check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision> {
-    if (this.mode === 'yolo') return 'allow';
     const policy = new PermissionPolicyEngine({
       cwd: this.cwd,
       globalAllow: this.allowRules,
@@ -82,6 +111,16 @@ export class PermissionManager {
       }
     }
 
+    if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
+      return 'deny';
+    }
+
+    if (isScreenAutomationFallbackInvocation(toolName, input)) {
+      return 'deny';
+    }
+
+    if (this.mode === 'yolo') return 'allow';
+
     if (toolName === 'bash') {
       const command = readBashCommand(input);
       if (evaluation.action === 'allow' && this.allowRules.some(isExactCommandApprovalRule)) {
@@ -100,14 +139,6 @@ export class PermissionManager {
         if (targets.some(target => isOutsideWorkspace(target, this.cwd, effectiveDir))) return 'prompt';
         if (targets.length && this.mode !== 'auto') return 'prompt';
       }
-    }
-
-    if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
-      return 'deny';
-    }
-
-    if (isScreenAutomationFallbackInvocation(toolName, input)) {
-      return 'deny';
     }
 
     if (this.mode === 'auto') {

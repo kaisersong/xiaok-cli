@@ -1,3 +1,4 @@
+import {observeInstalledCompletion} from '../verification/installed-completion-observation.js';
 import { access, open, stat, realpath, lstat } from 'node:fs/promises';
 import { validateArtifactBytes, type StructuralKind, type StructuralValidationResult } from '../../quality/artifact-structure.js';
 import { completionEvidenceFlow, type CompletionEvidenceInput, type EvidenceEffect, type EvidenceEffectResult, type EvidenceValidationResult } from './completion-evidence.js';
@@ -40,6 +41,7 @@ export async function validateCompletionEvidenceAsync(input: CompletionEvidenceI
 
 async function executeEffect(effect: EvidenceEffect, options: EvidenceIoOptions): Promise<EvidenceEffectResult> {
   switch (effect.kind) {
+    case 'current-completion': return raw(observeInstalledCompletion(effect.owner,options.signal),options);
     case 'exists':
       try { await raw(access(effect.path), options); return true; }
       catch { assertEvidenceActive(options); return false; }

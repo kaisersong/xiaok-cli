@@ -3,18 +3,19 @@ import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { terminateOwnedProcess } from '../../scripts/evals/local-model-cache/capture.mjs';
 
+const profileAccountChildSetupPath = resolve('tests/support/profile-account-child.setup.mjs');
 const event = (delta, reason) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
 const call = (id, name, input, index = 0) => ({ index, id, type: 'function', function: { name, arguments: JSON.stringify(input) } });
 
 test('built CLI: toggle sorts real main/SubAgent requests, preserves tools and executes read/grep in both', { timeout: 60000 }, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'xiaok-tool-order-cli-'));
-  const cwd = join(root, 'work'); const configDir = join(root, 'config');
-  await mkdir(cwd); await mkdir(configDir);
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'xiaok-tool-order-cli-')));
+  const cwd = join(root, 'work'); const configDir = join(root, 'config'); const homeDir = join(root, 'home');
+  await mkdir(cwd); await mkdir(configDir); await mkdir(homeDir);
   const file = join(cwd, 'fixture.txt'); await writeFile(file, 'TOOL_ORDER_READ_GREP_OK\n');
   let active; const failures = [];
   const server = createServer(async (req, res) => {
@@ -63,9 +64,9 @@ test('built CLI: toggle sorts real main/SubAgent requests, preserves tools and e
   const runs = [];
   for (const setting of ['0', JSON.stringify({ baseUrl, model, order: 'name' })]) {
     active = { main: 0, child: 0, verified: new Set(), requests: [] };
-    const child = spawn(process.execPath, [resolve('dist/index.js'), 'chat', '-p', 'Read and grep fixture.txt, delegate the independent read-only check, then report.'], {
+    const child = spawn(process.execPath, ['--import', profileAccountChildSetupPath, resolve('dist/index.js'), 'chat', '-p', 'Read and grep fixture.txt, delegate the independent read-only check, then report.'], {
       cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', XIAOK_CONFIG_DIR: configDir, XIAOK_DISABLE_GLOBAL_PLUGINS: '1', XIAOK_TURN_TIMEOUT_MS: '20000', XIAOK_EXPERIMENTAL_TOOL_ORDER: setting, NO_COLOR: '1' },
+      env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, NODE_OPTIONS: '', NODE_PATH: '', XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir, XIAOK_DISABLE_GLOBAL_PLUGINS: '1', XIAOK_TURN_TIMEOUT_MS: '20000', XIAOK_EXPERIMENTAL_TOOL_ORDER: setting, NO_COLOR: '1' },
     });
     let output = ''; let errors = ''; let timeout = false; let termination = Promise.resolve(true);
     child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { errors += data; });

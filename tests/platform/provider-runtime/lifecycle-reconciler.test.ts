@@ -76,7 +76,7 @@ describe('LifecycleReconciler activation (design §5.2)', () => {
     await Promise.resolve();
     // User disables while activation is still awaiting its external step.
     const disabling = r.setDesiredActive('mcp:cua-driver-provider', false, 'user');
-    release?.();
+    (release as (() => void) | null)?.();
     await Promise.all([enabling, disabling]);
 
     expect(disposed).toEqual(['child']);

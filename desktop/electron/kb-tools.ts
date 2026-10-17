@@ -35,7 +35,7 @@ export function createKbTools(
       permission: 'safe',
       definition: {
         name: 'kb_create_collection',
-        description: '创建一个新的知识库集合。',
+        description: '只能创建新的知识库集合；严禁覆盖、删除或重命名已有用户集合。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -53,7 +53,7 @@ export function createKbTools(
           description: input.description as string | undefined,
           embeddingModelId: input.embeddingModelId as string,
           embeddingDim: input.embeddingDim as number,
-        });
+        }, 'agent');
         return `已创建集合「${col.name}」(${col.id})`;
       },
     },
@@ -94,7 +94,7 @@ export function createKbTools(
           const claim = store.claimSourceContentHash(source.id, computeKnowledgeContentHash(text), 'agent');
           if (!claim.created) return duplicateSourceMessage(claim.source.title, claim.source.id, claim.source.chunkCount);
           const chunks = simpleChunk(text);
-          store.insertChunks(source.id, chunks);
+          store.insertChunks(source.id, chunks, 'agent');
           markSourceParsed(store, source.id, { engine: 'builtin-text' });
           return `已写入「${title}」到知识库（${chunks.length} 片段）。`;
         }
@@ -114,7 +114,7 @@ export function createKbTools(
             const claim = store.claimSourceContentHash(source.id, computeKnowledgeContentHash(extracted.text), 'agent');
             if (!claim.created) return duplicateSourceMessage(claim.source.title, claim.source.id, claim.source.chunkCount);
             const chunks = simpleChunk(extracted.text);
-            store.insertChunks(source.id, chunks);
+            store.insertChunks(source.id, chunks, 'agent');
             markSourceParsed(store, source.id, extractionMetadata(extracted));
             return `已写入文件「${title}」到知识库（${chunks.length} 片段）。`;
           } catch (e) {
@@ -146,7 +146,7 @@ export function createKbTools(
             const claim = store.claimSourceContentHash(source.id, computeKnowledgeContentHash(plainText), 'agent');
             if (!claim.created) return duplicateSourceMessage(claim.source.title, claim.source.id, claim.source.chunkCount);
             const chunks = simpleChunk(plainText);
-            store.insertChunks(source.id, chunks);
+            store.insertChunks(source.id, chunks, 'agent');
             markSourceParsed(store, source.id, { engine: 'builtin-url' });
             return `已写入 URL「${title}」到知识库（${chunks.length} 片段）。`;
           } catch (e) {

@@ -4,7 +4,7 @@ import { runPunctuationWorkerRequest } from '../../electron/meeting-punctuation-
 describe('meeting punctuation worker', () => {
   it('uses sherpa-onnx OfflinePunctuation with ctTransformer and addPunct', async () => {
     const addPunct = vi.fn((text: string) => `${text}。`);
-    const OfflinePunctuation = vi.fn(function OfflinePunctuation(this: { addPunct: typeof addPunct }, config: unknown) {
+    const construct = vi.fn((config: unknown) => {
       expect(config).toEqual({
         model: {
           ctTransformer: '/models/punctuation/model.int8.onnx',
@@ -12,8 +12,11 @@ describe('meeting punctuation worker', () => {
           provider: 'cpu',
         },
       });
-      this.addPunct = addPunct;
     });
+    class OfflinePunctuation {
+      addPunct = addPunct;
+      constructor(config: unknown) { construct(config); }
+    }
 
     const result = await runPunctuationWorkerRequest({
       text: '我们都是木头人不会说话不会动',
@@ -22,7 +25,7 @@ describe('meeting punctuation worker', () => {
       loadRuntime: async () => ({ OfflinePunctuation }),
     });
 
-    expect(OfflinePunctuation).toHaveBeenCalledTimes(1);
+    expect(construct).toHaveBeenCalledTimes(1);
     expect(addPunct).toHaveBeenCalledWith('我们都是木头人不会说话不会动');
     expect(result).toEqual({
       ok: true,

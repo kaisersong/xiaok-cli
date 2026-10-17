@@ -106,6 +106,7 @@ export function validateBoundaryDecision(
     ? `${input.input}，${buildDeliverableInstruction(intentType, concreteDeliverables)}`
     : input.input;
   const planResult = createIntentPlan({
+    ...(input.newIntentId !== undefined ? {newIntentId: input.newIntentId} : {}),
     instanceId: input.instanceId,
     sessionId: input.sessionId,
     input: plannerInput,

@@ -74,7 +74,7 @@ describe('lsp server process transport', () => {
     const child = createMockChildProcess();
     const transport = createStdioLspTransport(child as never);
 
-    transport.dispose();
+    transport.dispose!();
 
     expect(child.kill).toHaveBeenCalledTimes(1);
   });

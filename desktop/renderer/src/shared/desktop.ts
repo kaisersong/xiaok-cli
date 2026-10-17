@@ -1,3 +1,5 @@
+import type { UpdateInstallDto } from '../../../shared/updater-ipc-contract.js';
+import type { MemoryLayerIpcEntry } from '../../../shared/memory-ipc-types.js';
 import type { MemoryCompactionResult } from '../../../shared/memory-distillation-contract.js';
 import type { FullDesktopApi } from '../../../electron/preload-api.js';
 
@@ -62,7 +64,7 @@ function getWindowApi(): FullDesktopApi | null {
 export interface AppUpdaterApi {
   check(): Promise<AppUpdaterState>;
   download(): Promise<AppUpdaterState>;
-  install(): Promise<void>;
+  install(): Promise<UpdateInstallDto>;
   getState(): Promise<AppUpdaterState>;
   onState(handler: (state: AppUpdaterState) => void): () => void;
 }
@@ -82,7 +84,7 @@ export interface DesktopMemoryApi {
   stats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
   compact(): Promise<MemoryCompactionResult>;
   personaTraits(): Promise<{ trait: string; confidence: number }[]>;
-  listLayer(layer: number, limit?: number, offset?: number): Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>;
+  listLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   deleteEntry(id: string, layer: number): Promise<boolean>;
   clearAll(): Promise<boolean>;
   getModelId(): Promise<string | null>;
@@ -117,8 +119,8 @@ export function getDesktopApi(): ExtendedDesktopApi | null {
       const status = await raw.getUpdateStatus() as PreloadUpdateStatus
       return mapUpdateStatus(status)
     },
-    async install(): Promise<void> {
-      await raw.quitAndInstall()
+    async install(): Promise<UpdateInstallDto> {
+      return raw.quitAndInstall()
     },
     async getState(): Promise<AppUpdaterState> {
       const status = await raw.getUpdateStatus() as PreloadUpdateStatus
@@ -188,7 +190,7 @@ export function getDesktopApi(): ExtendedDesktopApi | null {
       return raw.memoryPersonaTraits() as Promise<{ trait: string; confidence: number }[]>
     },
     async listLayer(layer: number, limit?: number, offset?: number) {
-      return raw.memoryListLayer(layer, limit, offset) as Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>
+      return raw.memoryListLayer(layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>
     },
     async deleteEntry(id: string, layer: number) {
       return raw.memoryDeleteEntry(id, layer) as Promise<boolean>

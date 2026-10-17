@@ -1,0 +1,123 @@
+import { createHash } from 'node:crypto';
+import { canonicalVerificationJson as json } from './protocol.js';
+const hash = (value) => createHash('sha256').update(json(value)).digest('hex');
+/** Reads only original protected database facts. It creates no execution grant. */
+export function inspectLegacyBlobInventory(db, authorityId) {
+    const exists = (table) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    const rows = (table) => exists(table) ? db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() : [];
+    const pool = rows('verification_authority_pool');
+    if (pool.length !== 1 || pool[0].authority_id !== authorityId)
+        throw Error('shared_blob_migration_authority');
+    const blobs = rows('verification_blob_reservations'), staged = rows('broker_staging_intents'), challenges = rows('material_authority_challenges'), raw = rows('docker_runner_resources'), attempts = rows('execution_attempts'), transcripts = rows('verification_execution_transcripts'), runs = rows('verification_protected_runs'), members = rows('verification_run_executions'), producers = rows('verification_run_producers'), qualification = rows('verification_engine_qualification'), profiles = rows('verification_profiles'), owners = rows('verification_registered_owners'), invocations = rows('verification_registered_invocations');
+    const inventory = { blobs, staged, challenges, raw, attempts, transcripts, runs, members, producers, qualification, profiles, owners, invocations, pool };
+    const encoded = json(inventory);
+    if (blobs.length > 131072 || Buffer.byteLength(encoded) > 128 * 1024 ** 2)
+        throw Error('shared_blob_migration_inventory_limit');
+    function session(ownerKey, invocation) { if (!invocation || Object.keys(invocation).sort().join(',') !== 'compoundOperationId,sessionIdentity,validationInvocationId' || Object.values(invocation).some(v => typeof v !== 'string' || !v || Buffer.byteLength(v) > 160))
+        throw Error('shared_blob_migration_invocation'); const owner = JSON.parse(ownerKey); if (json(owner) !== ownerKey || Object.keys(owner).sort().join(',') !== 'ownerId,ownerKind,profileId')
+        throw Error('shared_blob_migration_owner'); const registered = owners.find(r => r.owner_key === ownerKey), profile = profiles.find(r => r.profile_id === owner.profileId); if (!registered || !profile)
+        throw Error('shared_blob_migration_registration_missing'); if (registered.uid !== profile.uid || typeof profile.account_id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(profile.account_id))
+        throw Error('shared_blob_migration_registration'); if (!invocations.some(r => r.profile_id === profile.profile_id && r.owner_key === ownerKey && r.invocation_json === json(invocation)))
+        throw Error('shared_blob_migration_registration_missing'); return hash({ authorityId, profileId: profile.profile_id, accountId: profile.account_id, sessionIdentity: invocation.sessionIdentity }); }
+    function execution(p) { for (const row of raw) {
+        const value = JSON.parse(row.resources_json);
+        if (hash(value.inputAllocation) !== hash(p) && hash(value.outputAllocation) !== hash(p))
+            continue;
+        const e = value.expected, a = attempts.find(x => x.execution_id === e.executionIdentity);
+        if (!a)
+            throw Error('shared_blob_migration_execution_missing');
+        const proposal = JSON.parse(a.proposal_json);
+        if (proposal.sessionIdentity !== e.sessionIdentity || proposal.compoundOperationId !== e.compoundOperationId || proposal.validationInvocationId !== e.validationInvocationId || proposal.scopeDigest !== p.scopeDigest || value.ownerKey !== p.ownerKey || value.expected.scopeDigest !== p.scopeDigest)
+            throw Error('shared_blob_migration_execution');
+        return value;
+    } return undefined; }
+    function executionSession(ownerKey, expected) {
+        const invocation = { sessionIdentity: expected.sessionIdentity, compoundOperationId: expected.compoundOperationId, validationInvocationId: expected.validationInvocationId };
+        if (invocations.some(r => r.owner_key === ownerKey && r.invocation_json === json(invocation)))
+            return session(ownerKey, invocation);
+        const matches = members.filter(r => r.execution_id === expected.executionIdentity && r.expected_json === json(expected));
+        if (!matches.length)
+            throw Error('shared_blob_migration_case_missing');
+        if (matches.length !== 1)
+            throw Error('shared_blob_migration_case');
+        const member = matches[0], run = runs.find(r => r.source_run_id === member.source_run_id), producer = producers.find(r => r.producer_id === member.producer_id && r.source_run_id === member.source_run_id);
+        if (!run || !producer || run.owner_key !== ownerKey)
+            throw Error('shared_blob_migration_case');
+        const root = JSON.parse(run.invocation_json);
+        if (root.sessionIdentity !== expected.sessionIdentity || root.compoundOperationId !== expected.compoundOperationId)
+            throw Error('shared_blob_migration_case');
+        return session(ownerKey, root);
+    }
+    function derive(p) {
+        let key, producer, engine = p.engineBinding;
+        if (p.kind === 'host-staging') {
+            const row = staged.find(r => r.resource_id === p.resourceId);
+            if (!row)
+                throw Error('shared_blob_migration_staging_missing');
+            const value = JSON.parse(row.record_json);
+            if (hash(value.allocation) !== hash(p))
+                throw Error('shared_blob_migration_staging');
+            const match = challenges.some(c => { if (!c.secret_hash)
+                return false; const r = JSON.parse(c.record_json); return r.ownerKey === p.ownerKey && r.review.scopeDigest === p.scopeDigest && json(r.review.invocation) === json(value.manifest.invocation) && hash({ ownerKey: r.ownerKey, peer: r.peer, review: r.review, executableFiles: r.executableFiles }) === value.factsHash; });
+            if (!match)
+                throw Error('shared_blob_migration_grant');
+            key = session(p.ownerKey, value.manifest.invocation);
+            producer = 'installed-material-staging';
+        }
+        else if (p.kind === 'guest-input' || p.kind === 'guest-output') {
+            const value = execution(p);
+            if (value) {
+                const e = value.expected;
+                if (p.ownerKey === 'private-engine-qualification') {
+                    if (e.sessionIdentity !== 'private-mounted-probe')
+                        throw Error('shared_blob_migration_probe');
+                    key = hash({ authorityId, component: 'engine-qualification' });
+                }
+                else
+                    key = executionSession(p.ownerKey, e);
+                producer = 'installed-execution-' + p.kind;
+            }
+            else {
+                const q = qualification.some(r => { const value = JSON.parse(r.record_json); return value.allocation && hash(value.allocation) === hash(p); });
+                if (!q || p.ownerKey !== 'private-engine-qualification' || p.kind !== 'guest-output' || p.bytes !== 32 * 1024 ** 2 || !p.resourceId.startsWith('qualification-'))
+                    throw Error('shared_blob_migration_qualification');
+                key = hash({ authorityId, component: 'engine-qualification' });
+                producer = 'installed-execution-guest-output';
+            }
+        }
+        else if (p.kind === 'host-export') {
+            const transcript = transcripts.find(r => r.resource_id === p.resourceId);
+            if (transcript) {
+                if (hash(JSON.parse(transcript.allocation_json)) !== hash(p))
+                    throw Error('shared_blob_migration_transcript');
+                const m = JSON.parse(transcript.manifest_json), r = raw.find(r => r.execution_id === m.expected.executionIdentity);
+                if (!r)
+                    throw Error('shared_blob_migration_transcript');
+                const output = JSON.parse(r.resources_json).outputAllocation, original = derive(output);
+                if (m.ownerKey !== p.ownerKey || m.expected.scopeDigest !== p.scopeDigest || original.ownerKey !== p.ownerKey)
+                    throw Error('shared_blob_migration_transcript');
+                key = original.sessionKey;
+                engine = original.engineBinding;
+                producer = 'installed-execution-transcript';
+            }
+            else {
+                const run = runs.find(r => r.source_run_id === p.resourceId);
+                if (!run || !run.allocation_json || hash(JSON.parse(run.allocation_json)) !== hash(p) || run.owner_key !== p.ownerKey)
+                    throw Error('shared_blob_migration_run');
+                const invocation = JSON.parse(run.invocation_json);
+                key = session(p.ownerKey, invocation);
+                const original = raw.map(r => JSON.parse(r.resources_json)).find(r => r.ownerKey === p.ownerKey && r.expected.sessionIdentity === invocation.sessionIdentity && r.expected.compoundOperationId === invocation.compoundOperationId && r.expected.validationInvocationId === invocation.validationInvocationId);
+                if (!original)
+                    throw Error('shared_blob_migration_run');
+                engine = derive(original.outputAllocation).engineBinding;
+                producer = 'installed-protected-run';
+            }
+        }
+        if (!key || !producer || !engine || !Number.isSafeInteger(p.bytes) || p.bytes < 0)
+            throw Error('shared_blob_migration_source');
+        return { sessionKey: key, producerKey: producer, ownerKey: p.ownerKey, scopeDigest: p.scopeDigest, authorityId, bytes: p.bytes, engineBinding: engine };
+    }
+    const entries = blobs.filter(r => r.state === 'reserved').map(row => { const allocation = JSON.parse(row.tuple_json); if (row.profile_id !== pool[0].pool_id || row.tuple_hash !== hash(allocation) || row.resource_id !== allocation.resourceId || row.owner_key !== allocation.ownerKey || row.bytes !== allocation.bytes)
+        throw Error('shared_blob_migration_tuple'); return { allocation, binding: derive(allocation) }; });
+    return { digest: hash(inventory), entries, released: blobs.filter(r => r.state === 'released').map(r => ({ resourceId: r.resource_id, allocationHash: r.tuple_hash })) };
+}

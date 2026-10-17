@@ -43,7 +43,7 @@ describe('MCP cancellation R1: real ToolRegistry boundaries', () => {
         });
         if (stage === 'pre-hook') hook.runPreHooks.mockImplementation(rejectLate);
         const execute = vi.fn(async () => { throw new Error('ordinary effect failure'); });
-        const registry = new ToolRegistry({ permissionManager: permission, hooksRunner: hook,
+        const registry = new ToolRegistry({ permissionManager: permission, hookInputMode: 'direct-callback', hooksRunner: hook,
           onPrompt: stage === 'prompt' ? rejectLate : async () => stage !== 'prompt-denied',
         }, [probe(execute, 'write')]);
         if (stage === 'protected-output') vi.spyOn(registry as unknown as { evaluateProtectedOutputGuard(): Promise<never> }, 'evaluateProtectedOutputGuard').mockImplementation(rejectLate);
@@ -53,7 +53,21 @@ describe('MCP cancellation R1: real ToolRegistry boundaries', () => {
           expect.soft(await outcome).toEqual({ error: cancel ? reason : dependencyError });
           expect(execute).toHaveBeenCalledTimes(stage === 'failure-hook' ? 1 : 0);
           if (stage !== 'failure-hook') expect(hook.runHooks).not.toHaveBeenCalledWith('PostToolUseFailure', expect.anything());
-        } finally { held.release(); await outcome; registry.dispose(); }
+        } finally {
+          held.release(); await outcome;
+          const cleanupFailures: unknown[] = [];
+          try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+          const hookFailureStages = ['permission-request', 'policy-denied', 'request-denied', 'prompt-denied', 'pre-hook', 'failure-hook'];
+          if (hookFailureStages.includes(stage)) {
+            const joinFailure: unknown = await registry.waitForAcceptedHookCalls().catch(error => error);
+            expect.soft(joinFailure).toBeInstanceOf(AggregateError);
+            if (joinFailure instanceof AggregateError) expect.soft(joinFailure.errors).toContain(dependencyError);
+          } else {
+            try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+          }
+          // Keep body rejection and cleanup faults on independent assertion planes.
+          expect.soft(cleanupFailures).toEqual([]);
+        }
       }
     });
 

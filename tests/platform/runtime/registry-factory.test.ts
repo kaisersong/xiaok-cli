@@ -1,3 +1,9 @@
+import { drainCliRegistryWriters } from '../../../src/commands/chat-owned-writers.js';
+import { FileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
+import { createSessionExecutionAuthority, createSessionExecutionContext } from '../../../src/ai/runtime/session-store/execution-authority.js';
+import { createCompoundSessionJournal } from '../../../src/runtime/sol-pi/compound-session-journal.js';
+import { createCompoundExecutionCoordinator } from '../../../src/runtime/sol-pi/compound-execution-coordinator.js';
+import { createReadTool } from '../../../src/ai/tools/read.js';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createPlatformRegistryFactory } from '../../../src/platform/runtime/registry-factory.js';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
@@ -5,6 +11,10 @@ import { applySandboxToTools } from '../../../src/platform/sandbox/tool-wrappers
 import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { PlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import type { ModelAdapter, Tool, ToolDefinition } from '../../../src/types.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createBackgroundRunner } from '../../../src/platform/agents/background-runner.js';
 
 const mockState = vi.hoisted(() => ({
   tools: [
@@ -54,12 +64,13 @@ vi.mock('../../../src/ai/tools/index.js', () => ({
   ToolRegistry: vi.fn().mockImplementation((_opts, tools) => mockRegistry(tools)),
 }));
 
-vi.mock('../../../src/platform/sandbox/tool-wrappers.js', () => ({
+vi.mock('../../../src/platform/sandbox/tool-wrappers.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../src/platform/sandbox/tool-wrappers.js')>(),
   applySandboxToTools: vi.fn((tools) => tools),
 }));
 
 vi.mock('../../../src/runtime/hooks-runner.js', () => ({
-  createHooksRunner: vi.fn(() => ({})),
+  createHooksRunner: vi.fn(() => ({ closeAndDrain: () => Promise.resolve() })),
 }));
 
 vi.mock('../../../src/ai/tools/tool-pool.js', () => ({
@@ -78,7 +89,7 @@ function makeMockPlatform(expandAllowedPaths = vi.fn()): PlatformRuntimeContext 
     worktreeManager: undefined,
     lspManager: undefined,
     teamService: undefined,
-    createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })) })),
+    createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })), waitForDisposedResources: vi.fn(async () => {}) })),
     createReminderApi: vi.fn(() => undefined),
     mcpReady: Promise.resolve(),
     onMcpToolsChanged: vi.fn(() => () => undefined),
@@ -138,6 +149,7 @@ describe('registry-factory sandbox auto mode', () => {
       undefined,
       { cwd: '/test/cwd', allowOutsideCwd: true, outsideCwdGuard: expect.any(Function) },
       expect.any(Array),
+      expect.any(Map),
       { isYolo: expect.any(Function) },
     );
   });
@@ -151,7 +163,7 @@ describe('registry-factory sandbox auto mode', () => {
     });
     factory.createRegistry('/test/cwd');
     factory.createRegistry('/test/cwd', undefined, 'child');
-    const authorities = vi.mocked(buildToolList).mock.calls.slice(-2).map(args => args[3]);
+    const authorities = vi.mocked(buildToolList).mock.calls.slice(-2).map(args => args[4]);
     expect(authorities).toHaveLength(2);
     for (const authority of authorities) expect(authority?.isYolo?.()).toBe(true);
     manager.setMode('auto');
@@ -214,7 +226,7 @@ describe('registry-factory CC tool filtering', () => {
       worktreeManager: undefined,
       lspManager: undefined,
       teamService: undefined,
-      createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })) })),
+      createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })), waitForDisposedResources: vi.fn(async () => {}) })),
       createReminderApi: vi.fn(() => undefined),
       mcpReady: Promise.resolve(),
       onMcpToolsChanged: vi.fn(() => () => undefined),
@@ -305,7 +317,7 @@ describe('registry-factory allowedTools filtering', () => {
       worktreeManager: undefined,
       lspManager: undefined,
       teamService: undefined,
-      createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })) })),
+      createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })), waitForDisposedResources: vi.fn(async () => {}) })),
       createReminderApi: vi.fn(() => undefined),
       mcpReady: Promise.resolve(),
       onMcpToolsChanged: vi.fn(() => () => undefined),
@@ -432,6 +444,88 @@ describe('registry-factory multi-agent surface', () => {
     expect(vi.mocked(ToolRegistry)).toHaveBeenCalledTimes(2);
   });
 
+  it('publishes one original disposal before unsubscribe reenters it', async () => {
+    const platform = makeMockPlatform();
+    let nested: Promise<void> | undefined;
+    const unsubscribe = vi.fn(() => { nested = factory.dispose(); });
+    platform.onMcpToolsChanged = vi.fn(() => unsubscribe);
+    const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'reentrant',
+      adapter: () => ({} as ModelAdapter), buildSystemPrompt: async () => '' });
+    await expect(factory.waitForDisposedResources()).rejects.toThrow('platform_cleanup_not_started');
+    const stopping = factory.dispose();
+    expect(factory.dispose()).toBe(stopping);
+    await stopping;
+    expect(nested).toBe(stopping);
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(() => factory.createRegistry(process.cwd())).toThrow('disposed');
+    await factory.waitForDisposedResources();
+  });
+
+  it('holds physical cleanup until the actual child settles even when background drain rejects', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'registry-physical-'));
+    let finishPrompt!: (value: string) => void;
+    let rejectBackground!: (error: Error) => void;
+    const prompt = new Promise<string>((resolve) => { finishPrompt = resolve; });
+    const background = new Promise<void>((_resolve, reject) => { rejectBackground = reject; });
+    const failure = new Error('background physical rejection');
+    const runner = createBackgroundRunner({ rootDir, shutdownTimeoutMs: 5, notify: vi.fn(),
+      execute: async () => { await background; return { ok: true }; } });
+    const platform = makeMockPlatform();
+    platform.createBackgroundRunner = vi.fn(() => runner);
+    platform.customAgents = [{ name: 'gated', systemPrompt: '', source: 'builtin' }];
+    const buildSystemPrompt = vi.fn(() => prompt);
+    const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'physical',
+      adapter: () => ({} as ModelAdapter), buildSystemPrompt });
+    try {
+      await runner.start({ sessionId: 'physical', source: 'chat', input: 'run' });
+      const root = factory.createRegistry(process.cwd()) as unknown as ReturnType<typeof mockRegistry>;
+      await root.executeTool('spawn_agent', { task_name: 'gated', agent: 'gated', message: 'run', fork_context: false });
+      await vi.waitFor(() => expect(buildSystemPrompt).toHaveBeenCalledOnce());
+      await factory.dispose();
+      const physical = factory.waitForDisposedResources();
+      let settled = false;
+      void physical.then(() => { settled = true; }, () => { settled = true; });
+      rejectBackground(failure);
+      await new Promise(setImmediate);
+      expect(settled).toBe(false);
+      finishPrompt('done');
+      await expect(physical).rejects.toBeInstanceOf(AggregateError);
+    } finally {
+      finishPrompt('done');
+      rejectBackground(failure);
+      await factory.dispose();
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects physical completion when the actual child worktree cleanup fails', async () => {
+    let finishPrompt!: (value: string) => void;
+    const prompt = new Promise<string>((resolve) => { finishPrompt = resolve; });
+    const platform = makeMockPlatform();
+    const release = vi.fn(async () => { throw new Error('actual worktree cleanup failed'); });
+    platform.worktreeManager = { allocate: vi.fn(async (input) => ({ ...input, path: process.cwd(), created: true })),
+      release } as unknown as PlatformRuntimeContext['worktreeManager'];
+    platform.customAgents = [{ name: 'gated', systemPrompt: '', source: 'builtin', isolation: 'worktree', cleanup: 'delete' }];
+    const buildSystemPrompt = vi.fn(() => prompt);
+    const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'failed-child',
+      adapter: () => ({} as ModelAdapter), buildSystemPrompt });
+    try {
+      const root = factory.createRegistry(process.cwd()) as unknown as ReturnType<typeof mockRegistry>;
+      await root.executeTool('spawn_agent', { task_name: 'gated', agent: 'gated', message: 'run', fork_context: false });
+      await vi.waitFor(() => expect(buildSystemPrompt).toHaveBeenCalledOnce());
+      const disposal = factory.dispose();
+      // Let the factory publish its shutdown before releasing initialization.
+      await Promise.resolve();
+      await Promise.resolve();
+      finishPrompt('late prompt');
+      await disposal;
+      await expect(factory.waitForDisposedResources()).rejects.toMatchObject({ errors: expect.arrayContaining([
+        expect.objectContaining({ message: 'multi_agent_cleanup_unconfirmed' }),
+      ]) });
+      expect(release).toHaveBeenCalledExactlyOnceWith(process.cwd());
+    } finally { finishPrompt('late prompt'); await factory.dispose(); }
+  });
+
   it.each(['interrupt_agent', 'close_agent'] as const)('forwards %s cancellation through named initialization before registry creation', async (stopTool) => {
     let finishPrompt!: (value: string) => void;
     const promptGate = new Promise<string>((resolve) => { finishPrompt = resolve; });
@@ -490,3 +584,45 @@ it('routes reminder delivery through the frontend sink instead of raw stdout', a
     expect(stdout).not.toHaveBeenCalled();
   } finally { stdout.mockRestore(); await factory.dispose(); }
 });
+
+
+it.each([false, true])('CLI waits for the original factory physical writer before closing the actual compound coordinator (late rejection=%s)', async rejected => {
+  const rootDir=mkdtempSync(join(tmpdir(),'cli-registry-order-'));
+  let releaseBackground!:()=>void,enteredBackground!:()=>void,enteredRead!:()=>void;
+  const backgroundGate=new Promise<void>(r=>releaseBackground=r),backgroundEntered=new Promise<void>(r=>enteredBackground=r),readEntered=new Promise<void>(r=>enteredRead=r);
+  const failure=Error('original background write rejected after shutdown');
+  const runner=createBackgroundRunner({rootDir:join(rootDir,'jobs'),shutdownTimeoutMs:5,notify:()=>{},execute:async()=>{
+    enteredBackground();await backgroundGate;if(rejected)throw failure;return{ok:true};
+  }});
+  const platform=makeMockPlatform();platform.createBackgroundRunner=()=>runner;
+  const factory=createPlatformRegistryFactory({platform,source:'chat',sessionId:'root',adapter:()=>({} as ModelAdapter),buildSystemPrompt:async()=>''});
+  const store=new FileSessionStore(join(rootDir,'sessions')),sessionId='root';
+  await store.save({sessionId,cwd:rootDir,createdAt:1,updatedAt:1,lineage:[],messages:[],usage:{inputTokens:0,outputTokens:0},compactions:[],memoryRefs:[],approvalRefs:[],backgroundJobRefs:[]});
+  const authority=createSessionExecutionAuthority({root:join(rootDir,'sessions'),sessionIdentity:sessionId,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'owner',scopeId:'cli-test'})});
+  const journal=createCompoundSessionJournal({store,root:join(rootDir,'sessions'),sessionIdentity:sessionId,ownerId:'owner',scopeId:'cli-test',requestSource:'agent',assertCurrent:()=>{}});
+  const file=join(rootDir,'source');writeFileSync(file,'original bytes');
+  const read=createReadTool({cwd:rootDir}),nativeRead=read.execute;let compoundAborted=false;
+  read.execute=async(input,context)=>{
+    enteredRead();const signal=context!.signal;
+    await new Promise<void>(resolve=>{signal!.addEventListener('abort',()=>{compoundAborted=true;resolve();},{once:true});});
+    signal!.throwIfAborted();return nativeRead(input,context);
+  };
+  const compound=createCompoundExecutionCoordinator({journal,authority,sessionIdentity:sessionId,assertCurrent:()=>{},getPermissionRevision:()=>0,readonlyTools:[read],fileTools:[]});
+  const actual=await vi.importActual<typeof import('../../../src/ai/tools/index.js')>('../../../src/ai/tools/index.js');
+  const registry=new actual.ToolRegistry({permissionManager:new PermissionManager({mode:'auto'}),compoundExecution:compound},[read]);
+  const work=registry.executeTool('read',{file_path:file},{taskId:'task',session:(await store.load(sessionId))!,messages:[],systemPrompt:'',toolDefinitions:[],hostProviderInvocationId:'provider',toolInvocationId:'original'});
+  void work.catch(()=>{});
+  try {
+    await Promise.race([readEntered,work.then(()=>{throw Error('read finished before actual gate');},error=>{throw error;})]);await runner.start({sessionId,source:'chat',input:'hold original background writer'});await backgroundEntered;
+    await factory.dispose();
+    const drain=drainCliRegistryWriters(factory,compound);void drain.catch(()=>{});
+    await new Promise(setImmediate);
+    expect(compoundAborted).toBe(false);
+    releaseBackground();
+    if(rejected)await expect(drain).rejects.toBeInstanceOf(AggregateError);else await drain;
+    expect(compoundAborted).toBe(true);await expect(work).rejects.toBeInstanceOf(DOMException);
+  }finally{
+    releaseBackground();await factory.dispose();await runner.waitForDisposedResources().catch(()=>{});
+    await compound.dispose().catch(()=>{});await work.catch(()=>{});registry.dispose();authority.dispose();rmSync(rootDir,{recursive:true,force:true});
+  }
+},20000);

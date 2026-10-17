@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDesktopApi } from '@xiaok/shared/desktop';
-import type { KSwarmAgentSemanticInput, ProjectTeamOperationView, ProjectTeamPlanView } from '../api/types';
+import type { ProxyHttpBody, KSwarmAgentSemanticInput, ProjectTeamOperationView, ProjectTeamPlanView } from '../api/types';
 
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
@@ -931,7 +931,7 @@ async function httpPost<T>(path: string, body?: unknown): Promise<T | null> {
   const api = getDesktopApi();
   if (!api?.kswarmProxyPost) return null;
   try {
-    return await api.kswarmProxyPost(path, body) as T | null;
+    return await api.kswarmProxyPost(path, body as ProxyHttpBody) as T | null;
   } catch (err) {
     console.warn(`[kswarm] POST ${path} failed`, err);
     return null;
@@ -942,7 +942,7 @@ async function httpPostJson<T>(path: string, body?: unknown): Promise<T | null> 
   const api = getDesktopApi();
   if (!api?.kswarmProxyPostJson) return null;
   try {
-    return await api.kswarmProxyPostJson(path, body) as T | null;
+    return await api.kswarmProxyPostJson(path, body as ProxyHttpBody) as T | null;
   } catch (err) {
     console.warn(`[kswarm] POST(json) ${path} failed`, err);
     return null;
@@ -1045,9 +1045,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       }
     };
 
+    let subscriptionUncertain = false;
     const applyConnectionStatus = (status?: string) => {
       if (disposed) return;
-      const isConnected = status === 'connected';
+      const isConnected = status === 'connected' && !subscriptionUncertain;
       const wasConnected = connectedRef.current;
       setConnected(isConnected);
       connectedRef.current = isConnected;
@@ -1067,7 +1068,18 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     });
     wsEventRef.current = unsubEvent || null;
 
-    api.kswarmStreamSubscribe?.();
+    const subscriptionFailed = () => {
+      if (disposed) return;
+      subscriptionUncertain = true;
+      applyConnectionStatus('disconnected');
+    };
+    try {
+      Promise.resolve(api.kswarmStreamSubscribe?.())
+        .then((receipt: unknown) => {
+          if (receipt && typeof receipt === 'object' && 'ok' in receipt && receipt.ok === false) subscriptionFailed();
+        })
+        .catch(subscriptionFailed);
+    } catch { subscriptionFailed(); }
     Promise.resolve(api.kswarmStreamGetStatus?.())
       .then((payload: unknown) => {
         applyConnectionStatus(readConnectionStatus(payload));
@@ -1082,7 +1094,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
 
     return () => {
       disposed = true;
-      api.kswarmStreamUnsubscribe?.();
+      try {
+        Promise.resolve(api.kswarmStreamUnsubscribe?.())
+          .catch(error => console.warn('[kswarm] stream unsubscribe outcome unknown', error));
+      } catch (error) { console.warn('[kswarm] stream unsubscribe outcome unknown', error); }
       wsRef.current?.();
       wsRef.current = null;
       wsEventRef.current?.();

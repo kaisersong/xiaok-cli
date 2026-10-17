@@ -85,7 +85,7 @@ describe.runIf(nativeAuthorizer)('R6 AF actual timers, dispatch boundaries and a
 
   it('AF3c real provider prepare mailbox await and actual OpenAIAdapter preflight both reject after trusted usage failure', async () => {
     const f = await activityFixture(cleanup), entered = barrier(), release = barrier(); cleanup.push(() => { release.release(); });
-    await f.services.saveModelConfig({ providerId: 'openai', apiKey: 'fixture-no-network' });
+    await f.services.saveModelConfig({ providerId: 'openai', apiKey: 'fixture-no-network' }, undefined, 'user');
     f.setProgram(async function* ({ call }) { if (call === 1) yield { type: 'tool_use', id: 'list', name: 'list_agents', input: {} };
       else yield { type: 'text', delta: 'late provider response' }; });
     const original = DesktopMultiAgentTurnMailbox.prototype.drainInput;

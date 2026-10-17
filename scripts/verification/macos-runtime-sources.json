@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "architecture": "arm64",
+  "packages": [
+    {
+      "name": "qemu",
+      "version": "11.1.1",
+      "url": "https://ghcr.io/v2/homebrew/core/qemu/blobs/sha256:7d44c9254d15991c90d5c5955029971ed921fd7a06091dfa1225d1a2e6cdcfd0",
+      "sha256": "7d44c9254d15991c90d5c5955029971ed921fd7a06091dfa1225d1a2e6cdcfd0"
+    },
+    {
+      "name": "ca-certificates",
+      "version": "2026-08-13",
+      "url": "https://ghcr.io/v2/homebrew/core/ca-certificates/blobs/sha256:37f5c1413f65c05d86e1279d76699f5d27ad77f8126f5776db13f3d64ee3d010",
+      "sha256": "37f5c1413f65c05d86e1279d76699f5d27ad77f8126f5776db13f3d64ee3d010"
+    },
+    {
+      "name": "capstone",
+      "version": "5.0.9",
+      "url": "https://ghcr.io/v2/homebrew/core/capstone/blobs/sha256:6b31fe379681e2c0778e30b3516cdfc2cfdff6424f666463643f1507039daf0b",
+      "sha256": "6b31fe379681e2c0778e30b3516cdfc2cfdff6424f666463643f1507039daf0b"
+    },
+    {
+      "name": "dtc",
+      "version": "1.8.1",
+      "url": "https://ghcr.io/v2/homebrew/core/dtc/blobs/sha256:92ee4960b1643f3ba722d3d0cd9eb31af546215c7eaf858e76e2c69dd2c7afe8",
+      "sha256": "92ee4960b1643f3ba722d3d0cd9eb31af546215c7eaf858e76e2c69dd2c7afe8"
+    },
+    {
+      "name": "gettext",
+      "version": "1.0",
+      "url": "https://ghcr.io/v2/homebrew/core/gettext/blobs/sha256:f65cd0001209a5d431234383e2ff96af4f82f9da1b63b43823edcdf837422856",
+      "sha256": "f65cd0001209a5d431234383e2ff96af4f82f9da1b63b43823edcdf837422856"
+    },
+    {
+      "name": "glib",
+      "version": "2.90.0",
+      "url": "https://ghcr.io/v2/homebrew/core/glib/blobs/sha256:07422c68ee1c3d01ba6ac6296668e82cad2ee21c9466e60e79a70da2c5947207",
+      "sha256": "07422c68ee1c3d01ba6ac6296668e82cad2ee21c9466e60e79a70da2c5947207"
+    },
+    {
+      "name": "gmp",
+      "version": "6.3.0",
+      "url": "https://ghcr.io/v2/homebrew/core/gmp/blobs/sha256:5116a8201d8e044aef7d486da7e57f1e4dd2d8554ea6b540b44e45c0804f8f6f",
+      "sha256": "5116a8201d8e044aef7d486da7e57f1e4dd2d8554ea6b540b44e45c0804f8f6f"
+    },
+    {
+      "name": "gnutls",
+      "version": "3.8.13",
+      "url": "https://ghcr.io/v2/homebrew/core/gnutls/blobs/sha256:366c9b9c0a6b246af58952c4bb5ac921ec5be87bdc23c0b9d8b2ca97b1a3d996",
+      "sha256": "366c9b9c0a6b246af58952c4bb5ac921ec5be87bdc23c0b9d8b2ca97b1a3d996"
+    },
+    {
+      "name": "jpeg-turbo",
+      "version": "3.2.0",
+      "url": "https://ghcr.io/v2/homebrew/core/jpeg-turbo/blobs/sha256:7bc0f7c007a73c68da8c11055e836de66c2814c1b0ca0302da9a6317199fd37a",
+      "sha256": "7bc0f7c007a73c68da8c11055e836de66c2814c1b0ca0302da9a6317199fd37a"
+    },
+    {
+      "name": "json-c",
+      "version": "0.19",
+      "url": "https://ghcr.io/v2/homebrew/core/json-c/blobs/sha256:6b45746f31780a84ae3ed11d056bd101d1b0a6d0f16bf91aad2d35a18f6107dc",
+      "sha256": "6b45746f31780a84ae3ed11d056bd101d1b0a6d0f16bf91aad2d35a18f6107dc"
+    },
+    {
+      "name": "libidn2",
+      "version": "2.3.8",
+      "url": "https://ghcr.io/v2/homebrew/core/libidn2/blobs/sha256:bacc89595e4e8d2a4e14eb71730ae96a1ca68830068a741c59fc363a355ef1bc",
+      "sha256": "bacc89595e4e8d2a4e14eb71730ae96a1ca68830068a741c59fc363a355ef1bc"
+    },
+    {
+      "name": "libpng",
+      "version": "1.6.58",
+      "url": "https://ghcr.io/v2/homebrew/core/libpng/blobs/sha256:d83a3631d041986456c084c192e7dcb4cfac4b645c3b21c26bb2252b3e0888fd",
+      "sha256": "d83a3631d041986456c084c192e7dcb4cfac4b645c3b21c26bb2252b3e0888fd"
+    },
+    {
+      "name": "libslirp",
+      "version": "4.9.4",
+      "url": "https://ghcr.io/v2/homebrew/core/libslirp/blobs/sha256:9f24148638d099d7c11b64a73a52fd80d8510a1352c7b0d8f3ada6d92848d503",
+      "sha256": "9f24148638d099d7c11b64a73a52fd80d8510a1352c7b0d8f3ada6d92848d503"
+    },
+    {
+      "name": "libssh",
+      "version": "0.12.2",
+      "url": "https://ghcr.io/v2/homebrew/core/libssh/blobs/sha256:cc4bab002dd48933367fe51da95ce7a4140e8e06aa01dad06c48d057414de073",
+      "sha256": "cc4bab002dd48933367fe51da95ce7a4140e8e06aa01dad06c48d057414de073"
+    },
+    {
+      "name": "libtasn1",
+      "version": "4.21.0",
+      "url": "https://ghcr.io/v2/homebrew/core/libtasn1/blobs/sha256:68d1748171848565af7a083ca92b834ab1fe4ac7832140b1cd22fd1fcb072fd7",
+      "sha256": "68d1748171848565af7a083ca92b834ab1fe4ac7832140b1cd22fd1fcb072fd7"
+    },
+    {
+      "name": "libunistring",
+      "version": "1.4.2",
+      "url": "https://ghcr.io/v2/homebrew/core/libunistring/blobs/sha256:d489b51a9ce0a76657f226159fdc39eab37798c86b0465c56ccfbde60c98d953",
+      "sha256": "d489b51a9ce0a76657f226159fdc39eab37798c86b0465c56ccfbde60c98d953"
+    },
+    {
+      "name": "libusb",
+      "version": "1.0.30",
+      "url": "https://ghcr.io/v2/homebrew/core/libusb/blobs/sha256:b462926c2314b5bb7d1a6721f9a3cf7336a4166ba67024b4bbd0226de457132a",
+      "sha256": "b462926c2314b5bb7d1a6721f9a3cf7336a4166ba67024b4bbd0226de457132a"
+    },
+    {
+      "name": "libyaml",
+      "version": "0.2.5",
+      "url": "https://ghcr.io/v2/homebrew/core/libyaml/blobs/sha256:afaaa073d70a7e69f0ff53dcdf1ee08d1ac594eb2e458afa665403adf4209078",
+      "sha256": "afaaa073d70a7e69f0ff53dcdf1ee08d1ac594eb2e458afa665403adf4209078"
+    },
+    {
+      "name": "lz4",
+      "version": "1.10.0",
+      "url": "https://ghcr.io/v2/homebrew/core/lz4/blobs/sha256:53ea7532077fe43abfe3d6e0d9991ebc8370e9edcc508f997c92902d60c8b151",
+      "sha256": "53ea7532077fe43abfe3d6e0d9991ebc8370e9edcc508f997c92902d60c8b151"
+    },
+    {
+      "name": "lzo",
+      "version": "2.10",
+      "url": "https://ghcr.io/v2/homebrew/core/lzo/blobs/sha256:928ed0070e25fe8082e24daa3f967657be0c1c5c72c14a3ac4cd498874eeec11",
+      "sha256": "928ed0070e25fe8082e24daa3f967657be0c1c5c72c14a3ac4cd498874eeec11"
+    },
+    {
+      "name": "ncurses",
+      "version": "6.6",
+      "url": "https://ghcr.io/v2/homebrew/core/ncurses/blobs/sha256:36a1f053f1be8ce8dce8a92b68395fb1483b077d313077e9c8f4b20b6f712602",
+      "sha256": "36a1f053f1be8ce8dce8a92b68395fb1483b077d313077e9c8f4b20b6f712602"
+    },
+    {
+      "name": "nettle",
+      "version": "4.0",
+      "url": "https://ghcr.io/v2/homebrew/core/nettle/blobs/sha256:42ff85a054b4a265542175dd31f4a515e0a3e7d8113cfddacc5472555a036bc8",
+      "sha256": "42ff85a054b4a265542175dd31f4a515e0a3e7d8113cfddacc5472555a036bc8"
+    },
+    {
+      "name": "openssl@3",
+      "version": "3.6.4",
+      "url": "https://ghcr.io/v2/homebrew/core/openssl/3/blobs/sha256:51eb22ee51d7b6e678ef5dc2be234adb46f9f541ac1d98e5ed08c9a7535789dc",
+      "sha256": "51eb22ee51d7b6e678ef5dc2be234adb46f9f541ac1d98e5ed08c9a7535789dc"
+    },
+    {
+      "name": "p11-kit",
+      "version": "0.26.5",
+      "url": "https://ghcr.io/v2/homebrew/core/p11-kit/blobs/sha256:4a29e277bb379f786b85d2de2d5a4da381e9aae159dcd359d4d9d9c4af027680",
+      "sha256": "4a29e277bb379f786b85d2de2d5a4da381e9aae159dcd359d4d9d9c4af027680"
+    },
+    {
+      "name": "pcre2",
+      "version": "10.48",
+      "url": "https://ghcr.io/v2/homebrew/core/pcre2/blobs/sha256:0b27d55ce599c9f208dd0ecef2d4e081c32044cda68b53e81d3aad550a04a991",
+      "sha256": "0b27d55ce599c9f208dd0ecef2d4e081c32044cda68b53e81d3aad550a04a991"
+    },
+    {
+      "name": "pixman",
+      "version": "0.46.4",
+      "url": "https://ghcr.io/v2/homebrew/core/pixman/blobs/sha256:918ff532bf70bc121376f4b51420f44fc1abd0b9c519d7f8040f6ad9d304bc02",
+      "sha256": "918ff532bf70bc121376f4b51420f44fc1abd0b9c519d7f8040f6ad9d304bc02"
+    },
+    {
+      "name": "snappy",
+      "version": "1.3.1",
+      "url": "https://ghcr.io/v2/homebrew/core/snappy/blobs/sha256:7f20ac629eaf9a34a0e4d0e1fe60a933d42ececf3d956988fa8b24916e467c85",
+      "sha256": "7f20ac629eaf9a34a0e4d0e1fe60a933d42ececf3d956988fa8b24916e467c85"
+    },
+    {
+      "name": "vde",
+      "version": "2.3.3",
+      "url": "https://ghcr.io/v2/homebrew/core/vde/blobs/sha256:972ce0f14fb0fe92932f45b887019b228ac4529f06d0a95eeb88ece1359d76ba",
+      "sha256": "972ce0f14fb0fe92932f45b887019b228ac4529f06d0a95eeb88ece1359d76ba"
+    },
+    {
+      "name": "xz",
+      "version": "5.8.4",
+      "url": "https://ghcr.io/v2/homebrew/core/xz/blobs/sha256:b2b5d6523153be05c20bcc51cd358ea3dd1f4bf893748fdedb779ab508ea63ce",
+      "sha256": "b2b5d6523153be05c20bcc51cd358ea3dd1f4bf893748fdedb779ab508ea63ce"
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7",
+      "url": "https://ghcr.io/v2/homebrew/core/zstd/blobs/sha256:7fb4af03304cc4897326168cdcd53290311c5543150f5502a61c3e84b6d62765",
+      "sha256": "7fb4af03304cc4897326168cdcd53290311c5543150f5502a61c3e84b6d62765"
+    }
+  ],
+  "lima": {
+    "version": "2.2.0",
+    "url": "https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Darwin-arm64.tar.gz",
+    "sha256": "bbdef91774885a0d05f7b048c4eb89ae2bcf3a0c252ae7ca7934e63df76d93c3"
+  },
+  "baseImage": {
+    "url": "https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-arm64.img",
+    "sha256": "7bcf159e29ad0000bfed9c57875908c39268f5ed1257f4958fa6a9f5f60edd54"
+  },
+  "engine": {
+    "version": "29.8.1",
+    "url": "https://download.docker.com/linux/static/stable/aarch64/docker-29.8.1.tgz",
+    "sha256": "667395fbffab52901b80181dfbb39ea76da2fbd7642c4fbddd24e42146b07b48"
+  },
+  "workerImage": {
+    "source": "Previously saved exact docker.io/library/alpine:3.21 linux/arm64 image, no mutable pull during assembly or install",
+    "sha256": "a25f0d3b886ef75645aa49bea664aef3a78262d6a75862d94013586beda0f592",
+    "imageId": "sha256:2155344e09b47f8ea09459100e050bed74b5202316318fd0ad0f7f6856089efc"
+  }
+}

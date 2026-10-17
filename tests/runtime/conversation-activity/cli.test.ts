@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { taskId } from '@modelcontextprotocol/ext-tasks/core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +19,7 @@ describe('CLI activity presentation boundaries', () => {
   async function complete(owner: CliConversationActivities) {
     await owner.service.prepareAssociation({ threadId: 'session', operationId: 'operation', creationIdempotencyKey: 'operation' }, { requestSource: 'user', actorId: 'cli-user' });
     await owner.service.bindWork({ operationId: 'operation', watchId: 'watch', source: 'mcp', logicalSourceId: 'endpoint', sourceDataEpoch: 'epoch', workId: 'task' },
-      { endpointId: 'endpoint', generation: 'v2', taskId: 'task', originalOperation: 'tools/call' });
+      { endpointId: 'endpoint', generation: 'v2', taskId: taskId('task'), originalOperation: 'tools/call' });
     await owner.service.acceptEvent('watch', { schemaVersion: 1, eventId: 'done', source: 'mcp', logicalSourceId: 'endpoint', sourceDataEpoch: 'epoch', workId: 'task', runId: '',
       transportGeneration: 0, kind: 'completed', receivedAt: Date.now(), evidenceRefs: [], summary: '报告完成\x1b[2J\x1b]52;c;clipboard\x07' });
     await vi.waitFor(() => expect(owner.hasPending).toBe(true));

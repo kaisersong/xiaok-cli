@@ -6,13 +6,13 @@ import { stripAnsi } from '../../src/ui/text-metrics.js';
 describe('MarkdownRenderer', () => {
   let output = '';
   let originalWrite: typeof process.stdout.write;
-  let originalColumns: number | undefined;
+  let originalColumnsDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     setColorsEnabled(false);
     output = '';
     originalWrite = process.stdout.write;
-    originalColumns = process.stdout.columns;
+    originalColumnsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
     process.stdout.write = ((chunk: any) => {
       output += chunk;
       return true;
@@ -21,7 +21,11 @@ describe('MarkdownRenderer', () => {
 
   afterEach(() => {
     process.stdout.write = originalWrite;
-    process.stdout.columns = originalColumns;
+    if (originalColumnsDescriptor) {
+      Object.defineProperty(process.stdout, 'columns', originalColumnsDescriptor);
+    } else {
+      Reflect.deleteProperty(process.stdout, 'columns');
+    }
     setColorsEnabled(false);
   });
 

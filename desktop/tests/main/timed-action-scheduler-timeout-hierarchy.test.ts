@@ -3,20 +3,27 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TimedActionScheduler } from '../../electron/timed-action-scheduler.js';
+import { LoopStore } from '../../electron/loop-store.js';
+import { createLoopTimedCompletionHost, type LoopTimedCompletionHost } from '../../electron/loop-timed-completion.js';
 import { TimedActionStore } from '../../electron/timed-action-store.js';
 import type { TimedActionExecutorHandler } from '../../electron/timed-action-types.js';
 
 describe('TimedActionScheduler timeout hierarchy', () => {
   let rootDir: string;
   let store: TimedActionStore;
+  let loops: LoopStore;
+  let completion: LoopTimedCompletionHost;
 
   beforeEach(() => {
     rootDir = join(tmpdir(), `xiaok-timed-scheduler-timeout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
     store = new TimedActionStore(join(rootDir, 'timed-actions.sqlite'));
+    loops = new LoopStore(join(rootDir,'loops.sqlite'));loops.ensureBuiltInLoops(0);
+    completion = createLoopTimedCompletionHost({timedStore:store,loopStore:loops,captureAdmission:()=>()=>{},now:()=>2000});
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await completion.close();loops.close();
     store.close();
     rmSync(rootDir, { recursive: true, force: true });
   });
@@ -64,7 +71,7 @@ describe('TimedActionScheduler timeout hierarchy', () => {
         id: 'long_loop',
         title: 'Long Loop',
         trigger: { kind: 'once', at: 1_000 },
-        executor: { kind: 'loop', loopId: 'loop_1' },
+        executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
         source: 'user',
         now: 0,
       });
@@ -72,12 +79,16 @@ describe('TimedActionScheduler timeout hierarchy', () => {
       let resolveLoop: (() => void) | null = null;
       const loopExecutor: TimedActionExecutorHandler = {
         kind: 'loop',
-        execute: async (_action, _ctx, runtimeContext) => {
+        execute: async (action, context, runtimeContext) => {
           await new Promise<void>((resolve, reject) => {
             resolveLoop = () => resolve();
             runtimeContext?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
           });
-          return { decision: { loopRunId: 'r1', loopStatus: 'success' } };
+          if(action.executor.kind!=='loop'||!runtimeContext?.timedActionRunId)throw Error('original loop admission missing');
+          const began=loops.beginLoopRun(action.executor.loopId,{kind:'scheduled',timedActionId:action.id,timedActionRunId:runtimeContext.timedActionRunId,scheduledDueAt:context.scheduledDueAt},2000,60000,{requestSource:'scheduler'});
+          if(began.status!=='started')throw Error('original loop not started');
+          loops.finishLoopRunSuccess(began.run.id,[],2000,'original watchdog completed');
+          return {decision:{loopRunId:began.run.id,loopStatus:'success'}};
         },
       };
       const scheduler = new TimedActionScheduler(store, {
@@ -85,6 +96,7 @@ describe('TimedActionScheduler timeout hierarchy', () => {
         now: () => 2_000,
         executorTimeoutForKind: (kind) => kind === 'loop' ? 60_000 : 50,
         maxLoopConcurrent: 1,
+        loopCompletion: completion,
       });
 
       await scheduler.runOnce('normal_tick');
@@ -144,7 +156,7 @@ describe('TimedActionScheduler timeout hierarchy', () => {
       const observed: { aborted: boolean; reason: unknown } = { aborted: false, reason: null };
       const notify: TimedActionExecutorHandler = {
         kind: 'notify',
-        execute: async (_action, _ctx, runtimeContext) => {
+        execute: async (action, context, runtimeContext) => {
           await new Promise<void>((resolve) => {
             runtimeContext?.signal?.addEventListener('abort', () => {
               observed.aborted = true;

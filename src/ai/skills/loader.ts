@@ -1,3 +1,4 @@
+import { types as nodeTypes } from 'node:util';
 import { readdirSync, readFileSync, existsSync, Dirent, statSync } from 'fs';
 import { basename, dirname, join, relative } from 'path';
 import { getBuiltinSkillRoots } from './defaults.js';
@@ -55,6 +56,8 @@ export interface SkillMeta {
 export interface SkillLoadOptions {
   builtinRoots?: string[];
   extraRoots?: string[];
+  /** Optional Desktop completeness observation; default CLI tolerance is unchanged. */
+  onDiscoveryIssue?: (issue: { kind: 'directory_unavailable' | 'skill_read_unavailable' | 'skill_parse_invalid' | 'resource_discovery_unavailable'; path: string }) => void;
 }
 
 export interface ResolvedSkillRoots {
@@ -360,8 +363,23 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter | null {
   };
 }
 
-function walkFiles(rootDir: string, maxDepth = 6): string[] {
-  if (!existsSync(rootDir)) {
+function reportDiscoveryIssue(options: SkillLoadOptions | undefined, kind: Parameters<NonNullable<SkillLoadOptions['onDiscoveryIssue']>>[0]['kind'], path: string): void {
+  options?.onDiscoveryIssue?.({ kind, path });
+}
+function discoveryPathExists(path: string, options: SkillLoadOptions | undefined, directory: boolean, kind: Parameters<NonNullable<SkillLoadOptions['onDiscoveryIssue']>>[0]['kind']): boolean {
+  if (!options?.onDiscoveryIssue) return existsSync(path);
+  try {
+    const info = statSync(path);
+    if (directory && !info.isDirectory()) { reportDiscoveryIssue(options, kind, path); return false; }
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && !nodeTypes.isProxy(error) && Object.getOwnPropertyDescriptor(error, 'code')?.value === 'ENOENT') return false;
+    reportDiscoveryIssue(options, kind, path); return false;
+  }
+}
+
+function walkFiles(rootDir: string, maxDepth = 6, options?: SkillLoadOptions): string[] {
+  if (!discoveryPathExists(rootDir, options, true, 'resource_discovery_unavailable')) {
     return [];
   }
 
@@ -375,6 +393,7 @@ function walkFiles(rootDir: string, maxDepth = 6): string[] {
     try {
       entries = readdirSync(currentDir, { withFileTypes: true });
     } catch {
+      reportDiscoveryIssue(options, 'resource_discovery_unavailable', currentDir);
       return;
     }
 
@@ -403,10 +422,10 @@ function toManifestEntry(rootDir: string, absolutePath: string, kind: SkillResou
   };
 }
 
-function collectSkillResources(skillRoot: string, folderName: string, kind: SkillResourceKind): SkillResourceEntry[] {
+function collectSkillResources(skillRoot: string, folderName: string, kind: SkillResourceKind, options?: SkillLoadOptions): SkillResourceEntry[] {
   const folderPath = join(skillRoot, folderName);
-  return walkFiles(folderPath)
-    .filter((absolutePath) => existsSync(absolutePath))
+  return walkFiles(folderPath, 6, options)
+    .filter((absolutePath) => discoveryPathExists(absolutePath, options, false, 'resource_discovery_unavailable'))
     .map((absolutePath) => toManifestEntry(skillRoot, absolutePath, kind))
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
@@ -417,6 +436,7 @@ function normalizeSkill(
   source: SkillMeta['source'],
   tier: SkillMeta['tier'],
   aliases: string[] = [],
+  options?: SkillLoadOptions,
 ): SkillMeta {
   const rootDir = dirname(filePath);
   const normalizedAliases = Array.from(
@@ -445,9 +465,9 @@ function normalizeSkill(
       outputKinds: parsed.outputKinds,
       examples: parsed.examples,
     },
-    referencesManifest: collectSkillResources(rootDir, 'references', 'reference'),
-    scriptsManifest: collectSkillResources(rootDir, 'scripts', 'script'),
-    assetsManifest: collectSkillResources(rootDir, 'assets', 'asset'),
+    referencesManifest: collectSkillResources(rootDir, 'references', 'reference', options),
+    scriptsManifest: collectSkillResources(rootDir, 'scripts', 'script', options),
+    assetsManifest: collectSkillResources(rootDir, 'assets', 'asset', options),
     requiredReferences: parsed.requiredReferences,
     requiredScripts: parsed.requiredScripts,
     requiredSteps: parsed.requiredSteps,
@@ -460,14 +480,16 @@ function loadSkillsFromDir(
   dir: string,
   source: SkillMeta['source'],
   tier: SkillMeta['tier'],
+  options?: SkillLoadOptions,
 ): SkillMeta[] {
-  if (!existsSync(dir)) return [];
+  if (!discoveryPathExists(dir, options, true, 'directory_unavailable')) return [];
 
   const results: SkillMeta[] = [];
   let entries: Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
+    reportDiscoveryIssue(options, 'directory_unavailable', dir);
     return [];
   }
 
@@ -476,11 +498,13 @@ function loadSkillsFromDir(
       const raw = readFileSync(filePath, 'utf-8');
       const parsed = parseFrontmatter(raw);
       if (!parsed) {
+        reportDiscoveryIssue(options, 'skill_parse_invalid', filePath);
         console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${displayName}`);
         return;
       }
-      results.push(normalizeSkill(parsed, filePath, source, tier, aliases));
+      results.push(normalizeSkill(parsed, filePath, source, tier, aliases, options));
     } catch {
+      reportDiscoveryIssue(options, 'skill_read_unavailable', filePath);
       console.warn(`[xiaok] Skills: 读取文件失败: ${displayName}`);
     }
   };
@@ -496,7 +520,7 @@ function loadSkillsFromDir(
     }
 
     const skillFilePath = join(dir, entry.name, 'SKILL.md');
-    if (existsSync(skillFilePath)) {
+    if (discoveryPathExists(skillFilePath, options, false, 'skill_read_unavailable')) {
       loadSkillFile(skillFilePath, `${entry.name}/SKILL.md`, [entry.name]);
     }
   }
@@ -525,9 +549,9 @@ export async function discoverSkills(
   options?: SkillLoadOptions,
 ): Promise<SkillMeta[]> {
   const roots = resolveSkillRoots(xiaokConfigDir, cwd, options);
-  const builtinSkills = roots.builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system'));
-  const globalSkills = loadSkillsFromDir(roots.globalSkillsDir, 'global', 'user');
-  const projectSkills = loadSkillsFromDir(roots.projectSkillsDir, 'project', 'project');
+  const builtinSkills = roots.builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system', options));
+  const globalSkills = loadSkillsFromDir(roots.globalSkillsDir, 'global', 'user', options);
+  const projectSkills = loadSkillsFromDir(roots.projectSkillsDir, 'project', 'project', options);
 
   return [...builtinSkills, ...globalSkills, ...projectSkills];
 }

@@ -24,6 +24,20 @@ export class ConversationActivitySources {
   private projectConnected = false;
   private projectFallback: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
+  private closing?: Promise<void>;
+  private readonly drainWork = new Set<Promise<void>>();
+  /** Reserve ownership before any synchronous producer prefix can reenter close. */
+  private own(begin: () => Promise<void>): Promise<void> {
+    let completed!: () => void, failed!: (error: unknown) => void;
+    const reservation = new Promise<void>((resolve, reject) => { completed = resolve; failed = reject; });
+    this.drainWork.add(reservation);
+    void reservation.then(() => { this.drainWork.delete(reservation); }, () => {
+      this.drainWork.delete(reservation);
+    });
+    try { const raw = begin(); void raw.then(completed, failed); return raw; }
+    catch (error) { failed(error); return reservation; }
+  }
+
 
   constructor(private readonly options: {
     store: ConversationActivityStore; service: ConversationActivityApi;
@@ -34,7 +48,11 @@ export class ConversationActivitySources {
     onError?(error: unknown): void;
   }) {}
 
-  async startWatch(watchId: string): Promise<void> {
+  startWatch(watchId: string): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    return this.own(() => this.startWatchNow(watchId));
+  }
+  private async startWatchNow(watchId: string): Promise<void> {
     const watch = this.options.store.getWatch(watchId);
     if (!watch || watch.status !== 'active' || this.disposed) return;
     if (watch.source === 'kswarm') { this.scheduleProjectFallback(); return this.refreshProject(watch.workId); }
@@ -45,7 +63,8 @@ export class ConversationActivitySources {
     this.taskRetries.delete(watchId);
     const controller = new AbortController(); this.controllers.set(watchId, controller);
     let retry = true;
-    void Promise.resolve().then(async () => {
+    void this.own(() => Promise.resolve().then(async () => {
+      if (this.disposed || controller.signal.aborted) return;
       const host = this.options.taskHost(watch.workId);
       if (!host.subscribeTaskRecords) { retry = false; throw new Error('activity_source_unsupported'); }
       await this.readTask(watch, host, controller);
@@ -58,7 +77,7 @@ export class ConversationActivitySources {
     }).finally(() => {
       if (this.controllers.get(watchId) === controller) this.controllers.delete(watchId);
       if (retry && !controller.signal.aborted && !this.disposed) this.scheduleTaskRetry(watch);
-    }).catch(error => this.options.onError?.(error));
+    }).catch(error => this.options.onError?.(error)));
   }
 
   private async readTask(watch: WorkWatch, host: TaskRuntimeHost, controller: AbortController): Promise<void> {
@@ -99,6 +118,10 @@ export class ConversationActivitySources {
 
   refreshProject(projectId: string, sourceChanged = false): Promise<void> {
     if (this.disposed) return Promise.resolve();
+    return this.own(() => this.refreshProjectNow(projectId, sourceChanged));
+  }
+  private refreshProjectNow(projectId: string, sourceChanged = false): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     const existing = this.projectReads.get(projectId);
     if (existing) {
       if (sourceChanged) this.projectPending.add(projectId);
@@ -121,7 +144,11 @@ export class ConversationActivitySources {
     return this.options.store.listWatches().filter(watch => watch.source === 'kswarm' && watch.workId === projectId && watch.status === 'active');
   }
 
-  async projectConnectionChanged(status: 'connected' | 'disconnected' | 'reconnecting'): Promise<void> {
+  projectConnectionChanged(status: 'connected' | 'disconnected' | 'reconnecting'): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    return this.own(() => this.projectConnectionChangedNow(status));
+  }
+  private async projectConnectionChangedNow(status: 'connected' | 'disconnected' | 'reconnecting'): Promise<void> {
     if (this.disposed) return;
     this.projectConnected = status === 'connected';
     if (this.projectFallback) clearTimeout(this.projectFallback);
@@ -142,7 +169,7 @@ export class ConversationActivitySources {
       if (this.disposed || this.projectConnected) return;
       const ids = new Set(this.options.store.listWatches().filter(watch => watch.source === 'kswarm' && watch.status === 'active').map(watch => watch.workId));
       if (!ids.size) return;
-      void Promise.all([...ids].map(id => this.refreshProject(id, true))).finally(() => this.scheduleProjectFallback());
+      void this.own(() => Promise.all([...ids].map(id => this.refreshProject(id, true))).then(() => undefined).finally(() => this.scheduleProjectFallback()));
     }, 30_000);
     this.projectFallback.unref?.();
   }
@@ -222,6 +249,10 @@ export class ConversationActivitySources {
   }
 
   refreshGroup(groupId: string, sourceChanged = false): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    return this.own(() => this.refreshGroupNow(groupId, sourceChanged));
+  }
+  private refreshGroupNow(groupId: string, sourceChanged = false): Promise<void> {
     if (this.disposed || !this.options.readGroup) return Promise.resolve();
     const existing = this.groupReads.get(groupId);
     if (existing) { if (sourceChanged) this.groupPending.add(groupId); return existing; }
@@ -285,6 +316,22 @@ export class ConversationActivitySources {
     }
   }
 
+  /** Seals scheduling synchronously and waits actual owned work; never fabricates a drain ACK. */
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    let completed!: () => void, failed!: (error: unknown) => void;
+    this.closing = new Promise<void>((resolve, reject) => { completed = resolve; failed = reject; });
+    const sealFailures: unknown[] = [];
+    try { this.dispose(); } catch (error) { sealFailures.push(error); }
+    const active = [...this.drainWork];
+    void Promise.allSettled(active).then(outcomes => {
+      const failures = [...sealFailures,
+        ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+      if (failures.length) failed(new AggregateError([...new Set(failures)], 'activity_sources_drain_failed'));
+      else completed();
+    }, failed);
+    return this.closing;
+  }
   dispose(): void {
     this.disposed = true;
     for (const controller of this.controllers.values()) controller.abort();

@@ -1,8 +1,16 @@
+import { ConversationProjectService } from '../../electron/conversation-project-service.js';
+import * as atomicUserFile from '../../../src/utils/atomic-file.js';
+import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
+import { types } from 'node:util';
+import { openOwnedWorkflowNormalCase } from '../support/owned-workflow-normal-case.js';
+// @vitest-environment node
+import {createServer} from 'node:http';
+import type {AddressInfo} from 'node:net';
 import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-compatibility.js';
 import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +29,33 @@ import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
 import { TimedActionStore } from '../../electron/timed-action-store.js';
 
+
+import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
+vi.mock('node:worker_threads', async original => {
+  const actual = await original<typeof import('node:worker_threads')>();
+  const deliverySource = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
+  return { ...actual, Worker: class extends actual.Worker {
+    constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
+      const mapped = String(filename) === deliverySource, protectionMapped = String(filename) === protectionSource;
+      if (mapped && !nativeWorker.output || protectionMapped && !nativeWorker.protectionOutput) throw Error('fresh fixed Worker required');
+      super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
+      if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => nativeWorker.exits++); }
+    }
+  } };
+});
+beforeAll(async () => {
+  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+});
+afterAll(() => {
+  try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
+  finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
+});
+
 function mockKSwarmService(): KSwarmService {
   return {
     start: async () => {},
@@ -29,6 +64,11 @@ function mockKSwarmService(): KSwarmService {
     getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {},
     getDesktopMutationToken: () => 'desktop-token',
+    // This legacy stub has no service/factory authority. Unsupported newer APIs fail closed.
+    getServiceStatus: async () => { throw Error('fixture_unsupported_service_capability'); },
+    getHealthDiagnosticInput: async () => { throw Error('fixture_unsupported_service_capability'); },
+    restartRelatedService: async () => { throw Error('fixture_unsupported_service_capability'); },
+    getIntentBrokerRoomToken: () => { throw Error('fixture_unsupported_service_capability'); },
     request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
   };
 }
@@ -406,13 +446,13 @@ describe('desktop services', () => {
       taskId: 'desktop_task',
       filePath: sourcePath,
       role: 'customer_material',
-    });
+    }, 'user');
     const created = await services.createTask({
       prompt: '帮我基于这些材料，生成一版给 A 客户 CIO 汇报的制造业数字化方案 PPT 初稿。',
       materials: [{ materialId: material.materialId }],
     });
 
-    expect(created.understanding.taskType).toBe('sales_deck');
+    expect(created.understanding?.taskType).toBe('sales_deck');
     const replayed = await collectFirst(services.subscribeTask(created.taskId), 4);
     expect(replayed.map((event) => event.type)).not.toContain('needs_user');
 
@@ -472,7 +512,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     const observedOptions: Array<StreamOptions | undefined> = [];
     const observedPrompts: string[] = [];
     const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (
@@ -773,13 +813,16 @@ describe('desktop services', () => {
   });
 
   it('runs a script-generated workflow agent node from the node prompt instead of project diagnosis', async () => {
-    const workFolder = join(rootDir, 'script-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-script-workflow","name":"AI products","goal":"分析 AI 产品动态"},"workflowName":"ai_products_analysis_may_2026","prompt":"搜索并分析 Anthropic 与 Meta 在 2026 年 5 月的 AI 产品动态。","label":"Anthropic+Meta 动态采集","phaseTitle":"Anthropic+Meta 动态采集"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const artifactsDir = join(workFolder, 'artifacts');
     const finalArtifactPath = join(artifactsDir, 'script-agent-report.md');
     let receivedPrompt = '';
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner: async ({ prompt, emitRuntimeEvent, sessionId }) => {
         receivedPrompt = prompt;
@@ -803,21 +846,7 @@ describe('desktop services', () => {
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-script-workflow',
-        workflowRunId: 'wf-proj-script-workflow-ai-products-1',
-        workflowId: 'ai_products_analysis_may_2026',
-        nodeId: 'script-agent-3',
-        nodeKind: 'agent_task',
-        nodeTitle: 'Anthropic+Meta 动态采集',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-3',
-        project: { id: 'proj-script-workflow', name: 'AI products', goal: '分析 AI 产品动态', status: 'active', workFolder },
-        input: {
-          prompt: '搜索并分析 Anthropic 与 Meta 在 2026 年 5 月的 AI 产品动态。',
-          label: 'Anthropic+Meta 动态采集',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
@@ -830,10 +859,15 @@ describe('desktop services', () => {
       { path: 'artifacts/script-agent-report.md', kind: 'markdown', label: 'script-agent-report.md' },
     ]);
     expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/script-agent-report.md']);
+  
+    } finally { await owned.close(services); }
   });
 
   it('falls back to raw markdown summary when a script node returns non-JSON output', async () => {
-    const workFolder = join(rootDir, 'markdown-fallback-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-markdown-fallback","name":"AI products","goal":"分析 AI 产品动态"},"workflowName":"ai_products_analysis_may_2026","prompt":"输出战略与市场分析。","label":"战略与市场分析","phaseTitle":"战略与市场分析"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const markdownSummary = [
       '## 战略与市场分析',
       '',
@@ -842,9 +876,9 @@ describe('desktop services', () => {
       '- 要点一：市场份额持续扩大',
       '- 要点二：竞品动态密集',
     ].join('\n');
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner: async ({ emitRuntimeEvent, sessionId }) => {
         emitRuntimeEvent({
@@ -859,29 +893,20 @@ describe('desktop services', () => {
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-markdown-fallback',
-        workflowRunId: 'wf-proj-markdown-fallback-1',
-        workflowId: 'ai_products_analysis_may_2026',
-        nodeId: 'script-agent-4',
-        nodeKind: 'agent_task',
-        nodeTitle: '战略与市场分析',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-4',
-        project: { id: 'proj-markdown-fallback', name: 'AI products', goal: '分析 AI 产品动态', status: 'active', workFolder },
-        input: {
-          prompt: '输出战略与市场分析。',
-          label: '战略与市场分析',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
     expect(result.output?.summary).toBe(markdownSummary);
+  
+    } finally { await owned.close(services); }
   });
 
   it('retries a script-generated workflow node once after a transient stream close', async () => {
-    const workFolder = join(rootDir, 'retry-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-script-workflow-retry","name":"Workflow retry","goal":"验证 transient retry"},"workflowName":"dynamic_workflow_retry","prompt":"执行一次可能发生 transient stream close 的节点。","label":"重试节点","phaseTitle":"并行 Smoke 检查"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const artifactsDir = join(workFolder, 'artifacts');
     const finalArtifactPath = join(artifactsDir, 'retry-script-agent-report.md');
     const runner = vi.fn(async ({ emitRuntimeEvent, sessionId }) => {
@@ -905,29 +930,15 @@ describe('desktop services', () => {
         }),
       });
     });
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner,
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-script-workflow-retry',
-        workflowRunId: 'wf-proj-script-workflow-retry-1',
-        workflowId: 'dynamic_workflow_retry',
-        nodeId: 'script-agent-1',
-        nodeKind: 'agent_task',
-        nodeTitle: '并行 Smoke 检查',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-1',
-        project: { id: 'proj-script-workflow-retry', name: 'Workflow retry', goal: '验证 transient retry', status: 'active', workFolder },
-        input: {
-          prompt: '执行一次可能发生 transient stream close 的节点。',
-          label: '重试节点',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
@@ -936,39 +947,32 @@ describe('desktop services', () => {
     expect(result.output?.artifacts).toEqual([
       { path: 'artifacts/retry-script-agent-report.md', kind: 'markdown', label: 'retry-script-agent-report.md' },
     ]);
+  
+    } finally { await owned.close(services); }
   });
 
   it('fails a workflow node when the desktop runner fails instead of leaving it running', async () => {
-    const workFolder = join(rootDir, 'failed-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-script-workflow-failed","name":"Workflow failed","goal":"验证失败收敛"},"workflowName":"dynamic_workflow_smoke","prompt":"执行会失败的节点。","label":"失败节点","phaseTitle":"并行 Smoke 检查"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const runner = vi.fn(async () => {
       throw new Error('simulated_worker_failure');
     });
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner,
     });
 
     await expect(services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-script-workflow-failed',
-        workflowRunId: 'wf-proj-script-workflow-failed-1',
-        workflowId: 'dynamic_workflow_smoke',
-        nodeId: 'script-agent-2',
-        nodeKind: 'agent_task',
-        nodeTitle: '并行 Smoke 检查',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-2',
-        project: { id: 'proj-script-workflow-failed', name: 'Workflow failed', goal: '验证失败收敛', status: 'active', workFolder },
-        input: {
-          prompt: '执行会失败的节点。',
-          label: '失败节点',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     })).rejects.toThrow(/desktop_task_failed/);
     expect(runner).toHaveBeenCalledTimes(1);
+  
+    } finally { await owned.close(services); }
   });
 
   it('probes the current model without running a user task', async () => {
@@ -1129,7 +1133,7 @@ describe('desktop services', () => {
         now: () => 300,
       });
 
-      await expect(services.installPlugin('bad name')).resolves.toEqual({
+      await expect(services.installPlugin('bad name', 'user')).resolves.toEqual({
         success: false,
         error: 'invalid_plugin_name',
       });
@@ -2695,8 +2699,10 @@ describe('desktop services', () => {
     let aborted = false;
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'), now: () => 300,
-      kswarmService: { ...mockKSwarmService(), request: async () => Response.json({
-        project: { id: 'proj-timeout', status: 'active', name: 'Timeout project' }, tasks: [] }) },
+      kswarmService: { ...mockKSwarmService(), request: async (path: string) => {
+        if (path === '/projects/proj-timeout') return Response.json({ project: { id: 'proj-timeout', status: 'active', name: 'Timeout project' }, tasks: [] });
+        throw new Error('fixture_route_unavailable');
+      } },
       runner: async ({ signal }) => {
         started = true;
         await new Promise<void>(resolve => signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true }));
@@ -2721,17 +2727,22 @@ describe('desktop services', () => {
         emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '已完成当前用户要求的分析步骤，结果已确认并可交接。' });
       },
     });
-    const work = services.runKSwarmHandoffTask({ handoff: {
+    const legacyInput: unknown = { handoff: {
       runId: 'run-queued-idle', task: { id: 'task-queued-idle', title: '分析当前步骤', brief: '', acceptanceCriteria: '' },
       project: { id: 'proj-queued-idle', name: 'Project', goal: 'Analyze current step', requirements: '', workFolder: rootDir },
-    } });
+    } };
+    // Keep the original kind-less raw compatibility input unqualified, rather than inventing a DTO field.
+    const work: unknown = Reflect.apply(services.runKSwarmHandoffTask, services, [legacyInput]);
+    if (!types.isPromise(work)) throw Error('legacy_queued_fixture_promise_required');
     void work.catch(() => undefined);
     try {
       await vi.waitFor(() => expect(coordinator.snapshot().waiting).toBe(1), { interval: 5 });
       await new Promise(resolve => setTimeout(resolve, 200));
       expect(coordinator.snapshot().waiting).toBe(1);
       blocker.release();
-      expect((await work).summary).toContain('已完成当前用户要求');
+      const completed: unknown = await work;
+      if (!completed || typeof completed !== 'object' || !('summary' in completed) || typeof completed.summary !== 'string') throw Error('legacy_queued_fixture_summary_required');
+      expect(completed.summary).toContain('已完成当前用户要求');
     } finally { blocker.release(); vi.unstubAllEnvs(); }
   });
 
@@ -2779,7 +2790,7 @@ describe('desktop services', () => {
       providerId: 'kimi',
       modelName: 'kimi-k2-thinking',
       apiKey: 'sk-kimi',
-    });
+    }, undefined, 'user');
 
     expect(snapshot.defaultProvider).toBe('kimi');
     expect(snapshot.defaultModelId).toBe('kimi-kimi-k2-thinking');
@@ -2803,7 +2814,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.saveModelConfig({ providerId: 'kimi' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
     const snapshot = await services.getModelConfig();
     const kimiProvider = snapshot.providers.find(provider => provider.id === 'kimi');
     const kimiDefault = snapshot.models.find(model => model.id === 'kimi-default');
@@ -2843,7 +2854,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    let snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'k3' });
+    let snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'k3' }, undefined, 'user');
     expect(snapshot.models.find(model => model.id === 'kimi-k3')).toMatchObject({
       model: 'k3',
       runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
@@ -2853,7 +2864,7 @@ describe('desktop services', () => {
       },
     });
 
-    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.6' });
+    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.6' }, undefined, 'user');
     const stable = snapshot.models.find(model => model.id === 'kimi-kimi-k2.6');
     expect(stable).toMatchObject({ model: 'kimi-k2.6' });
     // K2.6 有自己的官方窗口（262,144，与 K3 恰好相同），所以不能只看 contextLimit；
@@ -2881,7 +2892,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
     const configPath = join(rootDir, 'config', 'config.json');
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
     persisted.models['kimi-kimi-k2.7'].runtimeOptions = {
@@ -2906,7 +2917,7 @@ describe('desktop services', () => {
       providerId: 'glm',
       apiKey: 'sk-glm',
       modelName: 'GLM-5.2',
-    });
+    }, undefined, 'user');
 
     // Desktop 合成的 modelId 与 catalog 的 'glm-5.2' 并不相等 —— 这是本测试要守的前提，
     // 而不是要修的东西。修的是「即使 id 不相等，元数据也必须到位」。
@@ -2939,13 +2950,13 @@ describe('desktop services', () => {
       providerId: 'kimi',
       modelName: 'k3',
       baseUrl: 'https://proxy.example.com/v1',
-    });
+    }, undefined, 'user');
     await services.saveModelConfig({
       providerId: 'acme',
       modelName: 'k3',
       baseUrl: 'https://api.acme.example/v1',
       protocol: 'openai_legacy',
-    });
+    }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -2973,7 +2984,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-old' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-old' }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const seeded = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -2986,7 +2997,7 @@ describe('desktop services', () => {
     writeFileSync(configPath, JSON.stringify(seeded, null, 2));
 
     const before = JSON.parse(readFileSync(configPath, 'utf-8'));
-    const snapshot = await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-new' });
+    const snapshot = await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-new' }, undefined, 'user');
     const after = JSON.parse(readFileSync(configPath, 'utf-8'));
 
     expect(snapshot.defaultModelId).toBe('kimi-default');
@@ -3008,15 +3019,15 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const before = JSON.parse(readFileSync(configPath, 'utf-8'));
     const snapshot = await services.updateModelRuntimeOptions({
       modelId: 'kimi-default',
       runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
-    });
+    }, 'user');
     const after = JSON.parse(readFileSync(configPath, 'utf-8'));
 
     expect(snapshot.defaultModelId).toBe(before.defaultModelId);
@@ -3063,7 +3074,7 @@ describe('desktop services', () => {
     expect(readFileSync(path, 'utf8')).toBe(oldContent);
     const binding = resolveRuntimeModelBinding(await loadConfig());
     expect(binding.runtimeOptions).toEqual(current.runtimeOptions);
-    const selected = await services.saveModelConfig({ providerId: current.provider, modelId: current.id });
+    const selected = await services.saveModelConfig({ providerId: current.provider, modelId: current.id }, undefined, 'user');
     expect(selected.defaultModelId).toBe(current.id);
     expect(selected.models.find(model => model.id === current.id)?.runtimeOptions).toEqual(current.runtimeOptions);
     const reloaded = await services.getModelConfig();
@@ -3081,26 +3092,26 @@ describe('desktop services', () => {
     mkdirSync(join(rootDir, 'config'), { recursive: true });
     writeFileSync(join(rootDir, 'config', 'config.json'), JSON.stringify(config));
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    const snapshot = await services.updateModelRuntimeOptions({ modelId: 'old-pinned-model', runtimeOptions: { reasoningEffort: 'max' } });
+    const snapshot = await services.updateModelRuntimeOptions({ modelId: 'old-pinned-model', runtimeOptions: { reasoningEffort: 'max' } }, 'user');
     expect(snapshot.models.find(model => model.id === 'old-pinned-model')?.runtimeOptions).toEqual({ contextLimit: 128_000, reasoningEffort: 'max' });
     expect((await services.getModelConfig()).models.find(model => model.id === 'old-pinned-model')?.runtimeOptions).toEqual({ contextLimit: 128_000, reasoningEffort: 'max' });
   });
 
   it('selects and persists the middle GLM default, preserving an explicit choice on reselection', async () => {
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    const snapshot = await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' });
+    const snapshot = await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' }, undefined, 'user');
     const model = snapshot.models.find(entry => entry.model === 'GLM-5.3')!;
     expect(model.runtimeOptions?.reasoningEffort).toBe('high');
     const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf-8'));
     expect(persisted.models[model.id].runtimeOptions.reasoningEffort).toBe('high');
-    await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' } });
-    const reselected = await services.saveModelConfig({ providerId: 'glm', modelId: model.id });
+    await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' } }, 'user');
+    const reselected = await services.saveModelConfig({ providerId: 'glm', modelId: model.id }, undefined, 'user');
     expect(reselected.models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('max');
   });
 
   it('hides effort for unsupported protocols and unknown endpoints without losing the context window', async () => {
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' });
+    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' }, undefined, 'user');
     const configPath = join(rootDir, 'config', 'config.json');
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     for (const override of [{ protocol: 'openai_responses', baseUrl: 'https://api.openai.com/v1' }, { protocol: 'openai_legacy', baseUrl: 'https://proxy.example.com/v1' }]) {
@@ -3109,7 +3120,7 @@ describe('desktop services', () => {
       const model = (await services.getModelConfig()).models.find(entry => entry.model === 'gpt-5.5')!;
       expect(model.runtimeConstraints?.reasoningEfforts ?? []).toEqual([]);
       expect(model.runtimeOptions).toEqual({ contextLimit: 1_050_000 });
-      await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'high' } })).rejects.toThrow();
+      await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'high' } }, 'user')).rejects.toThrow();
     }
   });
 
@@ -3119,14 +3130,14 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' });
+    await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' }, undefined, 'user');
     const before = await services.getModelConfig();
     const model = before.models.find(entry => entry.model === 'GLM-5.3');
     expect(model?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
     const after = await services.updateModelRuntimeOptions({
       modelId: model!.id,
       runtimeOptions: { ...model!.runtimeOptions, reasoningEffort: 'low' },
-    });
+    }, 'user');
     expect(after.models.find(entry => entry.id === model!.id)?.runtimeOptions).toEqual({
       contextLimit: 1_048_576,
       reasoningEffort: 'low',
@@ -3140,19 +3151,19 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' });
+    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' }, undefined, 'user');
     const snapshot = await services.getModelConfig();
     const model = snapshot.models.find(entry => entry.model === 'gpt-5.5')!;
     expect(model.runtimeConstraints?.reasoningEfforts).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
     const updated = await services.updateModelRuntimeOptions({
       modelId: model.id,
       runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'xhigh' },
-    });
+    }, 'user');
     expect(updated.models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('xhigh');
     await expect(services.updateModelRuntimeOptions({
       modelId: model.id,
       runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' },
-    })).rejects.toThrow(/reasoningEffort/);
+    }, 'user')).rejects.toThrow(/reasoningEffort/);
   });
 
   it('rejects invalid or out-of-scope runtime policy updates without mutating config', async () => {
@@ -3161,14 +3172,14 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
     await services.saveModelConfig({
       providerId: 'custom-k3',
       modelName: 'k3',
       baseUrl: 'https://example.com/v1',
       protocol: 'openai_legacy',
-    });
+    }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const cases = [
@@ -3196,7 +3207,7 @@ describe('desktop services', () => {
 
     for (const testCase of cases) {
       const before = readFileSync(configPath, 'utf-8');
-      await expect(services.updateModelRuntimeOptions(testCase.input)).rejects.toThrow(testCase.error);
+      await expect(services.updateModelRuntimeOptions(testCase.input, 'user')).rejects.toThrow(testCase.error);
       expect(readFileSync(configPath, 'utf-8')).toBe(before);
     }
   });
@@ -3212,14 +3223,14 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
     const configPath = join(rootDir, 'config', 'config.json');
     const before = readFileSync(configPath, 'utf-8');
 
     await expect(services.updateModelRuntimeOptions({
       modelId: 'kimi-default',
       runtimeOptions: runtimeOptions as never,
-    })).rejects.toThrow(/runtimeOptions|unsupported/i);
+    }, 'user')).rejects.toThrow('model_config_input_invalid');
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
   });
 
@@ -3229,11 +3240,11 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
 
     const observed: Array<{ model: string; contextLimit?: number }> = [];
-    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (this: OpenAIAdapter) {
       observed.push({
         model: this.getModelName(),
         contextLimit: this.getCapabilities().contextLimit,
@@ -3246,7 +3257,7 @@ describe('desktop services', () => {
       const result = await withoutBrowserGlobals(() => services.testProviderConnection({
         providerId: 'kimi',
         modelId: 'kimi-default',
-      }));
+      }, 'user'));
       expect(result.error).toBeUndefined();
       expect(result).toMatchObject({ success: true });
       expect(observed).toEqual([{ model: 'k3', contextLimit: 262_144 }]);
@@ -3261,13 +3272,13 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
-    await services.saveModelConfig({ providerId: 'anthropic', apiKey: 'sk-anthropic' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'anthropic', apiKey: 'sk-anthropic' }, undefined, 'user');
     const before = await services.getModelConfig();
     expect(before.defaultProvider).toBe('anthropic');
 
     const observed: Array<{ model: string; contextLimit?: number }> = [];
-    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (this: OpenAIAdapter) {
       observed.push({
         model: this.getModelName(),
         contextLimit: this.getCapabilities().contextLimit,
@@ -3277,7 +3288,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       expect(result.error).toBeUndefined();
       expect(result).toMatchObject({ success: true });
       expect(observed).toEqual([{ model: 'k3', contextLimit: 262_144 }]);
@@ -3293,20 +3304,20 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
     const before = await services.getModelConfig();
     expect(before.defaultModelId).toBe('kimi-kimi-k2.7');
 
     const observed: string[] = [];
-    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (this: OpenAIAdapter) {
       observed.push(this.getModelName());
       yield { type: 'text', delta: 'ok' };
       yield { type: 'done' };
     });
 
     try {
-      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       expect(result).toMatchObject({ success: true });
       expect(observed).toEqual(['k3']);
       expect((await services.getModelConfig()).defaultModelId).toBe(before.defaultModelId);
@@ -3368,7 +3379,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     const calls: Array<{
       messages: Message[];
       tools: ToolDefinition[];
@@ -3393,7 +3404,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
 
       expect(result.success).toBe(expectedSuccess);
       expect(calls).toHaveLength(1);
@@ -3422,7 +3433,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     vi.useFakeTimers();
     const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       yield { type: 'text' as const, delta: 'first' };
@@ -3431,7 +3442,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       await vi.advanceTimersByTimeAsync(125);
       await expect(pending).resolves.toMatchObject({ success: true, latencyMs: 125 });
     } finally {
@@ -3446,7 +3457,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     vi.useFakeTimers();
     let attempts = 0;
     let timeoutReason: unknown;
@@ -3468,7 +3479,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       for (let index = 0; index < 10 && attempts === 0; index += 1) {
         await Promise.resolve();
       }
@@ -3502,7 +3513,7 @@ describe('desktop services', () => {
     writeFileSync(join(npmDir, 'xiaok.ps1'), '# stub');
     process.env.APPDATA = appDataRoot;
 
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, agent: { id: 'xiaok-po' } })));
+    const fetchMock = vi.fn<KSwarmService['request']>(async () => new Response(JSON.stringify({ ok: true, agent: { id: 'xiaok-po' } })));
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
     try {
@@ -3516,13 +3527,13 @@ describe('desktop services', () => {
         providerId: 'anthropic',
         modelId: 'anthropic-default',
         apiKey: 'sk-anthropic',
-      });
+      }, undefined, 'user');
 
       const result = await services.createManagedXiaokAgent({
         name: 'PO-Agent',
         roles: ['project_owner'],
         instructions: '负责规划',
-      });
+      }, { requestSource: 'user' });
 
       expect(result).toEqual({ ok: true, agent: { id: 'xiaok-po' } });
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -3574,7 +3585,7 @@ describe('desktop services', () => {
 
   it('deletes built-in providers, repairs defaults, and keeps an empty configuration deleted', async () => {
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'test' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'test' }, undefined, 'user');
     await services.deleteProvider('kimi', { requestSource: 'user' });
     let snapshot = await services.getModelConfig();
     expect(snapshot.models.some(model => model.id === snapshot.defaultModelId && model.provider === snapshot.defaultProvider)).toBe(true);
@@ -3622,7 +3633,7 @@ describe('desktop services', () => {
       baseUrl: 'https://api.test.com/v1',
       apiKey: 'test-key',
       protocol: 'openai_legacy',
-    });
+    }, undefined, 'user');
 
     let snapshot = await services.getModelConfig();
     expect(snapshot.providers.find(p => p.id === 'custom-test')).toBeDefined();
@@ -3648,7 +3659,7 @@ describe('desktop services', () => {
       providerId: 'anthropic',
       modelName: 'claude-test-model',
       label: 'Test Model',
-    });
+    }, undefined, 'user');
 
     let snapshot = await services.getModelConfig();
     const testModel = snapshot.models.find(m => m.model === 'claude-test-model');
@@ -3670,7 +3681,7 @@ describe('desktop services', () => {
     });
 
     // Default config has no API key
-    const result = await services.testProviderConnection({ providerId: 'anthropic' });
+    const result = await services.testProviderConnection({ providerId: 'anthropic' }, 'user');
     expect(result.success).toBe(false);
     expect(result.error).toContain('API key');
   });
@@ -3684,18 +3695,26 @@ describe('desktop services', () => {
       },
     });
 
-    // Configure with API key (but fake, so connection will fail)
-    await services.saveModelConfig({
-      providerId: 'anthropic',
-      apiKey: 'sk-test-key',
+    const requests:Array<{method:string|undefined,path:string|undefined,key:string|string[]|undefined,body:any}>=[];
+    const server=createServer((request,response)=>{
+      let body='';request.setEncoding('utf8');request.on('data',chunk=>{body+=chunk;});
+      request.on('end',()=>{
+        requests.push({method:request.method,path:request.url,key:request.headers['x-api-key'],body:JSON.parse(body)});
+        response.writeHead(401,{'content-type':'application/json'});response.end(JSON.stringify({type:'error',error:{type:'authentication_error',message:'synthetic key rejected'}}));
+      });
     });
-
-    // With a fake API key, the connection will fail, but we can verify it tried
-    const result = await services.testProviderConnection({ providerId: 'anthropic' });
-    // Either succeeds (if adapter returns immediately) or fails with connection error
-    expect(result.success).toBeDefined();
-    if (!result.success) {
-      expect(result.error).toBeDefined();
+    try{
+      for(const key of ['XIAOK_ANTHROPIC_API_KEY','XIAOK_CLAUDE_API_KEY','ANTHROPIC_API_KEY','CLAUDE_API_KEY','ANTHROPIC_BASE_URL'])vi.stubEnv(key,undefined);
+      await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+      await services.saveModelConfig({providerId:'anthropic',apiKey:'sk-test-key',baseUrl:`http://127.0.0.1:${(server.address() as AddressInfo).port}`}, undefined, 'user');
+      const result=await services.testProviderConnection({providerId:'anthropic'}, 'user');
+      expect(result.success).toBeDefined();expect(result.success).toBe(false);expect(result.error).toBeDefined();expect(result.error).toContain('synthetic key rejected');
+      expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({method:'POST',path:'/v1/messages',key:'sk-test-key'});
+      expect(requests[0].body.model).toEqual(expect.any(String));expect(JSON.stringify(requests[0].body.messages)).toContain('ping');
+      expect(requests[0].body.system).toBe('Reply with "ok" to verify connection.');
+    }finally{
+      try{if(server.listening)await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+      finally{vi.unstubAllEnvs();}
     }
   });
 
@@ -3710,7 +3729,7 @@ describe('desktop services', () => {
     await services.saveModelConfig({
       providerId: 'kimi',
       apiKey: 'sk-kimi',
-    });
+    }, undefined, 'user');
 
     let snapshot = await services.getModelConfig();
     expect(snapshot.defaultProvider).toBe('kimi');
@@ -3763,7 +3782,7 @@ describe('desktop services', () => {
       apiKeyMasked: null,
     });
 
-    const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-desktop-1234' });
+    const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-desktop-1234' }, 'user');
     expect(saved).toEqual({
       configured: true,
       keySource: 'config',
@@ -3808,12 +3827,12 @@ describe('desktop services', () => {
       expect(JSON.stringify(fromEnv)).not.toContain('env-jev-key-9999');
 
       // 显式保存的配置优先于环境变量。
-      const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-config-0001' });
+      const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-config-0001' }, 'user');
       expect(saved.keySource).toBe('config');
       expect(saved.keyEnvVar).toBeNull();
 
       // 清空后整块删除，回落到环境变量。
-      const cleared = await services.saveSystemOneConfig({ apiKey: '' });
+      const cleared = await services.saveSystemOneConfig({ apiKey: '' }, 'user');
       expect(cleared.keySource).toBe('env');
       const raw = JSON.parse(readFileSync(join(process.env.XIAOK_CONFIG_DIR!, 'config.json'), 'utf8')) as Record<string, unknown>;
       expect(raw.systemOne).toBeUndefined();
@@ -3829,7 +3848,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.saveSystemOneConfig({ apiKey: 'k-jev-isolation' });
+    await services.saveSystemOneConfig({ apiKey: 'k-jev-isolation' }, 'user');
     const snapshot = await services.getModelConfig();
 
     expect(snapshot.providers.map((provider) => provider.id)).not.toContain('jev');
@@ -3917,7 +3936,7 @@ describe('desktop services', () => {
     const snapshot = await services.saveModelConfig({
       providerId: 'deepseek',
       apiKey: 'sk-ds-test',
-    });
+    }, undefined, 'user');
 
     const dsProvider = snapshot.providers.find(p => p.id === 'deepseek');
     expect(dsProvider).toBeDefined();
@@ -3993,7 +4012,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    const channel = await services.createChannel({ type: 'discord', name: 'My Discord', webhookUrl: 'https://discord.com/api/webhooks/...' });
+    const channel = await services.createChannel({ type: 'discord', name: 'My Discord', webhookUrl: 'https://discord.com/api/webhooks/...' }, 'user');
     expect(channel.id).toBe('discord');
     expect(channel.type).toBe('discord');
     expect(channel.name).toBe('My Discord');
@@ -4014,10 +4033,10 @@ describe('desktop services', () => {
     });
 
     // First create
-    await services.createChannel({ type: 'telegram', name: 'Old Name' });
+    await services.createChannel({ type: 'telegram', name: 'Old Name' }, 'user');
 
     // Then update
-    const updated = await services.updateChannel('telegram', { name: 'New Name', webhookUrl: 'https://api.telegram.org/bot123' });
+    const updated = await services.updateChannel('telegram', { name: 'New Name', webhookUrl: 'https://api.telegram.org/bot123' }, 'user');
     expect(updated.name).toBe('New Name');
     expect(updated.webhookUrl).toBe('https://api.telegram.org/bot123');
   });
@@ -4029,7 +4048,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await expect(services.updateChannel('nonexistent', { name: 'test' })).rejects.toThrow('not found');
+    await expect(services.updateChannel('nonexistent', { name: 'test' }, 'user')).rejects.toThrow('not found');
   });
 
   it('deletes a channel from config.json', async () => {
@@ -4039,11 +4058,11 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.createChannel({ type: 'feishu', name: 'Feishu' });
+    await services.createChannel({ type: 'feishu', name: 'Feishu' }, 'user');
     let channels = await services.listChannels();
     expect(channels.find(c => c.id === 'feishu')).toBeDefined();
 
-    await services.deleteChannel('feishu');
+    await services.deleteChannel('feishu', 'user');
     channels = await services.listChannels();
     expect(channels.find(c => c.id === 'feishu')).toBeUndefined();
   });
@@ -4072,7 +4091,7 @@ describe('desktop services', () => {
       name: 'Playwright',
       source: 'npm',
       command: '@anthropic/mcp-playwright',
-    });
+    }, 'user');
 
     expect(install.id).toBeDefined();
     expect(install.name).toBe('Playwright');
@@ -4098,9 +4117,9 @@ describe('desktop services', () => {
       name: 'Brave Search',
       source: 'npm',
       command: '@anthropic/mcp-brave-search',
-    });
+    }, 'user');
 
-    const updated = await services.updateMCPInstall(created.id, { enabled: false });
+    const updated = await services.updateMCPInstall(created.id, { enabled: false }, 'user');
     expect(updated.enabled).toBe(false);
   });
 
@@ -4111,7 +4130,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await expect(services.updateMCPInstall('nonexistent', { enabled: false })).rejects.toThrow('not found');
+    await expect(services.updateMCPInstall('nonexistent', { enabled: false }, 'user')).rejects.toThrow('not found');
   });
 
   it('deletes an MCP install', async () => {
@@ -4121,8 +4140,8 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    const created = await services.createMCPInstall({ name: 'Test MCP', source: 'npm', command: 'test' });
-    await services.deleteMCPInstall(created.id);
+    const created = await services.createMCPInstall({ name: 'Test MCP', source: 'npm', command: 'test' }, 'user');
+    await services.deleteMCPInstall(created.id, 'user');
 
     const installs = await services.listMCPInstalls();
     expect(installs).toHaveLength(0);
@@ -4135,8 +4154,8 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    const install1 = await services.createMCPInstall({ name: 'MCP1', source: 'npm', command: 'cmd1' });
-    const install2 = await services.createMCPInstall({ name: 'MCP2', source: 'github', command: 'cmd2' });
+    const install1 = await services.createMCPInstall({ name: 'MCP1', source: 'npm', command: 'cmd1' }, 'user');
+    const install2 = await services.createMCPInstall({ name: 'MCP2', source: 'github', command: 'cmd2' }, 'user');
 
     expect(install1.id).not.toBe(install2.id);
     expect(install1.source).toBe('npm');
@@ -4232,7 +4251,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: ['xiaok-worker'],
       startPolicy: 'activate_and_dispatch_after_plan',
-    })));
+    }, 'user')));
 
     const immediateResult = await Promise.race([
       executePromise.then((value) => ({ kind: 'returned' as const, value })),
@@ -4329,7 +4348,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: [],
       startPolicy: 'auto_activate_after_plan',
-    });
+    }, 'user');
 
     expect(result).toMatchObject({ ok: true, status: 'queued' });
     await waitFor(() => {
@@ -4498,7 +4517,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: [],
       startPolicy: 'activate_and_dispatch_after_plan',
-    });
+    }, 'user');
     expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-dispatch-fail/activate-and-start'));
@@ -4586,7 +4605,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: [],
       startPolicy: 'activate_and_dispatch_after_plan',
-    });
+    }, 'user');
     expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-replan/activate-and-start'));
@@ -5439,15 +5458,20 @@ describe('desktop services', () => {
 
   it('timed action tools create notification reminders and agent scheduled tasks', async () => {
     const store = new TimedActionStore(join(rootDir, 'timed-actions.sqlite'));
+    let fixture: ReturnType<typeof createScheduledToolFixture> | undefined;
+    let failed = false;
+    const cleanupErrors: unknown[] = [];
+    try {
     const service = new TimedActionService(store, { now: () => 1_000 });
     const tools = createTimedActionTools(service, 'Asia/Shanghai');
+    fixture = createScheduledToolFixture(tools, 'legacy-agent-task');
 
     const reminderTool = tools.find(tool => tool.definition.name === 'reminder_create');
     const scheduledTool = tools.find(tool => tool.definition.name === 'scheduled_task_create');
     expect(reminderTool).toBeTruthy();
     expect(scheduledTool).toBeTruthy();
 
-    const reminderResult = JSON.parse(await reminderTool!.execute({
+    const reminderResult = JSON.parse(await fixture.execute('reminder_create', {
       content: '看项目',
       schedule_at: 61_000,
     }));
@@ -5458,7 +5482,7 @@ describe('desktop services', () => {
     });
     expect(store.getAction(reminderResult.reminderId)?.executor.kind).toBe('notify');
 
-    const scheduledResult = JSON.parse(await scheduledTool!.execute({
+    const scheduledResult = JSON.parse(await fixture.execute('scheduled_task_create', {
       name: '检查 OpenAI本月分析',
       prompt: '检查 proj-1779188304918，如果完成调用 scheduled_task_cancel',
       frequency: 'interval',
@@ -5472,7 +5496,15 @@ describe('desktop services', () => {
     });
     expect(store.getAction(scheduledResult.taskId)?.executor.kind).toBe('agent_task');
 
-    store.close();
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      try { fixture?.close(); } catch (error) { cleanupErrors.push(error); }
+      try { store.close(); } catch (error) { cleanupErrors.push(error); }
+      if (failed && cleanupErrors.length) console.error('Timed fixture cleanup failed alongside original test failure', cleanupErrors);
+    }
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Timed fixture cleanup failed');
   });
 
   it('system prompt routes stuck Swarm project recovery through file-first repair', async () => {
@@ -5946,7 +5978,10 @@ describe('desktop services', () => {
     });
     // 任务结束后必须释放绑定，防止 taskId 复用/绑定残留。
     expect(observedTaskId).toBeTruthy();
-    expect(getRoomHistoryCapability(observedTaskId as string)).toBeUndefined();
+    const readObservedTaskId = (): string | null => observedTaskId;
+    const finishedTaskId = readObservedTaskId();
+    if (typeof finishedTaskId !== 'string') throw Error('room_fixture_task_id_not_captured');
+    expect(getRoomHistoryCapability(finishedTaskId)).toBeUndefined();
   });
 });
 
@@ -5970,3 +6005,51 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+describe('A1 actual Main prepared-user admission entry',()=>{
+  it('commits an actual Host task/session source before the ordinary user runner starts',async()=>{
+    const root=join(tmpdir(),`main-user-source-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
+    const dataRoot=join(root,'data');let observed=false;
+    const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
+    const services=createDesktopServices({dataRoot,kswarmService:mockKSwarmService(),runner:async input=>{
+      const path=join(dataRoot,'conversation-projects','user-inputs',createHash('sha256').update(input.taskId).digest('hex')+'.json');
+      const fact=JSON.parse(readFileSync(path,'utf8'));
+      expect(fact).toMatchObject({taskId:input.taskId,sessionId:input.sessionId,threadId:'thread-a1-main',requestSource:'user'});
+      expect(fact.promptSha256).toBe(createHash('sha256').update(input.prompt).digest('hex'));observed=true;
+      await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:input.taskId,intentId:'analysis',stepId:'done',note:'已完成分析。'});
+    }});
+    try{
+      const task=await services.createTask({prompt:'请分析当前说明',materials:[],context:{threadId:'thread-a1-main'}});
+      for await(const event of services.subscribeTask(task.taskId)){if(event.type==='task_terminal')break;}
+      expect(observed).toBe(true);expect(record).toHaveBeenCalledOnce();
+      expect(record.mock.calls[0][0]).toMatchObject({taskId:task.taskId,status:'understanding'});
+    }finally{
+      record.mockRestore();services.goalShutdown.ingress.stopAccepting();
+      await services.closeTaskSourceWritersForMigration();await services.disposeMultiAgent();await services.goalShutdown.durable.close();
+      if(oldConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=oldConfig;
+      rmSync(root,{recursive:true,force:true});
+    }
+  });
+  it('preserves actual atomic-write failure through Main and never invokes the prepared runner',async()=>{
+    const root=join(tmpdir(),`main-user-source-fail-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
+    const runner=vi.fn(async()=>{}),failure=new Error('main-user-source-IO-failed'),actual=atomicUserFile.writeFileAtomicallySync;
+    const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:mockKSwarmService(),runner});
+    const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
+    const writer=vi.spyOn(atomicUserFile,'writeFileAtomicallySync').mockImplementation((path,...args)=>{
+      if(path.includes('user-inputs'))throw failure;return actual(path,...args);
+    });
+    try{
+      await expect(services.createTask({prompt:'创建一个项目',materials:[],context:{threadId:'thread-a1-failure'}})).rejects.toBe(failure);
+      expect(runner).not.toHaveBeenCalled();expect(record).toHaveBeenCalledOnce();
+      const actualTaskId=record.mock.calls[0][0].taskId;
+      expect((await services.recoverTask(actualTaskId)).snapshot.status).toBe('cancelled');
+    }finally{
+      writer.mockRestore();record.mockRestore();services.goalShutdown.ingress.stopAccepting();
+      await services.closeTaskSourceWritersForMigration();await services.disposeMultiAgent();await services.goalShutdown.durable.close();
+      if(oldConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=oldConfig;
+      rmSync(root,{recursive:true,force:true});
+    }
+  });
+});

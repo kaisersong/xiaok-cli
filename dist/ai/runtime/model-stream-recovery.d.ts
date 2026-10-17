@@ -1,3 +1,4 @@
+import type { ModelStreamPhysicalRun } from './model-stream-physical-owner.js';
 import type { StreamChunk } from '../../types.js';
 export interface ModelRecoveryPolicy {
     windowMs: number;
@@ -15,6 +16,7 @@ export declare function resolveModelRecoveryPolicy(env?: NodeJS.ProcessEnv): Mod
 export declare function recoverModelStream(input: {
     open(signal: AbortSignal): AsyncIterable<StreamChunk>;
     signal: AbortSignal;
+    physicalRun?: ModelStreamPhysicalRun;
     policy?: ModelRecoveryPolicy;
     onRetry?(notice: ModelRecoveryNotice): void | Promise<void>;
     /** Additional owner gate; it cannot make permanent errors recoverable. */

@@ -1,4 +1,5 @@
-// Real process fixture. Only the model transport is controlled; allocation,
+// Real process fixture. Model transport and the isolated test account home are
+// controlled; allocation,
 // scoped spawn, managed session, host, journal and boot ownership are production.
 import { join } from 'node:path';
 import { writeSync } from 'node:fs';

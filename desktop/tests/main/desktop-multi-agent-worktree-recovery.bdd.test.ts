@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
@@ -45,7 +45,7 @@ describe('BDD: actual worktree runtime process death and boot reconciliation', (
       .filter(line => line.startsWith('worktree ')).some(line => canonical(line.slice(9)) === canonical(target));
   }
   function repository() {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-worktree-process-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-worktree-process-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const cwd = join(root, 'repo'); mkdirSync(cwd); mkdirSync(join(root, 'data'));
     git(cwd, ['init']); writeFileSync(join(cwd, 'seed.txt'), 'KEEP_TRACKED_BYTES'); git(cwd, ['add', 'seed.txt']);
@@ -55,7 +55,10 @@ describe('BDD: actual worktree runtime process death and boot reconciliation', (
   async function startFixture(root: string, cleanupPolicy: 'keep' | 'delete', checkpoint: WorktreeCheckpoint = 'running') {
     const projectRoot = fileURLToPath(new URL('../../../', import.meta.url));
     const fixture = fileURLToPath(new URL('../fixtures/multi-agent-worktree-owner.ts', import.meta.url));
-    const child = spawn(process.execPath, ['--import', 'tsx', fixture, root, cleanupPolicy, checkpoint], {
+    const accountPreload = fileURLToPath(new URL('../fixtures/worktree-test-account-preload.mjs', import.meta.url));
+    const accountRoot = inject('profileTestAccountRoot');
+    if (typeof accountRoot !== 'string') throw Error('test_profile_account_root_required');
+    const child = spawn(process.execPath, ['--import', accountPreload, '--import', 'tsx', fixture, root, cleanupPolicy, checkpoint, accountRoot, userInfo().homedir], {
       cwd: projectRoot, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     });
     processClosed.set(child, new Promise<void>(resolve => { child.once('close', () => resolve()); }));

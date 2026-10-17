@@ -2,10 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 
+export type DesktopProviderRequest = Parameters<typeof streamDesktopTaskProviderConversation>[0];
+export type DesktopRequestPreparer = (input: DesktopProviderRequest) => Promise<DesktopProviderRequest>;
 type Input = Parameters<typeof streamDesktopTaskProviderConversation>[0] & {
+  prepareRequest?: DesktopRequestPreparer;
   deadline: number;
+  beforeRequest?: () => Promise<void>;
   canRecover?: () => boolean;
-  onRecovery?: () => void;
+  onRecovery?: (notice?: { summaryOnly: boolean }) => void | Promise<void>;
   onInvocation?: (id: string) => void;
   summaryOnly?: boolean;
 };
@@ -26,9 +30,15 @@ export async function* streamDesktopSummaryRecovery(input: Input): AsyncGenerato
   for (;;) {
     input.options?.signal?.throwIfAborted();
     if (Date.now() >= input.deadline) throw new Error('summary_recovery_deadline');
+    await input.beforeRequest?.();
+    input.options?.signal?.throwIfAborted();
+    if (Date.now() >= input.deadline) throw new Error('summary_recovery_deadline');
+    const request = { ...input, messages, tools: recovering ? [] : input.tools, invocationId };
+    const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
+    input.options?.signal?.throwIfAborted();
+    if (Date.now() >= input.deadline) throw new Error('summary_recovery_deadline');
     input.onInvocation?.(invocationId);
-    const iterator = streamDesktopTaskProviderConversation({ ...input, messages,
-      tools: recovering ? [] : input.tools, invocationId })[Symbol.asyncIterator]();
+    const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
     let restart = false;
     let recoveredText = '';
     try {
@@ -40,7 +50,7 @@ export async function* streamDesktopSummaryRecovery(input: Input): AsyncGenerato
           if (recovering || sawTool || !prefix.trim() || !isDisconnect(error)
             || Date.now() >= input.deadline || !input.canRecover?.()) throw error;
           recovering = true;
-          input.onRecovery?.();
+          await input.onRecovery?.({ summaryOnly: true });
           messages = [...messages, { role: 'assistant', content: [{ type: 'text', text: prefix }] },
             { role: 'user', content: [{ type: 'text', text: 'The connection interrupted your response. Continue directly after the text already delivered above; do not repeat it. Use the existing completed subtask results to finish the requested summary. Tools are disabled: do not spawn, repeat, or claim new actions. If evidence is insufficient, explicitly state the remaining limitation.' }] }];
           invocationId = `inv_${randomUUID()}`;

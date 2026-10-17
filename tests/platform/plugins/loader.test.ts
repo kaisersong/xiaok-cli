@@ -273,6 +273,8 @@ describe('plugin loader', () => {
 
     const loaded = await loadPlugins([pluginsDir], { platform: 'linux' });
 
-    expect(loaded[0].mcpServers?.[0]?.command).toBe(join(pythonRuntimeDir, 'bin', 'python'));
+    const server = loaded[0]?.mcpServers?.[0];
+    if (!server || server.type !== 'stdio') throw new Error('expected_stdio_python_manifest');
+    expect(server.command).toBe(join(pythonRuntimeDir, 'bin', 'python'));
   });
 });

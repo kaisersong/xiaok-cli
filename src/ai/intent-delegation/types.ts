@@ -74,6 +74,7 @@ export interface PlannedStep {
 }
 
 export type StageStatus =
+  | 'publication_pending'
   | 'planned'
   | 'running'
   | 'waiting_user'
@@ -151,6 +152,8 @@ export interface IntentPlanDraft {
 }
 
 export interface IntentLedgerRecord {
+  producerReports?: import('../../runtime/intent-delegation/producer-facts.js').IntentProducerReport[];
+  executionTerminals?: import('../../runtime/intent-delegation/intent-commit-boundary.js').IntentExecutionTerminal[];
   intentId: string;
   instanceId: string;
   sessionId: string;
@@ -172,6 +175,7 @@ export interface IntentLedgerRecord {
   steps: PlannedStep[];
   activeStepId: string;
   overallStatus:
+    | 'publication_pending'
     | 'drafting_plan'
     | 'executing'
     | 'waiting_user'

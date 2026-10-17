@@ -13,11 +13,11 @@ export class AgentRunController {
     hasActiveRun() {
         return Boolean(this.active);
     }
-    abortActiveRun() {
+    abortActiveRun(reason) {
         if (!this.active) {
             return false;
         }
-        this.active.controller.abort();
+        this.active.controller.abort(reason);
         return true;
     }
     completeRun(runId) {

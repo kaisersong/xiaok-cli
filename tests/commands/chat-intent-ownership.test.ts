@@ -79,10 +79,29 @@ function createPlanDraft(input: {
     normalizedIntent: 'write a proposal',
     intentType: 'generate',
     deliverable: 'proposal draft',
+    finalDeliverable: 'proposal draft',
     explicitConstraints: [],
     delegationBoundary: [],
     riskTier,
     templateId: 'generate_v1',
+    // Explicit existing ownership-policy scenario, sourced from the production
+    // legacy single-stage/record normalization rules; not a planner execution.
+    intentMode: 'single_stage',
+    segmentationConfidence: 'low',
+    stages: [{
+      stageId: `${input.intentId}:stage:1`,
+      order: 0,
+      label: '生成proposal draft',
+      intentType: 'generate',
+      deliverable: 'proposal draft',
+      templateId: 'generate_v1',
+      riskTier,
+      dependsOnStageIds: [],
+      steps: [
+        createStep(input.intentId, 0, 'collect', [], riskTier),
+        createStep(input.intentId, 1, 'normalize', [`${input.intentId}:step:collect`], riskTier),
+      ],
+    }],
     steps: [
       createStep(input.intentId, 0, 'collect', [], riskTier),
       createStep(input.intentId, 1, 'normalize', [`${input.intentId}:step:collect`], riskTier),

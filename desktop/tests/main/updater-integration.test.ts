@@ -25,7 +25,7 @@ describe('real updater handoff wiring', () => {
     });
     fixture.updater = updater;
     subject = await import('../../electron/updater.js');
-    await subject.setupAutoUpdater({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any);
+    await subject.setupAutoUpdater({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any, undefined, { requestSource: 'scheduler' });
   });
   afterEach(() => {
     vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllEnvs();
@@ -35,29 +35,29 @@ describe('real updater handoff wiring', () => {
 
   it('rejects absent download before entering mac wrapper', () => {
     const handoff = subject.createUpdaterHandoff('darwin');
-    expect(handoff.begin().status).toBe('rejected_sync');
+    expect(handoff.begin({ requestSource: 'user' }).status).toBe('rejected_sync');
     expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
   it('preserves a prior native failure and rejects before wrapper', () => {
     updater.emit('update-downloaded', { version: '1.5.3' });
     updater.emit('error', new Error('signature rejected'));
-    expect(subject.createUpdaterHandoff('darwin').begin().status).toBe('rejected_sync');
+    expect(subject.createUpdaterHandoff('darwin').begin({ requestSource: 'user' }).status).toBe('rejected_sync');
     expect(subject.getUpdateStatus().error).toBe('signature rejected');
     expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
   it('stops spinning without retry or shutdown after observation expires; late quit is allowed', async () => {
     updater.emit('update-downloaded', { version: '1.5.3' });
     const handoff = subject.createUpdaterHandoff('darwin');
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     await vi.advanceTimersByTimeAsync(30_001);
     expect(subject.getUpdateStatus()).toMatchObject({ downloaded: true, installing: false, error: 'update_install_handoff_unconfirmed' });
     expect(handoff.hasPendingIntent).toBe(true);
     for (const event of ['checking-for-update', 'update-available', 'update-not-available', 'download-progress', 'update-downloaded']) {
       updater.emit(event, { version: '1.5.4', percent: 12 });
     }
-    await subject.checkForUpdates();
+    await subject.checkForUpdates({ requestSource: 'user' });
     expect(subject.getUpdateStatus().error).toBe('update_install_handoff_unconfirmed');
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
     expect(updater.checkForUpdates).not.toHaveBeenCalled();
     handoff.commitHandoffOnBeforeQuit();
@@ -68,37 +68,37 @@ describe('real updater handoff wiring', () => {
   it.each(['darwin', 'win32'] as const)('keeps asynchronous errors sticky on %s', (platform) => {
     updater.emit('update-downloaded', { version: '1.5.3' });
     const handoff = subject.createUpdaterHandoff(platform);
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     updater.emit('error', new Error('native delayed failure'));
     expect(handoff.snapshot().kind).toBe('pending_error_sticky');
     expect(subject.getUpdateStatus()).toMatchObject({ installing: false, error: 'native delayed failure' });
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
   });
   it('attributes Windows synchronous emitted errors without treating delayed errors as retryable', () => {
     updater.emit('update-downloaded', { version: '1.5.3' });
     updater.quitAndInstall.mockImplementation(() => updater.emit('error', new Error('install refused')));
     const handoff = subject.createUpdaterHandoff('win32');
-    expect(handoff.begin().status).toBe('rejected_sync');
+    expect(handoff.begin({ requestSource: 'user' }).status).toBe('rejected_sync');
     expect(handoff.snapshot().kind).toBe('error');
   });
   it.each(['darwin', 'win32'] as const)('classifies synchronous wrapper throws on %s', (platform) => {
     updater.emit('update-downloaded', { version: '1.5.3' });
     updater.quitAndInstall.mockImplementation(() => { throw new Error('wrapper failed'); });
     const handoff = subject.createUpdaterHandoff(platform);
-    expect(handoff.begin().status).toBe(platform === 'darwin' ? 'pending_error_sticky' : 'rejected_sync');
+    expect(handoff.begin({ requestSource: 'user' }).status).toBe(platform === 'darwin' ? 'pending_error_sticky' : 'rejected_sync');
     expect(subject.getUpdateStatus()).toMatchObject({ installing: false, error: 'wrapper failed' });
   });
   it('suppresses the scheduled startup retry and periodic check once an install is pending', async () => {
     const error = new Error('startup check failed');
     updater.checkForUpdatesAndNotify.mockRejectedValueOnce(error);
-    await subject.setupAutoUpdater({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any);
+    await subject.setupAutoUpdater({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any, undefined, { requestSource: 'scheduler' });
     await Promise.resolve();
-    await subject.checkForUpdates();
+    await subject.checkForUpdates({ requestSource: 'user' });
     updater.emit('update-downloaded', { version: '1.5.3' });
     const startupCalls = updater.checkForUpdatesAndNotify.mock.calls.length;
     const checkCalls = updater.checkForUpdates.mock.calls.length;
-    subject.createUpdaterHandoff('darwin').begin();
+    subject.createUpdaterHandoff('darwin').begin({ requestSource: 'user' });
     await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000);
     expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledTimes(startupCalls);
     expect(updater.checkForUpdates).toHaveBeenCalledTimes(checkCalls);
@@ -106,7 +106,7 @@ describe('real updater handoff wiring', () => {
   });
   it('logs useful updater diagnostics without credentials embedded in download URLs', async () => {
     const logger = vi.fn();
-    await subject.setupAutoUpdater({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any, logger);
+    await subject.setupAutoUpdater({ isDestroyed: () => false, webContents: { send: vi.fn() } } as any, logger, { requestSource: 'scheduler' });
     updater.emit('error', new Error('native rejected https://user:secret@download.example/package.zip?token=private'));
     expect(logger).toHaveBeenCalledWith('error', 'native rejected [URL omitted]');
     expect(JSON.stringify(logger.mock.calls)).not.toMatch(/secret|private|download\.example/);
@@ -118,7 +118,7 @@ describe('real updater handoff wiring', () => {
       handoff.commitHandoffOnBeforeQuit();
       subject.completeUpdaterHandoff();
     });
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     await vi.advanceTimersByTimeAsync(30_001);
     expect(handoff.snapshot().kind).toBe('handed_off');
     expect(subject.getUpdateStatus().error).toBeUndefined();
@@ -131,9 +131,9 @@ describe('real updater handoff wiring', () => {
       subject.completeUpdaterHandoff();
       throw new Error('after quit');
     });
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     expect(handoff.snapshot().kind).toBe('handed_off');
-    handoff.begin();
+    handoff.begin({ requestSource: 'user' });
     expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
   });
 });

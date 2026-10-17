@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { execFile, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,7 @@ import { assertOpenAIToolProtocol, type OpenAIToolProtocolMessage } from '../sup
 const execFileAsync = promisify(execFile);
 const cliEntryPath = process.env.XIAOK_MULTI_AGENT_E2E_CLI_ENTRY
   ?? join(process.cwd(), '.test-dist', 'src', 'index.js');
+const profileAccountChildSetupPath = join(process.cwd(), 'tests', 'support', 'profile-account-child.setup.mjs');
 
 type ProviderRequest = {
   messages?: OpenAIToolProtocolMessage[];
@@ -143,7 +144,7 @@ describe('chat CLI multi-agent process e2e', () => {
   });
 
   itIfCanSpawn.each(['AskUserQuestion', 'ask_user'] as const)('delivers the CLI policy and refuses unavailable user input through %s', async (tool) => {
-    const rootDir = join(tmpdir(), `xiaok-delegation-question-${Date.now()}-${tool}`);
+    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), `xiaok-delegation-question-${tool}-`)));
     tempDirs.push(rootDir);
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');
@@ -179,8 +180,8 @@ describe('chat CLI multi-agent process e2e', () => {
     if (!address || typeof address === 'string') throw new Error('missing local address');
     writeConfig(configDir, `http://127.0.0.1:${address.port}/v1`);
     try {
-      const { stdout } = await execFileAsync(process.execPath, [cliEntryPath, 'chat', '--auto', '--json', 'Review the implementation and coverage.'], {
-        cwd: projectDir, env: { ...process.env, HOME: homeDir, XIAOK_CONFIG_DIR: configDir }, timeout: 15_000,
+      const { stdout } = await execFileAsync(process.execPath, ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', 'Review the implementation and coverage.'], {
+        cwd: projectDir, env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir }, timeout: 15_000,
       });
       expect(errors).toEqual([]);
       expect(requests).toBe(2);
@@ -192,7 +193,7 @@ describe('chat CLI multi-agent process e2e', () => {
   }, 20_000);
 
   itIfCanSpawn('reports a stalled real child as failed and persists live progress before main completes', async () => {
-    const rootDir = join(tmpdir(), `xiaok-agent-stall-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-agent-stall-')));
     tempDirs.push(rootDir);
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');
@@ -250,9 +251,9 @@ describe('chat CLI multi-agent process e2e', () => {
     if (!address || typeof address === 'string') throw new Error('missing local address');
     writeConfig(configDir, `http://127.0.0.1:${address.port}/v1`);
     try {
-      const { stdout } = await execFileAsync(process.execPath, [cliEntryPath, 'chat', '--auto', '--json', 'STALL_TEST'], {
+      const { stdout } = await execFileAsync(process.execPath, ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', 'STALL_TEST'], {
         cwd: projectDir,
-        env: { ...process.env, HOME: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_MAX_AGENT_THREADS: '2', XIAOK_SUBAGENT_IDLE_TIMEOUT_MS: '1000', XIAOK_SUBAGENT_TURN_TIMEOUT_MS: '5000' },
+        env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir, XIAOK_MAX_AGENT_THREADS: '2', XIAOK_SUBAGENT_IDLE_TIMEOUT_MS: '1000', XIAOK_SUBAGENT_TURN_TIMEOUT_MS: '5000' },
         timeout: 15_000,
       });
       expect(errors).toEqual([]);
@@ -270,7 +271,7 @@ describe('chat CLI multi-agent process e2e', () => {
 
   itIfCanSpawn.each(['isolated', 'default_fork', 'default_fork_same_batch', 'live_message'] as const)(
     'runs concurrent children, bidirectional messages, persistent follow-up and close: %s', async (mode) => {
-    const rootDir = join(tmpdir(), `xiaok-multi-agent-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), `xiaok-multi-agent-e2e-${mode}-`)));
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');
     const projectDir = join(rootDir, 'project');
@@ -514,10 +515,10 @@ describe('chat CLI multi-agent process e2e', () => {
     try {
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
-        [cliEntryPath, 'chat', '--auto', '--json', 'E2E_MULTI_AGENT_START'],
+        ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', 'E2E_MULTI_AGENT_START'],
         {
           cwd: projectDir,
-          env: { ...process.env, HOME: homeDir, XIAOK_CONFIG_DIR: configDir },
+          env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir },
           timeout: 20_000,
         },
       );

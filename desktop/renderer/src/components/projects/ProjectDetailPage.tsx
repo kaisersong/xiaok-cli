@@ -449,6 +449,20 @@ export function ProjectDetailPage() {
   const [manualTeamOpen, setManualTeamOpen] = useState(false);
   const retryCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeLabelsRef = useRef(t); resumeLabelsRef.current = t;
+  const resumeProjectRef = useRef(projectId); resumeProjectRef.current = projectId;
+  const resumeEpochRef = useRef({ live: false, projectId });
+  const resumeLeaseRef = useRef<{ epoch: typeof resumeEpochRef.current } | null>(null);
+  useEffect(() => {
+    const prior = resumeEpochRef.current; prior.live = false;
+    if (resumeLeaseRef.current?.epoch === prior) {
+      resumeLeaseRef.current = null;
+      setActionLoading(value => value === 'continue' ? null : value);
+      setActionNotice(null);
+    }
+    const epoch = { live: true, projectId }; resumeEpochRef.current = epoch;
+    return () => { epoch.live = false; };
+  }, [projectId]);
   const smartTeamClient = useMemo(() => ({
     planProjectTeam,
     applyProjectTeamPlan,
@@ -873,24 +887,35 @@ export function ProjectDetailPage() {
         showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueMissingWorkflowId }, 8_000);
         return;
       }
+      if (resumeLeaseRef.current) return;
+      const epoch = resumeEpochRef.current;
+      const lease = { epoch }; resumeLeaseRef.current = lease;
+      const current = () => epoch.live && resumeEpochRef.current === epoch && resumeLeaseRef.current === lease && resumeProjectRef.current === projectId;
       setActionLoading('continue');
       try {
         const api = getDesktopApi() as { kswarmResumeWorkflowRun?: (input: { projectId: string; workflowRunId: string }) => Promise<{ restored: boolean; reason?: string; jobId?: string }> } | null;
         const result = await api?.kswarmResumeWorkflowRun?.({ projectId, workflowRunId });
+        if (!current()) return;
+        const labels = resumeLabelsRef.current;
         if (result?.restored || result?.reason === 'already_running') {
-          showNotice({ action: 'continue', kind: 'success', message: t.projectsDetailContinueResumedWorkflow }, 5_000);
+          showNotice({ action: 'continue', kind: 'success', message: labels.projectsDetailContinueResumedWorkflow }, 5_000);
         } else if (result?.reason === 'no_script_source') {
-          showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueNoScript }, 8_000);
+          showNotice({ action: 'continue', kind: 'error', message: labels.projectsDetailContinueNoScript }, 8_000);
         } else if (result?.reason === 'kswarm_unavailable') {
-          showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueKswarmUnavailable }, 8_000);
+          showNotice({ action: 'continue', kind: 'error', message: labels.projectsDetailContinueKswarmUnavailable }, 8_000);
         } else {
-          showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueResumeFailed }, 8_000);
+          showNotice({ action: 'continue', kind: 'error', message: labels.projectsDetailContinueResumeFailed }, 8_000);
         }
       } catch {
-        showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueResumeFailedRetry }, 8_000);
+        if (!current()) return;
+        const labels = resumeLabelsRef.current;
+        showNotice({ action: 'continue', kind: 'error', message: labels.projectsDetailContinueResumeFailedRetry }, 8_000);
       } finally {
-        await refreshOnce();
-        setActionLoading(null);
+        try { if (current()) await refreshOnce(); }
+        finally {
+          if (current()) setActionLoading(null);
+          if (resumeLeaseRef.current === lease) resumeLeaseRef.current = null;
+        }
       }
       return;
     }

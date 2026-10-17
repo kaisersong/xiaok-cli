@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { resolveAutoContextMaxChars, truncateContextContent } from './context-budget.js';
 import {
   getCurrentBranch,
   getRecentCommitSubjects,
@@ -60,21 +61,8 @@ function collectSearchDirs(cwd: string): string[] {
   return dirs.reverse();
 }
 
-function truncateContent(content: string, maxChars: number): { content: string; truncated: boolean } {
-  if (content.length <= maxChars) {
-    return { content, truncated: false };
-  }
-
-  const suffix = '\n...(已截断)';
-  const sliceLength = Math.max(0, maxChars - suffix.length);
-  return {
-    content: content.slice(0, sliceLength) + suffix,
-    truncated: true,
-  };
-}
-
 export async function loadAutoContext(options: LoadAutoContextOptions): Promise<LoadedContext> {
-  const maxChars = options.maxChars ?? 8_000;
+  const maxChars = resolveAutoContextMaxChars(options.maxChars);
   const docs: LoadedContextDoc[] = [];
   let remainingChars = maxChars;
 
@@ -90,7 +78,7 @@ export async function loadAutoContext(options: LoadAutoContextOptions): Promise<
         continue;
       }
 
-      const truncated = truncateContent(raw, remainingChars);
+      const truncated = truncateContextContent(raw, remainingChars);
       docs.push({
         name,
         path,

@@ -45,6 +45,7 @@ describe('ChatView failed state', () => {
     )
 
     expect(screen.queryByText('Task failed. Please try again.')).not.toBeInTheDocument()
-    expect(screen.getByText(/任务未完成/)).toBeInTheDocument()
+    expect(screen.getByText(/任务已停止/)).toBeInTheDocument()
+    expect(screen.getByText(/执行记录已保留/)).toBeInTheDocument()
   })
 })

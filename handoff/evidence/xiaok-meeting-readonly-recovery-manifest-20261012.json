@@ -1,0 +1,1212 @@
+{
+  "sourceFullHead": "4772d6d4e47b3ed44b1a86853a8a12b85c427a18",
+  "docsFullHead": "f17059a23f56ae0d785ec91816674265ab8c8d61",
+  "acceptedOriginalSource": 224,
+  "remainingOriginalSource": 74,
+  "bundleSha256": "394d041025794ef972a7c208de931a4c0b9c4fc007166301e10b090cfdaedc0c",
+  "verifiedEveryMember": true,
+  "parentComplete": false,
+  "wholePrQuality": "NOT RUN / NOT APPROVED",
+  "members": [
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/electron/ipc-runtime.ts",
+      "size": 7217,
+      "sha256": "4bd8a4ce979f6f42219f4b88b917b2a41340fc771349518c97b19526e213e80d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/electron/ipc.ts",
+      "size": 107351,
+      "sha256": "24b9bb711d9936776ae1722dbc9795b5b23dbe570751094ad73908055a8ab435"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/electron/meeting-model-service.ts",
+      "size": 21789,
+      "sha256": "8249ef57a24c962b75964468ed14d6e829d882cfc2b48ffcb126c81c52f18a33"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/electron/meeting-readonly-data.ts",
+      "size": 2723,
+      "sha256": "decfe435da99a3949181c37ffabc56071041e6fd300fc238c61e980c7baa9d87"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/electron/meeting-readonly-typed-ipc.ts",
+      "size": 2239,
+      "sha256": "8cf29e4fd617fdf2ee95513a88743395a2673ead8bd4ac19d1bb53d26ba76b8b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/electron/preload-api.ts",
+      "size": 121996,
+      "sha256": "63ee05302cc4d6f69ef2e1dfc8ee2a28ab5b1b3e3ab37c8fd0446446b13ee77e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/renderer/src/components/DesktopSettings.tsx",
+      "size": 235617,
+      "sha256": "02b338c19143c7a9f6c5fb850ecb641c67f5f7f10715ab44cd53aa0690ee60ff"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/renderer/src/hooks/useMeetingReadonly.ts",
+      "size": 861,
+      "sha256": "5285c6e81d849a1669fad47a2df206f67e20dc3cf5361d6cdf1fe44b6984f21d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/renderer/src/locales/en.ts",
+      "size": 210317,
+      "sha256": "106b4a0383b8a8de28f19910958ec65065a769e0e11fee5feb0e725ed36eec0c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/renderer/src/locales/index.ts",
+      "size": 132178,
+      "sha256": "af373a2738652904df1d3d930dedb5b38a829f9a12c0872463180d0649e57617"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/renderer/src/locales/zh.ts",
+      "size": 205014,
+      "sha256": "ec14a21141ca1e3cb37d42d82815c72af59aa073902fce353eb8696be8a121d7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/shared/meeting-readonly-ipc-contract.ts",
+      "size": 1857,
+      "sha256": "91c4b326fc6ff711715d69f9d82d5df8a0a3b62d4cc31a07c95ca1817adda857"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/ipc-native-promise-sibling.test.ts",
+      "size": 9359,
+      "sha256": "755603b986303eefe91f8232469401780370266eb83f2c42a42c9731703c6e5a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/ipc-schema-coverage.test.ts",
+      "size": 5412,
+      "sha256": "910efab2822c5acff92dd7ce0be0e8ae0ad480185aa274b45748af69e8edf101"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/meeting-punctuation-worker.test.ts",
+      "size": 1651,
+      "sha256": "5191e110261dcfbc8b21778e9738ecdfe2cd6039f98745793b17108a7bfd7349"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/meeting-readonly-controls.test.ts",
+      "size": 8523,
+      "sha256": "d52665b8fd67d2a5221e898fc5a89159b423be9aea7ea3e2ea30ee1d5d6cf16b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/meeting-readonly-model-io.test.ts",
+      "size": 2222,
+      "sha256": "6e9a396eff633c1647840d41941345a311c35e5a7c21147bd2e4145598c433f7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/meeting-readonly-output-boundary.test.ts",
+      "size": 3460,
+      "sha256": "1c0b3b495b0d79b31e2eb36f6eec5e2092c3e5f983bf6e223668960bd182dbff"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/meeting-readonly-preload.test.ts",
+      "size": 2001,
+      "sha256": "0df7bca9f97fde6523c859385dd93a0f7f442d770727a1e9762712a9f618ea02"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/main/preload-contract.test.ts",
+      "size": 56797,
+      "sha256": "e7fec6cecbf60ad6a60532dea12fa9652069a1c654481ca97dfea51aca7cd5d5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/renderer/meeting-readonly-bridge.test.ts",
+      "size": 716,
+      "sha256": "206652b6c6b5498d05e40c95084175b5c2ad505394d3dca477b84e91880e5345"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/accepted-source/desktop/tests/renderer/meeting-readonly-consumers.test.tsx",
+      "size": 6495,
+      "sha256": "a849e3c99a36a4d306fe42cdc27217ae4be2b5e88bedadd3f274e0a51ac27b9f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/characterization-cleanup-r1.json",
+      "size": 115,
+      "sha256": "d0bf69065bef705b137a2d89864af87cc48834f52a462656c83443808bfcb6e4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/characterization-current-r1.json",
+      "size": 5686,
+      "sha256": "7582083518aac1ee0a80b03ff3a5473f4fd1176d825a02a5bf2b5beddaa43668"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/characterize-current.mjs",
+      "size": 2786,
+      "sha256": "2ecfb34e623eff1210f48637a4c3a6abbf04fce16dec04119eee04d0aa5dbbe2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/check-prior-source-continuity.mjs",
+      "size": 2175,
+      "sha256": "e56bc3725fbc21bf953e040ebe23e9dbfeb27618a369723bcb15a0a9df81081e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/check-queue-r1.json",
+      "size": 757,
+      "sha256": "e4143371bac799f38b56127606c18b02a82fb40ace15d352ab71d0c7b26ddbfc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/check-queue-r2.json",
+      "size": 757,
+      "sha256": "162935e3cf15eeb27352152f3824e5e10549b84f2e8ecd6d30824159766bc267"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/check-queue-r3.json",
+      "size": 757,
+      "sha256": "a54fa44e2f989aa51a1d91bdc2c05f76eb92adae72fbef91a9b0ee99e10f4ac2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/code-review-r2.md",
+      "size": 2807,
+      "sha256": "9fa7dc8a1447abb08d36ce73bd4238bb3e32fcff971b85df96d7ffbecefec378"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/component-final-r1.json",
+      "size": 7410,
+      "sha256": "baf1658682576caa296408303bb684ded73562097a8de5847665c6af554237cf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/component-pending-r1.json",
+      "size": 2446,
+      "sha256": "4a1254f6e7352252742c62837adffe1695466b7b00224a0c3c7353ab3bd838bf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/consumer-census-r1.json",
+      "size": 7626,
+      "sha256": "1f55181be6b116fe9b413300afd3aa7630268b0a258f18ca1050c633e5356b00"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/consumer-census.mjs",
+      "size": 1529,
+      "sha256": "8cc21d8f20276ba2a811a1b2f40b5642374ad219eb7a579a5229f78c79f2e2c4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/core-brothers-continuity-r1.json",
+      "size": 1699,
+      "sha256": "347565b3fe3e0475c438ae6dfcfc3e1454aea59245b24b82db4fb0f426253fd2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/credential-fix-check-queue-r1.json",
+      "size": 1335,
+      "sha256": "e9e06a9fc00c55970ff54797767a599f5563625b7af8c60cb33e1e1a65623e8e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/current-source-paths-r1.json",
+      "size": 1060,
+      "sha256": "9eff57d1d831b21255bce13850f319b645a342cea81afc761eea38dfea8d28ea"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/current-source-paths-r2.json",
+      "size": 1119,
+      "sha256": "80d037ff67b4aaad30d62c265496a4bf13203259734331639106044816e84ba7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/design-draft-r1.md",
+      "size": 4903,
+      "sha256": "632bdcba38e8996cab1b30b4cab9893492f958c26e4de05f2bfefce8dc53cdfc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/design-r2.md",
+      "size": 8804,
+      "sha256": "54d9ad240786662602c546a3ac886513471af8ca2b52160b57cfb43b0f40e7c7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/design-review-r1.md",
+      "size": 4106,
+      "sha256": "c442cae015b0a81227a98232e0ca9769929defa9f626d5fc1845fb45ac7d2abe"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/design-review-r2.md",
+      "size": 1904,
+      "sha256": "40fbcd8daee7e191828c62acb5eb4bedd91333629adeaf37fb12d29f8212952e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/design-runtime-addendum-r1.md",
+      "size": 2729,
+      "sha256": "f1e477cb1c18fabe9792bb8d7a0980db54eac3ea1b4e350fac40d85d1823e411"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/docs-context/xiaok-cli/design/2026-10-10-unfinished-development-live-handoff.md",
+      "size": 104234,
+      "sha256": "ad7a67c2ad7eef2dc6e06f1551b9716e3e3c0e2958cb4006856e7df20c660c6c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/docs-context/xiaok-cli/design/2026-10-12-meeting-readonly3-contract.md",
+      "size": 5570,
+      "sha256": "72602833b9435bf4fb9e61e8a37614a4ad3e32dbce5b35822f88da1472809ee8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/docs-context/xiaok-cli/quality/lessons-ledger.md",
+      "size": 13832,
+      "sha256": "c494eab7df776f5507c91f6459cf0e960cf3520f1ab18d0125f224202bbd0aa8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r1-pid.json",
+      "size": 108,
+      "sha256": "87803593248cb9deddf903b41b7925a3726006040f458d794319806b9c324e9b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r1-process.json",
+      "size": 11141,
+      "sha256": "abe71817fdd146f572935f575bd9c1590f93a46fed16187d7b9388fa1699564a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r1-request.json",
+      "size": 4077,
+      "sha256": "0543b2d60ffda2db0b679b0e5dbdb28642912d5096335bef03ec3599927bfbc1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r1.json",
+      "size": 23060,
+      "sha256": "6ef5d1fe8ae51ae3a8ae0c326138eab713609d94e21f2c5efc462fd48a0edee5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r1.log",
+      "size": 6479,
+      "sha256": "7cecff46a417f648695609b813d7b31a0365b77d267426e50c38ddf48298a167"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r2-pid.json",
+      "size": 108,
+      "sha256": "a7890af65874922afaba45edf69d2a70668a42fc242eba624c624c806bdc0517"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r2-process.json",
+      "size": 10206,
+      "sha256": "dd33637a860a5a74373527b1accc3d6156458ce9e7ac8f862616c33416af93bd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r2-request.json",
+      "size": 3746,
+      "sha256": "ab97cdba12ca5a0481699e0d5f76828da3b78a5f7e96cd76bc48f501e4d9dab5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r2.json",
+      "size": 23024,
+      "sha256": "ff1ee02c55512b0db49fcb9b17188bf82e585167af8e2c8c3050c9a4e05a9484"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-meeting-probe-r2.log",
+      "size": 6411,
+      "sha256": "5ea491406d6c20aabb0a4e5d4bc0fb97949107b214dedd6e654ee20d7d6718df"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-probe-cleanup-r1.json",
+      "size": 192,
+      "sha256": "4d55a12036f79570c1d49dd730787f546c2319ebcfa42940c14bfc7459f691b5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-probe-cleanup-r2.json",
+      "size": 207,
+      "sha256": "bcc68f238dd7a74ee736150ad9bb628f52566abd23749b50c03a49406a459bd4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-probe-script-r1.json",
+      "size": 2460,
+      "sha256": "8144631dd10230f9f07e6f1f3f18fe97040d1aae6b0d013231b45f38d61aa3ca"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-probe-script-r1.mjs",
+      "size": 8608,
+      "sha256": "61ba95c4fd7c85fb02e793b2086b3a359c6ddd18f5964b11a7eeb9d3e257d4ca"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-probe-script-r2.json",
+      "size": 2460,
+      "sha256": "9cc5d65d2ef46252f702a34e1423bfb2615a1376a1bd90cfb5e39f10c49a8985"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/electron-probe-script-r2.mjs",
+      "size": 8817,
+      "sha256": "cfa173474a9512a2d2535c20b0e14e9026521f97addbc47705477016d1eb6d1f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/failed-generator-owned-script-r2.mjs",
+      "size": 8817,
+      "sha256": "137518defb5c639792fff52895d20aa7a28ea65bb437fecd030fda4c6f8fcaf9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/final-check-queue-r1.json",
+      "size": 959,
+      "sha256": "17fd19f0328eaa8eda950184724ae7439e17afc808a76d3402bbce76ffc83dae"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/final-process-audit-r1.json",
+      "size": 7136,
+      "sha256": "5ce610b2d0e265f30e0e523cdf5ea815650059b38e383483c9cbb3ed4def3d67"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/generator-path-failure-cleanup-r2.json",
+      "size": 474,
+      "sha256": "91a4fea1b316af18d2efeea1a31652605828e9047df2cc65afa278680dfd5dbd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/json-parse-error-self-audit-r1.json",
+      "size": 625,
+      "sha256": "b539ee80fa01b1567778722a124667b81a2f3fea86de95b149da060704d3de91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/main-red-unapplied-candidate-r1.ts",
+      "size": 6181,
+      "sha256": "b9c2369dd6904dd12e4b90ca02bfe528de17030d9c6e92b174ffa3d7a1b8fcb8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/make-electron-probe-r2-fixed.mjs",
+      "size": 8484,
+      "sha256": "88a3e978d4668e5b942d723b5bbc494742d04eff108403322847d0838d75390c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/make-electron-probe-r2.mjs",
+      "size": 8484,
+      "sha256": "432236c41b2adb52b0dc719fdf83f305280a20f2f25862fe7fa5087d14dacbfb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/make-electron-probe.mjs",
+      "size": 8275,
+      "sha256": "956d6f16cb9546b66bdcc1a31657e3bca7ed8064e38688a6f7c9703b492f27e0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/make-review-packet-r2.mjs",
+      "size": 3149,
+      "sha256": "b6931752a4fe214498fdf0cdfc75c46fc9212f360dc307c89e0282cde8269cb7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-debt-census-r1.json",
+      "size": 1724,
+      "sha256": "8a74898a42b84af4c4144eebb49186bd65d8ccea42abb7818d91803eb086c324"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r1-pid.json",
+      "size": 109,
+      "sha256": "ab034c3999b49da7969204598b07101927cd3edaa07ff524b47c3ca717d9bdb3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r1-process.json",
+      "size": 9650,
+      "sha256": "657ee808ad0751704357655e49ca670372675ffd287c2b14a000a4f789c9530d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r1-request.json",
+      "size": 3197,
+      "sha256": "75ae35540089cefc539c489acd186049e2a1649632c4695c34a30857cce12213"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r1.log",
+      "size": 1099,
+      "sha256": "95f579e2d5a35e5154985d0869829d1ba4cbdb51b46dc32defa61f9403df92b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r2-pid.json",
+      "size": 109,
+      "sha256": "1f66d5aad3178e0afb54362e8412c05be0d51bbf88db9be3ee50304bbc0a4de9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r2-process.json",
+      "size": 9650,
+      "sha256": "676514a1402d6636bc1a87260a4189fbdce70026474616e580ce21a029de92d0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r2-request.json",
+      "size": 3197,
+      "sha256": "77f08a93a27efd3390337c04dbd47f8da304b537f65b62452f5b3fc4cfafe415"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-main-r2.log",
+      "size": 1099,
+      "sha256": "95f579e2d5a35e5154985d0869829d1ba4cbdb51b46dc32defa61f9403df92b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r1-pid.json",
+      "size": 108,
+      "sha256": "81fdc86e8e36f2033079d13f2366da568b5565bd83f593938c528ca99767be3b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r1-process.json",
+      "size": 9656,
+      "sha256": "2901f9f71737716094dd89ac1bc5998f715b9371810115bf0367779d44a679be"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r1-request.json",
+      "size": 3205,
+      "sha256": "de040c167d9dee520b0e44bc6cc7138bf6b09e81ea2f680223a96834d28131e7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r1.log",
+      "size": 37028,
+      "sha256": "cd05e34699ed75def0d9608bcb76fec4772bb644a0f8b527b1297817dd5f3fa8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r2-pid.json",
+      "size": 108,
+      "sha256": "b534e3b6ad026d49698c512d5e483895b49f89aae09fd85557412d855503e3a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r2-process.json",
+      "size": 9656,
+      "sha256": "20aa4aa87cd5873d8397d6ce4cd9308d059a7cd98aa5f3e091fe9b2be2c712ea"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r2-request.json",
+      "size": 3205,
+      "sha256": "a9cdccf809be47b51c9d2db4caa0b82d5f2c646293a4d718c938509b7723f0f8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-build-renderer-r2.log",
+      "size": 37028,
+      "sha256": "f7eabc27ee8682d5e590b30b894a000c1c817d6a71e6983b5db8677c8443b6a7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r1-pid.json",
+      "size": 106,
+      "sha256": "ad1bc9a105ee0b59bdb4427ccef87cbb5910eb32f2e21df7920f2e7a96d571d0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r1-process.json",
+      "size": 9682,
+      "sha256": "fc540eb0f8143f4fa4f9c51c2ed659c1be5f3f8f99e4cf328bdc6457363acd3e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r1-request.json",
+      "size": 3231,
+      "sha256": "c3c2a9fa5de2279419b3ab22daf449ed64c1351febb884ef4989c68ed9297482"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r1.log",
+      "size": 64,
+      "sha256": "3ac5341c6edfe44e382640ebefe95c83cdf4718eef455f295700c7e996f88c8f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r2-pid.json",
+      "size": 108,
+      "sha256": "5983bdd24b66a8b18839598b8673f91611edc41820c8d5d0464b6371584d02e5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r2-process.json",
+      "size": 9683,
+      "sha256": "65b126bd9f867a1d123a3cd55c6355453c419058377e4d244bc1657855f68aea"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r2-request.json",
+      "size": 3231,
+      "sha256": "e80bd6a9a1c527d84a3830d0d63169610dd53fefea8240fb987025959417a327"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-changed-r2.log",
+      "size": 64,
+      "sha256": "3ac5341c6edfe44e382640ebefe95c83cdf4718eef455f295700c7e996f88c8f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-credential-error-red-r1-pid.json",
+      "size": 108,
+      "sha256": "904bde7ffdbcb873d4a7740b9edf4a79ae8aab0217b74728c8ff204f9653b352"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-credential-error-red-r1-process.json",
+      "size": 1591,
+      "sha256": "5008cc829e5afd5a42733b277494bce6aae79d3e1523736247a9e3fe18ecb3d1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-credential-error-red-r1-request.json",
+      "size": 874,
+      "sha256": "fd7a11a0c91aa3d8697bfec1a84b3a1261d82d3448020327a59bb4a92680df83"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-credential-error-red-r1.json",
+      "size": 6392,
+      "sha256": "fa9c34cce7853bdbe2d5ec140549189c62cdd0d26c0da4da518845f8cc286553"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-credential-error-red-r1.log",
+      "size": 3032,
+      "sha256": "525f91717776222e1394b3636bd0bd4f21bed6f58e6abdd8e6d1900edab1b668"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r1-pid.json",
+      "size": 107,
+      "sha256": "ace35e0c334e572fac8cb280abeb7f5cb4c654216a3e4779e1af4974706ce911"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r1-process.json",
+      "size": 9640,
+      "sha256": "28a9c2e61580e5aef46d3ba812b258284a7b748965cb5fd2e69e71e1de27222e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r1-request.json",
+      "size": 3188,
+      "sha256": "5a4513e0256d37556af0c090c008589a04937f8a395cb70efcccab33eb3e5a95"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r1.log",
+      "size": 359,
+      "sha256": "baac41b4a2da6663944f7909b701856f2b9b81b5ebb99723fc93bfccaedac633"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r2-pid.json",
+      "size": 108,
+      "sha256": "dc325a9d9731459e558ea98e72c28a06aaa01c8d0b82faa8ff388506fad1aafd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r2-process.json",
+      "size": 9639,
+      "sha256": "dff3e406a595a1075ff53b5a75e08d027101cc8f405c7500ef16a3cb13720afa"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r2-request.json",
+      "size": 3188,
+      "sha256": "95c95d2f706c73989bdd8e7433f918b188fe85cd89677aabfc76db7edc487dea"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-gov-r2.log",
+      "size": 359,
+      "sha256": "baac41b4a2da6663944f7909b701856f2b9b81b5ebb99723fc93bfccaedac633"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-main-green-r1-pid.json",
+      "size": 108,
+      "sha256": "2782616425f5c45255cc6de6508d53ea8cc0d6e97027479bf6bccd312d6cc51a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-main-green-r1-process.json",
+      "size": 3089,
+      "sha256": "75589462779606fd86600bc06e75673b328076c204cdc17062977019dd4b79d4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-main-green-r1-request.json",
+      "size": 1367,
+      "sha256": "a12f7627041e7340c34906a23a4bce8c28a58b0e8cd938536451244b5350cd5a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-main-green-r1.json",
+      "size": 3877,
+      "sha256": "08b8a45cbc3afd4e7f5c854beb4a842966430b50ab3288c7dcf32adb85402116"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-main-green-r1.log",
+      "size": 612,
+      "sha256": "7c22e2b8ea42ad90286dbec07e324e34fae3333456d114cfff6126c19a3ef4fe"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-red-r1-pid.json",
+      "size": 108,
+      "sha256": "4f18f17e3b8cdad4f9bf9a8b278e8e5a573620af581adfbb355eb490e558fcb2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-red-r1-process.json",
+      "size": 3074,
+      "sha256": "a5730072fe3d19bac94072e53276eac80cd6654be7b9648c47ddd56420cd41db"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-red-r1-request.json",
+      "size": 1353,
+      "sha256": "f9b35ce044eca93e148a99a3284a4160b03ba715b6ece93484a9fa737f60aaf4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-red-r1.json",
+      "size": 9231,
+      "sha256": "4c4330437e2957e519f41fc4539b677a4682c3958fff299a1941b26bfa7bca12"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-red-r1.log",
+      "size": 11106,
+      "sha256": "64feaf5280e7c5d67606f51fe164741c206a29e8f4988fcddf70939271babb1a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r1-pid.json",
+      "size": 108,
+      "sha256": "9e4a88b4558676608c9a4f8e7397566d114b49b18b6fcd5e19228120ddbf5fc4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r1-process.json",
+      "size": 2418,
+      "sha256": "f0fb3c6080a5530d6fd72e74cc9b30412bf812d8d787d815774cca232dca4729"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r1-request.json",
+      "size": 1169,
+      "sha256": "583dfdc03ec0f8f34dbf5712cffc23e7519799b3d34ec020204ecb62cceb0407"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r1.json",
+      "size": 34966,
+      "sha256": "101c134a22ea8e554605afb1602089cdc236bdb59497e93d4817526f051e42ba"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r1.log",
+      "size": 63440,
+      "sha256": "c1fc883574a0cd589c3d7840b3e69d6a82b2e62499572276cbd87b426b58eb86"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r2-pid.json",
+      "size": 108,
+      "sha256": "03df2eb1a41abe552885e3023c4b2969b5d63e84029e65e9b554bccadc0dfaf9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r2-process.json",
+      "size": 2419,
+      "sha256": "4b461d84441999b27e3dfe497fa8f7ab3c740f2bc052976452fd5ef8c945ee81"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r2-request.json",
+      "size": 1169,
+      "sha256": "5188fcf32216534e956eae28ad7a955ffee52a08986f886924e6006e37987949"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r2.json",
+      "size": 6718,
+      "sha256": "4833b3d11fda29162f41db9724862f766da826c5c0a23f3a6ef9bc3301ab9357"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-shape-ui-r2.log",
+      "size": 622,
+      "sha256": "e465dd3fdf83f978c2d17741bb2c9a263cd60a5f9250056ba6f382ea8755d956"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r1-pid.json",
+      "size": 107,
+      "sha256": "6e20c846a025b5fe93807f3d28e97835b35260210392de2951380fd23763f09d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r1-process.json",
+      "size": 9563,
+      "sha256": "8a7d954b43faeea1bc754fa5085b699e4d1716cd1fd58d856ae866664102768d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r1-request.json",
+      "size": 3377,
+      "sha256": "1e9527d7a7b4fed11bbdbc1c0375c573c62d9ea23c803462761897bce0e89d17"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r1.json",
+      "size": 982159,
+      "sha256": "48d84210bcd12a45f7875c2137808cd78db3750bfbdf9e916c3a3028b129a927"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r1.log",
+      "size": 2848,
+      "sha256": "713df9bf028ce55dff4488510b19f3e4379f65fa091d20c560fa07a9eaeb143b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r2-pid.json",
+      "size": 108,
+      "sha256": "99582f96acbbe4e75ca15041a95258d5675159794f595ec026a647a2649a13f4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r2-process.json",
+      "size": 9958,
+      "sha256": "56fc96594f1b384c4ab61d013dc78041991331a8eb30d40adfbaa2656482fa72"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r2-request.json",
+      "size": 3506,
+      "sha256": "15f34506dfeb13bb7eaf731baacb26216d4ce35798ede4a65dfbe4dcf5efcaa9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r2.json",
+      "size": 980963,
+      "sha256": "3030f1520bfbb0c2e114b153145e24b290e16894a92e7d07715e5056fa0d01f0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r2.log",
+      "size": 561,
+      "sha256": "e8b7a84bae7d6f9375f6376b9432de1f902845f79b750a7fa415ca4f8d70562d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r3-pid.json",
+      "size": 104,
+      "sha256": "f29dc7af7fac7fb4def1df2ac2a6eba4cdf96c633afa5b315964d1a353abc3a0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r3-process.json",
+      "size": 9956,
+      "sha256": "389764cf842ffec56770e2ae9e99667b423b5968230b94b4be042259f2159955"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r3-request.json",
+      "size": 3506,
+      "sha256": "58eced7a293bd6fc7169b69e2ef71090f6c2f16637381909c479f9cfd4719100"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r3.json",
+      "size": 980752,
+      "sha256": "93ff8f0b89f009ec37ae66ee62cf080dc92fcf9b3aa9009bfb6adea8a791adc9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r3.log",
+      "size": 91,
+      "sha256": "bedc33e2f3d846ecf11c08c549f4ebf1b792e417960eed6b3bc0b0f2e464c9cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r4-pid.json",
+      "size": 105,
+      "sha256": "338f0b1adcd17f490a97db8e7a2fd4e1dfc32a6da096a2f065d3cead10b17dc2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r4-process.json",
+      "size": 9956,
+      "sha256": "8a62d906ba7f7b588eb39b79785972a606e3052d5213b21f293317506073a2f9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r4-request.json",
+      "size": 3506,
+      "sha256": "11a163a5cef7f4923fa8338f63b2addec8eb1bd71fe8b17250c389721f6aa13e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r4.json",
+      "size": 980752,
+      "sha256": "b2116d84fca70e94de5c70de9da0eae3d12fed4a6e99d182b3a7fe31fdbf340d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r4.log",
+      "size": 91,
+      "sha256": "bedc33e2f3d846ecf11c08c549f4ebf1b792e417960eed6b3bc0b0f2e464c9cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r5-pid.json",
+      "size": 109,
+      "sha256": "961b1f84b1ee3cb58a6be0e087e086f0c6b41a71307cf522ff2b4e6dffc2c769"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r5-process.json",
+      "size": 9958,
+      "sha256": "a2403bb4a324700a7bade6c7dff9c0b2e0ced8bcbacbc5f0f1755bb95998d563"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r5-request.json",
+      "size": 3506,
+      "sha256": "4538cdbf736ed7e2ad296fad4ff232bda068f627d142e7a667e34c78e4113287"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r5.json",
+      "size": 980752,
+      "sha256": "4b52aae753836996217980528949ab29f611c323dfd56845c9f59ca9d3e6bf83"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-strict-r5.log",
+      "size": 91,
+      "sha256": "bedc33e2f3d846ecf11c08c549f4ebf1b792e417960eed6b3bc0b0f2e464c9cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r1-pid.json",
+      "size": 106,
+      "sha256": "a0f042950a345e8646b1b75bacf8e8478bc70cc916d0cfb335af7719ecd66771"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r1-process.json",
+      "size": 9967,
+      "sha256": "da05ef1a1ef5ebc65cbb7a15ca3aab46381922aded0080fe64a6ffd8a142377c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r1-request.json",
+      "size": 3515,
+      "sha256": "a5c40b5392ca5f6ddb1979bcd93b3c42393b09a1c948f12e15266f150264b6e1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r1.json",
+      "size": 1084,
+      "sha256": "a13cf70198acd7fa2126571f6cc72c536450ea33cdedd68a4864a2cce3f1f96b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r1.log",
+      "size": 48,
+      "sha256": "9c5c568528b0a51d4683b9a0c4041b48c4141b37ca220d98b4465cbc2371a33f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r2-pid.json",
+      "size": 108,
+      "sha256": "d9929f2e4d3fcc55267a0447e78169ce8ae60b342ddaee669fbdff307fa0eb66"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r2-process.json",
+      "size": 9968,
+      "sha256": "48228256e53077a57b786c611e9363d74e1ee55456797d01693029aa82e0e1a7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r2-request.json",
+      "size": 3515,
+      "sha256": "5f3603f6227cc35d7e33e0aad7fd0b9974ec339453bf527ebbc41e83d6d4aea5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r2.json",
+      "size": 1084,
+      "sha256": "a13cf70198acd7fa2126571f6cc72c536450ea33cdedd68a4864a2cce3f1f96b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r2.log",
+      "size": 48,
+      "sha256": "9c5c568528b0a51d4683b9a0c4041b48c4141b37ca220d98b4465cbc2371a33f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r3-pid.json",
+      "size": 108,
+      "sha256": "20cd7285670f2ac83344c79353c83510455a63458bb94bcbcc0bee54b7c96548"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r3-process.json",
+      "size": 9968,
+      "sha256": "e0b3df53e2cbf481a71d97c0882a978d45b70ae603d976b8fa7df7df0b7cb84c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r3-request.json",
+      "size": 3515,
+      "sha256": "1040a781b741863a4d669dde912f30f5341d353108ca5b1672dd84b01f11ec57"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r3.json",
+      "size": 1084,
+      "sha256": "a13cf70198acd7fa2126571f6cc72c536450ea33cdedd68a4864a2cce3f1f96b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-test-lint-r3.log",
+      "size": 48,
+      "sha256": "9c5c568528b0a51d4683b9a0c4041b48c4141b37ca220d98b4465cbc2371a33f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-ui-red-r1-pid.json",
+      "size": 108,
+      "sha256": "1655fb13462cf24e106a9dd6d06160d6278311bca40ce98ff1f5319c8cc36f48"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-ui-red-r1-process.json",
+      "size": 1600,
+      "sha256": "ae60de29804cd14be2da2fd09433956fe843477369fa320cadc7f9d7a9060216"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-ui-red-r1-request.json",
+      "size": 868,
+      "sha256": "84c66a6e3729bf4574432b6f770f9eedd731201176e64810696f401d8bc3a456"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-ui-red-r1.json",
+      "size": 70042,
+      "sha256": "6ff4d8a0b081dbd7bff04de8ffa8ae17109dcc06cf9efee5fec74c5248f9d18e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-ui-red-r1.log",
+      "size": 191944,
+      "sha256": "04bd6fb35148743e77bf4a05942575f48ff09d940fc1f105287ceedb5f251aec"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r1-pid.json",
+      "size": 108,
+      "sha256": "6a79fde7cd8c08804edb71163e3327a61d33b5bc0021e9400b5e4d31db057096"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r1-process.json",
+      "size": 15081,
+      "sha256": "473fdd6cee93596fc0b9b695308bba17bb4005e2445b275b2e1de5e7f0955923"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r1-request.json",
+      "size": 9497,
+      "sha256": "526f3f2e15dd2605b6a8d5b7dfd618ec5e76fe88ab520d48291c65a5c14ac4fc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r1.json",
+      "size": 473097,
+      "sha256": "6790a3d2016f1248eb47a41ba9e54cd1b1aec9635b5b86aab28de3fba66901ed"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r1.log",
+      "size": 185935,
+      "sha256": "e40133c20abb3ac0cc11b3e572d6b4911d976d89d414ec4d86f9e9546ec141de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r2-pid.json",
+      "size": 108,
+      "sha256": "d251e3c0d31f61e0b7c4b63d2b61819410fa9e263a7982cd841cbb4bb89105eb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r2-process.json",
+      "size": 15081,
+      "sha256": "5590f2e0f6e2942e3d3edefe15ab4598b4fc4c87cbd14b596c00656c3235a9f0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r2-request.json",
+      "size": 9497,
+      "sha256": "5680dabfe4273b63ea07043787ce64aeceb91bf55e135c195f936dad81735b7c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r2.json",
+      "size": 460802,
+      "sha256": "d88bb52aebe16cb89ef3be72b889d85b0f418c610f7cac3b7ff4c67b2e7d011f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r2.log",
+      "size": 154325,
+      "sha256": "81bd3674e09a4d5ce41b8c49fe521bed63b0193c14f130fa1efacbb0168f9393"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r3-pid.json",
+      "size": 106,
+      "sha256": "618b7021b1d95f6a7d2c0054bb66685b1ca6640ffa05d1f9c6c46b15340f1ccc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r3-process.json",
+      "size": 16408,
+      "sha256": "4ae735c448333b59593313c6c7c06b4e05aff763f55c09221ae40852d28e9c01"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r3-request.json",
+      "size": 9957,
+      "sha256": "e520b58f0f7bee6f6c57981c979ab73f1f6dc7194cca6cbf964ec838a59495b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r3.json",
+      "size": 461670,
+      "sha256": "82b9c85b27c39719a4530854be0f14deb0aad03f4ad5a04a62b45fbe1b93ab2f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r3.log",
+      "size": 154217,
+      "sha256": "b9f254abd3571c655d663f0b6f6b22625a6361192d8d01590d3b6e75e9e7197f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r4-pid.json",
+      "size": 109,
+      "sha256": "98f99940df9c52c414f7a7a8498a4a14496857f68ff5bbb36dcc6ffbfeefc51f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r4-process.json",
+      "size": 16410,
+      "sha256": "1f543e50eef6a4705953ad91086e31a61584802c679f3ce24294eab6db2afded"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r4-request.json",
+      "size": 9957,
+      "sha256": "d9b0bfab4eabac2328f34d3bfbb61d9373ef65cb8865a65f94111f697215edd8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r4.json",
+      "size": 461978,
+      "sha256": "cac41e17e80eb075739d136fdffe4232cf4043cf9aa8192c202746af0f35b38a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly-whole-r4.log",
+      "size": 154332,
+      "sha256": "395cd2fa022165b83856b5f7c093e896559bc7f671c2287bb9f4373e9cd72a3a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r1-manual-obsolete-stop.json",
+      "size": 500,
+      "sha256": "81bb800d3c7217835e8dc5c8aa1739011f2b68659590c55d552a552e16e38123"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r1-pid.json",
+      "size": 107,
+      "sha256": "9f36134f81b5d2e201304d0cd2d3e74c3204a77e3f599b72ab1ad6fd2185f2af"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r1-process.json",
+      "size": 10972,
+      "sha256": "d9807ccf725c2ea5130f7558af538b08649fdf2743a9680181512e7cb5c2f755"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r1-request.json",
+      "size": 7208,
+      "sha256": "73ae6a40baa1425e6f3705fb5e7203f2e818985b597199dc2443c53645f9e7f1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r1.log",
+      "size": 786314,
+      "sha256": "66ec85e23b181e5308587628463c85661b54a17fed926ae62cbe9f2ef74fe9b2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r2-pid.json",
+      "size": 109,
+      "sha256": "1402572f7aefc35b5e3fc35af05ffd4b84a02a24857e9d073490aeb81834109e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r2-process.json",
+      "size": 11457,
+      "sha256": "4123e127ba7a0761a24e4929e6072c8fc340801880f04e005ce193e10ae70ed6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r2-request.json",
+      "size": 8569,
+      "sha256": "ba218c3d05fd0e812034be5a0e49dbbf506a76b877958f8448948b2685f552cf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-code-r2.log",
+      "size": 536896,
+      "sha256": "5f9de4189c4bf598ed07649580b50dc9c1a5f8a39fbfb583e58acf916f9cd925"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r1-pid.json",
+      "size": 106,
+      "sha256": "0d9eae86d5dafcd5dcbe92c370e03befdb231a3c05accbf68b8140da791e824d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r1-process.json",
+      "size": 6317,
+      "sha256": "fbdff84f3635724b65ca7818348c57f1af8bfe0b5e9736b3df3c517c2f4265ad"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r1-request.json",
+      "size": 4452,
+      "sha256": "9c415ebac1f082a75903dd1e9509d09b94abb7b2ba78d86063a22360fb1fca1f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r1.log",
+      "size": 320280,
+      "sha256": "af261fe4c9fc978bae93662c0163f9ab655e02d28d226bdcda672686b5364bc4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r2-pid.json",
+      "size": 108,
+      "sha256": "97e6e8966b23e6e1f1cc95e38ad4ba9c3342c460c7ca51e3b4a838e2f9afb213"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r2-process.json",
+      "size": 3752,
+      "sha256": "a63668842946c457faeab21e99662d8a8ec9c3dcb546c4e1fa5a94e9742fbba1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r2-request.json",
+      "size": 2456,
+      "sha256": "b27e3cb73620d5a45b850738420f069d8706a7a1cf716a4e15ac6402c13d4680"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/meeting-readonly3-glm53-design-r2.log",
+      "size": 94291,
+      "sha256": "faec72ca5a464b31484947bafb9790885c8ef869706722a2fb0a0593f35af299"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/parent-populations-continuity-r1.json",
+      "size": 942,
+      "sha256": "cda2b53bb89356e38251d8ec3e95c710ed1de2d04007cb5968c0b3cc85858f02"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/electron/ipc.ts",
+      "size": 107300,
+      "sha256": "1b6d6950a509ecbe3103986376511316d09106b387cd345bb4655f96532204fb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/electron/meeting-asr-config.ts",
+      "size": 6753,
+      "sha256": "8dff6fe7d67b71f7c2bd6a07f94f9bb089e8061565611c3428d11d390487da13"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/electron/meeting-audio-permission.ts",
+      "size": 1932,
+      "sha256": "78440af28bae453e40aaca5b65f516ab85caeda477f3e01f5fc73eff03633b1e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/electron/meeting-model-service.ts",
+      "size": 20777,
+      "sha256": "9861f50cae0d26672b88be5a897af57fbdf80090d04bf52bee07c1ea4bb2e2cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/electron/preload-api.ts",
+      "size": 121812,
+      "sha256": "2827b6a069eb4ae0f75a4ac8e0a60ac48c3332ec4cdba396629490caf4169f1b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/electron/preload.cjs",
+      "size": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/renderer/src/components/DesktopSettings.tsx",
+      "size": 235904,
+      "sha256": "aa5031bcb1dbe84877920c55bb06c1154a4e7364d39bfa9a05e2d75c743ad501"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/renderer/src/components/KnowledgePage.tsx",
+      "size": 159205,
+      "sha256": "feb4136af8f434e7041d7e652ae8b0f3ad1581dc7f26fa94c0c494ca7c8a543a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/desktop/renderer/src/components/settings/VoiceSettings.tsx",
+      "size": 38798,
+      "sha256": "b2712746b23a1a9b5afce0797cb0c383e8c51abd0398b123aa813396cd1c9f5b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight/src/utils/config.ts",
+      "size": 4760,
+      "sha256": "d19a76cdffb8f66927db38efd871c8ed03b56c858d889cec4f9643a6632b5417"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/preflight-r1.json",
+      "size": 5926,
+      "sha256": "41939f1759960ad4baa2f84e58c871b74db3bd38409d9c50c51028041784a723"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/prior-source-continuity-r1.json",
+      "size": 2717,
+      "sha256": "5e404e5fa1510c935358129f7a87be871c8a0a9b6da080add6d8ce831cda1d38"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/process-audit-before-code-r1.json",
+      "size": 4705,
+      "sha256": "b0b140ccd2786d8e43b3fd9ef21e363bdb575f8b20ab49af49a35cfa9896074b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/progress-r1.json",
+      "size": 439,
+      "sha256": "f6c351387a963b4971ec8e55b1cb8b7f266221f2a5a633bd4a52f71e3035223e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/review-dependencies-r2.md",
+      "size": 51405,
+      "sha256": "9e4715bb0bcb27e1d7858b34cbfbb6c8048fee432040588ed0906c6ca06f8fe6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/review-gates-r2.json",
+      "size": 9526,
+      "sha256": "36eb8d15db76da906adf1cd4aae5d2e9e78778a83e5c2674aa7eeb97b950fa47"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/review-source-r2.md",
+      "size": 87006,
+      "sha256": "cac554c8835f2a5707a2f756e21a98832bc64470486cde1da64d815e2ffe9a28"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/run.py",
+      "size": 2107,
+      "sha256": "367a767227f319b28780b207cae7d61f749997584bf579b29ae49a7868f042de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/source-commit-continuity-r1.json",
+      "size": 6478,
+      "sha256": "f134bbb0edc144dcf0a84b3d4807d029135b198d88e406faec303d9f2b9d58c9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/source-diff-r1.patch",
+      "size": 31447,
+      "sha256": "5fd7083f6e6fb637e9220d642fc5ec4e9a2bb8242ed53099586992e1a3445e9a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/source-manifest-r1.json",
+      "size": 3598,
+      "sha256": "cece0db6b7e86d86e9dfb554922f9c198a0ce712a842d609dc5e46b26bd4f6da"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/source-manifest-r2.json",
+      "size": 3598,
+      "sha256": "029fadc945ef1e368eae5fe2c64b08b8947a4e366a541381d6a31e42f3503534"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/strict.mjs",
+      "size": 5835,
+      "sha256": "47776a3890fb5162ebee84a42687cae4b13c27131f9992357ba77409ef48ce16"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/meeting-readonly3-20261012-recovery-r1/test-lint.mjs",
+      "size": 939,
+      "sha256": "5d64c5eb9cd162a509e7f68a813cf25103a0ac9c70431fc9e404e19543598b73"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/parent-complete-acceptance-queue-meeting-readonly-20261012-recovery-r1.json",
+      "size": 76884,
+      "sha256": "771aede1e11d3c13ef03981a443c902607eafcdaf4e0097be3b8c9b7b7f83b15"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/parent-inventory-resume-20261009-r1/original-176-consumers.json",
+      "size": 27395,
+      "sha256": "6b037319a9e4ea6b6a2796f1f03f420ff740d93d18fbdcf2d3812d8662e75d38"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/parent-inventory-resume-20261009-r1/original-full-351-test-files.json",
+      "size": 40163,
+      "sha256": "ddea5c41c45ca42dbd3c18aaad3f2d9c0560fd81459f95d77c715a07a0ca8fe3"
+    }
+  ]
+}

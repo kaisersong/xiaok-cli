@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createHooksRunner, type HookConfig, type HookEventName } from '../../src/runtime/hooks-runner.js';
 import { ToolRegistry } from '../../src/ai/tools/index.js';
 import { PermissionManager } from '../../src/ai/permissions/manager.js';
+import { mcpTestContext } from '../support/mcp-cancellation-context.js';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -38,7 +39,7 @@ function registry(hooks: HookConfig[], approved = false, name = 'write', signal?
   }]);
   return { onPrompt, execute, runner, run: () => toolRegistry.executeTool(name,
     { command: 'permission_probe', file_path: join(tmpdir(), 'permission-probe'), content: 'probe' },
-    signal ? { signal } : undefined) };
+    signal ? mcpTestContext(signal) : undefined) };
 }
 
 describe('PermissionRequest operational failure through production hooks and registry', () => {

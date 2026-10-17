@@ -72,7 +72,7 @@ describe('TranscriptBuffer capacity boundaries', () => {
     const buffer = new TranscriptBuffer({ entryByteLimit: 512 });
     buffer.record({ kind: 'assistant', text: 'y'.repeat(4096) });
 
-    const entry = buffer.getEntries()[0] as Extract<TranscriptBufferEntry, { kind: 'assistant' }>;
+    const entry = buffer.getEntries()[0] as Extract<TranscriptBufferEntry, { kind: 'user' | 'assistant' | 'thinking' }>;
     expect(entry.text).toContain('[truncated, original 4 KB]');
   });
 
@@ -80,7 +80,7 @@ describe('TranscriptBuffer capacity boundaries', () => {
     const buffer = new TranscriptBuffer({ entryByteLimit: 64 });
     buffer.record({ kind: 'assistant', text: '中'.repeat(200) });
 
-    const entry = buffer.getEntries()[0] as Extract<TranscriptBufferEntry, { kind: 'assistant' }>;
+    const entry = buffer.getEntries()[0] as Extract<TranscriptBufferEntry, { kind: 'user' | 'assistant' | 'thinking' }>;
     expect(entry.text).not.toContain('\ufffd');
   });
 

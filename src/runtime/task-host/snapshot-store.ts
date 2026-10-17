@@ -1,8 +1,31 @@
+import {createKnownDirectoryWriterFence} from '../verification/known-directory-writer-fence.js';
+import {assertOrdinarySourceWriterRoute,observeOrdinaryDirectoryWriter} from '../verification/ordinary-source-writer-observation.js';
+import {assertCapturedJsonUniqueKeys} from '../verification/captured-source-json.js';
+import {createCapturedTaskDeclarationAccumulator} from './captured-task-declarations.js';
+import {observeTaskSnapshotCompletion,observeTaskSnapshotCompletionSync,withoutTaskCompletionObservation} from './snapshot-completion-observation.js';
+import { DesktopTaskObservationStore } from './protected-observation-store.js';
+import { mergeProtectedObservationClosures } from '../../ai/runtime/protected-observation-closure.js';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { appendFile, mkdir, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
+import { readFileSync, lstatSync, realpathSync } from 'node:fs';
+import { acquireSaveLock } from '../../ai/runtime/session-store/mutation-lock.js';
+import { appendFile, mkdir, open, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ActiveTaskRef, DesktopTaskEvent, TaskSnapshot } from './types.js';
+
+export interface TaskSnapshotWriteReceipt { readonly opaqueTaskSnapshotWriteReceipt: never }
+export interface TaskSnapshotWriteFacts {
+  readonly taskId: string;
+  readonly sessionId: string;
+  readonly status: TaskSnapshot['status'];
+  readonly sequence: number;
+  readonly snapshotDigest: string;
+}
+const writeReceipts = new WeakMap<object, { store: FileTaskSnapshotStore; facts: Readonly<TaskSnapshotWriteFacts> }>();
+export function getTaskSnapshotWriteReceipt(receipt: TaskSnapshotWriteReceipt, store: FileTaskSnapshotStore): Readonly<TaskSnapshotWriteFacts> {
+  const entry = receipt && typeof receipt === 'object' ? writeReceipts.get(receipt) : undefined;
+  if (!entry || entry.store !== store) throw Error('task_snapshot_write_receipt');
+  return entry.facts;
+}
 
 interface SnapshotIndex {
   activeTaskIds: string[];
@@ -56,7 +79,12 @@ const TERMINAL_STATUSES = new Set<TaskSnapshot['status']>(['completed', 'failed'
  * Terminal transitions materialize the complete historical TaskSnapshot so
  * older readers keep seeing completed tasks without understanding journals.
  */
+const knownTaskWriters=new WeakMap<object,{fence:ReturnType<typeof createKnownDirectoryWriterFence>;pending?:Promise<void>}>();
 export class FileTaskSnapshotStore {
+  readonly observations: DesktopTaskObservationStore;
+  private writerQueue: Promise<void> = Promise.resolve();
+  private writerClosed = false;
+  private assertWriterCurrent: (() => void) | undefined;
   private indexWriteQueue: Promise<void> = Promise.resolve();
   private readonly taskWriteQueues = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedSnapshot>();
@@ -64,20 +92,135 @@ export class FileTaskSnapshotStore {
   constructor(
     private readonly rootDir: string,
     private readonly diagnostics: TaskSnapshotStoreDiagnostics = {},
-  ) {}
+  ) { this.observations = new DesktopTaskObservationStore(rootDir);knownTaskWriters.set(this,{fence:createKnownDirectoryWriterFence(rootDir,'task-root')}); }
 
   async save(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<void> {
-    const previous = this.taskWriteQueues.get(snapshot.taskId) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(() => this.saveSerial(snapshot, expectedPrevious));
-    const tracked = run.catch(() => undefined);
-    this.taskWriteQueues.set(snapshot.taskId, tracked);
-    try {
-      await run;
-    } finally {
-      if (this.taskWriteQueues.get(snapshot.taskId) === tracked) {
-        this.taskWriteQueues.delete(snapshot.taskId);
+    const original: TaskSnapshot = JSON.parse(JSON.stringify(snapshot));
+    const expected = expectedPrevious === undefined ? undefined : JSON.parse(JSON.stringify(expectedPrevious));
+    await this.enqueueWrite(original.taskId, () => this.saveSerial(original, expected));
+  }
+
+  /** Permanently rejects new writes, then waits for accepted physical IO. */
+  async closeAndDrain(): Promise<void> {
+    this.writerClosed = true;
+    await this.writerQueue;
+  }
+
+  /** User-only cooperative fence; it grants no all-writer or migration authority. */
+  fenceKnownWriter(requestSource: 'user' | 'agent' | 'scheduler'): Promise<void> {
+    const owner=knownTaskWriters.get(this);
+    if(!owner||arguments.length!==1)return Promise.reject(Error('known_writer_fence_owner'));
+    if(requestSource!=='user')return Promise.reject(Error('known_writer_fence_request_source'));
+    if(!['darwin','linux'].includes(process.platform))return Promise.reject(Error('known_writer_fence_platform'));
+    if(owner.pending)return owner.pending;
+    this.writerClosed=true;const accepted=this.writerQueue;
+    const work=Promise.resolve().then(async()=>{await accepted;const release=acquireSaveLock(join(this.rootDir,'.task-store.save.lock'));try{owner.fence.persist();}finally{release();}});
+    owner.pending=work;void work.then(()=>{if(owner.pending===work)owner.pending=undefined;},()=>{if(owner.pending===work)owner.pending=undefined;});return work;
+  }
+
+  private enqueueWrite<T>(taskId: string | undefined, action: () => Promise<T>): Promise<T> {
+    if (this.writerClosed) return Promise.reject(Error('task_store_closed'));
+    const run = this.writerQueue.then(async () => {
+      assertOrdinarySourceWriterRoute();
+      await mkdir(this.rootDir, { recursive: true });
+      const root = lstatSync(this.rootDir), resolved = realpathSync(this.rootDir);
+      if (!root.isDirectory() || root.isSymbolicLink()) throw Error('task_store_identity_changed');
+      const lockPath = join(this.rootDir, '.task-store.save.lock');
+      const release = acquireSaveLock(lockPath);
+      const lock = lstatSync(lockPath), bytes = readFileSync(lockPath, 'utf8');
+      const assertCurrent = () => {
+        const now = lstatSync(this.rootDir), current = lstatSync(lockPath);
+        if (now.dev !== root.dev || now.ino !== root.ino || now.isSymbolicLink()
+          || realpathSync(this.rootDir) !== resolved || current.dev !== lock.dev || current.ino !== lock.ino
+          || current.isSymbolicLink() || readFileSync(lockPath, 'utf8') !== bytes) throw Error('task_store_identity_changed');
+      };
+      this.assertWriterCurrent = assertCurrent;
+      let failure: { error: unknown } | undefined;
+      let settledBodyResult!: T;
+      let settledBodyFailure: {
+          error: unknown;
+      } | undefined;
+      try {
+          try {
+              assertCurrent();
+              knownTaskWriters.get(this)!.fence.assertOpen();
+              observeOrdinaryDirectoryWriter(resolved, 'task-root');
+              assertOrdinarySourceWriterRoute();
+              assertCurrent();
+              // This admitted sequence retains the original Task lock across every
+              // awaited write. Pending migration must acquire that same lock later.
+              const result = await action();
+              assertCurrent();
+              {
+                  settledBodyResult = result;
+              }
+          }
+          catch (error) {
+              failure = { error };
+              throw error;
+          }
       }
+      catch (error) {
+          settledBodyFailure = { error };
+      }
+      {
+          this.assertWriterCurrent = undefined;
+          // A renamed root may now expose an unrelated lock at the old path.
+          // The original lock must remain for explicit recovery in that case.
+          try {
+              assertCurrent();
+              release();
+          }
+          catch (cleanupError) {
+              if (failure)
+                  throw new AggregateError([failure.error, cleanupError], 'task_store_identity_changed_or_release_failed', { cause: failure.error });
+              throw cleanupError;
+          }
+      }
+      if (settledBodyFailure)
+          throw settledBodyFailure.error;
+      return settledBodyResult;
+    });
+    const tracked = run.then(() => undefined, () => undefined);
+    this.writerQueue = tracked;
+    if (taskId) {
+      this.taskWriteQueues.set(taskId, tracked);
+      void tracked.then(() => { if (this.taskWriteQueues.get(taskId) === tracked) this.taskWriteQueues.delete(taskId); });
     }
+    return run;
+  }
+
+  /** Main-only exact-write receipt; it grants no completion/verification authority. */
+  async saveWithReceipt(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<TaskSnapshotWriteReceipt> {
+    const original: TaskSnapshot = JSON.parse(JSON.stringify(snapshot));
+    const expected: TaskSnapshot | undefined = expectedPrevious === undefined ? undefined : JSON.parse(JSON.stringify(expectedPrevious));
+    return this.enqueueWrite(original.taskId, async () => {
+      await this.saveSerial(original, expected);
+      const committed = this.cache.get(original.taskId);
+      if (!committed) throw Error('task_snapshot_write_unconfirmed');
+      // An earlier write may have persisted data but failed its index update.
+      // A no-change retry must complete that original durable bookkeeping.
+      await this.syncIndexForTransition(undefined, committed.snapshot);
+      const sync = async (path: string, optional = false) => {
+        let handle;
+        try { handle = await open(path, 'r'); }
+        catch (error) { if (optional && isNodeErrorCode(error, 'ENOENT')) return; throw error; }
+        try { await handle.sync(); } finally { await handle.close(); }
+      };
+      await sync(this.snapshotPath(original.taskId));
+      await sync(this.journalPath(original.taskId), true);
+      await sync(this.snapshotDir());
+      await sync(this.indexPath());
+      await sync(this.rootDir);
+      const facts = Object.freeze({ taskId: committed.snapshot.taskId, sessionId: committed.snapshot.sessionId,
+        status: committed.snapshot.status, sequence: committed.sequence,
+        snapshotDigest: createHash('sha256').update(JSON.stringify(committed.snapshot)).digest('hex') });
+      const receipt = Object.freeze({}) as TaskSnapshotWriteReceipt;
+      this.assertWriterCurrent?.();
+      writeReceipts.set(receipt, { store: this, facts });
+      return receipt;
+    });
+
   }
 
   async getActiveTasks(): Promise<ActiveTaskRef[]> {
@@ -93,16 +236,32 @@ export class FileTaskSnapshotStore {
 
   async recoverTask(taskId: string, options?: TaskSnapshotReadOptions): Promise<TaskSnapshot | null> {
     options?.signal.throwIfAborted();
+    const protection = await this.readProtection(taskId, options);
+    const protectedClosure = protection.closure;
     const pendingWrite = this.taskWriteQueues.get(taskId);
     if (pendingWrite) await waitSnapshotRead(() => pendingWrite, options);
     options?.signal.throwIfAborted();
     const cached = this.cache.get(taskId);
-    if (cached) return cached.snapshot;
-    const loaded = await this.loadSnapshotState(taskId, options);
+    if (cached) {
+      const protectedSnapshot = await this.withProtection(cached.snapshot, options);
+      return waitSnapshotRead(() => observeTaskSnapshotCompletion(protectedSnapshot, taskId, options?.signal), options);
+    }
+    let loaded: CachedSnapshot | null;
+    try { loaded = await this.loadSnapshotState(taskId, options); }
+    catch (cause) {
+      if (protectedClosure || protection.executionProtected) throw Object.assign(new Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE', { cause }), { code: 'SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE' });
+      throw cause;
+    }
     options?.signal.throwIfAborted();
-    if (!loaded) return null;
+    if (!loaded) {
+      if (protectedClosure || protection.executionProtected) throw Object.assign(new Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE'), { code: 'SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE' });
+      return null;
+    }
+    const protectedSnapshot = await this.withProtection(loaded.snapshot, options);
+    const observed = await waitSnapshotRead(() => observeTaskSnapshotCompletion(protectedSnapshot, taskId, options?.signal), options);
+    options?.signal.throwIfAborted();
     this.cache.set(taskId, loaded);
-    return loaded.snapshot;
+    return observed;
   }
 
   /** Read-only legacy ownership check, including terminal tasks absent from the active index. */
@@ -145,16 +304,33 @@ export class FileTaskSnapshotStore {
   }
 
   async clearActiveTask(taskId: string): Promise<void> {
-    await this.updateIndex(index => {
+    await this.enqueueWrite(undefined, () => this.updateIndex(index => {
       const ids = new Set(index.activeTaskIds);
       ids.delete(taskId);
       return { activeTaskIds: [...ids] };
-    });
+    }));
+  }
+
+  private readProtection(taskId: string, options?: TaskSnapshotReadOptions) {
+    return waitSnapshotRead(() => options ? this.observations.readProtectionInWorker(taskId) : this.observations.readProtection(taskId), options);
+  }
+
+  private async withProtection(snapshot: TaskSnapshot, options?: TaskSnapshotReadOptions): Promise<TaskSnapshot> {
+    const protection = await this.readProtection(snapshot.taskId, options);
+    if (snapshot.executionProtected !== undefined && snapshot.executionProtected !== true) throw Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE');
+    const closure = mergeProtectedObservationClosures(protection.closure, snapshot.protectedObservationClosure);
+    return { ...snapshot, ...(closure ? { protectedObservationClosure: closure } : {}),
+      ...(protection.executionProtected || snapshot.executionProtected ? { executionProtected: true as const } : {}) };
   }
 
   private async saveSerial(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<void> {
+    if (snapshot.protectedObservationClosure) await this.observations.save(snapshot.taskId, snapshot.protectedObservationClosure);
+    snapshot = withoutTaskCompletionObservation(await this.withProtection(snapshot));
     await mkdir(this.snapshotDir(), { recursive: true });
-    const current = this.cache.get(snapshot.taskId) ?? await this.loadSnapshotState(snapshot.taskId);
+    const current = await this.loadSnapshotState(snapshot.taskId);
+    if (current) this.cache.set(snapshot.taskId, current);
+    else this.cache.delete(snapshot.taskId);
+    this.assertWriterCurrent?.();
     if (!current) {
       await this.writeCheckpoint(snapshot, 0);
       this.cache.set(snapshot.taskId, { snapshot, sequence: 0, checkpointEventCount: snapshot.events.length, sealed: true });
@@ -181,6 +357,7 @@ export class FileTaskSnapshotStore {
       if (current.journalRepairOffset !== undefined) {
         await truncate(this.journalPath(snapshot.taskId), current.journalRepairOffset);
       }
+    this.assertWriterCurrent?.();
       await appendFile(this.journalPath(snapshot.taskId), encodedRecord, 'utf8');
     } catch (error) {
       // A failed append may still leave a partial frame on disk. Force the next
@@ -238,6 +415,7 @@ export class FileTaskSnapshotStore {
   }
 
   private async writeCheckpoint(snapshot: TaskSnapshot, lastSequence: number): Promise<void> {
+    snapshot = withoutTaskCompletionObservation(snapshot);
     const target = this.snapshotPath(snapshot.taskId);
     const tmp = this.tempPath(target);
     const checkpoint = {
@@ -249,8 +427,11 @@ export class FileTaskSnapshotStore {
       } satisfies CheckpointPersistence,
     };
     const encoded = JSON.stringify(checkpoint, null, 2);
+    this.assertWriterCurrent?.();
     await writeFile(tmp, encoded, 'utf8');
+    this.assertWriterCurrent?.();
     await rename(tmp, target);
+    this.assertWriterCurrent?.();
     this.diagnostics.onWrite?.('checkpoint', Buffer.byteLength(encoded, 'utf8'));
   }
 
@@ -268,24 +449,27 @@ export class FileTaskSnapshotStore {
 
   private async updateIndex(mutator: (index: SnapshotIndex) => SnapshotIndex): Promise<void> {
     const run = this.indexWriteQueue.then(async () => {
-      const index = await this.loadIndex();
+      const index = await this.loadIndex(true);
       await this.saveIndex(mutator(index));
     });
     this.indexWriteQueue = run.catch(() => undefined);
     return run;
   }
 
-  private async loadIndex(): Promise<SnapshotIndex> {
+  private async loadIndex(strict = false): Promise<SnapshotIndex> {
     try {
       const raw = await readFile(this.indexPath(), 'utf8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       if ('activeTaskId' in parsed && !('activeTaskIds' in parsed)) {
         const old = parsed.activeTaskId as string | null;
+        if (strict && old !== null && typeof old !== 'string') throw Error('task_store_index_invalid');
         return { activeTaskIds: old ? [old] : [] };
       }
       const ids = parsed.activeTaskIds;
+      if (strict && (!Array.isArray(ids) || !ids.every(id => typeof id === 'string'))) throw Error('task_store_index_invalid');
       return { activeTaskIds: Array.isArray(ids) ? ids as string[] : [] };
-    } catch {
+    } catch (error) {
+      if (strict && !isNodeErrorCode(error, 'ENOENT')) throw error;
       return { activeTaskIds: [] };
     }
   }
@@ -295,8 +479,11 @@ export class FileTaskSnapshotStore {
     const target = this.indexPath();
     const tmp = this.tempPath(target);
     const encoded = JSON.stringify(index, null, 2);
+    this.assertWriterCurrent?.();
     await writeFile(tmp, encoded, 'utf8');
+    this.assertWriterCurrent?.();
     await rename(tmp, target);
+    this.assertWriterCurrent?.();
     this.diagnostics.onWrite?.('index', Buffer.byteLength(encoded, 'utf8'));
   }
 
@@ -336,11 +523,14 @@ function waitSnapshotRead<T>(start: () => Promise<T>, options?: TaskSnapshotRead
  * checkpoint JSON directly. New runtime paths should prefer recoverTask().
  */
 export function recoverTaskSnapshotSync(rootDir: string, taskId: string): TaskSnapshot | null {
+  const protection = new DesktopTaskObservationStore(rootDir).readProtectionSync(taskId);
+  const protectedClosure = protection.closure;
+  const protect=(snapshot:TaskSnapshot)=>{if(snapshot.executionProtected!==undefined&&snapshot.executionProtected!==true)throw Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE');const closure=mergeProtectedObservationClosures(protectedClosure,snapshot.protectedObservationClosure);return {...snapshot,...(closure?{protectedObservationClosure:closure}:{}),...(protection.executionProtected||snapshot.executionProtected?{executionProtected:true as const}:{})};};
   let checkpointRaw: string;
   try {
     checkpointRaw = readFileSync(join(rootDir, 'snapshots', `${taskId}.json`), 'utf8');
   } catch (error) {
-    if (isNodeErrorCode(error, 'ENOENT')) return null;
+    if (isNodeErrorCode(error, 'ENOENT') && !protectedClosure && !protection.executionProtected) return null;
     throw error;
   }
   const checkpoint = parseCheckpoint(checkpointRaw);
@@ -349,9 +539,9 @@ export function recoverTaskSnapshotSync(rootDir: string, taskId: string): TaskSn
     if (!checkpoint.sealed && journalRaw.length > 0) {
       throw new Error('unsealed checkpoint has a task journal');
     }
-    return replayJournal(checkpoint, journalRaw, taskId).snapshot;
+    return observeTaskSnapshotCompletionSync(protect(replayJournal(checkpoint, journalRaw, taskId).snapshot),taskId);
   } catch (error) {
-    if (isNodeErrorCode(error, 'ENOENT')) return checkpoint.snapshot;
+    if (isNodeErrorCode(error, 'ENOENT')) return observeTaskSnapshotCompletionSync(protect(checkpoint.snapshot),taskId);
     throw error;
   }
 }
@@ -392,8 +582,83 @@ function applyJournalRecord(snapshot: TaskSnapshot, record: JournalRecord): Task
   return next;
 }
 
-function parseCheckpoint(raw: string): CachedSnapshot {
+const CAPTURED_TASK_FIELDS = new Set([
+  'taskId', 'sessionId', 'status', 'prompt', 'materials', 'events', 'understanding', 'result',
+  'salvage', 'context', 'executionScope', 'multiAgentPreparation', 'hostDelivery', 'usage',
+  'createdAt', 'updatedAt', 'executionProtected', 'protectedObservationClosure', 'currentCompletion',
+]);
+function capturedIdentity(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || !value || /[\x00-\x1f\x7f]/.test(value)) throw Error('captured_task_session');
+}
+function capturedCore(value: TaskSnapshot): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !['understanding', 'running', 'waiting_user', 'completed', 'failed', 'cancelled'].includes(value.status)
+    || typeof value.prompt !== 'string' || !Array.isArray(value.materials) || !Array.isArray(value.events)
+    || !Number.isSafeInteger(value.createdAt) || value.createdAt < 0
+    || !Number.isSafeInteger(value.updatedAt) || value.updatedAt < value.createdAt) throw Error('captured_task_checkpoint');
+  capturedIdentity(value.taskId); capturedIdentity(value.sessionId);
+}
+/** JSON.parse has already checked syntax. Decode object keys before comparing
+ * them, so escaped spellings cannot conceal an ambiguous duplicate. */
+function capturedUniqueKeys(raw: string): void {
+  assertCapturedJsonUniqueKeys(raw, 'captured_task_duplicate');
+}
+
+/** Narrow facts from captured bytes only. Actual full-source custody, retained
+ * history and cross-owner relationships must be checked by the source collector. */
+export function readCapturedTaskSessions(checkpointRaw: string, journalRaw: string, taskId: string): Readonly<{taskId: string; sessionIdentities: readonly string[]}> {
+  return readCapturedTaskHistory(checkpointRaw,journalRaw,taskId);
+}
+
+/** Captured declarations only: references remain in their original namespace. */
+export function readCapturedTaskDeclarations(checkpointRaw:string,journalRaw:string,taskId:string){
+  const declarations=createCapturedTaskDeclarationAccumulator();
+  const sessions=readCapturedTaskHistory(checkpointRaw,journalRaw,taskId,declarations);
+  return declarations.finish(taskId,sessions.sessionIdentities);
+}
+
+function readCapturedTaskHistory(checkpointRaw:string,journalRaw:string,taskId:string,declarations?:ReturnType<typeof createCapturedTaskDeclarationAccumulator>):Readonly<{taskId:string;sessionIdentities:readonly string[]}>{
+  if (typeof checkpointRaw !== 'string' || typeof journalRaw !== 'string') throw Error('captured_task_input');
+  capturedIdentity(taskId);
+  const checkpoint = parseCheckpoint(checkpointRaw, true);
+  if (checkpoint.snapshot.taskId !== taskId) throw Error('captured_task_owner');
+  declarations?.capture(checkpoint.snapshot,'checkpoint');
+  if (journalRaw && !journalRaw.endsWith('\n')) throw Error('captured_task_tail');
+  const sessions = new Set([checkpoint.snapshot.sessionId]);
+  let firstSequence: number | undefined, previousSequence: number | undefined, oldSession: string | undefined;
+  const result = replayJournal(checkpoint, journalRaw, taskId, record => {
+    declarations?.capture({...record.patch,events:record.events},`journal[${record.sequence}]`);
+    if (record.sequence !== record.previousSequence + 1
+      || previousSequence !== undefined && record.previousSequence !== previousSequence) throw Error('captured_task_sequence');
+    firstSequence ??= record.sequence; previousSequence = record.sequence;
+    if (record.removed.includes('sessionId')) throw Error('captured_task_session');
+    if (Object.hasOwn(record.patch, 'sessionId')) {
+      const session = record.patch.sessionId; capturedIdentity(session); sessions.add(session);
+      if (record.sequence <= checkpoint.sequence) oldSession = session;
+    }
+  });
+  if (firstSequence !== undefined && firstSequence <= checkpoint.sequence && previousSequence! < checkpoint.sequence
+    || oldSession !== undefined && oldSession !== checkpoint.snapshot.sessionId) throw Error('captured_task_anchor');
+  capturedCore(result.snapshot);
+  if (result.snapshot.taskId !== taskId) throw Error('captured_task_owner');
+  sessions.add(result.snapshot.sessionId);
+  declarations?.capture(result.snapshot,'final');
+  return Object.freeze({taskId, sessionIdentities: Object.freeze([...sessions].sort())});
+}
+
+function parseCheckpoint(raw: string, captured = false): CachedSnapshot {
   const parsed = JSON.parse(raw) as TaskSnapshot & { [CHECKPOINT_META_KEY]?: CheckpointPersistence };
+  if (captured) {
+    capturedUniqueKeys(raw); capturedCore(parsed);
+    if (Object.keys(parsed).some(key => key !== CHECKPOINT_META_KEY && !CAPTURED_TASK_FIELDS.has(key))) throw Error('captured_task_schema');
+    if (Object.hasOwn(parsed, CHECKPOINT_META_KEY)) {
+      const meta = parsed[CHECKPOINT_META_KEY];
+      if (!meta || typeof meta !== 'object' || Array.isArray(meta)
+        || Object.keys(meta).sort().join(',') !== 'checkpointEventCount,lastSequence,version'
+        || meta.version !== 1 || !Number.isSafeInteger(meta.lastSequence) || meta.lastSequence < 0
+        || meta.checkpointEventCount !== parsed.events.length) throw Error('captured_task_checkpoint');
+    }
+  }
   const persistence = parsed[CHECKPOINT_META_KEY];
   delete parsed[CHECKPOINT_META_KEY];
   const sealed = persistence?.version === 1
@@ -413,7 +678,7 @@ function parseCheckpoint(raw: string): CachedSnapshot {
   };
 }
 
-function replayJournal(checkpoint: CachedSnapshot, journalRaw: string, taskId: string): CachedSnapshot {
+function replayJournal(checkpoint: CachedSnapshot, journalRaw: string, taskId: string, captureRecord?: (record: JournalRecord) => void): CachedSnapshot {
   if (!checkpoint.sealed && journalRaw.length > 0) {
     throw new Error('unsealed checkpoint has a task journal');
   }
@@ -423,13 +688,23 @@ function replayJournal(checkpoint: CachedSnapshot, journalRaw: string, taskId: s
   if (terminated) lines.pop();
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line) continue;
+    if (!line) {
+      if (captureRecord && journalRaw) throw Error('captured_task_frame');
+      continue;
+    }
     if (!terminated && index === lines.length - 1) {
       // appendFile only commits newline-terminated frames. A final fragment,
       // even if parseable, is an unacknowledged crash tail.
       break;
     }
     const record = parseJournalRecord(line, taskId, index + 1);
+    if (captureRecord) {
+      capturedUniqueKeys(line);
+      if (Object.keys(record).sort().join(',') !== 'checksum,events,patch,previousSequence,removed,sequence,taskId,version'
+        || Array.isArray(record.patch)
+        || [...Object.keys(record.patch), ...record.removed].some(key => !CAPTURED_TASK_FIELDS.has(key) || ['taskId', 'events', 'currentCompletion'].includes(key))) throw Error('captured_task_schema');
+      captureRecord(record);
+    }
     if (record.sequence <= sequence) continue;
     if (record.previousSequence !== sequence || record.sequence !== sequence + 1) {
       throw new Error(`task journal sequence gap at line ${index + 1}`);

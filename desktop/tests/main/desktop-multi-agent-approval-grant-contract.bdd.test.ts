@@ -66,7 +66,7 @@ describe('AP2/AP3 shared grant shape, consumption and actual async dispatch boun
     }, { beforeOpaqueInvocation: async () => { entered.resolve(); await release.promise; } });
     const work = handle.registry.executeTool('write', raw, context());
     try {
-      await bounded(entered.promise); expect(retained).toBe(raw);
+      await bounded(entered.promise); expect(retained).toEqual(raw); expect(retained).not.toBe(raw);
       (retained!.nested as { value: string }).value = 'mutated-after-prepare'; release.resolve(); await work;
       expect(prepareInput).toHaveBeenCalledOnce(); expect(execute.mock.calls[0]?.[0]).toEqual(privateCopy);
       expect(execute.mock.calls[0]?.[0]).not.toBe(raw);
@@ -110,6 +110,34 @@ describe('AP2/AP3 shared grant shape, consumption and actual async dispatch boun
       release.resolve(); expect(await work).toContain('approval_invalidated');
       expect(execute).not.toHaveBeenCalled(); expect(bind).not.toHaveBeenCalled();
     } finally { release.resolve(); await work.catch(() => undefined); }
+  });
+
+  it.each(['auto', 'default'] as const)('rejects policy revocation after opaque journal await in %s mode', async mode => {
+    const entered = deferred(); const release = deferred(); cleanup.push(() => release.resolve());
+    const execute = vi.fn(async () => 'unexpected');
+    const permissionManager = new PermissionManager({ mode });
+    const handle = scoped(writable(execute), { permissionManager, onPrompt: returning(validGrant()) }, {
+      beforeOpaqueInvocation: async () => { entered.resolve(); await release.promise; },
+    });
+    const work = handle.registry.executeTool('write', {}, context());
+    try {
+      await bounded(entered.promise); permissionManager.setMode('plan'); release.resolve();
+      expect(await work).toContain('authorization changed'); expect(execute).not.toHaveBeenCalled();
+    } finally { release.resolve(); await work.catch(() => undefined); }
+  });
+
+  it('captures Catalog approval methods so retained grant replacement cannot remove its guard', async () => {
+    let revoked = false; const execute = vi.fn(async () => 'unexpected');
+    const grant: Grant = { approved: true, prepareInput: input => input,
+      assertCurrent: () => { if (revoked) throw new Error('original_grant_revoked'); },
+    };
+    const handle = scoped(writable(execute), { onPrompt: returning(grant),
+      hooksRunner: { runHooks: async () => ({ ok: true }), runPreHooks: async () => {
+        revoked = true; grant.assertCurrent = () => {}; return { ok: true };
+      }, runPostHooks: async () => [] } as unknown as NonNullable<RegistryOptions['hooksRunner']>,
+    });
+    expect(await handle.registry.executeTool('write', {}, context())).toContain('original_grant_revoked');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it.each(['removed', 'new-owner', 'same-slot'])('existing instance guards still deny %s after opaque await', async replacement => {

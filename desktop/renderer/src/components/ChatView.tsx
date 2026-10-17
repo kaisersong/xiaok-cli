@@ -602,6 +602,7 @@ export function ChatView({
               </div>
             )}
 
+            {activityContent}
             {approvalContent}
 
             {/* Question */}

@@ -55,26 +55,13 @@ export function buildCapabilityToolDefinition(record: CapabilityRecord): ToolDef
   };
 }
 
-export function dedupeToolSearchEntries(entries: ToolSearchEntry[]): ToolDefinition[] {
-  const merged = new Map<string, ToolDefinition>();
-  for (const entry of entries) {
-    if (!merged.has(entry.canonicalId)) {
-      merged.set(entry.canonicalId, entry.definition);
-    }
-  }
-  return [...merged.values()];
+export function dedupeToolSearchEntries(entries: ToolSearchEntry[]): ToolDefinition[] {return dedupeToolSearchCandidates(entries).map(entry=>entry.definition);}
+export function selectToolEntries(entries: ToolSearchEntry[], names: string[]): ToolDefinition[] {return selectToolSearchCandidates(entries,names).map(entry=>entry.definition);}
+
+/** Preserve the whole selected registration, including host-only sidecars. */
+export function dedupeToolSearchCandidates<T extends ToolSearchEntry>(entries:T[]):T[]{
+ const merged=new Map<string,T>();for(const entry of entries)if(!merged.has(entry.canonicalId))merged.set(entry.canonicalId,entry);return [...merged.values()];
 }
-
-export function selectToolEntries(entries: ToolSearchEntry[], names: string[]): ToolDefinition[] {
-  const lookup = new Map(entries.map((entry) => [entry.canonicalId, entry.definition] as const));
-  const selected: ToolDefinition[] = [];
-
-  for (const name of names) {
-    const definition = lookup.get(getCanonicalToolId(name));
-    if (definition) {
-      selected.push(definition);
-    }
-  }
-
-  return selected;
+export function selectToolSearchCandidates<T extends ToolSearchEntry>(entries:T[],names:string[]):T[]{
+ const lookup=new Map(entries.map(entry=>[entry.canonicalId,entry] as const));const result:T[]=[];for(const name of names){const entry=lookup.get(getCanonicalToolId(name));if(entry)result.push(entry);}return result;
 }

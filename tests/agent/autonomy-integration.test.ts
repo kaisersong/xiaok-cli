@@ -6,7 +6,7 @@ describe('Agent autonomy prompt integration', () => {
   let prompt: string;
   beforeAll(async () => {
     prompt = (await new PromptBuilder({
-      memoryStore: { listRelevant: async () => [] }, harnessMemoryStore: { listActive: () => [] },
+      memoryStore: { save: async () => { throw Error('ordinary_prompt_fixture_write_forbidden'); }, listRelevant: async () => [] }, harnessMemoryStore: { listActive: () => [] },
     }).build({ cwd: process.cwd(), enterpriseId: null, devApp: null, budget: 4000,
       channel: 'chat', autoContext: { docs: [], git: null },
     })).rendered;

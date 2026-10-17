@@ -312,6 +312,8 @@ export class InputReader {
   private clipboardImageSaver: ClipboardImageSaver = saveClipboardImageToTemp;
   private busyCapture: BusyCaptureHandle | null = null;
   private readActive = false;
+  private cancelRead?: () => void;
+  private readsClosed = false;
   private onToggleTranscript?: () => void | Promise<void>;
   private suspendHooks: { detach(): void; attach(): void } | null = null;
   private suspendDepth = 0;
@@ -323,6 +325,12 @@ export class InputReader {
     this.onInterrupt = handler;
     this.onOtherInput = onOtherInput;
   }
+
+  /** Host shutdown uses the original read's completion and detach path. */
+  cancelActiveRead(): void { this.cancelRead?.(); }
+
+  /** Closing the host also fences a late permission/confirmation prompt. */
+  close(): void { this.readsClosed = true; this.cancelActiveRead(); }
 
   private dispatchInput(data: Buffer, consume: (data: Buffer) => void): void {
     const bytes = normalizeEnhancedKeys(Buffer.isBuffer(data) ? data : Buffer.from(data));
@@ -665,17 +673,30 @@ export class InputReader {
   }
 
   async read(prompt: string, options?: InputReadOptions): Promise<string | null> {
-    if (options?.signal?.aborted) return null;
+    if (this.readsClosed || options?.signal?.aborted) return null;
     if (!stdin.isTTY) {
       const rl = readline.createInterface({ input: stdin, output: stdout });
       return new Promise((resolve) => {
-        const abort = () => { rl.close(); resolve(null); };
-        options?.signal?.addEventListener('abort', abort, {once:true});
-        rl.once('close', () => { options?.signal?.removeEventListener('abort', abort); resolve(null); });
-        rl.question(prompt, (answer) => {
-          options?.signal?.removeEventListener('abort', abort);
-          resolve(answer);
+        let resolved = false;
+        const cancel = () => done(null);
+        const done = (value: string | null) => {
+          if (resolved) return;
+          resolved = true;
+          if (this.cancelRead === cancel) this.cancelRead = undefined;
+          options?.signal?.removeEventListener('abort', cancel);
+          rl.removeListener('close', cancel);
           rl.close();
+          resolve(value);
+        };
+        this.cancelRead = cancel;
+        options?.signal?.addEventListener('abort', cancel, { once: true });
+        rl.once('close', cancel);
+        if (this.readsClosed || options?.signal?.aborted || stdin.readableEnded) {
+          cancel();
+          return;
+        }
+        rl.question(prompt, (answer) => {
+          done(answer);
         });
       });
     }
@@ -1068,6 +1089,7 @@ export class InputReader {
 
         closeMenu();
         resolved = true;
+        if (this.cancelRead === cancel) this.cancelRead = undefined;
         stdin.removeListener('data', onData);
         stdin.removeListener('end', onEnd);
         options?.signal?.removeEventListener('abort', onAbort);
@@ -1084,6 +1106,9 @@ export class InputReader {
         this.historyIdx = this.history.length;
         resolve(result);
       };
+
+      const cancel = () => done(null, 'cancel');
+      this.cancelRead = cancel;
 
       const inputDecoder = new StringDecoder('utf8');
       const consumeData = (data: Buffer) => {

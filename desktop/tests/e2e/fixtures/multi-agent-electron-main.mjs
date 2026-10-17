@@ -27,6 +27,7 @@ let releaseCleanup = () => {};
 let holdContent = false;
 let releaseContent = () => {};
 const contentReads = [];
+const deletionDiagnostics = [];
 const disposers = [];
 const log = (...parts) => appendFileSync(join(root, 'electron.log'), `${parts.map(part => typeof part === 'string' ? part : JSON.stringify(part)).join(' ')}\n`);
 app.on('render-process-gone', (_event, _contents, details) => log('render-process-gone', details));
@@ -50,6 +51,22 @@ ipcMain.handle = (channel, listener) => registerHandler(channel, async (event, .
     if (control) log('control', channel, { operationId: args[0]?.operationId, expectedTurn: args[0]?.expectedTurn, result });
     return result;
   } catch (error) {
+    if (channel === 'desktop:recoverTask') {
+      try {
+        // Inspect only an own DATA message; never execute an error getter or log its body.
+        const descriptor = error !== null && (typeof error === 'object' || typeof error === 'function')
+          ? Object.getOwnPropertyDescriptor(error, 'message') : undefined;
+        const message = descriptor && 'value' in descriptor ? descriptor.value : undefined;
+        const known = ['task_actor_forbidden', 'task_scope_forbidden', 'invalid_task_id', 'task_input_invalid',
+          'task_projection_unavailable', 'task_source_closing', 'multi_agent_recovery_not_bound',
+          'multi_agent_recovery_unconfirmed', 'SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE', 'task_snapshot_completion_owner'];
+        const code = typeof message === 'string' && known.includes(message) ? message
+          : typeof message === 'string' && message.startsWith('task not found: ') ? 'task_not_found' : 'unclassified';
+        log('recover-rejected-code', { code });
+      } catch {
+        try { log('recover-rejected-code', { code: 'diagnostic_failed' }); } catch {}
+      }
+    }
     if (control) log('control-rejected', channel, { operationId: args[0]?.operationId, expectedTurn: args[0]?.expectedTurn, error: String(error) });
     throw error;
   }
@@ -73,7 +90,11 @@ const owner = new DesktopApplicationWindowOwner({ current: () => window && !wind
   bootstrap: async () => {
     services = createDesktopServices({ dataRoot: join(root, 'data'), knowledgeDbPath: join(root, 'knowledge.sqlite'), workspaceRoot: join(root, 'workspace'),
       pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService: kswarm });
-    await services.saveModelConfig({ providerId: 'e2e-local', modelName: 'e2e-model', protocol: 'openai_legacy', baseUrl: process.env.XIAOK_MULTI_AGENT_E2E_PROVIDER, apiKey: 'e2e-fixture-only' });
+    // Main-only observer. Retain only frozen scalar diagnostic DATA in memory.
+    services.multiAgent.service.options.onThreadDeletionDiagnostic = fact => {
+      deletionDiagnostics.push({ ...fact, ...(fact.facts ? { facts: { ...fact.facts } } : {}) });
+    };
+    await services.saveModelConfig({ providerId: 'e2e-local', modelName: 'e2e-model', protocol: 'openai_legacy', baseUrl: process.env.XIAOK_MULTI_AGENT_E2E_PROVIDER, apiKey: 'e2e-fixture-only' }, undefined, 'user');
     await services.multiAgent.ready;
     if (process.env.XIAOK_ACTIVITY_E2E_OWNER === 'daemon') {
       await services.attachConversationActivityOwner({ kswarm: { url: activityKswarmUrl, mutationToken: 'fixture', brokerUrl: process.env.XIAOK_ACTIVITY_E2E_BROKER_URL, roomToken: 'fixture' } });
@@ -126,6 +147,8 @@ globalThis.multiAgentE2E = {
     };
   },
   releaseCleanup: () => releaseCleanup(),
+  threadDeletionDiagnostics: () => deletionDiagnostics.map(fact => ({ ...fact,
+    ...(fact.facts ? { facts: { ...fact.facts } } : {}) })),
 };
 // Isolated test control invokes the same native window/application owners.
 // No production IPC, source fact, credential or task state is fabricated.

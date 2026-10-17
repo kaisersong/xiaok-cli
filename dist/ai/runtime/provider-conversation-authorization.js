@@ -1,3 +1,4 @@
+import { measureProviderStream } from '../../runtime/trace/observation-metrics.js';
 import { computeEphemeralProviderTranscriptDigest, } from './provider-transcript-digest.js';
 import { resolveRegisteredStrictKimiK3Profile } from './model-harness-identity.js';
 const claimsByAuthorization = new WeakMap();
@@ -45,9 +46,9 @@ function streamOwnedProviderConversation(input, surfaceKind) {
             || claimedProfileId === 'kimi-k3-256k-coding-openai') {
             throw new Error('KIMI_K3_PROFILE_CAPABILITY_REQUIRED');
         }
-        return input.options === undefined
+        return measureProviderStream({ messages: input.messages, surface: surfaceKind }, () => input.options === undefined
             ? input.adapter.stream(input.messages, input.tools, input.systemPrompt)
-            : input.adapter.stream(input.messages, input.tools, input.systemPrompt, input.options);
+            : input.adapter.stream(input.messages, input.tools, input.systemPrompt, input.options));
     }
     const providerConversationAuthorization = issueTaskLocalProviderConversationAuthorization({
         adapter: input.adapter,
@@ -55,10 +56,10 @@ function streamOwnedProviderConversation(input, surfaceKind) {
         invocationId: input.invocationId,
         messages: input.messages,
     });
-    return input.adapter.stream(input.messages, input.tools, input.systemPrompt, {
+    return measureProviderStream({ messages: input.messages, surface: surfaceKind }, () => input.adapter.stream(input.messages, input.tools, input.systemPrompt, {
         ...input.options,
         providerConversationAuthorization,
-    });
+    }));
 }
 function readClaimedHarnessProfileId(adapter) {
     const candidate = adapter;

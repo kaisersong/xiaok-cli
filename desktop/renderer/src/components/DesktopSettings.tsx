@@ -1,4 +1,16 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
+import { useChannelReadonly } from '../hooks/useChannelReadonly';
+import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
+import { useSkillListReadonly, useSkillStatsReadonly } from '../hooks/useSkillReadonly';
+import type { PluginMcpServerDto, PluginDependencyStatusDto } from '../../../shared/plugin-catalog-ipc-contract';
+import {connectorsErrorMessage} from '../lib/connectors-error';
+import {scheduledErrorMessage} from '../lib/scheduled-timed-action-error';
+import { modelConfigErrorMessage } from '../lib/model-config-error';
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../lib/loop-management-errors';
+import {LoopArtifactList} from './loops/LoopArtifactList';
+import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../lib/loop-run-observation';
+import {LoopPublicationPanel} from './loops/LoopPublicationPanel';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import * as QRCode from 'qrcode';
 import {
   ChevronLeft,
@@ -338,7 +350,8 @@ function VoicePane() {
   const [engine, setEngine] = useState<MeetingTranscriberEngine>(readStoredMeetingTranscriberEngine);
   const [model, setModel] = useState<MeetingTranscriberModel>(() => readStoredMeetingTranscriberModel(readStoredMeetingTranscriberEngine()));
   const [language, setLanguage] = useState<MeetingTranscriberLanguage>(readStoredMeetingTranscriberLanguage);
-  const [asrConfig, setAsrConfig] = useState<MeetingAsrConfigSnapshot | null>(null);
+  const modelFacts = useMeetingModelsReadonly(), asrFacts = useMeetingAsrReadonly();
+  const asrConfig = asrFacts.data;
   const [asrDraft, setAsrDraft] = useState({
     volcAppKey: '',
     volcAccessKey: '',
@@ -350,10 +363,19 @@ function VoicePane() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [modelStatuses, setModelStatuses] = useState<MeetingModelStatusSnapshot[]>([]);
-  const [modelStatusesLoading, setModelStatusesLoading] = useState(false);
+  const modelStatuses = modelFacts.data ?? [];
+  const modelStatusesLoading = modelFacts.reading;
   const [modelStatusesError, setModelStatusesError] = useState('');
   const [modelAction, setModelAction] = useState<MeetingModelActionState | null>(null);
+
+  // One mounted action owner. Locale changes reproject reasons at render time;
+  // they do not cancel an already authorized main-process mutation.
+  const actionLifetime = useRef<{ active: boolean; saving: boolean; model: boolean } | null>(null);
+  useEffect(() => {
+    const owner = { active: true, saving: false, model: false };
+    actionLifetime.current = owner;
+    return () => { owner.active = false; };
+  }, []);
 
   const engineLabels: Record<MeetingTranscriberEngine, string> = {
     'sherpa-onnx-paraformer': t.knowledge.meetingSpeechEngineSherpaOnnxParaformer,
@@ -384,11 +406,12 @@ function VoicePane() {
     },
   ].filter(group => group.models.length > 0);
 
-  const loadMeetingAsrConfig = useCallback(async () => {
-    if (!desktop?.meetingGetAsrConfig) return;
-    try {
-      const snapshot = await desktop.meetingGetAsrConfig() as MeetingAsrConfigSnapshot;
-      setAsrConfig(snapshot);
+  const loadMeetingModelStatuses = useCallback(async () => {
+    await modelFacts.reload().catch(() => {});
+  }, [modelFacts.reload]);
+  useEffect(() => {
+    const snapshot = asrFacts.data;
+    if (!snapshot) return;
       setAsrDraft(prev => ({
         ...prev,
         volcEndpoint: snapshot.volcengine?.endpoint ?? '',
@@ -404,30 +427,7 @@ function VoicePane() {
       setEngine(nextEngine);
       setModel(nextModel);
       setLanguage(nextLanguage);
-    } catch {
-      setAsrConfig(null);
-    }
-  }, [desktop]);
-
-  const loadMeetingModelStatuses = useCallback(async () => {
-    if (!desktop?.meetingListModels) return;
-    setModelStatusesLoading(true);
-    setModelStatusesError('');
-    try {
-      const result = await desktop.meetingListModels();
-      setModelStatuses(normalizeMeetingModelStatuses(result));
-    } catch (error) {
-      setModelStatuses([]);
-      setModelStatusesError(t.knowledge.meetingModelStatusLoadFailed(error instanceof Error ? error.message : 'unknown'));
-    } finally {
-      setModelStatusesLoading(false);
-    }
-  }, [desktop, t]);
-
-  useEffect(() => {
-    void loadMeetingAsrConfig();
-    void loadMeetingModelStatuses();
-  }, [loadMeetingAsrConfig, loadMeetingModelStatuses]);
+  }, [asrFacts.data]);
 
   const persistTranscriberChoice = (nextEngine: MeetingTranscriberEngine, nextModel: MeetingTranscriberModel, nextLanguage = language) => {
     try {
@@ -462,7 +462,10 @@ function VoicePane() {
   };
 
   const handleSaveMeetingAsrConfig = async () => {
-    if (!desktop?.meetingSaveAsrConfig || saving) return;
+    const owner = actionLifetime.current;
+    if (!desktop?.meetingSaveAsrConfig || !owner?.active || owner.saving) return;
+    owner.saving = true;
+    const current = () => owner.active && actionLifetime.current === owner;
     setSaving(true);
     setSaved(false);
     setSaveError('');
@@ -489,7 +492,11 @@ function VoicePane() {
         : { defaultProvider: engine };
     try {
       const snapshot = await desktop.meetingSaveAsrConfig(input) as MeetingAsrConfigSnapshot;
-      setAsrConfig(snapshot);
+      if (!current()) return;
+      // A read failure remains a read failure. It cannot change this confirmed
+      // save into a failure or replace the readonly owner's last-good facts.
+      await asrFacts.reload().catch(() => {});
+      if (!current()) return;
       setAsrDraft(prev => ({
         ...prev,
         volcAppKey: '',
@@ -501,49 +508,58 @@ function VoicePane() {
       }));
       setSaved(true);
     } catch (error) {
-      setSaveError(t.knowledge.meetingOnlineAsrSaveFailed(error instanceof Error ? error.message : 'unknown'));
+      if (current()) setSaveError(error instanceof Error ? error.message : 'unknown');
     } finally {
-      setSaving(false);
+      owner.saving = false;
+      if (current()) setSaving(false);
     }
   };
 
   const handleDownloadMeetingModel = async (modelId: string) => {
-    if (!desktop?.meetingDownloadModel || modelAction) return;
+    const owner = actionLifetime.current;
+    if (!desktop?.meetingDownloadModel || !owner?.active || owner.model) return;
+    owner.model = true;
+    const current = () => owner.active && actionLifetime.current === owner;
     setModelAction({ modelId, kind: 'download' });
     setModelStatusesError('');
     try {
       const result = await desktop.meetingDownloadModel(modelId) as { ok?: boolean; reason?: string; error?: string };
+      if (!current()) return;
+      if (result?.ok === false) setModelStatusesError(result.reason ?? result.error ?? 'unknown');
       await loadMeetingModelStatuses();
-      if (result?.ok === false) {
-        setModelStatusesError(t.knowledge.meetingModelActionFailed(result.reason ?? result.error ?? 'unknown'));
-      }
-      setModelAction(null);
+      if (!current()) return;
     } catch (error) {
-      setModelStatusesError(t.knowledge.meetingModelActionFailed(error instanceof Error ? error.message : 'unknown'));
-      setModelAction(null);
+      if (current()) setModelStatusesError(error instanceof Error ? error.message : 'unknown');
+    } finally {
+      owner.model = false;
+      if (current()) setModelAction(null);
     }
   };
 
   const handleUninstallMeetingModel = async (modelId: string) => {
-    if (!desktop?.meetingUninstallModel || modelAction) return;
+    const owner = actionLifetime.current;
+    if (!desktop?.meetingUninstallModel || !owner?.active || owner.model) return;
+    owner.model = true;
+    const current = () => owner.active && actionLifetime.current === owner;
     setModelAction({ modelId, kind: 'uninstall' });
     setModelStatusesError('');
     try {
       const result = await desktop.meetingUninstallModel(modelId) as { ok?: boolean; reason?: string; error?: string };
+      if (!current()) return;
+      if (result?.ok === false) setModelStatusesError(result.reason ?? result.error ?? 'unknown');
       await loadMeetingModelStatuses();
-      if (result?.ok === false) {
-        setModelStatusesError(t.knowledge.meetingModelActionFailed(result.reason ?? result.error ?? 'unknown'));
-      }
-      setModelAction(null);
+      if (!current()) return;
     } catch (error) {
-      setModelStatusesError(t.knowledge.meetingModelActionFailed(error instanceof Error ? error.message : 'unknown'));
-      setModelAction(null);
+      if (current()) setModelStatusesError(error instanceof Error ? error.message : 'unknown');
+    } finally {
+      owner.model = false;
+      if (current()) setModelAction(null);
     }
   };
 
   const renderProviderStatus = (configured?: boolean) => (
     <span className={`rounded-full border px-2 py-0.5 text-[11px] ${configured ? 'border-green-200 bg-green-50 text-green-700' : 'border-[var(--c-border)] bg-[var(--c-bg-page)] text-[var(--c-text-tertiary)]'}`}>
-      {configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+      {asrConfig === null ? t.meetingAsrReadonlyUnknown : configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
     </span>
   );
 
@@ -632,6 +648,9 @@ function VoicePane() {
 
   return (
     <div className="space-y-6">
+      {modelFacts.failed && <p role="alert">{t.meetingModelsReadonlyUnavailable}</p>}
+      {asrFacts.failed && <p role="alert">{t.meetingAsrReadonlyUnavailable}</p>}
+      <button type="button" onClick={() => { modelFacts.refresh(); asrFacts.refresh(); }}>{t.desktopReadonlyRetry}</button>
       <Section>
         <SectionHeader icon={Mic}>{ds.meetingRecordingSettingsTitle}</SectionHeader>
         <p className="mb-4 text-sm leading-6 text-[var(--c-text-secondary)]">{ds.meetingRecordingSettingsDesc}</p>
@@ -689,9 +708,8 @@ function VoicePane() {
             <p className="text-sm text-[var(--c-text-secondary)]">{t.knowledge.meetingModelDownloadStatusTitle}</p>
             {modelStatusesLoading && <span className="text-xs text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusLoading}</span>}
           </div>
-          {modelStatusesError ? (
-            <p className="text-xs leading-5 text-red-600">{modelStatusesError}</p>
-          ) : groupedModelStatuses.length > 0 ? (
+          {modelStatusesError && <p className="text-xs leading-5 text-red-600">{t.knowledge.meetingModelActionFailed(modelStatusesError)}</p>}
+          {groupedModelStatuses.length > 0 ? (
             <div className="space-y-4">
               {groupedModelStatuses.map(group => (
                 <div key={group.id} className="space-y-2">
@@ -701,7 +719,7 @@ function VoicePane() {
               ))}
             </div>
           ) : (
-            <p className="text-xs leading-5 text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusUnavailable}</p>
+            <p className="text-xs leading-5 text-[var(--c-text-tertiary)]">{modelFacts.data === null ? t.meetingModelsReadonlyUnknown : t.knowledge.meetingModelStatusUnavailable}</p>
           )}
         </Card>
       </Section>
@@ -792,7 +810,7 @@ function VoicePane() {
           <div className="mt-4 flex items-center justify-between gap-3">
             <div className="min-w-0">
               {saved && <p className="text-xs text-green-700">{ds.meetingAsrSaved}</p>}
-              {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+              {saveError && <p className="text-xs text-red-600">{t.knowledge.meetingOnlineAsrSaveFailed(saveError)}</p>}
             </div>
             <button type="button" onClick={() => void handleSaveMeetingAsrConfig()} disabled={saving} className={btnPrimary}>
               {saving ? ds.meetingAsrSaving : ds.meetingAsrSave}
@@ -806,66 +824,136 @@ function VoicePane() {
 
 function MobilePane() {
   const { t } = useLocale();
-  const [pairing, setPairing] = useState<DesktopMobilePairingInfo | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [snapshot, setSnapshot] = useState<{ pairing: DesktopMobilePairingInfo; qrDataUrl: string } | null>(null);
+  const pairing = snapshot?.pairing ?? null;
+  const qrDataUrl = snapshot?.qrDataUrl ?? '';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-  // Relay credentials expire after 7 days and there is no refresh grant, so the
-  // UI has to distinguish "offline" from "you must sign in again".
+  const pairingLifetime = useRef<{ active: boolean; busy: boolean } | null>(null);
+  const copyTimer = useRef<number | null>(null);
+  // Relay credentials have no refresh grant; these reads never sign in for the user.
   const [relayStatus, setRelayStatus] = useState<DesktopMobileRelayStatus | null>(null);
+  const [relayUnavailable, setRelayUnavailable] = useState(false);
+  const [relayReading, setRelayReading] = useState(false);
+  const relayLifetime = useRef<{ active: boolean; busy: boolean; revision: number } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void api.getMobileRelayStatus().then((status) => {
-      if (!cancelled) setRelayStatus(status);
-    }).catch(() => undefined);
-    const off = api.onMobileRelayStatus?.((status) => setRelayStatus(status));
-    return () => {
-      cancelled = true;
-      off?.();
-    };
+  const loadRelayStatus = useCallback(async () => {
+    const lifetime = relayLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
+    const revision = lifetime.revision;
+    setRelayReading(true);
+    try {
+      const status = await api.getMobileRelayStatus();
+      if (lifetime.active && lifetime.revision === revision) {
+        setRelayStatus(status);
+        setRelayUnavailable(false);
+      }
+    } catch {
+      if (lifetime.active && lifetime.revision === revision) setRelayUnavailable(true);
+    } finally {
+      lifetime.busy = false;
+      if (lifetime.active) setRelayReading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    const lifetime = { active: true, busy: false, revision: 0 };
+    relayLifetime.current = lifetime;
+    const off = api.onMobileRelayStatus?.((status) => {
+      if (!lifetime.active) return;
+      lifetime.revision++;
+      setRelayStatus(status);
+      setRelayUnavailable(false);
+    });
+    void loadRelayStatus();
+    return () => {
+      lifetime.active = false;
+      if (relayLifetime.current === lifetime) relayLifetime.current = null;
+      off?.();
+    };
+  }, [loadRelayStatus]);
+
   const loadPairingInfo = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
+    const lifetime = pairingLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
     if (mode === 'refresh') setRefreshing(true);
     else setLoading(true);
     setError('');
     try {
       const info = await api.getMobilePairingInfo();
-      setPairing(info);
-      setQrDataUrl(await QRCode.toDataURL(info.deepLink, {
-        errorCorrectionLevel: 'M',
-        margin: 1,
-        width: 220,
-        color: {
-          dark: '#111827',
-          light: '#ffffff',
-        },
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t.desktopSettings.mobilePairingLoadFailed);
+      if (!lifetime.active) return;
+      const qr = await QRCode.toDataURL(info.deepLink, {
+        errorCorrectionLevel: 'M', margin: 1, width: 220,
+        color: { dark: '#111827', light: '#ffffff' },
+      });
+      if (!lifetime.active) return;
+      setSnapshot({ pairing: info, qrDataUrl: qr });
+      setCopyStatus('idle');
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    } catch {
+      if (lifetime.active) setError(t.desktopSettings.mobilePairingLoadFailed);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      lifetime.busy = false;
+      if (lifetime.active) { setLoading(false); setRefreshing(false); }
     }
   }, [t.desktopSettings.mobilePairingLoadFailed]);
 
   useEffect(() => {
+    const lifetime = { active: true, busy: false };
+    pairingLifetime.current = lifetime;
     void loadPairingInfo();
+    return () => {
+      lifetime.active = false;
+      if (pairingLifetime.current === lifetime) pairingLifetime.current = null;
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    };
   }, [loadPairingInfo]);
 
   const copyPairingLink = useCallback(async () => {
-    if (!pairing?.deepLink) return;
+    const lifetime = pairingLifetime.current;
+    if (!pairing?.deepLink || !lifetime?.active) return;
     try {
       await navigator.clipboard.writeText(pairing.deepLink);
+      if (!lifetime.active) return;
       setCopyStatus('copied');
     } catch {
+      if (!lifetime.active) return;
       setCopyStatus('failed');
     }
-    window.setTimeout(() => setCopyStatus('idle'), 2500);
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => {
+      if (lifetime.active) setCopyStatus('idle');
+    }, 2500);
   }, [pairing?.deepLink]);
+
+  const [signInBusy, setSignInBusy] = useState(false);
+  const [signInFailed, setSignInFailed] = useState(false);
+  const signInLifetime = useRef<{ active: boolean; busy: boolean } | null>(null);
+  useEffect(() => {
+    const lifetime = { active: true, busy: false };
+    signInLifetime.current = lifetime;
+    return () => { lifetime.active = false; if (signInLifetime.current === lifetime) signInLifetime.current = null; };
+  }, []);
+  const openRelaySignIn = useCallback(async () => {
+    const lifetime = signInLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
+    setSignInBusy(true);
+    setSignInFailed(false);
+    try {
+      const result = await api.openMobileRelaySignIn();
+      if (lifetime.active) setSignInFailed(!result || typeof result !== 'object' || result.ok !== true || typeof result.url !== 'string' || result.url.length === 0);
+    } catch {
+      if (lifetime.active) setSignInFailed(true);
+    } finally {
+      lifetime.busy = false;
+      if (lifetime.active) setSignInBusy(false);
+    }
+  }, []);
 
   const relayReady = Boolean(pairing?.relayUrl && pairing.relayJwt && pairing.relayRoomSecret);
 
@@ -873,6 +961,15 @@ function MobilePane() {
     <div className="space-y-6">
       <Section>
         <SectionHeader icon={Smartphone}>{t.desktopSettings.mobilePairingTitle}</SectionHeader>
+        {signInFailed && <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{t.desktopSettings.mobileRelaySignInFailed}</div>}
+        {relayUnavailable && (
+          <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div>{t.desktopSettings.mobileRelayReadUnavailable}</div>
+            <button type="button" onClick={() => void loadRelayStatus()} disabled={relayReading} className={`${btnSecondary} mt-2`}>
+              {t.desktopSettings.mobileRelayReadRetry}
+            </button>
+          </div>
+        )}
         {relayStatus && relayStatus.credentialState !== 'ok' && (
           <div
             className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
@@ -896,7 +993,8 @@ function MobilePane() {
             {relayStatus.requiresUserReauth && relayStatus.relayUrl && (
               <button
                 type="button"
-                onClick={() => { void api.openMobileRelaySignIn(); }}
+                onClick={() => { void openRelaySignIn(); }}
+                disabled={signInBusy}
                 className="mt-2 inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white"
               >
                 {t.desktopSettings.mobileRelaySignInAction}
@@ -905,13 +1003,17 @@ function MobilePane() {
           </div>
         )}
         <Card>
-          {loading ? (
+          {error && (
+            <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div>{error}</div>
+              {!pairing && <button type="button" onClick={() => void loadPairingInfo('refresh')} disabled={refreshing} className={`${btnSecondary} mt-2`}>{t.desktopSettings.mobilePairingRefresh}</button>}
+            </div>
+          )}
+          {loading && !pairing ? (
             <div className="flex items-center gap-2 text-sm text-[var(--c-text-secondary)]">
               <Loader2 size={14} className="animate-spin" />
               <span>{t.desktopSettings.mobilePairingLoading}</span>
             </div>
-          ) : error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           ) : pairing ? (
             <div className="grid gap-5 md:grid-cols-[240px_1fr]">
               <div className="flex flex-col items-center gap-3">
@@ -1040,7 +1142,7 @@ function ModelPane() {
       .then(c => {
         setConfig(c);
       })
-      .catch(e => setError(e.message))
+      .catch(e => setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? e.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -1071,7 +1173,7 @@ function ModelPane() {
       setApiKey('');
       setSuccess(t.desktopSettings.apiKeyUpdated(updated.providers.find(p => p.id === selectedProvider)?.label ?? selectedProvider));
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1098,7 +1200,7 @@ function ModelPane() {
         setError(`${diagnostic}${guidance}`);
       }
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setTesting(prev => ({ ...prev, [providerId]: false }));
     }
@@ -1127,7 +1229,7 @@ function ModelPane() {
       setSuccess(t.desktopSettings.modelAdded(foundModel.label));
       setShowAddModel('');
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1148,7 +1250,7 @@ function ModelPane() {
       setSuccess(t.desktopSettings.customModelAdded(modelName.trim()));
       setShowAddModel('');
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1174,7 +1276,7 @@ function ModelPane() {
         : '';
       setSuccess(`${t.desktopSettings.modelSwitched(updatedCurrentModel?.label ?? model.label)}${newSessionHint}`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1196,7 +1298,7 @@ function ModelPane() {
       setConfig(updated);
       setSuccess(`${t.desktopSettings.kimiK3RuntimeOptionsSaved} ${t.desktopSettings.kimiK3NewSessionHint}`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSavingRuntimeOptions(false);
     }
@@ -1212,7 +1314,7 @@ function ModelPane() {
       setConfig(updated);
       setSuccess(t.desktopSettings.modelDeleted);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1231,7 +1333,7 @@ function ModelPane() {
       }
       setSuccess(t.desktopSettings.providerDeleted);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1604,7 +1706,7 @@ function AddProviderCard({
       setProviderApiKey('');
       setCustomName('');
     } catch (e) {
-      onError((e as Error).message);
+      onError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
       onMutationPendingChange(false);
@@ -1720,33 +1822,15 @@ function AddProviderCard({
 
 function SkillsPane() {
   const { t } = useLocale();
-  const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const listFacts = useSkillListReadonly(), statFacts = useSkillStatsReadonly();
+  const skills = listFacts.data ?? [];
+  const loading = listFacts.reading && listFacts.data === null;
   const [installing, setInstalling] = useState(false);
   const [installName, setInstallName] = useState('');
   const [showInstall, setShowInstall] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [statsMap, setStatsMap] = useState<Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>>(new Map());
-
-  useEffect(() => {
-    api.listSkills()
-      .then(setSkills)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    const unsubscribe = api.onSkillsChanged(() => {
-      api.listSkills().then(setSkills).catch(() => {});
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    api.getSkillStats()
-      .then(stats => {
-        setStatsMap(new Map(stats.map(s => [s.skillName, s])));
-      })
-      .catch(() => {});
-  }, []);
+  const statsMap = new Map((statFacts.data ?? []).map(s => [s.skillName, s]));
 
   const handleInstall = async () => {
     if (!installName.trim()) return;
@@ -1759,8 +1843,7 @@ function SkillsPane() {
         setShowInstall(false);
         setInstallName('');
         // Refresh skill list
-        const updated = await api.listSkills();
-        setSkills(updated);
+        listFacts.refresh();
       } else {
         setError(result.message);
       }
@@ -1780,8 +1863,7 @@ function SkillsPane() {
       if (result.success) {
         setSuccess(result.message);
         // Refresh skill list
-        const updated = await api.listSkills();
-        setSkills(updated);
+        listFacts.refresh();
       } else {
         setError(result.message);
       }
@@ -1792,7 +1874,7 @@ function SkillsPane() {
     }
   };
 
-  if (loading) {
+  if (loading && !listFacts.failed) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
         <Loader2 size={20} className="animate-spin text-[var(--c-text-secondary)]" />
@@ -1802,8 +1884,11 @@ function SkillsPane() {
 
   return (
     <>
+      {listFacts.failed && <p role="alert">{t.skillsReadonlyListFailed}</p>}
+      {statFacts.failed && <p role="alert">{t.skillsReadonlyStatsFailed}</p>}
+      <button type="button" onClick={() => { listFacts.refresh(); statFacts.refresh(); }}>{t.skillsReadonlyRetry}</button>
       <Section>
-        <SectionHeader icon={Puzzle}>{t.desktopSettings.installedSkills(skills.length)}</SectionHeader>
+        <SectionHeader icon={Puzzle}>{listFacts.data === null ? t.skillsReadonlyUnknown : t.desktopSettings.installedSkills(skills.length)}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -1865,7 +1950,7 @@ function SkillsPane() {
         )}
 
         <div className="flex flex-col gap-2">
-          {skills.length === 0 ? (
+          {listFacts.data !== null && skills.length === 0 ? (
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
@@ -1896,7 +1981,7 @@ function SkillsPane() {
                         <span className="text-xs text-[var(--c-text-tertiary)]">[{skill.tier}]</span>
                         {stats && stats.totalCalls > 0 && (
                           <span className="ml-auto text-xs text-[var(--c-text-tertiary)]">
-                            {t.desktopSettings.skillStats(stats.totalCalls, Math.round(stats.avgDurationMs / 1000))}
+                            {Number.isFinite(stats.avgDurationMs) ? t.desktopSettings.skillStats(stats.totalCalls, Math.round(stats.avgDurationMs / 1000)) : t.skillsReadonlyMetricUnknown}
                           </span>
                         )}
                       </div>
@@ -2020,28 +2105,53 @@ function getChannelTypeConfig(ts: ReturnType<typeof useLocale>['t']['desktopSett
 }
 
 function ChannelsPane() {
-  const [channels, setChannels] = useState<ChannelConfig[]>([]);
-  const [loading, setLoading] = useState(true);
+  const channelFacts = useChannelReadonly();
+  const channels: ChannelConfig[] = channelFacts.data ?? [];
+  const loading = channelFacts.reading && channelFacts.data === null;
   const [showAdd, setShowAdd] = useState(false);
   const [newType, setNewType] = useState('yunzhijia');
   const [newName, setNewName] = useState('');
   const [newFields, setNewFields] = useState<Record<string, string>>({});
-  const [testingChannel, setTestingChannel] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const ts = t.desktopSettings;
   const channelTypeConfig = getChannelTypeConfig(ts);
 
-  const load = () => {
-    api.listChannels()
-      .then(setChannels)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+  const load = channelFacts.refresh;
 
-  useEffect(() => { load(); }, []);
+  type ActionOwner = { active: boolean; epoch: number; pending: Map<string, symbol> };
+  type ActionLease = { owner: ActionOwner; epoch: number; token: symbol; keys: string[] };
+  const actionOwner = useRef<ActionOwner>({ active: false, epoch: 0, pending: new Map() });
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set());
+  const testRevision = useRef(0);
+  useEffect(() => {
+    const owner = actionOwner.current;
+    owner.active = true; owner.epoch += 1;
+    setPendingActions(new Set(owner.pending.keys()));
+    setError(''); setSuccess('');
+    return () => {
+      owner.active = false; owner.epoch += 1;
+      testRevision.current += 1;
+      // Pending effects remain locked across locale changes until their real settlement.
+    };
+  }, [locale]);
+  const beginAction = (keys: string[]): ActionLease | null => {
+    const owner = actionOwner.current;
+    if (!owner.active || keys.some(key => owner.pending.has(key))) return null;
+    const token = Symbol();
+    for (const key of keys) owner.pending.set(key, token);
+    setPendingActions(new Set(owner.pending.keys()));
+    return { owner, epoch: owner.epoch, token, keys };
+  };
+  const isCurrentAction = (lease: ActionLease) => actionOwner.current === lease.owner
+    && lease.owner.active && lease.owner.epoch === lease.epoch;
+  const finishAction = (lease: ActionLease) => {
+    for (const key of lease.keys) if (lease.owner.pending.get(key) === lease.token) lease.owner.pending.delete(key);
+    // An old locale may release only its own settled locks; it cannot publish an action fact.
+    if (actionOwner.current === lease.owner && lease.owner.active) setPendingActions(new Set(lease.owner.pending.keys()));
+  };
 
   // Reset fields when type changes
   useEffect(() => {
@@ -2049,47 +2159,63 @@ function ChannelsPane() {
   }, [newType]);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (!actionOwner.current.active || actionOwner.current.pending.has('create') || !newName.trim()) return;
     const typeConfig = channelTypeConfig[newType];
-    // Check required fields
     for (const field of typeConfig.fields) {
       if (field.required && !newFields[field.key]?.trim()) {
         alert(ts.channelsFieldRequired(field.label));
         return;
       }
     }
+    const lease = beginAction(['create', 'row:' + newType]);
+    if (!lease) return;
     try {
-      await api.createChannel({
-        type: newType,
-        name: newName.trim(),
-        ...newFields,
-      });
-      setNewName('');
-      setNewFields({});
-      setShowAdd(false);
+      await api.createChannel({ type: newType, name: newName.trim(), ...newFields });
+      if (!isCurrentAction(lease)) return;
+      setNewName(''); setNewFields({}); setShowAdd(false);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+    } catch {
+      if (isCurrentAction(lease)) alert(t.channelMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleDelete = async (id: string) => {
+    if (!actionOwner.current.active || actionOwner.current.pending.has('row:' + id)) return;
     if (!confirm(ts.channelsDeleteConfirm)) return;
+    const lease = beginAction(['row:' + id]);
+    if (!lease) return;
     try {
       await api.deleteChannel(id);
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      if (isCurrentAction(lease)) load();
+    } catch {
+      if (isCurrentAction(lease)) alert(t.channelMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleToggle = async (channel: ChannelConfig) => {
+    const lease = beginAction(['row:' + channel.id]);
+    if (!lease) return;
     try {
       await api.updateChannel(channel.id, { enabled: !channel.enabled });
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      if (isCurrentAction(lease)) load();
+    } catch {
+      if (isCurrentAction(lease)) alert(t.channelMutationFailed);
+    } finally { finishAction(lease); }
+  };
+
+  const handleTest = async (id: string) => {
+    const lease = beginAction(['test:' + id]);
+    if (!lease) return;
+    const revision = ++testRevision.current;
+    setError(''); setSuccess('');
+    try {
+      const result = await api.testChannel(id);
+      if (!isCurrentAction(lease) || revision !== testRevision.current) return;
+      if (result.success) setSuccess(ts.channelsTestSuccess(result.latencyMs ?? 0));
+      else setError(result.error?.startsWith('channel_mcp_mutation_') ? ts.channelsTestFailed : result.error || ts.channelsTestFailed);
+    } catch {
+      if (isCurrentAction(lease) && revision === testRevision.current) setError(ts.channelsTestFailed);
+    } finally { finishAction(lease); }
   };
 
   if (loading) {
@@ -2102,8 +2228,10 @@ function ChannelsPane() {
 
   return (
     <>
+      {channelFacts.failed && <p role="alert">{t.channelReadonlyUnavailable}</p>}
+      <button type="button" onClick={load}>{t.desktopReadonlyRetry}</button>
       <Section>
-        <SectionHeader icon={Globe}>{ts.channelsTitle}</SectionHeader>
+        <SectionHeader icon={Globe}>{channelFacts.data === null ? t.channelReadonlyUnknown : ts.channelsTitle}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -2181,7 +2309,7 @@ function ChannelsPane() {
                 </div>
               ))}
               <div className="flex gap-2">
-                <button type="button" onClick={handleCreate} className={btnPrimary}>{ts.channelsCreateBtn}</button>
+                <button type="button" onClick={handleCreate} disabled={pendingActions.has('create')} className={btnPrimary}>{ts.channelsCreateBtn}</button>
                 <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>{ts.channelsCancelBtn}</button>
               </div>
             </div>
@@ -2190,7 +2318,7 @@ function ChannelsPane() {
 
         {/* Channel list */}
         <div className="flex flex-col gap-2">
-          {channels.length === 0 ? (
+          {channelFacts.data === null ? <p>{t.channelReadonlyUnknown}</p> : channels.length === 0 ? (
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
@@ -2212,28 +2340,15 @@ function ChannelsPane() {
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <button type="button"
-                      onClick={async () => {
-                        setTestingChannel(ch.id);
-                        try {
-                          const result = await api.testChannel(ch.id);
-                          if (result.success) {
-                            setSuccess(ts.channelsTestSuccess(result.latencyMs ?? 0));
-                          } else {
-                            setError(result.error || ts.channelsTestFailed);
-                          }
-                        } catch (e) {
-                          setError((e as Error).message);
-                        } finally {
-                          setTestingChannel(null);
-                        }
-                      }}
-                      disabled={testingChannel === ch.id}
+                      onClick={() => void handleTest(ch.id)}
+                      disabled={pendingActions.has('test:' + ch.id)}
                       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
                     >
-                      {testingChannel === ch.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                      {pendingActions.has('test:' + ch.id) ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                       {ts.channelsTestBtn}
                     </button>
                     <button type="button"
+                      disabled={pendingActions.has('row:' + ch.id)}
                       onClick={() => handleToggle(ch)}
                       className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
                         ch.enabled ? 'bg-green-50 text-green-600' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
@@ -2242,6 +2357,8 @@ function ChannelsPane() {
                       {ch.enabled ? ts.channelsEnabled : ts.channelsDisabled}
                     </button>
                     <button type="button"
+                      aria-label={ts.channelsDeleteConfirm}
+                      disabled={pendingActions.has('row:' + ch.id)}
                       onClick={() => handleDelete(ch.id)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                     >
@@ -2270,27 +2387,13 @@ interface MCPInstallConfig {
   createdAt: number;
 }
 
-interface PluginDependencyStatus {
-  pluginName: string;
-  dependencyId: string;
-  displayName: string;
-  pluginInstalled?: boolean;
-  state: 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
-  code: string;
-  resolvedBinary?: string;
-  version?: string;
-  detail?: string;
-  canInstall: boolean;
-  canUpdate: boolean;
-  canDiagnose: boolean;
-  task?: { taskId: string; dependencyId: string; state: 'running' | 'cancelling' };
-}
+type PluginDependencyStatus = PluginDependencyStatusDto;
 
 function McpPane() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const ts = t.desktopSettings;
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
-  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean; lastError?: string; lastErrorDetail?: { category: 'python_version_too_old' | 'python_module_missing' | null; message: string; detectedVersion?: string; requiredVersion?: string; command?: string; missingModule?: string } }>>([]);
+  const [pluginServers, setPluginServers] = useState<PluginMcpServerDto[]>([]);
   const [dependencies, setDependencies] = useState<PluginDependencyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -2299,159 +2402,171 @@ function McpPane() {
   const [newArgs, setNewArgs] = useState('');
   const [dependencyAction, setDependencyAction] = useState('');
 
-  const load = useCallback(() => {
-    Promise.all([
-      api.listMCPInstalls().catch(() => []),
-      api.listPluginMcpServers().catch(() => []),
-      api.listPluginDependencyStatuses().catch(() => []),
+  const [installsReady, setInstallsReady] = useState(false), [installsUnavailable, setInstallsUnavailable] = useState(false);
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false);
+  type ActionOwner = { active: boolean; epoch: number; pending: Map<string, symbol> };
+  type ActionLease = { owner: ActionOwner; epoch: number; token: symbol; keys: string[] };
+  const actionOwner = useRef<ActionOwner>({ active: false, epoch: 0, pending: new Map() });
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    const owner = actionOwner.current;
+    owner.active = true; owner.epoch += 1;
+    setPendingActions(new Set(owner.pending.keys()));
+    return () => {
+      owner.active = false; owner.epoch += 1;
+      // Pending effects remain locked across locale changes until their real settlement.
+    };
+  }, [locale]);
+  const beginAction = (keys: string[]): ActionLease | null => {
+    const owner = actionOwner.current;
+    if (!owner.active || keys.some(key => owner.pending.has(key))) return null;
+    const token = Symbol();
+    for (const key of keys) owner.pending.set(key, token);
+    setPendingActions(new Set(owner.pending.keys()));
+    return { owner, epoch: owner.epoch, token, keys };
+  };
+  const isCurrentAction = (lease: ActionLease) => actionOwner.current === lease.owner
+    && lease.owner.active && lease.owner.epoch === lease.epoch;
+  const finishAction = (lease: ActionLease) => {
+    for (const key of lease.keys) if (lease.owner.pending.get(key) === lease.token) lease.owner.pending.delete(key);
+    // An old locale may release only its own settled locks; it cannot publish an action fact.
+    if (actionOwner.current === lease.owner && lease.owner.active) setPendingActions(new Set(lease.owner.pending.keys()));
+  };
+
+  const readGeneration = useRef(0), pendingRead = useRef<number | null>(null), manualReread = useRef(false);
+  const load = useCallback((queueIfBusy = true) => {
+    if (pendingRead.current !== null) { if (queueIfBusy) manualReread.current = true; return; }
+    const generation = ++readGeneration.current;
+    pendingRead.current = generation;
+    Promise.allSettled([
+      (async () => { const raw = await api.listMCPInstalls(); const parsed = MCP_INSTALLS_READONLY_OUTPUT_SCHEMA.safeParse(raw); if (!parsed.success) throw Error('channel_mcp_projection_unavailable'); return parsed.data; })(),
+      api.listPluginMcpServers(),
+      api.listPluginDependencyStatuses(),
     ]).then(([mcpInstalls, plugins, dependencyStatuses]) => {
-      setInstalls(mcpInstalls);
-      setPluginServers(plugins);
-      setDependencies(dependencyStatuses);
-    }).finally(() => setLoading(false));
+      if (generation !== readGeneration.current) return;
+      if (mcpInstalls.status === 'fulfilled') { setInstalls(mcpInstalls.value); setInstallsReady(true); }
+      setInstallsUnavailable(mcpInstalls.status === 'rejected');
+      if (plugins.status === 'fulfilled') setPluginServers(plugins.value);
+      if (dependencyStatuses.status === 'fulfilled') setDependencies(dependencyStatuses.value);
+      setCatalogUnavailable(plugins.status === 'rejected' || dependencyStatuses.status === 'rejected');
+    }).finally(() => {
+      if (pendingRead.current === generation) {
+        pendingRead.current = null; setLoading(false);
+        if (manualReread.current) { manualReread.current = false; load(); }
+      }
+    });
   }, []);
 
   useEffect(() => {
     load();
-    const timer = setInterval(load, 2_000);
-    return () => clearInterval(timer);
-  }, [load]);
+    const timer = setInterval(() => load(false), 2_000);
+    return () => { clearInterval(timer); readGeneration.current += 1; pendingRead.current = null; manualReread.current = false; };
+  }, [load, locale]);
 
   const handleCreate = async () => {
     if (!newName.trim() || !newCommand.trim()) return;
+    const lease = beginAction(['create']);
+    if (!lease) return;
     try {
       await api.createMCPInstall({
-        name: newName.trim(),
-        source: 'npm',
-        command: newCommand.trim(),
+        name: newName.trim(), source: 'npm', command: newCommand.trim(),
         args: newArgs.trim() ? newArgs.trim().split(/\s+/) : undefined,
       });
-      setNewName('');
-      setNewCommand('');
-      setNewArgs('');
-      setShowAdd(false);
+      if (!isCurrentAction(lease)) return;
+      setNewName(''); setNewCommand(''); setNewArgs(''); setShowAdd(false);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+    } catch {
+      if (isCurrentAction(lease)) alert(t.mcpMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleDelete = async (id: string) => {
+    if (!actionOwner.current.active || actionOwner.current.pending.has('row:' + id)) return;
+    if (!window.confirm(t.mcpInstallDeleteConfirm)) return;
+    const lease = beginAction(['row:' + id]);
+    if (!lease) return;
     try {
       await api.deleteMCPInstall(id);
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      if (isCurrentAction(lease)) load();
+    } catch {
+      if (isCurrentAction(lease)) alert(t.mcpMutationFailed);
+    } finally { finishAction(lease); }
   };
 
+  const dependencyKey = (dependency: PluginDependencyStatus) => 'dependency:' + dependency.pluginName + ':' + dependency.dependencyId;
   const handleInstallDependency = async (dependency: PluginDependencyStatus) => {
-    if (!dependency.canInstall) return;
-    const confirmed = window.confirm(ts.mcpInstallConfirm(dependency.displayName));
-    if (!confirmed) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:install`;
-    setDependencyAction(actionKey);
+    const key = dependencyKey(dependency);
+    if (!dependency.canInstall || !actionOwner.current.active || actionOwner.current.pending.has(key)) return;
+    if (!window.confirm(ts.mcpInstallConfirm(dependency.displayName))) return;
+    const lease = beginAction([key]); if (!lease) return;
     try {
-      const result = await api.installPluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-        confirmed: true,
-      });
-      if (!result.success) alert(result.error || ts.mcpInstallFailed);
+      const result = await api.installPluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId, confirmed: true });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpInstallFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpInstallFailed); }
+    finally { finishAction(lease); }
   };
-
   const handleSetupPluginDependency = async (dependency: PluginDependencyStatus) => {
-    if (!dependency.canInstall) return;
-    const confirmed = window.confirm(ts.mcpSetupConfirm(formatPluginDependencyTitle(dependency), dependency.displayName));
-    if (!confirmed) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:setup`;
-    setDependencyAction(actionKey);
+    const key = dependencyKey(dependency), pluginKey = 'plugin:' + dependency.pluginName;
+    if (!dependency.canInstall || !actionOwner.current.active || actionOwner.current.pending.has(key) || actionOwner.current.pending.has(pluginKey)) return;
+    if (!window.confirm(ts.mcpSetupConfirm(formatPluginDependencyTitle(dependency), dependency.displayName))) return;
+    const lease = beginAction([key, pluginKey]); if (!lease) return;
     try {
       const pluginResult = await api.installPlugin(dependency.pluginName);
-      if (!pluginResult.success) {
-        alert(pluginResult.error || ts.mcpPluginInstallFailed);
-        return;
-      }
-      const result = await api.installPluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-        confirmed: true,
-      });
-      if (!result.success) alert(result.error || ts.mcpInstallFailed);
+      if (!isCurrentAction(lease)) return;
+      if (!pluginResult.success) { alert(ts.mcpPluginInstallFailed); return; }
+      const result = await api.installPluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId, confirmed: true });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpInstallFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpInstallFailed); }
+    finally { finishAction(lease); }
   };
-
   const handleUpdateDependency = async (dependency: PluginDependencyStatus) => {
-    if (!dependency.canUpdate) return;
-    const confirmed = window.confirm(ts.mcpUpdateConfirm(dependency.displayName));
-    if (!confirmed) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:update`;
-    setDependencyAction(actionKey);
+    const key = dependencyKey(dependency);
+    if (!dependency.canUpdate || !actionOwner.current.active || actionOwner.current.pending.has(key)) return;
+    if (!window.confirm(ts.mcpUpdateConfirm(dependency.displayName))) return;
+    const lease = beginAction([key]); if (!lease) return;
     try {
-      const result = await api.updatePluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-        confirmed: true,
-      });
-      if (!result.success) alert(result.error || ts.mcpUpdateFailed);
+      const result = await api.updatePluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId, confirmed: true });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpUpdateFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpUpdateFailed); }
+    finally { finishAction(lease); }
   };
-
   const handleDiagnoseDependency = async (dependency: PluginDependencyStatus) => {
     if (!dependency.canDiagnose) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
-    setDependencyAction(actionKey);
+    const lease = beginAction([dependencyKey(dependency)]); if (!lease) return;
     try {
-      const result = await api.diagnosePluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-      });
-      if (!result.success) alert(result.error || ts.mcpDiagnoseFailed);
+      const result = await api.diagnosePluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpDiagnoseFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpDiagnoseFailed); }
+    finally { finishAction(lease); }
   };
-
+  const handleCancelDependency = async (dependency: PluginDependencyStatus) => {
+    const lease = beginAction(['cancel:' + dependencyKey(dependency)]); if (!lease) return;
+    try {
+      await api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId });
+      if (isCurrentAction(lease)) load();
+    } catch { if (isCurrentAction(lease)) alert(t.mcpMutationFailed); }
+    finally { finishAction(lease); }
+  };
   const handleOpenPermissionSettings = async (permission: 'accessibility' | 'screen') => {
-    try {
-      await api.openPluginDependencyPermissionSettings({ permission });
-    } catch (e) {
-      alert((e as Error).message);
-    }
+    const lease = beginAction(['permission:' + permission]); if (!lease) return;
+    try { await api.openPluginDependencyPermissionSettings({ permission }); }
+    catch { if (isCurrentAction(lease)) alert(t.mcpMutationFailed); }
+    finally { finishAction(lease); }
   };
-
-  // Design v58 §7.2: retry is scoped to one component and never writes desired
-  // state, so a disabled CUA cannot be re-enabled by pressing reconnect.
+  // Retry retains original disabled-CUA policy; one component lock, no desired-state write.
   const handleRetryPluginComponent = async (componentId: string) => {
-    const actionKey = 'plugin-mcp:restart';
-    setDependencyAction(actionKey);
-    try {
-      await api.retryPluginComponent({ componentId });
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    const lease = beginAction(['retry:' + componentId]); if (!lease) return;
+    try { await api.retryPluginComponent({ componentId }); if (isCurrentAction(lease)) load(); }
+    catch { if (isCurrentAction(lease)) alert(t.mcpMutationFailed); }
+    finally { finishAction(lease); }
   };
 
   const handleEnableComputerUse = async () => {
@@ -2477,6 +2592,9 @@ function McpPane() {
 
   return (
     <>
+      {installsUnavailable && <p role="alert">{t.mcpInstallsReadonlyUnavailable}</p>}
+      <button type="button" onClick={() => load()}>{t.desktopReadonlyRetry}</button>
+      {catalogUnavailable && <div role="alert" className="mb-3 text-sm text-red-500">{ts.pluginsCatalogUnavailable}</div>}
       {dependencies.length > 0 && (
         <Section>
           <SectionHeader icon={Package}>{ts.mcpPluginDeps}</SectionHeader>
@@ -2486,11 +2604,11 @@ function McpPane() {
               const dependencyServer = pluginServers.find(server => server.pluginName === dependency.pluginName);
               const statusText = formatPluginDependencyStatus(dependency, dependencyServer, ts);
               const dependencyLayerRows = formatPluginDependencyLayerRows(dependency, pluginInstalled, dependencyServer, ts);
-              const isSettingUp = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:setup`;
-              const isInstalling = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:install`;
-              const isUpdating = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:update`;
-              const isDiagnosing = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
-              const isRestartingMcp = dependencyAction === 'plugin-mcp:restart';
+              const isSettingUp = pendingActions.has('plugin:' + dependency.pluginName) || pendingActions.has(dependencyKey(dependency));
+              const isInstalling = pendingActions.has(dependencyKey(dependency));
+              const isUpdating = pendingActions.has(dependencyKey(dependency));
+              const isDiagnosing = pendingActions.has(dependencyKey(dependency));
+              const isRestartingMcp = pendingActions.has('retry:' + (dependencyServer?.name ?? ''));
               const isEnablingComputerUse = dependencyAction === 'computer-use:enable';
               const canReconnectMcp = dependency.state === 'ready' && Boolean(dependencyServer) && dependencyServer?.connected === false;
               const isComputerUse = dependency.pluginName === 'cua-computer-use';
@@ -2524,8 +2642,8 @@ function McpPane() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {dependency.task && (
-                        <button type="button" disabled={dependency.task.state === 'cancelling'}
-                          onClick={() => void api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId }).then(load).catch(error => alert(error instanceof Error ? error.message : String(error)))}
+                        <button type="button" disabled={dependency.task.state === 'cancelling' || pendingActions.has('cancel:' + dependencyKey(dependency))}
+                          onClick={() => void handleCancelDependency(dependency)}
                           className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs disabled:opacity-50">
                           {dependency.task.state === 'cancelling' ? ts.mcpCancellingTask : ts.mcpCancelTask}
                         </button>
@@ -2533,6 +2651,7 @@ function McpPane() {
                       {dependency.code === 'permission_accessibility_missing' && (
                         <button
                           type="button"
+                          disabled={pendingActions.has('permission:accessibility')}
                           onClick={() => void handleOpenPermissionSettings('accessibility')}
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                         >
@@ -2543,6 +2662,7 @@ function McpPane() {
                       {dependency.code === 'permission_screen_missing' && (
                         <button
                           type="button"
+                          disabled={pendingActions.has('permission:screen')}
                           onClick={() => void handleOpenPermissionSettings('screen')}
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                         >
@@ -2702,7 +2822,7 @@ function McpPane() {
                 />
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={handleCreate} className={btnPrimary}>{ts.mcpCreateBtn}</button>
+                <button type="button" onClick={handleCreate} disabled={pendingActions.has('create')} className={btnPrimary}>{ts.mcpCreateBtn}</button>
                 <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>{ts.mcpCancelBtn}</button>
               </div>
             </div>
@@ -2710,7 +2830,7 @@ function McpPane() {
         )}
 
         <div className="flex flex-col gap-2">
-          {installs.length === 0 ? (
+          {!installsReady ? <Card>{t.mcpInstallsReadonlyUnknown}</Card> : installs.length === 0 ? (
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
@@ -2734,6 +2854,8 @@ function McpPane() {
                     </div>
                   </div>
                   <button type="button"
+                    aria-label={t.mcpInstallDeleteConfirm}
+                    disabled={pendingActions.has('row:' + install.id)}
                     onClick={() => handleDelete(install.id)}
                     className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                   >
@@ -2880,6 +3002,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [loopRunResults, setLoopRunResults] = useState<Record<string, RunLoopNowResultView | undefined>>({});
   const [loopDiagnosticsLoading, setLoopDiagnosticsLoading] = useState(true);
   const [loopDiagnosticsError, setLoopDiagnosticsError] = useState('');
+  const [scheduledBindingsError, setScheduledBindingsError] = useState('');
   const [runningLoopId, setRunningLoopId] = useState<string | null>(null);
   const [loopOutputPreviews, setLoopOutputPreviews] = useState<Record<string, LoopOutputPreviewView | undefined>>({});
   const [loopTaskResults, setLoopTaskResults] = useState<Record<string, LoopTaskResultView | undefined>>({});
@@ -2900,25 +3023,38 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [editLoopOutputDir, setEditLoopOutputDir] = useState('');
   const [editLoopOutputFile, setEditLoopOutputFile] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const loopLoadGeneration=useRef(0),previewGeneration=useRef(0),taskResultGeneration=useRef(0);
+  useEffect(()=>()=>{loopLoadGeneration.current++;previewGeneration.current++;taskResultGeneration.current++;},[]);
+  const observationLabel=(run:LoopRunView)=>loopObservationLabel(run,{pending:t.desktopSettings.loopDiagnosticsPublicationPending,verified:at=>t.desktopSettings.loopDiagnosticsVerifiedAt(new Date(at).toLocaleString()),status:getLoopRunStatusLabel});
   const loadLoops = useCallback(async (silent = false) => {
+    const generation=++loopLoadGeneration.current;
+    previewGeneration.current++;taskResultGeneration.current++;setLoopOutputPreviews({});setLoopTaskResults({});setPreviewingLoopId(null);setViewingTaskResultLoopId(null);
+    setLoopRuns(invalidateLoopObservations);
+    setLoopRunResults(previous=>Object.fromEntries(Object.entries(previous).filter(([,result])=>result?.status!=='success'&&result?.status!=='already_completed')));
+
     if (!silent) setLoopDiagnosticsLoading(true);
     setLoopDiagnosticsError('');
     try {
       const [definitions, templates, scheduleBindings] = await Promise.all([
         api.getLoopDefinitions(),
         api.listUserLoopTemplates(),
-        api.getLoopScheduleBindings().catch(() => [] as LoopScheduleBindingView[]),
+        api.getLoopScheduleBindings(),
       ]);
       const details = await Promise.all(definitions.map(async (loop) => {
         const [runs, anomalies] = await Promise.all([
           api.getLoopRuns(loop.id),
-          api.getEvidenceAnomalies(loop.id).catch(() => [] as EvidenceAnomalyView[]),
+          api.getEvidenceAnomalies(loop.id).catch(error => {
+            if (loopManagementFailureKind(error) === 'unavailable') throw error;
+            return [] as EvidenceAnomalyView[];
+          }),
         ]);
         return { loop, runs, anomalies };
       }));
+      if(generation!==loopLoadGeneration.current)return;
       setLoopDefinitions(definitions);
       setUserLoopTemplates(templates);
       setLoopScheduleBindings(Object.fromEntries(scheduleBindings.map(binding => [binding.loopId, binding])));
+      setScheduledBindingsError('');
       setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])));
       setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])));
       setLoopRunResults(prev => {
@@ -2931,11 +3067,15 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         return next;
       });
     } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsLoadError);
+      if(generation!==loopLoadGeneration.current)return;
+      setLoopRuns(invalidateLoopObservations);
+      const scheduledFailure = error instanceof Error && /scheduled_(projection_unavailable|runtime_unavailable|input_invalid)/.test(error.message);
+      if (scheduledFailure) setScheduledBindingsError(scheduledErrorMessage(error,t,true));
+      setLoopDiagnosticsError(scheduledFailure ? scheduledErrorMessage(error,t,true) : loopManagementErrorMessage(error, t, t.desktopSettings.loopDiagnosticsLoadError));
     } finally {
-      if (!silent) setLoopDiagnosticsLoading(false);
+      if (generation===loopLoadGeneration.current) setLoopDiagnosticsLoading(false);
     }
-  }, [t.desktopSettings.loopDiagnosticsLoadError]);
+  }, [t.desktopSettings.loopDiagnosticsLoadError, t.loopOperationResultUnknown, t.loopProjectionUnavailable, t.loopInputInvalid, t.scheduledProjectionUnavailable, t.scheduledOperationUnknown, t.scheduledInputInvalid]);
 
   useEffect(() => {
     void loadLoops();
@@ -2969,7 +3109,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         await loadLoops(true);
       }
     } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
+      setLoopDiagnosticsError(loopManagementErrorMessage(error, t, t.desktopSettings.loopDiagnosticsRunFailed));
     } finally {
       setRunningLoopId(null);
     }
@@ -2987,32 +3127,38 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   };
 
   const handlePreviewLoopOutput = async (loopId: string) => {
+    const generation=++previewGeneration.current;setLoopOutputPreviews(previous=>({...previous,[loopId]:undefined}));
     setPreviewingLoopId(loopId);
     try {
       const result = await api.readLoopOutputPreview(loopId);
+      if(generation!==previewGeneration.current)return;
       setLoopOutputPreviews(prev => ({ ...prev, [loopId]: result }));
       if (!result.ok) {
         showToast(result.message || t.desktopSettings.userLoopOutputPreviewUnavailable);
       }
     } catch (error) {
+      if(generation!==previewGeneration.current)return;
       showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopOutputPreviewUnavailable);
     } finally {
-      setPreviewingLoopId(null);
+      if(generation===previewGeneration.current)setPreviewingLoopId(null);
     }
   };
 
   const handleViewLoopTaskResult = async (loopId: string) => {
+    const generation=++taskResultGeneration.current;setLoopTaskResults(previous=>({...previous,[loopId]:undefined}));
     setViewingTaskResultLoopId(loopId);
     try {
       const result = await api.readLoopTaskResult(loopId);
+      if(generation!==taskResultGeneration.current)return;
       setLoopTaskResults(prev => ({ ...prev, [loopId]: result }));
       if (!result.ok) {
         showToast(result.message || t.desktopSettings.userLoopTaskResultUnavailable);
       }
     } catch (error) {
+      if(generation!==taskResultGeneration.current)return;
       showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopTaskResultUnavailable);
     } finally {
-      setViewingTaskResultLoopId(null);
+      if(generation===taskResultGeneration.current)setViewingTaskResultLoopId(null);
     }
   };
 
@@ -3042,7 +3188,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] save edit failed', error);
-      showToast(error instanceof Error ? error.message : t.desktopSettings.saveLoopFailed);
+      showToast(loopManagementErrorMessage(error, t, t.desktopSettings.saveLoopFailed));
     } finally {
       setSavingEdit(false);
     }
@@ -3057,7 +3203,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] delete loop failed', error);
-      showToast(error instanceof Error ? error.message : t.desktopSettings.deleteLoopFailed);
+      showToast(loopManagementErrorMessage(error, t, t.desktopSettings.deleteLoopFailed));
     }
   };
 
@@ -3067,7 +3213,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     anomalies: EvidenceAnomalyView[],
   ) => {
     try {
-      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies });
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies, observationLabel,labels:t.desktopSettings.loopDiagnosticsCopyLabels });
       await navigator.clipboard.writeText(summary);
       showToast(t.desktopSettings.loopDiagnosticsCopied, 'success');
     } catch {
@@ -3089,7 +3235,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   };
 
   const handleCreateUserLoop = async () => {
-    const input: CreateUserLoopTemplateInputView = {
+    const input = {
       loopId: createUserLoopId(),
       title: newLoopTitle.trim(),
       kind: newLoopKind,
@@ -3098,7 +3244,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         outputDirectory: newLoopOutputDirectory.trim(),
         outputFileName: newLoopOutputFileName.trim(),
       } : {}),
-    };
+    } as CreateUserLoopTemplateInputView;
     if (!input.title || !input.prompt) {
       setCreateLoopError(t.desktopSettings.userLoopCreateMissingFields);
       return;
@@ -3116,14 +3262,14 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       showToast(t.desktopSettings.userLoopCreateSuccess, 'success');
       await loadLoops(true);
     } catch (error) {
-      setCreateLoopError(error instanceof Error ? error.message : t.desktopSettings.userLoopCreateFailed);
+      setCreateLoopError(loopManagementErrorMessage(error, t, t.desktopSettings.userLoopCreateFailed));
     } finally {
       setCreatingLoop(false);
     }
   };
 
   const handleCreateFromTemplate = async (template: UserLoopStarterTemplate) => {
-    const input: CreateUserLoopTemplateInputView = {
+    const input = {
       loopId: createUserLoopId(),
       title: template.title,
       kind: template.kind,
@@ -3132,7 +3278,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         outputDirectory: template.outputDirectory ?? '',
         outputFileName: template.outputFileName ?? 'output.md',
       } : {}),
-    };
+    } as CreateUserLoopTemplateInputView;
     try {
       console.log('[LoopsPane] creating from template', { templateId: template.templateId });
       await api.createUserLoopTemplate(input);
@@ -3140,7 +3286,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] create from template failed', error);
-      showToast(error instanceof Error ? error.message : t.desktopSettings.createFromTemplateFailed);
+      showToast(loopManagementErrorMessage(error, t, t.desktopSettings.createFromTemplateFailed));
     }
   };
 
@@ -3155,6 +3301,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
 
   return (
     <>
+      {showUserLoops && !showDiagnostics && scheduledBindingsError && <div role="alert" className="mb-3 rounded-md border p-3 text-xs text-[var(--c-status-error-text)]"><p>{scheduledBindingsError}</p><button type="button" onClick={()=>void loadLoops()} className="mt-2 rounded-md border px-2 py-1">{t.scheduledRefreshData}</button></div>}
       {showUserLoops && (
       <Section>
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -3265,7 +3412,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
             <div className="text-xs text-[var(--c-text-secondary)]">
               {t.desktopSettings.userLoopsLoading}
             </div>
-          ) : userLoops.length === 0 ? (
+          ) : userLoops.length === 0 && !scheduledBindingsError ? (
             <div>
               <p className="text-xs text-[var(--c-text-secondary)] mb-3">
                 {t.desktopSettings.userLoopsEmpty}
@@ -3321,7 +3468,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                   ? t.desktopSettings.loopDiagnosticsRunning
                   : isAlreadyRunning
                     ? t.desktopSettings.loopDiagnosticsAlreadyRunning
-                    : t.desktopSettings.loopDiagnosticsRunNow;
+                    : (runResult?.status==='publication_pending'||loopNeedsRevalidation(latestRun))?t.desktopSettings.loopDiagnosticsPublicationPending:t.desktopSettings.loopDiagnosticsRunNow;
                 return (
                   <div key={template.loopId} id={`loop-${template.loopId}`} className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 scroll-mt-4">
                     <div className="flex items-start justify-between gap-3">
@@ -3381,6 +3528,8 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         {loopStatus}
                       </span>
                     </div>
+                    <LoopPublicationPanel loopId={template.loopId} runs={runs} onChanged={() => void loadLoops(true)} />
+                    {latestRun?.status==='success'&&<div className="mt-2 text-xs text-[var(--c-text-secondary)]">{observationLabel(latestRun)}</div>}
                     {latestRunFailed && (
                       <div className="mt-3 rounded-md border border-red-200 bg-red-50/50 px-3 py-2 text-xs">
                         <div className="flex items-center justify-between gap-2">
@@ -3456,10 +3605,12 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         {t.commonDelete}
                       </button>
                     </div>
+                    {isMarkdownLoop ? <p className="mt-2 text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.userLoopWorkspaceNavigationHint}</p> : null}
+                    <LoopArtifactList loopId={template.loopId} refreshGeneration={loopLoadGeneration.current}/>
                     {outputPreview ? (
                       <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
                         <div className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">
-                          {t.desktopSettings.userLoopOutputPreview}
+                          {t.desktopSettings.userLoopOutputPreview}{outputPreview.ok&&outputPreview.origin==='verified_publication'&&outputPreview.checkedAt ? ` · ${t.desktopSettings.loopDiagnosticsVerifiedAt(new Date(outputPreview.checkedAt).toLocaleString())}` : ''}
                         </div>
                         {outputPreview.ok ? (
                           <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-3 text-xs leading-5 text-[var(--c-text-primary)]">
@@ -3479,7 +3630,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                     {taskResult ? (
                       <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
                         <div className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">
-                          {t.desktopSettings.userLoopTaskResult}
+                          {t.desktopSettings.userLoopTaskResult}{taskResult.ok&&taskResult.origin==='verified_publication'&&taskResult.checkedAt ? ` · ${t.desktopSettings.loopDiagnosticsVerifiedAt(new Date(taskResult.checkedAt).toLocaleString())}` : ''}
                         </div>
                         {taskResult.ok ? (
                           <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-3 text-xs leading-5 text-[var(--c-text-primary)]">
@@ -3594,7 +3745,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                   ? t.desktopSettings.loopDiagnosticsRunning
                   : isAlreadyRunning
                     ? t.desktopSettings.loopDiagnosticsAlreadyRunning
-                    : t.desktopSettings.loopDiagnosticsRunNow;
+                    : (runResult?.status==='publication_pending'||loopNeedsRevalidation(latestRun))?t.desktopSettings.loopDiagnosticsPublicationPending:t.desktopSettings.loopDiagnosticsRunNow;
 
                 return (
                   <div
@@ -3615,12 +3766,13 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                       </span>
                     </div>
 
+                    <LoopPublicationPanel loopId={loop.id} runs={runs} onChanged={() => void loadLoops(true)} />
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded-md bg-[var(--c-bg-card)] p-2">
                         <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLastRun}</div>
                         <div className="mt-1 text-[var(--c-text-primary)]">
                           {latestRun
-                            ? `${getLoopRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+                            ? `${observationLabel(latestRun)} · ${formatLoopRunTime(latestRun)}`
                             : t.desktopSettings.loopDiagnosticsNoRuns}
                         </div>
                       </div>
@@ -3720,78 +3872,138 @@ function GeneralPane() {
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(3);
   const [savingConcurrency, setSavingConcurrency] = useState(false);
+  const skillConfigSequence = useRef(0);
+  const concurrencyConfigSequence = useRef(0);
+  const [skillConfigError, setSkillConfigError] = useState<'' | 'load' | 'unknown' | 'save'>('');
+  const [concurrencyConfigError, setConcurrencyConfigError] = useState<'' | 'load' | 'unknown' | 'save'>('');
   const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
   const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
-  const [serviceStatusError, setServiceStatusError] = useState('');
+  const [serviceReadUnavailable, setServiceReadUnavailable] = useState(false);
+  const [serviceActionUnknown, setServiceActionUnknown] = useState(false);
+  const serviceReadLifetime = useRef<{ active: boolean; busy: boolean; queued: boolean } | null>(null);
+  const serviceActionLifetime = useRef<{ active: boolean; busy: boolean } | null>(null);
   const [restartingService, setRestartingService] = useState<DesktopRelatedServiceId | null>(null);
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
   const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
 
-  const loadServiceStatus = useCallback(async (silent = false) => {
-    if (!silent) setServiceStatusLoading(true);
-    setServiceStatusError('');
-    try {
-      setServiceStatus(await api.getServiceStatus());
-    } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : t.desktopSettings.serviceStatusLoadError);
-    } finally {
-      if (!silent) setServiceStatusLoading(false);
+  const loadServiceStatus = useCallback(async (mode: 'initial' | 'poll' | 'manual' = 'manual'): Promise<void> => {
+    const lifetime = serviceReadLifetime.current;
+    if (!lifetime?.active) return;
+    if (lifetime.busy) {
+      if (mode === 'manual') { lifetime.queued = true; setServiceStatusLoading(true); }
+      return;
     }
-  }, [t]);
-
-  useEffect(() => {
-    api.getSkillDebugConfig().then(c => {
-      setSkillDebug(c.enabled);
-    });
+    lifetime.busy = true;
+    if (mode !== 'poll') setServiceStatusLoading(true);
+    try {
+      do {
+        lifetime.queued = false;
+        try {
+          const snapshot = await api.getServiceStatus();
+          if (lifetime.active) { setServiceStatus(snapshot); setServiceReadUnavailable(false); }
+        } catch {
+          if (lifetime.active) setServiceReadUnavailable(true);
+        }
+      } while (lifetime.active && lifetime.queued);
+    } finally {
+      lifetime.busy = false;
+      if (lifetime.active) setServiceStatusLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    void loadServiceStatus();
-    const timer = window.setInterval(() => {
-      void loadServiceStatus(true);
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [loadServiceStatus]);
+    const lifetime = { active: true, busy: false };
+    serviceActionLifetime.current = lifetime;
+    return () => {
+      lifetime.active = false;
+      if (serviceActionLifetime.current === lifetime) serviceActionLifetime.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const sequence = ++skillConfigSequence.current;
+    api.getSkillDebugConfig().then(c => {
+      if (active && sequence === skillConfigSequence.current) setSkillDebug(c.enabled);
+    }).catch(() => {
+      if (active && sequence === skillConfigSequence.current) setSkillConfigError('load');
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const lifetime = { active: true, busy: false, queued: false };
+    serviceReadLifetime.current = lifetime;
+    void loadServiceStatus('initial');
+    const timer = window.setInterval(() => { void loadServiceStatus('poll'); }, 10_000);
+    return () => {
+      lifetime.active = false;
+      lifetime.queued = false;
+      if (serviceReadLifetime.current === lifetime) serviceReadLifetime.current = null;
+      window.clearInterval(timer);
+    };
+  }, [loadServiceStatus, t.desktopSettings.serviceStatusLoadError]);
 
   const handleSkillDebugToggle = async (enabled: boolean) => {
-    setSkillDebug(enabled);
+    const sequence = ++skillConfigSequence.current;
+    setSkillConfigError('');
     setSavingSkillDebug(true);
     try {
-      await api.saveSkillDebugConfig({ enabled });
+      const saved = await api.saveSkillDebugConfig({ enabled });
+      if (sequence === skillConfigSequence.current) setSkillDebug(saved.enabled);
+    } catch (error) {
+      if (sequence === skillConfigSequence.current) setSkillConfigError(
+        error instanceof Error && (error.message === 'desktop_config_operation_unknown' || error.message.endsWith(': desktop_config_operation_unknown'))
+          ? 'unknown' : 'save');
     } finally {
-      setSavingSkillDebug(false);
+      if (sequence === skillConfigSequence.current) setSavingSkillDebug(false);
     }
   };
 
   useEffect(() => {
+    let active = true;
+    const sequence = ++concurrencyConfigSequence.current;
     api.getKswarmConfig().then(c => {
-      setMaxConcurrentTasks(c.maxConcurrentTasks);
+      if (active && sequence === concurrencyConfigSequence.current) setMaxConcurrentTasks(c.maxConcurrentTasks);
+    }).catch(() => {
+      if (active && sequence === concurrencyConfigSequence.current) setConcurrencyConfigError('load');
     });
+    return () => { active = false; };
   }, []);
 
   const handleConcurrencyChange = async (value: number) => {
     const clamped = Math.max(1, Math.min(10, value));
-    setMaxConcurrentTasks(clamped);
+    const sequence = ++concurrencyConfigSequence.current;
+    setConcurrencyConfigError('');
     setSavingConcurrency(true);
     try {
-      await api.saveKswarmConfig({ maxConcurrentTasks: clamped });
+      const saved = await api.saveKswarmConfig({ maxConcurrentTasks: clamped });
+      if (sequence === concurrencyConfigSequence.current) setMaxConcurrentTasks(saved.maxConcurrentTasks);
+    } catch (error) {
+      if (sequence === concurrencyConfigSequence.current) setConcurrencyConfigError(
+        error instanceof Error && (error.message === 'desktop_config_operation_unknown' || error.message.endsWith(': desktop_config_operation_unknown'))
+          ? 'unknown' : 'save');
     } finally {
-      setSavingConcurrency(false);
+      if (sequence === concurrencyConfigSequence.current) setSavingConcurrency(false);
     }
   };
 
   const handleRestartService = async (serviceId: DesktopRelatedServiceId) => {
+    const lifetime = serviceActionLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
     setRestartingService(serviceId);
-    setServiceStatusError('');
+    setServiceActionUnknown(false);
     try {
       await api.restartRelatedService(serviceId);
-      await loadServiceStatus(true);
-    } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : t.desktopSettings.serviceRestartFailed);
+      if (lifetime.active) await loadServiceStatus('manual');
+    } catch {
+      if (lifetime.active) setServiceActionUnknown(true);
     } finally {
-      setRestartingService(null);
+      lifetime.busy = false;
+      if (lifetime.active) setRestartingService(null);
     }
   };
 
@@ -3943,14 +4155,20 @@ function GeneralPane() {
                 key={service.id}
                 service={service}
                 restarting={restartingService === service.id}
+                disabled={restartingService !== null}
                 onRestart={handleRestartService}
               />
             ))}
-            {serviceStatusError ? (
-              <div className="rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
-                {serviceStatusError}
+            {serviceReadUnavailable || serviceActionUnknown ? (
+              <div role="alert" className="rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
+                {serviceReadUnavailable && <div>{t.desktopSettings.serviceStatusLoadError}</div>}
+                {serviceActionUnknown && <div>{t.desktopSettings.serviceRestartUnknown}</div>}
               </div>
             ) : null}
+            <button type="button" onClick={() => void loadServiceStatus('manual')} className={`${btnSecondary} self-start`}>
+              {serviceStatusLoading ? <Loader2 size={13} className="mr-1 inline animate-spin" aria-hidden="true" /> : null}
+              {t.desktopSettings.serviceStatusReadRetry}
+            </button>
           </div>
         </Card>
       </Section>
@@ -3969,6 +4187,7 @@ function GeneralPane() {
               max={10}
               step={1}
               value={maxConcurrentTasks}
+              disabled={savingConcurrency}
               onChange={(e) => handleConcurrencyChange(Number(e.target.value))}
               className="flex-1 accent-[var(--c-accent)]"
             />
@@ -3977,6 +4196,7 @@ function GeneralPane() {
             </span>
             {savingConcurrency && <Loader2 size={14} className="animate-spin text-[var(--c-text-tertiary)]" />}
           </div>
+          {concurrencyConfigError ? <div role="alert" className="mt-2 text-xs text-[var(--c-status-error-text)]">{concurrencyConfigError === 'load' ? t.desktopSettings.configLoadFailed : concurrencyConfigError === 'unknown' ? t.desktopSettings.configOperationUnknown : t.desktopSettings.configSaveFailed}</div> : null}
           <div className="mt-2 flex justify-between text-[10px] text-[var(--c-text-tertiary)]">
             <span>{t.desktopSettings.taskConcurrencyMin}</span>
             <span>{t.desktopSettings.taskConcurrencyMax}</span>
@@ -3999,6 +4219,7 @@ function GeneralPane() {
             </div>
             <button type="button"
               aria-label={t.desktopSettings.stageDebugToggleAria}
+              disabled={savingSkillDebug}
               onClick={() => handleSkillDebugToggle(!skillDebug)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 skillDebug ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-border)]'
@@ -4011,6 +4232,7 @@ function GeneralPane() {
               />
             </button>
           </div>
+          {skillConfigError ? <div role="alert" className="mt-2 text-xs text-[var(--c-status-error-text)]">{skillConfigError === 'load' ? t.desktopSettings.configLoadFailed : skillConfigError === 'unknown' ? t.desktopSettings.configOperationUnknown : t.desktopSettings.configSaveFailed}</div> : null}
         </Card>
       </Section>
 
@@ -4032,10 +4254,12 @@ function GeneralPane() {
 function ServiceStatusRow({
   service,
   restarting,
+  disabled,
   onRestart,
 }: {
   service: DesktopRelatedServiceStatus;
   restarting: boolean;
+  disabled: boolean;
   onRestart: (serviceId: DesktopRelatedServiceId) => void;
 }) {
   const { t } = useLocale();
@@ -4069,7 +4293,7 @@ function ServiceStatusRow({
         aria-label={`restart-service-${service.id}`}
         title={`${service.label} ${t.desktopSettings.serviceRestart}`}
         onClick={() => onRestart(service.id)}
-        disabled={restarting}
+        disabled={disabled || restarting}
         className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--c-border)] px-2.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
@@ -4221,30 +4445,38 @@ function AboutPane() {
   const { t } = useLocale();
   const [updateStatus, setUpdateStatus] = useState<{ checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; installing?: boolean; progress: number; version?: string; error?: string } | null>(null);
   const [checking, setChecking] = useState(false);
-
-  useEffect(() => {
-    const unsub = api.onUpdateStatus(setUpdateStatus);
-    api.getUpdateStatus().then(setUpdateStatus).catch(() => {});
-    return unsub;
-  }, []);
-
-  const handleCheckUpdate = async () => {
-    setChecking(true);
+  const [updateReadError, setUpdateReadError] = useState('');
+  const updateGeneration = useRef(0);
+  const readUpdateFacts = async () => {
+    const generation = ++updateGeneration.current;
     try {
-      await api.checkForUpdates();
-    } finally {
-      setChecking(false);
+      const next = await api.getUpdateStatus();
+      if (generation === updateGeneration.current) { setUpdateStatus(next); setUpdateReadError(''); }
+    } catch {
+      if (generation === updateGeneration.current) setUpdateReadError(t.desktopSettings.updaterProjectionUnavailable);
     }
   };
-
+  useEffect(() => {
+    const unsub = api.onUpdateStatus(status => { ++updateGeneration.current; setUpdateStatus(status); setUpdateReadError(''); });
+    void readUpdateFacts();
+    return () => { ++updateGeneration.current; unsub(); };
+    // The subscription belongs to this mounted pane; explicit refresh reads current facts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleCheckUpdate = async () => {
+    ++updateGeneration.current;
+    setChecking(true);
+    try { await api.checkForUpdates(); await readUpdateFacts(); }
+    catch { setUpdateReadError(t.desktopSettings.updaterOperationUnknown); }
+    finally { setChecking(false); }
+  };
   const handleInstallUpdate = async () => {
+    ++updateGeneration.current;
     try {
-      await api.quitAndInstall();
-    } catch (error) {
-      setUpdateStatus((previous) => previous ? {
-        ...previous, installing: false, error: error instanceof Error ? error.message : String(error),
-      } : previous);
-    }
+      const result = await api.quitAndInstall();
+      if (result?.status === 'rejected_sync' || result?.status === 'pending_error_sticky') setUpdateReadError(t.sidebarUpdateHandoffUnconfirmedHint);
+      else if (!result || !['pending', 'already_pending', 'already_handed_off'].includes(result.status)) setUpdateReadError(t.desktopSettings.updaterOperationUnknown);
+    } catch { setUpdateReadError(t.desktopSettings.updaterOperationUnknown); }
   };
 
   return (
@@ -4276,10 +4508,11 @@ function AboutPane() {
       <Section>
         <SectionHeader icon={Zap}>{t.desktopSettings.softwareUpdate}</SectionHeader>
         <Card>
+          {updateReadError && <div role="alert" className="mb-3 text-sm text-red-500"><p>{updateReadError}</p><button type="button" onClick={() => void readUpdateFacts()} className={btnSecondary}>{t.desktopSettings.updaterRefreshData}</button></div>}
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">
-                {updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmed : updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
+                {updateReadError && !updateStatus ? t.desktopSettings.updaterProjectionUnavailable : updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmed : updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
               </div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
                 {updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmedHint :
@@ -4291,7 +4524,7 @@ function AboutPane() {
                  `v${__APP_VERSION__}`}
               </div>
               {updateStatus?.error && updateStatus.error !== 'update_install_handoff_unconfirmed' && (
-                <div className="text-xs text-red-500 mt-1">{updateStatus.error === 'update_install_handoff_unconfirmed' ? t.sidebarUpdateHandoffUnconfirmedHint : updateStatus.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady : updateStatus.error}</div>
+                <div className="text-xs text-red-500 mt-1">{updateStatus.error === 'update_install_handoff_unconfirmed' ? t.sidebarUpdateHandoffUnconfirmedHint : updateStatus.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady : t.desktopSettings.updaterOperationUnknown}</div>
               )}
             </div>
             <div className="flex gap-2">
@@ -4421,6 +4654,7 @@ function runtimeStateLabel(state: ConnectorsProviderRuntime['runtime_state'], ds
     case 'missing_config': return { text: ds.connectorStatusMissingConfig, tone: 'warn' };
     case 'invalid_config': return { text: ds.connectorStatusInvalidConfig, tone: 'err' };
     case 'not_implemented': return { text: ds.connectorStatusNotImplemented, tone: 'mute' };
+    case 'decrypt_failed': return { text: ds.connectorStatusDecryptFailed, tone: 'err' };
     default: return { text: state, tone: 'mute' };
   }
 }
@@ -4540,7 +4774,7 @@ function TestButton({ kind, ds }: TestButtonProps & { ds: LocaleStrings['desktop
       const r = await api.testConnectorProvider(kind);
       setResult(r);
     } catch (e) {
-      setResult({ success: false, latencyMs: 0, error: (e as Error).message });
+      setResult({ success: false, latencyMs: 0, error: connectorsErrorMessage(e, ds) });
     } finally {
       setTesting(false);
     }
@@ -4669,25 +4903,38 @@ function SystemOneSection() {
 
 function ToolsPane() {
   const { t } = useLocale();
+  const ds = t.desktopSettings;
+  const labelsRef = useRef(ds);
+  labelsRef.current = ds;
+  const readGeneration = useRef(0);
+  const [readError, setReadError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [snapshot, setSnapshot] = useState<ConnectorsConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [draft, setDraft] = useState<ConnectorsConfig | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
-  useEffect(() => {
-    let cancelled = false;
-    api.getConnectorsConfig()
-      .then(snap => {
-        if (cancelled) return;
-        setSnapshot(snap);
-        if (snap?.config) setDraft(snap.config);
-      })
-      .catch(e => { if (!cancelled) setError((e as Error).message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+  const load = useCallback(async () => {
+    const generation = ++readGeneration.current;
+    setRefreshing(true);
+    try {
+      const snap = await api.getConnectorsConfig();
+      if (generation !== readGeneration.current) return;
+      if (!snap) throw Error('connectors_projection_unavailable');
+      setSnapshot(snap);
+      setDraft(current => current ?? snap.config);
+      setReadError('');
+    } catch (failure) {
+      if (generation === readGeneration.current) setReadError(connectorsErrorMessage(failure, labelsRef.current, true));
+    } finally {
+      if (generation === readGeneration.current) { setLoading(false); setRefreshing(false); }
+    }
   }, []);
+  useEffect(() => { void load(); return () => { readGeneration.current++; }; }, [load]);
 
   const runtimeOf = useCallback((name: string): ConnectorsProviderRuntime | undefined => {
     return snapshot?.providers.find(p => p.provider_name === name);
@@ -4695,20 +4942,27 @@ function ToolsPane() {
 
   const handleSave = async () => {
     if (!draft) return;
+    const submitted = draft;
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      const next = await api.saveConnectorsConfig(draft);
+      const next = await api.saveConnectorsConfig(submitted);
       if (next) {
+        // Acknowledged save supersedes reads begun before this commit.
+        readGeneration.current++;
+        setRefreshing(false);
+        setReadError('');
         setSnapshot(next);
-        setDraft(next.config);
-        setSuccess(t.desktopSettings.connectorSaved);
+        if (draftRef.current === submitted) {
+          setDraft(next.config);
+          setSuccess(t.desktopSettings.connectorSaved);
+        }
       } else {
         setError(t.desktopSettings.connectorSaveFailedNoDesktop);
       }
     } catch (e) {
-      setError((e as Error).message);
+      setError(connectorsErrorMessage(e, ds));
     } finally {
       setSaving(false);
     }
@@ -4725,7 +4979,8 @@ function ToolsPane() {
   if (!draft) {
     return (
       <div className="text-sm text-[var(--c-text-secondary)]">
-        {t.desktopSettings.connectorLoadFailed}{error && <div className="mt-2 text-red-500">{error}</div>}
+        {readError || t.desktopSettings.connectorLoadFailed}
+        <button type="button" className={btnSecondary} disabled={refreshing} onClick={() => { void load(); }}>{ds.connectorRefreshData}</button>
       </div>
     );
   }
@@ -4735,11 +4990,13 @@ function ToolsPane() {
 
   return (
     <>
-      <Section>
+      <Section key="connectors-overview">
         <SectionHeader icon={Wrench}>{t.desktopSettings.networkTools}</SectionHeader>
         <div className="text-xs text-[var(--c-text-secondary)] mb-3">
           {t.desktopSettings.networkToolsDesc}
         </div>
+        <div aria-live="polite">{readError && <div className="text-xs text-red-500">{readError}</div>}</div>
+        <button type="button" className={btnSecondary} disabled={refreshing} onClick={() => { void load(); }}>{ds.connectorRefreshData}</button>
         {snapshot?.loadStatus === 'parse_failed' && (
           <div className="mb-3 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
             {t.desktopSettings.connectorConfigParseError}
@@ -4747,13 +5004,13 @@ function ToolsPane() {
         )}
       </Section>
 
-      <Section>
+      <Section key="connectors-search">
         <SectionHeader icon={Search}>{t.desktopSettings.searchProviderTitle}</SectionHeader>
         <div className="flex flex-col gap-3">
           {SEARCH_PROVIDERS.map(opt => {
             const checked = search.provider === opt.key;
             const disabled = !!opt.notImplemented;
-            const runtime = runtimeOf(opt.key);
+            const runtime = runtimeOf(`web_search.${opt.key}`);
             return (
               <Card key={opt.key} className={disabled ? 'opacity-60' : ''}>
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -4809,13 +5066,13 @@ function ToolsPane() {
         <TestButton kind="search" ds={t.desktopSettings} />
       </Section>
 
-      <Section>
+      <Section key="connectors-fetch">
         <SectionHeader icon={LinkIcon}>{t.desktopSettings.fetchProviderTitle}</SectionHeader>
         <div className="flex flex-col gap-3">
           {FETCH_PROVIDERS.map(opt => {
             const checked = fetchCfg.provider === opt.key;
             const disabled = !!opt.notImplemented;
-            const runtime = runtimeOf(opt.key);
+            const runtime = runtimeOf(`web_fetch.${opt.key}`);
             return (
               <Card key={opt.key} className={disabled ? 'opacity-60' : ''}>
                 <label className="flex items-start gap-3 cursor-pointer">

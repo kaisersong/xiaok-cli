@@ -1,3 +1,4 @@
+import {reportScheduledReadFailure} from '../lib/scheduled-timed-action-error';
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
@@ -102,10 +103,13 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     return () => window.removeEventListener('xiaok:gtd-enabled-changed', handler);
   }, []);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateReadError, setUpdateReadError] = useState('');
+  const updateGeneration = useRef(0);
   const [showUpdatePopover, setShowUpdatePopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const updateButtonRef = useRef<HTMLButtonElement>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab>('tasks');
+  const [scheduledReadUnavailable, setScheduledReadUnavailable] = useState(false);
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
   const [scheduledRuntimeTaskIds, setScheduledRuntimeTaskIds] = useState<Set<string>>(new Set());
@@ -136,7 +140,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             if (Array.isArray(mainItems)) {
               items = mergeScheduledTaskCache(mainItems as SidebarScheduledTask[], localItems);
             }
-          } catch { /* keep local cache */ }
+          } catch (error) { throw error; }
         }
 
         const runtimeTaskIds = new Set<string>();
@@ -144,7 +148,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         for (const item of items) {
           let runs: unknown[] = [];
           if (desktop?.getTimedActionRuns && item.id) {
-            runs = await desktop.getTimedActionRuns(item.id).catch(() => []);
+            runs = await desktop.getTimedActionRuns(item.id);
           }
           const collectedRuntimeTaskIds = collectScheduledRuntimeTaskIds(item, Array.isArray(runs) ? runs : []);
           for (const runtimeTaskId of collectedRuntimeTaskIds) runtimeTaskIds.add(runtimeTaskId);
@@ -169,7 +173,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         }
         setScheduledThreadIds(threadIds);
         setScheduledRuntimeTaskIds(runtimeTaskIds);
-      } catch { /* ignore */ }
+        setScheduledReadUnavailable(false);
+      } catch { if (!disposed) {setScheduledReadUnavailable(true);reportScheduledReadFailure();} }
     };
 
     const storageHandler = (e: StorageEvent) => {
@@ -209,16 +214,26 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     };
   }, []);
 
-  // Subscribe to update status
+  const readUpdateFacts = async () => {
+    const generation = ++updateGeneration.current;
+    try {
+      const next = await api.getUpdateStatus();
+      if (generation === updateGeneration.current) { setUpdateStatus(next); setUpdateReadError(''); }
+    } catch {
+      if (generation === updateGeneration.current) setUpdateReadError(t.desktopSettings.updaterProjectionUnavailable);
+    }
+  };
+  // Subscribe to the sole Main updater facts; events invalidate older held reads.
   useEffect(() => {
-    const unsub = api.onUpdateStatus((status) =>
-      setUpdateStatus(prev => ({
-        ...(status as UpdateStatus),
-        currentVersion: (status as UpdateStatus).currentVersion ?? prev?.currentVersion,
-      })),
-    );
-    api.getUpdateStatus().then(setUpdateStatus).catch(() => {});
-    return unsub;
+    const unsub = api.onUpdateStatus(status => {
+      ++updateGeneration.current;
+      setUpdateStatus(prev => ({ ...status, currentVersion: (status as UpdateStatus).currentVersion ?? prev?.currentVersion }));
+      setUpdateReadError('');
+    });
+    void readUpdateFacts();
+    return () => { ++updateGeneration.current; unsub(); };
+    // Stable mount subscription; explicit reads use the current Main API.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const routeTab: SidebarTab = routerLocation.pathname === '/scheduled' || routerLocation.pathname.startsWith('/automations')
@@ -336,6 +351,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       className="relative flex min-h-0 w-60 shrink-0 flex-col overflow-hidden border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
       style={{ paddingTop: 12 }}
     >
+      {updateReadError && <div role="alert" className="mx-3 mb-2 text-xs text-[var(--c-text-secondary)]"><p>{updateReadError}</p><button type="button" onClick={() => void readUpdateFacts()}>{t.desktopSettings.updaterRefreshData}</button></div>}
+      {scheduledReadUnavailable && <p role="alert" className="mx-3 mb-2 text-xs text-[var(--c-text-secondary)]">{t.scheduledProjectionUnavailable}</p>}
       {deleteError && <p role="alert" className="mx-3 mb-2 text-xs text-[var(--c-text-secondary)]">{deleteError}</p>}
       <nav data-testid="sidebar-main-navigation" className="mx-2 mb-3 flex shrink-0 flex-col gap-0.5 border-b border-[var(--c-border)] pb-3">
         {[
@@ -594,7 +611,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                           type="button"
                           onClick={async () => {
                             setShowUpdatePopover(false);
-                            try { await api.quitAndInstall(); } catch (e) { log.error('quitAndInstall failed', e); }
+                            ++updateGeneration.current;
+                            try { const result = await api.quitAndInstall(); if (!result || result.status === 'rejected_sync' || result.status === 'pending_error_sticky') setUpdateReadError(t.desktopSettings.updaterOperationUnknown); } catch { setUpdateReadError(t.desktopSettings.updaterOperationUnknown); }
                           }}
                           disabled={Boolean(updateStatus?.installing)}
                           className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
@@ -611,7 +629,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                         <button
                           type="button"
                           onClick={async () => {
-                            try { await api.checkForUpdates(); } catch (e) { log.error('checkForUpdates failed', e); }
+                            ++updateGeneration.current;
+                            try { await api.checkForUpdates(); await readUpdateFacts(); } catch { setUpdateReadError(t.desktopSettings.updaterOperationUnknown); }
                           }}
                           className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
                         >

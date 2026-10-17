@@ -31,7 +31,7 @@ describe('ConnectorsStore', () => {
     await store.save({
       search: { provider: 'tavily', tavilyApiKey: 'tvly-secret' },
       fetch: { provider: 'jina', jinaApiKey: 'jina-key' },
-    });
+    }, {requestSource:'user'});
 
     const persistedJson = JSON.parse(readFileSync(join(dataRoot, 'connectors.json'), 'utf-8'));
     expect(persistedJson.schemaVersion).toBe(1);
@@ -55,7 +55,7 @@ describe('ConnectorsStore', () => {
     const loaded = store.load();
     expect(loaded.config.search.tavilyApiKey).toBe('tvly-example');
     expect(readFileSync(file, 'utf8')).toBe(legacy);
-    await store.save({ search: { provider: 'tavily', tavilyApiKey: '  "tavily: tvly-example"  ' }, fetch: { provider: 'basic' } });
+    await store.save({ search: { provider: 'tavily', tavilyApiKey: '  "tavily: tvly-example"  ' }, fetch: { provider: 'basic' } }, {requestSource:'user'});
     expect(JSON.parse(readFileSync(file, 'utf8')).search.tavilyApiKey).toBe('tvly-example');
     expect(new ConnectorsStore({ dataRoot }).load().config.search.tavilyApiKey).toBe('tvly-example');
   });
@@ -81,11 +81,11 @@ describe('ConnectorsStore', () => {
     await store.save({
       search: { provider: 'tavily', tavilyApiKey: 'key1' },
       fetch: { provider: 'basic' },
-    });
+    }, {requestSource:'user'});
     await store.save({
       search: { provider: 'brave', braveApiKey: 'key2' },
       fetch: { provider: 'jina', jinaApiKey: 'jina2' },
-    });
+    }, {requestSource:'user'});
 
     const reloaded = store.load();
     expect(reloaded.status).toBe('ok');
