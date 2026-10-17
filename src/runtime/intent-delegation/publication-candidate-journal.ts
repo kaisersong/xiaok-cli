@@ -418,7 +418,9 @@ export function parseIntentPublicationCandidates(ledger: IntentPublicationReader
     return freeze(raw);
 }
 /** Capture source data only; actual native/verification remains in the fixed host. */
-export function applyIntentPublicationMutation(previous: PersistedSessionSnapshot, input: IntentPublicationMutation): PersistedSessionSnapshot {
+export function applyIntentPublicationMutation(previous: PersistedSessionSnapshot, input: IntentPublicationMutation): PersistedSessionSnapshot;
+export function applyIntentPublicationMutation(previous: StoredSessionSnapshot, input: IntentPublicationMutation): StoredSessionSnapshot;
+export function applyIntentPublicationMutation(previous: StoredSessionSnapshot, input: IntentPublicationMutation): StoredSessionSnapshot {
     if (input.publicationAction === 'receiver') return applyIntentReceiverMutation(previous,input);
     if (input.publicationAction === 'verification') return applyIntentVerificationMutation(previous,input);
     return applyIntentPublicationCapture(previous, input);
@@ -589,21 +591,38 @@ export function intentPublicationRouteVector(ledger:StoredSessionIntentLedgerInp
         throw Error('intent_candidate_route');
     return json(route);
 }
-export function assertIntentPublicationRoute(ledger: SessionIntentLedger | undefined, original: string, candidateId?: string|null): void { if (intentPublicationMutationRouteVector(ledger, candidateId) !== original)
+export function assertIntentPublicationRoute(ledger: SessionIntentLedger | undefined, original: string, candidateId?: string|null): void;
+export function assertIntentPublicationRoute(ledger: StoredSessionIntentLedgerInput | undefined, original: string, candidateId?: string|null): void;
+export function assertIntentPublicationRoute(ledger: StoredSessionIntentLedgerInput | undefined, original: string, candidateId?: string|null): void { if (intentPublicationMutationRouteVector(ledger, candidateId) !== original)
     throw Error('intent_candidate_route'); }
 
+function mutationVerificationCandidateId(value:unknown,input:{readonly id:string}):string|null|undefined{
+ if(value===null||value===undefined)return undefined;const row=captureRows(value).find(row=>captureFact(row).id===input.id);if(row===undefined)return undefined;
+ const candidateId=captureFact(row).candidateId;return candidateId===null||candidateId===undefined?candidateId:captureText(candidateId);
+}
+function mutationCandidateById(value:unknown,candidateId:string):Record<string,unknown>|undefined{
+ if(value===null||value===undefined)return undefined;const row=captureRows(value).find(row=>captureFact(row).id===candidateId);return row===undefined?undefined:captureFact(row);
+}
+function mutationCandidateByStage(value:unknown,record:Pick<StoredIntentRecordInput,'intentId'>,stage:Pick<StoredStageInput,'stageId'>):Record<string,unknown>|undefined{
+ if(value===null||value===undefined)return undefined;const row=captureRows(value).find(row=>{const fact=captureFact(row);return fact.intentId===record.intentId&&fact.stageId===stage.stageId;});return row===undefined?undefined:captureFact(row);
+}
+
 /** Fixed local mutation fence, distinct from the stored single application route. */
-export function intentPublicationMutationCandidateId(ledger:SessionIntentLedger|undefined,input:IntentPublicationMutation):string|null|undefined{
+export function intentPublicationMutationCandidateId(ledger:SessionIntentLedger|undefined,input:IntentPublicationMutation):string|null|undefined;
+export function intentPublicationMutationCandidateId(ledger:StoredSessionIntentLedgerInput|undefined,input:IntentPublicationMutation):string|null|undefined;
+export function intentPublicationMutationCandidateId(ledger:StoredSessionIntentLedgerInput|undefined,input:IntentPublicationMutation):string|null|undefined{
  if(input.publicationAction==='reserve-parent')return null;
  if('candidateId'in input)return input.candidateId;
- if(input.publicationAction==='verification'&&'id'in input)return ledger?.verificationExecutions?.find(r=>r.id===input.id)?.candidateId;
+ if(input.publicationAction==='verification'&&'id'in input)return mutationVerificationCandidateId(ledger?.verificationExecutions,input);
  return undefined;
 }
-export function intentPublicationMutationRouteVector(ledger:SessionIntentLedger|undefined,candidateId?:string|null):string{
- const candidate=candidateId?ledger?.publicationCandidates?.find(c=>c.id===candidateId):undefined;
+export function intentPublicationMutationRouteVector(ledger:SessionIntentLedger|undefined,candidateId?:string|null):string;
+export function intentPublicationMutationRouteVector(ledger:StoredSessionIntentLedgerInput|undefined,candidateId?:string|null):string;
+export function intentPublicationMutationRouteVector(ledger:StoredSessionIntentLedgerInput|undefined,candidateId?:string|null):string{
+ const candidate=candidateId?mutationCandidateById(ledger?.publicationCandidates,candidateId):undefined;
  if(candidateId!==null&&candidate?.stageId!==null)return intentPublicationRouteVector(ledger,candidateId);
  if(!ledger)throw Error('intent_candidate_current');const intentId=candidate?.intentId??ledger.activeIntentId,record=ledger.intents.find(r=>r.intentId===intentId);if(!record)throw Error('intent_candidate_current');
  const root=readInstalledCurrentOwner(intentHostSubjectOwner({version:1,sessionId:ledger.sessionId,intentId:record.intentId,stageId:null}));if(!['migrated','protected-unregistered'].includes(root.kind))throw Error('intent_candidate_route');
- const children=record.stages.map(s=>{const child=ledger.publicationCandidates?.find(c=>c.intentId===record.intentId&&c.stageId===s.stageId),route=readInstalledCurrentOwner(intentHostSubjectOwner({version:1,sessionId:ledger.sessionId,intentId:record.intentId,stageId:s.stageId}));if(!child)throw Error('intent_candidate_route');return route;});
+ const children=captureStages(record.stages).map(s=>{const child=mutationCandidateByStage(ledger.publicationCandidates,record,s),route=readInstalledCurrentOwner(intentHostSubjectOwner({version:1,sessionId:ledger.sessionId,intentId:record.intentId,stageId:s.stageId}));if(!child)throw Error('intent_candidate_route');return route;});
  return json({root,children});
 }

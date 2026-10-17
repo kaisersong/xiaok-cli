@@ -12,11 +12,11 @@ import {parseIntentHostSubject,type IntentHostSubject} from '../../../runtime/ve
 import {parseIntentNativeContracts} from '../../../runtime/intent-delegation/native-contract-journal.js';
 import {parseIntentPublicationCandidates} from '../../../runtime/intent-delegation/publication-candidate-journal.js';
 import {parseIntentVerificationExecutions} from '../../../runtime/intent-delegation/verification-execution-journal.js';
-import type {PersistedSessionSnapshot} from './store.js';
+import type {PersistedSessionSnapshot, StoredSessionSnapshot} from './store.js';
 export const SESSION_SCHEMA_VERSION=1;
-export interface PersistedSessionDocument extends PersistedSessionSnapshot{schemaVersion:typeof SESSION_SCHEMA_VERSION}
+export interface PersistedSessionDocument extends StoredSessionSnapshot{schemaVersion:typeof SESSION_SCHEMA_VERSION}
 export interface SessionDeletionJournal {version:1;sessionId:string;operationId:string;deletedAt:number;state:'pending'|'committed';snapshotHash:string;closure:NonNullable<PersistedSessionSnapshot['protectedObservationClosure']>}
-export function parseFileSessionSnapshot(raw: string, sessionId: string, preserveIntent = false): PersistedSessionSnapshot {
+export function parseFileSessionSnapshot(raw: string, sessionId: string, preserveIntent = false): StoredSessionSnapshot {
     const parsed = JSON.parse(raw) as Partial<PersistedSessionDocument>;
     if (parsed.schemaVersion !== SESSION_SCHEMA_VERSION) {
       throw new Error('session_snapshot_schema_unsupported');
@@ -46,7 +46,7 @@ export function parseFileSessionSnapshot(raw: string, sessionId: string, preserv
       skillExecution: snapshot.skillExecution
         ? cloneSessionSkillExecutionState(snapshot.skillExecution)
         : undefined,
-    } as PersistedSessionSnapshot;
+    };
 }
 
 /** Statements contained in one captured file; the full collector must verify
@@ -82,7 +82,7 @@ export function readCapturedSessionDocument(raw: string, sessionId: string) {
   lineage.forEach(capturedIdentity);
   if (snapshot.forkedFromSessionId !== undefined) capturedIdentity(snapshot.forkedFromSessionId);
   const subjects = new Map<string, Readonly<IntentHostSubject>>();
-  const add = (intentId: string, stageId: string | null) => {
+  const add = (intentId: string, stageId: unknown) => {
     const subject = parseIntentHostSubject({version: 1, sessionId, intentId, stageId});
     subjects.set(JSON.stringify([intentId, stageId]), subject);
   };
@@ -96,7 +96,7 @@ export function readCapturedSessionDocument(raw: string, sessionId: string) {
     for (const record of ledger.intents) {
       if (!record || record.sessionId !== sessionId || ids.has(record.intentId) || !Array.isArray(record.stages)) throw Error('captured_session_intent');
       add(record.intentId, null); ids.add(record.intentId);
-      const stages = new Set<string>();
+      const stages = new Set<unknown>();
       for (const stage of record.stages) {
         if (!stage || stages.has(stage.stageId)) throw Error('captured_session_intent_stage');
         add(record.intentId, stage.stageId); stages.add(stage.stageId);

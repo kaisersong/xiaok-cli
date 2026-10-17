@@ -37,10 +37,11 @@ async function goalFixture(){
  const second=createGoalState({sessionId:'session',objective:'second',expectedEvidenceKinds:['answer'],now:5});await store.commit({sessionId:'session',expectedRevision:1,next:second,events:[],turns:[],evidence:[]});
  return {store,first,second,intent,retry,path:join(r,'session.goal.json'),raw:readFileSync(join(r,'session.goal.json'),'utf8')};
 }
+function assertDeclaredStageLists<T extends {stages?:unknown}>(records:T[]):asserts records is Array<T & {stages:unknown[]}>{for(const record of records)if(!Array.isArray(record.stages))throw TypeError('fixture_captured_stages');}
 it('reads actual Session/native history as declarations while keeping lineage/fork separate',async()=>{
  const {readCapturedFileSession}=await import('../../../src/ai/runtime/session-store/file-store.js');const f=await sessionFixture(true),before=await f.store.load('session');
  const facts=readCapturedFileSession(f.raw,'session');expect(facts.kind).toBe('captured-source-declarations');expect(facts.containerSessionId).toBe('session');expect(facts.storedSessionIdentity).toBe('present');expect(facts.lineageReferences).toEqual(['ancestor','session']);expect(facts.forkReference).toBe('ancestor');
- const ledger=before!.intentDelegation!;expect(new Set(facts.intentSubjects.map(row=>row.intentId))).toEqual(new Set(ledger.intents.map(row=>row.intentId)));expect(facts.intentSubjects).toHaveLength(ledger.intents.reduce((n,row)=>n+1+row.stages.length,0));
+ const ledger=before!.intentDelegation!;expect(new Set(facts.intentSubjects.map(row=>row.intentId))).toEqual(new Set(ledger.intents.map(row=>row.intentId)));assertDeclaredStageLists(ledger.intents);expect(facts.intentSubjects).toHaveLength(ledger.intents.reduce((n,row)=>n+1+row.stages.length,0));
  expect(Object.isFrozen(facts)).toBe(true);expect(Object.isFrozen(facts.intentSubjects)).toBe(true);expect(Object.isFrozen(facts.intentSubjects[0])).toBe(true);expect(await f.store.load('session')).toEqual(before);expect(readFileSync(f.path,'utf8')).toBe(f.raw);
 });
 it.each(['absent','null'] as const)('preserves the original legacy Session container without assigning reference ownership: %s',async mode=>{

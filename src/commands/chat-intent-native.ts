@@ -1,3 +1,5 @@
+import type {StoredSessionIntentLedgerInput} from '../runtime/intent-delegation/stored-intent-clone.js';
+import {readNativeLookupRows,readNativeLookupSubjects,readNativeOriginalIntent,assertContinuationPlanData} from '../runtime/intent-delegation/chat-intent-data.js';
 import {closeSync,constants,fstatSync,openSync,readSync} from 'node:fs';
 import {captureIntentData} from '../runtime/intent-delegation/intent-commit-boundary.js';
 import {parseGoalVerificationDefinition} from '../runtime/goal/verification-definition.js';
@@ -26,12 +28,16 @@ export function parseIntentNativeCommand(input:string):IntentNativeCommand|null{
 }
 
 /** Pure lexical selection for the fixed CLI. This is not an execution grant. */
-export function prepareIntentNativeContinuation(ledger:import('../runtime/intent-delegation/types.js').SessionIntentLedger|undefined,input:string,hasAttachments:boolean):null|{plan:import('../ai/intent-delegation/types.js').IntentPlanDraft;text:string;basis:string}{
+type NativeContinuationData = null|{plan:import('../ai/intent-delegation/types.js').IntentPlanDraft;text:string;basis:string};
+export function prepareIntentNativeContinuation(ledger:import('../runtime/intent-delegation/types.js').SessionIntentLedger|undefined,input:string,hasAttachments:boolean):NativeContinuationData;
+export function prepareIntentNativeContinuation(ledger:StoredSessionIntentLedgerInput|undefined,input:string,hasAttachments:boolean):NativeContinuationData;
+export function prepareIntentNativeContinuation(ledger:StoredSessionIntentLedgerInput|undefined,input:string,hasAttachments:boolean):NativeContinuationData{
  if(!ledger||hasAttachments||!/^(继续|继续执行|continue|resume)$/iu.test(input.trim()))return null;
- const actual=captureIntentData(ledger),native=actual.nativeContracts?.find(row=>row.intentId===actual.activeIntentId),record=actual.intents.find(row=>row.intentId===actual.activeIntentId);
- if(!native||!record||native.subjects.some(subject=>subject.attempts.at(-1)?.phase!=='enrolled')||!['drafting_plan','executing','recovering'].includes(record.overallStatus))return null;
+ const actual=captureIntentData(ledger),native=readNativeLookupRows(actual.nativeContracts)?.find(row=>row.intentId===actual.activeIntentId),record=actual.intents.find(row=>row.intentId===actual.activeIntentId);
+ if(!native||!record||readNativeLookupSubjects(native.subjects).some(subject=>subject.attempts.at(-1)?.phase!=='enrolled')||!(['drafting_plan','executing','recovering'] as readonly unknown[]).includes(record.overallStatus))return null;
+ assertContinuationPlanData(record);
  const stage=record.stages.find(row=>row.stageId===record.activeStageId),step=stage?.steps.find(row=>row.stepId===record.activeStepId);
- if(!stage||!step||stage.status==='publication_pending'||stage.status==='completed'||record.executionTerminals?.some(row=>row.kind==='step'&&row.identity===record.activeStepId))return null;
+ if(!stage||!step||stage.status==='publication_pending'||stage.status==='completed'||record.executionTerminals?.some((row:{readonly kind?:unknown;readonly identity?:unknown})=>row.kind==='step'&&row.identity===record.activeStepId))return null;
  const {instanceId,intentId,sessionId,rawIntent,normalizedIntent,providedSourcePaths,intentType,deliverable,finalDeliverable,explicitConstraints,delegationBoundary,riskTier,intentMode,segmentationConfidence,templateId,stages,steps}=record;
- return {basis:intentNativeLedgerHash(actual),plan:{instanceId,intentId,sessionId,rawIntent,normalizedIntent,...(providedSourcePaths?{providedSourcePaths}:{}),intentType,deliverable,finalDeliverable,explicitConstraints,delegationBoundary,riskTier,intentMode,segmentationConfidence,templateId,stages,steps,continuationMode:'continue_active'},text:`继续执行已登记的原始任务，保持原合同、材料、全部义务和边界不变。\n原始任务：${native.originalDraft.rawIntent}\n原意图：${record.intentId}\n当前阶段：${record.activeStageId}\n当前步骤：${record.activeStepId}\n任务执行结束只报告实际执行与产物，不声明独立验证或业务发布已完成。`};
+ return {basis:intentNativeLedgerHash(actual),plan:{instanceId,intentId,sessionId,rawIntent,normalizedIntent,...(providedSourcePaths?{providedSourcePaths}:{}),intentType,deliverable,finalDeliverable,explicitConstraints,delegationBoundary,riskTier,intentMode,segmentationConfidence,templateId,stages,steps,continuationMode:'continue_active'},text:`继续执行已登记的原始任务，保持原合同、材料、全部义务和边界不变。\n原始任务：${readNativeOriginalIntent(native.originalDraft)}\n原意图：${record.intentId}\n当前阶段：${record.activeStageId}\n当前步骤：${record.activeStepId}\n任务执行结束只报告实际执行与产物，不声明独立验证或业务发布已完成。`};
 }

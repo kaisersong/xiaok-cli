@@ -1,3 +1,4 @@
+import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
 import { confirmChatPermission } from './chat-permission.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import {parseIntentReceiverCommand,intentReceiverHelp} from './chat-intent-receiver.js';
@@ -724,9 +725,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const captureNativeInputOrigin=(text:string)=>{const token={};nativeInputOrigins.set(token,text);return token;};
   let preparedNativeContinuation:{turnToken:string;selection:NonNullable<ReturnType<typeof prepareIntentNativeContinuation>>}|undefined;
   let nativeExecutionTurn=false;
-  const hasActiveNativeIntent=()=>{const actual=sessionStore.getIntentNativeLedgerSync(sessionId);return !!actual?.nativeContracts?.some(row=>row.intentId===actual.activeIntentId);};
+  const hasActiveNativeIntent=()=>{const actual=sessionStore.getIntentNativeLedgerSync(sessionId);return !!(actual&&readNativeLookupRows(actual.nativeContracts)?.some(row=>row.intentId===actual.activeIntentId));};
   const assertNoGoalForNativeIntent=()=>{if(isGoalArmed()||goalTurnDrafts.size||settledGoalTurns.length||pendingGoalCompleteSummary||pendingGoalBlockedClaim||goalPublicationWork||currentGoalState?.pendingCompletionIntentId)throw Error('intent_goal_execution_conflict');};
-  const assertIntentNativeExecutionReady=()=>{const actual=sessionStore.getIntentNativeLedgerSync(sessionId);if(actual?.nativeContracts?.some(row=>row.intentId===actual.activeIntentId))throw Error('intent_native_execution_current_required');};
+  const assertIntentNativeExecutionReady=()=>{const actual=sessionStore.getIntentNativeLedgerSync(sessionId);if(actual&&readNativeLookupRows(actual.nativeContracts)?.some(row=>row.intentId===actual.activeIntentId))throw Error('intent_native_execution_current_required');};
 
   type RuntimeTurnRequestArg = Parameters<RuntimeFacade['runTurn']>[0];
   type RuntimeTurnChunkHandler = Parameters<RuntimeFacade['runTurn']>[1];
@@ -854,7 +855,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   releaseAfterBootstrap = releaseDrainedSessionOwnership;
 
-  if(persistedIntentLedger?.nativeContracts?.length){
+  if(readNativeJournalLength(persistedIntentLedger?.nativeContracts)){
     if(ownershipMode==='fork')throw Error('intent_native_fork_requires_original_contract');
     const authority=intentAuthority(),lease=await authority.acquire({invocationId:`intent-native-ownership-${randomUUID()}`,kind:'direct-mutation'});
     try{const original=sessionStore.getIntentNativeLedgerSync(sessionId);await trackSessionWrite(async () => { await sessionStore.transitionIntentSessionOwnership({sessionId,instanceId,expectedLedgerHash:intentNativeLedgerHash(original),action:ownershipMode==='takeover'?'takeover':'resume',confirmHighRisk:opts.confirmHighRiskTakeover===true,requestSource:'user',now:Date.now(),lease}); });currentIntentLedger=sessionStore.getIntentNativeLedgerSync(sessionId)!;}finally{await lease.releaseAfterDrain();}
@@ -1442,7 +1443,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
   const lifecycleHookDenied = (): boolean => {
     const actual = sessionStore.getIntentNativeLedgerSync(sessionId);
-    return !!(intentVerificationDefinition || actual?.nativeContracts?.length || productObservation?.summary.compoundExecution);
+    return !!(intentVerificationDefinition || readNativeJournalLength(actual?.nativeContracts) || productObservation?.summary.compoundExecution);
   };
   const runLifecycleHooks:typeof lifecycleHooks.runHooks=async(event,payload)=>{
     if(lifecycleHookDenied())return {ok:false,message:'intent_native_execution_current_required'};
@@ -1560,7 +1561,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if(hasActiveNativeIntent())throw Error('intent_native_history_writer_required');
           await sessionStore.save({ ...snapshot,
           sessionId, cwd, model: adapter.getModelName(), createdAt: sessionCreatedAt, updatedAt: Date.now(),
-          forkedFromSessionId, lineage: sessionLineage, intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+          forkedFromSessionId, lineage: sessionLineage, intentDelegation: (readNativeJournalLength(currentIntentLedger.nativeContracts) ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
           skillEval: currentSkillEvalState, skillExecution: currentSkillExecutionState });} });
       // Isolate both executable tools and provider schemas. The shared registry
       // remains authoritative for permission changes and native replacement.
@@ -1655,7 +1656,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     skillExecution: currentSkillExecutionState,
   }));
 
-  if(intentVerificationDefinition||currentIntentLedger.nativeContracts?.length){
+  if(intentVerificationDefinition||readNativeJournalLength(currentIntentLedger.nativeContracts)){
     intentNativeHost=createIntentNativeContractHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_native_product_revoked');}});
     intentPublicationHost=createIntentPublicationHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,workspaceRoot:cwd,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_publication_product_revoked');}});
     intentReceiverHost=createIntentReceiverPublicationHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,workspaceRoot:cwd,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_receiver_product_revoked');}});
@@ -2491,14 +2492,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     currentIntentLedger = await intentLedgerStore.updateIntent(sessionId, intentId, {
       overallStatus: 'completed',
-      latestReceipt: intent.latestReceipt ?? `Completed ${intent.finalDeliverable || intent.deliverable}`,
+      latestReceipt: readIntentText(intent.latestReceipt ?? `Completed ${intent.finalDeliverable || intent.deliverable}`, 'latestReceipt'),
       blockedReason: '',
     });
   };
 
   const createConfiguredIntentBoundaryResolver = (): ReturnType<IntentBoundaryResolverFactory> => {
     const originalBoundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
-    const boundaryConfig = intentVerificationDefinition || currentIntentLedger.nativeContracts?.length ? {...originalBoundaryConfig,llmClassifier:'off' as const} : originalBoundaryConfig;
+    const boundaryConfig = intentVerificationDefinition || readNativeJournalLength(currentIntentLedger.nativeContracts) ? {...originalBoundaryConfig,llmClassifier:'off' as const} : originalBoundaryConfig;
     const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
     return resolverFactory({
       config: boundaryConfig,
@@ -2527,9 +2528,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     const user=!!origin&&nativeInputOrigins.get(origin)===input;if(origin)nativeInputOrigins.delete(origin);
     preparedNativeContinuation=undefined;nativeExecutionTurn=false;
     const turnToken = beginPreparedIntentTurnContext();
-    const canonical=sessionStore.getIntentNativeLedgerSync(sessionId),activeNative=canonical?.nativeContracts?.find(row=>row.intentId===canonical.activeIntentId);
+    const canonical=sessionStore.getIntentNativeLedgerSync(sessionId),activeNative=canonical===undefined?undefined:readNativeLookupRows(canonical.nativeContracts)?.find(row=>row.intentId===canonical.activeIntentId);
     if((intentVerificationDefinition||activeNative)&&!user){intentTurnState.setPlan(turnToken,undefined);return;}
-    const stale=activeNative?.subjects.some(row=>row.attempts.at(-1)?.phase==='stale')&&!activeNative?.subjects.some(row=>row.attempts.at(-1)?.phase==='enrolling');
+    const stale=activeNative!==undefined&&readNativeLookupSubjects(activeNative.subjects).some(row=>row.attempts.at(-1)?.phase==='stale')&&!readNativeLookupSubjects(activeNative.subjects).some(row=>row.attempts.at(-1)?.phase==='enrolling');
     if(activeNative&&!stale){
       assertNoGoalForNativeIntent();const selection=prepareIntentNativeContinuation(canonical,input,hasAttachments);
       intentTurnState.setPlan(turnToken,selection?.plan);if(selection){currentIntentLedger=canonical!;preparedNativeContinuation={turnToken,selection};intentTurnState.setActiveIntentReminderBlock(turnToken,buildIntentReminderBlock(currentIntentLedger,instanceId));}return;
@@ -2628,9 +2629,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     const turnIntentPlan = snapshot.currentTurnIntentPlan;
     const turnToken = snapshot.activeTurnToken;
     const actual=sessionStore.getIntentNativeLedgerSync(sessionId);
-    const activeNative=actual?.nativeContracts?.find(row=>row.intentId===actual.activeIntentId);
+    const activeNative=actual===undefined?undefined:readNativeLookupRows(actual.nativeContracts)?.find(row=>row.intentId===actual.activeIntentId);
     if(preparedNativeContinuation){if(preparedNativeContinuation.turnToken!==turnToken||intentNativeLedgerHash(actual)!==preparedNativeContinuation.selection.basis)return false;currentIntentLedger=actual!;return true;}
-    const staleGeneration=activeNative?.subjects.some(s=>s.attempts.at(-1)!.phase==='stale')&&!activeNative.subjects.some(s=>s.attempts.at(-1)!.phase==='enrolling');
+    const staleGeneration=activeNative!==undefined&&readNativeLookupSubjects(activeNative.subjects).some(s=>s.attempts.at(-1)!.phase==='stale')&&!readNativeLookupSubjects(activeNative.subjects).some(s=>s.attempts.at(-1)!.phase==='enrolling');
     if(activeNative&&!(staleGeneration&&intentVerificationDefinition&&turnIntentPlan?.continuationMode==='new_intent'))return false;
     if (!turnIntentPlan || !turnToken) {
       return true;
@@ -2641,7 +2642,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       currentIntentLedger=sessionStore.getIntentNativeLedgerSync(sessionId)!;
       return false;
     }
-    if(currentIntentLedger.nativeContracts?.some(row=>row.intentId===currentIntentLedger.activeIntentId))return false;
+    if(readNativeLookupRows(currentIntentLedger.nativeContracts)?.some(row=>row.intentId===currentIntentLedger.activeIntentId))return false;
 
     const beforeIntentCount = currentIntentLedger.intents.length;
     currentIntentLedger = await bootstrapTurnIntentPlan(
@@ -2749,7 +2750,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       updatedAt: Date.now(),
       forkedFromSessionId,
       lineage: sessionLineage,
-      intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+      intentDelegation: (readNativeJournalLength(currentIntentLedger.nativeContracts) ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
       skillEval: currentSkillEvalState,
       skillExecution: currentSkillExecutionState,
     });
@@ -4442,7 +4443,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     if (trimmed === '/yzjchannel') {
-      if(intentVerificationDefinition||sessionStore.getIntentNativeLedgerSync(sessionId)?.nativeContracts?.length){writeCommandOutput(trimmed,'intent_native_execution_current_required：此原 Intent 会话不能开启未绑定的后台模型入口。\n');return 'continue';}
+      if(intentVerificationDefinition||readNativeJournalLength(sessionStore.getIntentNativeLedgerSync(sessionId)?.nativeContracts)){writeCommandOutput(trimmed,'intent_native_execution_current_required：此原 Intent 会话不能开启未绑定的后台模型入口。\n');return 'continue';}
       if (productObservation) { writeCommandOutput(trimmed, 'SOL_PI_CHANNEL_NOT_READY：观察归档仅限当前本地会话；外部通道请退出后新建普通会话。\n'); return 'continue'; }
       if (embeddedChannels.length > 0) {
         writeCommandOutput(trimmed, '已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');

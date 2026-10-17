@@ -1,3 +1,7 @@
+import type {StoredStageInput} from '../intent-delegation/stored-intent-clone.js';
+function compoundIntentStageRows(value:StoredStageInput[]|null|undefined):StoredStageInput[]{
+ if(!Array.isArray(value))throw Error('intent_stage_context_stages');return value;
+}
 import {assertIntentStagePrefix,intentStageMessages,intentStageMessagesHash} from '../intent-delegation/stage-context.js';
 import {parseIntentPublicationCandidates} from '../intent-delegation/publication-candidate-journal.js';
 import {hasProtectedIntentProducerHistory} from '../intent-delegation/intent-commit-boundary.js';
@@ -73,7 +77,7 @@ export function prepareCompoundRootIntentStageView(session:AgentSessionState,log
  const ordinary=()=>({messages:all,active:false,assertCurrent(){},dispose(){}});
  if(!state)return ordinary();state.current();const ledger=state.store.getIntentNativeLedgerSync?.(state.sessionId);
  if(!ledger||!hasProtectedIntentProducerHistory(ledger))return ordinary();
- const record=ledger.intents.find(r=>r.intentId===ledger.activeIntentId),stage=record?.stages.find(r=>r.stageId===record.activeStageId);
+ const record=ledger.intents.find(r=>r.intentId===ledger.activeIntentId),stage=record?compoundIntentStageRows(record.stages).find(r=>r.stageId===record.activeStageId):undefined;
  if(!record||!stage||stage.order===0)return ordinary();
  const candidates=parseIntentPublicationCandidates(ledger).filter(c=>c.intentId===record.intentId&&c.businessProjection?.nextStageContext?.stageId===stage.stageId);
  if(candidates.length!==1||stage.needsFreshContextHandoff)throw Error('intent_stage_context_required');
@@ -145,8 +149,8 @@ async function createProviderAdmission(input:{chain:SessionExecutionChain;parent
   if(child.store&&(!intentRoot||child.sessionIdentity!==intentRoot.sessionId||child.root!==root.root))checks.push(await prepareIntentProviderCurrent({store:child.store,sessionId:child.sessionIdentity,instanceId:undefined,signal:active}));
   const check=()=>{live();active.throwIfAborted();permission();for(const value of checks)value();};check();return check;
  }
- function parentCurrent(){const rows=ancestors.map((ancestor,index)=>{const store=ancestor.store as SessionStore&{loadSync?:(id:string)=>import('../../ai/runtime/session-store/store.js').PersistedSessionSnapshot|null},read=store.loadSync?.bind(store);if(!read)throw Error('compound_parent_sync_reader_required');const row=read(ancestor.sessionIdentity)?.compoundOperations?.directOperations?.find(value=>value.id===ancestor.operationId);if(!row||row.stage!=='started'||row.delegation?.state!=='live'||row.delegation.childPhase!=='running'||row.delegation.generation!==ancestor.generation||row.delegation.childSessionIdentity!==(ancestors[index+1]??child).sessionIdentity||realpathSync(row.delegation.childStoreRoot)!==(ancestors[index+1]??child).root)throw Error('compound_parent_admission_not_current');return {ancestor,read,row:structuredClone(row)};});
-  const store=child.store as (SessionStore&{loadSync?:(id:string)=>import('../../ai/runtime/session-store/store.js').PersistedSessionSnapshot|null})|undefined,readChild=store?.loadSync?.bind(store),managed=readChild?.(child.sessionIdentity)?.compoundOperations?.managedTurns?.records.at(-1);
+ function parentCurrent(){const rows=ancestors.map((ancestor,index)=>{const store=ancestor.store,read=store.loadSync?.bind(store);if(!read)throw Error('compound_parent_sync_reader_required');const row=read(ancestor.sessionIdentity)?.compoundOperations?.directOperations?.find(value=>value.id===ancestor.operationId);if(!row||row.stage!=='started'||row.delegation?.state!=='live'||row.delegation.childPhase!=='running'||row.delegation.generation!==ancestor.generation||row.delegation.childSessionIdentity!==(ancestors[index+1]??child).sessionIdentity||realpathSync(row.delegation.childStoreRoot)!==(ancestors[index+1]??child).root)throw Error('compound_parent_admission_not_current');return {ancestor,read,row:structuredClone(row)};});
+  const store=child.store,readChild=store?.loadSync?.bind(store),managed=readChild?.(child.sessionIdentity)?.compoundOperations?.managedTurns?.records.at(-1);
   return ()=>{for(const item of rows)if(!isDeepStrictEqual(item.read(item.ancestor.sessionIdentity)?.compoundOperations?.directOperations?.find(row=>row.id===item.ancestor.operationId),item.row))throw Error('compound_parent_admission_not_current');if(managed&&!isDeepStrictEqual(readChild?.(child.sessionIdentity)?.compoundOperations?.managedTurns?.records.at(-1),managed))throw Error('compound_managed_turn_not_active');};
  }
  async function assertParent(scope:AcquiredSessionExecutionChain){

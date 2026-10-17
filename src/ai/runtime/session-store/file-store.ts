@@ -163,6 +163,7 @@ type CommitMutation = IntentExecutionTerminalInput | IntentProducerActionInput |
 type KnownSessionWriter={fence:ReturnType<typeof createKnownDirectoryWriterFence>;closed:boolean;pending?:Promise<void>;forks:Set<Promise<unknown>>;unknownCleanup:Set<unknown>};
 const knownSessionWriters=new WeakMap<object,KnownSessionWriter>();
 const acceptedSessionForks=new WeakMap<object,KnownSessionWriter>();
+import {nativeJournalLengthData} from '../../../runtime/intent-delegation/data.js';
 type TerminalLookupData = {readonly kind?:unknown;readonly identity?:unknown;readonly status?:unknown;readonly recordedAt?:unknown};
 export class FileSessionStore implements SessionStore {
   private readonly reader:FileSessionReader;
@@ -200,7 +201,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   private readonly commitNotifications = new SessionCommitNotifications();
-  onCommit(listener: (snapshot: PersistedSessionSnapshot) => void): () => void {
+  onCommit(listener: (snapshot: StoredSessionSnapshot) => void): () => void {
     return this.commitNotifications.subscribe(listener);
   }
 
@@ -212,8 +213,8 @@ export class FileSessionStore implements SessionStore {
   assertIntentNativeLease(sessionId:string,requestSource:'user'|'scheduler',lease:SessionExecutionLease):void {
     assertSessionExecutionLease(lease,{root:this.rootDir,sessionIdentity:sessionId,requestSource,allowedKinds:['direct-mutation','recovery']});
   }
-  async getIntentNativeLedger(sessionId:string):Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger|undefined>{return this.getIntentNativeLedgerSync(sessionId);}
-  getIntentNativeLedgerSync(sessionId:string):import('../../../runtime/intent-delegation/types.js').SessionIntentLedger|undefined{
+  async getIntentNativeLedger(sessionId:string):Promise<StoredSessionSnapshot['intentDelegation']>{return this.getIntentNativeLedgerSync(sessionId);}
+  getIntentNativeLedgerSync(sessionId:string):StoredSessionSnapshot['intentDelegation']{
     const snapshot=this.readSnapshot(sessionId,true);if(!snapshot)return undefined;parseIntentNativeContracts(snapshot.intentDelegation?.nativeContracts,sessionId);return freezeIntentNativeLedger(captureIntentSnapshot(snapshot).intentDelegation);
   }
   async recordIntentReceiverPublication(raw:IntentReceiverWriteInput):Promise<IntentPublicationCandidate>{
@@ -407,7 +408,7 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  save(snapshot: PersistedSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void> {
+  save(snapshot: StoredSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void> {
     return this.observedMutation('save', attempt => { this.commitSnapshot(snapshot, undefined, undefined, options?.lease, false, undefined, attempt); });
   }
 
@@ -419,14 +420,14 @@ export class FileSessionStore implements SessionStore {
   }
 
   private mutationInProgress = false;
-  private commitSnapshot(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation, attempt?: PrecommitAttempt, acceptedFork?:object): SessionCommitReceipt {
+  private commitSnapshot(snapshot: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation, attempt?: PrecommitAttempt, acceptedFork?:object): SessionCommitReceipt {
     this.assertKnownWriterAdmission(acceptedFork);
     if (this.mutationInProgress) throw Error('session_commit_reentrant');
     this.mutationInProgress = true;
     try { return this.commitSnapshotLocked(captureIntentSnapshot(snapshot), cas, forkSourceId, executionLease, rootLockHeld,terminal,attempt,acceptedFork); }
     finally { this.mutationInProgress = false; }
   }
-  private commitSnapshotLocked(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation, attempt?: PrecommitAttempt, acceptedFork?:object): SessionCommitReceipt {
+  private commitSnapshotLocked(snapshot: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation, attempt?: PrecommitAttempt, acceptedFork?:object): SessionCommitReceipt {
     this.ensureRoot();
     const lockPath = `${this.getFilePath(snapshot.sessionId)}.save-lock`;
     const releaseLock = this.acquireWriterMutationLock(lockPath, rootLockHeld, acceptedFork);
@@ -464,12 +465,12 @@ export class FileSessionStore implements SessionStore {
       if (cas) assertSessionExecutionLease(cas.lease, { root: this.rootDir, sessionIdentity: snapshot.sessionId });
       const forkSource = forkSourceId ? this.readSnapshot(forkSourceId) : undefined;
       if (forkSourceId && !forkSource) throw Error('session_fork_source_missing');
-      let durableSnapshot: PersistedSessionSnapshot;
+      let durableSnapshot: StoredSessionSnapshot;
       try { durableSnapshot = prepareSessionStoreCommit(previous, { ...snapshot, protectedObservationClosure }, cas, forkSource ?? undefined); }
       catch (error) { if (attempt) attempt.rejected = true; throw error; }
       const { sessionId, cwd, intentDelegation, ...rest } = durableSnapshot;
       const document: PersistedSessionDocument = { schemaVersion: SESSION_SCHEMA_VERSION, sessionId, cwd, intentDelegation, ...rest };
-      const durability = protectedObservationClosure || durableSnapshot.executionProtected || durableSnapshot.intentDelegation?.nativeContracts?.length ?  { requireDirectorySync: true } : undefined;
+      const durability = protectedObservationClosure || durableSnapshot.executionProtected || nativeJournalLengthData(durableSnapshot.intentDelegation?.nativeContracts) ?  { requireDirectorySync: true } : undefined;
       try { assertSynchronousSessionHook(cas?.beforeCommit); }
       catch (error) { if (attempt) attempt.rejected = true; throw error; }
       if (cas) assertSessionExecutionLease(cas.lease, { root: this.rootDir, sessionIdentity: snapshot.sessionId });
@@ -697,7 +698,7 @@ export class FileSessionStore implements SessionStore {
     assertSynchronousWrite(this.atomicWrite(join(directory, `${journal.sessionId}.json`), bytes, { requireDirectorySync: true }));
   }
 
-  async loadLast(): Promise<PersistedSessionSnapshot | null> {
+  async loadLast(): Promise<StoredSessionSnapshot | null> {
     const lastFile = join(this.rootDir, 'last_session');
     if (existsSync(lastFile)) {
       try {
@@ -717,13 +718,13 @@ export class FileSessionStore implements SessionStore {
       .at(0) ?? null;
   }
 
-  async load(sessionId: string): Promise<PersistedSessionSnapshot | null> {
+  async load(sessionId: string): Promise<StoredSessionSnapshot | null> {
     return this.loadSync(sessionId);
   }
 
   /** Main admission fences may need a canonical read without yielding between
    * their final permission check and a native request. Same parser as load. */
-  loadSync(sessionId: string): PersistedSessionSnapshot | null {
+  loadSync(sessionId: string): StoredSessionSnapshot | null {
     return this.readSnapshot(sessionId);
   }
   readIdentity(sessionId: string): NativeSessionIdentity | null {
@@ -749,21 +750,21 @@ export class FileSessionStore implements SessionStore {
       }));
   }
 
-  fork(sessionId:string):Promise<PersistedSessionSnapshot>{
+  fork(sessionId:string):Promise<StoredSessionSnapshot>{
     let owner:KnownSessionWriter;try{owner=this.assertKnownWriterAdmission();}catch(error){return Promise.reject(error);}
     const token=Object.freeze({});acceptedSessionForks.set(token,owner);
-    let resolve!: (value:PersistedSessionSnapshot)=>void,reject!: (error:unknown)=>void;
-    const accepted=new Promise<PersistedSessionSnapshot>((done,failed)=>{resolve=done;reject=failed;});owner.forks.add(accepted);
+    let resolve!: (value:StoredSessionSnapshot)=>void,reject!: (error:unknown)=>void;
+    const accepted=new Promise<StoredSessionSnapshot>((done,failed)=>{resolve=done;reject=failed;});owner.forks.add(accepted);
     const forget=()=>{owner.forks.delete(accepted);acceptedSessionForks.delete(token);};void accepted.then(forget,forget);
     void this.forkAccepted(sessionId,token,owner).then(resolve,reject);return accepted;
   }
-  private async forkAccepted(sessionId:string,acceptedFork:object,owner:KnownSessionWriter):Promise<PersistedSessionSnapshot>{
+  private async forkAccepted(sessionId:string,acceptedFork:object,owner:KnownSessionWriter):Promise<StoredSessionSnapshot>{
     if(this.assertKnownWriterAdmission(acceptedFork)!==owner)throw Error('known_writer_fence_owner');
     const lockPath=join(this.rootDir,'.session-store-lock');let releaseRoot:(()=>void)|undefined,releaseSource=()=>{};
     let held: {device:number;inode:number;bytes:string}|undefined,executionAttempted=false;
     const checkReleased=()=>{try{const now=lstatSync(lockPath);throw Error(now.dev===held?.device&&now.ino===held?.inode?'session_fork_original_lock_retained':'session_fork_replacement_lock_unknown');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}};
     try{this.ensureRoot();releaseRoot=acquireSaveLock(lockPath);const stat=lstatSync(lockPath);held={device:stat.dev,inode:stat.ino,bytes:readFileSync(lockPath,'utf8')};owner.fence.assertOpen();executionAttempted=true;releaseSource=acquireSessionStoreExecutionGuard(this.rootDir,sessionId,undefined,true);}catch(error){if(!releaseRoot||executionAttempted)owner.unknownCleanup.add({phase:'fork-acquisition',error,held});const cleanup:unknown[]=[];if(releaseRoot){try{releaseRoot();checkReleased();}catch(value){cleanup.push(value);owner.unknownCleanup.add({phase:'fork-acquisition-cleanup',error:value,held});}}if(cleanup.length)throw new AggregateError([error,...cleanup],'session_fork_cleanup_unknown',{cause:error});throw error;}
-    let result:PersistedSessionSnapshot|undefined,bodyFailed=false,bodyError:unknown;
+    let result:StoredSessionSnapshot|undefined,bodyFailed=false,bodyError:unknown;
     try{
     const source = await this.load(sessionId);
     if (!source) {
@@ -778,7 +779,7 @@ export class FileSessionStore implements SessionStore {
       ? [...sourceLineage]
       : [...sourceLineage, source.sessionId];
     const nextSessionId = this.createSessionId();
-    const forked: PersistedSessionSnapshot = {
+    const forked: StoredSessionSnapshot = {
       ...source,
       sessionId: nextSessionId,
       createdAt: now,
@@ -813,7 +814,7 @@ export class FileSessionStore implements SessionStore {
     if(bodyFailed)throw bodyError;return result!;
   }
 
-  private readSnapshot(sessionId: string, preserveIntent = false): PersistedSessionSnapshot | null {return this.reader.readSessionSnapshot(sessionId,preserveIntent);}
+  private readSnapshot(sessionId: string, preserveIntent = false): StoredSessionSnapshot | null {return this.reader.readSessionSnapshot(sessionId,preserveIntent);}
 
   private getFilePath(sessionId: string): string {return this.reader.getFilePath(sessionId);}
 
@@ -822,7 +823,7 @@ export class FileSessionStore implements SessionStore {
     mkdirSync(this.rootDir, { recursive: true });
   }
 
-  private readSnapshots(): PersistedSessionSnapshot[] {
+  private readSnapshots(): StoredSessionSnapshot[] {
     if (!existsSync(this.rootDir)) {
       return [];
     }
@@ -837,7 +838,7 @@ export class FileSessionStore implements SessionStore {
         }
       })
       .filter(
-        (snapshot): snapshot is PersistedSessionSnapshot => snapshot !== null,
+        (snapshot): snapshot is StoredSessionSnapshot => snapshot !== null,
       );
   }
 }
@@ -858,8 +859,8 @@ function getPreview(messages: Message[]): string {
 }
 
 function compareSnapshots(
-  left: PersistedSessionSnapshot,
-  right: PersistedSessionSnapshot,
+  left: StoredSessionSnapshot,
+  right: StoredSessionSnapshot,
 ): number {
   return right.updatedAt - left.updatedAt
     || left.sessionId.localeCompare(right.sessionId);

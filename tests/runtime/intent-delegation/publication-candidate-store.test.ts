@@ -1,5 +1,5 @@
 import {intentHostSubjectOwner} from '../../../src/runtime/verification/intent-host-subject.js';
-import {intentNativeLedgerHash} from '../../../src/runtime/intent-delegation/native-contract-journal.js';
+import {intentNativeLedgerHash,parseIntentNativeContracts} from '../../../src/runtime/intent-delegation/native-contract-journal.js';
 import {afterEach,expect,it,vi} from 'vitest';
 import {mkdtempSync,rmSync,readFileSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {createHash} from 'node:crypto';
 const wire=vi.hoisted(()=>({protected:false}));
@@ -26,7 +26,7 @@ async function fixture(kind:'file'|'sqlite',empty=false){
 }
 for(const kind of ['file','sqlite'] as const)it(`${kind}: actual producer completion captures original reports and an immutable application request without business success`,async()=>{
  const f=await fixture(kind),original=await f.store.reserveIntentNativeContract(f.request as any);let now=20;
- for(const subject of original.subjects){let current=f.store.getIntentNativeLedgerSync('session')!.nativeContracts![0];const base={sessionId:'session',instanceId:'host',intentId:original.intentId,expectedRevision:current.revision,expectedRequestId:subject.attempts[0].requestId,stageId:subject.stageId,retirementReason:null,requestSource:'user',now:now++,lease:f.lease};await f.store.advanceIntentNativeContractSubject({...base,phase:'enrolling'} as any);current=f.store.getIntentNativeLedgerSync('session')!.nativeContracts![0];await f.store.advanceIntentNativeContractSubject({...base,expectedRevision:current.revision,phase:'enrolled',now:now++} as any);}
+ for(const subject of original.subjects){let current=storedFixtureNativeContracts(f.store.getIntentNativeLedgerSync('session')!)[0];const base={sessionId:'session',instanceId:'host',intentId:original.intentId,expectedRevision:current.revision,expectedRequestId:subject.attempts[0].requestId,stageId:subject.stageId,retirementReason:null,requestSource:'user',now:now++,lease:f.lease};await f.store.advanceIntentNativeContractSubject({...base,phase:'enrolling'} as any);current=storedFixtureNativeContracts(f.store.getIntentNativeLedgerSync('session')!)[0];await f.store.advanceIntentNativeContractSubject({...base,expectedRevision:current.revision,phase:'enrolled',now:now++} as any);}
  const stage=original.contract.stages[0];for(const step of stage.steps){const ledger=f.store.getIntentNativeLedgerSync('session')!;await f.store.recordIntentProducerAction({sessionId:'session',instanceId:'host',intentId:original.intentId,expectedLedgerHash:createHash('sha256').update(json(captureIntentData(ledger))).digest('hex'),requestSource:'user',now:now++,lease:f.lease,action:{kind:'step-report',stepId:step.stepId,status:'completed',breadcrumb:'原完整执行报告',receiptNote:null,blockedReason:null,origin:{kind:'model-report',providerInvocationId:'provider-'+step.stepId,toolInvocationId:'tool-'+step.stepId}}});}
  const before=f.store.getIntentNativeLedgerSync('session')!,row=await (f.store as any).reserveIntentPublicationCandidate({sessionId:'session',instanceId:'host',expectedLedgerHash:intentNativeLedgerHash(before),artifactSelections:[],fileObservations:[],requestSource:'user',now:now++,lease:f.lease});
  const after=f.store.getIntentNativeLedgerSync('session')!;expect(after.intents).toEqual(before.intents);expect(after.nativeContracts).toEqual(before.nativeContracts);expect(row.body.producerReports).toEqual(before.intents.at(-1)!.producerReports);expect(row.body.executionReports).toEqual([]);expect(row.applicationAttempts[0].phase).toBe('reserved');expect(after.intents.at(-1)!.overallStatus).toBe('publication_pending');
@@ -61,12 +61,28 @@ for(const kind of ['file','sqlite'] as const)it(`${kind}: actual producer comple
 
 for(const kind of ['file','sqlite'] as const)it(`${kind}: actual producer retains 10 KiB inline report twice in the complete legal stage body`,async()=>{
  const f=await fixture(kind),native=await f.store.reserveIntentNativeContract(f.request as any);let now=20;
- for(const subject of native.subjects){let current=f.store.getIntentNativeLedgerSync('session')!.nativeContracts![0]!;const base={sessionId:'session',instanceId:'host',intentId:native.intentId,expectedRevision:current.revision,expectedRequestId:subject.attempts[0]!.requestId,stageId:subject.stageId,retirementReason:null,requestSource:'user',now:now++,lease:f.lease};await f.store.advanceIntentNativeContractSubject({...base,phase:'enrolling'} as any);current=f.store.getIntentNativeLedgerSync('session')!.nativeContracts![0]!;await f.store.advanceIntentNativeContractSubject({...base,expectedRevision:current.revision,phase:'enrolled',now:now++} as any);}
+ for(const subject of native.subjects){let current=storedFixtureNativeContracts(f.store.getIntentNativeLedgerSync('session')!)[0]!;const base={sessionId:'session',instanceId:'host',intentId:native.intentId,expectedRevision:current.revision,expectedRequestId:subject.attempts[0]!.requestId,stageId:subject.stageId,retirementReason:null,requestSource:'user',now:now++,lease:f.lease};await f.store.advanceIntentNativeContractSubject({...base,phase:'enrolling'} as any);current=storedFixtureNativeContracts(f.store.getIntentNativeLedgerSync('session')!)[0]!;await f.store.advanceIntentNativeContractSubject({...base,expectedRevision:current.revision,phase:'enrolled',now:now++} as any);}
  const stage=native.contract.stages[0]!,text='x'.repeat(10000);const record=async(action:any)=>{const ledger=f.store.getIntentNativeLedgerSync('session')!;await f.store.recordIntentProducerAction({sessionId:'session',instanceId:'host',intentId:native.intentId,expectedLedgerHash:createHash('sha256').update(json(ledger)).digest('hex'),requestSource:'user',now:now++,lease:f.lease,action});};
  await record({kind:'artifact-report',stageId:stage.stageId,kindOfArtifact:'report',storage:'inline',label:'original',path:null,inlineValue:text,summary:null,reportedStructuralValidation:'pending',reportedSemanticValidation:'pending',origin:{kind:'model-report',providerInvocationId:'actual-artifact-provider',toolInvocationId:'actual-artifact-tool'}});
  for(const step of stage.steps)await record({kind:'step-report',stepId:step.stepId,status:'completed',breadcrumb:'actual result',receiptNote:null,blockedReason:null,origin:{kind:'model-report',providerInvocationId:'actual-provider-'+step.stepId,toolInvocationId:'actual-tool-'+step.stepId}});
  const ledger=f.store.getIntentNativeLedgerSync('session')!,original=ledger.intents.find(r=>r.intentId===native.intentId)!.artifacts![0]!;
- const candidate=await f.store.reserveIntentPublicationCandidate({sessionId:'session',instanceId:'host',expectedLedgerHash:intentNativeLedgerHash(ledger),requestSource:'user',now:now++,lease:f.lease,artifactSelections:[{artifactId:original.artifactId,obligationId:'original',path:'result.md'}],fileObservations:[]});
+ const candidate=await f.store.reserveIntentPublicationCandidate({sessionId:'session',instanceId:'host',expectedLedgerHash:intentNativeLedgerHash(ledger),requestSource:'user',now:now++,lease:f.lease,artifactSelections:[{artifactId:storedFixtureString(storedFixtureObject(original).artifactId),obligationId:'original',path:'result.md'}],fileObservations:[]});
  expect(candidate.body.kind).toBe('intent-stage');if(candidate.body.kind!=='intent-stage')throw Error('stage');expect(candidate.body.artifacts[0]!.content).toEqual({kind:'inline',text});expect(candidate.body.producerReports!.find(r=>r.action.kind==='artifact-report')!.action).toMatchObject({inlineValue:text});
  console.info(json({kind,actualStageBodyBytes:Buffer.byteLength(json(candidate.body)),actualLedgerBytes:Buffer.byteLength(json(f.store.getIntentNativeLedgerSync('session')))}));
 });
+
+// Test-only observations keep original raw references; no authority or modern ledger assertion.
+function isStoredFixtureObject(value:unknown):value is Record<string,unknown>{
+ return value!==null&&typeof value==='object'&&!Array.isArray(value);
+}
+function storedFixtureObject(value:unknown):Record<string,unknown>{
+ if(!isStoredFixtureObject(value))throw Error('stored_fixture_object');
+ return value;
+}
+function storedFixtureString(value:unknown):string{
+ if(typeof value!=='string')throw Error('stored_fixture_string');
+ return value;
+}
+function storedFixtureNativeContracts(ledger:{sessionId:string;nativeContracts?:unknown}){
+ return parseIntentNativeContracts(ledger.nativeContracts,ledger.sessionId);
+}

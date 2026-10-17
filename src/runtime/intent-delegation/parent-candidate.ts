@@ -25,12 +25,14 @@ export function deriveIntentParentBody(ledger:IntentPublicationReaderLedgerData,
 }
 
 /** Rejection-only route fence, including every original child before parent side effects. */
-export function assertIntentParentRoutesCurrent(ledger:SessionIntentLedger,candidate:IntentPublicationCandidate):void{
+export function assertIntentParentRoutesCurrent(ledger:SessionIntentLedger,candidate:IntentPublicationCandidate):void;
+export function assertIntentParentRoutesCurrent(ledger:IntentPublicationReaderLedgerData,candidate:IntentPublicationCandidate):void;
+export function assertIntentParentRoutesCurrent(ledger:IntentPublicationReaderLedgerData,candidate:IntentPublicationCandidate):void{
  if(candidate.stageId!==null)return;
  const native=parseIntentNativeContracts(ledger.nativeContracts,ledger.sessionId).find(r=>r.intentId===candidate.intentId);
  if(!native)throw Error('intent_parent_route');
  for(const stage of native.contract.stages){
-  const child=ledger.publicationCandidates?.find(c=>c.intentId===candidate.intentId&&c.stageId===stage.stageId),application=child?.applicationAttempts.at(-1);
+  const child=readIntentPublicationRowFacts(ledger,candidate.intentId,stage.stageId),application=child?.applicationAttempts.at(-1);
   const owner=intentHostSubjectOwner({version:1,sessionId:ledger.sessionId,intentId:candidate.intentId,stageId:stage.stageId});
   if(!child||application?.phase!=='ready'||!application.route||json(readInstalledCurrentOwner(owner))!==application.route)throw Error('intent_parent_route');
  }

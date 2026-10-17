@@ -10,6 +10,7 @@ import {createIntentPlan} from '../../../src/ai/intent-delegation/planner.js';
 import {createEmptySessionIntentLedger,appendIntentToLedger} from '../../../src/runtime/intent-delegation/store.js';
 import {captureIntentData} from '../../../src/runtime/intent-delegation/intent-commit-boundary.js';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
+import type {StoredStageInput} from '../../../src/runtime/intent-delegation/stored-intent-clone.js';
 const cleanup:Array<()=>unknown>=[];afterEach(async()=>{for(const fn of cleanup.splice(0).reverse())await fn();wire.protected=false;});
 const definition=()=>({version:1,obligations:[{obligationId:'original',predicateId:'original-content',predicateVersion:'1',semantics:'current-subject',recipe:{kind:'artifact-content',checks:[{id:'content',path:'result.md',sha256:'a'.repeat(64),structure:'utf8'}]}}]});
 async function fixture(kind:'file'|'sqlite',empty=false){
@@ -62,14 +63,14 @@ for(const kind of ['file','sqlite'] as const){
  });
  it(`${kind}: the original journal is durable across an actual Store reopen and immutable clones cannot edit it`,async()=>{
   const f=await fixture(kind),row=await f.store.reserveIntentNativeContract(f.request as any);expect(Object.isFrozen(row)).toBe(true);await f.lease.releaseAfterDrain();if(f.store instanceof SQLiteSessionStore)f.store.dispose();
-  const reopened=kind==='file'?new FileSessionStore(f.root):new SQLiteSessionStore(join(f.root,'sessions.sqlite'));if(reopened instanceof SQLiteSessionStore)cleanup.push(()=>reopened.dispose());const snapshot=(await reopened.load('session'))!;expect(snapshot.intentDelegation!.nativeContracts).toEqual([row]);snapshot.intentDelegation!.nativeContracts![0].subjects[0].attempts[0].phase='enrolled';expect((await reopened.load('session'))!.intentDelegation!.nativeContracts).toEqual([row]);
+  const reopened=kind==='file'?new FileSessionStore(f.root):new SQLiteSessionStore(join(f.root,'sessions.sqlite'));if(reopened instanceof SQLiteSessionStore)cleanup.push(()=>reopened.dispose());const snapshot=(await reopened.load('session'))!;expect(snapshot.intentDelegation!.nativeContracts).toEqual([row]);testNativeJournal(snapshot.intentDelegation!.nativeContracts)[0].subjects[0].attempts[0].phase='enrolled';expect((await reopened.load('session'))!.intentDelegation!.nativeContracts).toEqual([row]);
  });
 }
 for(const kind of ['file','sqlite'] as const)it(`${kind}: a native draft remains protected under an ordinary route; generic ownership/business writes and producer completion cannot downgrade it`,async()=>{
  const f=await fixture(kind),row=await f.store.reserveIntentNativeContract(f.request as any);wire.protected=false;const before=(await f.store.load('session'))!;
  const raw=structuredClone(before);raw.intentDelegation!.ownership.ownerInstanceId='foreign';await expect(f.store.save(raw,{lease:f.lease})).rejects.toThrow();expect(await f.store.load('session')).toEqual(before);
  const stage=row.originalDraft.stages[0];for(const step of stage.steps){const current=(await f.store.load('session'))!;await f.store.recordIntentProducerAction({sessionId:'session',instanceId:'host',intentId:row.intentId,requestSource:'user',now:20,expectedLedgerHash:(await import('../../../src/runtime/intent-delegation/producer-facts.js')).intentProducerLedgerHash(current.intentDelegation),action:{kind:'step-report',stepId:step.stepId,status:'completed',breadcrumb:'actual model report',receiptNote:null,blockedReason:null,origin:{kind:'model-report',providerInvocationId:'provider',toolInvocationId:step.stepId}},lease:f.lease});}
- const actual=(await f.store.load('session'))!.intentDelegation!.intents.at(-1)!;expect(actual.stages[0].status).toBe('publication_pending');expect(actual.producerReports!.every(r=>r.protectionMode==='protected')).toBe(true);
+ const actual=(await f.store.load('session'))!.intentDelegation!.intents.at(-1)!;expect(testStages(actual.stages)[0].status).toBe('publication_pending');expect(testReportArray(actual.producerReports).every(r=>r.protectionMode==='protected')).toBe(true);
 });
 for(const kind of ['file','sqlite'] as const)it(`${kind}: explicit user ownership transition retains old absent optional fields and requires the exact durable baseline`,async()=>{
  const f=await fixture(kind);const snapshot=(await f.store.load('session'))!,old=snapshot.intentDelegation!;for(const r of [...old.intents,old.latestPlan!]){delete r.artifacts;delete r.executionTerminals;delete r.producerReports;}old.ownership={state:'released',previousOwnerInstanceId:'host',updatedAt:2};old.updatedAt=2;
@@ -96,7 +97,7 @@ it('SQLite retains all 32 subject attempts; the explicit 33rd retry fails withou
 });
 it('File failure before replacement creates no journal; failure after replacement keeps original IDs and never retries a second reservation',async()=>{
  const f=await fixture('file'),before=await f.store.load('session');const reject=new FileSessionStore(f.root,()=>{throw Error('before write');});await expect(reject.reserveIntentNativeContract(f.request as any)).rejects.toThrow('before write');expect(await f.store.load('session')).toEqual(before);
- const atomic=(await import('../../../src/utils/atomic-file.js')).writeFileAtomicallySync;const after=new FileSessionStore(f.root,(...args)=>{atomic(...args);throw Error('after replacement');});await expect(after.reserveIntentNativeContract(f.request as any)).rejects.toThrow('after replacement');const durable=(await f.store.getIntentNativeLedger('session'))!.nativeContracts![0];const row=await f.store.reserveIntentNativeContract(f.request as any);expect(row).toEqual(durable);expect((await f.store.getIntentNativeLedger('session'))!.nativeContracts).toHaveLength(1);
+ const atomic=(await import('../../../src/utils/atomic-file.js')).writeFileAtomicallySync;const after=new FileSessionStore(f.root,(...args)=>{atomic(...args);throw Error('after replacement');});await expect(after.reserveIntentNativeContract(f.request as any)).rejects.toThrow('after replacement');const durable=testNativeArray((await f.store.getIntentNativeLedger('session'))!.nativeContracts)[0];const row=await f.store.reserveIntentNativeContract(f.request as any);expect(row).toEqual(durable);expect((await f.store.getIntentNativeLedger('session'))!.nativeContracts).toHaveLength(1);
 });
 for(const kind of ['file','sqlite'] as const)it(`${kind}: inherited native envelope fields and prototype behavior are rejected before any reducer write`,async()=>{const f=await fixture(kind),before=await f.store.load('session');const input=Object.assign(Object.create({requestSource:'user'}),f.request);await expect(f.store.reserveIntentNativeContract(input)).rejects.toThrow();expect(await f.store.load('session')).toEqual(before);});
 for(const kind of ['file','sqlite'] as const)for(const leaseKind of ['compound','compaction'] as const)it(`${kind}: ${leaseKind} lease cannot record native recovery facts or unlock an explicit retry`,async()=>{const f=await fixture(kind),row=await f.store.reserveIntentNativeContract(f.request as any),base={sessionId:'session',instanceId:'host',intentId:row.intentId,expectedRevision:1,expectedRequestId:row.subjects[0].attempts[0].requestId,stageId:row.subjects[0].stageId,phase:'enrolling' as const,retirementReason:null,requestSource:'user' as const,now:11,lease:f.lease};await f.store.advanceIntentNativeContractSubject(base);await f.lease.releaseAfterDrain();const lease=await f.authority.acquire({kind:leaseKind,invocationId:'wrong-kind'});cleanup.push(()=>lease.releaseAfterDrain());const before=await f.store.load('session');await expect(f.store.advanceIntentNativeContractSubject({...base,expectedRevision:2,phase:'retired',retirementReason:'not_approved',lease})).rejects.toThrow('session_execution_kind');expect(await f.store.load('session')).toEqual(before);});
@@ -111,3 +112,31 @@ for(const kind of ['file','sqlite'] as const)it(`${kind}: a new original contrac
  const f=await fixture(kind);await f.store.reserveIntentNativeContract(f.request as any);const before=(await f.store.getIntentNativeLedger('session'))!;const next=createIntentPlan({sessionId:'session',instanceId:'host',input:'请写报告，然后生成幻灯片',newIntentId:'different-intent',skills:[]});if(next.kind!=='plan')throw Error('planner');
  await expect(f.store.reserveIntentNativeContract({...f.request,plan:next.plan,expectedLedgerHash:intentNativeLedgerHash(before),now:20} as any)).rejects.toThrow('intent_native_pending');expect(await f.store.getIntentNativeLedger('session')).toEqual(before);
 });
+
+// R475_DATA_GUARDS_START
+function testStages(value:StoredStageInput[]|null|undefined):StoredStageInput[]{
+ if(!Array.isArray(value))throw Error('test_stages_data');return value;
+}
+function isTestObject(value:unknown):value is Record<string,unknown>{
+ return value!==null&&typeof value==='object'&&!Array.isArray(value);
+}
+interface TestReportData {protectionMode?:unknown}
+function assertTestReports(value:unknown):asserts value is TestReportData[]{
+ if(!Array.isArray(value))throw Error('test_reports_data');const reports:readonly unknown[]=value;
+ for(const report of reports)if(!isTestObject(report))throw Error('test_reports_data');
+}
+function testReportArray(value:unknown):TestReportData[]{assertTestReports(value);return value;}
+interface TestNativeJournalData {subjects:{stageId?:unknown;attempts:{requestId?:unknown;phase?:unknown}[]}[]}
+function assertTestNativeJournal(value:unknown):asserts value is TestNativeJournalData[]{
+ if(!Array.isArray(value))throw Error('test_native_data');const rows:readonly unknown[]=value;
+ for(const row of rows){
+  if(!isTestObject(row)||!Array.isArray(row.subjects))throw Error('test_native_data');const subjects:readonly unknown[]=row.subjects;
+  for(const subject of subjects){
+   if(!isTestObject(subject)||!Array.isArray(subject.attempts))throw Error('test_native_data');const attempts:readonly unknown[]=subject.attempts;
+   for(const attempt of attempts)if(!isTestObject(attempt))throw Error('test_native_data');
+  }
+ }
+}
+function testNativeJournal(value:unknown):TestNativeJournalData[]{assertTestNativeJournal(value);return value;}
+function testNativeArray(value:unknown):unknown[]{if(!Array.isArray(value))throw Error('test_native_data');return value;}
+// R475_DATA_GUARDS_END

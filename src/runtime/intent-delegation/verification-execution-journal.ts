@@ -7,13 +7,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { captureIntentData } from './data.js';
 import { intentNativeLedgerHash } from './native-contract-journal.js';
-import { parseIntentPublicationCandidates, intentPublicationTarget, intentPublicationRouteVector, applyIntentPublicationMutation, type IntentPublicationReaderLedgerData } from './publication-candidate-journal.js';
+import { parseIntentPublicationCandidates, intentPublicationTarget, intentPublicationRouteVector, applyIntentPublicationMutation, type IntentPublicationReaderLedgerData, intentPublicationFactArray, intentPublicationFactObject } from './publication-candidate-journal.js';
 import { assertSessionWriteOwnership } from './ownership.js';
 import { parseValidationMaterialDraft, type ValidationMaterialDraft, type ValidationMaterialInvocation } from '../verification/product-material-authorization.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 import type { SessionIntentLedger } from './types.js';
 import type { StoredSessionIntentLedgerInput } from './stored-intent-clone.js';
-import type { PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
+import type { PersistedSessionSnapshot, StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 
 export interface IntentVerificationExecution {
@@ -117,13 +117,15 @@ export function captureIntentVerificationOperation(raw:RecordIntentVerificationO
  if(!['user','scheduler'].includes(input.requestSource)||input.action?.kind!=='observe'&&input.requestSource!=='user'||!Number.isSafeInteger(input.now)||input.now<0||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<1||typeof input.expectedLedgerHash!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedLedgerHash))throw Error('intent_verification_source');
  return {input:{...input,verificationAction:'operation',publicationAction:'verification'} as Extract<IntentVerificationMutation,{verificationAction:'operation'}>,lease:lease.value as SessionExecutionLease};
 }
-function currentCandidate(previous:PersistedSessionSnapshot,ledger:SessionIntentLedger,input:{sessionId:string;instanceId:string;expectedLedgerHash:string;now:number},candidate:ReturnType<typeof target>['candidate']){
+function currentCandidate(previous:StoredSessionSnapshot,ledger:StoredSessionIntentLedgerInput,input:{sessionId:string;instanceId:string;expectedLedgerHash:string;now:number},candidate:ReturnType<typeof target>['candidate']){
  const attempt=candidate.applicationAttempts.at(-1)!;
- if(attempt.phase!=='ready'||!attempt.route||input.now<attempt.updatedAt||ledger.activeIntentId!==candidate.intentId||(candidate.stageId===null?ledger.intents.find(r=>r.intentId===candidate.intentId)?.overallStatus!=='publication_pending'||ledger.intents.find(r=>r.intentId===candidate.intentId)!.stages.some(s=>s.status!=='completed'):ledger.intents.find(r=>r.intentId===candidate.intentId)?.activeStageId!==candidate.stageId)||intentPublicationRouteVector(ledger,candidate.id)!==attempt.route)throw Error('intent_verification_candidate_current');
+ if(attempt.phase!=='ready'||!attempt.route||input.now<attempt.updatedAt||ledger.activeIntentId!==candidate.intentId||(candidate.stageId===null?ledger.intents.find(r=>r.intentId===candidate.intentId)?.overallStatus!=='publication_pending'||intentPublicationFactArray(ledger.intents.find(r=>r.intentId===candidate.intentId)!.stages,'intent_verification_candidate_current').some(s=>intentPublicationFactObject(s,'intent_verification_candidate_current').status!=='completed'):ledger.intents.find(r=>r.intentId===candidate.intentId)?.activeStageId!==candidate.stageId)||intentPublicationRouteVector(ledger,candidate.id)!==attempt.route)throw Error('intent_verification_candidate_current');
  applyIntentPublicationMutation(previous,{sessionId:input.sessionId,instanceId:input.instanceId,expectedLedgerHash:input.expectedLedgerHash,requestSource:'user',now:input.now,fileObservations:candidate.fileObservations,...(candidate.body.kind==='intent-parent'?{publicationAction:'reserve-parent',references:candidate.body.stages}:{publicationAction:'reserve',artifactSelections:candidate.body.artifacts.map(a=>({artifactId:a.artifactId,obligationId:a.selection.obligationId,path:a.selection.path}))})});
  return attempt.route;
 }
-export function applyIntentVerificationMutation(previous:PersistedSessionSnapshot,input:IntentVerificationMutation):PersistedSessionSnapshot {
+export function applyIntentVerificationMutation(previous:PersistedSessionSnapshot,input:IntentVerificationMutation):PersistedSessionSnapshot;
+export function applyIntentVerificationMutation(previous:StoredSessionSnapshot,input:IntentVerificationMutation):StoredSessionSnapshot;
+export function applyIntentVerificationMutation(previous:StoredSessionSnapshot,input:IntentVerificationMutation):StoredSessionSnapshot {
  const next=captureIntentData(previous),ledger=next.intentDelegation;
  if(!ledger||next.sessionId!==input.sessionId||intentNativeLedgerHash(ledger)!==input.expectedLedgerHash)throw Error('intent_verification_basis');
  assertSessionWriteOwnership(ledger,input.instanceId,'reserve intent verification');

@@ -2,19 +2,19 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 import {isDeepStrictEqual} from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
-import { assertSynchronousSessionHook, computeSessionHistoryDigest, type PersistedSessionSnapshot, type SessionStore } from '../../ai/runtime/session-store/store.js';
+import { assertSynchronousSessionHook, computeSessionHistoryDigest, type PersistedSessionSnapshot, type StoredSessionSnapshot, type SessionStore } from '../../ai/runtime/session-store/store.js';
 import { describeProductObservationPolicy, type ProductObservationPolicy } from './product-bootstrap.js';
 import { measureRequestCapacity, checkRequestCapacity, type VerifiedCapacityProfile } from './capacity-admission.js';
 import { computeSemanticRequestCostUpperBound } from './semantic-policy.js';
 import { reserveSemanticCompaction, transitionSemanticReservation, commitSemanticCompaction, type SemanticCompactionLedger, type SemanticReservation } from './semantic-compaction-ledger.js';
-import { readSemanticSnapshotCandidate, type SemanticSnapshotCandidate } from './semantic-snapshot.js';
+import { readSemanticSnapshotCandidate, type SemanticSnapshotCandidate, type StoredSemanticSnapshotCandidate } from './semantic-snapshot.js';
 import { qualifySemanticPrice, assertSemanticPriceQualification, semanticPriceEvidenceRevision, type SemanticPriceQualification, type SemanticPriceBinding } from './semantic-price-qualification.js';
 import { createSingleRequestHttpsFetch } from './single-request-https.js';
 
 export interface SemanticSummaryAttempt { readonly opaqueSemanticSummaryAttempt: never }
 interface Input {
  policy: ProductObservationPolicy; store: SessionStore; lease: SessionExecutionLease;
- logicalInvocationId?:string;sessionId: string; sourceSnapshot: PersistedSessionSnapshot; operationId: string;
+ logicalInvocationId?:string;sessionId: string; sourceSnapshot: Readonly<Pick<StoredSessionSnapshot, 'sessionId' | 'storeRevision' | 'messages'>>; operationId: string;
  destination: string; serializedBody: string; capacityProfile: VerifiedCapacityProfile; signal?: AbortSignal;
  assertBoundaryCurrent?: () => void;
 }
@@ -105,7 +105,7 @@ export function resolveSemanticSummaryAttempt(attempt: SemanticSummaryAttempt): 
  value.fetch=guarded;return {fetch:guarded,maxOutputTokens:value.maxOutputTokens};
 }
 /** Failure remains charged. This never rewrites conversation history or refunds money. */
-export async function finishSemanticSummaryAttempt(attempt:SemanticSummaryAttempt,status:'settled'|'unknown'):Promise<PersistedSessionSnapshot>{
+export async function finishSemanticSummaryAttempt(attempt:SemanticSummaryAttempt,status:'settled'|'unknown'):Promise<StoredSessionSnapshot>{
  const value=current(attempt);if(value.finished)denied('ALREADY_FINISHED');
  value.input.lease.assertCurrent();
  const snapshot=await value.input.store.load(value.input.sessionId);
@@ -117,7 +117,9 @@ export async function finishSemanticSummaryAttempt(attempt:SemanticSummaryAttemp
 }
 
 /** Commit only a host-built strict candidate; budget was already persisted independently. */
-export async function commitSemanticSummarySnapshot(attempt:SemanticSummaryAttempt,candidate:SemanticSnapshotCandidate):Promise<PersistedSessionSnapshot>{
+export function commitSemanticSummarySnapshot(attempt:SemanticSummaryAttempt,candidate:SemanticSnapshotCandidate):Promise<StoredSessionSnapshot>;
+export function commitSemanticSummarySnapshot(attempt:SemanticSummaryAttempt,candidate:StoredSemanticSnapshotCandidate):Promise<StoredSessionSnapshot>;
+export async function commitSemanticSummarySnapshot(attempt:SemanticSummaryAttempt,candidate:StoredSemanticSnapshotCandidate):Promise<StoredSessionSnapshot>{
  const value=current(attempt);if(!value.finished||value.committed)denied('NOT_SETTLED');
  value.input.lease.assertCurrent();value.input.signal?.throwIfAborted();
  const policy=describeProductObservationPolicy(value.input.policy).semanticCompaction;

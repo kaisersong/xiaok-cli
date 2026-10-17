@@ -2,7 +2,7 @@ import {reserveProviderAttempt,settleProviderAttempt,retireProviderAttempt,type 
 import {createOrGetDirectOperation,advanceDirectOperation,retireDirectOperation,type DirectOperationAdvance,type DirectOperationRecord} from './compound-direct-operation.js';
 import { isDeepStrictEqual } from 'node:util';
 import {reserveCompoundTreeAllocation,type CompoundTreeAllocationInput} from './compound-tree-budget.js';
-import type { SessionStore, PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
+import type { SessionStore, StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import { assertSessionExecutionLease, type SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 import { advanceCompoundOperation, createCompoundOperationLedger, createOrGetCompoundOperation, retireCompoundOperation,
   validateCompoundOperationLedger, type CompoundAdvance, type CompoundOperationInput, type CompoundOperationLedger, type CompoundOperationRecord } from './compound-operation.js';
@@ -28,12 +28,12 @@ export function createCompoundSessionJournal(options: {
   const issuedPreparedCompound = new Map<string, CompoundOperationRecord>();
   const issuedPreparedDirect = new Map<string, DirectOperationRecord>();
   const check = (lease: SessionExecutionLease) => { assertCurrent(); assertSessionExecutionLease(lease, { root, sessionIdentity }); };
-  async function current(lease: SessionExecutionLease): Promise<PersistedSessionSnapshot> {
+  async function current(lease: SessionExecutionLease): Promise<StoredSessionSnapshot> {
     check(lease); const snapshot = await store.load(sessionIdentity); check(lease);
     if (!snapshot || snapshot.sessionId !== sessionIdentity || snapshot.storeRevision === undefined || snapshot.historyDigest === undefined) throw Error('compound_session_not_initialized');
     return snapshot;
   }
-  async function commit(snapshot: PersistedSessionSnapshot, ledger: CompoundOperationLedger, lease: SessionExecutionLease, beforeCommit?:(candidate:PersistedSessionSnapshot)=>void): Promise<void> {
+  async function commit(snapshot: StoredSessionSnapshot, ledger: CompoundOperationLedger, lease: SessionExecutionLease, beforeCommit?:(candidate:StoredSessionSnapshot)=>void): Promise<void> {
     check(lease);
     await store.compareAndSave!({ expectedStoreRevision: snapshot.storeRevision!, expectedHistoryDigest: snapshot.historyDigest!,
       nextSnapshot: { ...snapshot, compoundOperations: ledger }, lease, beforeCommit: () => {
@@ -52,7 +52,7 @@ export function createCompoundSessionJournal(options: {
       if(result.created){ledger.treeBudget=result.budget;ledger.generation++;await commit(snapshot,validateCompoundOperationLedger(ledger),lease);}
       return{allocationId:result.allocationId,created:result.created};
     },
-    async reserveProviderAttempt(input:CompoundProviderAttemptInput,lease:SessionExecutionLease,beforeCommit?:(candidate:PersistedSessionSnapshot)=>void){
+    async reserveProviderAttempt(input:CompoundProviderAttemptInput,lease:SessionExecutionLease,beforeCommit?:(candidate:StoredSessionSnapshot)=>void){
       const captured=structuredClone(input),snapshot=await current(lease);
       const key=JSON.stringify([captured.logicalInvocationId,captured.attemptIndex]);
       if(unissuedProviderKeys.has(key))throw Error('compound_provider_unissued_pending');

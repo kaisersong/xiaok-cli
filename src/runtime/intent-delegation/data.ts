@@ -68,3 +68,8 @@ export function captureIntentData<T>(raw: T): T {
         throw Error('intent_commit_limit');
     return result as T;
 }
+
+/** Ordinary nullable-array length DATA only; not native admission or a journal validator. */
+export function nativeJournalLengthData(value:unknown):number|undefined{
+ if(value===undefined||value===null)return undefined;if(!Array.isArray(value))throw Error('intent_native_journal');return value.length;
+}

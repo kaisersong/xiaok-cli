@@ -19,6 +19,7 @@ import { applyIntentStepUpdate, recordStageArtifact } from '../../runtime/intent
 import { SessionIntentDelegationStore,getIntentProducerMutationPort,isIntentDelegationStoreFor } from '../../runtime/intent-delegation/store.js';
 import { assertSessionWriteOwnership } from '../../runtime/intent-delegation/ownership.js';
 import type { SessionIntentLedger } from '../../runtime/intent-delegation/types.js';
+import type { NormalizedStoredSessionIntentLedger, NormalizedStoredIntentRecord } from '../../runtime/intent-delegation/stored-intent-clone.js';
 
 export interface IntentDelegationToolOptions {
   ledgerStore: SessionIntentDelegationStore;
@@ -559,7 +560,7 @@ function resolveTurnIntentPlan(
 
 function resolveContinuationMode(input: {
   explicitContinuationMode?: IntentPlanDraft['continuationMode'];
-  ledger: SessionIntentLedger;
+  ledger: NormalizedStoredSessionIntentLedger;
   sessionId: string;
   instanceId: string;
   rawIntent: string;
@@ -592,7 +593,9 @@ function resolveContinuationMode(input: {
   return planned.kind === 'plan' ? planned.plan.continuationMode : 'new_intent';
 }
 
-function resolveActiveIntent(ledger: SessionIntentLedger) {
+function resolveActiveIntent(ledger: SessionIntentLedger): SessionIntentLedger['intents'][number] | undefined;
+function resolveActiveIntent(ledger: NormalizedStoredSessionIntentLedger): NormalizedStoredIntentRecord | undefined;
+function resolveActiveIntent(ledger: NormalizedStoredSessionIntentLedger): NormalizedStoredIntentRecord | undefined {
   if (!ledger.activeIntentId) {
     return undefined;
   }
@@ -600,10 +603,12 @@ function resolveActiveIntent(ledger: SessionIntentLedger) {
   return ledger.intents.find((intent) => intent.intentId === ledger.activeIntentId);
 }
 
+function requireActiveIntent(ledger: SessionIntentLedger, continuationMode: IntentPlanDraft['continuationMode']): SessionIntentLedger['intents'][number];
+function requireActiveIntent(ledger: NormalizedStoredSessionIntentLedger, continuationMode: IntentPlanDraft['continuationMode']): NormalizedStoredIntentRecord;
 function requireActiveIntent(
-  ledger: SessionIntentLedger,
+  ledger: NormalizedStoredSessionIntentLedger,
   continuationMode: IntentPlanDraft['continuationMode'],
-) {
+): NormalizedStoredIntentRecord {
   const activeIntent = resolveActiveIntent(ledger);
   if (!activeIntent) {
     throw new Error(`cannot use continuation_mode ${continuationMode}: no active intent is tracked for this session`);

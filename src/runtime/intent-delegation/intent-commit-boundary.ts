@@ -7,7 +7,7 @@ import {assertIntentPublicationRetained} from './publication-candidate-journal.j
 import {assertIntentNativeJournalRetained,assertNoIntentNativeJournal} from './native-contract-journal.js';
 import {isDeepStrictEqual} from 'node:util';
 import {readInstalledCurrentOwner} from '../verification/installed-owner-state.js';
-import type {PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
+import type {PersistedSessionSnapshot,StoredSessionSnapshot} from '../../ai/runtime/session-store/store.js';
 import type {StoredIntentRecordInput,StoredSessionIntentLedgerInput} from './stored-intent-clone.js';
 import {createIntentLedgerRecord, cloneIntentRecord, type SessionIntentLedger} from './types.js';
 export interface IntentExecutionTerminal {
@@ -36,6 +36,9 @@ function propertyData(value:unknown,error:string):Readonly<Record<string,unknown
 function arrayData(value:unknown,error:string):unknown[]{
  if(!Array.isArray(value))throw Error(error);return value;
 }
+function forkJournalLength(value:unknown,error:string):number|undefined{
+ return value===undefined||value===null?undefined:arrayData(value,error).length;
+}
 function reportLength(value:unknown):number|undefined{
  return value===undefined||value===null?undefined:arrayData(value,'intent_producer_records').length;
 }
@@ -63,11 +66,11 @@ function baseline(ledger:StoredSessionIntentLedgerInput|undefined){
  for(const record of [...value.intents,...(value.latestPlan?[value.latestPlan]:[])]){const mutable:Omit<StoredIntentRecordInput,'updatedAt'>&{updatedAt?:number}=record;delete mutable.executionTerminals;delete mutable.updatedAt;}return value;
 }
 /** Initial protected data must be the original constructor draft, not arbitrary history. */
-function assertInitialDraft(ledger:SessionIntentLedger):void {
- const pick=(value:any,keys:string)=>Object.fromEntries(keys.split(' ').filter(k=>value[k]!==undefined).map(k=>[k,value[k]]));
+function assertInitialDraft(ledger:StoredSessionIntentLedgerInput):void {
+ const pick=(value:unknown,keys:string)=>{const data=propertyData(value,'intent_initial_draft');return Object.fromEntries(keys.split(' ').filter(k=>data[k]!==undefined).map(k=>[k,data[k]]));};
  const draftRecords=ledger.intents.map(record=>{
   const plan:any=pick(record,'intentId instanceId sessionId rawIntent normalizedIntent providedSourcePaths intentType deliverable finalDeliverable explicitConstraints delegationBoundary riskTier intentMode segmentationConfidence templateId');
-  plan.stages=record.stages.map(stage=>({...pick(stage,'stageId order label intentType deliverable templateId riskTier dependsOnStageIds'),steps:stage.steps.map(step=>({...pick(step,'stepId key order role skillName dependsOn riskTier'),status:'planned'}))}));
+  plan.stages=arrayData(record.stages,'intent_initial_draft').map(stage=>({...pick(stage,'stageId order label intentType deliverable templateId riskTier dependsOnStageIds'),steps:arrayData(propertyData(stage,'intent_initial_draft').steps,'intent_initial_draft').map(step=>({...pick(step,'stepId key order role skillName dependsOn riskTier'),status:'planned'}))}));
   plan.steps=plan.stages[0]?.steps??[];
   if(!Number.isSafeInteger(record.createdAt)||record.createdAt<0)throw Error('intent_initial_draft');
   const expected=captureIntentData(cloneIntentRecord(createIntentLedgerRecord(plan,record.createdAt)));
@@ -80,9 +83,11 @@ function assertInitialDraft(ledger:SessionIntentLedger):void {
  if(!isDeepStrictEqual(ledger,expected))throw Error('intent_initial_draft');
 }
 /** Called inside both actual store locks. This is a deny boundary, not a grant. */
-export function assertIntentSessionCommit(previous:PersistedSessionSnapshot|null,next:PersistedSessionSnapshot,forkSource?:PersistedSessionSnapshot,executionPrimitive=false,producerPrimitive=false,nativePrimitive=false,publicationPrimitive=false,verificationPrimitive=false,receiverPrimitive:boolean|'projection'=false):void{
- assertIntentVerificationRetained(previous?.intentDelegation,next.intentDelegation,verificationPrimitive);if(forkSource?.intentDelegation?.verificationExecutions?.length)throw Error('intent_verification_fork');
- assertIntentPublicationRetained(previous?.intentDelegation,next.intentDelegation,receiverPrimitive==='projection'?'projection':receiverPrimitive?'receiver':publicationPrimitive&&!verificationPrimitive);if(forkSource?.intentDelegation?.publicationCandidates?.length)throw Error('intent_candidate_fork');
+export function assertIntentSessionCommit(previous:PersistedSessionSnapshot|null,next:PersistedSessionSnapshot,forkSource?:PersistedSessionSnapshot,executionPrimitive?:boolean,producerPrimitive?:boolean,nativePrimitive?:boolean,publicationPrimitive?:boolean,verificationPrimitive?:boolean,receiverPrimitive?:boolean|'projection'):void;
+export function assertIntentSessionCommit(previous:StoredSessionSnapshot|null,next:StoredSessionSnapshot,forkSource?:StoredSessionSnapshot,executionPrimitive?:boolean,producerPrimitive?:boolean,nativePrimitive?:boolean,publicationPrimitive?:boolean,verificationPrimitive?:boolean,receiverPrimitive?:boolean|'projection'):void;
+export function assertIntentSessionCommit(previous:StoredSessionSnapshot|null,next:StoredSessionSnapshot,forkSource?:StoredSessionSnapshot,executionPrimitive=false,producerPrimitive=false,nativePrimitive=false,publicationPrimitive=false,verificationPrimitive=false,receiverPrimitive:boolean|'projection'=false):void{
+ assertIntentVerificationRetained(previous?.intentDelegation,next.intentDelegation,verificationPrimitive);if(forkJournalLength(forkSource?.intentDelegation?.verificationExecutions,'intent_verification_fork'))throw Error('intent_verification_fork');
+ assertIntentPublicationRetained(previous?.intentDelegation,next.intentDelegation,receiverPrimitive==='projection'?'projection':receiverPrimitive?'receiver':publicationPrimitive&&!verificationPrimitive);if(forkJournalLength(forkSource?.intentDelegation?.publicationCandidates,'intent_candidate_fork'))throw Error('intent_candidate_fork');
  assertIntentNativeJournalRetained(previous?.intentDelegation,next.intentDelegation,next.sessionId,nativePrimitive);if(forkSource)assertNoIntentNativeJournal(forkSource);
  const old=records(previous?.intentDelegation),incoming=records(next.intentDelegation),fork=records(forkSource?.intentDelegation);
  for(const [ledger,rows] of [[previous?.intentDelegation,old],[forkSource?.intentDelegation,fork]] as const){const mirror=ledger?.latestPlan;if(mirror&&!isDeepStrictEqual(mirror.producerReports??[],rows.get(mirror.intentId)?.producerReports??[]))throw Error('intent_producer_original_mirror');}
@@ -104,11 +109,13 @@ export function assertIntentSessionCommit(previous:PersistedSessionSnapshot|null
  else if(next.intentDelegation&&!nativePrimitive)assertInitialDraft(next.intentDelegation);
 }
 /** Store-private call path constructs from locked current state, never supplied nextSnapshot. */
-export function appendIntentExecutionTerminal(previous:PersistedSessionSnapshot,input:IntentExecutionTerminalInput):PersistedSessionSnapshot {
+export function appendIntentExecutionTerminal(previous:PersistedSessionSnapshot,input:IntentExecutionTerminalInput):PersistedSessionSnapshot;
+export function appendIntentExecutionTerminal(previous:StoredSessionSnapshot,input:IntentExecutionTerminalInput):StoredSessionSnapshot;
+export function appendIntentExecutionTerminal(previous:StoredSessionSnapshot,input:IntentExecutionTerminalInput):StoredSessionSnapshot {
  const next=captureIntentSnapshot(previous),ledger=next.intentDelegation;
  if(!ledger||next.sessionId!==input.sessionId)throw Error('intent_execution_session');
  mirrors(ledger,next.sessionId);const record=ledger.intents.find(i=>i.intentId===input.intentId);if(!record)throw Error('intent_execution_missing');
- if(input.kind==='step'&&!record.stages.some(s=>s.steps.some(step=>step.stepId===input.identity)))throw Error('intent_execution_step');
+ if(input.kind==='step'&&!arrayData(record.stages,'intent_execution_step').some(s=>arrayData(propertyData(s,'intent_execution_step').steps,'intent_execution_step').some(step=>propertyData(step,'intent_execution_step').stepId===input.identity)))throw Error('intent_execution_step');
  const original=terminals(record),existing=original.find(v=>v.kind===input.kind&&v.identity===input.identity);
  if(existing){if(existing.status!==input.status||existing.recordedAt!==input.recordedAt)throw Error('intent_execution_conflict');return next;}
  if(input.requestSource==='scheduler')throw Error('intent_execution_source');

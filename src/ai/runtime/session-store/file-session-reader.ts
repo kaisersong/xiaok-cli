@@ -5,18 +5,18 @@ import {captureMigrationMarker,type SessionMigrationMarker} from './migration.js
 import {readSessionAliasBinding} from './aliases.js';
 import {readCompoundDeletionBytes} from './compound-deletion-read.js';
 import type {CompoundDeletionBudget} from './compound-deletion-census.js';
-import type {PersistedSessionSnapshot} from './store.js';
+import type {StoredSessionSnapshot} from './store.js';
 function statIfPresent(path: string) {
   try { return lstatSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
 }
 export class FileSessionReader {constructor(private readonly rootDir=join(getConfigDir(),'sessions')){}
-async load(sessionId: string): Promise<PersistedSessionSnapshot | null> {
+async load(sessionId: string): Promise<StoredSessionSnapshot | null> {
     return this.loadSync(sessionId);
   }
-loadSync(sessionId: string): PersistedSessionSnapshot | null {
+loadSync(sessionId: string): StoredSessionSnapshot | null {
     return this.readSessionSnapshot(sessionId);
   }
-readSessionSnapshot(sessionId: string, preserveIntent = false): PersistedSessionSnapshot | null {
+readSessionSnapshot(sessionId: string, preserveIntent = false): StoredSessionSnapshot | null {
     if (this.readSessionMigration(sessionId)) throw Error('MIGRATED_SESSION');
     const deletion = this.readDeletionJournal(sessionId);
     if (deletion?.state === 'pending') throw new Error('session_deletion_pending');

@@ -5,7 +5,7 @@ import { CompactRunner } from '../../ai/runtime/compact-runner.js';
 import { executePortableCompaction } from '../../ai/runtime/portable-compaction-executor.js';
 import { decideCompactionCandidate } from './compaction-policy.js';
 import type { SessionExecutionAuthority } from '../../ai/runtime/session-store/execution-authority.js';
-import { assertSynchronousSessionHook, computeSessionHistoryDigest, type SessionStore } from '../../ai/runtime/session-store/store.js';
+import { assertSynchronousSessionHook, computeSessionHistoryDigest, type SessionStore, type StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import { describeProductObservationPolicy, type ProductObservationPolicy } from './product-bootstrap.js';
 import { getObservationSessionOwnerHostBinding, type ObservationSessionOwner } from './observation-session-owner.js';
 import { measureRequestCapacity, type VerifiedCapacityProfile } from './capacity-admission.js';
@@ -88,14 +88,14 @@ export function createSemanticCompactionOwner(options:{
     if(reservations.length>=policy.maxCalls||spent+BigInt(maximumCost)>BigInt(policy.maxCostUnits))return skipped('summary_budget_exhausted');
     const live=options.session.exportSnapshot();
     // Compaction owns conversation history, not the original Intent journal.
-    const saved={...previous,...live,intentDelegation:previous.intentDelegation};
+    const saved:StoredSessionSnapshot={...previous,...live,intentDelegation:previous.intentDelegation};
     const receipt=await options.store.compareAndSave!({expectedStoreRevision:previous.storeRevision??0,
      expectedHistoryDigest:computeSessionHistoryDigest(previous),nextSnapshot:saved,lease,beforeCommit:()=>{
       assertSynchronousSessionHook(input.assertBoundaryCurrent);
       input.signal.throwIfAborted();options.observationOwner.prepareSemanticAnchors([]);
       if(options.session.planCompaction().sourceRevision!==input.sourceRevision)throw Error('SEMANTIC_STALE_BOUNDARY');
      }});
-    const sourceSnapshot={...saved,...receipt};plan=options.session.planCompaction();
+    const sourceSnapshot:StoredSessionSnapshot={...saved,...receipt};plan=options.session.planCompaction();
     const before=await options.observationOwner.prepareRequest({logicalInvocationId:`semantic-measure:${randomUUID()}`,
      messages:sourceSnapshot.messages,tools:input.tools,systemPrompt:input.systemPrompt,requestPreview:input.adapter.getObservationRequestPreview.bind(input.adapter)});
     const baselineTokens=measure(before.messages);if(before.providerDisclosure)disposeProviderDisclosureContext(before.providerDisclosure);

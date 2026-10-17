@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { FileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import { SQLiteSessionStore } from '../../../src/ai/runtime/session-store/sqlite-store.js';
-import { computeSessionHistoryDigest, type PersistedSessionSnapshot } from '../../../src/ai/runtime/session-store/store.js';
+import { computeSessionHistoryDigest, type PersistedSessionSnapshot, type StoredSessionSnapshot } from '../../../src/ai/runtime/session-store/store.js';
 import { createSessionExecutionAuthority, createSessionExecutionContext } from '../../../src/ai/runtime/session-store/execution-authority.js';
 const roots:string[]=[];const cleanups:(()=>void)[]=[];
 afterEach(()=>{for(const f of cleanups.splice(0))f();for(const r of roots.splice(0))rmSync(r,{recursive:true,force:true});});
@@ -49,7 +49,7 @@ for (const kind of ['file','sqlite'] as const) it(`${kind}: commit notification 
  const root=mkdtempSync(join(tmpdir(),'session-notify-'));roots.push(root);
  const store=kind==='file'?new FileSessionStore(root):new SQLiteSessionStore(join(root,'sessions.sqlite'));
  if(store instanceof SQLiteSessionStore)cleanups.push(()=>store.dispose());
- const notifications:PersistedSessionSnapshot[]=[];
+ const notifications:StoredSessionSnapshot[]=[];
  const unsubscribe=store.onCommit(value=>{notifications.push(value);value.messages=[];});
  await store.save(snapshot());
  expect(notifications[0].storeRevision).toBe(1);

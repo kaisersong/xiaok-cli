@@ -1,13 +1,14 @@
 import {readInstalledCurrentOwner} from '../verification/installed-owner-state.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-import type {PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
+import type {PersistedSessionSnapshot,StoredSessionSnapshot} from '../../ai/runtime/session-store/store.js';
+import type {StoredStageInput} from './stored-intent-clone.js';
 import type {SessionExecutionLease} from '../../ai/runtime/session-store/execution-authority.js';
 import {captureIntentData,hasProtectedIntentProducerHistory} from './intent-commit-boundary.js';
 import {canonicalVerificationJson as json} from '../verification/protocol.js';
 import {applyIntentStepUpdate} from './dispatcher.js';
 import {assertSessionWriteOwnership} from './ownership.js';
-import {parseIntentProducerAction,type IntentProducerAction} from './producer-report.js';
+import {parseIntentProducerAction,parseIntentProducerReport,type IntentProducerAction} from './producer-report.js';
 export type {IntentProducerOrigin,IntentProducerAction,IntentProducerReport} from './producer-report.js';
 export interface IntentProducerActionInput {instanceId:string;sessionId:string;intentId:string;expectedLedgerHash:string;requestSource:'user'|'agent'|'scheduler';action:IntentProducerAction;now:number}
 const id=(v:unknown)=>typeof v==='string'&&v.length>0&&Buffer.byteLength(v)<=160&&!/[\x00-\x1f\x7f]/.test(v);
@@ -34,29 +35,50 @@ export function intentProducerRouteVector(ledger:IntentProducerRouteData|undefin
  return json([...ids].sort().map(ownerId=>({ownerId,route:readInstalledCurrentOwner({ownerKind:'intent',ownerId})})));
 }
 export function assertIntentProducerRoutesCurrent(ledger:IntentProducerRouteData|undefined,original:string):void{if(intentProducerRouteVector(ledger)!==original)throw Error('intent_producer_route_changed');}
+interface ProducerReplayReportData {readonly action:{readonly origin:{readonly providerInvocationId?:unknown;readonly toolInvocationId?:unknown}};readonly now?:unknown;readonly requestSource?:unknown}
+interface ProducerStageData extends StoredStageInput {latestArtifactId?:unknown}
+function isProducerReportObject(value:unknown):value is Readonly<Record<string,unknown>>{
+ return value!==null&&typeof value==='object'&&!Array.isArray(value);
+}
+function producerReportObject(value:unknown):Readonly<Record<string,unknown>>{
+ if(!isProducerReportObject(value))throw Error('intent_producer_report_data');return value;
+}
+function assertProducerReportsData(value:unknown):asserts value is ProducerReplayReportData[]{
+ if(!Array.isArray(value))throw Error('intent_producer_report_data');
+ const reports:readonly unknown[]=value;
+ for(const report of reports){
+  parseIntentProducerReport(report);
+  const data=producerReportObject(report);producerReportObject(producerReportObject(data.action).origin);
+ }
+}
+function producerStages(value:StoredStageInput[]|null|undefined):StoredStageInput[]{
+ if(!Array.isArray(value))throw Error('intent_producer_stage_data');return value;
+}
 /** Called only by actual SessionStore primitive under its original lease/save lock.
  * These are model reports, never proof of a producer side effect or current business. */
-export function applyIntentProducerAction(previous:PersistedSessionSnapshot,input:IntentProducerActionInput,originalRoutes:string):PersistedSessionSnapshot{
+export function applyIntentProducerAction(previous:PersistedSessionSnapshot,input:IntentProducerActionInput,originalRoutes:string):PersistedSessionSnapshot;
+export function applyIntentProducerAction(previous:StoredSessionSnapshot,input:IntentProducerActionInput,originalRoutes:string):StoredSessionSnapshot;
+export function applyIntentProducerAction(previous:StoredSessionSnapshot,input:IntentProducerActionInput,originalRoutes:string):StoredSessionSnapshot{
  let protectedMode=(JSON.parse(originalRoutes) as Array<{route:{kind:string}}>).some(v=>v.route.kind!=='ordinary');
  const next=captureIntentData(previous),ledger=next.intentDelegation;
  if(!ledger||next.sessionId!==input.sessionId)throw Error('intent_producer_session');
  const index=ledger.intents.findIndex(i=>i.intentId===input.intentId),record=ledger.intents[index];if(!record||ledger.activeIntentId!==record.intentId)throw Error('intent_producer_intent');
  protectedMode ||= hasProtectedIntentProducerHistory(ledger);
  assertSessionWriteOwnership(ledger,input.instanceId,'record intent producer report');
- const reports=record.producerReports??[],a=input.action,prior=reports.find(r=>r.action.origin.providerInvocationId===a.origin.providerInvocationId&&r.action.origin.toolInvocationId===a.origin.toolInvocationId);
+ const reports=record.producerReports??[];assertProducerReportsData(reports);const a=input.action,prior=reports.find(r=>r.action.origin.providerInvocationId===a.origin.providerInvocationId&&r.action.origin.toolInvocationId===a.origin.toolInvocationId);
  if(prior){if(!isDeepStrictEqual(prior.action,a)||prior.now!==input.now||prior.requestSource!==input.requestSource)throw Error('intent_producer_replay_conflict');return next;}
  if(intentProducerLedgerHash(ledger)!==input.expectedLedgerHash)throw Error('intent_producer_stale');
- if(input.now<record.updatedAt||['completed','cancelled','failed','publication_pending'].includes(record.overallStatus))throw Error('intent_producer_terminal');
- const stage=record.stages.find(s=>s.stageId===record.activeStageId);if(!stage)throw Error('intent_producer_stage');
+ if(input.now<record.updatedAt||(['completed','cancelled','failed','publication_pending'] as readonly unknown[]).includes(record.overallStatus))throw Error('intent_producer_terminal');
+ const stage:ProducerStageData|undefined=producerStages(record.stages).find(s=>s.stageId===record.activeStageId);if(!stage)throw Error('intent_producer_stage');
  let updated=record,artifactId:string|null=null;
  if(a.kind==='step-report'){
   updated=applyIntentStepUpdate(record,{stepId:a.stepId,status:a.status,now:input.now});
-  if(protectedMode&&a.status==='failed'){updated.stages.find(s=>s.stageId===stage.stageId)!.status='waiting_user';updated.overallStatus='waiting_user';}
-  if(protectedMode&&a.status==='completed'&&(updated.stages.find(s=>s.stageId===stage.stageId)?.status==='completed'||updated.activeStageId!==stage.stageId||updated.overallStatus==='completed')){
-   const ended=updated.stages.find(s=>s.stageId===stage.stageId)!;ended.status='publication_pending';ended.structuralValidation=stage.structuralValidation;ended.semanticValidation=stage.semanticValidation;
+  if(protectedMode&&a.status==='failed'){producerStages(updated.stages).find(s=>s.stageId===stage.stageId)!.status='waiting_user';updated.overallStatus='waiting_user';}
+  if(protectedMode&&a.status==='completed'&&(producerStages(updated.stages).find(s=>s.stageId===stage.stageId)?.status==='completed'||updated.activeStageId!==stage.stageId||updated.overallStatus==='completed')){
+   const ended=producerStages(updated.stages).find(s=>s.stageId===stage.stageId)!;ended.status='publication_pending';ended.structuralValidation=stage.structuralValidation;ended.semanticValidation=stage.semanticValidation;
    updated.activeStageId=stage.stageId;updated.activeStepId=stage.activeStepId;updated.steps=ended.steps;updated.overallStatus='publication_pending';
    // The ordinary reducer's next-stage projection is not an execution fact.
-   updated.stages=updated.stages.map(s=>s.stageId===stage.stageId?s:record.stages.find(old=>old.stageId===s.stageId)!);
+   updated.stages=producerStages(updated.stages).map(s=>s.stageId===stage.stageId?s:producerStages(record.stages).find(old=>old.stageId===s.stageId)!);
   }
   updated.latestBreadcrumb=a.breadcrumb;if(a.blockedReason!==null)updated.blockedReason=a.blockedReason;
   ledger.breadcrumbs.push({intentId:record.intentId,stepId:a.stepId,status:a.status,message:a.breadcrumb,createdAt:input.now});

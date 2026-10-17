@@ -147,7 +147,7 @@ export interface SessionCompareAndSave {
   beforeCommit?: () => void;
   expectedStoreRevision: number;
   expectedHistoryDigest: string;
-  nextSnapshot: PersistedSessionSnapshot;
+  nextSnapshot: StoredSessionSnapshot;
   lease: SessionExecutionLease;
 }
 export interface SessionCommitReceipt { storeRevision: number; historyDigest: string }
@@ -175,11 +175,11 @@ export function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null
 
 /** Host notifications report durable facts; exceptions propagate without rolling back commits. */
 export class SessionCommitNotifications {
-  private readonly listeners = new Set<(snapshot: PersistedSessionSnapshot) => void>();
-  subscribe(listener: (snapshot: PersistedSessionSnapshot) => void): () => void {
+  private readonly listeners = new Set<(snapshot: StoredSessionSnapshot) => void>();
+  subscribe(listener: (snapshot: StoredSessionSnapshot) => void): () => void {
     this.listeners.add(listener); return () => { this.listeners.delete(listener); };
   }
-  publish(snapshot: PersistedSessionSnapshot): void {
+  publish(snapshot: StoredSessionSnapshot): void {
     for (const listener of [...this.listeners]) assertSynchronousSessionHook(() => listener(structuredClone(snapshot)));
   }
 }
@@ -196,8 +196,8 @@ export function assertSynchronousSessionHook(hook?: () => void): void {
 
 export interface SessionStore {
   assertIntentNativeLease?(sessionId:string,requestSource:'user'|'scheduler',lease:SessionExecutionLease):void;
-  getIntentNativeLedgerSync?(sessionId:string):import('../../../runtime/intent-delegation/types.js').SessionIntentLedger|undefined;
-  getIntentNativeLedger?(sessionId:string):Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger|undefined>;
+  getIntentNativeLedgerSync?(sessionId:string):StoredSessionSnapshot['intentDelegation'];
+  getIntentNativeLedger?(sessionId:string):Promise<StoredSessionSnapshot['intentDelegation']>;
   retryIntentPublicationApplication?(input:import('../../../runtime/intent-delegation/publication-candidate-journal.js').RetryIntentPublicationInput&{lease:SessionExecutionLease}):Promise<import('../../../runtime/intent-delegation/publication-candidate-journal.js').IntentPublicationCandidate>;
   observeIntentPublicationApplication?(input:import('../../../runtime/intent-delegation/publication-candidate-journal.js').ObserveIntentPublicationInput&{lease:SessionExecutionLease}):Promise<import('../../../runtime/intent-delegation/publication-candidate-journal.js').IntentPublicationCandidate>;
   claimIntentPublicationApplication?(input:import('../../../runtime/intent-delegation/publication-candidate-journal.js').ClaimIntentPublicationInput&{lease:SessionExecutionLease}):Promise<import('../../../runtime/intent-delegation/publication-candidate-journal.js').IntentPublicationCandidate>;
@@ -215,12 +215,12 @@ export interface SessionStore {
 
   recordIntentProducerAction?(input:import('../../../runtime/intent-delegation/producer-facts.js').IntentProducerActionInput&{lease:SessionExecutionLease}):Promise<void>;
   recordIntentExecutionTerminal?(input: import('../../../runtime/intent-delegation/intent-commit-boundary.js').IntentExecutionTerminalInput & {lease:SessionExecutionLease}):Promise<void>;
-  onCommit?(listener: (snapshot: PersistedSessionSnapshot) => void): () => void;
+  onCommit?(listener: (snapshot: StoredSessionSnapshot) => void): () => void;
   compareAndSave?(input: SessionCompareAndSave): Promise<SessionCommitReceipt>;
-  save(snapshot: PersistedSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void>;
-  load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
-  loadSync?(sessionId: string): PersistedSessionSnapshot | null;
-  loadLast(): Promise<PersistedSessionSnapshot | null>;
+  save(snapshot: StoredSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void>;
+  load(sessionId: string): Promise<StoredSessionSnapshot | null>;
+  loadSync?(sessionId: string): StoredSessionSnapshot | null;
+  loadLast(): Promise<StoredSessionSnapshot | null>;
   list(): Promise<SessionListEntry[]>;
-  fork(sessionId: string): Promise<PersistedSessionSnapshot>;
+  fork(sessionId: string): Promise<StoredSessionSnapshot>;
 }

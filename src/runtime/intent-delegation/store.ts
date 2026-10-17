@@ -26,6 +26,29 @@ import {
 export { createEmptySessionIntentLedger } from './types.js';
 export { rekeySessionIntentLedger } from './types.js';
 
+// Consumed report DATA only; not a producer/authority/control witness.
+function isProducerReportObject(value:unknown):value is Readonly<Record<string,unknown>> {
+  return value!==null&&(typeof value==='object'||typeof value==='function');
+}
+function producerReportObject(value:unknown):Readonly<Record<string,unknown>> {
+  if(!isProducerReportObject(value))throw Error('intent_producer_report_data');return value;
+}
+function producerReportNow(value:unknown,origin:IntentProducerAction['origin']):number|undefined {
+  if(value===undefined||value===null)return undefined;
+  if(!Array.isArray(value))throw Error('intent_producer_report_data');
+  const rows:readonly unknown[]=value,length=rows.length;
+  for(let index=0;index<length;index++){
+    const report=producerReportObject(rows[index]),action=producerReportObject(report.action),source=producerReportObject(action.origin);
+    if(source.providerInvocationId===origin.providerInvocationId&&source.toolInvocationId===origin.toolInvocationId){
+      const now=report.now;
+      if(now===undefined||now===null)return undefined;
+      if(typeof now!=='number')throw Error('intent_producer_report_time');
+      return now;
+    }
+  }
+  return undefined;
+}
+
 type ProducerMutationPort=SessionIntentDelegationStore['recordProducerAction'];
 const producerMutationPorts=new WeakMap<object,ProducerMutationPort>();
 const producerSessionStores=new WeakMap<object,SessionStore>();
@@ -41,12 +64,12 @@ export class SessionIntentDelegationStore {
     producerMutationPorts.set(this,async(sessionId,intentId,instanceId,action,requestSource,lease)=>{
       const captured=captureIntentData(action),snapshot=await load(sessionId),ledger=snapshot?readLedger(snapshot):null;
       if(!ledger||!write)throw Error('intent_producer_store_required');
-      await write({sessionId,intentId,instanceId,action:captured,requestSource,expectedLedgerHash:intentProducerLedgerHash(ledger),now:ledger.intents.find(row=>row.intentId===intentId)?.producerReports?.find(report=>report.action.origin.providerInvocationId===captured.origin.providerInvocationId&&report.action.origin.toolInvocationId===captured.origin.toolInvocationId)?.now??Date.now(),lease});
+      await write({sessionId,intentId,instanceId,action:captured,requestSource,expectedLedgerHash:intentProducerLedgerHash(ledger),now:producerReportNow(ledger.intents.find(row=>row.intentId===intentId)?.producerReports,captured.origin)??Date.now(),lease});
       const saved=await load(sessionId);if(!saved)throw Error('intent_producer_store_required');return readLedger(saved);
     });
   }
 
-  async recordExecutionTerminal(sessionId:string,input:Omit<IntentExecutionTerminalInput,'sessionId'>,lease:SessionExecutionLease):Promise<SessionIntentLedger> {
+  async recordExecutionTerminal(sessionId:string,input:Omit<IntentExecutionTerminalInput,'sessionId'>,lease:SessionExecutionLease):Promise<NormalizedStoredSessionIntentLedger> {
     const captured=captureIntentData(input);
     if(!captured||Object.keys(captured).sort().join(',')!=='identity,intentId,kind,recordedAt,requestSource,status')throw Error('intent_execution_input');
     const value=parseIntentExecutionInput({...captured,sessionId});
@@ -55,11 +78,11 @@ export class SessionIntentDelegationStore {
     return (await this.load(sessionId))!;
   }
 
-  async recordProducerAction(sessionId:string,intentId:string,instanceId:string,action:IntentProducerAction,requestSource:IntentProducerActionInput['requestSource'],lease:SessionExecutionLease):Promise<SessionIntentLedger> {
+  async recordProducerAction(sessionId:string,intentId:string,instanceId:string,action:IntentProducerAction,requestSource:IntentProducerActionInput['requestSource'],lease:SessionExecutionLease):Promise<NormalizedStoredSessionIntentLedger> {
     return getIntentProducerMutationPort(this)(sessionId,intentId,instanceId,action,requestSource,lease);
   }
 
-  async load(sessionId: string): Promise<SessionIntentLedger | null> {
+  async load(sessionId: string): Promise<NormalizedStoredSessionIntentLedger | null> {
     const snapshot = await this.sessionStore.load(sessionId);
     if (!snapshot) {
       return null;
@@ -68,34 +91,34 @@ export class SessionIntentDelegationStore {
     return readLedger(snapshot);
   }
 
-  async appendIntent(sessionId: string, plan: IntentPlanInput): Promise<SessionIntentLedger> {
+  async appendIntent(sessionId: string, plan: IntentPlanInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => appendIntentToLedger(ledger, plan));
   }
 
-  async updateIntent(sessionId: string, intentId: string, patch: UpdateIntentLedgerPatch): Promise<SessionIntentLedger> {
+  async updateIntent(sessionId: string, intentId: string, patch: UpdateIntentLedgerPatch): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => updateIntentInLedger(ledger, intentId, patch));
   }
 
-  async recordBreadcrumb(sessionId: string, input: RecordBreadcrumbInput): Promise<SessionIntentLedger> {
+  async recordBreadcrumb(sessionId: string, input: RecordBreadcrumbInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => recordBreadcrumbInLedger(ledger, input));
   }
 
-  async recordReceipt(sessionId: string, input: RecordReceiptInput): Promise<SessionIntentLedger> {
+  async recordReceipt(sessionId: string, input: RecordReceiptInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => recordReceiptInLedger(ledger, input));
   }
 
-  async recordSalvage(sessionId: string, input: RecordSalvageInput): Promise<SessionIntentLedger> {
+  async recordSalvage(sessionId: string, input: RecordSalvageInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => recordSalvageInLedger(ledger, input));
   }
 
-  async saveDispatchedIntent(sessionId: string, intent: IntentLedgerRecord): Promise<SessionIntentLedger> {
+  async saveDispatchedIntent(sessionId: string, intent: NormalizedStoredIntentRecord): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => saveDispatchedIntentInLedger(ledger, intent));
   }
 
   private async mutate(
     sessionId: string,
-    apply: (ledger: SessionIntentLedger) => SessionIntentLedger,
-  ): Promise<SessionIntentLedger> {
+    apply: (ledger: NormalizedStoredSessionIntentLedger) => NormalizedStoredSessionIntentLedger,
+  ): Promise<NormalizedStoredSessionIntentLedger> {
     const snapshot = await this.requireSnapshot(sessionId);
     const current = readLedger(snapshot);
     const next = apply(current);
@@ -107,7 +130,7 @@ export class SessionIntentDelegationStore {
     return next;
   }
 
-  private async requireSnapshot(sessionId: string): Promise<PersistedSessionSnapshot> {
+  private async requireSnapshot(sessionId: string): Promise<StoredSessionSnapshot> {
     const snapshot = await this.sessionStore.load(sessionId);
     if (!snapshot) {
       throw new Error(`session not found: ${sessionId}`);
@@ -243,10 +266,10 @@ export function recordSalvageInLedger(
 }
 
 export function saveDispatchedIntentInLedger(ledger: SessionIntentLedger, intentRecord: IntentLedgerRecord): SessionIntentLedger;
-export function saveDispatchedIntentInLedger(ledger: NormalizedStoredSessionIntentLedger, intentRecord: IntentLedgerRecord): NormalizedStoredSessionIntentLedger;
+export function saveDispatchedIntentInLedger(ledger: NormalizedStoredSessionIntentLedger, intentRecord: NormalizedStoredIntentRecord): NormalizedStoredSessionIntentLedger;
 export function saveDispatchedIntentInLedger(
   ledger: NormalizedStoredSessionIntentLedger,
-  intentRecord: IntentLedgerRecord,
+  intentRecord: NormalizedStoredIntentRecord,
 ): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const existing = requireIntent(next, intentRecord.intentId);

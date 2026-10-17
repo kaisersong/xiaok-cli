@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Message } from '../../../types.js';
 import type {
-  PersistedSessionSnapshot,
+  StoredSessionSnapshot,
   SessionListEntry,
   SessionStore,
 } from './store.js';
@@ -82,6 +82,7 @@ function assertKnownSqliteSessionWriter(owner:object,rootLockHeld=false,accepted
   if(rootLockHeld||acceptedFork!==undefined){if(!rootLockHeld||!acceptedFork||acceptedSqliteSessionForks.get(acceptedFork)!==owner)throw Error('known_writer_fence_owner');return;}
   writer.fence?.assertOpen();
 }
+import {nativeJournalLengthData} from '../../../runtime/intent-delegation/data.js';
 type TerminalLookupData = {readonly kind?:unknown;readonly identity?:unknown;readonly status?:unknown;readonly recordedAt?:unknown};
 export class SQLiteSessionStore implements SessionStore {
   private readonly db: Database.Database;
@@ -108,7 +109,7 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   private readonly commitNotifications = new SessionCommitNotifications();
-  onCommit(listener: (snapshot: PersistedSessionSnapshot) => void): () => void {
+  onCommit(listener: (snapshot: StoredSessionSnapshot) => void): () => void {
     return this.commitNotifications.subscribe(listener);
   }
 
@@ -120,8 +121,8 @@ export class SQLiteSessionStore implements SessionStore {
   assertIntentNativeLease(sessionId:string,requestSource:'user'|'scheduler',lease:SessionExecutionLease):void {
     assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:sessionId,requestSource,allowedKinds:['direct-mutation','recovery']});
   }
-  async getIntentNativeLedger(sessionId:string):Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger|undefined>{return this.getIntentNativeLedgerSync(sessionId);}
-  getIntentNativeLedgerSync(sessionId:string):import('../../../runtime/intent-delegation/types.js').SessionIntentLedger|undefined{
+  async getIntentNativeLedger(sessionId:string):Promise<StoredSessionSnapshot['intentDelegation']>{return this.getIntentNativeLedgerSync(sessionId);}
+  getIntentNativeLedgerSync(sessionId:string):StoredSessionSnapshot['intentDelegation']{
     const snapshot=this.readSnapshot(sessionId);if(!snapshot)return undefined;parseIntentNativeContracts(snapshot.intentDelegation?.nativeContracts,sessionId);return freezeIntentNativeLedger(captureIntentSnapshot(snapshot).intentDelegation);
   }
   async recordIntentReceiverPublication(raw:IntentReceiverWriteInput):Promise<IntentPublicationCandidate>{
@@ -233,7 +234,7 @@ export class SQLiteSessionStore implements SessionStore {
     this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
   }
 
-  async save(snapshot: PersistedSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void> {
+  async save(snapshot: StoredSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void> {
     assertKnownSqliteSessionWriter(this);
     this.commitSnapshot(snapshot, undefined, undefined, options?.lease);
   }
@@ -245,19 +246,19 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   private mutationInProgress = false;
-  private commitSnapshot(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation,acceptedFork?:object): SessionCommitReceipt {
+  private commitSnapshot(snapshot: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation,acceptedFork?:object): SessionCommitReceipt {
     assertKnownSqliteSessionWriter(this,rootLockHeld,acceptedFork);
     if (this.mutationInProgress) throw Error('session_commit_reentrant');
     this.mutationInProgress = true;
     try { return this.commitSnapshotLocked(captureIntentSnapshot(snapshot), cas, forkSourceId, executionLease, rootLockHeld,terminal,acceptedFork); }
     finally { this.mutationInProgress = false; }
   }
-  private commitSnapshotLocked(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation,acceptedFork?:object): SessionCommitReceipt {
+  private commitSnapshotLocked(snapshot: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation,acceptedFork?:object): SessionCommitReceipt {
     assertKnownSqliteSessionWriter(this,rootLockHeld,acceptedFork);
     const releaseExecution = acquireSessionStoreExecutionGuard(dirname(this.dbPath), snapshot.sessionId, cas?.lease ?? executionLease, rootLockHeld);
     try {
     const durableSnapshot = toDurableSessionSnapshot(snapshot);
-    const saveTransaction = this.db.transaction((nextSnapshot: PersistedSessionSnapshot) => {
+    const saveTransaction = this.db.transaction((nextSnapshot: StoredSessionSnapshot) => {
       assertOrdinarySourceWriterRoute();
       if (cas) assertSessionExecutionLease(cas.lease, { root: dirname(this.dbPath), sessionIdentity: snapshot.sessionId });
       const forkSource = forkSourceId ? this.readSnapshot(forkSourceId) : undefined;
@@ -376,7 +377,7 @@ export class SQLiteSessionStore implements SessionStore {
       if(publicationRoute!==undefined)assertIntentPublicationRoute(originalSnapshot?.intentDelegation,publicationRoute,publicationCandidateId);
       if(terminal)assertSessionExecutionLease(executionLease!,{root:dirname(this.dbPath),sessionIdentity:terminal.sessionId,requestSource:terminal.requestSource,...('publicationAction'in terminal?((terminal.publicationAction==='observe'||terminal.publicationAction==='receiver'&&(terminal.action.kind==='observe'||terminal.action.kind==='retire')||terminal.publicationAction==='verification'&&(terminal.verificationAction==='observe-enrollment'||terminal.verificationAction==='operation'&&terminal.action.kind==='observe'))?{allowedKinds:['direct-mutation','recovery'] as const}:{kind:'direct-mutation' as const}):'nativeAction'in terminal?(terminal.nativeAction!=='advance'||terminal.phase==='enrolling'?{kind:'direct-mutation' as const}:{allowedKinds:['direct-mutation','recovery'] as const}):'action'in terminal?{kind:'direct-mutation' as const}:{})});
       if(terminal){const tail=this.readSnapshot(nextSnapshot.sessionId);if(JSON.stringify(tail?.intentDelegation??null)!==JSON.stringify(nextSnapshot.intentDelegation??null)||tail?.storeRevision!==nextSnapshot.storeRevision||tail?.historyDigest!==nextSnapshot.historyDigest)throw Error('intent_producer_readback');}
-      return { snapshot: { ...nextSnapshot, protectedObservationClosure }, protectedPublication: protectedObservationClosure !== undefined || nextSnapshot.executionProtected === true || !!nextSnapshot.intentDelegation?.nativeContracts?.length, storeRevision: nextSnapshot.storeRevision!, historyDigest: nextSnapshot.historyDigest! };
+      return { snapshot: { ...nextSnapshot, protectedObservationClosure }, protectedPublication: protectedObservationClosure !== undefined || nextSnapshot.executionProtected === true || !!nativeJournalLengthData(nextSnapshot.intentDelegation?.nativeContracts), storeRevision: nextSnapshot.storeRevision!, historyDigest: nextSnapshot.historyDigest! };
     });
 
     const protectedPublication = saveTransaction.immediate(durableSnapshot);
@@ -425,7 +426,7 @@ export class SQLiteSessionStore implements SessionStore {
     syncDirectoryTreeStrict(dirname(this.dbPath)); return marker;
   }
 
-  async loadLast(): Promise<PersistedSessionSnapshot | null> {
+  async loadLast(): Promise<StoredSessionSnapshot | null> {
     const row = this.db.prepare(`
       SELECT value
       FROM session_meta
@@ -438,10 +439,10 @@ export class SQLiteSessionStore implements SessionStore {
     return this.load(sessionId);
   }
 
-  async load(sessionId: string): Promise<PersistedSessionSnapshot | null> { return this.loadSync(sessionId); }
-  loadSync(sessionId: string): PersistedSessionSnapshot | null { return this.readSnapshot(sessionId); }
+  async load(sessionId: string): Promise<StoredSessionSnapshot | null> { return this.loadSync(sessionId); }
+  loadSync(sessionId: string): StoredSessionSnapshot | null { return this.readSnapshot(sessionId); }
 
-  private readSnapshot(sessionId: string): PersistedSessionSnapshot | null {
+  private readSnapshot(sessionId: string): StoredSessionSnapshot | null {
     if (this.readSessionMigration(sessionId)) throw Error('MIGRATED_SESSION');
     const row = this.db.prepare(`
       SELECT *
@@ -494,7 +495,7 @@ export class SQLiteSessionStore implements SessionStore {
     }));
   }
 
-  async fork(sessionId: string): Promise<PersistedSessionSnapshot> {
+  async fork(sessionId: string): Promise<StoredSessionSnapshot> {
     assertKnownSqliteSessionWriter(this);
     const releaseRoot = acquireSaveLock(join(dirname(this.dbPath), '.session-store-lock'));
     let releaseSource = () => {};
@@ -514,7 +515,7 @@ export class SQLiteSessionStore implements SessionStore {
       ? [...sourceLineage]
       : [...sourceLineage, source.sessionId];
     const nextSessionId = this.createSessionId();
-    const forked: PersistedSessionSnapshot = {
+    const forked: StoredSessionSnapshot = {
       ...source,
       sessionId: nextSessionId,
       createdAt: now,
@@ -582,12 +583,12 @@ function cloneMessages(messages: Message[]): Message[] {
 }
 
 /** Original SQLite row normalization; no source reads or migration filtering. */
-export function parseSQLiteSessionSnapshot(row: SessionRow, messages: readonly SessionMessageRow[]): PersistedSessionSnapshot {
+export function parseSQLiteSessionSnapshot(row: SessionRow, messages: readonly SessionMessageRow[]): StoredSessionSnapshot {
     const parsedSkillExecution = row.skill_execution_json
       ? (JSON.parse(row.skill_execution_json) ?? undefined)
       : undefined;
 
-    const snapshot: PersistedSessionSnapshot = {
+    const snapshot: StoredSessionSnapshot = {
       sessionId: row.session_id,
       compoundOperations: row.compound_operations_json ? validateCompoundOperationLedger(JSON.parse(row.compound_operations_json)) : undefined,
       semanticCompaction: row.semantic_compaction_json ? validateSemanticCompactionLedger(JSON.parse(row.semantic_compaction_json)) : undefined,

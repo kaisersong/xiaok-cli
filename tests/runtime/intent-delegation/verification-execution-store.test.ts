@@ -1,3 +1,4 @@
+import {parseIntentNativeContracts} from '../../../src/runtime/intent-delegation/native-contract-journal.js';
 import {SQLiteSessionStore} from '../../../src/ai/runtime/session-store/sqlite-store.js';
 import {createIntentPublicationHost} from '../../../src/runtime/intent-delegation/publication-host.js';
 import {intentApplicationBindingHash} from '../../../src/runtime/verification/intent-application-binding.js';
@@ -25,7 +26,7 @@ async function fixture(kind:'file'|'sqlite'='file'){
  const requests=new Map<string,any>(),challenges=new Map<string,any>();let approvals=0;
  const transport=async(method:string,payload:any)=>{
   if(method==='completion.prepare-owner-request'){
-   const journal=(await store.getIntentNativeLedger('session'))!.nativeContracts![0];expect(journal.subjects.find(s=>s.attempts.at(-1)!.requestId===payload.requestId)?.attempts.at(-1)!.phase??store.getIntentNativeLedgerSync('session')!.verificationExecutions?.find(row=>row.enrollmentRequestId===payload.requestId)?.phase).toBe('enrolling');
+   const journal=storedFixtureNativeContracts((await store.getIntentNativeLedger('session'))!)[0];expect(journal.subjects.find(s=>s.attempts.at(-1)!.requestId===payload.requestId)?.attempts.at(-1)!.phase??storedFixtureVerificationPhase(store.getIntentNativeLedgerSync('session')!.verificationExecutions,()=>payload.requestId)).toBe('enrolling');
    const {requestId,...proposal}=payload,challengeId=`challenge-${requests.size}`,challenge={challengeId,canonicalReview:{version:1,purpose:'completion-owner-enrollment',authorityId:'authority',challengeId,principal:{uid:501,auditSessionId:1,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555'},profileSlot:'default',deadline:{domainId:'clock',qualificationEpoch:1,notBefore:1,validUntil:1000},...proposal}};requests.set(requestId,{challenge,committed:false});challenges.set(challengeId,requests.get(requestId));return {created:true,challenge};
   }
   if(method==='completion.authorize-owner'){approvals++;const row=challenges.get(payload.challengeId);row.committed=true;const e=row.challenge.canonicalReview.enrollment,owner={profileId:'profile',ownerKind:e.ownerKind,ownerId:e.ownerId};row.owner=owner;leaf.routes.set(owner.ownerId,{kind:'protected-unregistered',authorityId:'authority',owner});return {owner,readGrant:{id:'read',secret:'a'.repeat(64)}};}
@@ -45,12 +46,12 @@ async function applicationFixture(storage?:'inline'|'file_ref',kind:'file'|'sqli
   if(method==='application.recoverRequest'||method==='application.lookupRequest'){const r=requests.get(payload.requestId);if(!r)return {state:method.endsWith('recoverRequest')?'not_prepared':'absent'};return {state:r.committed?'committed':'not_approved',challengePhase:r.committed?'committed':'not_approved',challenge:{...r.challenge,alreadyCommitted:r.committed},...(r.committed?{observation:{state:'active',current:{binding:r.challenge.canonicalReview.binding,bindingHash:r.challenge.canonicalReview.bindingHash,revision:1},pendingTransitionId:null,pendingTarget:null}}:{})};}
   return f.transport(method,payload);
  });
- const host=createIntentPublicationHost({...f.options,workspaceRoot:f.root});cleanup.push(()=>host.close());const artifactSelections=(f.store.getIntentNativeLedgerSync('session')!.intents[0]!.artifacts??[]).map(a=>({artifactId:a.artifactId,obligationId:'original',path:'result.md'}));const candidate=await host.capture({artifactSelections,requestSource:'user'});return {...f,host,candidate,requests,transport:leaf.call.getMockImplementation()!,get approvals(){return approvals;},tick(){f.setNow(now++);}};
+ const host=createIntentPublicationHost({...f.options,workspaceRoot:f.root});cleanup.push(()=>host.close());const artifactSelections=(f.store.getIntentNativeLedgerSync('session')!.intents[0]!.artifacts??[]).map(a=>({artifactId:storedFixtureString(storedFixtureObject(a).artifactId),obligationId:'original',path:'result.md'}));const candidate=await host.capture({artifactSelections,requestSource:'user'});return {...f,host,candidate,requests,transport:leaf.call.getMockImplementation()!,get approvals(){return approvals;},tick(){f.setNow(now++);}};
 }
 
 it.each(['file','sqlite'] as const)('%s: actual candidate binding reserves all verification request identities before any native/material call',async(kind)=>{
  const f=await applicationFixture(undefined,kind);f.tick();const candidate=await f.host.advance({candidateId:f.candidate.id,requestSource:'user'});expect(candidate.applicationAttempts[0].phase).toBe('ready');
- const {intentNativeLedgerHash}=await import('../../../src/runtime/intent-delegation/native-contract-journal.js');const currentContract=f.store.getIntentNativeLedgerSync('session')!.nativeContracts![0].contract,registration=intentContractOriginalRegistration({subject:{version:1,sessionId:'session',intentId:currentContract.intentId,stageId:candidate.stageId},contract:currentContract});
+ const {intentNativeLedgerHash}=await import('../../../src/runtime/intent-delegation/native-contract-journal.js');const currentContract=storedFixtureNativeContracts(f.store.getIntentNativeLedgerSync('session')!)[0].contract,registration=intentContractOriginalRegistration({subject:{version:1,sessionId:'session',intentId:currentContract.intentId,stageId:candidate.stageId},contract:currentContract});
  const lease=await f.authority.acquire({kind:'direct-mutation',invocationId:'verification-reservation'});
  try{const before=f.store.getIntentNativeLedgerSync('session')!,calls=leaf.call.mock.calls.length;
  const row=await (f.store as any).reserveIntentVerificationExecution({sessionId:'session',instanceId:'host',expectedLedgerHash:intentNativeLedgerHash(before),candidateId:candidate.id,obligationId:'original',registration,exactCommand:{argv:['node','verify.mjs'],cwdRelative:'.'},materials:[{path:join(f.root,'verify.mjs'),byteLimit:4096}],expiresAt:1000,requestSource:'user',now:100,lease});
@@ -64,7 +65,7 @@ it.each(['file','sqlite'] as const)('%s: actual candidate binding reserves all v
  await expect((f.store as any).reserveIntentVerificationExecution({...request,ownerId:'forged'})).rejects.toThrow('intent_verification_shape');
  await expect((f.store as any).reserveIntentVerificationExecution({...request,obligationId:'foreign'})).rejects.toThrow('intent_verification_obligation');
  await expect((f.store as any).reserveIntentVerificationExecution({...request,exactCommand:{argv:['true'],cwdRelative:'.'}})).rejects.toThrow('intent_verification_conflict');
- const changed=structuredClone(saved!);changed.intentDelegation!.verificationExecutions![0].materialRequestId='replacement';await expect(f.store.save(changed,{lease})).rejects.toThrow('intent_verification_requires_primitive');
+ const changed=structuredClone(saved!);storedFixtureObject(storedFixtureArray(changed.intentDelegation!.verificationExecutions)[0]).materialRequestId='replacement';await expect(f.store.save(changed,{lease})).rejects.toThrow('intent_verification_requires_primitive');
  const removed=structuredClone(saved!);delete removed.intentDelegation!.verificationExecutions;await expect(f.store.save(removed,{lease})).rejects.toThrow('intent_verification_requires_primitive');
  let getterReads=0;await expect((f.store as any).reserveIntentVerificationExecution({...request,get materials(){getterReads++;return [];}})).rejects.toThrow('intent_verification_accessor');expect(getterReads).toBe(0);expect(await f.store.load('session')).toEqual(saved);
  await expect((f.store as any).claimIntentVerificationEnrollment({sessionId:'session',instanceId:'host',id:row.id,expectedLedgerHash:intentNativeLedgerHash(current),expectedRevision:1,requestSource:'user',now:1000,lease})).rejects.toThrow('intent_verification_expired');expect(await f.store.load('session')).toEqual(saved);
@@ -164,3 +165,28 @@ it('verification physical close retains an already settled original enrollment f
  await expect(host.advance({id:row.id,requestSource:'user'})).rejects.toBe(failure);
  await host.close();await expect(host.waitForClosedResources()).rejects.toMatchObject({errors:[failure]});
 });
+
+// Test-only observations keep original raw references; no authority or modern ledger assertion.
+function isStoredFixtureObject(value:unknown):value is Record<string,unknown>{
+ return value!==null&&typeof value==='object'&&!Array.isArray(value);
+}
+function storedFixtureObject(value:unknown):Record<string,unknown>{
+ if(!isStoredFixtureObject(value))throw Error('stored_fixture_object');
+ return value;
+}
+function storedFixtureString(value:unknown):string{
+ if(typeof value!=='string')throw Error('stored_fixture_string');
+ return value;
+}
+function storedFixtureNativeContracts(ledger:{sessionId:string;nativeContracts?:unknown}){
+ return parseIntentNativeContracts(ledger.nativeContracts,ledger.sessionId);
+}
+function storedFixtureArray(value:unknown):unknown[]{
+ if(!Array.isArray(value))throw Error('stored_fixture_array');
+ return value;
+}
+function storedFixtureVerificationPhase(value:unknown,readRequestId:()=>unknown):unknown{
+ if(value===null||value===undefined)return undefined;
+ const row=storedFixtureArray(value).find(entry=>storedFixtureObject(entry).enrollmentRequestId===readRequestId());
+ return row===undefined?undefined:storedFixtureObject(row).phase;
+}
