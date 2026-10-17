@@ -15,6 +15,12 @@ export interface IntentVerificationOperation {
  operationId:string|null;attemptId:string|null;expected:Readonly<QuiescenceExpectation>|null;
  materialObservation:Readonly<MaterialRequestObservation>|null;verificationObservation:VerificationOperationRequestObservation|null;
 }
+/** Public comparison facts, not a complete execution row or material authority. */
+export interface IntentVerificationOperationRowData {
+ readonly registration:{readonly obligations:readonly {readonly obligation:{readonly obligationId:unknown;readonly definitionHash:unknown}}[]};
+ readonly obligationId:unknown;readonly bindingHash:unknown;readonly invocation:unknown;
+ readonly route:string;readonly materialRequestId:unknown;readonly verificationRequestId:unknown;
+}
 export type IntentVerificationOperationAction=
  |{kind:'begin-materials';observation:VerificationObligationObservation}
  |{kind:'material-step';step:ValidationMaterialRequestStep}
@@ -23,10 +29,10 @@ export type IntentVerificationOperationAction=
  |{kind:'observe';materialObservation:MaterialRequestObservation;verificationObservation:VerificationOperationRequestObservation};
 const shape=(v:unknown,keys:string)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!==keys.split(' ').sort().join(','))throw Error('intent_operation_shape');};
 const id=(v:unknown)=>{if(typeof v!=='string'||!v||Buffer.byteLength(v)>160||/[\x00-\x1f\x7f]/.test(v))throw Error('intent_operation_identity');};
-const owner=(row:IntentVerificationExecution)=>JSON.parse(row.route).owner;
+const owner=(row:Pick<IntentVerificationOperationRowData,'route'>)=>JSON.parse(row.route).owner;
 function compact(raw:VerificationObligationObservation,row:IntentVerificationExecution,binding:Readonly<IntentApplicationBinding>){const value=parseVerificationObligationObservation(raw),obligation=row.registration.obligations.find(o=>o.obligation.obligationId===row.obligationId);if(!obligation||value.obligationId!==row.obligationId||value.definitionHash!==obligation.obligation.definitionHash||json(value.owner)!==json(owner(row))||value.application.state!=='active'||value.application.pendingTransitionId!==null||!value.application.current||value.application.current.bindingHash!==row.bindingHash||json(value.application.current.binding)!==json(binding))throw Error('intent_operation_obligation');return {definitionHash:value.definitionHash,attemptEpoch:value.attemptEpoch,activeAttemptId:value.activeAttemptId,bindingHash:row.bindingHash,applicationRevision:value.application.current.revision};}
-function receipt(raw:unknown,row:IntentVerificationExecution,challengeId:string|null){shape(raw,'authorizationId scopeDigest invocation');const value=raw as AuthorizedProductValidationMaterials['publicReceipt'];id(value.authorizationId);if(value.authorizationId!==challengeId||!/^[a-f0-9]{64}$/.test(value.scopeDigest)||json(value.invocation)!==json(row.invocation))throw Error('intent_operation_material');return value;}
-function pair(materialRaw:MaterialRequestObservation,verificationRaw:VerificationOperationRequestObservation,row:IntentVerificationExecution,prior:IntentVerificationOperation){
+function receipt(raw:unknown,row:Pick<IntentVerificationOperationRowData,'invocation'>,challengeId:string|null){shape(raw,'authorizationId scopeDigest invocation');const value=raw as AuthorizedProductValidationMaterials['publicReceipt'];id(value.authorizationId);if(value.authorizationId!==challengeId||!/^[a-f0-9]{64}$/.test(value.scopeDigest)||json(value.invocation)!==json(row.invocation))throw Error('intent_operation_material');return value;}
+function pair(materialRaw:MaterialRequestObservation,verificationRaw:VerificationOperationRequestObservation,row:Pick<IntentVerificationOperationRowData,'materialRequestId'|'verificationRequestId'|'invocation'|'obligationId'|'route'>,prior:IntentVerificationOperation){
  const material=parseMaterialRequestObservation(materialRaw),verification=parseVerificationOperationRequestObservation(verificationRaw);
  if(material.requestId!==row.materialRequestId||verification.requestId!==row.verificationRequestId||json(verification.invocation)!==json(row.invocation)||verification.obligationId!==row.obligationId||json(verification.owner)!==json(owner(row)))throw Error('intent_operation_binding');
  if(prior.challengeId&&material.challengeId&&prior.challengeId!==material.challengeId)throw Error('intent_operation_material');
@@ -44,7 +50,9 @@ function observationPhase(verification:VerificationOperationRequestObservation,m
  if((verification.state==='not_prepared'||verification.state==='retired'||verification.state==='operation'&&verification.operation.state==='cancelled')&&['not_prepared','retired'].includes(material.state))return 'retired';
  return 'observing';
 }
-export function parseIntentVerificationOperation(raw:unknown,row:IntentVerificationExecution,binding:Readonly<IntentApplicationBinding>):IntentVerificationOperation|null {
+export function parseIntentVerificationOperation(raw:unknown,row:IntentVerificationExecution,binding:Readonly<IntentApplicationBinding>):IntentVerificationOperation|null;
+export function parseIntentVerificationOperation(raw:unknown,row:IntentVerificationOperationRowData,binding:Readonly<IntentApplicationBinding>):IntentVerificationOperation|null;
+export function parseIntentVerificationOperation(raw:unknown,row:IntentVerificationOperationRowData,binding:Readonly<IntentApplicationBinding>):IntentVerificationOperation|null {
  if(raw===null)return null;const v=captureIntentData(raw) as IntentVerificationOperation;shape(v,'revision phase obligationObservation challengeId materialReceipt operationId attemptId expected materialObservation verificationObservation');
  if(!Number.isSafeInteger(v.revision)||v.revision<1||!['material_preparing','material_authorizing','material_staging','preparing','dispatching','observing','terminal','retired'].includes(v.phase))throw Error('intent_operation_phase');
  if(v.obligationObservation!==null){shape(v.obligationObservation,'definitionHash attemptEpoch activeAttemptId bindingHash applicationRevision');const o=v.obligationObservation,definition=row.registration.obligations.find(entry=>entry.obligation.obligationId===row.obligationId);if(!definition||o.definitionHash!==definition.obligation.definitionHash||o.bindingHash!==row.bindingHash||!Number.isSafeInteger(o.attemptEpoch)||o.attemptEpoch<0||!Number.isSafeInteger(o.applicationRevision)||o.applicationRevision<1||(o.attemptEpoch===0)!==(o.activeAttemptId===null))throw Error('intent_operation_obligation');if(o.activeAttemptId!==null)id(o.activeAttemptId);}

@@ -8,6 +8,7 @@ import {assertIntentNativeJournalRetained,assertNoIntentNativeJournal} from './n
 import {isDeepStrictEqual} from 'node:util';
 import {readInstalledCurrentOwner} from '../verification/installed-owner-state.js';
 import type {PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
+import type {StoredIntentRecordInput,StoredSessionIntentLedgerInput} from './stored-intent-clone.js';
 import {createIntentLedgerRecord, cloneIntentRecord, type SessionIntentLedger} from './types.js';
 export interface IntentExecutionTerminal {
  kind:'turn'|'step';identity:string;status:'stopped'|'completed'|'failed';
@@ -23,24 +24,43 @@ export function parseIntentExecutionInput(raw:unknown):IntentExecutionTerminalIn
  if(!v||typeof v!=='object'||Object.keys(v).sort().join(',')!=='identity,intentId,kind,recordedAt,requestSource,sessionId,status'||!id(v.sessionId)||!id(v.intentId)||!id(v.identity)||!['turn','step'].includes(v.kind)||!['stopped','completed','failed'].includes(v.status)||!['user','agent','scheduler'].includes(v.requestSource)||!Number.isSafeInteger(v.recordedAt)||v.recordedAt<0)throw Error('intent_execution_input');
  return v;
 }
-function terminals(record:any):IntentExecutionTerminal[]{
- const values=record.executionTerminals??[];if(!Array.isArray(values))throw Error('intent_execution_records');const keys=new Set<string>();
- for(const v of values){parseIntentExecutionInput({...v,sessionId:record.sessionId,intentId:record.intentId});if(Object.keys(v).sort().join(',')!=='identity,kind,recordedAt,requestSource,status')throw Error('intent_execution_record');const key=JSON.stringify([v.kind,v.identity]);if(keys.has(key))throw Error('intent_execution_duplicate');keys.add(key);if(v.kind==='step'&&!record.stages.some((s:any)=>s.steps.some((step:any)=>step.stepId===v.identity)))throw Error('intent_execution_step');}
- return values;
+interface CommitRecordData extends StoredIntentRecordInput {producerReports?:unknown}
+interface CommitTerminalRecordData {readonly sessionId?:unknown;readonly intentId?:unknown;readonly executionTerminals?:unknown;readonly stages?:unknown}
+interface TerminalFactsData {readonly kind?:unknown;readonly identity?:unknown;readonly status?:unknown;readonly requestSource?:unknown;readonly recordedAt?:unknown}
+function isCommitObject(value:unknown):value is Readonly<Record<string,unknown>>{
+ return value!==null&&(typeof value==='object'||typeof value==='function');
 }
-function records(ledger:SessionIntentLedger|undefined):Map<string,any>{
- const result=new Map<string,any>();if(ledger===undefined)return result;
+function propertyData(value:unknown,error:string):Readonly<Record<string,unknown>>{
+ if(!isCommitObject(value))throw Error(error);return value;
+}
+function arrayData(value:unknown,error:string):unknown[]{
+ if(!Array.isArray(value))throw Error(error);return value;
+}
+function reportLength(value:unknown):number|undefined{
+ return value===undefined||value===null?undefined:arrayData(value,'intent_producer_records').length;
+}
+function assertTerminalEntries(values:unknown[],record:CommitTerminalRecordData):asserts values is TerminalFactsData[]{
+ const keys=new Set<string>();
+ for(const raw of values){const v=propertyData(raw,'intent_execution_input');parseIntentExecutionInput({...v,sessionId:record.sessionId,intentId:record.intentId});if(Object.keys(v).sort().join(',')!=='identity,kind,recordedAt,requestSource,status')throw Error('intent_execution_record');const key=JSON.stringify([v.kind,v.identity]);if(keys.has(key))throw Error('intent_execution_duplicate');keys.add(key);if(v.kind==='step'&&!arrayData(record.stages,'intent_execution_step').some(s=>arrayData(propertyData(s,'intent_execution_step').steps,'intent_execution_step').some(step=>propertyData(step,'intent_execution_step').stepId===v.identity)))throw Error('intent_execution_step');}
+}
+function terminals(record:SessionIntentLedger['intents'][number]):IntentExecutionTerminal[];
+function terminals(record:CommitTerminalRecordData):TerminalFactsData[];
+function terminals(record:CommitTerminalRecordData):TerminalFactsData[]{
+ const values=arrayData(record.executionTerminals??[],'intent_execution_records');assertTerminalEntries(values,record);return values;
+}
+function records(ledger:StoredSessionIntentLedgerInput|undefined):Map<string,CommitRecordData>{
+ const result=new Map<string,CommitRecordData>();if(ledger===undefined)return result;
  if(!ledger||!Array.isArray(ledger.intents))throw Error('intent_commit_ledger');
  for(const record of ledger.intents){if(!record||!id(record.intentId)||result.has(record.intentId))throw Error('intent_commit_identity');terminals(record);result.set(record.intentId,record);}return result;
 }
-function mirrors(ledger:SessionIntentLedger,sessionId:string){
+function mirrors(ledger:StoredSessionIntentLedgerInput,sessionId:string){
  const map=records(ledger);if(ledger.sessionId!==sessionId||ledger.activeIntentId!==undefined&&!map.has(ledger.activeIntentId))throw Error('intent_commit_identity');
  if(ledger.latestPlan!==null&&(!ledger.latestPlan||!isDeepStrictEqual(ledger.latestPlan,map.get(ledger.latestPlan.intentId))))throw Error('intent_commit_mirror');
- for(const record of map.values()){const stage=record.stages.find((s:any)=>s.stageId===record.activeStageId);if(record.sessionId!==sessionId||!stage||record.activeStepId!==stage.activeStepId||!isDeepStrictEqual(record.steps,stage.steps))throw Error('intent_commit_mirror');}
+ for(const record of map.values()){const stage=arrayData(record.stages,'intent_commit_mirror').find(s=>propertyData(s,'intent_commit_mirror').stageId===record.activeStageId);if(record.sessionId!==sessionId||!stage||record.activeStepId!==propertyData(stage,'intent_commit_mirror').activeStepId||!isDeepStrictEqual(record.steps,propertyData(stage,'intent_commit_mirror').steps))throw Error('intent_commit_mirror');}
 }
-function baseline(ledger:SessionIntentLedger|undefined){
- if(!ledger)return null;const value=captureIntentData(ledger) as any;delete value.updatedAt;delete value.publicationCandidates;delete value.verificationExecutions;
- for(const record of [...value.intents,...(value.latestPlan?[value.latestPlan]:[])]){delete record.executionTerminals;delete record.updatedAt;}return value;
+function baseline(ledger:StoredSessionIntentLedgerInput|undefined){
+ if(!ledger)return null;const value:Omit<StoredSessionIntentLedgerInput,'updatedAt'>&{updatedAt?:number}=captureIntentData(ledger);delete value.updatedAt;delete value.publicationCandidates;delete value.verificationExecutions;
+ for(const record of [...value.intents,...(value.latestPlan?[value.latestPlan]:[])]){const mutable:Omit<StoredIntentRecordInput,'updatedAt'>&{updatedAt?:number}=record;delete mutable.executionTerminals;delete mutable.updatedAt;}return value;
 }
 /** Initial protected data must be the original constructor draft, not arbitrary history. */
 function assertInitialDraft(ledger:SessionIntentLedger):void {
@@ -68,8 +88,8 @@ export function assertIntentSessionCommit(previous:PersistedSessionSnapshot|null
  for(const [ledger,rows] of [[previous?.intentDelegation,old],[forkSource?.intentDelegation,fork]] as const){const mirror=ledger?.latestPlan;if(mirror&&!isDeepStrictEqual(mirror.producerReports??[],rows.get(mirror.intentId)?.producerReports??[]))throw Error('intent_producer_original_mirror');}
  for(const [key,value] of incoming){const before=old.get(key);if(!executionPrimitive&&!isDeepStrictEqual(terminals(value),before?terminals(before):[]))throw Error('intent_execution_requires_primitive');if(before){const prior=terminals(before),after=terminals(value);if(prior.some((v,i)=>!isDeepStrictEqual(v,after[i])))throw Error('intent_execution_immutable');}}
  for(const [key,value] of old)if(terminals(value).length&&!incoming.has(key))throw Error('intent_execution_immutable');
- for(const [key,value] of incoming){const prior=old.get(key)?.producerReports??[],after=value.producerReports??[];if(!producerPrimitive&&!isDeepStrictEqual(prior,after)||prior.some((v:unknown,i:number)=>!isDeepStrictEqual(v,after[i])))throw Error('intent_producer_requires_primitive');}
- for(const [key,value] of old)if(value.producerReports?.length&&!incoming.has(key))throw Error('intent_producer_immutable');
+ for(const [key,value] of incoming){const prior=old.get(key)?.producerReports??[],after=value.producerReports??[];if(!producerPrimitive&&!isDeepStrictEqual(prior,after)||arrayData(prior,'intent_producer_records').some((v,i)=>!isDeepStrictEqual(v,arrayData(after,'intent_producer_records')[i])))throw Error('intent_producer_requires_primitive');}
+ for(const [key,value] of old)if(reportLength(value.producerReports)&&!incoming.has(key))throw Error('intent_producer_immutable');
  const nextMirror=next.intentDelegation?.latestPlan;
  if(nextMirror&&!isDeepStrictEqual(nextMirror.producerReports??[],incoming.get(nextMirror.intentId)?.producerReports??[]))throw Error('intent_producer_mirror');
  if(nextMirror){const prior=old.get(nextMirror.intentId);const values=terminals(nextMirror);if(!executionPrimitive&&!isDeepStrictEqual(values,prior?terminals(prior):[]))throw Error('intent_execution_requires_primitive');if(values.length&&!isDeepStrictEqual(values,terminals(incoming.get(nextMirror.intentId)??{})))throw Error('intent_execution_mirror');}

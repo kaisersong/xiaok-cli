@@ -1,4 +1,4 @@
-import {parseIntentVerificationOperation,applyIntentVerificationOperation,type IntentVerificationOperation,type IntentVerificationOperationAction} from './verification-operation-journal.js';
+import {parseIntentVerificationOperation,applyIntentVerificationOperation,type IntentVerificationOperation,type IntentVerificationOperationAction,type IntentVerificationOperationRowData} from './verification-operation-journal.js';
 import {parseOwnerEnrollmentReview,parseOwnerEnrollmentRegistration,type OwnerEnrollmentReview} from '../verification/owner-enrollment-review.js';
 import type {OwnerEnrollmentRequestRecovery} from '../verification/owner-enrollment-request.js';
 import {intentHostSubjectOwner} from '../verification/intent-host-subject.js';
@@ -7,11 +7,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { captureIntentData } from './data.js';
 import { intentNativeLedgerHash } from './native-contract-journal.js';
-import { parseIntentPublicationCandidates, intentPublicationTarget, intentPublicationRouteVector, applyIntentPublicationMutation } from './publication-candidate-journal.js';
+import { parseIntentPublicationCandidates, intentPublicationTarget, intentPublicationRouteVector, applyIntentPublicationMutation, type IntentPublicationReaderLedgerData } from './publication-candidate-journal.js';
 import { assertSessionWriteOwnership } from './ownership.js';
 import { parseValidationMaterialDraft, type ValidationMaterialDraft, type ValidationMaterialInvocation } from '../verification/product-material-authorization.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 import type { SessionIntentLedger } from './types.js';
+import type { StoredSessionIntentLedgerInput } from './stored-intent-clone.js';
 import type { PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 
@@ -32,14 +33,23 @@ export type IntentVerificationMutation=(RecordIntentVerificationOperationInput&{
 function shape(v:unknown,keys:string):asserts v is Record<string,any>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!==keys.split(' ').sort().join(','))throw Error('intent_verification_shape');}
 function identity(v:unknown):asserts v is string {if(typeof v!=='string'||!v.length||Buffer.byteLength(v)>160||/[\x00-\x1f\x7f]/.test(v))throw Error('intent_verification_identity');}
 function frozen<T>(v:T):T {if(v&&typeof v==='object'){Object.values(v).forEach(frozen);Object.freeze(v);}return v;}
-function target(ledger:SessionIntentLedger,candidateId:string,obligationId:string,registration?:OwnerEnrollmentReview['registration']){
+function target(ledger:IntentPublicationReaderLedgerData,candidateId:string,obligationId:string,registration?:OwnerEnrollmentReview['registration']){
  const candidate=parseIntentPublicationCandidates(ledger).find(row=>row.id===candidateId);if(!candidate)throw Error('intent_verification_candidate');
  const binding=intentPublicationTarget(ledger,candidate),definition=binding.subject.stageId===null?binding.contract.verification:binding.contract.stages.find(stage=>stage.stageId===binding.subject.stageId)!.verification;
  if(!(registration?parseOwnerEnrollmentRegistration(registration).obligations.some(o=>o.obligation.obligationId===obligationId):definition.obligations.some(o=>o.obligationId===obligationId)))throw Error('intent_verification_obligation');
  return {candidate,binding,definition};
 }
 /** Durable identity and source facts only. No returned row grants native/execution/publication. */
-export function parseIntentVerificationExecutions(ledger:SessionIntentLedger|undefined):IntentVerificationExecution[]{
+export interface IntentVerificationReaderLedgerData extends IntentPublicationReaderLedgerData {
+ readonly verificationExecutions?:unknown;
+}
+function assertVerificationOperationRowData(row:Record<string,unknown>):asserts row is Record<string,unknown>&IntentVerificationOperationRowData {
+ parseOwnerEnrollmentRegistration(row.registration);if(typeof row.route!=='string')throw Error('intent_verification_route');
+}
+export function parseIntentVerificationExecutions(ledger:SessionIntentLedger|undefined):IntentVerificationExecution[];
+export function parseIntentVerificationExecutions(ledger:StoredSessionIntentLedgerInput|undefined):IntentVerificationExecution[];
+export function parseIntentVerificationExecutions(ledger:IntentVerificationReaderLedgerData|undefined):IntentVerificationExecution[];
+export function parseIntentVerificationExecutions(ledger:IntentVerificationReaderLedgerData|undefined):IntentVerificationExecution[]{
  const rows=captureIntentData(ledger?.verificationExecutions??[]);if(!Array.isArray(rows))throw Error('intent_verification_shape');
  const identities=new Set<string>(),subjects=new Set<string>();
  for(const row of rows){shape(row,'version id candidateId obligationId bindingHash sourceHash invocation enrollmentRequestId materialRequestId verificationRequestId draft registration route originalSource phase enrollmentObservation operation revision createdAt updatedAt');
@@ -52,9 +62,10 @@ export function parseIntentVerificationExecutions(ledger:SessionIntentLedger|und
   const {candidate,binding}=target(ledger,row.candidateId,row.obligationId,row.registration);
   const registration=parseOwnerEnrollmentRegistration(row.registration);if(!candidate.applicationAttempts.some(a=>a.phase==='ready'&&a.route===row.route&&a.observation?.registrationHash===intentOriginalRegistrationHash(registration)))throw Error('intent_verification_registration');
   const original=intentContractOriginalRegistration({subject:binding.subject,contract:binding.contract});if(original.obligations.some(entry=>!registration.obligations.some(actual=>json(actual)===json(entry))))throw Error('intent_verification_registration');
-  if(row.phase!=='enrolled'&&row.operation!==null)throw Error('intent_operation_phase');parseIntentVerificationOperation(row.operation,row,binding);
+  if(row.phase!=='enrolled'&&row.operation!==null)throw Error('intent_operation_phase');assertVerificationOperationRowData(row);parseIntentVerificationOperation(row.operation,row,binding);
   validateFact(row.enrollmentObservation,row,binding);if(row.phase!==phaseForFact(row.enrollmentObservation,row.phase==='reserved'))throw Error('intent_verification_state');
   if(row.bindingHash!==candidate.bindingHash||row.sourceHash!==candidate.sourceHash||!candidate.applicationAttempts.some(a=>a.phase==='ready'&&a.route===row.route))throw Error('intent_verification_original');
+  if(typeof row.createdAt!=='number')throw Error('intent_verification_state');
   const draft=parseValidationMaterialDraft(row.draft,row.createdAt);if(draft.purpose!=='isolated-command'||json(draft.invocation)!==json(row.invocation))throw Error('intent_verification_draft');
  }
  return frozen(rows);
@@ -78,8 +89,9 @@ export function captureIntentVerificationClaim(raw:ClaimIntentVerificationInput&
 }
 const hash=(value:unknown)=>createHash('sha256').update(json(value)).digest('hex');
 function phaseForFact(fact:EnrollmentFact|null,reserved=false):IntentVerificationExecution['phase'] {return fact===null?(reserved?'reserved':'enrolling'):fact.state==='committed'?'enrolled':'retired';}
-function proposal(row:IntentVerificationExecution,binding:ReturnType<typeof intentPublicationTarget>){return {enrollment:{...intentHostSubjectOwner(binding.subject),invocations:[row.invocation]},registration:row.registration};}
-function validateFact(raw:unknown,row:IntentVerificationExecution,binding:ReturnType<typeof intentPublicationTarget>):asserts raw is EnrollmentFact|null {
+interface IntentVerificationEnrollmentRowData {readonly route:string;readonly invocation:unknown;readonly registration:unknown}
+function proposal(row:IntentVerificationEnrollmentRowData,binding:ReturnType<typeof intentPublicationTarget>){return {enrollment:{...intentHostSubjectOwner(binding.subject),invocations:[row.invocation]},registration:row.registration};}
+function validateFact(raw:unknown,row:IntentVerificationEnrollmentRowData,binding:ReturnType<typeof intentPublicationTarget>):asserts raw is EnrollmentFact|null {
  if(raw===null)return;shape(raw,raw&&typeof raw==='object'&&(raw as any).state==='not_prepared'?'state':'state challengeId reviewHash enrollmentHash registrationHash authorityId');
  if(raw.state==='not_prepared')return;if(!['not_approved','committed'].includes(raw.state))throw Error('intent_verification_enrollment');
  const original=proposal(row,binding),route=JSON.parse(row.route);identity(raw.challengeId);
@@ -144,10 +156,12 @@ export function applyIntentVerificationMutation(previous:PersistedSessionSnapsho
  const row:IntentVerificationExecution={version:1,id:randomUUID(),candidateId:candidate.id,obligationId:input.obligationId,bindingHash:candidate.bindingHash,sourceHash:candidate.sourceHash,invocation,enrollmentRequestId:randomUUID(),materialRequestId:randomUUID(),verificationRequestId:randomUUID(),draft,registration,route,originalSource:'user',phase:'reserved',enrollmentObservation:null,operation:null,revision:1,createdAt:input.now,updatedAt:input.now};
  ledger.verificationExecutions=[...rows,row];ledger.updatedAt=Math.max(ledger.updatedAt,input.now);next.updatedAt=Math.max(next.updatedAt,input.now);parseIntentVerificationExecutions(ledger);return next;
 }
-export function assertIntentVerificationRetained(before:SessionIntentLedger|undefined,after:SessionIntentLedger|undefined,primitive=false):void{
+export function assertIntentVerificationRetained(before:SessionIntentLedger|undefined,after:SessionIntentLedger|undefined,primitive?:boolean):void;
+export function assertIntentVerificationRetained(before:StoredSessionIntentLedgerInput|undefined,after:StoredSessionIntentLedgerInput|undefined,primitive?:boolean):void;
+export function assertIntentVerificationRetained(before:StoredSessionIntentLedgerInput|undefined,after:StoredSessionIntentLedgerInput|undefined,primitive=false):void{
  const a=parseIntentVerificationExecutions(before),b=parseIntentVerificationExecutions(after);
  if(!primitive){if(!isDeepStrictEqual(a,b))throw Error('intent_verification_requires_primitive');return;}
- const strip=(ledger:SessionIntentLedger|undefined)=>{if(!ledger)return ledger;const value=captureIntentData(ledger);delete value.verificationExecutions;delete (value as Partial<SessionIntentLedger>).updatedAt;return value;};
+ const strip=(ledger:StoredSessionIntentLedgerInput|undefined)=>{if(!ledger)return ledger;const value:Omit<StoredSessionIntentLedgerInput,'updatedAt'>&{updatedAt?:number}=captureIntentData(ledger);delete value.verificationExecutions;delete value.updatedAt;return value;};
  let changed=0;
  if(!isDeepStrictEqual(strip(before),strip(after))||b.length<a.length||b.length>a.length+1||a.some((row,i)=>{const next=b[i];if(isDeepStrictEqual(row,next))return false;changed++;if(!next||b.length!==a.length||!((row.phase==='reserved'&&next.phase==='enrolling')||(row.phase==='enrolling'&&['enrolled','retired'].includes(next.phase))||(row.phase==='enrolled'&&next.phase==='enrolled'&&isDeepStrictEqual(row.enrollmentObservation,next.enrollmentObservation)&&next.operation?.revision===(row.operation?.revision??0)+1))||next.revision!==row.revision+1)return true;return !isDeepStrictEqual({...row,phase:next.phase,enrollmentObservation:next.enrollmentObservation,operation:next.operation,revision:next.revision,updatedAt:next.updatedAt},next);})||changed>1)throw Error('intent_verification_original');
 }
