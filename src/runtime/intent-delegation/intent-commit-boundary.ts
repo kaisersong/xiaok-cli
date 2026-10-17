@@ -1,4 +1,6 @@
 import {captureIntentSnapshot} from './intent-snapshot-data.js';
+import {hasProtectedIntentProducerHistory} from './protected-history-data.js';
+export {hasProtectedIntentProducerHistory} from './protected-history-data.js';
 export {captureIntentSnapshot} from './intent-snapshot-data.js';
 import {assertIntentVerificationRetained} from './verification-execution-journal.js';
 import {assertIntentPublicationRetained} from './publication-candidate-journal.js';
@@ -56,9 +58,6 @@ function assertInitialDraft(ledger:SessionIntentLedger):void {
  if(!first||!last)throw Error('intent_initial_draft');
  const expected=captureIntentData({sessionId:ledger.sessionId,instanceId:first.instanceId,activeIntentId:last.intentId,latestPlan:last,intents:draftRecords,breadcrumbs:[],receipt:null,salvage:null,ownership:{state:'owned',ownerInstanceId:first.instanceId,updatedAt:first.createdAt},updatedAt:last.createdAt});
  if(!isDeepStrictEqual(ledger,expected))throw Error('intent_initial_draft');
-}
-export function hasProtectedIntentProducerHistory(ledger:PersistedSessionSnapshot['intentDelegation']):boolean {
- return (ledger?.nativeContracts?.length??0)>0 || [...(ledger?.intents??[]),...(ledger?.latestPlan?[ledger.latestPlan]:[])].some(row=>row.producerReports?.some(report=>report.protectionMode!=='ordinary'));
 }
 /** Called inside both actual store locks. This is a deny boundary, not a grant. */
 export function assertIntentSessionCommit(previous:PersistedSessionSnapshot|null,next:PersistedSessionSnapshot,forkSource?:PersistedSessionSnapshot,executionPrimitive=false,producerPrimitive=false,nativePrimitive=false,publicationPrimitive=false,verificationPrimitive=false,receiverPrimitive:boolean|'projection'=false):void{
