@@ -5,27 +5,37 @@ on:
     paths:
       - 'src/ui/**'
       - 'src/commands/chat.ts'
+      - 'src/ai/memory/layered-store.ts'
+      - 'src/utils/logger.ts'
       - 'src/ai/tools/ask-user*.ts'
       - 'tests/ui/**'
       - 'tests/commands/chat-interactive-runtime.test.ts'
+      - 'tests/ai/memory/background-diagnostics.test.ts'
+      - 'tests/utils/logger.test.ts'
       - 'tests/ai/tools/ask-user*.test.ts'
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
+      - 'tests/e2e/memory-background-footer.py'
       - '.github/workflows/terminal-ui.yml'
   pull_request:
     paths:
       - 'src/ui/**'
       - 'src/commands/chat.ts'
+      - 'src/ai/memory/layered-store.ts'
+      - 'src/utils/logger.ts'
       - 'src/ai/tools/ask-user*.ts'
       - 'tests/ui/**'
       - 'tests/commands/chat-interactive-runtime.test.ts'
+      - 'tests/ai/memory/background-diagnostics.test.ts'
+      - 'tests/utils/logger.test.ts'
       - 'tests/ai/tools/ask-user*.test.ts'
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
+      - 'tests/e2e/memory-background-footer.py'
       - '.github/workflows/terminal-ui.yml'
   workflow_dispatch: {}
 permissions:
@@ -61,6 +71,11 @@ jobs:
           .test-dist/tests/ui/image-renderer.test.js
           .test-dist/tests/ui/scroll-region.test.js
           .test-dist/tests/ui/scroll-region-return.test.js
+          .test-dist/tests/ai/memory/background-diagnostics.test.js
+          .test-dist/tests/ai/memory/layered-store.test.js
+          .test-dist/tests/ai/memory/compaction.test.js
+          .test-dist/tests/ai/memory/distillation-repair.test.js
+          .test-dist/tests/utils/logger.test.js
           .test-dist/tests/ui/ask-question.test.js
           .test-dist/tests/ui/image-input.test.js
           .test-dist/tests/ui/transcript-buffer.test.js
@@ -81,6 +96,7 @@ jobs:
           python tests/e2e/askuser-short-menu.py
           python tests/e2e/thinking-draft-handoff.py
           python tests/e2e/footer-return.py
+          python tests/e2e/memory-background-footer.py
       - name: Retain synthetic Thinking draft failure evidence
         if: failure() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -89,4 +105,5 @@ jobs:
           path: |
             /tmp/xiaok-thinking-draft-*/
             /tmp/xiaok-footer-return-*/
+            /tmp/xiaok-memory-footer-*/
           retention-days: 7

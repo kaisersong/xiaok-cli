@@ -11,7 +11,15 @@ import { hybridSearch } from './retrieval.js';
 import { compactL0toL1, compactL1toL2, compactL2toL3 } from './compaction.js';
 import { createLogger } from '../../utils/logger.js';
 
-const logger = createLogger('memory:layered-store');
+// Timer/embedding callbacks run while the terminal cursor may be in the editor.
+// A normal warn logger also writes stderr, so these diagnostics must be file-only.
+const logger = createLogger('memory:layered-store', { stderr: false });
+const compactionErrorCodes = new Set([
+  'memory_output_incomplete', 'memory_compaction_timeout',
+  'memory_compaction_invalid_response', 'memory_inputs_changed',
+  'memory_store_closed', 'memory_model_unavailable',
+  'memory_compaction_busy', 'memory_compaction_forbidden',
+]);
 import { segmentChinese } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
 import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
@@ -447,7 +455,9 @@ export class LayeredMemoryStore implements MemoryStore {
     this.compactTimer = setInterval(() => {
       if (this.compacting || this.closed) return;
       this.compact({ requestSource: 'scheduler' }).catch(err => {
-        console.error('[memory] auto-compaction failed:', (err as Error).message);
+        const code = err instanceof Error && compactionErrorCodes.has(err.message)
+          ? err.message : 'memory_compaction_failed';
+        logger.error('auto-compaction failed', { code });
       });
     }, this.compactionConfig.compactIntervalMs);
     this.compactTimer.unref?.();
