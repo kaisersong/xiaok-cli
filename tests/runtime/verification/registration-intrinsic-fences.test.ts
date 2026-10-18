@@ -147,3 +147,67 @@ it.each(['row','schema'] as const)('actual native closing fence refuses a real %
   expect(proof).toEqual({error:'application_registration_changed',returned:false,calls:0,restoredRows:[{owner_key:'owner',n:kind==='row'?2:1}]});
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+it('fixed schema table_list keeps its full fence around a real reconnecting unrelated virtual-table factory',()=>{
+ const root=mkdtempSync(join(tmpdir(),'registration-schema-vtab-')),db=openPrivateVerificationDatabase(root);
+ const prior=Object.getOwnPropertyDescriptor(Map,'length')!,define=Object.defineProperty;
+ let armed=false,calls=0,error:unknown;
+ try{
+  db.table('schema_metadata_probe',function(){
+   if(armed){calls++;define(Map,'length',{...prior,value:-0});}
+   return {columns:['value'],rows:function*(){yield [1];}};
+  });
+  db.exec('CREATE VIRTUAL TABLE unrelated_schema_probe USING schema_metadata_probe');
+  // Discard SQLite schema metadata so the original table_list must reconnect it.
+  db.exec('PRAGMA writable_schema=RESET');
+  const census=createRegistrationCensusDatabase(db)!;armed=true;
+  try{census.begin();}catch(value){error=value;}
+  finally{armed=false;define(Map,'length',prior);}
+  expect(calls).toBeGreaterThan(0);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe('application_registration_changed');
+  const restored=census.begin();restored.finish();
+ }finally{armed=false;define(Map,'length',prior);db.close();rmSync(root,{recursive:true,force:true});}
+});
+it('public records still fences an actual SQL callback before copying any returned row',()=>{
+ const root=mkdtempSync(join(tmpdir(),'registration-public-record-callback-')),db=openPrivateVerificationDatabase(root);
+ const prior=Object.getOwnPropertyDescriptor(Map,'length')!,define=Object.defineProperty;
+ let armed=true,calls=0;
+ try{
+  db.function('schema_metadata_callback',()=>{calls++;if(armed)define(Map,'length',{...prior,value:-0});return 1;});
+  const census=createRegistrationCensusDatabase(db)!,current=census.begin();let error:unknown;
+  try{current.records('SELECT schema_metadata_callback() AS value');}catch(value){error=value;}
+  finally{armed=false;define(Map,'length',prior);}
+  expect(calls).toBe(1);expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe('application_registration_changed');
+  current.finish();const restored=census.begin();restored.finish();
+ }finally{armed=false;define(Map,'length',prior);db.close();rmSync(root,{recursive:true,force:true});}
+});
+
+it('non-text sqlite_master names keep the original pre-query guard after real Buffer coercion',()=>{
+ const root=mkdtempSync(join(tmpdir(),'registration-schema-name-coercion-')),db=openPrivateVerificationDatabase(root);
+ const table='verification_application_history',define=Object.defineProperty,apply=Reflect.apply;
+ const mapLength=Object.getOwnPropertyDescriptor(Map,'length')!,bufferString=Object.getOwnPropertyDescriptor(Buffer.prototype,'toString')!;
+ let armed=false,coercions=0,error:unknown;
+ try{
+  db.exec('CREATE TABLE '+table+'(owner_key TEXT)');
+  // Only this owned DB's malicious-fixture construction disables defensive mode.
+  db.unsafeMode(true);
+  try{db.pragma('writable_schema=ON');db.prepare('UPDATE main.sqlite_master SET name=CAST(name AS BLOB) WHERE name=?').run(table);}
+  finally{db.unsafeMode(false);}
+  define(Buffer.prototype,'toString',{...bufferString,value:function(this:Buffer,...args:unknown[]){
+   const result=apply(bufferString.value,this,args);
+   if(armed&&result===table&&++coercions===2)define(Map,'length',{...mapLength,value:-0});
+   return result;
+  }});
+  const census=createRegistrationCensusDatabase(db)!;armed=true;
+  try{census.begin();}catch(value){error=value;}
+  finally{armed=false;define(Map,'length',mapLength);define(Buffer.prototype,'toString',bufferString);}
+  expect(coercions).toBeGreaterThanOrEqual(2);expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe('application_registration_changed');
+  db.unsafeMode(true);
+  try{db.exec("UPDATE main.sqlite_master SET name=CAST(name AS TEXT) WHERE typeof(name)='blob'");}
+  finally{db.unsafeMode(false);}
+  const restored=census.begin();restored.finish();
+ }finally{armed=false;define(Map,'length',mapLength);define(Buffer.prototype,'toString',bufferString);db.close();rmSync(root,{recursive:true,force:true});}
+});

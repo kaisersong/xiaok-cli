@@ -30,8 +30,18 @@ export function createRegistrationCensusDatabase(db:Database){
  function raw(sql:string,args:unknown[]=[]){assertNativeSqliteArrayConstruction();const stmt=prepare(sql);call('raw',stmt,[true]);const rows=call('all',stmt,args) as unknown[][];assertNativeSqliteArrayConstruction();return rows;}
  function records(sql:string,args:unknown[]=[]):Record<string,any>[] {
   assertNativeSqliteColumnConstruction();
-  const stmt=prepare(sql);call('raw',stmt,[true]);assertNativeSqliteColumnConstruction();const columns=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt,args) as unknown[][];assertNativeSqliteColumnConstruction();const result:Record<string,any>[]=[];
+  const stmt=prepare(sql);call('raw',stmt,[true]);assertNativeSqliteColumnConstruction();const columns=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt,args) as unknown[][];assertNativeSqliteColumnConstruction();return copyRecords(columns,rows);
+ }
+ function copyRecords(columns:Array<{name:string}>,rows:unknown[][]):Record<string,any>[] {const result:Record<string,any>[]=[];
   for(let i=0;i<rows.length;i++){if(rows[i]!.length!==columns.length)fail();const row:Record<string,any>={__proto__:null};for(let j=0;j<columns.length;j++){if(columns[j]!.name==='__proto__')fail();row[columns[j]!.name]=rows[i]![j];}appendResult(result,row);}return result;
+ }
+ // Private fixed-query reader: schema() already checked the realm before the
+ // first call, or the preceding call checked it after all(). Keep both guards
+ // after native SQL boundaries; prepare/step can reconnect a changed schema.
+ function tableColumns(table:typeof tables[number]):Record<string,any>[] {
+  const stmt=prepare('PRAGMA main.table_xinfo('+table+')');call('raw',stmt,[true]);assertNativeSqliteColumnConstruction();
+  const columns=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt) as unknown[][];assertNativeSqliteColumnConstruction();
+  return copyRecords(columns,rows);
  }
  function counter(){current();const funcs=records('PRAGMA function_list');if(!funcs.some(f=>f.name==='total_changes'&&f.builtin===1)||funcs.some(f=>typeof f.name==='string'&&lower(f.name)==='total_changes'&&f.builtin!==1))fail();
   const schema=raw('PRAGMA main.schema_version')[0]?.[0],data=raw('PRAGMA main.data_version')[0]?.[0];if(!Number.isSafeInteger(schema)||Number(schema)<0||!Number.isSafeInteger(data)||Number(data)<0)fail();
@@ -42,7 +52,14 @@ export function createRegistrationCensusDatabase(db:Database){
   for(const row of master)if(tables.includes(lower(String(row.name)))&&row.type==='table'&&typeof row.sql==='string'&&/^CREATE\s+VIRTUAL\s+TABLE/i.test(row.sql))fail();
   const kinds=records('PRAGMA main.table_list');for(const row of kinds)if(row.schema==='main'&&tables.includes(lower(String(row.name)))&&(row.type!=='table'&&row.type!=='view'||row.type==='view'&&['verification_profiles','verification_storage_features'].includes(lower(String(row.name)))))fail();
   const columns={__proto__:null} as unknown as Record<string,Record<string,any>[]>,present=new Set<string>();
-  for(const table of tables){const entry=master.find(row=>row.type==='table'&&lower(String(row.name))===table);if(!entry)continue;if(entry.name===table)present.add(table);const value=records('PRAGMA main.table_xinfo('+table+')');if(value.some(c=>c.hidden!==0||c.name==='__proto__'))fail();columns[table]=value;}
+  // table_list stays fully guarded: SQLite may connect arbitrary views/vtabs.
+  // Only private native metadata copying/control flow separates one table read
+  // from the next. SQL callback/reconnect boundaries keep their original guards.
+  // Non-text SQLite schema names may be Buffers with caller-modified coercion.
+  // Such rows keep the complete original per-query fences and evaluation order.
+  const adjacentMetadata=master.every(row=>typeof row.name==='string');
+  if(adjacentMetadata)assertNativeSqliteColumnConstruction();
+  for(const table of tables){const entry=master.find(row=>row.type==='table'&&lower(String(row.name))===table);if(!entry)continue;if(entry.name===table)present.add(table);const value=adjacentMetadata?tableColumns(table):records('PRAGMA main.table_xinfo('+table+')');if(value.some(c=>c.hidden!==0||c.name==='__proto__'))fail();columns[table]=value;}
   return {master,columns,present};
  }
  return freeze({begin(){const before=counter(),structure=schema();if(!isDeepStrictEqual(before,counter()))fail();
