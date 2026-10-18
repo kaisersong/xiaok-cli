@@ -13,6 +13,32 @@ import { createServer as createBrokerHttpServer } from '../../../../intent-broke
 const desktop = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const soak = process.env.XIAOK_ACTIVITY_SOAK === '1';
 
+interface ActivityMainGeneration {
+  application: ElectronApplication;
+  child: ChildProcess;
+  applicationClosed: boolean;
+  rawClosed: boolean;
+}
+
+function bindActivityMain(application: ElectronApplication): ActivityMainGeneration {
+  const child = application.process();
+  if (!child) throw new Error('activity_main_raw_child_unavailable');
+  const generation: ActivityMainGeneration = { application, child, applicationClosed: false, rawClosed: false };
+  application.once('close', () => { generation.applicationClosed = true; });
+  child.once('close', () => { generation.rawClosed = true; });
+  return generation;
+}
+
+function selectActivityMainSignalTarget(
+  current: ActivityMainGeneration | undefined,
+  application: ElectronApplication,
+): ChildProcess | undefined {
+  if (!current || current.application !== application) throw new Error('activity_main_generation_not_bound');
+  const child = current.child;
+  if (current.applicationClosed || current.rawClosed || child.exitCode !== null || child.signalCode !== null || child.killed) return undefined;
+  return child;
+}
+
 test('project activity returns to its real conversation without changing a draft and survives a view restart', async () => {
   test.setTimeout(soak ? 25 * 60_000 : 90_000);
   const root = mkdtempSync(join(tmpdir(), 'xiaok-activity-electron-'));
@@ -30,7 +56,9 @@ test('project activity returns to its real conversation without changing a draft
   const sourceLog = createWriteStream(join(root, 'kswarm.log'));
   let nativeSource: ChildProcess | undefined, mcpSource: ChildProcess | undefined;
   let source: ChildProcess | undefined, app: ElectronApplication | undefined;
-  let activityOwnerPid: number | undefined, nativeAppPid: number | undefined;
+  let activityOwnerPid: number | undefined;
+  let mainGeneration: ActivityMainGeneration | undefined;
+  let bodyFailed = false;
   let modelCalls = 0;
   const model = createHttpServer(async (request, response) => {
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -57,11 +85,11 @@ test('project activity returns to its real conversation without changing a draft
       XIAOK_ACTIVITY_E2E_OWNER: 'daemon', XIAOK_ACTIVITY_E2E_KSWARM_URL: sourceUrl, XIAOK_ACTIVITY_E2E_BROKER_URL: brokerUrl,
       XIAOK_E2E_BACKGROUND: '1',
       XIAOK_DISABLE_GLOBAL_PLUGINS: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' } };
-    app = await electron.launch(launchOptions); record({ phase: 'app-launched' });
+    app = await electron.launch(launchOptions); mainGeneration = bindActivityMain(app); record({ phase: 'app-launched' });
     let page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
     const ownerStatus = JSON.parse(readFileSync(join(root, 'data', 'activity-owner.status.json'), 'utf8')) as { pid: number; ownerEpoch: string };
     activityOwnerPid = ownerStatus.pid;
-    nativeAppPid = JSON.parse(readFileSync(join(root, 'e2e-process.json'), 'utf8')).pid;
+    const nativeAppPid = JSON.parse(readFileSync(join(root, 'e2e-process.json'), 'utf8')).pid;
     expect(ownerStatus.pid).not.toBe(nativeAppPid); record({ phase: 'owner-status', ownerStatus });
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     await page.waitForLoadState('domcontentloaded');
@@ -201,7 +229,7 @@ test('project activity returns to its real conversation without changing a draft
     await expect.poll(() => offlineProjection().executionState).toBe('cancelled');
     offlineDb.close(); expect(modelCalls).toBe(afterCreationCalls);
     record({ phase: 'desktop-exited-source-observed', ownerPid: ownerStatus.pid, ownerEpoch: ownerStatus.ownerEpoch, sourcePid: source.pid, modelCalls });
-    app = await electron.launch(launchOptions); page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
+    app = await electron.launch(launchOptions); mainGeneration = bindActivityMain(app); page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
     await page.evaluate(() => { location.hash = '#/t/activity-thread'; });
     expect(closed.ok).toBe(true);
     await expect.poll(async () => (await page.evaluate(id => window.xiaokDesktop.getWorkActivity(id), watchId)).projection.executionState).toBe('cancelled');
@@ -222,8 +250,54 @@ test('project activity returns to its real conversation without changing a draft
       await expect(page.getByTestId(`activity-work-${watchId}`)).toHaveCount(0); record({ phase: 'real-renderer-delete-cas-no-late-activity' });
     }
     record({ phase: 'passed', projectId, modelCalls, root });
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    if (app) { writeFileSync(join(root, 'e2e-control.json'), JSON.stringify({ action: 'quit', nonce: Date.now() })); await Promise.race([app.waitForEvent('close'), new Promise(resolve => setTimeout(resolve, 5000))]); if (nativeAppPid) { try { process.kill(nativeAppPid, 'SIGTERM'); } catch {} } }
+    const mainCleanupErrors: unknown[] = [];
+    try {
+      if (app) {
+        const generation = mainGeneration;
+        // Select only this launch's real ChildProcess; the status-file PID is observation only.
+        const child = selectActivityMainSignalTarget(generation, app);
+        let closeObservation: 'already-terminal' | 'close-event' | 'deadline' = 'already-terminal';
+        if (child && generation) {
+          const currentApp = app;
+          let closeListener: (() => void) | undefined;
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const closed = new Promise<'close-event'>(resolve => {
+            closeListener = () => resolve('close-event');
+            currentApp.once('close', closeListener);
+          });
+          const deadline = new Promise<'deadline'>(resolve => {
+            timer = setTimeout(() => resolve('deadline'), 5000);
+          });
+          try {
+            writeFileSync(join(root, 'e2e-control.json'), JSON.stringify({ action: 'quit', nonce: Date.now() }));
+            closeObservation = await Promise.race([closed, deadline]);
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+            if (closeListener) currentApp.removeListener('close', closeListener);
+          }
+          // Recheck after the await: close/exit or another successful signal forbids a second signal.
+          const target = selectActivityMainSignalTarget(mainGeneration, currentApp);
+          if (target && !target.kill('SIGTERM')) throw new Error('activity_main_sigterm_not_sent');
+        }
+        record({ phase: 'main-cleanup-observation', closeObservation,
+          mainPid: generation?.child.pid, applicationClosed: generation?.applicationClosed,
+          rawClosed: generation?.rawClosed, exitCode: generation?.child.exitCode,
+          signalCode: generation?.child.signalCode, signalSent: generation?.child.killed,
+          rawChildCloseObserved: generation?.rawClosed === true });
+      }
+    } catch (error) {
+      mainCleanupErrors.push(error);
+      try {
+        record({ phase: 'main-cleanup-error', bodyFailed,
+          errors: mainCleanupErrors.map(value => value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : { message: String(value) }) });
+      } catch (evidenceError) {
+        mainCleanupErrors.push(evidenceError);
+      }
+    }
     if (activityOwnerPid) { try { process.kill(activityOwnerPid, 'SIGTERM'); await expect.poll(() => { try { process.kill(activityOwnerPid!, 0); return true; } catch { return false; } }).toBe(false); } catch {} }
     if (mcpSource && mcpSource.exitCode === null) { mcpSource.kill('SIGTERM'); await new Promise<void>(resolve => mcpSource!.once('exit',()=>resolve())); }
     if (nativeSource && nativeSource.exitCode === null) { nativeSource.kill('SIGTERM'); await new Promise<void>(resolve => nativeSource!.once('exit', () => resolve())); }
@@ -231,5 +305,6 @@ test('project activity returns to its real conversation without changing a draft
     sourceLog.end(); await new Promise<void>(resolve => model.close(() => resolve()));
     await brokerHttp.close(); broker.close();
     console.log(`activity E2E evidence: ${root}`);
+    if (!bodyFailed && mainCleanupErrors.length > 0) throw new AggregateError(mainCleanupErrors, 'activity_main_cleanup_failed');
   }
 });
