@@ -6,5 +6,6 @@ export declare function runFallbackGrepSearch(input: {
     context?: number;
     output_mode?: string;
     type?: string;
+    signal?: AbortSignal;
 }): Promise<string[]>;
 export declare const grepTool: Tool;

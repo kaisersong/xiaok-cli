@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import fg from 'fast-glob';
+import { runBoundedGlob } from './bounded-glob.js';
 import { readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { appendPaginationNotice, paginateItems, truncateText } from './truncation.js';
@@ -26,7 +26,8 @@ function buildRegex(pattern) {
         throw new Error(`无效正则: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
-async function resolveFallbackFiles(searchPath, fileGlob, type) {
+async function resolveFallbackFiles(searchPath, fileGlob, type, signal) {
+    signal?.throwIfAborted();
     const resolvedPath = resolve(searchPath);
     const stats = statSync(resolvedPath);
     if (stats.isFile()) {
@@ -37,22 +38,20 @@ async function resolveFallbackFiles(searchPath, fileGlob, type) {
         : type
             ? (TYPE_GLOBS[type] ?? [`**/*.${type}`])
             : ['**/*'];
-    return fg(patterns, {
+    return (await runBoundedGlob({ patterns,
         cwd: resolvedPath,
-        absolute: true,
-        onlyFiles: true,
         dot: true,
-        unique: true,
-        suppressErrors: true,
+        skipInaccessible: true,
         ignore: ['**/.git/**', '**/node_modules/**'],
-    });
+    }, signal)).map(entry => entry.path);
 }
 export async function runFallbackGrepSearch(input) {
     const { pattern, path: searchPath = process.cwd(), glob: fileGlob, context = 0, output_mode = 'lines', type, } = input;
     const matcher = buildRegex(pattern);
-    const files = await resolveFallbackFiles(searchPath, fileGlob, type);
+    const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal);
     const results = [];
     for (const file of files) {
+        input.signal?.throwIfAborted();
         let lines;
         try {
             lines = readFileSync(file, 'utf-8').split(/\r?\n/);
@@ -110,7 +109,7 @@ export const grepTool = {
             required: ['pattern'],
         },
     },
-    async execute(input) {
+    async execute(input, executionContext) {
         const { pattern, path: searchPath = process.cwd(), glob: fileGlob, context = 0, head_limit = 50, offset = 0, output_mode = 'lines', type, max_chars = 12_000, } = input;
         // 优先使用 rg（ripgrep），回退到 grep，再回退到纯 Node 搜索。
         const hasRg = canRunCommand('rg');
@@ -148,6 +147,7 @@ export const grepTool = {
                 context,
                 output_mode,
                 type,
+                signal: executionContext?.signal,
             })).join('\n').trim();
         if (!output)
             return '（无匹配结果）';
