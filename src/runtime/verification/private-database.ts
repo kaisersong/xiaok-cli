@@ -10,7 +10,7 @@ const privateCreate=Object.create,privateApply=Reflect.apply,privateDescriptor=O
 const privateRequire=createRequire(import.meta.url);
 const NativeDatabase=privateRequire('better-sqlite3') as typeof import('better-sqlite3');
 const privateCppSymbol=privateRequire(join(dirname(privateRequire.resolve('better-sqlite3')),'util.js')).cppdb as symbol;
-const nativeConnections=new WeakMap<Database,Readonly<{cpp:object;symbol:symbol;prepare:Function;open:Function;statement:Readonly<Record<string,Function>>;databasePrototype:object;cppPrototype:object;statementPrototype:object;fingerprints:readonly Readonly<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>[] }>>();
+const nativeConnections=new WeakMap<Database,Readonly<{cpp:object;symbol:symbol;prepare:Function;open:Function;inTransaction:Function|undefined;statement:Readonly<Record<string,Function>>;databasePrototype:object;cppPrototype:object;statementPrototype:object;fingerprints:readonly Readonly<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>[] }>>();
 /** Only the actual no-verbose private opener mints this code/data-access context. No authority is supplied. */
 export function readPrivateDatabaseNativeAccess(db:Database){return nativeConnections.get(db);}
 
@@ -32,7 +32,7 @@ export function openPrivateVerificationDatabase(inputRoot: string): Database {
   const fingerprints:Array<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>=[];
   for(const target of [db,databasePrototype,cpp,cppPrototype])for(const key of ['prepare','pragma','open'])fingerprints.push({target,key,descriptor:privateDescriptor(target,key)});
   for(const key of Object.keys(statement))fingerprints.push({target:statementPrototype,key,descriptor:privateDescriptor(statementPrototype,key)});
-  const access=privateFreeze({cpp,symbol:privateCppSymbol,prepare,open:privateDescriptor(cpp,'open')!.get!,statement:privateFreeze(statement),databasePrototype,cppPrototype,statementPrototype,fingerprints:privateFreeze(fingerprints.map(entry=>privateFreeze({...entry,descriptor:entry.descriptor?privateFreeze({...entry.descriptor}):undefined})))});
+  const access=privateFreeze({cpp,symbol:privateCppSymbol,prepare,open:privateDescriptor(cpp,'open')!.get!,inTransaction:privateDescriptor(cpp,'inTransaction')?.get,statement:privateFreeze(statement),databasePrototype,cppPrototype,statementPrototype,fingerprints:privateFreeze(fingerprints.map(entry=>privateFreeze({...entry,descriptor:entry.descriptor?privateFreeze({...entry.descriptor}):undefined})))});
   try {
     db.pragma('journal_mode=DELETE'); db.pragma('synchronous=FULL');
     const max = Math.floor(VERIFICATION_BUDGET.controlDatabaseBytes / (db.pragma('page_size', { simple: true }) as number));

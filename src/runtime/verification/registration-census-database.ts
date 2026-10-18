@@ -58,8 +58,26 @@ export function createRegistrationCensusDatabase(db:Database){
   // Non-text SQLite schema names may be Buffers with caller-modified coercion.
   // Such rows keep the complete original per-query fences and evaluation order.
   const adjacentMetadata=master.every(row=>typeof row.name==='string');
+  // table_list may have entered callbacks. Use its final positive classification,
+  // not only the earlier master row, before trusting an existing main snapshot.
+  const transactionMetadata=adjacentMetadata&&typeof native!.inTransaction==='function'&&apply(native!.inTransaction,native!.cpp,[])===true&&tables.every(table=>!master.some(row=>row.type==='table'&&lower(row.name)===table)||kinds.some(row=>row.schema==='main'&&row.name===table&&row.type==='table'));
   if(adjacentMetadata)assertNativeSqliteColumnConstruction();
-  for(const table of tables){const entry=master.find(row=>row.type==='table'&&lower(String(row.name))===table);if(!entry)continue;if(entry.name===table)present.add(table);const value=adjacentMetadata?tableColumns(table):records('PRAGMA main.table_xinfo('+table+')');if(value.some(c=>c.hidden!==0||c.name==='__proto__'))fail();columns[table]=value;}
+  if(transactionMetadata){
+   // No transaction is created here. Fixed ordinary-table metadata only, using
+   // the existing read snapshot acquired by successful guarded table_list.
+   // Native addon/VFS/extension provenance remains the trusted-native boundary.
+   const pending:Array<{table:string;columns:Array<{name:string}>;rows:unknown[][]}>=[];
+   for(const table of tables){
+    const entry=master.find(row=>row.type==='table'&&lower(String(row.name))===table);if(!entry)continue;if(entry.name===table)present.add(table);
+    const stmt=prepare('PRAGMA main.table_xinfo('+table+')');call('raw',stmt,[true]);
+    const names=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt) as unknown[][];
+    append(pending,{table,columns:names,rows});
+   }
+   assertNativeSqliteColumnConstruction();
+   for(let i=0;i<pending.length;i++){const item=pending[i]!,value=copyRecords(item.columns,item.rows);if(value.some(c=>c.hidden!==0||c.name==='__proto__'))fail();columns[item.table]=value;}
+  }else{
+   for(const table of tables){const entry=master.find(row=>row.type==='table'&&lower(String(row.name))===table);if(!entry)continue;if(entry.name===table)present.add(table);const value=adjacentMetadata?tableColumns(table):records('PRAGMA main.table_xinfo('+table+')');if(value.some(c=>c.hidden!==0||c.name==='__proto__'))fail();columns[table]=value;}
+  }
   return {master,columns,present};
  }
  return freeze({begin(){const before=counter(),structure=schema();if(!isDeepStrictEqual(before,counter()))fail();
