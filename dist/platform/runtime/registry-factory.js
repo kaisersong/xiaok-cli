@@ -182,6 +182,7 @@ export function createPlatformRegistryFactory(options) {
             ...multiAgentTools,
         ];
         // 构建基础 tool list
+        const descriptions = new Map();
         const baseTools = buildToolList(options.skillTool, {
             cwd,
             allowOutsideCwd: Boolean(options.platform.sandboxEnforcer),
@@ -189,7 +190,7 @@ export function createPlatformRegistryFactory(options) {
             ...(options.platform.sandboxEnforcer
                 ? { outsideCwdGuard: (resolvedPath) => options.platform.sandboxPolicy?.checkPath(resolvedPath) ?? { allowed: false, reason: 'sandbox policy unavailable' } }
                 : {}),
-        }, extraTools, { isYolo: () => options.permissionManager?.getMode() === 'yolo' });
+        }, extraTools, descriptions, { isYolo: () => options.permissionManager?.getMode() === 'yolo' });
         // 应用 sandbox
         const executionTools = options.source === 'chat' && agentId === 'main' && options.runInteractiveBash
             ? baseTools.map(tool => tool.definition.name === 'bash' ? createInteractiveBashTool(options.runInteractiveBash, { isYolo: () => options.permissionManager?.getMode() === 'yolo' }) : tool)
@@ -197,6 +198,9 @@ export function createPlatformRegistryFactory(options) {
         const sandboxedTools = applySandboxToTools(executionTools, options.platform.sandboxEnforcer, {
             onSandboxDenied: handleSandboxDenied,
         });
+        const wrappedDescriptions = new Map();
+        executionTools.forEach((source, index) => { const metadata = descriptions.get(source); if (metadata)
+            wrappedDescriptions.set(sandboxedTools[index], metadata); });
         // 合并 built-in 和 MCP tools（保证 ordering）
         const sandboxedMcpTools = applySandboxToTools(expandMcpCatalog(options.platform.mcpTools), options.platform.sandboxEnforcer, {
             onSandboxDenied: handleSandboxDenied,
@@ -227,7 +231,7 @@ export function createPlatformRegistryFactory(options) {
             onPrompt: options.onPrompt,
             agentId,
             onToolObserved: options.onToolObserved,
-        }, filteredTools);
+        }, filteredTools, wrappedDescriptions);
         registries.add(registry);
         const platformMcpInstances = new Set(sandboxedMcpTools);
         const baseNames = new Set(sandboxedTools.map((tool) => tool.definition.name));

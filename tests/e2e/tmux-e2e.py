@@ -2003,6 +2003,31 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         welcome = tmux.wait_for(lambda text: has_welcome_screen(text) and has_input_prompt(text), timeout=12)
         assert_welcome_screen(welcome, "welcome screen did not render before permission flow")
 
+        # Establish and read back the original permission-flow precondition through the public CLI.
+        # Default mode is intentionally omitted from the footer; read the live manager in /mode.
+        tmux.send_text("/mode default")
+        tmux.send_key("Enter")
+        selected_mode = tmux.wait_for(
+            lambda text: "权限模式已切换为 default" in text and has_input_prompt(text),
+            timeout=12,
+        )
+        assert_contains(selected_mode, "权限模式已切换为 default", "public default mode selection did not finish")
+        tmux.send_text("/mode")
+        tmux.send_key("Enter")
+        current_mode = tmux.wait_for(
+            lambda text: "选择权限模式（当前：default）" in text and "❯ 1. default（当前）" in text,
+            timeout=12,
+        )
+        assert_contains(current_mode, "选择权限模式（当前：default）", "public mode readback did not report default")
+        assert_contains(current_mode, "❯ 1. default（当前）", "public mode readback did not select the current default")
+        tmux.send_key("Escape")
+        mode_closed = tmux.wait_for(
+            lambda text: "已取消模式切换。" in text and "选择权限模式" not in text and has_input_prompt(text),
+            timeout=12,
+        )
+        assert_contains(mode_closed, "已取消模式切换。", "public mode readback did not close through cancellation")
+        assert_true("选择权限模式" not in mode_closed, "mode readback overlay remained before the permission stimulus")
+
         print("--- E2E 8: permission menu remains intact and project allow persists ---")
         project_settings_path = project_fixture / ".xiaok" / "settings.json"
         project_settings_before_permission = project_settings_path.read_text(encoding="utf-8")

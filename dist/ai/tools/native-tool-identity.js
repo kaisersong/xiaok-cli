@@ -7,7 +7,7 @@ export function registerBuiltinToolIdentity(tool, kind) {
             throw Error('compound_builtin_tool_changed');
         return;
     }
-    nativeTools.set(tool, { kind, execute: tool.execute, permission: tool.permission, definition: structuredClone(tool.definition), precondition: tool.compoundFilePrecondition });
+    nativeTools.set(tool, { kind, execute: tool.execute, permission: tool.permission, definition: structuredClone(tool.definition), precondition: tool.compoundFilePrecondition, readonlyEligibility: () => kind === 'readonly' });
 }
 export function getBuiltinToolIdentity(tool) {
     const record = nativeTools.get(tool);
@@ -18,8 +18,17 @@ export function getBuiltinToolIdentity(tool) {
     return record.kind;
 }
 /** Called only by audited host sandbox/registry wrappers, not tool registration. */
-export function inheritBuiltinToolIdentity(source, target) {
+export function isNativeReadonlyExecutionEligible(tool) {
+    const binding = nativeTools.get(tool);
+    if (!binding || getBuiltinToolIdentity(tool) !== 'readonly')
+        return false;
+    return binding.readonlyEligibility();
+}
+export function inheritBuiltinToolIdentity(source, target, auditedReadonlyGuard) {
     const kind = getBuiltinToolIdentity(source);
-    if (kind)
-        registerBuiltinToolIdentity(target, kind);
+    if (!kind)
+        return;
+    registerBuiltinToolIdentity(target, kind);
+    const clone = target.execute === source.execute && target.permission === source.permission && target.compoundFilePrecondition === source.compoundFilePrecondition && isDeepStrictEqual(target.definition, source.definition);
+    nativeTools.get(target).readonlyEligibility = () => isNativeReadonlyExecutionEligible(source) && (clone || auditedReadonlyGuard?.() === true);
 }

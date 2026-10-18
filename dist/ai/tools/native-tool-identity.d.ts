@@ -4,4 +4,5 @@ export type NativeToolKind = 'readonly' | 'file' | 'command';
 export declare function registerBuiltinToolIdentity(tool: Tool, kind: NativeToolKind): void;
 export declare function getBuiltinToolIdentity(tool: Tool): NativeToolKind | undefined;
 /** Called only by audited host sandbox/registry wrappers, not tool registration. */
-export declare function inheritBuiltinToolIdentity(source: Tool, target: Tool): void;
+export declare function isNativeReadonlyExecutionEligible(tool: Tool): boolean;
+export declare function inheritBuiltinToolIdentity(source: Tool, target: Tool, auditedReadonlyGuard?: () => boolean): void;

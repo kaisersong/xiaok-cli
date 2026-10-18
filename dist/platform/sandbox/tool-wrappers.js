@@ -1,3 +1,5 @@
+import { types } from 'node:util';
+import { isReadonlySandboxEnforcer } from './enforcer.js';
 import { inheritBuiltinToolIdentity } from '../../ai/tools/native-tool-identity.js';
 function normalizeOptions(options) { return typeof options === 'function' ? { onSandboxDenied: options } : options ?? {}; }
 function detectNetworkIntent(command) { return /(curl|wget|https?:\/\/|npm\s+install|pnpm\s+add|yarn\s+add|git\s+clone)/i.test(command); }
@@ -57,7 +59,14 @@ export function applySandboxToTools(tools, enforcer, optionsOrCallback) {
                 context?.assertPermissionApproval?.();
                 return tool.execute(input, context);
             } };
-        inheritBuiltinToolIdentity(tool, wrapped);
+        inheritBuiltinToolIdentity(tool, wrapped, () => {
+            if (!isReadonlySandboxEnforcer(enforcer) || types.isProxy(options) || ![Object.prototype, null].includes(Object.getPrototypeOf(options)))
+                return false;
+            const callback = Object.getOwnPropertyDescriptor(options, 'onSandboxDenied');
+            if (callback)
+                return 'value' in callback && callback.value === undefined;
+            return Object.getOwnPropertyDescriptor(Object.prototype, 'onSandboxDenied') === undefined;
+        });
         compoundPreparations.set(wrapped, { execute: wrapped.execute, prepare: (input, context) => prepare(input, context, true) });
         return wrapped;
     });

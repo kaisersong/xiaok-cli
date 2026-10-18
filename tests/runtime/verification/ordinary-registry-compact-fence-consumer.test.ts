@@ -1,0 +1,31 @@
+import {afterEach, beforeEach, expect, it, vi} from 'vitest';
+import {mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const state = vi.hoisted(() => ({home: ''}));
+vi.mock('node:os', async load => { const actual = await load<typeof import('node:os')>(); return {...actual, userInfo: () => ({...actual.userInfo(), homedir: state.home})}; });
+vi.mock('../../../src/runtime/verification/migration-markers.js', () => ({readInstalledCurrentProfile: () => ({kind: 'ordinary'})}));
+import {registerOrdinaryProfileSource, readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
+import {encodeOrdinaryProfileSourceStorage} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
+import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
+let root = '';
+beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-compact-fence-'))); state.home = join(root, 'account'); mkdirSync(state.home); });
+afterEach(() => { if (root) rmSync(root, {recursive: true, force: true}); root = ''; });
+it('uses the genuine public fence consumer on raw v3 without changing generation or inventory', () => {
+  const directory = join(root, 'actual-directory'); mkdirSync(directory);
+  registerOrdinaryProfileSource({kind: 'session-root', directory});
+  registerOrdinaryProfileSource({kind: 'task-root', directory});
+  const facts = readOrdinaryProfileSources()!;
+  const registry = join(state.home, '.xiaok/profile-sources/registry.json');
+  writeFileSync(registry, JSON.stringify(encodeOrdinaryProfileSourceStorage(facts)));
+  const raw = readFileSync(registry, 'utf8');
+  const fence = createKnownDirectoryWriterFence(directory, 'session-root');
+  fence.assertOpen(); fence.persist();
+  const fenceRoot = join(state.home, '.xiaok/profile-sources/writer-fences');
+  const names = readdirSync(fenceRoot); expect(names).toHaveLength(1);
+  const record = JSON.parse(readFileSync(join(fenceRoot, names[0]!), 'utf8'));
+  expect(record).toMatchObject({version: 1, state: 'known-writer-fenced', uid: facts.uid,
+    directory: {...facts.sources[0]!.directory}, sourceIds: facts.sources.map(source => source.sourceId).sort()});
+  expect(() => fence.assertOpen()).toThrow('known_writer_fence_fenced');
+  expect(readFileSync(registry, 'utf8')).toBe(raw); expect(readOrdinaryProfileSources()).toEqual(facts);
+});

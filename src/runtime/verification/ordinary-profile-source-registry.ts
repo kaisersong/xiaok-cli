@@ -1,3 +1,4 @@
+import {decodeOrdinaryProfileSourceStorage,serializeOrdinaryProfileSourceStorage} from './ordinary-profile-source-storage-codec.js';
 import {createHash} from 'node:crypto';
 import {constants,closeSync,fstatSync,lstatSync,mkdirSync,openSync,readSync,realpathSync} from 'node:fs';
 import {userInfo} from 'node:os';
@@ -78,6 +79,9 @@ function parseComponentHistory(value:unknown):Readonly<OrdinarySQLiteComponentHi
  Object.freeze(value.components);Object.freeze(value.observations);return Object.freeze(value) as unknown as Readonly<OrdinarySQLiteComponentHistory>;
 }
 export function parseOrdinaryProfileSources(raw:unknown,uid:number):Readonly<OrdinaryProfileSources>{
+ return parseExpandedOrdinaryProfileSources(decodeOrdinaryProfileSourceStorage(raw),uid);
+}
+function parseExpandedOrdinaryProfileSources(raw:unknown,uid:number):Readonly<OrdinaryProfileSources>{
  shape(raw,['version','uid','generation','legacyInventoryRequired','sources']);
  if(![1,2].includes(raw.version as number)||raw.uid!==uid||!decimal(raw.generation)||raw.generation==='0'||raw.legacyInventoryRequired!==true||!Array.isArray(raw.sources)||!raw.sources.length)fail('schema');
  const seen=new Set<string>(),names=new Set<string>();
@@ -126,7 +130,7 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   if(layout){const observations=[...(prior?.componentHistory?.observations??[])];if(!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
   if(prior&&JSON.stringify(prior)===JSON.stringify(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail('capacity');
-  const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true,sources:prior?original!.sources.map(row=>row===prior?merged:row):[...(original?.sources??[]),merged]};const bytes=JSON.stringify(next);if(Buffer.byteLength(bytes)>MAX_BYTES)fail('capacity');parseOrdinaryProfileSources(next,loc.uid);
+  const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true,sources:prior?original!.sources.map(row=>row===prior?merged:row):[...(original?.sources??[]),merged]};const validated=parseOrdinaryProfileSources(next,loc.uid);const bytes=serializeOrdinaryProfileSourceStorage(validated);if(Buffer.byteLength(bytes)>MAX_BYTES)fail('capacity');
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();

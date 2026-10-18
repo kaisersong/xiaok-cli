@@ -1,3 +1,4 @@
+import { decodeOrdinaryProfileSourceStorage, serializeOrdinaryProfileSourceStorage } from './ordinary-profile-source-storage-codec.js';
 import { createHash } from 'node:crypto';
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -123,6 +124,9 @@ function parseComponentHistory(value) {
     return Object.freeze(value);
 }
 export function parseOrdinaryProfileSources(raw, uid) {
+    return parseExpandedOrdinaryProfileSources(decodeOrdinaryProfileSourceStorage(raw), uid);
+}
+function parseExpandedOrdinaryProfileSources(raw, uid) {
     shape(raw, ['version', 'uid', 'generation', 'legacyInventoryRequired', 'sources']);
     if (![1, 2].includes(raw.version) || raw.uid !== uid || !decimal(raw.generation) || raw.generation === '0' || raw.legacyInventoryRequired !== true || !Array.isArray(raw.sources) || !raw.sources.length)
         fail('schema');
@@ -258,10 +262,10 @@ function registerSource(input, layout, expectedPhysicalIdentity) {
         if (generation > U64)
             fail('capacity');
         const next = { version: layout ? 2 : (original?.version ?? 1), uid: loc.uid, generation: String(generation), legacyInventoryRequired: true, sources: prior ? original.sources.map(row => row === prior ? merged : row) : [...(original?.sources ?? []), merged] };
-        const bytes = JSON.stringify(next);
+        const validated = parseOrdinaryProfileSources(next, loc.uid);
+        const bytes = serializeOrdinaryProfileSourceStorage(validated);
         if (Buffer.byteLength(bytes) > MAX_BYTES)
             fail('capacity');
-        parseOrdinaryProfileSources(next, loc.uid);
         loc.assertCurrent();
         if (JSON.stringify(source(input)) !== JSON.stringify(observed))
             fail('identity');
