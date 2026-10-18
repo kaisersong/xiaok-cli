@@ -157,6 +157,7 @@ it('recoverRequest after prepare closes exactly the original challenge',async()=
 
 it('request tombstone write rollback grants no false retirement and combined rows share the fixed cap',async()=>{
  const f=await fixture();try{
+  f.reserveControllerMetadata(32*1024**2);
   f.database.exec("CREATE TRIGGER fail_tomb BEFORE INSERT ON publication_request_tombstones BEGIN SELECT RAISE(ABORT,'tombstone disk failure'); END");
   expect(()=>f.operations.recoverRequest(request,f.peer)).toThrow('tombstone disk failure');
   expect(f.operations.lookupRequest({requestId:request.requestId},f.peer)).toEqual({state:'absent'});

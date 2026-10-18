@@ -1,3 +1,6 @@
+import * as sharedCapacityModule from '../../src/runtime/verification/installed-shared-capacity.js';
+import * as metadataSourceModule from '../../src/runtime/verification/installed-metadata-source.js';
+import {reserveOriginalFixtureControllerMetadata} from './original-fixture-controller-metadata.js';
 import {vi} from 'vitest';
 import {mkdtempSync,realpathSync,mkdirSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join} from 'node:path';
@@ -39,11 +42,33 @@ export async function installedControllerFixture(options:{completionOwnerSchema?
  const transport={async populateInputFile(_id:string,file:{path:string;bytes:Buffer;executable:boolean}){inputFiles.set(file.path,{...file,bytes:Buffer.from(file.bytes)});},async readInputArchive(_id:string,path:string){return buildInputFileArchive(inputFiles.get(path)!);},async createVolume(v:any){volumes.add(v.name);},async inspectVolume(v:any){if(!volumes.has(v.name))throw Error('missing');},async createMounted(body:any){if(options.recoveryOnly)throw Error('unexpected fresh authority or execution');const Id=(++serial).toString(16).padStart(64,'0');containers.set(Id,{Id,Image:body.Image,HostConfig:body.HostConfig,Config:body,State:{Running:false,Pid:0,Status:'created',ExitCode:0}});return {Id};},async inspect(id:string){return containers.get(id);},async attachOutput(){return {completed:Promise.resolve({complete:!options.incompleteOutput,truncated:false,stdout:Buffer.from('finished'),stderr:Buffer.alloc(0)}),cancel(){}};},async start(id:string){Object.assign(containers.get(id).State,{Running:true,Pid:1,Status:'running'});},async wait(id:string){Object.assign(containers.get(id).State,{Running:false,Pid:0,Status:'exited'});},async kill(id:string){Object.assign(containers.get(id).State,{Running:false,Pid:0,Status:'exited'});},async isContainerAbsent(id:string){return !containers.has(id);},async remove(id:string){containers.delete(id);},async isVolumeAbsent(v:any){return !volumes.has(v.name);},async removeVolume(v:any){volumes.delete(v.name);},async readArtifactArchive(_id:string,path:string){return buildInputFileArchive({path,bytes:options.artifact??Buffer.from('result'),executable:false});}};
  boundary.transports.set(engine.hostSocket,transport);boundary.next={lifetime,engine,qualification,broker};
  const completion=vi.spyOn(completionModule,'createVerificationCompletionComposition'),operation=vi.spyOn(operationModule,'createApprovedVerificationOperations'),stack=vi.spyOn(stackModule,'createInstalledExecutionStack'),artifact=vi.spyOn(artifactModule,'createApprovedRecipeArtifactReader'),listener=vi.spyOn(publicModule,'startPublicController');
+ let restoreSharedCapacityObserver:(()=>void)|undefined,restoreMetadataSourceObserver:(()=>void)|undefined;
  const actualWallNow=Date.now;Date.now=()=>100000;
  try{
+  const sharedProducer=sharedCapacityModule.createInstalledSharedCapacity;
+  const sharedObservation=vi.isMockFunction(sharedProducer)?{observer:sharedProducer,owned:false}:{observer:vi.spyOn(sharedCapacityModule,'createInstalledSharedCapacity'),owned:true};
+  const sharedCapacityObserver=sharedObservation.observer;
+  if(sharedObservation.owned)restoreSharedCapacityObserver=()=>sharedCapacityObserver.mockRestore();
+  const metadataProducer=metadataSourceModule.createInstalledControllerMetadataSource;
+  const metadataObservation=vi.isMockFunction(metadataProducer)?{observer:metadataProducer,owned:false}:{observer:vi.spyOn(metadataSourceModule,'createInstalledControllerMetadataSource'),owned:true};
+  const metadataSourceObserver=metadataObservation.observer;
+  if(metadataObservation.owned)restoreMetadataSourceObserver=()=>metadataSourceObserver.mockRestore();
+  const sharedCallStart=sharedCapacityObserver.mock.calls.length,sharedResultStart=sharedCapacityObserver.mock.results.length;
+  const sourceCallStart=metadataSourceObserver.mock.calls.length,sourceResultStart=metadataSourceObserver.mock.results.length;
   const installed=await startInstalledVerificationController(),composition=completion.mock.results.at(-1)!.value as ReturnType<typeof completionModule.createVerificationCompletionComposition>,operations=operation.mock.results.at(-1)!.value as ReturnType<typeof operationModule.createApprovedVerificationOperations>,actualStack=await stack.mock.results.at(-1)!.value as Awaited<ReturnType<typeof stackModule.createInstalledExecutionStack>>,operationInput=operation.mock.calls.at(-1)![0],artifacts=artifact.mock.results.at(-1)!.value as ReturnType<typeof artifactModule.createApprovedRecipeArtifactReader>,invoke=listener.mock.calls.at(-1)![0].invoke;
   Date.now=actualWallNow;
-  return {installed,root,state,database,lifetime,keys,controllerKeys,receiverIdentity,clock,setTime(value:number){time=value;},composition,operations,operationInput,artifacts,stack:actualStack,material:actualStack.privateHost.materials,raw:actualStack.privateHost.execution.privateHost.raw,runs:actualStack.privateHost.runs,invoke,peer:{uid:501,gid:20,auditSessionId:7},containers,volumes,get qualificationCalls(){return qualificationCalls;},async close(preserveRoot=false){await installed.close();boundary.transports.delete(engine.hostSocket);if(!preserveRoot)rmSync(root,{recursive:true,force:true});}};
+  const sharedResult=sharedCapacityObserver.mock.results[sharedResultStart],sourceResult=metadataSourceObserver.mock.results[sourceResultStart];
+  const sharedCalls=sharedCapacityObserver.mock.calls.length-sharedCallStart,sharedResults=sharedCapacityObserver.mock.results.length-sharedResultStart;
+  const sourceCalls=metadataSourceObserver.mock.calls.length-sourceCallStart,sourceResults=metadataSourceObserver.mock.results.length-sourceResultStart;
+  const sharedArgumentCount=sharedCapacityObserver.mock.calls[sharedCallStart]?.length,sourceArgumentCount=metadataSourceObserver.mock.calls[sourceCallStart]?.length,sourceLifetime=metadataSourceObserver.mock.calls[sourceCallStart]?.[0];
+  const reserveControllerMetadata=(minimumBytes:number)=>{
+   if(sharedCalls!==1||sharedResults!==1||sharedArgumentCount!==1||!sharedResult||sharedResult.type!=='return'||sourceCalls!==1||sourceResults!==1||sourceArgumentCount!==1||!sourceResult||sourceResult.type!=='return'||sourceLifetime!==lifetime)throw Error('fixture_original_capacity_observation');
+   return reserveOriginalFixtureControllerMetadata(lifetime,sharedResult.value,sourceResult.value,minimumBytes);
+  };
+  return {installed,root,state,database,lifetime,reserveControllerMetadata,keys,controllerKeys,receiverIdentity,clock,setTime(value:number){time=value;},composition,operations,operationInput,artifacts,stack:actualStack,material:actualStack.privateHost.materials,raw:actualStack.privateHost.execution.privateHost.raw,runs:actualStack.privateHost.runs,invoke,peer:{uid:501,gid:20,auditSessionId:7},containers,volumes,get qualificationCalls(){return qualificationCalls;},async close(preserveRoot=false){await installed.close();boundary.transports.delete(engine.hostSocket);if(!preserveRoot)rmSync(root,{recursive:true,force:true});}};
  }catch(error){if(database.open)database.close();rmSync(root,{recursive:true,force:true});throw error;}
- finally{Date.now=actualWallNow;for(const spy of [completion,operation,stack,artifact,listener])spy.mockRestore();boundary.next=undefined;}
+ finally{
+  try{Date.now=actualWallNow;for(const spy of [completion,operation,stack,artifact,listener])spy.mockRestore();}
+  finally{try{restoreMetadataSourceObserver?.();}finally{try{restoreSharedCapacityObserver?.();}finally{boundary.next=undefined;}}}
+ }
 }

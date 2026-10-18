@@ -6,11 +6,19 @@ import {loopHostSubjectOwner} from '../../src/runtime/verification/loop-host-sub
 import {createApplicationBindingAuthority} from '../../src/runtime/verification/application-binding-authority.js';
 import {applicationBindingReviewBytes} from '../../src/runtime/verification/application-binding-review.js';
 import {canonicalVerificationJson as json} from '../../src/runtime/verification/protocol.js';
+const FixtureCleanupError=Error,defineFixtureCleanupData=Object.defineProperty;
+function fixtureReservationCleanupFailure(cause:unknown,cleanupError:unknown):Error{
+ const failure=new FixtureCleanupError('fixture_metadata_reservation_cleanup_unknown');
+ defineFixtureCleanupData(failure,'cause',{__proto__:null,value:cause,enumerable:false,writable:false,configurable:false} as PropertyDescriptor);
+ defineFixtureCleanupData(failure,'cleanupError',{__proto__:null,value:cleanupError,enumerable:false,writable:false,configurable:false} as PropertyDescriptor);
+ return failure;
+}
 const H='a'.repeat(64),hash=(text:string|Buffer)=>createHash('sha256').update(text).digest('hex'),invocation={sessionIdentity:'s',compoundOperationId:'o',validationInvocationId:'v'};
 /** Actual installed start mints all private owners; only native/engine leaves are fixtures. */
-export async function verifiedOperationFixture(mode:string='dispatch',fixtureOptions:{onClock?:()=>void;onQualified?:()=>void|Promise<void>;onRunCurrent?:()=>void;onAuthorityQualified?:()=>void}={}){
+export async function verifiedOperationFixture(mode:string='dispatch',fixtureOptions:{controllerMetadataMinimumBytes?:number;onClock?:()=>void;onQualified?:()=>void|Promise<void>;onRunCurrent?:()=>void;onAuthorityQualified?:()=>void}={}){
  const artifact=mode==='maximum-artifact'?Buffer.alloc(12*1024**2-32768,97):mode==='large-artifact'?Buffer.alloc(300*1024,97):Buffer.from('result');
  const f=await installedControllerFixture({artifact,incompleteOutput:mode==='incomplete-output',onClock:fixtureOptions.onClock,onQualified:fixtureOptions.onQualified,onAuthorityQualified:fixtureOptions.onAuthorityQualified}),peer=f.peer,material=f.material,command={argv:['/bin/true'],cwdRelative:'.'};
+  if(fixtureOptions.controllerMetadataMinimumBytes!==undefined){try{f.reserveControllerMetadata(fixtureOptions.controllerMetadataMinimumBytes);}catch(error){try{await f.close();}catch(cleanupError){throw fixtureReservationCleanupFailure(error,cleanupError);}throw error;}}
   const checks=[{id:'content',path:'result',sha256:hash(artifact),structure:'bytes'},...(mode==='maximum-artifact'?[{id:'content-second',path:'second-result',sha256:hash(artifact),structure:'bytes'}]:[])];
   const recipe={kind:'artifact-content',checks},obligation={obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject',definitionHash:hash(json(recipe)),requiredCheckIds:checks.map(check=>check.id)};
   const loopSubject={kind:'loop-run' as const,loopId:'artifact-evidence-regression',runId:'loop-run',stage:null};
