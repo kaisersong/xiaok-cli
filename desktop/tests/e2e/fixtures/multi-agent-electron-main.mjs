@@ -7,6 +7,7 @@ const desktop = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const compiled = join(desktop, 'dist', 'main', 'desktop', 'electron');
 const root = process.env.XIAOK_MULTI_AGENT_E2E_ROOT;
 if (!root || !process.env.XIAOK_E2E_USER_DATA || !process.env.XIAOK_CONFIG_DIR) throw new Error('isolated E2E paths are required');
+await import('./ordinary-ui-account-binding.cjs');
 mkdirSync(process.env.XIAOK_E2E_USER_DATA, { recursive: true });
 writeFileSync(join(root, 'e2e-process.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 });
 app.setPath('userData', process.env.XIAOK_E2E_USER_DATA);

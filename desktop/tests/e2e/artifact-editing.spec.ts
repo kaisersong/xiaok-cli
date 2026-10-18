@@ -43,7 +43,7 @@ describeE2E('Artifact Live Editing E2E', () => {
   test.beforeAll(async () => {
     runtimeRoot = mkdtempSync(join(tmpdir(), 'xiaok-artifact-runtime-e2e-'));
     app = await electron.launch({
-      args: [join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js'), `--user-data-dir=${join(runtimeRoot, 'profile')}`],
+      args: ['-r', join(DESKTOP_ROOT, 'tests', 'e2e', 'fixtures', 'ordinary-ui-account-binding.cjs'), join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js'), `--user-data-dir=${join(runtimeRoot, 'profile')}`],
       env: { ...process.env, NODE_ENV: 'test', XIAOK_CONFIG_DIR: join(runtimeRoot, 'config') },
     });
     page = await app.firstWindow();

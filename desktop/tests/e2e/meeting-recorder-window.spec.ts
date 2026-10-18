@@ -18,6 +18,7 @@ describeE2E('independent meeting recorder window', () => {
     runtimeRoot = mkdtempSync(join(tmpdir(), 'xiaok-recorder-runtime-e2e-'));
     app = await electron.launch({
       args: [
+        '-r', join(DESKTOP_ROOT, 'tests', 'e2e', 'fixtures', 'ordinary-ui-account-binding.cjs'), 
         join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js'),
         `--user-data-dir=${join(runtimeRoot, 'profile')}`,
         '--use-fake-device-for-media-stream',

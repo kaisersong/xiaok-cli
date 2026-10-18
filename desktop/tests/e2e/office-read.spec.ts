@@ -43,7 +43,7 @@ describeE2E('Office / PDF read path in the Electron runtime', () => {
     writeFileSync(join(workspace, 'doc.pdf'), buildMinimalPdf(['Hello from Electron', 'Second line here']));
 
     app = await electron.launch({
-      args: [MAIN_ENTRY, `--user-data-dir=${join(workspace, 'profile')}`],
+      args: ['-r', join(DESKTOP_ROOT, 'tests', 'e2e', 'fixtures', 'ordinary-ui-account-binding.cjs'), MAIN_ENTRY, `--user-data-dir=${join(workspace, 'profile')}`],
       env: { ...process.env, NODE_ENV: 'test', XIAOK_CONFIG_DIR: join(workspace, 'config') },
     });
     page = await app.firstWindow();
