@@ -112,7 +112,7 @@ test('project activity returns to its real conversation without changing a draft
       await expect(composer()).toHaveValue(draft);expect(modelCalls).toBe(afterCreationCalls);record({phase:'real-source-disconnect-reconnect-no-replay'});
     }
     if (!soak) {
-      nativeSource = spawn(process.execPath, [join(desktop, 'tests/e2e/fixtures/activity-native-source.mjs'), join(desktop, 'dist/main'), join(root, 'data'), 'activity-thread'], { stdio: ['ignore','pipe','pipe'] });
+      nativeSource = spawn(process.execPath, ['-r', join(desktop, 'tests/e2e/fixtures/ordinary-ui-node-shared-account.cjs'), join(desktop, 'tests/e2e/fixtures/activity-native-source.mjs'), join(desktop, 'dist/main'), join(root, 'data'), 'activity-thread'], { env: { ...process.env, XIAOK_CONFIG_DIR: join(root, 'config'), XIAOK_MULTI_AGENT_E2E_ROOT: root }, stdio: ['ignore','pipe','pipe'] });
       const native = await new Promise<{ url: string; watchId: string }>((resolve, reject) => {
         let output = ''; nativeSource!.stdout!.on('data', data => { output += data; if (output.includes('\n')) { try { resolve(JSON.parse(output.split('\n')[0])); } catch (error) { reject(error); } } });
         nativeSource!.stderr!.on('data', data => record({ nativeSourceDiagnostic: data.toString().slice(0,1024) }));
@@ -156,7 +156,7 @@ test('project activity returns to its real conversation without changing a draft
       await expect(page.getByTestId(`activity-work-${native.watchId}`)).not.toContainText('已完成');
       const finished=await fetch(`${native.url}/finish`,{method:'POST'});expect(finished.ok).toBe(true);
       await expect(page.getByTestId(`activity-work-${native.watchId}`)).toContainText('已完成');
-      mcpSource = spawn(process.execPath, [join(desktop,'tests/e2e/fixtures/activity-mcp-source.mjs'),join(desktop,'dist/main'),join(root,'data'),'activity-thread'], { stdio:['ignore','pipe','pipe'] });
+      mcpSource = spawn(process.execPath, ['-r', join(desktop, 'tests/e2e/fixtures/ordinary-ui-node-shared-account.cjs'), join(desktop,'tests/e2e/fixtures/activity-mcp-source.mjs'),join(desktop,'dist/main'),join(root,'data'),'activity-thread'], { env: { ...process.env, XIAOK_CONFIG_DIR: join(root, 'config'), XIAOK_MULTI_AGENT_E2E_ROOT: root }, stdio:['ignore','pipe','pipe'] });
       const pending = await new Promise<{ url:string;watchId:string }>((resolve,reject)=>{let output='';mcpSource!.stdout!.on('data',data=>{output+=data;if(output.includes('\n')){try{resolve(JSON.parse(output.split('\n')[0]));}catch(error){reject(error);}}});mcpSource!.once('error',reject);mcpSource!.stderr!.on('data',data=>record({mcpDiagnostic:data.toString().slice(0,1024)}));});
       await expect(page.getByTestId(`activity-work-${pending.watchId}`)).toContainText('选择输出格式');
       expect((await(await fetch(`${pending.url}/stats`)).json()).updates).toBe(0);
