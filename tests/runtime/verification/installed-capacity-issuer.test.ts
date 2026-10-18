@@ -43,9 +43,11 @@ it('rolls back both the real material allocation and its source row when a trigg
   const c=await f.invoke('completion.prepare-owner',{enrollment:{ownerKind:'task',ownerId:'issuer-task',invocations:[invocation]},registration:{migrationEpoch:1,obligations:[{obligation:{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject',definitionHash:sha(recipe),requiredCheckIds:['content']},recipe}],source:{kind:'new-owner'}}},f.peer,signal) as {challengeId:string};
   await f.invoke('completion.authorize-owner',{challengeId:c.challengeId},f.peer,signal);
   const review=await f.material.prepare({purpose:'isolated-command',invocation,materials:[{path:'/workspace/a',byteLimit:1}],exactCommand:{argv:['/bin/true'],cwdRelative:'.'},expiresAt:105000},f.peer,signal),grant=await f.material.authorize(review.challengeId,f.peer,signal);
+  const tables=['shared_blob_issuers','shared_blob_bindings','verification_blob_reservations','shared_capacity_reservations','broker_staging_intents'];
+  const beforeStage=tables.map(table=>f.database.prepare('SELECT * FROM '+table).all());
   f.database.exec("CREATE TRIGGER corrupt_issuer AFTER INSERT ON shared_blob_issuers BEGIN UPDATE shared_blob_issuers SET record_hash='corrupt' WHERE resource_id=new.resource_id; END");
   await expect(f.material.stage({grantHandle:grant,invocation},f.peer,signal)).rejects.toThrow('blob_issuer_changed');
-  for(const table of ['shared_blob_issuers','shared_blob_bindings','verification_blob_reservations','shared_capacity_reservations','broker_staging_intents'])expect(f.database.prepare('SELECT * FROM '+table).all()).toEqual([]);
+  for(const [index,table] of tables.entries())expect(f.database.prepare('SELECT * FROM '+table).all()).toEqual(beforeStage[index]);
   expect(f.database.inTransaction).toBe(false);
  }finally{f.database.exec('DROP TRIGGER IF EXISTS corrupt_issuer');await f.close();}
 });
