@@ -10,6 +10,7 @@ import {intentHostSubjectOwner} from '../../../src/runtime/verification/intent-h
 import {intentBusinessContractHash} from '../../../src/runtime/verification/intent-business-contract.js';
 import {intentContractOriginalRegistration,intentOriginalRegistrationHash} from '../../../src/runtime/verification/intent-contract-enrollment.js';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
+import {parseIndependentRecipeDefinition} from '../../../src/runtime/verification/independent-recipes.js';
 const hash=(v:Buffer|string)=>createHash('sha256').update(v).digest('hex'),H='a'.repeat(64);
 let state:any;
 beforeEach(()=>{
@@ -18,7 +19,8 @@ beforeEach(()=>{
   const currentSubject={...subject,stageId:stage.stageId},owner={profileId:'profile',...intentHostSubjectOwner(currentSubject)};
   const binding=createIntentApplicationBinding({...raw,subject:currentSubject,candidateId:`stage-${i}`,body:{...raw.body,stageId:stage.stageId,executionReports:[],artifacts:raw.body.artifacts.map((a:any)=>({...a,stageId:stage.stageId}))}}),active={binding,bindingHash:intentApplicationBindingHash(binding),revision:1};
   const registration={owner,subject:currentSubject,contract,contractHash:intentBusinessContractHash(contract),registrationHash:intentOriginalRegistrationHash(intentContractOriginalRegistration({subject:currentSubject,contract}))};registrations.set(owner.ownerId,registration);
-  const body={version:1,owner,application:active,dependencies:[],evaluations:[{obligationId:'original',artifacts:[{path:'result.md',sha256:hash('原文'),size:Buffer.byteLength('原文'),bytesBase64:Buffer.from('原文').toString('base64')}]}]},bytes=Buffer.from(json(body));
+  const artifactDefinition=parseIndependentRecipeDefinition(stage.verification.obligations[0].recipe);
+  const body={version:1,owner,application:active,dependencies:[],evaluations:[{obligationId:'original',definitionHash:artifactDefinition.definitionHash,binding:{},evaluation:{},artifacts:[{path:'result.md',sha256:hash('原文'),size:Buffer.byteLength('原文'),bytesBase64:Buffer.from('原文').toString('base64')}]}]},bytes=Buffer.from(json(body));
   return {owner,active,body,bytes,registration,observation:{owner,businessRevision:1,currentVerification:'valid',publication:{status:'committed',current:true,operationId:`operation-${i}`,fullTupleHash:H}}};
  });
  const parentOwner={profileId:'profile',...intentHostSubjectOwner(subject)};registrations.set(parentOwner.ownerId,{owner:parentOwner,subject,contract,contractHash:intentBusinessContractHash(contract),registrationHash:intentOriginalRegistrationHash(intentContractOriginalRegistration({subject,contract}))});
