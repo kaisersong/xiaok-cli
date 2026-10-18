@@ -27,7 +27,9 @@ export function createRegistrationCensusDatabase(db:Database){
  }
  const prepare=(sql:string)=>apply(native.prepare,native.cpp,[sql,db,false,false]);
  const call=(key:string,stmt:object,args:unknown[]=[])=>apply(native.statement[key]!,stmt,args);
- function raw(sql:string,args:unknown[]=[]){assertNativeSqliteArrayConstruction();const stmt=prepare(sql);call('raw',stmt,[true]);const rows=call('all',stmt,args) as unknown[][];assertNativeSqliteArrayConstruction();return rows;}
+ // Only counter() calls raw, after the complete function_list fence and builtin check.
+ // Its fixed header-read tail closes once before any counter result is returned.
+ function raw(sql:string,args:unknown[]=[]){const stmt=prepare(sql);call('raw',stmt,[true]);const rows=call('all',stmt,args) as unknown[][];return rows;}
  function records(sql:string,args:unknown[]=[]):Record<string,any>[] {
   assertNativeSqliteColumnConstruction();
   const stmt=prepare(sql);call('raw',stmt,[true]);assertNativeSqliteColumnConstruction();const columns=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt,args) as unknown[][];assertNativeSqliteColumnConstruction();return copyRecords(columns,rows);
@@ -45,7 +47,7 @@ export function createRegistrationCensusDatabase(db:Database){
  }
  function counter(){current();const funcs=records('PRAGMA function_list');if(!funcs.some(f=>f.name==='total_changes'&&f.builtin===1)||funcs.some(f=>typeof f.name==='string'&&lower(f.name)==='total_changes'&&f.builtin!==1))fail();
   const schema=raw('PRAGMA main.schema_version')[0]?.[0],data=raw('PRAGMA main.data_version')[0]?.[0];if(!Number.isSafeInteger(schema)||Number(schema)<0||!Number.isSafeInteger(data)||Number(data)<0)fail();
-  const stmt=prepare('SELECT total_changes() AS n');call('safeIntegers',stmt,[true]);call('raw',stmt,[true]);const changes=(call('get',stmt) as unknown[]|undefined)?.[0];if(typeof changes!=='bigint'||changes<0n)fail();return {schema,data,changes};
+  const stmt=prepare('SELECT total_changes() AS n');call('safeIntegers',stmt,[true]);call('raw',stmt,[true]);const row=call('get',stmt) as unknown[]|undefined;assertNativeSqliteArrayConstruction();const changes=row?.[0];if(typeof changes!=='bigint'||changes<0n)fail();return {schema,data,changes};
  }
  function schema(){const modules=records('PRAGMA module_list');if(modules.some(r=>typeof r.name==='string'&&tables.includes(lower(r.name))))fail();
   const master=records('SELECT type,name,tbl_name,rootpage,sql FROM main.sqlite_master ORDER BY type,name,tbl_name,rootpage,sql');
@@ -67,10 +69,13 @@ export function createRegistrationCensusDatabase(db:Database){
    // the existing read snapshot acquired by successful guarded table_list.
    // Native addon/VFS/extension provenance remains the trusted-native boundary.
    const pending:Array<{table:string;columns:Array<{name:string}>;rows:unknown[][]}>=[];
+   // This layout belongs only to this synchronous transaction metadata batch.
+   let layout:Array<{name:string}>|undefined;
    for(const table of tables){
     const entry=master.find(row=>row.type==='table'&&lower(String(row.name))===table);if(!entry)continue;if(entry.name===table)present.add(table);
     const stmt=prepare('PRAGMA main.table_xinfo('+table+')');call('raw',stmt,[true]);
-    const names=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt) as unknown[][];
+    const names:Array<{name:string}>=layout??(call('columns',stmt) as Array<{name:string}>),rows=call('all',stmt) as unknown[][];
+    layout=names;
     append(pending,{table,columns:names,rows});
    }
    assertNativeSqliteColumnConstruction();
