@@ -273,6 +273,7 @@ describe('InProcessTaskRuntimeHost', () => {
 
   it('dispatches persisted events after the task mutation chain and isolates callback failures', async () => {
     const seen: string[] = [];
+    const settledConsumers = new Set<string>();
     let host!: InProcessTaskRuntimeHost;
     let taskSequence = 0;
     host = new InProcessTaskRuntimeHost({
@@ -283,12 +284,16 @@ describe('InProcessTaskRuntimeHost', () => {
       createTaskId: () => (++taskSequence === 1 ? 'task_post_lock' : 'task_2'),
       createSessionId: () => 'sess_post_lock',
       onPersistedEvent: async ({ event, snapshot }) => {
-        seen.push(event.type);
-        await host.recoverTask(snapshot.taskId);
-        if (event.type === 'task_terminal') {
-          expect(host.activeExecutionCount()).toBe(0);
-          await host.prepareTask({ prompt: 'callback follow-up', materials: [] });
-          throw new Error('consumer failure is isolated');
+        try {
+          seen.push(event.type);
+          await host.recoverTask(snapshot.taskId);
+          if (event.type === 'task_terminal') {
+            expect(host.activeExecutionCount()).toBe(0);
+            await host.prepareTask({ prompt: 'callback follow-up', materials: [] });
+            throw new Error('consumer failure is isolated');
+          }
+        } finally {
+          settledConsumers.add(`${snapshot.taskId}:${event.type}`);
         }
       },
     });
@@ -297,6 +302,9 @@ describe('InProcessTaskRuntimeHost', () => {
     await waitFor(() => seen.includes('task_terminal'));
     await waitFor(async () => Boolean((await snapshotStore.recoverTask('task_2'))));
     expect((await host.recoverTask('task_post_lock')).snapshot.status).toBe('completed');
+    // Both task-local FIFO tails have completed their original callback I/O.
+    await waitFor(() => settledConsumers.has('task_post_lock:task_terminal')
+      && settledConsumers.has('task_2:understanding_updated'));
   });
 
   it('marks a persisted running task as failed when no execution exists after restart', async () => {
