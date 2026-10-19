@@ -1,6 +1,9 @@
 import {it,expect,vi} from 'vitest';
 const f=vi.hoisted(()=>({events:[] as string[],stackInput:undefined as any,archiveInput:undefined as any,applicationInput:undefined as any,listener:undefined as any,archiveCap:{},archiveRead:vi.fn(),sourceRead:vi.fn()}));
 vi.mock('../../../src/runtime/verification/installed-shared-capacity.js',()=>({createInstalledSharedCapacity:()=>({capacity:{migrateLegacy(){}},close(){}}),isCapacityMappingNotReady:()=>false}));
+// Keep metadata initialization at the same fixture boundary as installed capacity;
+// these routing cases must never perform a metadata preparation operation.
+vi.mock('../../../src/runtime/verification/installed-metadata-target-prepare.js',()=>({createInstalledMetadataTargetPreparation:()=>({initialize(){},prepare(){throw Error('fixture_metadata_prepare_unused');},close(){f.events.push('metadata');}})}));
 vi.mock('../../../src/runtime/verification/root-broker-client.js',()=>({assertInstalledRootBrokerClient(){},createInstalledRootBrokerClient:()=>({dispose(){}})}));
 vi.mock('../../../src/runtime/verification/installed-controller-lifetime.js',async()=>{const {default:Database}=await import('better-sqlite3');return {assertInstalledControllerLifetime(){},createInstalledControllerLifetime:()=>{const database=new Database(':memory:');return {database,base:'/fixture',state:'/fixture/state',manifest:{authorityId:'authority',packageHash:'a'.repeat(64),allowedUserIds:[501]},publicKey:{export:()=>Buffer.from('fixture-key')},assertCurrent(){},close(){database.close();f.events.push('lifetime');}};}};});
 vi.mock('../../../src/runtime/verification/installed-receiver-registration.js',()=>({createInstalledReceiverRegistration:()=>({identity:{},receiverVerifier:{},close(){f.events.push('receiver');}}),assertInstalledReceiverRegistration(){}}));
