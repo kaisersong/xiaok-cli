@@ -87,3 +87,15 @@ it.each(['get','set'] as const)('R9 keeps original schema evidence when WeakMap.
  }finally{define(WeakMap.prototype,kind,prior);}
  expect(error).toBeInstanceOf(Error);expect((error as Error).message).toBe('application_registration_changed');expect(replacedCalls).toBe(0);
 });
+
+it('keeps the exported registration fence current across rollback and a new transaction',()=>{
+ const f=fixture();
+ f.database.exec("DROP TABLE main.verification_application_history;CREATE TABLE main.verification_application_history(owner_key TEXT,future_value TEXT)");
+ f.database.prepare('INSERT INTO verification_application_history VALUES(?,?)').run(json(f.owner),'committed');
+ f.database.exec('BEGIN IMMEDIATE');
+ f.database.prepare('UPDATE verification_application_history SET future_value=?').run('rolled-back');
+ const fence=f.authority.captureRegistrationReadFence(f.owner),before=f.database.prepare('SELECT total_changes() AS n').get();
+ f.database.exec('ROLLBACK;BEGIN IMMEDIATE');
+ try{expect(f.database.prepare('SELECT total_changes() AS n').get()).toEqual(before);expect(fence).toThrow('application_registration_changed');}
+ finally{f.database.exec('ROLLBACK');}
+});
