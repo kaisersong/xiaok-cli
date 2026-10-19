@@ -1,6 +1,8 @@
 /** Fixed projections inventoried from actual production constructors. This is
  * neither a complete layout declaration nor source/session authority. */
 const definitions = {
+  "groups:activity_runs": {"table":"activity_runs","columns":["run_id","group_id","data_json","logical_bytes"]},
+  "groups:activity_members": {"table":"activity_members","columns":["run_id","member_id","group_id","data_json","logical_bytes"]},
   "groups:thread_bindings-v1-0": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision"]},
   "groups:thread_bindings-v1-1": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision","delete_state"]},
   "groups:thread_bindings-v1-2": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision","delete_state","delete_json"]},

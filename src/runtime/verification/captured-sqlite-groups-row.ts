@@ -22,6 +22,8 @@ function same(cell:CapturedSqliteCell|undefined,value:unknown):boolean{
  return false;
 }
 const indexes:Readonly<Record<string,Readonly<Record<string,string>>>>={
+  activity_runs:{run_id:'runId',group_id:'groupId'},
+  activity_members:{run_id:'runId',member_id:'memberId',group_id:'groupId'},
  groups:{group_id:'groupId',thread_id:'threadId',boot_id:'bootId',created_at:'createdAt'},
  agents:{agent_id:'id',parent_id:'parentId',created_at:'createdAt'},
  events:{group_id:'groupId',seq:'seq',event_id:'eventId',agent_id:'agentId'},

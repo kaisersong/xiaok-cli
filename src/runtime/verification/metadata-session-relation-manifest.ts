@@ -12,6 +12,9 @@ export interface MetadataSessionRelationDefinition {
 }
 
 const definitions = {
+  "groups:activity-run": {"queryId":"groups:activity_runs","whereEqual":["run_id"],"orderBy":["run_id"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
+  "groups:group-activity_runs": {"queryId":"groups:activity_runs","whereEqual":["group_id"],"orderBy":["run_id"],"rowidTieBreak":true,"cardinality":"many","boundKeyTypes":["text"]},
+  "groups:group-activity_members": {"queryId":"groups:activity_members","whereEqual":["group_id"],"orderBy":["run_id","member_id"],"rowidTieBreak":true,"cardinality":"many","boundKeyTypes":["text"]},
   "groups:group": {"queryId":"groups:groups","whereEqual":["group_id"],"orderBy":["group_id"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
   "groups:message": {"queryId":"groups:messages","whereEqual":["message_id"],"orderBy":["message_id"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
   "groups:event": {"queryId":"groups:events","whereEqual":["group_id","seq"],"orderBy":["group_id","seq"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text","text"]},
