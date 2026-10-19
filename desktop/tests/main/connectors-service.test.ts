@@ -281,4 +281,30 @@ describe('ConnectorsService', () => {
     // FALLBACK_LIMIT = 3：三次连败后 primary 标记失效，第 4 次直接走 fallback。
     expect(deepseekCalls).toBe(3);
   });
+
+  it('applies a config switch atomically with credential injection while tools execute', async () => {
+    // 评审 #9：setConfig 不得出现「先应用无凭证 persisted、再排队补 key」的
+    // 窗口——并发中的 web_search 必须始终打到 deepseek，不静默降级 DDG。
+    let ddgCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('api.deepseek.com')) {
+        return new Response(JSON.stringify({
+          results: [{ title: 'From DeepSeek', url: 'https://example.com/ds', summary: 'ds' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      ddgCalls += 1;
+      return new Response('<html><body><a class="result__a" href="https://example.com/ddg">DDG</a><div class="result__snippet">s</div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = new ConnectorsService({ store, toolRegistry, resolveDeepseekApiKey: async () => 'sk-atomic' });
+    await svc.setConfig({ search: { provider: 'deepseek' }, fetch: { provider: 'basic' } });
+
+    const [output] = await Promise.all([
+      toolRegistry.executeTool('web_search', { query: 'concurrent' }),
+      svc.setConfig({ search: { provider: 'deepseek' }, fetch: { provider: 'basic' } }),
+    ]);
+    expect(output).toContain('From DeepSeek');
+    expect(ddgCalls).toBe(0);
+  });
 });

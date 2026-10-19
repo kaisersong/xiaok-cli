@@ -21,6 +21,7 @@ interface DeepSeekRawResult {
 }
 
 interface DeepSeekSearchResponseBody {
+  error?: unknown;
   results?: unknown;
 }
 
@@ -113,6 +114,10 @@ export function createDeepSeekSearchProvider(options: DeepSeekSearchOptions): Se
       if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.results)) {
         throw new SearchProviderError('unexpected search response shape', { kind: 'parse' });
       }
+      // 200 错误 envelope（顶层 error 字段；正常命中响应不含）同样不是无命中。
+      if (parsed.error) {
+        throw new SearchProviderError('error envelope in 200 response', { kind: 'parse' });
+      }
 
       const rawResults: DeepSeekRawResult[] = parsed.results as DeepSeekRawResult[];
       const hits: SearchHit[] = [];
@@ -129,6 +134,11 @@ export function createDeepSeekSearchProvider(options: DeepSeekSearchOptions): Se
           publishedAt: pickString(item.date),
           score: typeof item.rerank_score === 'number' ? item.rerank_score : undefined,
         });
+      }
+      // 非空 results 里连一个有效条目都没有 = 异常响应，不是无命中——否则
+      // {results:[null]} 之类会伪装成空结果并按成功返回（评审 BLOCK 遗留 #7）。
+      if (rawResults.length > 0 && hits.length === 0) {
+        throw new SearchProviderError('no valid entries in non-empty results', { kind: 'parse' });
       }
       return hits;
     },

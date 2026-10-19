@@ -69,6 +69,11 @@ export function createDeepSeekFetchProvider(options) {
             catch (error) {
                 throw new FetchProviderError(`invalid json: ${toMessage(error)}`, { kind: 'parse' });
             }
+            // 顶层必须是对象：null/数组之类的异常 body 直接按 parse 处理，
+            // 不能以 TypeError 泄漏未分类异常。
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new FetchProviderError('unexpected fetch response shape', { kind: 'parse' });
+            }
             const content = typeof parsed.content === 'string' && parsed.content.trim()
                 ? parsed.content.trim()
                 : '';

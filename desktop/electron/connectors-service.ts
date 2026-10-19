@@ -82,16 +82,16 @@ export class ConnectorsService {
     this.bindTools(this.toolRegistry);
   }
 
-  private refreshCredentials(): Promise<void> {
+  private refreshCredentials(pendingBase?: ConnectorsConfig): Promise<void> {
     const next = this.credentialRefresh.then(
-      () => this.refreshCredentialsNow(),
-      () => this.refreshCredentialsNow(),
+      () => this.refreshCredentialsNow(pendingBase),
+      () => this.refreshCredentialsNow(pendingBase),
     );
     this.credentialRefresh = next.then(() => undefined, () => undefined);
     return next;
   }
 
-  private async refreshCredentialsNow(): Promise<void> {
+  private async refreshCredentialsNow(pendingBase?: ConnectorsConfig): Promise<void> {
     let apiKey: string | undefined;
     try {
       apiKey = (await this.deps.resolveDeepseekApiKey?.()) ?? undefined;
@@ -99,9 +99,10 @@ export class ConnectorsService {
       apiKey = undefined;
     }
     const trimmed = apiKey?.trim() ? apiKey.trim() : undefined;
-    // 基底与凭证分离：先剥离注入字段再统一覆盖，旧 key 不会残留在 registry
-    // 状态里（评审 BLOCK #2 的另一半）。
-    const base = stripDeepseekConfigKey(this.registry.getConfig());
+    // 基底与凭证分离：显式配置切换以 persisted 为基底（等待期间旧 registry
+    // 保持完整可用）；普通凭证刷新以当前 registry 状态为基底。旧注入字段先
+    // 剥离再统一覆盖，旧 key 不会残留在 registry 状态里（评审 BLOCK #2）。
+    const base = stripDeepseekConfigKey(pendingBase ?? this.registry.getConfig());
     const next = withDeepseekConfigKey(base, trimmed);
     // 仅在有效配置实际变化时 rebuild：registry.apply() 会清空连败降级窗口，
     // 每次工具执行前无条件 apply 会让三连败保护失效（评审 P2 #5）。
@@ -124,11 +125,11 @@ export class ConnectorsService {
   async setConfig(input: unknown): Promise<ConnectorsConfigSnapshot> {
     const persisted = await this.store.save(input);
     this.loadStatus = 'ok';
-    this.registry.apply(persisted);
-    // persisted 不含凭证字段；重置签名强制 refresh 重建（否则若凭证未变，
-    // 签名比对会跳过重建，registry 停留在无 key 的中间态）。
-    this.lastAppliedRuntimeSignature = undefined;
-    await this.refreshCredentials();
+    // 配置切换与凭证注入合并为同一串行轮次的一次性重建（评审 #9）：不存在
+    // 「先应用无凭证 persisted、再排队补 key」的窗口——并发中的工具调用要
+    // 么使用旧的完整配置，要么等待「persisted+注入 key」一次到位后才执行，
+    // 不会在有效凭证配置切换期间静默降级 fallback。
+    await this.refreshCredentials(persisted);
     return this.snapshot();
   }
 

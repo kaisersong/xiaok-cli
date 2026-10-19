@@ -80,4 +80,14 @@ describe('web_fetch.deepseek', () => {
     }
     expect(fetchFn).not.toHaveBeenCalled();
   });
+
+  it('treats non-object 200 bodies as parse errors instead of crashing', async () => {
+    const mk = (raw: string) => createDeepSeekFetchProvider({
+      apiKey: 'sk-x',
+      fetchFn: async () => new Response(raw, { status: 200, headers: { 'content-type': 'application/json' } }),
+    });
+    await expect(mk('null').fetch({ url: 'https://e.com', maxChars: 10 })).rejects.toMatchObject({ kind: 'parse' });
+    await expect(mk('["a"]').fetch({ url: 'https://e.com', maxChars: 10 })).rejects.toMatchObject({ kind: 'parse' });
+    await expect(mk('42').fetch({ url: 'https://e.com', maxChars: 10 })).rejects.toMatchObject({ kind: 'parse' });
+  });
 });

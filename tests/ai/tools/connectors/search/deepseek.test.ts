@@ -98,8 +98,17 @@ describe('web_search.deepseek', () => {
 
   it('treats 200 responses with abnormal shapes as parse errors, not empty results', async () => {
     // 只有合法的 results:[] 才是无命中；200+{} / {results:'nope'} /
-    // {error:{...}} 是异常结构，进 parse 错误而不是伪装成空结果（评审 P2 #7）。
-    for (const body of [{}, { results: 'nope' }, { error: { message: 'boom' } }]) {
+    // 错误 envelope / 全坏项的 results([null]/[{}]/[42,'bad'])都是异常
+    // 结构，进 parse 错误而不是伪装成空结果按成功返回（评审 BLOCK #7）。
+    for (const body of [
+      {},
+      { results: 'nope' },
+      { error: { message: 'boom' } },
+      { error: { message: 'boom' }, results: [] },
+      { results: [null] },
+      { results: [{}] },
+      { results: [42, 'bad'] },
+    ]) {
       const provider = createDeepSeekSearchProvider({ apiKey: 'sk-x', fetchFn: async () => jsonResponse(body) });
       await expect(provider.search({ query: 'q', count: 1 })).rejects.toMatchObject({ kind: 'parse' });
     }
