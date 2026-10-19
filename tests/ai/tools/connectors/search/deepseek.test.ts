@@ -61,12 +61,64 @@ describe('web_search.deepseek', () => {
     expect(hits).toEqual([]);
   });
 
-  it('maps 401/403 to auth and 429 to rate_limit errors', async () => {
+  it('maps 401 to auth and 429 to rate_limit errors', async () => {
     const provider = createDeepSeekSearchProvider({ apiKey: 'sk-x', fetchFn: async () => new Response('unauthorized', { status: 401 }) });
     await expect(provider.search({ query: 'q', count: 1 })).rejects.toMatchObject({ kind: 'auth', status: 401 });
 
     const limited = createDeepSeekSearchProvider({ apiKey: 'sk-x', fetchFn: async () => new Response('rate', { status: 429 }) });
     await expect(limited.search({ query: 'q', count: 1 })).rejects.toMatchObject({ kind: 'rate_limit', status: 429 });
+  });
+
+  it('maps 403 to http (security-policy rejection, not a credential fault)', async () => {
+    // 官方 guides/search #errors：403 = 请求被安全策略拒绝。标成 auth 会误导
+    // 用户去更换有效 key（评审 P2 #8）。
+    const provider = createDeepSeekSearchProvider({ apiKey: 'sk-x', fetchFn: async () => new Response('forbidden', { status: 403 }) });
+    await expect(provider.search({ query: 'q', count: 1 })).rejects.toMatchObject({
+      kind: 'http',
+      status: 403,
+    });
+  });
+
+  it('rejects malformed keys at construction with a fixed message that never echoes the key', async () => {
+    // Node 对含换行的 Authorization 头的校验错误会把 `Bearer <key>` 原文放进
+    // 消息（评审 BLOCK #1）；构造期必须拒绝，且错误文本不能含 key 片段。
+    const canary = 'sk-CANARYREVIEW\nbearer-header-copy';
+    const fetchFn = vi.fn(async () => jsonResponse({ results: [] }));
+    expect(() => createDeepSeekSearchProvider({ apiKey: canary, fetchFn })).toThrow(SearchProviderError);
+    try {
+      createDeepSeekSearchProvider({ apiKey: canary, fetchFn });
+      expect.unreachable('construction must throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SearchProviderError);
+      expect((error as Error).message).not.toContain('CANARYREVIEW');
+      expect((error as Error).message).toBe('invalid deepseek api key format');
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('treats 200 responses with abnormal shapes as parse errors, not empty results', async () => {
+    // 只有合法的 results:[] 才是无命中；200+{} / {results:'nope'} /
+    // {error:{...}} 是异常结构，进 parse 错误而不是伪装成空结果（评审 P2 #7）。
+    for (const body of [{}, { results: 'nope' }, { error: { message: 'boom' } }]) {
+      const provider = createDeepSeekSearchProvider({ apiKey: 'sk-x', fetchFn: async () => jsonResponse(body) });
+      await expect(provider.search({ query: 'q', count: 1 })).rejects.toMatchObject({ kind: 'parse' });
+    }
+  });
+
+  it('drops null entries from results instead of crashing on them', async () => {
+    const provider = createDeepSeekSearchProvider({
+      apiKey: 'sk-x',
+      fetchFn: async () => jsonResponse({
+        results: [
+          null,
+          { url: 'https://example.com/ok', title: 'ok', summary: 'ok summary' },
+          42,
+          'nope',
+        ],
+      }),
+    });
+    const hits = await provider.search({ query: 'q', count: 5 });
+    expect(hits).toEqual([{ title: 'ok', url: 'https://example.com/ok', snippet: 'ok summary' }]);
   });
 
   it('maps 402 insufficient balance and other http errors to http kind without retries', async () => {

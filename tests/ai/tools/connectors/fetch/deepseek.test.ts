@@ -56,4 +56,28 @@ describe('web_fetch.deepseek', () => {
     await expect(() => createDeepSeekFetchProvider({ apiKey: '', fetchFn: async () => new Response('', { status: 200 }) }))
       .toThrow(FetchProviderError);
   });
+
+  it('maps 403 to http with the security-policy message, not auth', async () => {
+    // 官方 guides/search #errors：403 = Fetch 请求被安全策略拒绝，不是凭证故障。
+    const provider = createDeepSeekFetchProvider({ apiKey: 'sk-x', fetchFn: async () => new Response('forbidden', { status: 403 }) });
+    const error = await provider.fetch({ url: 'https://e.com', maxChars: 10 }).catch((e: unknown) => e as FetchProviderError);
+    expect(error).toBeInstanceOf(FetchProviderError);
+    expect(error).toMatchObject({ kind: 'http', status: 403 });
+    expect(error.message).toContain('security policy');
+  });
+
+  it('rejects malformed keys at construction with a fixed message that never echoes the key', async () => {
+    const canary = 'sk-CANARYFETCH\nheader-copy';
+    const fetchFn = vi.fn(async () => new Response('', { status: 200 }));
+    expect(() => createDeepSeekFetchProvider({ apiKey: canary, fetchFn })).toThrow(FetchProviderError);
+    try {
+      createDeepSeekFetchProvider({ apiKey: canary, fetchFn });
+      expect.unreachable('construction must throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FetchProviderError);
+      expect((error as Error).message).toBe('invalid deepseek api key format');
+      expect((error as Error).message).not.toContain('CANARYFETCH');
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 });

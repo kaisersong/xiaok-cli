@@ -66,9 +66,15 @@ function buildFirstPartyConfig(
   }
 
   const wireModel = modelOverride?.model ?? profile.defaultModel.model;
+  // Kimi 之外，DeepSeek 的 legacy 迁移同样按实际 wire 查 catalog 变体继承能力：
+  // 默认模型换新后 profile.defaultModel 与钉死的 legacy wire 不同名，直接取默认
+  // 会把新默认的 image_in 泄露给纯文本 wire（评审 BLOCK #3）。Kimi 的
+  // endpoint/runtime 限制保持原样，不受影响。
   const catalogVariant = providerId === 'kimi'
     ? getProviderModelVariant(providerId, wireModel)
-    : undefined;
+    : providerId === 'deepseek'
+      ? getProviderModelVariant(providerId, wireModel)
+      : undefined;
   const capabilities = modelOverride?.capabilities
     ?? catalogVariant?.capabilities
     ?? profile.defaultModel.capabilities;

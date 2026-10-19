@@ -35,12 +35,15 @@ export interface ConnectorTestResult {
   error?: string;
 }
 
-/** 把 deepseek key 同时注入 search/fetch（Lazy 键复制成双份是既有 schema 形状）。 */
+/**
+ * 把 deepseek key 同时注入 search/fetch。无论 resolver 返回什么都**显式覆盖**
+ * 两处字段（含 undefined）：key 从模型配置删除后必须立即失效，不能靠旧配置
+ * spread 残留（评审 BLOCK #2）。
+ */
 function withDeepseekConfigKey(config: ConnectorsConfig, apiKey: string | undefined): ConnectorsConfig {
-  if (!apiKey) return config;
   return {
-    search: { ...config.search, deepseekApiKey: apiKey },
-    fetch: { ...config.fetch, deepseekApiKey: apiKey },
+    search: { ...config.search, deepseekApiKey: apiKey ?? undefined },
+    fetch: { ...config.fetch, deepseekApiKey: apiKey ?? undefined },
   };
 }
 
@@ -63,8 +66,11 @@ export class ConnectorsService {
   /**
    * 每次公开调用都重新解析模型配置里的 DeepSeek key：设置页改 key 不需要
    * 回调通知 connectors，下一次工具调用/快照即生效。失败按未配置处理。
+   * 链式队列保证顺序：后到的 resolver 结果不会覆盖先到的新 key（乱序防护）。
    */
   private credentialRefresh: Promise<void> = Promise.resolve();
+  /** 上次实际应用（注入后）的完整运行时配置指纹；无变化不重建 registry。 */
+  private lastAppliedRuntimeSignature: string | undefined;
 
   constructor(deps: ConnectorsServiceDeps) {
     this.deps = deps;
@@ -76,13 +82,13 @@ export class ConnectorsService {
     this.bindTools(this.toolRegistry);
   }
 
-  private storeConfig(): ConnectorsConfig {
-    return this.registry.getConfig();
-  }
-
   private refreshCredentials(): Promise<void> {
-    this.credentialRefresh = this.refreshCredentialsNow();
-    return this.credentialRefresh;
+    const next = this.credentialRefresh.then(
+      () => this.refreshCredentialsNow(),
+      () => this.refreshCredentialsNow(),
+    );
+    this.credentialRefresh = next.then(() => undefined, () => undefined);
+    return next;
   }
 
   private async refreshCredentialsNow(): Promise<void> {
@@ -92,8 +98,17 @@ export class ConnectorsService {
     } catch {
       apiKey = undefined;
     }
-    const base = this.storeConfig();
-    this.registry.apply(withDeepseekConfigKey(base, apiKey?.trim() ? apiKey.trim() : undefined));
+    const trimmed = apiKey?.trim() ? apiKey.trim() : undefined;
+    // 基底与凭证分离：先剥离注入字段再统一覆盖，旧 key 不会残留在 registry
+    // 状态里（评审 BLOCK #2 的另一半）。
+    const base = stripDeepseekConfigKey(this.registry.getConfig());
+    const next = withDeepseekConfigKey(base, trimmed);
+    // 仅在有效配置实际变化时 rebuild：registry.apply() 会清空连败降级窗口，
+    // 每次工具执行前无条件 apply 会让三连败保护失效（评审 P2 #5）。
+    const signature = JSON.stringify(next);
+    if (this.lastAppliedRuntimeSignature === signature) return;
+    this.lastAppliedRuntimeSignature = signature;
+    this.registry.apply(next);
   }
 
   /** 保持 public 方法返回前 registry 状态已含最新凭证注入。 */
@@ -110,7 +125,9 @@ export class ConnectorsService {
     const persisted = await this.store.save(input);
     this.loadStatus = 'ok';
     this.registry.apply(persisted);
-    // persisted 不含凭证字段；重新注入 DeepSeek key 后再产出快照。
+    // persisted 不含凭证字段；重置签名强制 refresh 重建（否则若凭证未变，
+    // 签名比对会跳过重建，registry 停留在无 key 的中间态）。
+    this.lastAppliedRuntimeSignature = undefined;
     await this.refreshCredentials();
     return this.snapshot();
   }

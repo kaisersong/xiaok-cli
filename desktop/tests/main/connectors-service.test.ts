@@ -184,4 +184,101 @@ describe('ConnectorsService', () => {
       expect(String(url)).not.toContain('api.deepseek.com');
     }
   });
+
+  it('stops using stale deepseek credentials as soon as the model config stops providing them', async () => {
+    // 评审 BLOCK #2：key 被删除/空白/resolver 抛错后，注入必须显式覆盖为
+    // undefined——旧 key 不能靠 spread 残留在 registry 状态里继续外发。
+    let stubbed: string | undefined = 'sk-revocable';
+    let failResolver = false;
+    const resolver = vi.fn(async () => {
+      if (failResolver) throw new Error('model config read failed');
+      return stubbed;
+    });
+    const svc = new ConnectorsService({ store, toolRegistry, resolveDeepseekApiKey: resolver });
+    const deepseekCalls: Array<{ url: string; auth?: string }> = [];
+    const ddgHtml = '<html><body><a class="result__a" href="https://example.com/ddg">DDG after revocation</a><div class="result__snippet">s</div></body></html>';
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('api.deepseek.com')) {
+        const headers = init?.headers;
+        deepseekCalls.push({
+          url,
+          auth: headers instanceof Headers
+            ? headers.get('authorization') ?? undefined
+            : (headers as Record<string, string> | undefined)?.authorization,
+        });
+        return new Response(JSON.stringify({
+          results: [{ title: 'From DeepSeek', url: 'https://example.com/ds', summary: 'ds' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(ddgHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await svc.setConfig({ search: { provider: 'deepseek' }, fetch: { provider: 'basic' } });
+    expect(await toolRegistry.executeTool('web_search', { query: 'live' })).toContain('From DeepSeek');
+    expect(deepseekCalls).toHaveLength(1);
+    expect(deepseekCalls[0]?.auth).toBe('Bearer sk-revocable');
+
+    // key 从模型配置删除 → 立即失效：不走 deepseek 端点，降级 DDG。
+    stubbed = undefined;
+    expect(await toolRegistry.executeTool('web_search', { query: 'revoked' })).toContain('DDG after revocation');
+    expect(deepseekCalls).toHaveLength(1);
+    const runtime = (await svc.listProviders()).find((r) => r.provider_name === 'web_search.deepseek');
+    expect(runtime?.runtime_state).toBe('missing_config');
+
+    // resolver 抛错 = 无 key，同样不得复用旧凭证（含空白 trim 归一为 undefined）。
+    deepseekCalls.length = 0;
+    stubbed = '   ';
+    expect(await toolRegistry.executeTool('web_search', { query: 'blank' })).toContain('DDG after revocation');
+    failResolver = true;
+    expect(await toolRegistry.executeTool('web_search', { query: 'resolver-fail' })).toContain('DDG after revocation');
+    expect(deepseekCalls).toHaveLength(0);
+  });
+
+  it('never leaks a malformed deepseek key through tool output or requests', async () => {
+    // 桌面端到端（评审 BLOCK #1）：含 CRLF 的 key 在 provider 构造期被固定
+    // 文本拒绝，canary 不允许出现在请求头、错误文本或会话 tool_result 里。
+    const canary = 'sk-CANARYDESKTOP\nheader-copy';
+    const svc = new ConnectorsService({ store, toolRegistry, resolveDeepseekApiKey: async () => canary });
+    const requests: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      requests.push(`${url} ${JSON.stringify(init?.headers ?? null)}`);
+      return new Response('<html><body><a class="result__a" href="https://example.com/ddg">DDG</a><div class="result__snippet">s</div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await svc.setConfig({ search: { provider: 'deepseek' }, fetch: { provider: 'basic' } });
+    const output = await toolRegistry.executeTool('web_search', { query: 'canary' });
+    expect(output).not.toContain('CANARYDESKTOP');
+    expect(output).toContain('DDG');
+    expect(await svc.listProviders().then((rs) => JSON.stringify(rs))).not.toContain('CANARYDESKTOP');
+    for (const request of requests) {
+      expect(request).not.toContain('CANARYDESKTOP');
+    }
+  });
+
+  it('keeps the consecutive-failure fallback intact across repeated deepseek executions', async () => {
+    // 评审 P2 #5：refreshCredentials 只在有效配置变化时重建 registry——
+    // 每次工具执行前的凭证刷新不得清空连败窗口，否则降级保护名存实亡。
+    let deepseekCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('api.deepseek.com')) {
+        deepseekCalls += 1;
+        return new Response('rate limited', { status: 429, headers: { 'content-type': 'text/plain' } });
+      }
+      return new Response('<html><body><a class="result__a" href="https://example.com/ddg">DDG</a><div class="result__snippet">s</div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = new ConnectorsService({ store, toolRegistry, resolveDeepseekApiKey: async () => 'sk-persistent' });
+    await svc.setConfig({ search: { provider: 'deepseek' }, fetch: { provider: 'basic' } });
+
+    for (let i = 0; i < 4; i += 1) {
+      await toolRegistry.executeTool('web_search', { query: `q${i}` });
+    }
+    // FALLBACK_LIMIT = 3：三次连败后 primary 标记失效，第 4 次直接走 fallback。
+    expect(deepseekCalls).toBe(3);
+  });
 });

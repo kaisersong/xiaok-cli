@@ -103,7 +103,14 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
     // 把新默认的能力(image_in 等)泄露给旧绑定 —— 否则图片会发给不支持它的
     // wire 模型并被 API 静默替换成占位文本(control-plane 回归)。
     // 与 runtimeOptions 的 catalogRuntimeModel 解析保持同一事实来源。
-    capabilities: modelEntry.capabilities ?? catalogModel?.capabilities ?? providerProfile?.defaultModel.capabilities ?? [],
+    // 最后一级 profile.defaultModel 兜底同样受 first-party 限制：id 与官方撞名
+    // 的 custom provider 拿到的是官方 profile，但运行在自己 baseUrl 上的模型
+    // 不能继承官方能力（评审 P2 #4）——custom 无显式声明时按保守空集。
+    capabilities: modelEntry.capabilities
+      ?? catalogModel?.capabilities
+      ?? (providerConfig.type === 'first_party'
+        ? providerProfile?.defaultModel.capabilities ?? []
+        : []),
     ...(runtimeOptions ? { runtimeOptions } : {}),
   };
 }
