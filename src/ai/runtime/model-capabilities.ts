@@ -85,7 +85,12 @@ function inferModelCapabilities(modelName: string): Partial<ModelCapabilities> {
     };
   }
 
-  if (/^deepseek-v4-flash-vision-exp$/i.test(modelName)) {
+  // Vision 仅限 DeepSeek 官方标了 Vision 的名字：canonical `deepseek-flash`
+  // 与实验型号 v4-flash-vision-exp（2026-10-18 查证 https://api-docs.deepseek.com/quick_start/pricing）。
+  // legacy `deepseek-v4-flash` / `deepseek-v4-pro` 维持纯文本推断——官方 pricing
+  // 脚注称旧名由 1017 服务，但未经本端直测前不承诺能力，避免把不支持图片的
+  // 会话误投影成视觉请求。
+  if (/^deepseek-(flash|v4-flash-vision-exp)$/i.test(modelName)) {
     return {
       supportsImageInput: true,
     };

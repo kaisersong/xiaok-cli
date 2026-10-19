@@ -256,23 +256,30 @@ describe('catalog only lists models the providers actually serve', () => {
     expect(getProviderProfile('minimax')?.baseUrl).toBe('https://api.minimax.io/v1');
   });
 
-  it('claims image input only for the official DeepSeek Vision Exp model', () => {
+  it('claims image input for the canonical DeepSeek Flash and the Vision Exp model', () => {
     const profile = getProviderProfile('deepseek');
     const variants = [profile!.defaultModel, ...(profile!.availableModels ?? [])];
 
     for (const variant of variants) {
-      if (variant.modelId === 'deepseek-v4-flash-vision-exp') {
+      if (variant.modelId === 'deepseek-v4-flash-vision-exp' || variant.model === 'deepseek-flash') {
+        // 官方 pricing（2026-10-18）FEATURES：deepseek-flash Vision ✓。
         expect(variant.capabilities, variant.modelId).toContain('image_in');
       } else {
+        // legacy 名字（deepseek-v4-flash 等）保持保守：不宣称未直测的 vision 能力。
         expect(variant.capabilities, variant.modelId).not.toContain('image_in');
       }
       expect(variant.capabilities, variant.modelId).toContain('thinking');
     }
+    expect(profile?.defaultModel.model).toBe('deepseek-flash');
   });
 
-  it('registers the exact temporary DeepSeek V4.1 Flash wire ID without replacing the default', () => {
+  it('registers the canonical DeepSeek Flash wire ID as the default model', () => {
     const profile=getProviderProfile('deepseek');
-    expect(profile?.defaultModel.model).toBe('deepseek-v4-pro');
+    // defaultModel 与 availableModels 的 deepseek-flash 共 wireModel，元数据逐字一致。
+    const flash: ProviderModelVariant = {
+      modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
+    };
+    expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-flash')).toEqual(flash);
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-v4.1-flash-expires-on-0910')).toEqual({
       modelId:'deepseek-v4.1-flash-expires-on-0910',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',capabilities:['tools','thinking'],runtimeOptions:{contextLimit:1_000_000},
     });
@@ -544,6 +551,7 @@ describe('official context windows per provider', () => {
     },
     // https://api-docs.deepseek.com/quick_start/pricing/
     deepseek: {
+      'deepseek-flash': 1_000_000,
       'deepseek-v4-pro': 1_000_000,
       'deepseek-v4-flash': 1_000_000,
       'deepseek-v4-flash-vision-exp': 1_000_000,

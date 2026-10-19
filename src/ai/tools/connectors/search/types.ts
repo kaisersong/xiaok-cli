@@ -21,7 +21,8 @@ export type SearchProviderName =
   | 'web_search.bing'
   | 'web_search.tavily'
   | 'web_search.brave'
-  | 'web_search.firecrawl';
+  | 'web_search.firecrawl'
+  | 'web_search.deepseek';
 
 export interface SearchProvider {
   readonly name: SearchProviderName;

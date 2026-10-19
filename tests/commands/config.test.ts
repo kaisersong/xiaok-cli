@@ -114,7 +114,7 @@ describe('config commands', () => {
       expect(updated.defaultProvider).toBe('deepseek');
       expect(updated.models['deepseek-default']).toMatchObject({
         provider: 'deepseek',
-        model: 'deepseek-v4-pro',
+        model: 'deepseek-flash',
       });
       expect(updated.providers.deepseek).toMatchObject({
         type: 'first_party',
@@ -402,7 +402,7 @@ describe('config commands', () => {
       expect(updated.defaultModelId).toBe('deepseek-default');
       expect(updated.models['deepseek-default']).toMatchObject({
         provider: 'deepseek',
-        model: 'deepseek-v4-pro',
+        model: 'deepseek-flash',
       });
 
       const logOutput = consoleLogSpy.mock.calls.map(([v]) => String(v)).join(' ');
