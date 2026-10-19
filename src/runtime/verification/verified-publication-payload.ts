@@ -14,6 +14,9 @@ interface Row{payload_id:string;owner_key:string;payload_hash:string;dependencie
 /** Private installed-controller composition. References and read results confer no ACL.
  * The exact connection is shared with proof/outbox. No caller bytes are accepted.
  */
+// Keep capture-owned bytes out of later mutable global copy hooks.
+const publicationBufferConstructor=Buffer,publicationBufferFrom=Buffer.from,publicationBufferApply=Reflect.apply;
+function copyPublicationBytes(bytes:Buffer):Buffer{return publicationBufferApply(publicationBufferFrom,publicationBufferConstructor,[bytes]);}
 export function createVerifiedPublicationPayloads(input:{
  database:Database;recipes:Pick<ReturnType<typeof createIndependentVerifierRecipes>,'exportVerifiedArtifacts'>;
  proofAuthority?:{publicKey:KeyObject;issuerId:string;keyId:string;serviceEpoch:string;verifierHash:string};
@@ -125,7 +128,7 @@ export function createVerifiedPublicationPayloads(input:{
   capture(payloadId:string,rawOwner:VerificationOwner){
    const owner=JSON.parse(ownerKey(rawOwner)) as VerificationOwner;
    return transaction(()=>{
-    const row=readRow(payloadId,owner),body=Buffer.from(row.payload),applications=row.applications;
+    const row=readRow(payloadId,owner),body=copyPublicationBytes(row.payload),applications=row.applications;
     const expected={ownerKey:row.owner_key,hash:row.payload_hash,dependencies:row.dependencies_json,length:body.length};
     const assertCurrent=()=>transaction(()=>{
      const actual=db.prepare('SELECT owner_key,payload_hash,dependencies_json,LENGTH(payload) byte_length FROM verified_publication_payloads WHERE payload_id=?').get(payloadId) as {owner_key:string;payload_hash:string;dependencies_json:string;byte_length:number}|undefined;
@@ -136,7 +139,7 @@ export function createVerifiedPublicationPayloads(input:{
     },()=>parentVector(owner),()=>parentVector(owner));
     // Only detached copies leave this operation-local snapshot. A later disk
     // change cannot substitute bytes already selected for this publication.
-    return Object.freeze({readBytes:()=>{assertCurrent();return Buffer.from(body);},assertCurrent});
+    return Object.freeze({readBytes:()=>{assertCurrent();return copyPublicationBytes(body);},assertCurrent});
    },()=>parentVector(owner),()=>parentVector(owner));
   },
   read(payloadId:string,rawOwner:VerificationOwner):Buffer{const owner=JSON.parse(ownerKey(rawOwner));return transaction(()=>Buffer.from(readRow(payloadId,owner).payload),()=>parentVector(owner),()=>parentVector(owner));},
