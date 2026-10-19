@@ -219,6 +219,55 @@ describe('resolveRuntimeModelBinding', () => {
     });
   });
 
+  it('marks the canonical deepseek-flash default binding image-capable, legacy pinned wires text-only', () => {
+    // 2026-10-18 默认切到 deepseek-flash(官方 pricing Vision ✓)。裸 deepseek-default
+    // 条目(auto-follow 默认)继承 flash 元数据；而钉死 v4-pro wire 的存量绑定
+    // 在 capabilities 兜底链修复(catalog 变体优先于 profile default)后仍保持纯文本,
+    // 不会把图片发给由 1017 服务的 legacy 名而误以为模型看到了。
+    const base: Config = {
+      schemaVersion: 2,
+      defaultProvider: 'deepseek',
+      defaultModelId: 'deepseek-default',
+      providers: {
+        deepseek: {
+          type: 'first_party',
+          protocol: 'openai_legacy',
+          apiKey: 'sk-deepseek',
+        },
+      },
+      models: {
+        'deepseek-default': {
+          provider: 'deepseek',
+          label: 'DeepSeek V4.1 Flash',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    };
+
+    expect(resolveRuntimeModelBinding(base)).toMatchObject({
+      wireModel: 'deepseek-flash',
+      capabilities: ['tools', 'thinking', 'image_in'],
+    });
+
+    const pinned: Config = {
+      ...base,
+      models: {
+        'deepseek-custom-pinned': {
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          label: 'DeepSeek V4 Pro',
+        },
+      },
+      defaultModelId: 'deepseek-custom-pinned',
+    };
+
+    expect(resolveRuntimeModelBinding(pinned)).toMatchObject({
+      wireModel: 'deepseek-v4-pro',
+      capabilities: ['tools', 'thinking'],
+    });
+  });
+
   it('does not let an old kimi-default to kimi-k2.7 mapping inherit K3 runtime policy', () => {
     const config = createOpenAICompatibleConfig({
       providerId: 'kimi',

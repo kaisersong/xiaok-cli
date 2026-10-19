@@ -2,12 +2,14 @@ import { createBingRssSearchProvider } from './search/bing-rss.js';
 import type { ConnectorsConfig, ProviderRuntime } from './config.js';
 import { evaluateProviderRuntimes } from './config.js';
 import { createBraveSearchProvider } from './search/brave.js';
+import { createDeepSeekSearchProvider } from './search/deepseek.js';
 import { createDuckDuckGoSearchProvider } from './search/duckduckgo.js';
 import { createFirecrawlSearchProvider } from './search/firecrawl.js';
 import { createTavilySearchProvider } from './search/tavily.js';
 import { SearchProviderError } from './search/types.js';
 import type { SearchHit, SearchProvider, SearchRunInput } from './search/types.js';
 import { createBasicFetchProvider } from './fetch/basic.js';
+import { createDeepSeekFetchProvider } from './fetch/deepseek.js';
 import { createFirecrawlFetchProvider } from './fetch/firecrawl.js';
 import { createJinaFetchProvider } from './fetch/jina.js';
 import { FetchProviderError } from './fetch/types.js';
@@ -251,6 +253,15 @@ export class ConnectorRegistry {
         return fallback;
       }
     }
+    case 'deepseek': {
+      const apiKey = config.search.deepseekApiKey?.trim();
+      if (!apiKey) return fallback;
+      try {
+        return createDeepSeekSearchProvider({ apiKey, fetchFn });
+      } catch {
+        return fallback;
+      }
+    }
     case 'duckduckgo':
     case 'searxng': // not implemented → use fallback
     default:
@@ -268,6 +279,15 @@ export class ConnectorRegistry {
         apiKey: config.fetch.firecrawlApiKey?.trim() || undefined,
         fetchFn,
       });
+    case 'deepseek': {
+      const apiKey = config.fetch.deepseekApiKey?.trim();
+      if (!apiKey) return fallback;
+      try {
+        return createDeepSeekFetchProvider({ apiKey, fetchFn });
+      } catch {
+        return fallback;
+      }
+    }
     case 'basic':
     default:
       return fallback;

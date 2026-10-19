@@ -89,20 +89,26 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     protocol: 'openai_legacy',
     baseUrl: 'https://api.deepseek.com/v1',
     envPrefixes: ['DEEPSEEK'],
-    // V4 Pro / Flash 为纯文本；只有实验型号 V4 Flash Vision Exp 接受图片输入。
-    // 三者默认开启思考模式。contextLimit 来自 https://api-docs.deepseek.com/quick_start/pricing/
+    // 官方 wire model `deepseek-flash` 即 DeepSeek-V4.1-Flash-1017（MODEL VERSION，
+    // https://api-docs.deepseek.com/quick_start/pricing/，2026-10-18 查证）；定价页
+    // 将其置于首位，xiaok 以其为默认。1M 上下文，工具、思考（默认开，可关闭）、
+    // 图片输入（Vision ✓，此前的 Flash 系列仅 vision-exp 支持图片）。
+    // 与下方 availableModels 的 deepseek-flash 条目共享 wireModel，元数据必须
+    // 逐字一致，否则 resolveProviderModelVariant 会抛 MODEL_VARIANT_AMBIGUOUS。
     defaultModel: {
       modelId: 'deepseek-default',
-      model: 'deepseek-v4-pro',
-      label: 'DeepSeek V4 Pro',
-      capabilities: ['tools', 'thinking'],
+      model: 'deepseek-flash',
+      label: 'DeepSeek V4.1 Flash',
+      capabilities: ['tools', 'thinking', 'image_in'],
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
-      // https://api-docs.deepseek.com/news/news260821 与 /guides/vision：
-      // 官方 wire model 为 deepseek-v4-flash-vision-exp，使用现有 API 端点，
-      // 通过 OpenAI-compatible image_url 接受图片；1M 上下文，支持工具与思考。
-      // Official API now serves this legacy preview ID as deepseek-flash (verified 2026-10-11); 1M per pricing docs.
+      { modelId: 'deepseek-flash', model: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
+      // 官方 pricing 脚注(1)：legacy 名字 deepseek-v4-flash 与
+      // deepseek-v4-flash-vision-exp 的对应模型已退役，请求仍受理，但由
+      // DeepSeek-V4.1-Flash-1017 服务并按 Flash 价格计费；保留条目让存量
+      // 配置无需迁移即可解析。expires-on-0910 为 2026-09-10 版本的临时
+      // preview ID（现在同样由 1017 服务）。
       { modelId: 'deepseek-v4.1-flash-expires-on-0910', model: 'deepseek-v4.1-flash-expires-on-0910', label: 'DeepSeek V4.1 Flash Preview (0910)', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-flash-vision-exp', model: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision Exp', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },

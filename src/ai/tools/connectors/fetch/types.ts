@@ -14,7 +14,7 @@ export interface FetchRunInput {
   signal?: AbortSignal;
 }
 
-export type FetchProviderName = 'web_fetch.basic' | 'web_fetch.jina' | 'web_fetch.firecrawl';
+export type FetchProviderName = 'web_fetch.basic' | 'web_fetch.jina' | 'web_fetch.firecrawl' | 'web_fetch.deepseek';
 
 export interface FetchProvider {
   readonly name: FetchProviderName;

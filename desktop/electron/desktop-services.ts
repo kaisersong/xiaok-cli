@@ -2212,6 +2212,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const connectorsService = new ConnectorsService({
     store: new ConnectorsStore({ dataRoot: options.dataRoot }),
     toolRegistry: registry,
+    // DeepSeek Search & Fetch 与模型共用 key：实时从模型配置解析，不在
+    // connectors.json 复制第二真相源（design 2026-10-18 §Part B）。
+    resolveDeepseekApiKey: async () => {
+      const config = await loadConfig();
+      const apiKey = config.providers.deepseek?.apiKey;
+      return apiKey && apiKey.trim() ? apiKey.trim() : undefined;
+    },
   });
 
   async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal, onExecutionStarted }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal; onExecutionStarted?: () => void | Promise<void> }) {

@@ -98,7 +98,12 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
     apiKey: transport.apiKey,
     baseUrl: transport.baseUrl,
     headers: transport.headers,
-    capabilities: modelEntry.capabilities ?? providerProfile?.defaultModel.capabilities ?? [],
+    // capabilities 优先取「解析出的 catalog 变体」：钉死 legacy wire 名(如
+    // deepseek-v4-pro)的存量绑定应继承该 wire 的元数据，而不是默认模型换新后
+    // 把新默认的能力(image_in 等)泄露给旧绑定 —— 否则图片会发给不支持它的
+    // wire 模型并被 API 静默替换成占位文本(control-plane 回归)。
+    // 与 runtimeOptions 的 catalogRuntimeModel 解析保持同一事实来源。
+    capabilities: modelEntry.capabilities ?? catalogModel?.capabilities ?? providerProfile?.defaultModel.capabilities ?? [],
     ...(runtimeOptions ? { runtimeOptions } : {}),
   };
 }

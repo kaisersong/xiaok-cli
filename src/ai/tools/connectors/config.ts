@@ -2,14 +2,15 @@
 // Same schema is consumed by both; only the persistence layer differs
 // (env / settings.json for CLI, encrypted store for desktop).
 
-export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
-export type FetchProviderName = 'basic' | 'jina' | 'firecrawl';
+export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'deepseek' | 'searxng';
+export type FetchProviderName = 'basic' | 'jina' | 'firecrawl' | 'deepseek';
 
 export interface SearchConnectorConfig {
   provider: SearchProviderName;
   tavilyApiKey?: string;
   braveApiKey?: string;
   firecrawlApiKey?: string;
+  deepseekApiKey?: string; // 与 fetch 共用一把；desktop 从模型配置注入，CLI 走 DEEPSEEK_API_KEY
   searxngBaseUrl?: string; // reserved, v1 not implemented
 }
 
@@ -17,6 +18,7 @@ export interface FetchConnectorConfig {
   provider: FetchProviderName;
   jinaApiKey?: string; // optional; Jina works keyless
   firecrawlApiKey?: string;
+  deepseekApiKey?: string; // 与 search 共用一把
   firecrawlBaseUrl?: string;
 }
 
@@ -30,8 +32,8 @@ export const DEFAULT_CONNECTORS_CONFIG: ConnectorsConfig = Object.freeze({
   fetch: { provider: 'basic' as FetchProviderName },
 }) as ConnectorsConfig;
 
-export const SEARCH_PROVIDER_NAMES: readonly SearchProviderName[] = ['duckduckgo', 'tavily', 'brave', 'firecrawl', 'searxng'];
-export const FETCH_PROVIDER_NAMES: readonly FetchProviderName[] = ['basic', 'jina', 'firecrawl'];
+export const SEARCH_PROVIDER_NAMES: readonly SearchProviderName[] = ['duckduckgo', 'tavily', 'brave', 'firecrawl', 'deepseek', 'searxng'];
+export const FETCH_PROVIDER_NAMES: readonly FetchProviderName[] = ['basic', 'jina', 'firecrawl', 'deepseek'];
 
 const NOT_IMPLEMENTED_SEARCH: ReadonlySet<SearchProviderName> = new Set(['searxng']);
 const NOT_IMPLEMENTED_FETCH: ReadonlySet<FetchProviderName> = new Set();
@@ -95,12 +97,14 @@ export function normalizeConnectorsConfig(input: unknown): ConnectorsConfig {
       tavilyApiKey: sanitizeApiKey(search.tavilyApiKey, 'tavily'),
       braveApiKey: sanitizeApiKey(search.braveApiKey, 'brave'),
       firecrawlApiKey: sanitizeApiKey(search.firecrawlApiKey, 'firecrawl'),
+      deepseekApiKey: sanitizeApiKey(search.deepseekApiKey, 'deepseek'),
       searxngBaseUrl: pickString(search.searxngBaseUrl),
     },
     fetch: {
       provider: fetchProvider,
       jinaApiKey: sanitizeApiKey(fetch.jinaApiKey, 'jina'),
       firecrawlApiKey: sanitizeApiKey(fetch.firecrawlApiKey, 'firecrawl'),
+      deepseekApiKey: sanitizeApiKey(fetch.deepseekApiKey, 'deepseek'),
       firecrawlBaseUrl: pickString(fetch.firecrawlBaseUrl),
     },
   };
@@ -139,6 +143,12 @@ export function resolveCliConnectorsConfig(
     normalized.search.firecrawlApiKey = firecrawlKey;
     normalized.fetch.firecrawlApiKey = firecrawlKey;
   }
+  // DeepSeek Search & Fetch 与模型共用同一把 API key（官方 /guides/search）。
+  const deepseekKey = sanitizeApiKey(env.DEEPSEEK_API_KEY, 'deepseek');
+  if (deepseekKey) {
+    normalized.search.deepseekApiKey = deepseekKey;
+    normalized.fetch.deepseekApiKey = deepseekKey;
+  }
 
   const envFetchProvider = pickString(env.XIAOK_FETCH_PROVIDER) as FetchProviderName | undefined;
   if (envFetchProvider && FETCH_PROVIDER_NAMES.includes(envFetchProvider)) {
@@ -176,10 +186,12 @@ export function evaluateProviderRuntimes(config: ConnectorsConfig): ProviderRunt
     searchRuntime('tavily', searchSelected, config),
     searchRuntime('brave', searchSelected, config),
     searchRuntime('firecrawl', searchSelected, config),
+    searchRuntime('deepseek', searchSelected, config),
     searchRuntime('searxng', searchSelected, config),
     fetchRuntime('basic', fetchSelected, config),
     fetchRuntime('jina', fetchSelected, config),
     fetchRuntime('firecrawl', fetchSelected, config),
+    fetchRuntime('deepseek', fetchSelected, config),
   ];
 }
 
@@ -204,6 +216,10 @@ function searchRuntime(
   if (name === 'brave' && !config.search.braveApiKey) {
     return { provider_name, runtime_state: 'missing_config', runtime_reason: 'missing_api_key' };
   }
+  // DeepSeek Search 复用 DeepSeek API key（desktop 由模型配置注入，CLI 用 DEEPSEEK_API_KEY）。
+  if (name === 'deepseek' && !config.search.deepseekApiKey) {
+    return { provider_name, runtime_state: 'missing_config', runtime_reason: 'missing_api_key' };
+  }
   return { provider_name, runtime_state: 'ready' };
 }
 
@@ -220,5 +236,8 @@ function fetchRuntime(
     return { provider_name, runtime_state: 'inactive' };
   }
   // jina works keyless, so it is always ready when selected
+  if (name === 'deepseek' && !config.fetch.deepseekApiKey) {
+    return { provider_name, runtime_state: 'missing_config', runtime_reason: 'missing_api_key' };
+  }
   return { provider_name, runtime_state: 'ready' };
 }

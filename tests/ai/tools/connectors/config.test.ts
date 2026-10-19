@@ -92,4 +92,39 @@ describe('connectors config', () => {
     expect(runtimes.find((r) => r.provider_name === 'web_fetch.jina')?.runtime_state).toBe('ready');
     expect(runtimes.find((r) => r.provider_name === 'web_search.duckduckgo')?.runtime_state).toBe('inactive');
   });
+
+  it('normalizes and sanitizes the shared deepseek key for both search and fetch', () => {
+    const cfg = normalizeConnectorsConfig({
+      search: { provider: 'deepseek', deepseekApiKey: ' deepseek sk-clean ' },
+      fetch: { provider: 'deepseek', deepseekApiKey: '"deepseek: sk-quoted"' },
+    });
+    expect(cfg.search.provider).toBe('deepseek');
+    expect(cfg.search.deepseekApiKey).toBe('sk-clean');
+    expect(cfg.fetch.deepseekApiKey).toBe('sk-quoted');
+  });
+
+  it('injects the DeepSeek key via DEEPSEEK_API_KEY env in CLI mode', () => {
+    const cfg = resolveCliConnectorsConfig(undefined, {
+      DEEPSEEK_API_KEY: 'deepseek sk-from-env',
+    } as NodeJS.ProcessEnv);
+    expect(cfg.search.deepseekApiKey).toBe('sk-from-env');
+    expect(cfg.fetch.deepseekApiKey).toBe('sk-from-env');
+  });
+
+  it('evaluateProviderRuntimes reports deepseek missing_config without a key and ready with one', () => {
+    const missing = cloneDefaultConnectorsConfig();
+    missing.search.provider = 'deepseek';
+    missing.fetch.provider = 'deepseek';
+    const missingRuntimes = evaluateProviderRuntimes(missing);
+    expect(missingRuntimes.find((r) => r.provider_name === 'web_search.deepseek')?.runtime_state).toBe('missing_config');
+    expect(missingRuntimes.find((r) => r.provider_name === 'web_fetch.deepseek')?.runtime_state).toBe('missing_config');
+    const ready = cloneDefaultConnectorsConfig();
+    ready.search.provider = 'deepseek';
+    ready.fetch.provider = 'deepseek';
+    ready.search.deepseekApiKey = 'sk-x';
+    ready.fetch.deepseekApiKey = 'sk-x';
+    const readyRuntimes = evaluateProviderRuntimes(ready);
+    expect(readyRuntimes.find((r) => r.provider_name === 'web_search.deepseek')?.runtime_state).toBe('ready');
+    expect(readyRuntimes.find((r) => r.provider_name === 'web_fetch.deepseek')?.runtime_state).toBe('ready');
+  });
 });

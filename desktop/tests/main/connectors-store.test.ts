@@ -47,6 +47,23 @@ describe('ConnectorsStore', () => {
     expect(reloaded.config.fetch.jinaApiKey).toBe('jina-key');
   });
 
+  it('round-trips deepseek selection but never persists the injected key', async () => {
+    await store.save({
+      search: { provider: 'deepseek', deepseekApiKey: 'sk-injected' },
+      fetch: { provider: 'deepseek' },
+    });
+
+    const persistedJson = JSON.parse(readFileSync(join(dataRoot, 'connectors.json'), 'utf-8'));
+    expect(persistedJson.search.provider).toBe('deepseek');
+    expect(persistedJson.search.deepseekApiKey).toBeUndefined();
+    expect(readFileSync(join(dataRoot, 'connectors.json'), 'utf-8')).not.toContain('sk-injected');
+
+    const reloaded = store.load();
+    expect(reloaded.config.search.provider).toBe('deepseek');
+    expect(reloaded.config.fetch.provider).toBe('deepseek');
+    expect(reloaded.config.search.deepseekApiKey).toBeUndefined();
+  });
+
   it('cleans pasted labels on load and persists only the pure key on save', async () => {
     const file = join(dataRoot, 'connectors.json');
     const legacy = JSON.stringify({ schemaVersion: 1,

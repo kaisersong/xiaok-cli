@@ -192,4 +192,53 @@ describe('DesktopSettings tools pane', () => {
     await screen.findByText(/123ms/);
   });
 
+  it('renders DeepSeek in both provider lists and reuses the model-config key (hint, no key input)', async () => {
+    mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());
+
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await screen.findByText('搜索 Provider');
+
+    // Both lists expose DeepSeek.
+    expect(screen.getAllByText('DeepSeek').length).toBeGreaterThanOrEqual(2);
+
+    // Selecting DeepSeek for search shows the model-config hint, not an ApiKeyInput.
+    fireEvent.click(screen.getByLabelText('search-deepseek'));
+    await screen.findByText(/复用模型配置中 DeepSeek 的 API Key|使用「模型配置」中 DeepSeek/);
+    expect(screen.queryByLabelText('deepseek-api-key')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('fetch-deepseek'));
+    const hints = await screen.findAllByText(/使用「模型配置」中 DeepSeek/);
+    expect(hints.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByLabelText('deepseek-api-key')).toBeNull();
+  });
+
+  it('saves a deepseek selection without any api key field', async () => {
+    mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());
+    mocks.saveConnectorsConfig.mockImplementation(async (input) => ({
+      config: input,
+      loadStatus: 'ok' as const,
+      providers: defaultSnapshot().providers,
+    }));
+
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await screen.findByText('搜索 Provider');
+
+    fireEvent.click(screen.getByLabelText('search-deepseek'));
+    fireEvent.click(screen.getByLabelText('fetch-deepseek'));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => {
+      const [input] = mocks.saveConnectorsConfig.mock.lastCall ?? [];
+      expect(input).toBeDefined();
+      expect((input as { search: { provider: string } }).search).toEqual({ provider: 'deepseek' });
+      expect((input as { fetch: { provider: string } }).fetch.provider).toBe('deepseek');
+    });
+
+    await screen.findByText('已保存');
+  });
+
 });
