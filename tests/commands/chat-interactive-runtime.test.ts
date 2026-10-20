@@ -1,7 +1,7 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
@@ -1164,6 +1164,56 @@ describe('chat interactive runtime', () => {
   let originalDisableGlobalPlugins: string | undefined;
   let cwdSpy: ReturnType<typeof vi.spyOn> | undefined;
 
+  // Diagnostic-only: keep the real fatal/report/exit path and original assertions.
+  // The producer report is already allowlist-only; never dump env or raw errors.
+  const diagnosticWrite = process.stderr.write.bind(process.stderr);
+  const diagnosticRoots = new Set<string>();
+  const diagnosticReports = new Set<string>();
+  const diagnosticReadFailures: unknown[] = [];
+  let diagnosticCase = 0;
+  const reportWorkerResources = (stage: string): void => {
+    const resourceTypes: Record<string, number> = {};
+    for (const type of process.getActiveResourcesInfo()) resourceTypes[type] = (resourceTypes[type] ?? 0) + 1;
+    diagnosticWrite(`[fixture-worker-resources] ${JSON.stringify({ stage, caseOrdinal: diagnosticCase,
+      knownFixtureRoots: diagnosticRoots.size, workerActiveResourcesOnly: resourceTypes,
+      liveDetachedProcessCount: 'UNKNOWN_NOT_MEASURED' })}\n`);
+  };
+  const retainOwnCrashReports = (): void => {
+    for (const root of tempDirs) diagnosticRoots.add(root);
+    // Retain previous roots too: a late pending command can recreate its old
+    // crash directory after that case's cleanup, under the next case's label.
+    for (const root of diagnosticRoots) {
+      const dir = join(root, 'config', 'crashes');
+      let entries: string[];
+      try { entries = readdirSync(dir); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const name of entries) {
+        if (!/^crash-[0-9TZ-]+\.json$/.test(name)) continue;
+        const path = join(dir, name);
+        if (diagnosticReports.has(path)) continue;
+        const stat = lstatSync(path);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) {
+          throw new Error('fixture_crash_report_not_bounded_regular_file');
+        }
+        const report = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+        diagnosticWrite(`[fixture-original-fatal] ${JSON.stringify({ fixture: basename(root), file: name,
+          time: report.time, node: report.node, platform: report.platform, arch: report.arch,
+          context: report.context, error: report.error })}\n`);
+        diagnosticReports.add(path);
+        reportWorkerResources('original-fatal-retained');
+      }
+    }
+  };
+
+
+  const observeOwnCrashReports = (): void => {
+    try { retainOwnCrashReports(); }
+    catch (error) { diagnosticReadFailures.push(error); }
+  };
+
   beforeEach(() => {
     resetAdapterState();
     watchdogEvents.length=0;
@@ -1176,9 +1226,19 @@ describe('chat interactive runtime', () => {
     tempDirs.push(isolatedHome);
     process.env.HOME = isolatedHome;
     process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = '1';
+    diagnosticCase += 1;
+    reportWorkerResources('before-case');
+  });
+
+  afterAll(() => {
+    observeOwnCrashReports();
+    if (diagnosticReadFailures.length) {
+      throw new AggregateError(diagnosticReadFailures, 'fixture_fatal_diagnostic_read_failed');
+    }
   });
 
   afterEach(async () => {
+    observeOwnCrashReports();
     cwdSpy?.mockRestore();
     cwdSpy = undefined;
     if (originalConfigDir === undefined) {
