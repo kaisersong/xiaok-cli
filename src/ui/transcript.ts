@@ -155,7 +155,7 @@ export class FileTranscriptLogger implements TranscriptLogger {
   }
 
   recordOutput(stream: 'stdout' | 'stderr', chunk: string): void {
-    if (!chunk) return;
+    if (this.closed || !chunk) return;
     if (this.suppressDepth > 0) return;
     this.record({
       type: 'output',

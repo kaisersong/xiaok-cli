@@ -75,7 +75,7 @@ import { FileTranscriptLogger } from '../ui/transcript.js';
 import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
 import { openTranscriptPager, spawnPagerProcess } from '../ui/transcript-pager.js';
 import { detectImageProtocol, readImageDimensions, renderInlineImageBlock, formatImageFallbackLine } from '../ui/image-renderer.js';
-import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
+import { handleFatalError, registerCrashOutputRestorer, setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
 import { createTerminalOutputRouter } from './terminal-output-router.js';
@@ -2303,6 +2303,17 @@ async function runChat(initialInput, opts) {
     inputReader.setTranscriptLogger(transcriptLogger);
     const originalStdoutWrite = process.stdout.write.bind(process.stdout);
     const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const restoreCapturedOutput = () => {
+        setStreamErrorHandler(null);
+        try {
+            process.stdout.write = originalStdoutWrite;
+        }
+        catch { }
+        try {
+            process.stderr.write = originalStderrWrite;
+        }
+        catch { }
+    };
     const isBrokenPipeError = (error) => (typeof error === 'object'
         && error !== null
         && 'code' in error
@@ -2336,6 +2347,7 @@ async function runChat(initialInput, opts) {
             return true;
         return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stderr', chunk, ...args);
     });
+    const unregisterCrashOutput = registerCrashOutputRestorer(restoreCapturedOutput);
     const releaseRawInputMode = retainRawInputModeForSession();
     let disposeInterruptHandlers = () => { };
     try {
@@ -2992,9 +3004,8 @@ async function runChat(initialInput, opts) {
                 log.warn('terminal shutdown cleanup failed', { error: String(error) });
             }
             finally {
-                setStreamErrorHandler(null);
-                process.stdout.write = originalStdoutWrite;
-                process.stderr.write = originalStderrWrite;
+                unregisterCrashOutput();
+                restoreCapturedOutput();
                 try {
                     await cleanupRuntimeResourcesWithTimeout();
                 }
@@ -3812,9 +3823,8 @@ async function runChat(initialInput, opts) {
         catch (e) {
             log.warn('scrollRegion.end failed in post-loop cleanup', e.message);
         }
-        setStreamErrorHandler(null);
-        process.stdout.write = originalStdoutWrite;
-        process.stderr.write = originalStderrWrite;
+        unregisterCrashOutput();
+        restoreCapturedOutput();
         stopIntentRuntimeSync();
         stopSkillEvalRuntimeSync();
         skillCatalogWatcher?.close();
@@ -3907,10 +3917,7 @@ export function registerChatCommands(program) {
                 writeError(error.code);
                 process.exit(1);
             }
-            const { reportCrash } = await import('../utils/crash-reporter.js');
-            const path = await reportCrash(error);
-            writeError(`运行中断，崩溃报告已保存: ${path}`);
-            process.exit(1);
+            await handleFatalError(error);
         }
     });
 }
