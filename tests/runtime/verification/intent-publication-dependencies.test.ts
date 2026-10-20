@@ -6,7 +6,7 @@ vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readI
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {join} from 'node:path';
 import {Session as InspectorSession} from 'node:inspector';
-import {writeFileSync} from 'node:fs';
+import {lstatSync,readdirSync,realpathSync,writeFileSync} from 'node:fs';
 import {verifiedOperationFixture} from '../../support/verified-operation-fixture.js';
 import {loopPublicationReceiver} from '../../support/loop-publication-receiver.js';
 import {intentApplicationCandidate} from '../../support/intent-application-fixture.js';
@@ -17,7 +17,20 @@ import {createApplicationBindingAuthority} from '../../../src/runtime/verificati
 import {applicationBindingReviewBytes} from '../../../src/runtime/verification/application-binding-review.js';
 import {canonicalVerificationJson as json,hashVerificationTuple} from '../../../src/runtime/verification/protocol.js';
 const hash=(v:string|Buffer)=>createHash('sha256').update(v).digest('hex'),signal=()=>new AbortController().signal;
+
+function diagnosticProfileWriter(directory:string|undefined){
+ const names=['solpi-intent-population.cpuprofile','solpi-intent-population-failure.cpuprofile'] as const;
+ if(directory===undefined)return (name:typeof names[number],data:string)=>writeFileSync('/tmp/'+name,data);
+ const identity=lstatSync(directory);
+ if(realpathSync(directory)!==directory||!identity.isDirectory()||identity.isSymbolicLink()||identity.uid!==process.getuid?.()||(identity.mode&0o777)!==0o700||readdirSync(directory).length!==0)throw Error('profile_output_directory_invalid');
+ return (name:typeof names[number],data:string)=>{
+  const current=lstatSync(directory);
+  if(!current.isDirectory()||current.isSymbolicLink()||current.dev!==identity.dev||current.ino!==identity.ino||current.uid!==identity.uid||(current.mode&0o777)!==0o700||realpathSync(directory)!==directory)throw Error('profile_output_directory_changed');
+  writeFileSync(join(directory,name),data,{flag:'wx',mode:0o600});
+ };
+}
 async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOperationFixture>[1]={},large=false){
+ const writeProfile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?diagnosticProfileWriter(process.env.SOLPI_INTENT_PROFILE_DIR):undefined;
  const f=await verifiedOperationFixture('dispatch',large?{...options,controllerMetadataMinimumBytes:96*1024**2}:options),raw=structuredClone(intentApplicationCandidate()),recipe={kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes' as const}]},definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe}]};
  raw.contract.verification=definition;for(const stage of raw.contract.stages)stage.verification=definition;
  if(large){const sample=structuredClone(raw.contract.stages[0]);raw.contract.stages=[];for(let i=0;;i++){const stage={...structuredClone(sample),stageId:`s${i}`,order:i,label:'stage',deliverable:'result',templateId:'template',dependsOnStageIds:[],steps:[{...sample.steps[0],stepId:`p${i}`,key:'main',order:0,skillName:null,dependsOn:[]}]};raw.contract.stages.push(stage);if(Buffer.byteLength(json(raw.contract))>61000){raw.contract.stages.pop();break;}}}
@@ -26,7 +39,7 @@ async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOp
  const receiver=await loopPublicationReceiver(f,{afterQuery}),bindings:any[]=[];
  const profile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?new InspectorSession():undefined;
  const post=(method:string)=>new Promise<any>((resolve,reject)=>profile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));
- if(profile){profile.connect();await post('Profiler.enable');await new Promise<void>((resolve,reject)=>profile.post('Profiler.setSamplingInterval',{interval:10000},error=>error?reject(error):resolve()));console.info('population-profile-sampling-interval-us 10000');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
+ if(profile){if(process.env.SOLPI_INTENT_PROFILE_DIR!==undefined)console.info('population-profile-output-mode owned-private');profile.connect();await post('Profiler.enable');await new Promise<void>((resolve,reject)=>profile.post('Profiler.setSamplingInterval',{interval:10000},error=>error?reject(error):resolve()));console.info('population-profile-sampling-interval-us 10000');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
  const started=Date.now();
  try{
   for(let i=0;i<contract.stages.length;i++){
@@ -40,9 +53,9 @@ async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOp
    phase('verification-prepare');const operation=await f.operations.prepare({mountPlanHandle:staged.mountPlanHandle,obligationId:'original',expectedAttemptEpoch:0,requestSource:'agent'},f.peer,signal());phase('verification-dispatch');await f.operations.dispatch({operationHandle:operation.operationHandle},f.peer,signal());
    phase('publication');const pub=receiver.publication.prepare({...intentHostSubjectOwner(subject),requestSource:'user'},f.peer);await receiver.publication.approve({challengeId:pub.challengeId},f.peer,signal());
    if(large&&!profile){console.info('population-actual-publication '+(i+1)+'/'+contract.stages.length+' elapsedMs='+(Date.now()-started));await new Promise<void>(resolve=>setImmediate(resolve));}
-   if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population.cpuprofile',JSON.stringify(result.profile));profile.disconnect();throw Error('explicit_profile_stopped_after_three_actual_publications');}}
+   if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');writeProfile!('solpi-intent-population.cpuprofile',JSON.stringify(result.profile));profile.disconnect();throw Error('explicit_profile_stopped_after_three_actual_publications');}}
   }
- }catch(error){if(profile){try{const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));profile.disconnect();}catch{/* Preserve the original entry failure if the profiler was already stopped. */}}await receiver.close();await f.close();throw error;}
+ }catch(error){if(profile){try{const result=await post('Profiler.stop');writeProfile!('solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));profile.disconnect();}catch{/* Preserve the original entry failure if the profiler was already stopped. */}}await receiver.close();await f.close();throw error;}
  return {f,receiver,subjects,owners,bindings,contract,async close(){await receiver.close();await f.close();}};
 }
 it('actual original Intent dependency observation derives empty first-stage and whole parent inventory from native receipts',async()=>{

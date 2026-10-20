@@ -112,6 +112,7 @@ def validate(raw,report_bytes,profile_bytes,process,repo):
                 hotspots.append({'function':name,'source':relative.as_posix(),'line0':frame.get('lineNumber'),'selfSamples':hits[node['id']]})
         if not hotspots:problems.append('no_sampled_runtime_source_function')
     except (ValueError,TypeError,KeyError,IndexError):problems.append('invalid_cpu_profile_json')
+    if process.get('profileDirectoryMode')!='owned-private' or process.get('profileDirectoryVerified')is not True or process.get('profileOutputModeObserved')is not True:problems.append('profile_output_mode_not_observed')
     if process.get('samplingIntervalUsRequested')!=10000 or process.get('samplingIntervalObserved')is not True:problems.append('sampling_interval_not_observed')
     if process.get('rawVitestExit')!=1:problems.append('unexpected_raw_exit')
     if not all(process.get(k) is True for k in ['actualWait','leaderReaped','stdioClosed','groupGone','originalProfileAbsentBefore','profileOwnedAndStable','criticalSourcePinsMatch','trackedInputsUnchanged']):problems.append('physical_or_input_qualification_missing')

@@ -48,4 +48,52 @@ class CaptureFileControls(unittest.TestCase):
  def test_caps_unchanged_and_no_wrong_limit(self):
   self.assertEqual(m.CAPTURE_LIMITS,{'profile':128*1024**2,'raw':8*1024**2,'report':4*1024**2});self.assertEqual(m.DIAGNOSTIC_WALL_SECONDS,38*60)
   self.assertRaises(m.CaptureRejected,m.read_regular,self.root/'absent',m.RAW_LIMIT+1,'raw',[])
+
+class R4ControlEvidence(unittest.TestCase):
+ def setUp(self):
+  self.temp=tempfile.TemporaryDirectory(prefix='signed99-r4-');self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve()
+ def catalog(self):
+  return {'tests/runtime/verification/intent-publication-dependencies.test.ts':{'absolute':str(self.root/'tests/runtime/verification/intent-publication-dependencies.test.ts'),'lineCount':30,'sha256':'0'*64}}
+ def report(self,error='UNKNOWN_SECRET'):
+  catalog=self.catalog();file=next(iter(catalog));title=m.TITLE;oracle=((file,title,1),);rows=[{'fullName':title,'status':'failed','failureMessages':['Error: '+error+'\n at SECRET_FUNCTION ('+catalog[file]['absolute']+':7:3)\n at SECRET_FUNCTION (/foreign/SECRET:3:2)\n at SECRET_FUNCTION ('+catalog[file]['absolute']+':999:1)']}]
+  return json.dumps({'numTotalTests':1,'numPendingTests':0,'numFailedTests':1,'numPassedTests':0,'numTodoTests':0,'testResults':[{'name':catalog[file]['absolute'],'assertionResults':rows}]}).encode(),catalog,oracle
+ def test_fixed_producer_codes_never_generic_and_arbitrary_errors_never_echo(self):
+  for code in m.PRODUCER_REASONS:self.assertEqual(m.producer_reason(m.ProducerRejected(code)),code)
+  self.assertEqual(m.producer_reason(RuntimeError('SECRET_PATH_OR_TOKEN')),'producer_exception')
+ def test_owned_private_directory_empty_identity_and_profile_inventory(self):
+  p=self.root/'owned';p.mkdir(mode=0o700);identity=m.private_directory(p,empty=True);before=m.profile_inventory(p,'before');self.assertEqual(len(before),3);self.assertTrue(all(v['exists']is False for v in before));(p/m.PROFILE_NAMES[1]).write_bytes(b'NOT_READ')
+  with patch.object(Path,'read_bytes',side_effect=AssertionError('inventory read content')):after=m.profile_inventory(p,'after')
+  self.assertTrue(after[1]['exists']);self.assertEqual(after[1]['size'],8);self.assertEqual(m.private_directory(p,identity).st_ino,identity.st_ino);self.assertRaises(m.ProducerRejected,m.private_directory,p,None,True)
+ def test_directory_symlink_rejected_without_read(self):
+  p=self.root/'owned';p.mkdir(mode=0o700);link=self.root/'link';link.symlink_to(p);self.assertRaises(m.ProducerRejected,m.private_directory,link)
+ def test_report_unknown_private_message_and_foreign_out_of_range_stack_never_upload(self):
+  report,catalog,oracle=self.report();v=m.case_observation(None,report,catalog,frozenset({'explicit_profile_stopped_after_three_actual_publications'}),oracle,m.TITLE);wire=json.dumps(v);self.assertEqual(v['selectedFailureCategory'],'unknown');self.assertEqual(v['stackLocations'],[{'path':next(iter(catalog)),'line':7}]);self.assertNotIn('UNKNOWN_SECRET',wire);self.assertNotIn('SECRET_FUNCTION',wire);self.assertNotIn('/foreign',wire);self.assertEqual(v['assertionCount'],1)
+ def test_literal_error_and_three_location_limit(self):
+  report,catalog,oracle=self.report('explicit_profile_stopped_after_three_actual_publications');v=m.case_observation(None,report,catalog,m.CASE_ERROR_LITERALS,oracle,m.TITLE);self.assertEqual(v['selectedFailureCategory'],'explicit_profile_stopped_after_three_actual_publications');self.assertLessEqual(len(v['stackLocations']),3)
+ def test_independent_raw_report_capture_not_profile_requirement(self):
+  report,catalog,oracle=self.report();raw=b'population-publication-ms 0 1\npopulation-publication-ms 1 2\npopulation-publication-ms 2 3\n';v=m.case_observation(raw,report,catalog,frozenset(),oracle,m.TITLE);self.assertTrue(v['rawThreePublications']);self.assertTrue(v['reportAvailable']);self.assertTrue(v['rawAvailable'])
+ def test_metadata_rejects_forged_location_or_unknown_extra_key(self):
+  report,catalog,oracle=self.report();v=m.case_observation(None,report,catalog,frozenset(),oracle,m.TITLE);proc={'caseObservation':v};a,b=m.control_metadata(proc,{},catalog);self.assertTrue(m.validate_control_metadata(a,b,catalog));a['caseObservation']['stackLocations'][0]['line']=31;self.assertRaises(ValueError,m.validate_control_metadata,a,b,catalog)
+ def test_source_catalog_before_hash_and_unknown_source_cannot_enter(self):
+  p=self.root/'test.ts';p.write_text("throw Error('verification_capacity_exhausted');\n");before={'test.ts':m.sha(p.read_bytes())};catalog,literals=m.source_catalog(self.root,before);self.assertEqual(catalog['test.ts']['lineCount'],2);self.assertIn('verification_capacity_exhausted',literals);p.write_text('changed');self.assertRaises(m.ProducerRejected,m.source_catalog,self.root,before)
+
+
+class R4FinalDirectoryQualification(unittest.TestCase):
+ def qualified(self):
+  proc={k:True for k in ['actualWait','leaderReaped','stdioClosed','groupGone','profileDirectoryVerified']};proc.update(profileInventory=[],auxCaptureProblems=[])
+  validation={'diagnosticQualified':True,'artifactPrivacySafe':True,'problems':[],'signed99WholePass':False}
+  return proc,validation
+ def test_real_final_recheck_failure_revokes_upload_and_exit(self):
+  proc,validation=self.qualified();self.assertEqual(m.qualification_outcome(validation,proc),(True,0));identity=object();directory=Path('/never-opened')
+  with patch.object(m,'private_directory',side_effect=m.ProducerRejected('profile_directory_changed')) as check,patch.object(m,'profile_inventory',side_effect=AssertionError('must not inspect rejected directory')) as inventory:
+   revoked=m.final_profile_directory_recheck(directory,identity,proc,validation)
+  check.assert_called_once_with(directory,identity);inventory.assert_not_called();self.assertFalse(revoked['diagnosticQualified']);self.assertFalse(revoked['artifactPrivacySafe']);self.assertFalse(proc['profileDirectoryVerified']);self.assertIn('profile_directory_changed',revoked['problems']);self.assertIn('profile_directory_changed',proc['auxCaptureProblems']);self.assertEqual(m.qualification_outcome(revoked,proc),(False,2));self.assertTrue(validation['diagnosticQualified'])
+ def test_unknown_final_exception_is_fixed_and_fail_closed(self):
+  proc,validation=self.qualified()
+  with patch.object(m,'private_directory',side_effect=RuntimeError('SECRET_PATH_OR_TOKEN')):
+   revoked=m.final_profile_directory_recheck(Path('/never-opened'),object(),proc,validation)
+  self.assertEqual(m.qualification_outcome(revoked,proc),(False,2));self.assertEqual(revoked['problems'],['producer_exception']);self.assertNotIn('SECRET_PATH_OR_TOKEN',json.dumps([revoked,proc]))
+ def test_pure_revocation_preserves_prior_rejection(self):
+  original={'diagnosticQualified':False,'artifactPrivacySafe':False,'problems':['unexpected_secondary_profile']};revoked=m.invalidate_qualification(original,'profile_directory_changed');self.assertEqual(original['problems'],['unexpected_secondary_profile']);self.assertEqual(revoked['problems'],['unexpected_secondary_profile','profile_directory_changed']);self.assertFalse(revoked['diagnosticQualified']);self.assertFalse(revoked['artifactPrivacySafe'])
+
 if __name__=='__main__':unittest.main()
