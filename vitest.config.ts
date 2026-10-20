@@ -10,5 +10,8 @@ export default defineConfig({
     pool: 'forks',
     setupFiles: ['./tests/support/profile-account.setup.mjs', './tests/support/setup-host-env.ts'],
     sequence: { setupFiles: 'list' },
+    // Owner-approved B1 (2026-10-19): budget for full verification fixtures.
+    // Runner deadline only; logical clocks, case populations and assertions stay unchanged.
+    testTimeout: 12000,
   },
 });
