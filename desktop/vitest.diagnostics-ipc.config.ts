@@ -10,7 +10,10 @@ export default defineConfig({
     fileParallelism: false,
     maxWorkers: 1,
     globalSetup: [resolve(__dirname, '../tests/support/profile-account.global.mjs')],
-    setupFiles: [resolve(__dirname, 'tests/profile-account.setup.mjs')],
+    setupFiles: [
+      resolve(__dirname, 'tests/profile-account.setup.mjs'),
+      resolve(__dirname, 'tests/setup-host-env.ts'),
+    ],
     server: { deps: { inline: ['electron'] } },
   },
 });
