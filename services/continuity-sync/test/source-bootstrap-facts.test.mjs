@@ -1,6 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import path from 'node:path';
-import {test} from 'node:test';
+import nodeTest from 'node:test';
+const test=(name,fn)=>nodeTest(name,{skip:process.platform==='win32'},fn);
 import assert from 'node:assert/strict';
 import {sourceOwnerFixture} from './helpers/source-owner-fixture.mjs';
 import * as original from '../src/device-owner.mjs';

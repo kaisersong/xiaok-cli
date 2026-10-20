@@ -92,7 +92,11 @@ export function registerIpcHandler<I, O>(opts: {
       throw new Error('ipc_output_fence_invalid');
     }
     return result;
-  },opts.assertOutputCurrent ? (result,event)=>opts.assertOutputCurrent!(result as O,event) : undefined);
+  },
+    ...(opts.assertOutputCurrent
+      ? [(result: unknown, event: IpcMainInvokeEvent) =>
+          opts.assertOutputCurrent!(result as O, event) as void]
+      : []));
   owned.set(opts.channel, entry);
   registrations.set(registrar, owned);
   IPC_SCHEMA_REGISTRY.set(opts.channel, entry);

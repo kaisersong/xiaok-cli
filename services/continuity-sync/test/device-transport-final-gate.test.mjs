@@ -1,4 +1,5 @@
-import {test} from 'node:test';
+import nodeTest from 'node:test';
+const test=(name,fn)=>nodeTest(name,{skip:process.platform==='win32'},fn);
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import https from 'node:https';
