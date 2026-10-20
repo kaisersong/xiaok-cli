@@ -1,4 +1,5 @@
 import { registerMemoryDistillationIpc } from '../../electron/memory-distillation.js';
+import { registerHarnessOptimizationIpc } from '../../electron/harness-optimization-ipc.js';
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
@@ -253,6 +254,11 @@ describe('preload API contract', () => {
       'downloadEmbeddingModel',
       'setEmbeddingModel',
       'getConnectorsConfig',
+      'getHarnessOptimizationConfig',
+      'saveHarnessOptimizationConfig',
+      'setHarnessOptimizationEnabled',
+      'revokeHarnessOptimizationGrants',
+      'resetOptimizationClockGuard',
       'saveConnectorsConfig',
       'listConnectorRuntimes',
       'testConnectorProvider',
@@ -990,6 +996,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
   registerMemoryDistillationIpc({ handle: channel => { channels.add(channel); } }, {}, () => false);
+  registerHarnessOptimizationIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => null);
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
