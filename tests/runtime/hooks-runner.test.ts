@@ -329,8 +329,9 @@ describe('Windows owned hook tree and pipe drain', () => {
     const f = start(), failure = Error('hook timeout after 50ms');
     await vi.advanceTimersByTimeAsync(50);
     f.killer.emit('error', failure);f.killer.emit('close', 0, null);f.child.emit('close', 1, null);
-    expect(await f.running).toMatchObject({ ok: false });
+    expect(await f.running).toEqual({ ok: false, message: 'AggregateError: hook_transport_failed; hook timeout after 50ms' });
     const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+    expect(error.errors[0].message).toBe('hook_transport_failed');
     expect(error.errors[0].errors).toContain(failure);
     expect(error.errors[0].errors).toHaveLength(2);
   });
@@ -376,16 +377,42 @@ describe('Windows owned hook tree and pipe drain', () => {
     try {
       const f = start();await vi.advanceTimersByTimeAsync(0);f.child.pid = 54321;
       await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
-      expect(await f.running).toMatchObject({ ok: false });
+      expect(await f.running).toEqual({ ok: false, message: probe === 'ESRCH'
+        ? 'Error: hook timeout after 50ms'
+        : 'AggregateError: hook_transport_failed; hook timeout after 50ms' });
       expect(kill).toHaveBeenCalledWith(-43210, 'SIGTERM');expect(kill).toHaveBeenCalledWith(-43210, 0);
       if (probe === 'ESRCH') await expect(f.runner.closeAndDrain()).resolves.toBeUndefined();
       else {
         const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
         expect(error).toBeInstanceOf(AggregateError);
+        expect(error.errors[0].message).toBe('hook_transport_failed');
         if (probe === 'EPERM') expect(error.errors[0].errors).toContain(failure);
         else expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_unconfirmed');
       }
     } finally { kill.mockRestore(); }
+  });
+
+  it.each(['command', 'prompt'] as const)('does not transfer timeout diagnostics with a reused aggregate to another %s producer', async producer => {
+    const first = start(), failure = Error('original_helper_failure');
+    await vi.advanceTimersByTimeAsync(50);
+    first.killer.emit('error', failure);first.killer.emit('close', 0, null);first.child.emit('close', 1, null);
+    expect(await first.running).toEqual({ ok: false, message: 'AggregateError: hook_transport_failed; hook timeout after 50ms' });
+    const closing = await first.runner.closeAndDrain().then(() => undefined, value => value);
+    const aggregate = closing.errors[0];
+    expect(aggregate).toBeInstanceOf(AggregateError);expect(aggregate.errors).toContain(failure);
+    if (producer === 'command') {
+      const second = start();await vi.advanceTimersByTimeAsync(0);
+      second.child.emit('error', aggregate);second.child.emit('close', 1, null);
+      expect(await second.running).toEqual({ ok: false, message: 'AggregateError: hook_transport_failed' });
+      const error = await second.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors).toEqual([aggregate]);expect(error.errors[0]).toBe(aggregate);
+    } else {
+      const runner = createHooksRunner({ hooks: [{ type: 'prompt', events: ['SessionStart'], prompt: '$ARGUMENTS' }],
+        promptExecutor: async () => { throw aggregate; } });
+      expect((await runner.runHooks('SessionStart', {})).message).toBe('AggregateError: hook_transport_failed');
+      const error = await runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors).toEqual([aggregate]);expect(error.errors[0]).toBe(aggregate);
+    }
   });
 });
 

@@ -381,7 +381,11 @@ function interpretExitCode(
 // Executors
 // ---------------------------------------------------------------------------
 
-type CommandClosureRecord = { timeoutError: Error; joinedTimeout: boolean };
+type CommandClosureRecord = {
+  timeoutError: Error;
+  joinedTimeout: boolean;
+  timeoutRejection?: { rejection: unknown; text: string };
+};
 const commandClosureFacts = new WeakMap<Promise<unknown>, CommandClosureRecord>();
 
 function executeCommand(
@@ -391,7 +395,8 @@ function executeCommand(
   signal: AbortSignal,
   extraEnv?: Record<string, string>,
 ): Promise<CommandResult> {
-  const closure = { timeoutError: new Error(`hook timeout after ${timeoutMs}ms`), joinedTimeout: false };
+  const timeoutText = `hook timeout after ${timeoutMs}ms`;
+  const closure: CommandClosureRecord = { timeoutError: new Error(timeoutText), joinedTimeout: false };
   let resolve!: (result: CommandResult) => void, reject!: (error: unknown) => void;
   const raw = new Promise<CommandResult>((yes, no) => { resolve = yes; reject = no; });
   commandClosureFacts.set(raw, closure);
@@ -422,7 +427,11 @@ function executeCommand(
       if (unknown.length === 1 && unknown[0] === closure.timeoutError && (windows ? treeSucceeded : groupGone)) {
         closure.joinedTimeout = true;
       }
-      if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
+      if (unknown.length) {
+        const rejection = unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed');
+        if (unknown.includes(closure.timeoutError)) closure.timeoutRejection = { rejection, text: timeoutText };
+        reject(rejection);
+      }
       else if (errors.size) reject(signal.reason);
       else resolve({ exitCode: closed.code ?? 1, stdout, stderr });
     };
@@ -655,6 +664,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
         continue;
       }
 
+      let commandRaw: Promise<CommandResult> | undefined;
       try {
         let result: CommandResult;
         const hookType = hook.type ?? 'command';
@@ -664,7 +674,8 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
         } else if (hookType === 'prompt') {
           result = await ownRaw(executePrompt(hook as PromptHookConfig, payloadJson, config.promptExecutor)).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }));
         } else {
-          result = await ownRaw(executeCommand(hook as CommandHookConfig, timeout, payloadJson, signal, extraEnv));
+          commandRaw = executeCommand(hook as CommandHookConfig, timeout, payloadJson, signal, extraEnv);
+          result = await ownRaw(commandRaw);
         }
 
         const interpreted = interpretExitCode(result, eventName, hook);
@@ -692,16 +703,21 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
         if (interpreted.decision) merged.decision = interpreted.decision;
         if (interpreted.message) merged.message = interpreted.message;
       } catch (error) {
+        const commandRecord = commandRaw ? commandClosureFacts.get(commandRaw) : undefined;
+        const timeoutRejection = commandRecord?.timeoutRejection;
+        const message = commandRecord && timeoutRejection && timeoutRejection.rejection === error && error !== commandRecord.timeoutError
+          ? `${String(error)}; ${timeoutRejection.text}`
+          : String(error);
         if (eventName === 'PermissionRequest') {
           // A failed approval bridge has no decision. The registry must still
           // ask locally; keep running later hooks so an explicit deny wins.
           permissionHookFailed = true;
         } else if (BLOCKING_EVENTS.has(eventName)) {
-          return { ok: false, message: String(error) };
+          return { ok: false, message };
         }
         merged.message = merged.message
-          ? `${merged.message}\n${String(error)}`
-          : String(error);
+          ? `${merged.message}\n${message}`
+          : message;
       }
     }
 

@@ -11,7 +11,7 @@ import { applySandboxToTools } from '../../../src/platform/sandbox/tool-wrappers
 import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { PlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import type { ModelAdapter, Tool, ToolDefinition } from '../../../src/types.js';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBackgroundRunner } from '../../../src/platform/agents/background-runner.js';
@@ -587,6 +587,7 @@ it('routes reminder delivery through the frontend sink instead of raw stdout', a
 
 
 it.each([false, true])('CLI waits for the original factory physical writer before closing the actual compound coordinator (late rejection=%s)', async rejected => {
+  if (process.platform === 'win32') return verifyWindowsFactoryPhysicalBarrier(rejected);
   const rootDir=mkdtempSync(join(tmpdir(),'cli-registry-order-'));
   let releaseBackground!:()=>void,enteredBackground!:()=>void,enteredRead!:()=>void;
   const backgroundGate=new Promise<void>(r=>releaseBackground=r),backgroundEntered=new Promise<void>(r=>enteredBackground=r),readEntered=new Promise<void>(r=>enteredRead=r);
@@ -626,3 +627,99 @@ it.each([false, true])('CLI waits for the original factory physical writer befor
     await compound.dispose().catch(()=>{});await work.catch(()=>{});registry.dispose();authority.dispose();rmSync(rootDir,{recursive:true,force:true});
   }
 },20000);
+
+
+/** Windows proves unsupported admission and the same physical factory barrier;
+ * it does not claim that directory durability or an admitted native read exists. */
+async function verifyWindowsFactoryPhysicalBarrier(rejected: boolean): Promise<void> {
+  const rootDir=realpathSync(mkdtempSync(join(tmpdir(),'cli-registry-win-order-'))),sessionId='root';
+  let releaseBackground:()=>void=()=>{},enteredBackground:()=>void=()=>{};
+  const backgroundGate=new Promise<void>(resolve=>{releaseBackground=resolve;}),backgroundEntered=new Promise<void>(resolve=>{enteredBackground=resolve;});
+  const failure=Error('original background write rejected after shutdown');
+  const runner=createBackgroundRunner({rootDir:join(rootDir,'jobs'),shutdownTimeoutMs:5,notify:()=>{},execute:async()=>{
+    enteredBackground();await backgroundGate;if(rejected)throw failure;return {ok:true};
+  }});
+  const platform=makeMockPlatform();platform.createBackgroundRunner=()=>runner;
+  const factory=createPlatformRegistryFactory({platform,source:'chat',sessionId,adapter:()=>({} as ModelAdapter),buildSystemPrompt:async()=>''});
+  let authority:ReturnType<typeof createSessionExecutionAuthority>|undefined;
+  let compound:ReturnType<typeof createCompoundExecutionCoordinator>|undefined;
+  let registry:ToolRegistry|undefined,work:Promise<string>|undefined;
+  const expectedFailures=new Set<unknown>();
+  let restoreRead:(()=>void)|undefined;
+  const outcome=async<T>(promise:Promise<T>)=>promise.then(value=>({ok:true as const,value}), (error:unknown)=>({ok:false as const,error}));
+  try {
+    const store=new FileSessionStore(join(rootDir,'sessions'));
+    await store.save({sessionId,cwd:rootDir,createdAt:1,updatedAt:1,lineage:[],messages:[],usage:{inputTokens:0,outputTokens:0},compactions:[],memoryRefs:[],approvalRefs:[],backgroundJobRefs:[]});
+    authority=createSessionExecutionAuthority({root:join(rootDir,'sessions'),sessionIdentity:sessionId,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'owner',scopeId:'cli-test'})});
+    const journal=createCompoundSessionJournal({store,root:join(rootDir,'sessions'),sessionIdentity:sessionId,ownerId:'owner',scopeId:'cli-test',requestSource:'agent',assertCurrent:()=>{}});
+    const file=join(rootDir,'source');writeFileSync(file,'original bytes');
+    const read=createReadTool({cwd:rootDir}),readObserved=vi.spyOn(read,'execute');
+    restoreRead=()=>readObserved.mockRestore();
+    const coordinator=createCompoundExecutionCoordinator({journal,authority,sessionIdentity:sessionId,assertCurrent:()=>{},getPermissionRevision:()=>0,readonlyTools:[read],fileTools:[]});
+    compound=coordinator;
+    const actual=await vi.importActual<typeof import('../../../src/ai/tools/index.js')>('../../../src/ai/tools/index.js');
+    registry=new actual.ToolRegistry({permissionManager:new PermissionManager({mode:'auto'}),compoundExecution:coordinator},[read]);
+    const session=await store.load(sessionId);if(!session)throw Error('original Windows session missing');
+    const context={taskId:'task',session,messages:[],systemPrompt:'',toolDefinitions:[],hostProviderInvocationId:'provider',toolInvocationId:'original'};
+    work=registry.executeTool('read',{file_path:file},context);
+    const admission=await outcome(work);
+    expect(admission.ok).toBe(false);if(admission.ok)throw Error('Windows durability unexpectedly admitted the read');
+    expect(admission.error).toBeInstanceOf(Error);
+    expect(admission.error).toHaveProperty('message','directory sync durability unsupported on Windows');
+    expectedFailures.add(admission.error);
+    expect(readObserved).not.toHaveBeenCalled();
+
+    await runner.start({sessionId,source:'chat',input:'hold original background writer'});await backgroundEntered;
+    await factory.dispose();
+    const backgroundPhysical=runner.waitForDisposedResources(),factoryPhysical=factory.waitForDisposedResources();
+    let factorySettled=false,drainSettled=false;
+    void factoryPhysical.then(()=>{factorySettled=true;},()=>{factorySettled=true;});
+    // The actual coordinator is frozen. Observe only this CLI call edge; never
+    // replace its method, suppress errors, insert a gate, or fabricate its Promise.
+    const originalDispose=coordinator.dispose,statesAtDispose:boolean[]=[];
+    const disposeObserved=vi.fn(()=>{
+      statesAtDispose.push(factorySettled);
+      return originalDispose.call(coordinator);
+    });
+    const drain=drainCliRegistryWriters(factory,{...coordinator,dispose:disposeObserved});
+    void drain.then(()=>{drainSettled=true;},()=>{drainSettled=true;});
+    await new Promise(setImmediate);
+    expect(factorySettled).toBe(false);expect(drainSettled).toBe(false);
+    expect(disposeObserved).not.toHaveBeenCalled();expect(readObserved).not.toHaveBeenCalled();
+    releaseBackground();
+    const [backgroundResult,factoryResult,drainResult]=await Promise.all([outcome(backgroundPhysical),outcome(factoryPhysical),outcome(drain)]);
+    if(rejected){
+      expect(backgroundResult.ok).toBe(false);if(backgroundResult.ok)throw Error('late original background rejection missing');
+      expect(backgroundResult.error).toBeInstanceOf(AggregateError);if(!(backgroundResult.error instanceof AggregateError))throw backgroundResult.error;
+      expect(backgroundResult.error.errors).toHaveLength(1);expect(backgroundResult.error.errors[0]).toBe(failure);expectedFailures.add(backgroundResult.error);
+      expect(factoryResult.ok).toBe(false);if(factoryResult.ok)throw Error('original factory rejection missing');
+      expect(factoryResult.error).toBeInstanceOf(AggregateError);if(!(factoryResult.error instanceof AggregateError))throw factoryResult.error;
+      expect(factoryResult.error.errors).toHaveLength(1);expect(factoryResult.error.errors[0]).toBe(backgroundResult.error);expectedFailures.add(factoryResult.error);
+      expect(drainResult.ok).toBe(false);if(drainResult.ok)throw Error('original CLI physical rejection missing');
+      expect(drainResult.error).toBeInstanceOf(AggregateError);if(!(drainResult.error instanceof AggregateError))throw drainResult.error;
+      expect(drainResult.error.errors).toHaveLength(1);expect(drainResult.error.errors[0]).toBe(factoryResult.error);
+    }else{
+      expect(backgroundResult.ok).toBe(true);expect(factoryResult.ok).toBe(true);expect(drainResult.ok).toBe(true);
+    }
+    expect(disposeObserved).toHaveBeenCalledTimes(1);expect(statesAtDispose).toEqual([true]);
+    const disposal=disposeObserved.mock.results[0];if(!disposal||disposal.type!=='return')throw Error('actual compound dispose did not return');
+    await expect(disposal.value).resolves.toBeUndefined();
+    await expect(registry.executeTool('read',{file_path:file},{...context,toolInvocationId:'after-actual-dispose'})).rejects.toHaveProperty('message','compound_owner_disposed');
+    expect(readObserved).not.toHaveBeenCalled();
+  }finally{
+    releaseBackground();
+    // Join every original resource, allowing only exact already-asserted errors.
+    // Any new cleanup failure fails this case and retains its own evidence root.
+    const results:PromiseSettledResult<unknown>[]=await Promise.allSettled([factory.dispose()]);
+    results.push(...await Promise.allSettled([
+      runner.waitForDisposedResources(),factory.waitForDisposedResources(),
+      Promise.resolve().then(()=>compound?.dispose()),Promise.resolve().then(()=>work),
+    ]));
+    results.push(...await Promise.allSettled([
+      Promise.resolve().then(()=>registry?.dispose()),Promise.resolve().then(()=>authority?.dispose()),Promise.resolve().then(()=>restoreRead?.()),
+    ]));
+    const unknown=results.flatMap(result=>result.status==='rejected'&&!expectedFailures.has(result.reason)?[result.reason]:[]);
+    if(unknown.length)throw new AggregateError(unknown,'Windows factory fixture cleanup unconfirmed');
+    rmSync(rootDir,{recursive:true,force:true});
+  }
+}
