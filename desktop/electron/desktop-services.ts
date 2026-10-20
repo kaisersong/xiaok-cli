@@ -11,7 +11,7 @@ import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.
 import type { DesktopSkillStats } from '../shared/desktop-diagnostics-ipc-contract.js';
 import { captureModelProviderInput } from './model-provider-typed-ipc.js';
 import { MODEL_PROVIDER_ID_SCHEMA, SAVE_MODEL_CONFIG_SCHEMA, UPDATE_MODEL_RUNTIME_SCHEMA, SYSTEM_ONE_PATCH_SCHEMA, MANAGED_AGENT_INPUT_SCHEMA, PROVIDER_CONNECTION_INPUT_SCHEMA } from '../shared/model-provider-ipc-contract.js';
-import {createNativeWorkflowRestrictionCheckpoint,bindNativeWorkflowRestrictionCheckpoint,assertNativeRegistryCheckpointCurrent,type NativeWorkflowRestrictionCheckpoint} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
+import {createNativeWorkflowRestrictionCheckpoint,bindNativeWorkflowRestrictionCheckpoint,assertNativeRegistryCheckpointCurrent,createNativeWorkflowArtifactRegistry,isNativeWorkflowArtifactCheckpoint,type NativeWorkflowRestrictionCheckpoint} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
 import { getBuiltinToolIdentity } from '../../src/ai/tools/native-tool-identity.js';
 import type { ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
 import { createDesktopMemoryLlm, getActiveMemoryEmbeddingModel } from './memory-distillation.js';
@@ -2152,15 +2152,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   type KSwarmScopedTaskOptions = { workflowRestrictionCheckpoint?: NativeWorkflowRestrictionCheckpoint; nativeReadonlyOnly?: boolean; readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; signal?: AbortSignal; onStarted?: () => void | Promise<void> };
+  const workflowArtifactRegistries = new WeakMap<InProcessTaskRuntimeHost, ToolRegistry>();
   const createKSwarmTaskHost = async (workspaceRoot: string, participantId?: string, taskOptions: KSwarmScopedTaskOptions = {}) => {
     taskSourcePopulation.assertAccepting();
     const execution = { clock: undefined as KSwarmExecutionClock | undefined };
+    const artifactScope = taskOptions.workflowRestrictionCheckpoint && isNativeWorkflowArtifactCheckpoint(taskOptions.workflowRestrictionCheckpoint)
+      ? await createNativeWorkflowArtifactRegistry(taskOptions.workflowRestrictionCheckpoint) : undefined;
     const scopedDescriptions = new Map<Tool, ToolDescriptionMetadata>();
-    const builtScopedTools = buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions);
+    const builtScopedTools = artifactScope?.tools ?? buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions);
     const scopedTools = taskOptions.nativeReadonlyOnly
       ? builtScopedTools.filter(tool => getBuiltinToolIdentity(tool) === 'readonly') : builtScopedTools;
-    const scopedRegistry = new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
-    if(taskOptions.workflowRestrictionCheckpoint)bindNativeWorkflowRestrictionCheckpoint(scopedRegistry,taskOptions.workflowRestrictionCheckpoint);
+    const scopedRegistry = artifactScope?.registry ?? new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
+    if(taskOptions.workflowRestrictionCheckpoint&&!artifactScope)bindNativeWorkflowRestrictionCheckpoint(scopedRegistry,taskOptions.workflowRestrictionCheckpoint);
     const scopedHost = taskSourcePopulation.createHost({
       // This scoped owner is bounded by the KSwarm queue/run clocks.
       taskIdleTimeoutMs: 0,
@@ -2186,11 +2189,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         {
           cwd:workspaceRoot,
           nativeReadonlyOnly: taskOptions.nativeReadonlyOnly,
+          restrictedArtifactGeneration: Boolean(artifactScope),
           getProjectModel: () => resolveProjectAgentModel(participantId),
           officeToMarkdown: input => officeDocumentParser.parse(input),
-          // Each KSwarm scoped registry gets the same main-owned runtime, so the
-          // report/slide gateways are reachable there too (design §6.2/§6.3).
-          ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
+          // General KSwarm tasks retain the main-owned report/slide gateways;
+          // PO artifact-only tasks cannot import plugin capabilities.
+          ...(!artifactScope && options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
         },
       ))(runInput);
       })({ ...input, signal }));
@@ -2200,10 +2204,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
     try {
+      if(artifactScope)workflowArtifactRegistries.set(scopedHost,scopedRegistry);
       kswarmTextExecutionClocks.set(scopedHost, execution);
       scopedKSwarmHosts.add(new WeakRef(scopedHost));
       return scopedHost;
     } catch (error) {
+      artifactScope?.registry.dispose();
       try { await taskSourcePopulation.retireHost(scopedHost); }
       catch (retirementError) { throw new AggregateError([error, retirementError], 'kswarm_task_source_retirement_unconfirmed'); }
       throw error;
@@ -2234,6 +2240,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
     {
         try {
+            workflowArtifactRegistries.get(taskHost)?.dispose();
             await taskSourcePopulation.retireHost(taskHost);
         }
         catch (error) {

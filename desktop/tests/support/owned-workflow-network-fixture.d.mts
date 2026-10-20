@@ -6,6 +6,15 @@ export interface OwnedWorkflowNodePermissions {
   deniedCommandIds?: string[];
   deniedCommands?: string[];
 }
+/** Ordinary task input accepted by the real Hub producer, never a workflow row. */
+export interface OwnedWorkflowTaskInput {
+  id?: string;
+  title: string;
+  description?: string;
+  acceptanceCriteria?: string;
+  requiredOutputs?: string[];
+  assignedAgent?: string;
+}
 export interface OwnedWorkflowNetworkFixtureOptions {
   issuer?: string;
   partialRunWriteDeny?: boolean;
@@ -14,6 +23,8 @@ export interface OwnedWorkflowNetworkFixtureOptions {
   phaseTitle?: string;
   prompt?: string;
   label?: string;
+  tasks?: OwnedWorkflowTaskInput[];
+  issuedAt?: number;
 }
 /** Fields established by the existing real Hub issuer; other persisted data stays unknown. */
 export interface OwnedWorkflowNodeDispatch extends KSwarmWorkflowNodeHandoff {

@@ -1,10 +1,15 @@
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createOwnedWorkflowNetworkFixture} from './owned-workflow-network-fixture.mjs';
+import {createOwnedWorkflowNetworkFixture,type OwnedWorkflowTaskInput} from './owned-workflow-network-fixture.mjs';
 import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
 import type {createDesktopServices} from '../../electron/desktop-services.js';
-/** Test-only setup uses a genuine script issuer/factory; never grants permission to a caller. */
-export async function openOwnedWorkflowNormalCase(options:{project:{id:string;name:string;goal:string};workflowName:string;prompt:string;label:string;phaseTitle:string}) {
+type OwnedWorkflowNormalCaseOptions={project:{id:string;name:string;goal:string}}&(
+ {issuer?:never;workflowName:string;prompt:string;label:string;phaseTitle:string}|
+ {issuer:'po_generated';tasks:[OwnedWorkflowTaskInput];issuedAt?:number}|
+ {issuer:'po_generated_project';tasks:OwnedWorkflowTaskInput[];issuedAt?:number}
+);
+/** Test-only setup uses a genuine Hub issuer/factory; never grants permission to a caller. */
+export async function openOwnedWorkflowNormalCase(options:OwnedWorkflowNormalCaseOptions) {
  const fixture=await createOwnedWorkflowNetworkFixture(null,options);
  const previous={fetch:globalThis.fetch,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS};
  const repositoryRoot=fileURLToPath(new URL('../../../',import.meta.url));

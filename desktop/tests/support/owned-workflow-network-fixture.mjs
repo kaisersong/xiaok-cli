@@ -21,7 +21,7 @@ const {initProjectWorkspace}=await import(resolve(siblingRoot,'kswarm','src/serv
 // Characterize actual persisted issuer -> actual HTTP GET, without model/network
 // command demonstrations or an invented successful GET response body.
 /** @param {{toolCategories?:string[],deniedCommandIds?:string[],deniedCommands?:string[]}|null} permissions
- * @param {{issuer?:string,partialRunWriteDeny?:boolean,project?:{id?:string,name?:string,goal?:string},workflowName?:string,phaseTitle?:string,prompt?:string,label?:string}} options */
+ * @param {{issuer?:string,partialRunWriteDeny?:boolean,project?:{id?:string,name?:string,goal?:string},workflowName?:string,phaseTitle?:string,prompt?:string,label?:string,tasks?:import('./owned-workflow-network-fixture.mjs').OwnedWorkflowTaskInput[],issuedAt?:number}} options */
 export async function createOwnedWorkflowNetworkFixture(permissions=null,options={}){
 const nativeFetch=globalThis.fetch;
 const root=realpathSync(mkdtempSync(join(tmpdir(),'workflow-real-get-')));
@@ -38,6 +38,23 @@ try{
  let issued;
  if(options.issuer==='builtin-smoke'){
   issued=hub.startAgentReviewSmokeWorkflow(project.id,{requestedBy:'human'});assert.equal(issued.ok,true);assert.equal(issued.workflowRun.source,'builtin-smoke');assert.equal(issued.workflowRun.workflowId,'agent-review-smoke');
+ }else if(options.issuer==='po_generated'||options.issuer==='po_generated_project'){
+  // These are ordinary persisted Hub producers, not hand-built run/spec rows.
+  // Keep the original mixed permissions intact for the real checkpoint.
+  assert.equal(permissions,null);assert.notEqual(options.partialRunWriteDeny,true);
+  assert.ok(Array.isArray(options.tasks));
+  if(options.issuer==='po_generated')assert.equal(options.tasks.length,1);
+  const added=hub.handleHumanAddTasks(project.id,options.tasks);assert.equal(added.ok,true);
+  assert.equal(added.taskIds.length,options.tasks.length);
+  const approved=hub.handleApprove(project.id);assert.equal(approved.ok,true);
+  const workflowId=options.issuer==='po_generated'?'po-generated-task-workflow':'po-generated-project-workflow';
+  const taskId=options.issuer==='po_generated'?added.taskIds[0]:null;
+  const now=options.issuedAt??1;assert.ok(Number.isSafeInteger(now)&&now>=1);
+  const proposal=hub.createWorkflowProposal(project.id,workflowId,{requestedBy:'human',taskId,now:now-1});assert.equal(proposal.ok,true);
+  issued=hub.startWorkflowRunFromProposal(proposal.workflowProposal.id,{projectId:project.id,workflowId,taskId,approvedBy:'human',now});assert.equal(issued.ok,true);
+  assert.equal(issued.workflowRun.source,options.issuer);assert.equal(issued.workflowRun.workflowId,workflowId);
+  assert.equal(issued.dispatches.length,1);
+  assert.equal(issued.dispatches[0].nodeId,options.issuer==='po_generated'?'worker-produce-deliverable':'worker-produce-project-deliverable');
  }else{
  const workflowName=options.workflowName??'actual_get_workflow',phaseTitle=options.phaseTitle??'Read';
  const scriptSource=options.workflowName===undefined&&options.phaseTitle===undefined?"export const meta = { name: 'actual_get_workflow' };\nphase('Read');":`export const meta = { name: ${JSON.stringify(workflowName)} };\nphase(${JSON.stringify(phaseTitle)});`;
