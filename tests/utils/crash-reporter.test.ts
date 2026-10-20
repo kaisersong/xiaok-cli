@@ -213,6 +213,66 @@ describe('crash reporter', () => {
     expect(readdirSync(join(configDir, 'crashes'))).toHaveLength(1);
   });
 
+  itIfCanSpawn('restores captured streams before reporting the first fatal error after transcript close', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-closed-transcript-fatal-'));
+    tempDirs.push(configDir);
+    const reporter = join(process.cwd(), '.test-dist', 'src', 'utils', 'crash-reporter.js');
+    const transcript = join(process.cwd(), '.test-dist', 'src', 'ui', 'transcript.js');
+    const restoredMarker = join(configDir, 'restored.json');
+    const script = `
+      import { writeFileSync } from 'node:fs';
+      import * as reporter from ${JSON.stringify(reporter)};
+      import { FileTranscriptLogger } from ${JSON.stringify(transcript)};
+      const logger = await FileTranscriptLogger.open('public_fixture', ${JSON.stringify(join(configDir, 'transcripts'))});
+      const stdout = process.stdout.write.bind(process.stdout);
+      const stderr = process.stderr.write.bind(process.stderr);
+      reporter.registerCrashOutputRestorer?.(() => {
+        process.stdout.write = stdout;
+        process.stderr.write = stderr;
+      });
+      process.stdout.write = (chunk, ...args) => { logger.recordOutput('stdout', String(chunk)); return stdout(chunk, ...args); };
+      process.stderr.write = (chunk, ...args) => { logger.recordOutput('stderr', String(chunk)); return stderr(chunk, ...args); };
+      process.once('exit', () => writeFileSync(${JSON.stringify(restoredMarker)}, JSON.stringify({
+        stdout: process.stdout.write === stdout, stderr: process.stderr.write === stderr,
+      })));
+      logger.close();
+      reporter.installGlobalCrashHandlers();
+      process.emit('uncaughtException', Object.assign(new Error('PRIVATE_FIRST'), { code: 'EAGAIN', errno: -11 }));
+      process.emit('unhandledRejection', Object.assign(new Error('PRIVATE_SECOND'), { code: 'EPERM' }));
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, XIAOK_CONFIG_DIR: configDir }, encoding: 'utf8', timeout: 2500,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('崩溃报告已保存');
+    expect(JSON.parse(readFileSync(restoredMarker, 'utf8'))).toEqual({ stdout: true, stderr: true });
+    const files = readdirSync(join(configDir, 'crashes'));
+    expect(files).toHaveLength(1);
+    const saved = readFileSync(join(configDir, 'crashes', files[0]!), 'utf8');
+    expect(JSON.parse(saved).error).toMatchObject({ code: 'EAGAIN', errno: -11, constructorName: 'Error' });
+    expect(saved).not.toContain('PRIVATE_');
+  });
+
+  it('retains bounded Node errno and safe constructor names without serializing custom names', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-errno-'));
+    tempDirs.push(configDir);
+    const previous = process.env.XIAOK_CONFIG_DIR;
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    try {
+      const file = await reportCrash(Object.assign(new RangeError('PRIVATE_MESSAGE'), { code: 'EAGAIN', errno: -11 }));
+      expect(JSON.parse(readFileSync(file, 'utf8')).error).toMatchObject({ type: 'RangeError', constructorName: 'RangeError', code: 'EAGAIN', errno: -11 });
+      class PRIVATE_CONSTRUCTOR_CANARY extends Error {}
+      const hidden = await reportCrash(Object.assign(new PRIVATE_CONSTRUCTOR_CANARY('PRIVATE_MESSAGE'), { code: 'PRIVATE_CODE_CANARY', errno: -123 }));
+      const text = readFileSync(hidden, 'utf8');
+      expect(text).not.toContain('PRIVATE_');
+      expect(JSON.parse(text).error.errno).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.XIAOK_CONFIG_DIR;
+      else process.env.XIAOK_CONFIG_DIR = previous;
+    }
+  });
+
   itIfCanSpawn('records only allowlisted command context for a failing top-level CLI command', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-cli-'));
     tempDirs.push(configDir);
@@ -280,7 +340,7 @@ describe('crash reporter', () => {
       const error=new Error('ordinary_source_route');
       error.stack='Error: ordinary_source_route\n at privateName (C:\\Users\\private\\dist\\ai\\runtime\\session-store\\file-store.js:864:9)\n at privateName (C:\\Users\\private\\dist\\runtime\\verification\\windows-installation-absence.js:10:1)';
       const raw=readFileSync(await reportCrash(error),'utf8');
-      expect(JSON.parse(raw).error).toEqual({type:'Error',code:'ordinary_source_route',frames:[{module:'ai/runtime/session-store/file-store.js',line:864,column:9},{module:'runtime/verification/windows-installation-absence.js',line:10,column:1}]});
+      expect(JSON.parse(raw).error).toEqual({type:'Error',constructorName:'Error',code:'ordinary_source_route',frames:[{module:'ai/runtime/session-store/file-store.js',line:864,column:9},{module:'runtime/verification/windows-installation-absence.js',line:10,column:1}]});
       expect(raw).not.toContain('private');
       const spoofed=readFileSync(await reportCrash(new Error('ordinary_source_route PRIVATE_KEY')),'utf8');
       expect(JSON.parse(spoofed).error.code).toBe('UNCLASSIFIED_ERROR');

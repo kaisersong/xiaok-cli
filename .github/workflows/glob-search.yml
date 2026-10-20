@@ -1,0 +1,31 @@
+name: Bounded glob search
+on:
+  push:
+    branches: [master]
+    paths: ['src/ai/tools/glob*', 'src/ai/tools/bounded-glob.ts', 'src/ai/tools/grep.ts', 'tests/ai/tools/*glob*', 'tests/ai/tools/grep.test.ts', 'tests/package/glob-worker.test.mjs', 'scripts/copy-glob-worker.mjs', 'package.json', 'desktop/package.json', '.github/workflows/glob-search.yml']
+  pull_request:
+    paths: ['src/ai/tools/glob*', 'src/ai/tools/bounded-glob.ts', 'src/ai/tools/grep.ts', 'tests/ai/tools/*glob*', 'tests/ai/tools/grep.test.ts', 'tests/package/glob-worker.test.mjs', 'scripts/copy-glob-worker.mjs', 'package.json', 'desktop/package.json', '.github/workflows/glob-search.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  search:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:sandbox:build
+      - run: npm run test:sandbox:run -- .test-dist/tests/ai/tools/glob.test.js .test-dist/tests/ai/tools/bounded-glob.test.js .test-dist/tests/ai/tools/index.test.js .test-dist/tests/ai/runtime/tool-timeout-recovery.test.js
+      - run: npm run test:full -- tests/ai/tools/grep.test.ts
+      - run: npm run build:release
+      - run: node --test tests/package/glob-worker.test.mjs

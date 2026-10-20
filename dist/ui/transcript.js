@@ -84,7 +84,7 @@ export class FileTranscriptLogger {
         }
     }
     recordOutput(stream, chunk) {
-        if (!chunk)
+        if (this.closed || !chunk)
             return;
         if (this.suppressDepth > 0)
             return;
