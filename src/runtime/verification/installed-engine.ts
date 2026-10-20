@@ -1,3 +1,4 @@
+import {types as utilTypes} from 'node:util';
 import {guestInstallationLock,guestArchiveInstall} from './guest-installation-phase.js';
 import type {Database} from 'better-sqlite3';
 import {verifyEngineBinaryCensus,ENGINE_BINARY_CENSUS_SCRIPT} from './engine-binary-census.js';
@@ -11,12 +12,39 @@ import {parseDeploymentPackageInventory,verifyDeploymentPackage} from './deploym
 import {buildPrivateMacEnginePlan} from './macos-engine-bootstrap.js';
 import {createEngineBootstrapJournal,type EngineVmObservation} from './engine-bootstrap-journal.js';
 import {recoverPrivateEngine} from './engine-bootstrap-coordinator.js';
+import {canonicalVerificationJson} from './protocol.js';
 import {writeFileAtomicallySync} from '../../utils/atomic-file.js';
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const installedHandles=new WeakMap<object,{current():void;inspect():Promise<unknown>;initialHash:string;database:Database}>();
 export function assertInstalledMacEngineHandle(value:object):void{const facts=installedHandles.get(value);if(!facts)throw Error('installed_engine_handle');facts.current();}
 export function assertInstalledEngineDatabase(value:object,database:Database):void{assertInstalledMacEngineHandle(value);if(installedHandles.get(value)!.database!==database)throw Error('installed_engine_database');}
-export async function inspectInstalledMacEngineHandle(value:object):Promise<void>{const facts=installedHandles.get(value);if(!facts)throw Error('installed_engine_handle');facts.current();const observation=await facts.inspect();facts.current();if(hash(JSON.stringify(observation))!==facts.initialHash)throw Error('installed_engine_changed');}
+export async function inspectInstalledMacEngineHandle(value:object):Promise<void>{const facts=installedHandles.get(value);if(!facts)throw Error('installed_engine_handle');facts.current();const observation=await facts.inspect();facts.current();if(hash(canonicalVerificationJson(observation))!==facts.initialHash)throw Error('installed_engine_changed');}
+interface InstalledEngineNamespace {seq:number;name:'main'|'temp';file:string}
+/** Fixed topology only; no namespace is a grant to qualify or delete resources. */
+function captureInstalledEngineNamespaces(rows:unknown):readonly InstalledEngineNamespace[]{
+ if(utilTypes.isProxy(rows)||!Array.isArray(rows)||Object.getPrototypeOf(rows)!==Array.prototype||rows.length<1||rows.length>2||Reflect.ownKeys(rows).length!==rows.length+1)throw Error('installed_engine_database');
+ const result:InstalledEngineNamespace[]=[];
+ for(let index=0;index<rows.length;index++){
+  const element=Object.getOwnPropertyDescriptor(rows,String(index));if(!element||!('value' in element))throw Error('installed_engine_database');const row:unknown=element.value;
+  if(!row||typeof row!=='object'||utilTypes.isProxy(row)||(Object.getPrototypeOf(row)!==Object.prototype&&Object.getPrototypeOf(row)!==null))throw Error('installed_engine_database');
+  const fields=Object.getOwnPropertyDescriptors(row);if(Reflect.ownKeys(fields).length!==3||!['seq','name','file'].every(key=>Object.hasOwn(fields,key)&&'value' in fields[key]!))throw Error('installed_engine_database');
+  const seq:unknown=fields.seq!.value,name:unknown=fields.name!.value,file:unknown=fields.file!.value;
+  if(typeof seq!=='number'||seq!==index||(name!=='main'&&name!=='temp')||name!==(index===0?'main':'temp')||typeof file!=='string'||(index===0?!file:file!==''))throw Error('installed_engine_database');
+  result.push({seq,name,file});
+ }
+ return result;
+}
+/** Read-only topology predicate. This returns no installed handle or authority.
+ * The actual initializer below always supplies its own fixed canonical path. */
+export function assertInstalledEngineDatabaseNamespaces(database:Database,expectedMain:string):void{
+ const before=captureInstalledEngineNamespaces(database.pragma('database_list'));
+ // Preserve the original fully qualified main path equality, never a prefix.
+ if(realpathSync(before[0]!.file)!==expectedMain)throw Error('installed_engine_database');
+ if(before.length===2&&database.prepare('SELECT 1 FROM temp.sqlite_schema LIMIT 1').get()!==undefined)throw Error('installed_engine_database');
+ // Only the existing empty temp may be observed; no attach/vector change is valid.
+ const after=captureInstalledEngineNamespaces(database.pragma('database_list'));
+ if(after.length!==before.length||after.some((row,index)=>{const previous=before[index]!;return row.seq!==previous.seq||row.name!==previous.name||row.file!==previous.file;})||realpathSync(after[0]!.file)!==expectedMain)throw Error('installed_engine_database');
+}
 /** Installed service only: fixed package/DB/VM. No injected executor or qualification flag.
  * Result is inspected installation facts; the qualified runner must still perform
  * actual escape/resource probes and bind its own engine lifetime. */
@@ -28,7 +56,7 @@ export async function initializeInstalledMacEngine(input:{database:Database;sign
  const release=join(base,'releases',manifest.packageHash),node=join(release,'bin/node');
  assertInstalledControllerIdentity({serviceUid:manifest.serviceUid,interactiveUids:manifest.allowedUserIds,executable:node,stateRoot:state});
  const inventoryPath=join(base,'releases',manifest.packageHash+'.json');assertRootProtectedFile(inventoryPath);const inventory=parseDeploymentPackageInventory(JSON.parse(readFileSync(inventoryPath,'utf8')));if(inventory.packageHash!==manifest.packageHash)throw Error('installed_engine_inventory');verifyDeploymentPackage(release,inventory);
- const db=input.database;if(db.inTransaction)throw Error('installed_engine_transaction');const files=db.pragma('database_list') as {name:string;file:string}[];if(files.length!==1||files[0].name!=='main'||realpathSync(files[0].file)!==join(state,'authority.sqlite'))throw Error('installed_engine_database');
+ const db=input.database;if(db.inTransaction)throw Error('installed_engine_transaction');assertInstalledEngineDatabaseNamespaces(db,join(state,'authority.sqlite'));
  const sources=JSON.parse(readFileSync(join(release,'runtime-sources.json'),'utf8'));for(const key of ['baseImage','engine','workerImage'])if(!/^[a-f0-9]{64}$/.test(sources[key]?.sha256))throw Error('installed_engine_sources');if(!/^sha256:[a-f0-9]{64}$/.test(sources.workerImage.imageId))throw Error('installed_engine_image');
  const expectedBinaries=JSON.parse(readFileSync(join(release,'vm/engine-files.json'),'utf8'));
  const journal=createEngineBootstrapJournal(db),old=journal.read(),nonce=old?.proposal.creationNonce??randomBytes(32).toString('hex');
@@ -73,5 +101,5 @@ export async function initializeInstalledMacEngine(input:{database:Database;sign
   {name:'load-worker',digest:sources.workerImage.sha256,isComplete:imageComplete,apply:async()=>{await copyArchive('worker.tar','/home/xiaokvm/worker.tar',sources.workerImage.sha256);await shell(guestLock+`\n${docker} image load --input /home/xiaokvm/worker.tar\n`,180000);}}
  ]}});
  const handle=Object.freeze({observation,hostSocket:plan.hostSocket,imageDigest:sources.workerImage.imageId as string,assertCurrent:current,inspect:observe,qualified:false as const});
- installedHandles.set(handle,{current,inspect:observe,initialHash:hash(JSON.stringify(observation)),database:db});return handle;
+ installedHandles.set(handle,{current,inspect:observe,initialHash:hash(canonicalVerificationJson(observation)),database:db});return handle;
 }

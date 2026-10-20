@@ -1,5 +1,5 @@
 import {claimInstalledMaintenanceBatch,readInstalledMaintenanceBatch,finishInstalledMaintenanceBatch,sealInstalledMaintenanceRequests} from './installed-maintenance-handoff.js';
-import {createInstalledMaintenanceStack,isInstalledConstructionPending} from './installed-execution-stack.js';
+import {createInstalledMaintenanceStack,isInstalledConstructionPending,readInstalledFailedStackDrain} from './installed-execution-stack.js';
 import {assertSharedBlobCapacityAuthority} from './shared-blob-capacity.js';
 import {assertSharedCapacityLedgerAuthority} from './shared-capacity-ledger.js';
 import {assertVerificationBlobBudgetAuthority} from './blob-budget.js';
@@ -159,7 +159,7 @@ export async function startInstalledVerificationController(){
    try{
     const targets=readInstalledMaintenanceBatch(recoveryBatch,lifetime);
     for(const target of targets.filter(target=>target.kind==='material')){admission.signal.throwIfAborted();await maintenanceStack.privateHost.staging.cleanupResource(target.resourceId,admission.signal);}
-    for(const target of targets.filter(target=>target.kind==='raw')){admission.signal.throwIfAborted();if(!target.expected)throw Error('maintenance_handoff_target');const receipt=await maintenanceStack.privateHost.execution.cleanupExecution(target.expected);maintenanceStack.privateHost.execution.assertQuiescent(receipt,target.expected);}
+    for(const target of targets.filter(target=>target.kind==='raw'||target.kind==='probe')){admission.signal.throwIfAborted();if(!target.expected)throw Error('maintenance_handoff_target');const receipt=await maintenanceStack.privateHost.execution.cleanupExecution(target.expected);maintenanceStack.privateHost.execution.assertQuiescent(receipt,target.expected);}
     finishInstalledMaintenanceBatch(recoveryBatch,lifetime,false);
    }catch(error){
     const failures:unknown[]=[error];try{finishInstalledMaintenanceBatch(recoveryBatch,lifetime,true);}catch(recordError){failures.push(recordError);}try{await close();}catch(cleanupError){failures.push(cleanupError);}if(failures.length>1){const failure=new AggregateError(failures,'installed_maintenance_recovery_unknown',{cause:error});if(failures.some(isInstalledControllerShutdownUnresolved))unresolvedShutdownErrors.add(failure);throw failure;}throw error;
@@ -206,10 +206,12 @@ export async function startInstalledVerificationController(){
   // Keep the original lifetime before cleanup: unknown drains and native close
   // failures must never let GC release its actual OS owner lock.
   failedLifetimes.add(lifetime);
+  let failedStack:object|undefined,failedDrainLookup:{error:unknown}|undefined;
+  try{failedStack=readInstalledFailedStackDrain(error,assembly,lifetime);}catch(lookupError){failedDrainLookup={error:lookupError};}
   try{
-   await closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending){const ticket=installedCapacityAuthorities.get(capacityAuthorityToken)?.stackConstruction;if(!ticket||isInstalledConstructionPending(ticket))throw Error('installed_stack_construction_unknown');}},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close(),()=>maintenanceStack?.close()],
-    finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose(),()=>{if(stack){maintenanceSealFacts.set(lifetime,{stack,closeAttemptId});sealInstalledMaintenanceRequests(lifetime,stack);}}],
-    closeLifetime(){},retainLifetime(){/* Already strongly retained before cleanup. */}});
+   await closeInstalledControllerComponents({components:[()=>{if(failedDrainLookup)throw failedDrainLookup.error;},()=>{if(stackConstructionPending){const ticket=installedCapacityAuthorities.get(capacityAuthorityToken)?.stackConstruction;if(!ticket||isInstalledConstructionPending(ticket))throw Error('installed_stack_construction_unknown');}},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close(),()=>maintenanceStack?.close()],
+    finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose(),()=>{const drained=stack??failedStack;if(drained){maintenanceSealFacts.set(lifetime,{stack:drained,closeAttemptId});sealInstalledMaintenanceRequests(lifetime,drained);}}],
+    closeLifetime(){if(failedStack){lifetime.close();assemblyFacts.closed=true;failedLifetimes.delete(lifetime);}},retainLifetime(){/* Already strongly retained before cleanup. */}});
   }catch(cleanupError){const failure=new AggregateError([error,cleanupError],'installed_controller_startup_cleanup_unknown',{cause:error});unresolvedShutdownErrors.add(failure);throw failure;}
   throw error;
  }

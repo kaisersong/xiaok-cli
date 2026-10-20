@@ -1,3 +1,5 @@
+import {inspectQualificationCleanupHandoffCommand} from './installed-engine-qualification.js';
+import {inspectMaintenanceProbeHandoffCommand} from './maintenance-execution.js';
 import {createHash} from 'node:crypto';
 import {readInstalledMaintenanceSeal} from './installed-controller.js';
 import type {Database} from 'better-sqlite3';
@@ -12,8 +14,8 @@ import {readInstalledCleanupOwner,assertInstalledStackDrained} from './installed
 import {assertNativeSqliteProducerTableKinds,assertNativeSqliteStoredProducerColumns} from './native-sqlite-census.js';
 import type {QuiescenceExpectation} from '../isolated-execution/physical-quiescence.js';
 
-export interface InstalledCleanupCommandFacts {readonly source:object;readonly database:Database;readonly kind:'raw'|'material';readonly resourceId:string;readonly expected:QuiescenceExpectation|null;readonly allocations:readonly Readonly<BlobReservationProposal>[];readonly action:'request'|'ack';readonly evidence?:string}
-interface Target {kind:'raw'|'material';resourceId:string;expected:QuiescenceExpectation|null;allocations:readonly Readonly<BlobReservationProposal>[];issuers:readonly object[]}
+export interface InstalledCleanupCommandFacts {readonly source:object;readonly database:Database;readonly kind:'raw'|'material'|'probe';readonly resourceId:string;readonly expected:QuiescenceExpectation|null;readonly allocations:readonly Readonly<BlobReservationProposal>[];readonly action:'request'|'ack';readonly evidence?:string}
+interface Target {kind:'raw'|'material'|'probe';resourceId:string;expected:QuiescenceExpectation|null;allocations:readonly Readonly<BlobReservationProposal>[];issuers:readonly object[]}
 interface Header {authority_id:string;origin_epoch:string;phase:'requested'|'sealed'|'claimed'|'failed-retained'|'completed';revision:number;claim_epoch:string|null;items_hash:string;close_attempt_id:string|null}
 interface Item {authority_id:string;origin_epoch:string;item_id:string;target_json:string;target_hash:string;outcome:'requested'|'completed';evidence_hash:string|null}
 const headerSQL="CREATE TABLE verification_maintenance_handoffs(authority_id TEXT NOT NULL,origin_epoch TEXT NOT NULL,phase TEXT NOT NULL CHECK(phase IN ('requested','sealed','claimed','failed-retained','completed')),revision INTEGER NOT NULL CHECK(revision>=1),claim_epoch TEXT,items_hash TEXT NOT NULL,close_attempt_id TEXT,PRIMARY KEY(authority_id,origin_epoch))";
@@ -33,13 +35,17 @@ function decodeAllocation(value:unknown):Readonly<BlobReservationProposal>{
  return {ownerKey:value.ownerKey,resourceId:value.resourceId,kind:value.kind,bytes:value.bytes,scopeDigest:value.scopeDigest,...(engineBinding?{engineBinding}:{})};
 }
 function decodeTarget(text:string):Target{
- if(Buffer.byteLength(text)>65536)throw Error('maintenance_handoff_target_schema');const value:unknown=JSON.parse(text);ownFields(value,['kind','resourceId','expected','allocations','issuers']);if(value.kind!=='raw'&&value.kind!=='material')throw Error('maintenance_handoff_target_schema');boundedText(value.resourceId);
- let expected:QuiescenceExpectation|null=null;if(value.kind==='raw'){ownFields(value.expected,['sessionIdentity','compoundOperationId','validationInvocationId','executionIdentity','scopeDigest']);const e=value.expected;boundedText(e.sessionIdentity);boundedText(e.compoundOperationId);boundedText(e.validationInvocationId);boundedText(e.executionIdentity);digestText(e.scopeDigest);
+ if(Buffer.byteLength(text)>65536)throw Error('maintenance_handoff_target_schema');const value:unknown=JSON.parse(text);ownFields(value,['kind','resourceId','expected','allocations','issuers']);if(value.kind!=='raw'&&value.kind!=='material'&&value.kind!=='probe')throw Error('maintenance_handoff_target_schema');boundedText(value.resourceId);
+ let expected:QuiescenceExpectation|null=null;if(value.kind==='raw'||value.kind==='probe'){ownFields(value.expected,['sessionIdentity','compoundOperationId','validationInvocationId','executionIdentity','scopeDigest']);const e=value.expected;boundedText(e.sessionIdentity);boundedText(e.compoundOperationId);boundedText(e.validationInvocationId);boundedText(e.executionIdentity);digestText(e.scopeDigest);
   expected={sessionIdentity:e.sessionIdentity,compoundOperationId:e.compoundOperationId,validationInvocationId:e.validationInvocationId,executionIdentity:e.executionIdentity,scopeDigest:e.scopeDigest};if(expected.executionIdentity!==value.resourceId)throw Error('maintenance_handoff_target_schema');
  }else if(value.expected!==null)throw Error('maintenance_handoff_target_schema');
  const count=value.kind==='raw'?2:1;if(!Array.isArray(value.allocations)||value.allocations.length!==count||!Array.isArray(value.issuers)||value.issuers.length!==count)throw Error('maintenance_handoff_target_schema');const allocations=value.allocations.map(decodeAllocation);if(new Set(allocations.map(p=>p.resourceId)).size!==count)throw Error('maintenance_handoff_target_schema');
  if(value.kind==='raw'&&(allocations[0]!.kind!=='guest-input'||allocations[1]!.kind!=='guest-output'||allocations.some(p=>p.scopeDigest!==expected?.scopeDigest))||value.kind==='material'&&(allocations[0]!.kind!=='host-staging'||allocations[0]!.resourceId!==value.resourceId))throw Error('maintenance_handoff_target_schema');
- const kind=value.kind,resourceId=value.resourceId,issuers:BlobIssuerRecord[]=value.issuers.map((item:unknown,index:number):BlobIssuerRecord=>{ownFields(item,['version','resourceId','allocationHash','ownerKey','scopeDigest','bytes','issuerKind','producerResourceId','producerLineageHash']);if(item.version!==1||item.issuerKind!==(kind==='raw'?'raw':'material'))throw Error('maintenance_handoff_target_schema');boundedText(item.resourceId);boundedText(item.ownerKey,1024);boundedText(item.producerResourceId);digestText(item.allocationHash);digestText(item.scopeDigest);digestText(item.producerLineageHash);bytes(item.bytes);const allocation=allocations[index]!;if(item.resourceId!==allocation.resourceId||item.allocationHash!==hash(allocation)||item.ownerKey!==allocation.ownerKey||item.scopeDigest!==allocation.scopeDigest||item.bytes!==allocation.bytes||item.producerResourceId!==resourceId)throw Error('maintenance_handoff_target_schema');return {version:1,resourceId:item.resourceId,allocationHash:item.allocationHash,ownerKey:item.ownerKey,scopeDigest:item.scopeDigest,bytes:item.bytes,issuerKind:kind==='raw'?'raw':'material',producerResourceId:item.producerResourceId,producerLineageHash:item.producerLineageHash};});
+ if(value.kind==='probe'){
+  const p=allocations[0]!;
+  if(!expected||expected.sessionIdentity!=='private-engine-qualification'||expected.compoundOperationId!==expected.validationInvocationId||p.ownerKey!=='private-engine-qualification'||p.resourceId!=='qualification-'+expected.executionIdentity||p.kind!=='guest-output'||p.bytes!==32*1024**2||p.scopeDigest!==expected.scopeDigest||!p.engineBinding)throw Error('maintenance_handoff_target_schema');
+ }
+ const kind=value.kind,resourceId=value.resourceId,issuers:BlobIssuerRecord[]=value.issuers.map((item:unknown,index:number):BlobIssuerRecord=>{ownFields(item,['version','resourceId','allocationHash','ownerKey','scopeDigest','bytes','issuerKind','producerResourceId','producerLineageHash']);if(item.version!==1||item.issuerKind!==(kind==='raw'?'raw':kind==='probe'?'qualification-probe':'material'))throw Error('maintenance_handoff_target_schema');boundedText(item.resourceId);boundedText(item.ownerKey,1024);boundedText(item.producerResourceId);digestText(item.allocationHash);digestText(item.scopeDigest);digestText(item.producerLineageHash);bytes(item.bytes);const allocation=allocations[index]!;if(item.resourceId!==allocation.resourceId||item.allocationHash!==hash(allocation)||item.ownerKey!==allocation.ownerKey||item.scopeDigest!==allocation.scopeDigest||item.bytes!==allocation.bytes||item.producerResourceId!==resourceId)throw Error('maintenance_handoff_target_schema');return {version:1,resourceId:item.resourceId,allocationHash:item.allocationHash,ownerKey:item.ownerKey,scopeDigest:item.scopeDigest,bytes:item.bytes,issuerKind:kind==='raw'?'raw':kind==='probe'?'qualification-probe':'material',producerResourceId:item.producerResourceId,producerLineageHash:item.producerLineageHash};});
  return {kind,resourceId,expected,allocations,issuers};
 }
 function schema(db:Database,create=false){
@@ -66,8 +72,8 @@ function targetFor(f:InstalledCleanupCommandFacts):Target{
 function header(db:Database,authority:string,origin:string){const row=db.prepare<[string,string],Header>('SELECT * FROM verification_maintenance_handoffs WHERE authority_id=? AND origin_epoch=?').get(authority,origin);if(!row)throw Error('maintenance_handoff_missing');return row;}
 /** Only original producers issue commands. This commits before their irreversible I/O. */
 export function persistInstalledMaintenanceRequest(command:object):void{
- const f=inspectDockerCleanupHandoffCommand(command)??inspectStagingCleanupHandoffCommand(command);if(!f)throw Error('maintenance_handoff_command');
- const owner=readInstalledCleanupOwner(f.source,f.kind==='raw'?'execution':'materials');if(!owner)return;
+ const f=inspectDockerCleanupHandoffCommand(command)??inspectStagingCleanupHandoffCommand(command)??inspectQualificationCleanupHandoffCommand(command)??inspectMaintenanceProbeHandoffCommand(command);if(!f)throw Error('maintenance_handoff_command');
+ const owner=readInstalledCleanupOwner(f.source,f.kind==='raw'?'execution':f.kind==='probe'?'probe':'materials');if(!owner)return;
  const lifetime=owner.lifetime;assertInstalledControllerLifetime(lifetime);if(lifetime.database!==f.database)throw Error('maintenance_handoff_database');
  const db=f.database,target=targetFor(f),encoded=json(target),targetHash=hash(target),id=hash({kind:f.kind,resourceId:f.resourceId}),authority=lifetime.manifest.authorityId;
  if(Buffer.byteLength(encoded)>65536)throw Error('maintenance_handoff_size');
@@ -98,6 +104,18 @@ export function persistInstalledMaintenanceRequest(command:object):void{
    if(db.prepare("UPDATE verification_maintenance_handoff_items SET outcome='completed',evidence_hash=? WHERE authority_id=? AND origin_epoch=? AND item_id=? AND target_hash=? AND outcome='requested' AND evidence_hash IS NULL").run(evidenceHash,authority,origin,id,targetHash).changes!==1)throw Error('maintenance_handoff_ack');
   }
  });
+}
+/** Lost return is not permission: only the still-live original private command
+ * can verify its exact committed request, without minting or mutating anything. */
+export function assertInstalledMaintenanceRequestRecorded(command:object):void{
+ const f=inspectDockerCleanupHandoffCommand(command)??inspectStagingCleanupHandoffCommand(command)??inspectQualificationCleanupHandoffCommand(command)??inspectMaintenanceProbeHandoffCommand(command);if(!f||f.action!=='request')throw Error('maintenance_handoff_command');
+ const owner=readInstalledCleanupOwner(f.source,f.kind==='raw'?'execution':f.kind==='probe'?'probe':'materials');if(!owner||owner.lifetime.database!==f.database)throw Error('maintenance_handoff_source');
+ const lifetime=owner.lifetime;assertInstalledControllerLifetime(lifetime);const db=f.database;if(db.inTransaction||!schema(db))throw Error('maintenance_handoff_not_committed');
+ let origin=lifetime.serviceEpoch;
+ if(owner.kind==='maintenance'){const token=activeClaims.get(lifetime),claim=token&&claims.get(token);if(!claim)throw Error('maintenance_handoff_claim');origin=claim.header.origin_epoch;const current=header(db,lifetime.manifest.authorityId,origin);if(json(current)!==json(claim.header)||current.claim_epoch!==lifetime.serviceEpoch||current.phase!=='claimed')throw Error('maintenance_handoff_fence');}
+ const h=header(db,lifetime.manifest.authorityId,origin);if(h.phase!==(owner.kind==='normal'?'requested':'claimed')||owner.kind==='normal'&&(h.claim_epoch!==null||h.close_attempt_id!==null))throw Error('maintenance_handoff_fence');
+ const target=targetFor(f),encoded=json(target),id=hash({kind:f.kind,resourceId:f.resourceId}),row=verifyItems(db,h).find(row=>row.item_id===id);
+ if(!row||row.target_json!==encoded||row.target_hash!==hash(target)||row.outcome!=='requested'||row.evidence_hash!==null)throw Error('maintenance_handoff_not_committed');
 }
 /** Only a real drained normal stack can seal its already accepted requests. */
 export function sealInstalledMaintenanceRequests(lifetime:InstalledControllerLifetime,stack:object):void{

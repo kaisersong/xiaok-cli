@@ -13,7 +13,7 @@ import * as operationModule from '../../src/runtime/verification/approved-verifi
 import * as stackModule from '../../src/runtime/verification/installed-execution-stack.js';
 import * as artifactModule from '../../src/runtime/verification/approved-artifact-reader.js';
 import * as publicModule from '../../src/runtime/verification/controller-public-daemon.js';
-import {startInstalledVerificationController} from '../../src/runtime/verification/installed-controller.js';
+import {startInstalledVerificationController,isInstalledControllerShutdownUnresolved} from '../../src/runtime/verification/installed-controller.js';
 import type {BlackboxObservation,RecipeBinding} from '../../src/runtime/verification/independent-recipes.js';
 type BlackboxRequest={binding:RecipeBinding;caseId:string;caseInvocationId:string;input:Buffer};
 function returned<T>(result:{type:'return';value:T}|{type:'throw'|'incomplete';value:unknown}|undefined):NonNullable<T>{
@@ -22,12 +22,16 @@ function returned<T>(result:{type:'return';value:T}|{type:'throw'|'incomplete';v
  return result.value;
 }
 const boundary=vi.hoisted(()=>({next:undefined as any,lifetimes:new WeakSet<object>(),engines:new WeakMap<object,any>(),qualifications:new WeakMap<object,any>(),brokers:new WeakMap<object,any>(),transports:new Map<string,any>()}));
+// Unknown fresh-start drains retain their actual owner and physical root.
+const retainedFreshStarts=new Set<object>();
 vi.mock('../../src/runtime/verification/installed-controller-lifetime.js',()=>({createInstalledControllerLifetime:()=>boundary.next.lifetime,assertInstalledControllerLifetime(value:any){if(!boundary.lifetimes.has(value))throw Error('fixture lifetime identity');value.assertCurrent();}}));
 vi.mock('../../src/runtime/verification/installed-identity.js',async original=>{const actual=await original<any>();return {...actual,assertRootProtectedFile(){},assertRootProtectedExecutable(path:string){if(boundary.next?.logicalOS)return boundary.next.logicalOS.assertExecutable(path);return actual.assertRootProtectedExecutable(path);},assertInstalledControllerIdentity(){}};});
 vi.mock('../../src/runtime/verification/migration-markers.js',async original=>({...await original<any>(),assertServiceProtectedMarkerPath(){}}));
 vi.mock('../../src/runtime/verification/root-broker-client.js',()=>({createInstalledRootBrokerClient:()=>boundary.next.broker,assertInstalledRootBrokerClient(value:object,lifetime:object){if(boundary.brokers.get(value)!==lifetime)throw Error('fixture broker identity');}}));
 vi.mock('../../src/runtime/verification/installed-engine.js',()=>({initializeInstalledMacEngine:async()=>boundary.next.engine,assertInstalledMacEngineHandle(value:object){const f=boundary.engines.get(value);if(!f)throw Error('fixture engine identity');f.current();},assertInstalledEngineDatabase(value:object,db:object){const f=boundary.engines.get(value);if(!f||f.database!==db)throw Error('fixture engine database');f.current();}}));
-vi.mock('../../src/runtime/verification/installed-engine-qualification.js',()=>({createInstalledEngineQualification:()=>boundary.next.qualification,assertInstalledEngineQualification(value:object,engine:object){const f=boundary.qualifications.get(value);if(!f||f.engine!==engine)throw Error('fixture qualification');f.current();},assertInstalledEngineQualificationIdentity(value:object,engine:object,db:object){const f=boundary.qualifications.get(value);if(!f||f.engine!==engine||f.database!==db)throw Error('fixture qualification identity');f.current();}}));
+// This legacy fake qualification never issues a probe cleanup command. Reject
+// every candidate; the separate real-probe fixture uses the actual inspector.
+vi.mock('../../src/runtime/verification/installed-engine-qualification.js',()=>({inspectQualificationCleanupHandoffCommand(){return undefined;},createInstalledEngineQualification:()=>boundary.next.qualification,assertInstalledEngineQualification(value:object,engine:object){const f=boundary.qualifications.get(value);if(!f||f.engine!==engine)throw Error('fixture qualification');f.current();},assertInstalledEngineQualificationIdentity(value:object,engine:object,db:object){const f=boundary.qualifications.get(value);if(!f||f.engine!==engine||f.database!==db)throw Error('fixture qualification identity');f.current();}}));
 vi.mock('../../src/runtime/isolated-execution/docker-engine-transport.js',()=>({DockerEngineTransport:class{constructor(input:{socketPath:string}){const transport=boundary.transports.get(input.socketPath);if(!transport)throw Error('fixture transport');return transport;}}}));
 const H='a'.repeat(64),hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 /** Test-only OS/engine leaves. The only operation issuer is actual installed start;
@@ -68,6 +72,26 @@ async function createInstalledControllerFixture(options:InstalledControllerFixtu
   // maintenance builder observer. No normal stack unpacking or forced DB close.
   const startupPromise=startInstalledVerificationController();
   const clear=()=>{boundary.transports.delete(engine.hostSocket);if(boundary.next?.lifetime===lifetime)boundary.next=undefined;};
+  if(!options.existingRoot){
+   const held={startupPromise,root,database,lifetime,engine,broker};let closing:Promise<void>|undefined;
+   retainedFreshStarts.add(held);
+   void startupPromise.catch(error=>{if(isInstalledControllerShutdownUnresolved(error))retainedFreshStarts.add(held);});
+   return {startupPromise,root,state,database,lifetime,keys,controllerKeys,receiverIdentity,
+    close(preserveRoot=true){return closing??=(async()=>{
+     let installed:Awaited<typeof startupPromise>;
+     try{installed=await startupPromise;}catch(error){
+      if(isInstalledControllerShutdownUnresolved(error)){retainedFreshStarts.add(held);throw error;}
+      // The real root already joined all component/finalizer cleanup. Its known
+      // startup rejection is retained; only this fixture's lifetime is closed.
+      try{if(database.open)lifetime.close();}catch(cleanup){retainedFreshStarts.add(held);throw new AggregateError([error,cleanup],'fixture_fresh_startup_close_unknown:'+root,{cause:error});}
+      clear();retainedFreshStarts.delete(held);if(!preserveRoot)rmSync(root,{recursive:true,force:true});throw error;
+     }
+     try{await installed.close();if(database.open)throw Error('fixture_fresh_startup_lifetime_open');}
+     catch(error){retainedFreshStarts.add(held);throw error;}
+     clear();retainedFreshStarts.delete(held);if(!preserveRoot)rmSync(root,{recursive:true,force:true});
+    })();},
+   };
+  }
   void startupPromise.then(clear,clear);
   let closing:Promise<void>|undefined;
   return {startupPromise,root,state,database,lifetime,keys,controllerKeys,receiverIdentity,
@@ -132,7 +156,8 @@ export async function installedControllerFixture(options:InstalledControllerFixt
 }
 /** Test-only OS/lifetime leaves, same DB/keys and the real zero-argument start.
  * Caller must observe/release/join startupPromise; this is not an owner factory. */
-export async function installedControllerStartupFixture(options:InstalledControllerFixtureOptions&{existingRoot:string}){
+export async function installedControllerStartupFixture(options:InstalledControllerFixtureOptions={}){
+ if(!options.existingRoot&&(options.docker||options.logicalOS||options.normalEngineBaseline))throw Error('fixture_fresh_startup_requires_ordinary_doubles');
  const value=await createInstalledControllerFixture({...options,startupOnly:true});
  if(!('startupPromise' in value))throw Error('fixture_missing_startup_promise');
  return value;

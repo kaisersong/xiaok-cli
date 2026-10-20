@@ -26,20 +26,27 @@ type RunAccess=Parameters<typeof createProtectedRunLedger>[0]['access'];
 type TranscriptAccess=Parameters<typeof createExecutionTranscriptStore>[0]['access'];
 type StackIdentity={lifetime:Readonly<InstalledControllerLifetime>;closed:boolean};
 const installedStacks=new WeakMap<object,StackIdentity>();
+const failedStackDrains=new WeakMap<object,{assembly:object;lifetime:InstalledControllerLifetime;ticket:object;identity:StackIdentity}>();
+/** Read the exact original builder rejection; there is no caller-issued drain token. */
+export function readInstalledFailedStackDrain(error:unknown,assembly:object,lifetime:InstalledControllerLifetime):object|undefined{
+ if(!error||typeof error!=='object')return undefined;const known=failedStackDrains.get(error);if(!known||known.assembly!==assembly||known.lifetime!==lifetime)return undefined;
+ assertInstalledAssemblyLifetime(assembly,lifetime);const state=capacityConstructions.get(known.ticket);if(!state||state.lifetime!==lifetime||state.kind!=='normal'||state.phase!=='drained'||!known.identity.closed)throw Error('installed_stack_drain_unknown');return error;
+}
 type CapacityConstruction={owner:object;lifetime:InstalledControllerLifetime;components:Map<string,object>;engine?:object;kind:'normal'|'maintenance';phase:'constructing'|'active'|'draining'|'drained'|'failed-unknown';executionClaimed?:boolean;materialsClaimed?:boolean};
 const capacityConstructions=new WeakMap<object,CapacityConstruction>();
 const componentOwners=new WeakMap<object,CapacityConstruction>();
 const unresolvedConstructions=new Set<CapacityConstruction>();
-export function readInstalledCleanupOwner(component:object,slot:'execution'|'materials'){
+export function readInstalledCleanupOwner(component:object,slot:'execution'|'materials'|'probe'){
  const facts=componentOwners.get(component);if(!facts)return undefined;
- if(facts.components.get(slot)!==component||!['active','draining'].includes(facts.phase))throw Error('maintenance_handoff_source');assertInstalledControllerLifetime(facts.lifetime);return {lifetime:facts.lifetime,kind:facts.kind};
+ const exactSlot=slot==='probe'?(facts.kind==='normal'?'qualification':'maintenance-probe'):slot;
+ if(facts.components.get(exactSlot)!==component||!(['active','draining'].includes(facts.phase)||slot==='probe'&&facts.kind==='normal'&&facts.phase==='constructing'))throw Error('maintenance_handoff_source');assertInstalledControllerLifetime(facts.lifetime);return {lifetime:facts.lifetime,kind:facts.kind};
 }
-export function assertInstalledStackDrained(stack:object,lifetime:InstalledControllerLifetime):void{const facts=installedStacks.get(stack);if(!facts||facts.lifetime!==lifetime||!facts.closed)throw Error('installed_stack_drain_unknown');assertInstalledControllerLifetime(lifetime);}
+export function assertInstalledStackDrained(stack:object,lifetime:InstalledControllerLifetime):void{const facts=installedStacks.get(stack)??failedStackDrains.get(stack)?.identity;if(!facts||facts.lifetime!==lifetime||!facts.closed)throw Error('installed_stack_drain_unknown');assertInstalledControllerLifetime(lifetime);}
 export function isInstalledConstructionPending(ticket:object):boolean{const state=capacityConstructions.get(ticket);return !state||state.phase==='constructing'||state.phase==='failed-unknown';}
 function maintenanceConstruction(ticket:object,lifetime:InstalledControllerLifetime,owner:object){const state=capacityConstructions.get(ticket);if(!state||state.kind!=='maintenance'||state.lifetime!==lifetime||state.owner!==owner||state.phase!=='constructing')throw Error('installed_capacity_construction');assertInstalledControllerLifetime(lifetime);return state;}
 export function claimInstalledMaintenanceExecutionConstruction(ticket:object,lifetime:InstalledControllerLifetime,owner:object):void{const state=maintenanceConstruction(ticket,lifetime,owner);if(state.executionClaimed)throw Error('installed_capacity_construction');state.executionClaimed=true;}
 export function claimInstalledMaintenanceMaterialsConstruction(ticket:object,lifetime:InstalledControllerLifetime,owner:object):void{const state=maintenanceConstruction(ticket,lifetime,owner);if(state.materialsClaimed||!state.components.has('execution'))throw Error('installed_capacity_construction');state.materialsClaimed=true;}
-export function bindInstalledMaintenanceExecutionConstruction(ticket:object,value:object,raw:object):void{const state=capacityConstructions.get(ticket);if(!state)throw Error('installed_capacity_construction');maintenanceConstruction(ticket,state.lifetime,state.owner);assertMaintenanceExecutionConstruction(value,raw,ticket,state.lifetime.database);if(state.components.has('execution')||state.components.has('maintenance-probe'))throw Error('installed_capacity_construction');state.components.set('execution',raw);state.components.set('maintenance-probe',value);registerInstalledCapacityIssuer(state.owner,'execution',raw,undefined,ticket);registerInstalledCapacityIssuer(state.owner,'maintenance-probe',value,undefined,ticket);componentOwners.set(raw,state);}
+export function bindInstalledMaintenanceExecutionConstruction(ticket:object,value:object,raw:object):void{const state=capacityConstructions.get(ticket);if(!state)throw Error('installed_capacity_construction');maintenanceConstruction(ticket,state.lifetime,state.owner);assertMaintenanceExecutionConstruction(value,raw,ticket,state.lifetime.database);if(state.components.has('execution')||state.components.has('maintenance-probe'))throw Error('installed_capacity_construction');state.components.set('execution',raw);state.components.set('maintenance-probe',value);registerInstalledCapacityIssuer(state.owner,'execution',raw,undefined,ticket);registerInstalledCapacityIssuer(state.owner,'maintenance-probe',value,undefined,ticket);componentOwners.set(raw,state);componentOwners.set(value,state);}
 export function bindInstalledMaintenanceMaterialsConstruction(ticket:object,value:object,materials:object):void{const state=capacityConstructions.get(ticket);if(!state)throw Error('installed_capacity_construction');maintenanceConstruction(ticket,state.lifetime,state.owner);assertMaintenanceStagingConstruction(value,materials,ticket,state.lifetime.database);if(state.components.has('materials'))throw Error('installed_capacity_construction');state.components.set('materials',materials);registerInstalledCapacityIssuer(state.owner,'materials',materials,undefined,ticket);componentOwners.set(materials,state);}
 export function assertInstalledMaintenanceConstructionReady(ticket:object):void{const state=capacityConstructions.get(ticket);if(!state||state.kind!=='maintenance'||state.phase!=='constructing'||state.components.size!==3||!['execution','maintenance-probe','materials'].every(slot=>state.components.has(slot)))throw Error('installed_capacity_construction');assertInstalledControllerLifetime(state.lifetime);}
 
@@ -116,7 +123,13 @@ export async function createInstalledExecutionStack(input:{assembly:object;lifet
    close(){return closing??=(async()=>{admission.abort();await Promise.allSettled([...active]);await drainOwners();})();},
   });
   constructionFacts.phase='active';installedStacks.set(result,identity);return result;
- }catch(error){admission.abort();try{await drainOwners();}catch(cleanupError){throw new AggregateError([error,cleanupError],'installed_stack_construction_cleanup_unknown');}throw error;}
+ }catch(error){admission.abort();try{await drainOwners();}catch(cleanupError){throw new AggregateError([error,cleanupError],'installed_stack_construction_cleanup_unknown',{cause:error});}
+  // The factory never returns a partial stack. Its exact failure can carry only
+  // the privately recorded result of the same completed owned drain.
+  if(error&&typeof error==='object')failedStackDrains.set(error,{assembly,lifetime,ticket:construction,identity});
+  // Primitive rejections have no identity witness and remain exactly unchanged.
+  throw error;
+ }
 }
 
 /** Fixed root-only mapped-resource owner. No qualification, new admission, or caller factories. */
