@@ -45,6 +45,7 @@ const TOOL_LABELS: Record<UiLocale, Record<string, string>> = {
 
 const UI_COPY = {
   'zh-CN': {
+    terminalRedrawPending: '终端重绘尚未完成，请稍后重试。',
     approvalTitle: 'xiaok 想要执行以下操作',
     mandatoryReview: '这个操作有风险，每次都会询问',
     exactCommandScope: '当前执行目录中的这条完整命令',
@@ -74,6 +75,7 @@ const UI_COPY = {
     hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
   },
   en: {
+    terminalRedrawPending: 'Terminal redraw is not finished. Please try again shortly.',
     approvalTitle: 'xiaok wants to run',
     mandatoryReview: 'This operation carries risk and requires approval every time',
     exactCommandScope: 'this exact command in the current execution directory',

@@ -1,3 +1,4 @@
+import { normalizeEnhancedKeys } from './keyboard-protocol.js';
 import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches, getExactCommandApprovalRule, isExactCommandApprovalRule } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
@@ -399,7 +400,7 @@ export async function showPermissionPrompt(
     };
 
     const onData = (data: Buffer | string) => {
-      const input = data.toString();
+      const input = normalizeEnhancedKeys(Buffer.isBuffer(data) ? data : Buffer.from(data)).toString('utf8');
       // stdin batches can contain multiple complete keys. Unknown/pasted text
       // remains ignored as a whole; multi-digit numbers stay a single token.
       const keys = input.match(/\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
@@ -451,7 +452,7 @@ export async function promptProjectRuleAdoption(rule: string, index = 1, total =
       resolve(adopt);
     };
     const onData = (data: Buffer | string) => {
-      const key = data.toString();
+      const key = normalizeEnhancedKeys(Buffer.isBuffer(data) ? data : Buffer.from(data)).toString('utf8');
       if (/^[yY]$/.test(key)) finish(true);
       else if (/^[nN\r\n]$/.test(key) || key === '\x03' || key === '\x1b') finish(false);
     };
