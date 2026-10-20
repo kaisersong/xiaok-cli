@@ -26,7 +26,7 @@ async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOp
  const receiver=await loopPublicationReceiver(f,{afterQuery}),bindings:any[]=[];
  const profile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?new InspectorSession():undefined;
  const post=(method:string)=>new Promise<any>((resolve,reject)=>profile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));
- if(profile){profile.connect();await post('Profiler.enable');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
+ if(profile){profile.connect();await post('Profiler.enable');await new Promise<void>((resolve,reject)=>profile.post('Profiler.setSamplingInterval',{interval:10000},error=>error?reject(error):resolve()));console.info('population-profile-sampling-interval-us 10000');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
  const started=Date.now();
  try{
   for(let i=0;i<contract.stages.length;i++){
