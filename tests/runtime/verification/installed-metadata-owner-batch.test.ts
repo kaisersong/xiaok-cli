@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
-import {installedControllerFixture} from '../../support/installed-controller-fixture.js';
+import {installedControllerFixture,isInstalledControllerShutdownUnresolved} from '../../support/installed-controller-fixture.js';
 import * as metadata from '../../../src/runtime/verification/installed-metadata-source.js';
 import * as census from '../../../src/runtime/verification/native-sqlite-census.js';
 import * as shared from '../../../src/runtime/verification/shared-blob-capacity.js';
@@ -40,7 +40,7 @@ it('fresh native and shared batches reject handles after the actual installed co
  const f=await fixture();await f.close();expect(()=>batch(f.handles,f.database,'authority')).toThrow();expect(()=>sharedBatch(f.authority,f.handles)).toThrow();
 });
 it('original metadata rejects virtual profiles before semantic reads or registered row callbacks',async()=>{
- const f=await fixture();try{const rows=f.database.prepare('SELECT uid,account_id,profile_id,state FROM main.verification_profiles').all() as Array<{uid:number;account_id:string;profile_id:string;state:string}>;let calls=0;f.database.table('profiles_probe',()=>({columns:['uid','account_id','profile_id','state'],rows:function*(){calls++;for(const row of rows)yield [row.uid,row.account_id,row.profile_id,row.state];}}));f.database.exec('DROP TABLE main.verification_profiles;CREATE VIRTUAL TABLE main.verification_profiles USING profiles_probe');let error:unknown;try{metadata.readInstalledMetadataSessions(f.source,f.database,'authority');}catch(e){error=e;}expect(calls).toBe(0);expect((error as Error)?.message).toBe('native_sqlite_census_schema');}finally{await f.close();}
+ const f=await fixture();let poisoned=false;try{const rows=f.database.prepare('SELECT uid,account_id,profile_id,state FROM main.verification_profiles').all() as Array<{uid:number;account_id:string;profile_id:string;state:string}>;let calls=0;f.database.table('profiles_probe',()=>({columns:['uid','account_id','profile_id','state'],rows:function*(){calls++;for(const row of rows)yield [row.uid,row.account_id,row.profile_id,row.state];}}));f.database.exec('DROP TABLE main.verification_profiles;CREATE VIRTUAL TABLE main.verification_profiles USING profiles_probe');poisoned=true;let error:unknown;try{metadata.readInstalledMetadataSessions(f.source,f.database,'authority');}catch(e){error=e;}expect(calls).toBe(0);expect((error as Error)?.message).toBe('native_sqlite_census_schema');}finally{if(poisoned)await expectRetainedProducerSchemaClose(f);else await f.close();}
 });
 it('actual metadata ledger attribution checkpoint rejects trigger changes and atomically rolls back original rows',async()=>{
  const f=await fixture();try{
@@ -64,3 +64,17 @@ it.each(['mixed-epochs','same-temporary-epoch'] as const)('fresh owner batch rej
  expect(()=>batch([mode==='mixed-epochs'?f.handles[0]:issuedA.owner,issuedB.owner],f.database,'authority')).toThrow('metadata_owner_census_changed');expect(calls).toBe(4);expect(f.database.prepare('PRAGMA main.table_info(verification_registered_invocations)').all().some((column:any)=>column.name==='rollback_census')).toBe(false);
  }finally{attack=undefined;await f.close();}
 });
+
+// This case deliberately leaves a producer namespace invalid. The original
+// close must fail closed and retain its actual lifetime, not remove the DB.
+async function expectRetainedProducerSchemaClose(f:Awaited<ReturnType<typeof installedControllerFixture>>){
+ let failure:unknown;try{await f.close();}catch(error){failure=error;}
+ expect(failure).toBeInstanceOf(AggregateError);
+ if(!(failure instanceof AggregateError))throw Error('expected_original_schema_shutdown_failure',{cause:failure});
+ expect(failure.message).toBe('installed_controller_shutdown_unknown');
+ expect(failure.errors).toHaveLength(1);
+ expect(failure.errors[0]).toBeInstanceOf(Error);
+ expect(failure.errors[0]?.message).toBe('native_sqlite_census_schema');
+ expect(isInstalledControllerShutdownUnresolved(failure)).toBe(true);
+ expect(f.database.open).toBe(true);
+}

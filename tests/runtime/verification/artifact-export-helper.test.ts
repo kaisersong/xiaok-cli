@@ -1,18 +1,20 @@
 import {afterAll,beforeAll,expect,it} from 'vitest';
-import {spawn,spawnSync,type ChildProcessWithoutNullStreams} from 'node:child_process';
+import {execFile,spawn,spawnSync,type ChildProcessWithoutNullStreams} from 'node:child_process';
+import {promisify} from 'node:util';
 import {copyFileSync,realpathSync,mkdtempSync,mkdirSync,readFileSync,writeFileSync,existsSync,statSync,renameSync,symlinkSync,linkSync,rmSync,openSync,writeSync,closeSync,truncateSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createHash,randomUUID,randomBytes} from 'node:crypto';
 const root=resolve(import.meta.dirname,'../../..'),work=realpathSync(mkdtempSync(join(tmpdir(),'xiaok-export-helper-'))),binary=join(work,process.platform==='win32'?'export.exe':'export'),children=new Set<ChildProcessWithoutNullStreams>();
 const hash=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
-beforeAll(()=>{
+beforeAll(async()=>{
  const lock=JSON.parse(readFileSync(join(root,'scripts/verification/artifact-export-toolchain.lock.json'),'utf8'));
  const host=lock.hosts[`${process.platform}-${process.arch}`];
  const archive=process.env.XIAOK_EXPORT_HELPER_TOOLCHAIN_ARCHIVE??join(root,'.artifacts/solpi-build-tools',host.filename);
  const target=`${process.platform}-${process.arch}`;
- const built=spawnSync(process.execPath,[join(root,'scripts/verification/build-artifact-export-helper.mjs'),'--target',target,'--toolchain-archive',archive],{env:{...process.env,TAR_OPTIONS:'--invalid-inherited-tar-option',GOROOT:join(work,'untrusted-sdk'),GOFLAGS:'-overlay=invalid-inherited-overlay.json',GOCACHEPROG:'must-not-execute'},encoding:'utf8',timeout:150000});
- expect(built.error?.message??built.stderr).toBe('');expect(built.status).toBe(0);
+ const built=await promisify(execFile)(process.execPath,[join(root,'scripts/verification/build-artifact-export-helper.mjs'),'--target',target,'--toolchain-archive',archive],{env:{...process.env,TAR_OPTIONS:'--invalid-inherited-tar-option',GOROOT:join(work,'untrusted-sdk'),GOFLAGS:'-overlay=invalid-inherited-overlay.json',GOCACHEPROG:'must-not-execute'},encoding:'utf8',timeout:150000,maxBuffer:1024*1024});
+ // execFile rejects on startup, timeout and nonzero exit after the owned child closes.
+ expect(built.stderr).toBe('');
  const {output}=JSON.parse(built.stdout.trim()),manifest=JSON.parse(readFileSync(join(output,'manifest.json'),'utf8'));
  expect(manifest.toolchainArchive.sha256).toBe(host.sha256);
  copyFileSync(join(output,manifest.filename),binary);

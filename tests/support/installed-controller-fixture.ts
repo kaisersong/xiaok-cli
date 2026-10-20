@@ -13,7 +13,8 @@ import * as operationModule from '../../src/runtime/verification/approved-verifi
 import * as stackModule from '../../src/runtime/verification/installed-execution-stack.js';
 import * as artifactModule from '../../src/runtime/verification/approved-artifact-reader.js';
 import * as publicModule from '../../src/runtime/verification/controller-public-daemon.js';
-import {startInstalledVerificationController,isInstalledControllerShutdownUnresolved} from '../../src/runtime/verification/installed-controller.js';
+import {startInstalledVerificationController} from '../../src/runtime/verification/installed-controller.js';
+import * as installedControllerModule from '../../src/runtime/verification/installed-controller.js';
 import type {BlackboxObservation,RecipeBinding} from '../../src/runtime/verification/independent-recipes.js';
 type BlackboxRequest={binding:RecipeBinding;caseId:string;caseInvocationId:string;input:Buffer};
 function returned<T>(result:{type:'return';value:T}|{type:'throw'|'incomplete';value:unknown}|undefined):NonNullable<T>{
@@ -161,4 +162,11 @@ export async function installedControllerStartupFixture(options:InstalledControl
  const value=await createInstalledControllerFixture({...options,startupOnly:true});
  if(!('startupPromise' in value))throw Error('fixture_missing_startup_promise');
  return value;
+}
+
+// Resolve the actual readonly brand check at call time: a direct re-export can
+// capture an undefined binding while Vitest initializes this fixture's cycle.
+// The root import stays at the original fixture boundary, after OS mock setup.
+export function isInstalledControllerShutdownUnresolved(error:unknown):boolean{
+ return installedControllerModule.isInstalledControllerShutdownUnresolved(error);
 }
