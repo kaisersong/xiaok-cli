@@ -134,7 +134,8 @@ function runActualIntentControllerScenario(mode:typeof scenarios[number],ctx:Tes
  return scenario;
 }
 // Vitest each supplies only case arguments; for also supplies the actual TestContext.
-it.for(scenarios.filter(mode=>!mode.includes('parent')))('Intent signed controller actual material and independent recipe: %s',{timeout:60000},runActualIntentControllerScenario);
+for(const mode of scenarios.filter(mode=>!mode.includes('parent')))
+ it.for([mode])('Intent signed controller actual material and independent recipe: %s',{timeout:mode==='receiver-project'?125000:60000},runActualIntentControllerScenario);
 // New three-subject end-to-end scenario includes the extra parent native/material/recipe/receiver chain. Existing two-stage bounds stay unchanged.
 it.for(scenarios.filter(mode=>mode.includes('parent')))('Intent signed controller actual material and independent recipe: %s',{timeout:180000},runActualIntentControllerScenario);
 

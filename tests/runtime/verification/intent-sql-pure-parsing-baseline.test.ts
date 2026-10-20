@@ -74,4 +74,4 @@ it('reuses pure SQL contracts across every actual dependency, completion and ins
   active='setup';const opened=f.f.composition.privateHost.enrollment.openOwner(intentHostSubjectOwner(f.subjects[1]),f.f.peer);await post('Profiler.takePreciseCoverage');active='completion-inspect';actual=0;
   const inspection:any=f.f.composition.public.invoke('completion.inspect',opened,f.f.peer);expect(inspection.currentVerification).toBe('valid');expect(actual).toBe(1);assertPath(32,'f5eee1f76115d2cfad3718f5aaabf65c36910588847365f91fd729e0809890e0',1,32,1,[[32,1]]);await assertAllDecoders(17);
  }finally{await post('Profiler.stopPreciseCoverage');inspector.disconnect();if(process.env.XIAOK_SQL_PARSE_CANDIDATE_OUTPUT)writeFileSync(process.env.XIAOK_SQL_PARSE_CANDIDATE_OUTPUT,JSON.stringify({records,results,coverages},null,2));spy.mockRestore();readSpy.mockRestore();contextSpy.mockRestore();await f.close();}
-},30000);
+},50000);

@@ -4,7 +4,7 @@ import {createPublicationClient} from '../../../src/runtime/verification/publica
 import {createAuthenticatedControllerClient} from '../../../src/runtime/verification/controller-client.js';
 import {startPublicController} from '../../../src/runtime/verification/controller-public-daemon.js';
 import {callControllerIpc} from '../../../src/runtime/verification/controller-ipc.js';
-import {it,expect,vi} from 'vitest';
+import {it,expect,vi,type TestContext} from 'vitest';
 import {join} from 'node:path';
 import {Session as InspectorSession} from 'node:inspector';
 import {createHash} from 'node:crypto';
@@ -16,20 +16,51 @@ import {createReceiverReplyVerifier} from '../../../src/runtime/verification/rec
 import {createReceiverUploadVerifier} from '../../../src/runtime/verification/receiver-upload-authentication.js';
 import {publicationReviewBytes} from '../../../src/runtime/verification/publication-operation-review.js';
 import {createApprovedPublicationOperations} from '../../../src/runtime/verification/approved-publication-operation.js';
-it.each(['publish','expired-approval','wrong-peer','repeat','lost-commit','reopen-query','wrong-receipt','principal-changed','expired-after-stage','aborted-native','competing-challenges','public-client','public-client-goal','public-client-large','public-client-near-limit','failed-upload-recovery','principal-during-registration','observe-principal-change','observe-revision-change','observe-expired-proof','observe-offline','read-payload','read-payload-stale','read-payload-corrupt','read-payload-principal','read-payload-near-limit','read-payload-replaced','read-payload-single-capture'] as const)('actual verification to receiver publication: %s',async mode=>{
+const publicationScenarios=['publish','expired-approval','wrong-peer','repeat','lost-commit','reopen-query','wrong-receipt','principal-changed','expired-after-stage','aborted-native','competing-challenges','public-client','public-client-goal','public-client-large','public-client-near-limit','failed-upload-recovery','principal-during-registration','observe-principal-change','observe-revision-change','observe-expired-proof','observe-offline','read-payload','read-payload-stale','read-payload-corrupt','read-payload-principal','read-payload-near-limit','read-payload-replaced','read-payload-single-capture'] as const;
+// User-approved near-limit budget; only this case receives timeout cancellation and join.
+for(const scenario of publicationScenarios){
+ if(scenario==='public-client-near-limit'){
+  it.for([scenario])('actual verification to receiver publication: %s',{timeout:300000},(mode,ctx:TestContext)=>{
+   const scenarioPromise=actualPublicationScenario(mode,ctx.signal);
+   const settledOutcome=scenarioPromise.then(()=>({failed:false,error:undefined}),(error:unknown)=>({failed:true,error}));
+   ctx.onTestFinished(async()=>{
+    const outcome=await settledOutcome;
+    if(ctx.signal.aborted&&outcome.failed&&outcome.error!==ctx.signal.reason)throw outcome.error;
+   });
+   return scenarioPromise;
+  });
+ }else it.each([scenario])('actual verification to receiver publication: %s',mode=>actualPublicationScenario(mode),120000);
+}
+async function actualPublicationScenario(mode:typeof publicationScenarios[number],testSignal?:AbortSignal){
+ testSignal?.throwIfAborted();
+ const nearCleanup:Array<()=>void|Promise<void>>=[],nearServerFailures:unknown[]=[];let bodyFailure:{error:unknown}|undefined;
+ try{
  const f=await verifiedOperationFixture(mode==='public-client-goal'?'goal-application':(mode==='read-payload-near-limit'||mode==='public-client-near-limit')?'maximum-artifact':(mode.startsWith('read-payload')||mode==='public-client-large')?'large-artifact':'dispatch', (mode==='read-payload-near-limit'||mode==='public-client-near-limit')?{controllerMetadataMinimumBytes:96*1024**2}:{}),identity=f.receiverIdentity,socketPath=join(f.root,'receiver.sock');
+ if(testSignal)nearCleanup.unshift(()=>f.close());
  const store=new VerificationReceiverStore({root:join(f.root,'receiver-state'),...identity,clock:f.clock});
+ if(testSignal)nearCleanup.unshift(()=>store.close());
  // Explicit peer fixture: full protocol/SQLite/signatures, not installed UID qualification.
  let changeDuringRecovery=false,recoveryConnections=0;
  const service=await startReceiverService({socketPath,controllerServiceUid:501,identity,privateKey:f.keys.privateKey,store,assertCurrent(){},readPeer:()=>{if(changeDuringRecovery&&++recoveryConnections===2)changedPrincipal=true;return {...f.peer,pid:123};}});
+ if(testSignal)nearCleanup.unshift(()=>service.close());
  const transport=createReceiverTransport({socketPath,receiverServiceUid:700,identity,verifier:createReceiverReplyVerifier({...identity,publicKey:f.keys.publicKey}),uploadVerifier:createReceiverUploadVerifier({...identity,publicKey:f.keys.publicKey}),assertCurrent(){},readPeer:()=>({uid:700,gid:700,auditSessionId:1,pid:234})});
+ if(testSignal)nearCleanup.unshift(()=>transport.close());
  let afterQuery:(()=>Promise<void>)|undefined;let approvals=0,commits=0,cancels=0,changedPrincipal=false,clockOverride:Partial<ReturnType<typeof f.clock>>={};const cancellation=new AbortController();
  const options={database:f.database,authorityId:'authority',completion:f.composition,verification:f.operations,receiverIdentity:identity,receiver:{async stagePayload(...args:Parameters<typeof transport.stagePayload>){if(mode==='failed-upload-recovery'||mode==='principal-during-registration')throw Error('upload unavailable before registration');const staged=await transport.stagePayload(...args);if(mode==='expired-after-stage')f.setTime(999999);return staged;},async call(...args:Parameters<typeof transport.call>){const result=await transport.call(...args);if(args[0]==='query'&&afterQuery){const hook=afterQuery;afterQuery=undefined;await hook();}if(args[0]==='cancel')cancels++;if(args[0]==='commit'){commits++;if(mode==='lost-commit')throw Error('response lost after real commit');}return result;}},clock:()=>({...f.clock(),...clockOverride}),assertCurrent(){},resolvePrincipal:(p:typeof f.peer)=>({...p,accountGeneration:changedPrincipal?'22222222-AAAA-BBBB-CCCC-555555555555':'11111111-AAAA-BBBB-CCCC-555555555555',source:'macos-local-generateduid' as const}),async approve(review:any){approvals++;if(mode==='principal-changed')changedPrincipal=true;if(mode==='aborted-native')cancellation.abort();if(mode==='expired-approval')f.setTime(999999);return{version:1 as const,purpose:'completion-publication' as const,authorityId:review.authorityId,challengeId:review.challengeId,uid:review.principal.uid,accountGeneration:review.principal.accountGeneration,auditSessionId:review.principal.auditSessionId,requestSource:review.requestSource,fullReviewHash:mode==='wrong-receipt'?'f'.repeat(64):createHash('sha256').update(publicationReviewBytes(review)).digest('hex')};}};
  let operations=createApprovedPublicationOperations(options);let publicServer:Awaited<ReturnType<typeof startPublicController>>|undefined,publicClient:ReturnType<typeof createAuthenticatedControllerClient>|undefined;
+ if(testSignal)nearCleanup.unshift(()=>publicClient?.dispose(),()=>publicServer?.close(),()=>operations.close());
  try{
   if(mode.startsWith('public-client')){
-   const path=join(f.root,'public.sock');publicServer=await startPublicController({socketPath:path,authorityId:'authority',serviceEpoch:'epoch',privateKey:f.keys.privateKey,allowedUserIds:[501],acceptPeer:()=>f.peer,async invoke(method,payload,p,signal){if(method==='publication.prepare')return operations.prepare(payload,p);if(method==='publication.approve')return operations.approve(payload,p,signal);if(method==='publication.reconcile')return operations.reconcile(payload,p,signal);if(method==='publication.observeOwner')return operations.observeOwner(payload,p,signal);if(method==='publication.readOwnerPayload')return operations.readOwnerPayload(payload,p,signal);if(method==='publication.recoverExpired')return operations.recoverExpired(payload,p,signal);throw Error('method');}});
-   publicClient=createAuthenticatedControllerClient({authorityId:'authority',publicKey:f.keys.publicKey,roundTrip:(bytes,signal)=>callControllerIpc(path,bytes,{signal}),roundTripSync(){throw Error('no sync');}});
+   const path=join(f.root,'public.sock');const serverOptions:Parameters<typeof startPublicController>[0]={socketPath:path,authorityId:'authority',serviceEpoch:'epoch',privateKey:f.keys.privateKey,allowedUserIds:[501],acceptPeer:()=>f.peer,async invoke(method,payload,p,signal){if(method==='publication.prepare')return operations.prepare(payload,p);if(method==='publication.approve')return operations.approve(payload,p,signal);if(method==='publication.reconcile')return operations.reconcile(payload,p,signal);if(method==='publication.observeOwner')return operations.observeOwner(payload,p,signal);if(method==='publication.readOwnerPayload')return operations.readOwnerPayload(payload,p,signal);if(method==='publication.recoverExpired')return operations.recoverExpired(payload,p,signal);throw Error('method');}};
+   if(testSignal){
+    const caseSignal=testSignal,invoke=serverOptions.invoke;
+    serverOptions.invoke=async(method,payload,peer,serverSignal)=>{
+     const signal=AbortSignal.any([serverSignal,caseSignal]);
+     try{signal.throwIfAborted();return await invoke(method,payload,peer,signal);}catch(error){if(!caseSignal.aborted||error!==caseSignal.reason)nearServerFailures.push(error);throw error;}
+    };
+   }
+   publicServer=await startPublicController(serverOptions);
+   publicClient=createAuthenticatedControllerClient({authorityId:'authority',publicKey:f.keys.publicKey,roundTrip:(bytes,signal)=>{if(testSignal){signal=signal===undefined?testSignal:AbortSignal.any([signal,testSignal]);signal.throwIfAborted();}return callControllerIpc(path,bytes,{signal,...(mode==='public-client-near-limit'?{timeoutMs:300000}:{})});},roundTripSync(){throw Error('no sync');}});
    const client=createPublicationClient({owner:f.owner,requestSource:'agent',transport:publicClient.publicationTransport}),ticket=await client.prepare();
    expect(Object.keys(ticket).sort()).toEqual(['challengeId','deadline','fullTupleHash','owner']);
    await expect(client.approve({...ticket})).rejects.toThrow('publication_client_challenge');
@@ -114,8 +145,21 @@ it.each(['publish','expired-approval','wrong-peer','repeat','lost-commit','reope
   if(mode==='reopen-query'){await operations.close();operations=createApprovedPublicationOperations(options);}
   const recovered=await operations.reconcile({challengeId:prepared.challengeId},f.peer,new AbortController().signal);expect(recovered.status).toBe('committed');expect(recovered.fullTupleHash).toBeTruthy();const observed=await operations.observeOwner({ownerKind:'task',ownerId:'task'},f.peer,cancellation.signal);expect(observed.publication).toMatchObject({status:'committed',current:true,fullTupleHash:prepared.fullTupleHash});const newLogin=await operations.observeOwner({ownerKind:'task',ownerId:'task'},{...f.peer,auditSessionId:f.peer.auditSessionId+1},cancellation.signal);expect(newLogin.publication).toMatchObject({status:'committed',current:true});expect(commits).toBe(1);expect((await operations.recoverExpired({challengeId:prepared.challengeId},f.peer,cancellation.signal)).status).toBe('committed');expect(cancels).toBe(0);
   await expect(operations.approve({challengeId:prepared.challengeId},f.peer,cancellation.signal)).rejects.toThrow();expect(approvals).toBe(1);
- }finally{publicClient?.dispose();await publicServer?.close();await operations.close();await transport.close();await service.close();store.close();await f.close();}
-},120000);
+ }finally{
+  if(!testSignal){publicClient?.dispose();await publicServer?.close();await operations.close();await transport.close();await service.close();store.close();await f.close();}
+ }
+ }catch(error){if(testSignal)bodyFailure={error};throw error;}
+ finally{
+  if(testSignal){
+   const cleanupErrors:unknown[]=[];
+   for(const close of nearCleanup){
+    try{await close();}catch(error){cleanupErrors.push(error);}
+   }
+   const failures=[...nearServerFailures,...cleanupErrors];
+   if(failures.length)throw new AggregateError([...(bodyFailure?[bodyFailure.error]:[]),...failures],'publication_near_limit_cleanup_or_transport_failed');
+  }
+ }
+}
 it('rejects copied or foreign actual verification assembly before creating publication state',async()=>{
  const a=await verifiedOperationFixture(),b=await verifiedOperationFixture();
  try{for(const verification of [{...a.operations},b.operations]){
