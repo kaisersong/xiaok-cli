@@ -3,7 +3,13 @@ on:
   push:
     branches: [master]
   pull_request: {}
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      signed99_cpu_diagnostic:
+        description: 'Diagnostic only: original worker profile after three publications; not signed99 acceptance'
+        type: boolean
+        default: false
+        required: false
 jobs:
   governance:
     strategy:
@@ -20,3 +26,36 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run test:governance
       - run: npm run governance:check
+
+  signed99-worker-cpu-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.signed99_cpu_diagnostic }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3 node-pty nodejieba
+      - name: Capture original worker profile (expected diagnostic sentinel)
+        id: signed99_cpu
+        run: python3 scripts/diagnostics/signed99-worker-cpu.py --output "${{ runner.temp }}/signed99-worker-cpu"
+      - name: Upload allowlisted diagnostic evidence only
+        if: ${{ always() && steps.signed99_cpu.outputs.artifact_safe == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed99-worker-cpu-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/profile.cpuprofile
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/raw.log
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/vitest.json
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/process.json
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/validation.json
