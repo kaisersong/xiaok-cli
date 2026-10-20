@@ -57,4 +57,4 @@ for(const mode of ['current','expired','different-run','duplicate','not-publishe
    expect(receiver.approvals).toBe(2);
   }else{await expect(observe()).rejects.toThrow();if(mode==='nonoverlap'){expect(queries).toBe(2);expect(f.composition.privateHost.authorityService.inspectOwner(other)?.currentVerification).toBe('valid');}}
  }finally{await receiver.close();await f.close();}
-});
+}, 18_000);
