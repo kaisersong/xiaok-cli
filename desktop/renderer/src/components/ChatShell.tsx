@@ -656,7 +656,8 @@ export function ChatShell() {
           providerAuth: t.chatShell.modelAuthFailed,
           modelKeyMissing: t.chatShell.modelKeyMissing,
           providerService: t.chatShell.modelServiceFailed,
-              modelConnectionFailed: t.chatShell.modelConnectionFailed,
+          modelConnectionFailed: t.chatShell.modelConnectionFailed,
+          modelTextRepetition: t.chatShell.modelTextRepetition,
           modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
         });
         streamRef.current = '';
@@ -1031,6 +1032,7 @@ export function ChatShell() {
               modelKeyMissing: t.chatShell.modelKeyMissing,
               providerService: t.chatShell.modelServiceFailed,
               modelConnectionFailed: t.chatShell.modelConnectionFailed,
+              modelTextRepetition: t.chatShell.modelTextRepetition,
               modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
             });
             msgs.push({

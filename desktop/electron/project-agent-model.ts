@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../src/ai/models.js';
-import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
+import { resolveModelRecoveryPolicy } from '../../src/ai/runtime/model-stream-recovery.js';
+import { MODEL_TEXT_REPETITION_CODE } from '../../src/ai/runtime/model-text-repetition.js';
 import { streamDesktopTaskRecovery } from './desktop-task-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
@@ -16,6 +17,7 @@ export function validateProjectAgentModelSelection(modelId: unknown, runtimeType
 }
 
 function isBoundaryFailure(error: unknown): boolean {
+  if (error && typeof error === 'object' && (error as { code?: unknown }).code === MODEL_TEXT_REPETITION_CODE) return true;
   return error instanceof Error && (error.name === 'AbortError' || /KIMI_K3_|authorization|permission|task.cancelled|workspace_|deadline/i.test(error.message));
 }
 
@@ -61,10 +63,11 @@ export async function createProjectAgentModel(options: {
             yield* streamDesktopTaskRecovery({...input, adapter, messages, systemPrompt, invocationId});
             return;
           }
-          await input.beforeRequest?.();
-          input.options?.signal?.throwIfAborted();
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
-          for await (const chunk of streamDesktopTaskProviderConversation({...input, adapter, messages, systemPrompt, invocationId})) {
+          // Keep its existing one-request/fallback policy, but share repetition,
+          // cancellation and deadline ownership with the default-model path.
+          for await (const chunk of streamDesktopTaskRecovery({...input, adapter, messages, systemPrompt, invocationId,
+            policy: { ...(input.policy ?? resolveModelRecoveryPolicy()), windowMs: 0 } })) {
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
