@@ -1,0 +1,48 @@
+name: Plugin offline wheels (manual only)
+on:
+  workflow_dispatch:
+    inputs:
+      verify_windows_offline:
+        description: Verify exact public sibling offline wheels and original Python tests
+        type: boolean
+        required: false
+        default: false
+permissions:
+  contents: read
+jobs:
+  windows-offline:
+    if: ${{ inputs.verify_windows_offline == true }}
+    runs-on: windows-2022
+    steps:
+      - name: Preserve exact Git blob line endings
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          path: cli
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kai-xiaok-plugins
+          ref: 210998993f6a95ff0f5fcf0a431edca08676a195
+          path: plugin
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          architecture: x64
+      - name: Offline closure then original Python wholes
+        shell: pwsh
+        working-directory: cli
+        run: |
+          python scripts/diagnostics/plugin-offline-wheels.py --plugin ../plugin --output "$env:RUNNER_TEMP/plugin-offline-${{ github.run_id }}-${{ github.run_attempt }}"
+          exit $LASTEXITCODE
+      - name: Original evidence (no venv or checkout upload)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-offline-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plugin-offline-${{ github.run_id }}-${{ github.run_attempt }}/evidence/
+          if-no-files-found: error
+          retention-days: 7
