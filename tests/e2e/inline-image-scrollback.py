@@ -17,6 +17,8 @@ def run(project: Path) -> None:
     helpers = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helpers)
     root = Path(tempfile.mkdtemp(prefix='xiaok-inline-image-scrollback-'))
+    (root / 'config').mkdir()
+    (root / 'home').mkdir()
     socket = f'xiaok-image-scrollback-{int(time.time() * 1000)}'
 
     class IsolatedTmux(helpers.TmuxHarness):
