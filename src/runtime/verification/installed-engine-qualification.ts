@@ -49,7 +49,7 @@ if [ "$probe_interfaces" = lo ]; then
   :
 else
   probe_interface_status=$?
-  (printf 'qualification_probe_interfaces stage=loopback_only exit=%s begin\\n%s\\nqualification_probe_interfaces end\\n' "$probe_interface_status" "$probe_interfaces" >&2) || :
+  (printf 'qualification_probe_interfaces stage=loopback_only exit=%s begin\\n%s\\nqualification_probe_interfaces end\\n' "$probe_interface_status" "$probe_interfaces") >&2 || :
   exit "$probe_interface_status"
 fi
 [ ! -S /var/run/docker.sock ]
