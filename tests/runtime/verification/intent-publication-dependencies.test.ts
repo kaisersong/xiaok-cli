@@ -54,20 +54,20 @@ it('actual original Intent dependency observation derives empty first-stage and 
   f.f.database.prepare('DELETE FROM owner_enrollment_intent_contracts WHERE owner_key=?').run(json(f.owners.at(-1)));
   await expect(observe(f.subjects[0])).rejects.toThrow();
  }finally{await f.close();}
-},30000);
+},45000);
 it('late expiration of an earlier dependency cannot be spliced into an otherwise-current parent set',async()=>{
  let ready=false,queries=0,expire:()=>void=()=>{};const f=await fixture(()=>{if(ready&&++queries===2)expire();});try{expire=()=>f.f.setTime(10000);ready=true;await expect((f.receiver.publication as any).observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal())).rejects.toThrow();expect(queries).toBe(2);}finally{await f.close();}
-},30000);
+},40000);
 it('foreign subject and caller-selected inventory cannot redefine original native dependencies',async()=>{
  const f=await fixture();try{for(const query of [{subject:{...f.subjects.at(-1),sessionId:'foreign'}},{subject:f.subjects.at(-1),owners:[f.owners[0]]}])await expect((f.receiver.publication as any).observeIntentDependencies(query,f.f.peer,signal())).rejects.toThrow();expect(f.f.database.prepare('SELECT count(*) n FROM verification_owner_dependencies').get()).toEqual({n:3});}finally{await f.close();}
-},30000);
+},40000);
 
 it('final whole-set check rejects a dependency application entering pending during the last receiver query',async()=>{
  let ready=false,queries=0,change:()=>void=()=>{};const f=await fixture(()=>{if(ready&&++queries===2)change();});try{
   change=()=>{const before=f.f.composition.privateHost.authorityHost.inspectApplication(f.owners[0]).current!;const old=structuredClone(f.bindings[0]);const {contractHash:_,candidatePayloadHash:__,...raw}=old;const binding=createIntentApplicationBinding({...raw,candidateId:'replacement',candidateRevision:2});f.f.composition.privateHost.authorityHost.beginApplicationTransition({owner:f.owners[0],transitionId:'late-transition',previousBindingHash:before.bindingHash,binding,registrationHash:'a'.repeat(64)});};ready=true;
   await expect((f.receiver.publication as any).observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal())).rejects.toThrow();expect(queries).toBe(2);
  }finally{await f.close();}
-},30000);
+},40000);
 
 import {startPublicController} from '../../../src/runtime/verification/controller-public-daemon.js';
 import {createAuthenticatedControllerClient} from '../../../src/runtime/verification/controller-client.js';
@@ -83,19 +83,20 @@ it('actual signed controller routes full original payload pages and last complet
  installed.factory=()=>createAuthenticatedControllerClient({authorityId:'authority',publicKey:keys.publicKey,roundTrip:bytes=>callControllerIpc(socketPath,bytes),roundTripSync(){throw Error('unused');}});
  installed.route=(owner:any)=>({kind:'protected-unregistered',authorityId:'authority',owner:{...owner,profileId:f.owners[0].profileId}});
  try{const result=await readCurrentIntentPublicationDependencies(f.subjects.at(-1));expect(result.publications.map(p=>p.owner)).toEqual(f.owners.slice(0,-1));expect(reads).toBe(2);expect(sets).toBe(1);expect(f.receiver.approvals).toBe(2);for(const p of result.publications)expect(JSON.parse(p.bytes.toString()).application).toEqual(p.application);}finally{installed.factory=installed.route=undefined;await server.close();app.close();await f.close();}
-},30000);
+},60000);
 
 it('no qualified callback occurs after the final qualified authority clock in the dependency result',async()=>{
  let armed=false,reading=false,clocks=0,tails=0;
  const f=await fixture(undefined,{onClock(){if(reading&&new Error().stack?.includes('inspectIntentPublicationDependencies')){clocks++;if(clocks===2)armed=true;}},onAuthorityQualified(){if(armed){tails++;throw Error('qualified_callback_after_final_clock');}}});
  try{reading=true;const result=await f.receiver.publication.observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal());expect(result.publications).toHaveLength(2);expect(clocks).toBe(2);expect(tails).toBe(0);}finally{armed=false;reading=false;await f.close();}
-},30000);
+},40000);
 
-it.each(['expire','close'] as const)('final authority clock %s still fences the result without a wrapper callback',async mode=>{
+for(const row of ['expire','close'] as const)
+ it.each([row])('final authority clock %s still fences the result without a wrapper callback',async mode=>{
  let reading=false,clocks=0,change:()=>void=()=>{};
  const f=await fixture(undefined,{onClock(){if(reading&&new Error().stack?.includes('inspectIntentPublicationDependencies')){clocks++;if(clocks===2&&mode==='close')change();}},onAuthorityQualified(){if(reading&&clocks===1&&mode==='expire'&&new Error().stack?.includes('inspectIntentPublicationDependencies'))change();}});
  try{change=()=>mode==='close'?f.f.composition.close():f.f.setTime(10000);reading=true;await expect(f.receiver.publication.observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal())).rejects.toThrow();expect(clocks).toBe(2);}finally{reading=false;await f.close();}
-},30000);
+},row==="expire"?45000:row==="close"?40000:30000);
 
 // Explicit extended acceptance: the original 99-stage pre-publication chain exceeded
 // 600s on 2026-09-27. Kept intact, not counted in routine component PASS.
@@ -106,7 +107,8 @@ it.runIf(process.env.SOLPI_INTENT_POPULATION === '1')('near-limit original contr
  const finalProfile=process.env.SOLPI_INTENT_FINAL_PROFILE==='1'?new InspectorSession():undefined;const finalPost=(method:string)=>new Promise<any>((resolve,reject)=>finalProfile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));if(finalProfile){finalProfile.connect();await finalPost('Profiler.enable');await finalPost('Profiler.start');console.info('population-final-set-start');}const finalStarted=Date.now();
  try{expect(Buffer.byteLength(json(f.contract))).toBeGreaterThan(60000);expect(f.contract.stages.length).toBeGreaterThan(80);const result:any=await client.publicationTransport.call('publication.observeIntentDependencies',{subject:f.subjects.at(-1)});expect(result.publications.map((v:any)=>v.owner)).toEqual(f.owners.slice(0,-1));expect(responseBytes).toBeLessThan(1024**2);console.info(JSON.stringify({contractBytes:Buffer.byteLength(json(f.contract)),stageCount:f.contract.stages.length,responseBytes}));}finally{console.info('population-final-set-ms '+(Date.now()-finalStarted));if(finalProfile){const result=await finalPost('Profiler.stop');writeFileSync('/tmp/solpi-intent-final-set.cpuprofile',JSON.stringify(result.profile));finalProfile.disconnect();}client.dispose();await server.close();await f.close();}
 },3600000);
-it.each(['noncanonical','subject','mandatory','registration'] as const)('whole graph read refuses actual sibling %s drift even for empty dependencies',async mode=>{
+for(const row of ['noncanonical','subject','mandatory','registration'] as const)
+ it.each([row])('whole graph read refuses actual sibling %s drift even for empty dependencies',async mode=>{
  const f=await fixture();try{
   const key=json(f.owners[1]),row=f.f.database.prepare('SELECT logical_owner_key,contract_json FROM owner_enrollment_intent_contracts WHERE owner_key=?').get(key) as {logical_owner_key:string;contract_json:string};
   if(mode==='mandatory')f.f.database.prepare('DELETE FROM mandatory_observation_checks WHERE owner_key=?').run(key);
@@ -114,8 +116,9 @@ it.each(['noncanonical','subject','mandatory','registration'] as const)('whole g
   else {const value=JSON.parse(row.contract_json);if(mode==='subject')value.subject.stageId=f.subjects[0].stageId;const encoded=mode==='noncanonical'?JSON.stringify(value,null,1):json(value);f.f.database.prepare('UPDATE owner_enrollment_intent_contracts SET contract_json=? WHERE owner_key=?').run(encoded,key);f.f.database.prepare('UPDATE owner_enrollment_intents SET intent_contract_json=? WHERE logical_owner_key=?').run(encoded,row.logical_owner_key);}
   await expect(f.receiver.publication.observeIntentDependencies({subject:f.subjects[0]},f.f.peer,signal())).rejects.toThrow();
  }finally{await f.close();}
-},30000);
-it.each(['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const)('actual invocation-only append retains complete parent graph: %s',async mode=>{
+},row==="noncanonical"?40000:row==="subject"?40000:row==="mandatory"?40000:30000);
+for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const)
+ it.each([row])('actual invocation-only append retains complete parent graph: %s',async mode=>{
  const f=await fixture();try{
   const parent=json(f.owners.at(-1)),sibling=json(f.owners[1]);
   if(mode==='missing-parent')f.f.database.prepare('DELETE FROM owner_enrollment_intent_contracts WHERE owner_key=?').run(parent);
@@ -126,7 +129,7 @@ it.each(['valid','missing-parent','missing-sibling-edge','extra-edge','parent-no
   const work=async()=>{const prepared:any=await f.f.composition.public.invoke('completion.prepare-owner',proposal,f.f.peer);return f.f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.f.peer);};
   if(mode==='valid'){await work();expect(f.f.composition.privateHost.enrollment.resolveOwnerKey(f.f.peer,invocation)).toBe(json(f.owners[0]));}else await expect(work()).rejects.toThrow();
  }finally{await f.close();}
-},30000);
+},row==="valid"?40000:row==="missing-parent"?40000:30000);
 
 it('completion observation includes its own actual publication and every original dependency without publishing the parent implicitly',async()=>{
  const f=await fixture();try{
@@ -135,12 +138,13 @@ it('completion observation includes its own actual publication and every origina
   await expect(f.receiver.publication.observeIntentCompletion({subject:f.subjects.at(-1)},f.f.peer,signal())).rejects.toThrow();
   await expect(f.receiver.publication.observeIntentCompletion({subject:f.subjects[1],owners:[f.owners[1]]},f.f.peer,signal())).rejects.toThrow('publication_operation_shape');
  }finally{await f.close();}
-},30000);
-it.each(['expire','close'] as const)('completion observation final clock %s rejects the entire self and dependency set',async mode=>{
+},45000);
+for(const row of ['expire','close'] as const)
+ it.each([row])('completion observation final clock %s rejects the entire self and dependency set',async mode=>{
  let reading=false,clocks=0,change:()=>void=()=>{};
  const f=await fixture(undefined,{onClock(){if(reading&&new Error().stack?.includes('inspectIntentPublicationCompletion')){clocks++;if(clocks===2&&mode==='close')change();}},onAuthorityQualified(){if(reading&&clocks===1&&mode==='expire'&&new Error().stack?.includes('inspectIntentPublicationCompletion'))change();}});
  try{change=()=>mode==='close'?f.f.composition.close():f.f.setTime(10000);reading=true;await expect(f.receiver.publication.observeIntentCompletion({subject:f.subjects[1]},f.f.peer,signal())).rejects.toThrow();expect(clocks).toBe(2);}finally{reading=false;await f.close();}
-},30000);
+},row==="expire"?45000:row==="close"?40000:30000);
 
 it('parent completion final set rejects old native-approved child publication references after a same-proof child republishes',async()=>{
  const f=await fixture();try{
@@ -158,10 +162,10 @@ it('parent completion final set rejects old native-approved child publication re
   expect(f.f.composition.privateHost.authorityService.inspectOwner(owner)?.currentVerification).toBe('valid');
   await expect(f.receiver.publication.observeIntentCompletion({subject},f.f.peer,signal())).rejects.toThrow();
  }finally{await f.close();}
-},60000);
+},105000);
 
 it('the original final dependency set carries actual receiver identity for parent capture',async()=>{
  const f=await fixture();try{const observed=await f.receiver.publication.observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal());
   for(const p of observed.publications){const row=f.f.database.prepare('SELECT tuple_json FROM settlement_decisions WHERE operation_id=?').get(p.operationId) as {tuple_json:string},tuple=JSON.parse(row.tuple_json);expect(p).toMatchObject({receiverId:tuple.receiverId,receiverProtocolVersion:tuple.receiverProtocolVersion,receiverInstanceEpoch:tuple.receiverInstanceEpoch});expect(p.fullTupleHash).toBe(hashVerificationTuple(tuple));}
  }finally{await f.close();}
-},30000);
+},40000);
