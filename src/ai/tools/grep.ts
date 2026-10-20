@@ -1,6 +1,6 @@
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
-import fg from 'fast-glob';
+import { runBoundedGlob } from './bounded-glob.js';
 import { readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import type { Tool } from '../../types.js';
@@ -31,7 +31,8 @@ function buildRegex(pattern: string): RegExp {
   }
 }
 
-async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string): Promise<string[]> {
+async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal): Promise<string[]> {
+  signal?.throwIfAborted();
   const resolvedPath = resolve(searchPath);
   const stats = statSync(resolvedPath);
   if (stats.isFile()) {
@@ -44,15 +45,12 @@ async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?
       ? (TYPE_GLOBS[type] ?? [`**/*.${type}`])
       : ['**/*'];
 
-  return fg(patterns, {
+  return (await runBoundedGlob({ patterns,
     cwd: resolvedPath,
-    absolute: true,
-    onlyFiles: true,
     dot: true,
-    unique: true,
-    suppressErrors: true,
+    skipInaccessible: true,
     ignore: ['**/.git/**', '**/node_modules/**'],
-  });
+  }, signal)).map(entry => entry.path);
 }
 
 export async function runFallbackGrepSearch(input: {
@@ -62,6 +60,7 @@ export async function runFallbackGrepSearch(input: {
   context?: number;
   output_mode?: string;
   type?: string;
+  signal?: AbortSignal;
 }): Promise<string[]> {
   const {
     pattern,
@@ -72,10 +71,11 @@ export async function runFallbackGrepSearch(input: {
     type,
   } = input;
   const matcher = buildRegex(pattern);
-  const files = await resolveFallbackFiles(searchPath, fileGlob, type);
+  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal);
   const results: string[] = [];
 
   for (const file of files) {
+    input.signal?.throwIfAborted();
     let lines: string[];
     try {
       lines = readFileSync(file, 'utf-8').split(/\r?\n/);
@@ -201,6 +201,7 @@ export const grepTool: Tool = {
         context,
         output_mode,
         type,
+        signal: toolContext?.signal,
       })).join('\n').trim();
     if (!output) return '（无匹配结果）';
     const page = paginateItems(output.split(/\r?\n/), offset, head_limit);

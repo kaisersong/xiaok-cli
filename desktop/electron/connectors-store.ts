@@ -18,6 +18,9 @@ import {
  *     "fetch": { "provider": "jina", "jinaApiKey": "..." }
  *   }
  *
+ * DeepSeek Search & Fetch 复用模型配置的 DeepSeek key，由
+ * ConnectorsService 运行时注入；deepseekApiKey 持续不落本文件。
+ *
  * Keys are stored in plaintext — same approach as model provider API keys
  * in this app. The file lives under the user-local app data directory which
  * is not world-readable on macOS/Windows.
@@ -81,14 +84,27 @@ export class ConnectorsStore {
   private doSave(input: unknown): ConnectorsConfig {
     const normalized = normalizeConnectorsConfig(input);
 
+    // deepseekApiKey 是运行时从「模型配置」注入的（见 connectors-service.ts），
+    // 不落 connectors.json，避免与模型配置形成两份可漂移的 key 副本。
     const persisted = {
       schemaVersion: 1,
-      search: { ...normalized.search },
-      fetch: { ...normalized.fetch },
+      search: {
+        provider: normalized.search.provider,
+        tavilyApiKey: normalized.search.tavilyApiKey,
+        braveApiKey: normalized.search.braveApiKey,
+        firecrawlApiKey: normalized.search.firecrawlApiKey,
+        searxngBaseUrl: normalized.search.searxngBaseUrl,
+      },
+      fetch: {
+        provider: normalized.fetch.provider,
+        jinaApiKey: normalized.fetch.jinaApiKey,
+        firecrawlApiKey: normalized.fetch.firecrawlApiKey,
+        firecrawlBaseUrl: normalized.fetch.firecrawlBaseUrl,
+      },
     };
 
     this.persist(persisted);
-    return normalized;
+    return persisted as ConnectorsConfig;
   }
 
   private persist(data: Record<string, unknown>): void {

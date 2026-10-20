@@ -1952,9 +1952,12 @@ export interface LocaleStrings {
     searchFirecrawlDesc: string;
     searchTavilyDesc: string;
     searchBraveDesc: string;
+    searchDeepseekDesc: string;
     fetchBasicDesc: string;
     fetchJinaDesc: string;
     fetchFirecrawlDesc: string;
+    fetchDeepseekDesc: string;
+    deepseekKeyFromModelConfigHint: string;
     firecrawlApiKeyPlaceholder: string;
     jinaApiKeyPlaceholder: string;
     tavilyApiKeyPlaceholder: string;

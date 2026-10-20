@@ -1,16 +1,18 @@
-export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
-export type FetchProviderName = 'basic' | 'jina' | 'firecrawl';
+export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'deepseek' | 'searxng';
+export type FetchProviderName = 'basic' | 'jina' | 'firecrawl' | 'deepseek';
 export interface SearchConnectorConfig {
     provider: SearchProviderName;
     tavilyApiKey?: string;
     braveApiKey?: string;
     firecrawlApiKey?: string;
+    deepseekApiKey?: string;
     searxngBaseUrl?: string;
 }
 export interface FetchConnectorConfig {
     provider: FetchProviderName;
     jinaApiKey?: string;
     firecrawlApiKey?: string;
+    deepseekApiKey?: string;
     firecrawlBaseUrl?: string;
 }
 export interface ConnectorsConfig {

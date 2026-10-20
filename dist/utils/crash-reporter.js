@@ -6,6 +6,21 @@ let crashContext = {};
 let handlersInstalled = false;
 let streamErrorHandler = null;
 let pipeBrokenFromStream = false;
+let fatalInProgress = false;
+let crashOutputRestorer = null;
+export function registerCrashOutputRestorer(restore) {
+    crashOutputRestorer = restore;
+    return () => { if (crashOutputRestorer === restore)
+        crashOutputRestorer = null; };
+}
+function restoreCrashOutput() {
+    const restore = crashOutputRestorer;
+    crashOutputRestorer = null;
+    try {
+        restore?.();
+    }
+    catch { /* Fatal diagnostics must still terminate. */ }
+}
 const CRASH_REPORT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SAFE_COMMANDS = new Set([
     'chat',
@@ -20,6 +35,7 @@ const SAFE_COMMANDS = new Set([
 ]);
 const SAFE_ERROR_CODES = new Set([
     'EACCES',
+    'EAGAIN',
     'EADDRINUSE',
     'ECONNREFUSED',
     'ECONNRESET',
@@ -28,6 +44,9 @@ const SAFE_ERROR_CODES = new Set([
     'EINVAL',
     'ENOENT',
     'ENOMEM',
+    'EMFILE',
+    'ENFILE',
+    'ENOBUFS',
     'ENOSPC',
     'EPERM',
     'EPIPE',
@@ -35,6 +54,10 @@ const SAFE_ERROR_CODES = new Set([
     'transcript_lock_identity_unreadable',
     'transcript_busy',
     'ordinary_source_route',
+]);
+const SAFE_CONSTRUCTORS = new Set([
+    'Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'URIError',
+    'EvalError', 'AggregateError', 'DOMException', 'TranscriptStorageError',
 ]);
 const SAFE_STARTUP_PHASES = new Set(['adapter', 'memory', 'credentials', 'platform', 'transcript', 'agent', 'ready']);
 const SAFE_STACK_MODULES = new Set([
@@ -139,6 +162,10 @@ function serializeError(error) {
     // One fixed internal sentinel only; never serialize arbitrary error messages.
     if (rawCode === undefined && error instanceof Error && error.message === 'ordinary_source_route')
         rawCode = 'ordinary_source_route';
+    const constructorName = error instanceof Error ? error.constructor?.name : undefined;
+    const errno = error && typeof error === 'object' && 'errno' in error ? error.errno : undefined;
+    const safeErrno = rawCode?.startsWith('E') && SAFE_ERROR_CODES.has(rawCode)
+        && typeof errno === 'number' && Number.isInteger(errno) && Math.abs(errno) <= 65535;
     const frames = [];
     if (error instanceof Error) {
         for (const line of (error.stack ?? '').split('\n').slice(1, 30)) {
@@ -162,6 +189,8 @@ function serializeError(error) {
     }
     return {
         type,
+        ...(constructorName && SAFE_CONSTRUCTORS.has(constructorName) ? { constructorName } : {}),
+        ...(safeErrno ? { errno } : {}),
         code: rawCode && SAFE_ERROR_CODES.has(rawCode)
             ? rawCode
             : 'UNCLASSIFIED_ERROR',
@@ -189,12 +218,15 @@ function shouldSilentlyExitOnBrokenPipe(stream) {
 }
 function installBrokenPipeExit(stream) {
     stream.on('error', (error) => {
+        if (fatalInProgress)
+            return;
         if (streamErrorHandler?.(error, stream)) {
             return;
         }
         if (isBrokenPipeError(error)) {
             pipeBrokenFromStream = true;
             if (shouldSilentlyExitOnBrokenPipe(stream)) {
+                restoreCrashOutput();
                 process.exit(0);
                 return;
             }
@@ -208,6 +240,29 @@ function installBrokenPipeExit(stream) {
         });
     });
 }
+/** One fatal owner: detach transcript capture before any await or diagnostic write. */
+export async function handleFatalError(error, label = '运行中断') {
+    if (fatalInProgress)
+        return;
+    fatalInProgress = true;
+    restoreCrashOutput();
+    try {
+        const path = await reportCrash(error);
+        try {
+            console.error(`\n[xiaok] ${label} — 崩溃报告已保存: ${path}`);
+        }
+        catch { }
+    }
+    catch {
+        try {
+            console.error(`\n[xiaok] ${label} — 保存崩溃报告失败`);
+        }
+        catch { }
+    }
+    finally {
+        process.exit(1);
+    }
+}
 export function installGlobalCrashHandlers() {
     if (handlersInstalled) {
         return;
@@ -216,6 +271,8 @@ export function installGlobalCrashHandlers() {
     installBrokenPipeExit(process.stdout);
     installBrokenPipeExit(process.stderr);
     const handle = async (label, error) => {
+        if (fatalInProgress)
+            return;
         if (isBrokenPipeError(error)
             && streamErrorHandler?.(error, process.stdout)) {
             return;
@@ -223,17 +280,11 @@ export function installGlobalCrashHandlers() {
         if (isBrokenPipeError(error)
             && pipeBrokenFromStream
             && shouldSilentlyExitOnBrokenPipe()) {
+            restoreCrashOutput();
             process.exit(0);
             return;
         }
-        try {
-            const path = await reportCrash(error);
-            console.error(`\n[xiaok] ${label} — 崩溃报告已保存: ${path}`);
-        }
-        catch {
-            console.error(`\n[xiaok] ${label} — 保存崩溃报告失败`);
-        }
-        process.exit(1);
+        await handleFatalError(error, label);
     };
     process.on('uncaughtException', (err) => handle('未捕获的异常', err));
     process.on('unhandledRejection', (reason) => handle('未处理的 Promise 拒绝', reason));

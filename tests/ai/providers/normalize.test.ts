@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeConfig } from '../../../src/ai/providers/normalize.js';
 import { getProviderProfile } from '../../../src/ai/providers/registry.js';
+import type { LegacyConfig } from '../../../src/types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../../src/types.js';
 
 describe('normalizeConfig', () => {
@@ -54,6 +55,35 @@ describe('normalizeConfig', () => {
       capabilities: ['tools'],
     });
     expect(entry).not.toHaveProperty('runtimeOptions');
+  });
+
+  it('inherits deepseek legacy wire capabilities during v1 upgrade instead of the new default', () => {
+    // default 换 deepseek-flash 后，v1 存量配置(custom endpoint 钉死
+    // deepseek-v4-pro)迁移时必须按 wire 继承该变体的能力(纯文本)；取新默认
+    // 能力会把 image_in 写成显式 capabilities,随后在绑定解析中赢得兜底链
+    // (评审 BLOCK #3)。v1 → deepseek 的入口是 models.custom + 官方域名识别。
+    const normalized = normalizeConfig({
+      schemaVersion: 1,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://api.deepseek.com',
+          apiKey: 'sk-ds-legacy',
+          model: 'deepseek-v4-pro',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    } as LegacyConfig);
+
+    expect(normalized.defaultProvider).toBe('deepseek');
+    const entry = normalized.models['deepseek-default'];
+    expect(entry).toMatchObject({
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      capabilities: ['tools', 'thinking'],
+    });
+    expect(entry.capabilities).not.toContain('image_in');
   });
 
   it('promotes known kimi coding custom config into the kimi provider profile', () => {

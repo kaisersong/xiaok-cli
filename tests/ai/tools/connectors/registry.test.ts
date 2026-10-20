@@ -26,7 +26,61 @@ function ddgResponse(): Response {
   `, { status: 200, headers: { 'content-type': 'text/html' } });
 }
 
+function deepSeekSearchResponse(): Response {
+  return new Response(JSON.stringify({
+    results: [{
+      rerank_score: 2.4,
+      title: 'DeepSeek V4 release',
+      url: 'https://example.com/ds',
+      snippet: 'short',
+      summary: 'Model-oriented summary for the DeepSeek Search API.',
+      date: '2026-10-17T00:00:00+00:00',
+    }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
 describe('ConnectorRegistry search routing', () => {
+  it('routes search to the deepseek provider when its key is configured', async () => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async () => deepSeekSearchResponse());
+    const registry = new ConnectorRegistry(
+      buildConfig((cfg) => {
+        cfg.search.provider = 'deepseek';
+        cfg.search.deepseekApiKey = 'sk-ds';
+      }),
+      { fetchFn },
+    );
+    const outcome = await registry.runSearch({ query: 'q', count: 3 });
+    expect(outcome.effective).toBe('web_search.deepseek');
+    expect(outcome.fallback).toBeUndefined();
+    expect(outcome.hits[0].url).toBe('https://example.com/ds');
+    const [, init] = fetchFn.mock.calls[0];
+    expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-ds');
+  });
+
+  it('falls back to duckduckgo when deepseek search is selected without a key', async () => {
+    // key 缺失时根本不该请求 DeepSeek 端点；mock 只服务 DDG。
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
+      const u = url.toString();
+      if (u.includes('deepseek')) throw new TypeError('deepseek provider must not be called without a key');
+      return ddgResponse();
+    });
+    const registry = new ConnectorRegistry(
+      buildConfig((cfg) => {
+        cfg.search.provider = 'deepseek';
+        cfg.search.deepseekApiKey = undefined;
+      }),
+      { fetchFn },
+    );
+    const outcome = await registry.runSearch({ query: 'q', count: 3 });
+    // 缺 key 时构建期即回退：primary/effective 都是 DDG，且从不请求 DeepSeek 端点。
+    expect(outcome.effective).toBe('web_search.duckduckgo');
+    expect(outcome.fallback).toBeUndefined();
+    for (const [url] of fetchFn.mock.calls) {
+      expect(String(url)).not.toContain('api.deepseek.com');
+    }
+    expect(fetchFn).toHaveBeenCalled();
+  });
+
   it('uses primary tavily when key is configured', async () => {
     const fetchFn = vi.fn(async () => tavilyResponse());
     const registry = new ConnectorRegistry(

@@ -21,7 +21,7 @@ import { registerDiagnoseCommands } from './commands/diagnose.js';
 import { registerTraceCommands } from './commands/trace-export.js';
 import { registerSkillCommands } from './commands/skill.js';
 import { registerUpdateCommand } from './commands/update.js';
-import { installGlobalCrashHandlers, reportCrash, setCrashContext } from './utils/crash-reporter.js';
+import { handleFatalError, installGlobalCrashHandlers, setCrashContext } from './utils/crash-reporter.js';
 installGlobalCrashHandlers();
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const program = new Command();
@@ -63,9 +63,7 @@ try {
     await program.parseAsync();
 }
 catch (error) {
-    const path = await reportCrash(error);
-    console.error(`运行中断，崩溃报告已保存: ${path}`);
-    process.exit(1);
+    await handleFatalError(error);
 }
 function formatCommandPath(command) {
     const parts = [];

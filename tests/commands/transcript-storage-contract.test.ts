@@ -47,8 +47,11 @@ describe('transcript storage contracts', () => {
     const interrupt = source.slice(interruptStart, source.indexOf('interrupt = onInterrupt;', interruptStart));
     expect(interrupt).toContain("shutdownTerminal('sigint')");
     expect(source).toContain("process.on('SIGINT', dispatchInterrupt)");
-    expect(terminal).toContain('process.stdout.write = originalStdoutWrite;');
-    expect(terminal).toContain('process.stderr.write = originalStderrWrite;');
+    expect(terminal).toContain('unregisterCrashOutput();');
+    expect(terminal).toContain('restoreCapturedOutput();');
+    const restoreHelper = source.slice(source.indexOf('const restoreCapturedOutput ='), source.indexOf('const isBrokenPipeError ='));
+    expect(restoreHelper).toContain('process.stdout.write = originalStdoutWrite;');
+    expect(restoreHelper).toContain('process.stderr.write = originalStderrWrite;');
     const finalizer = source.slice(source.indexOf('finalizeOwners = async errors =>'), source.indexOf('const rawRuntimeHooks ='));
     const drainIndex = finalizer.indexOf('await drainContinuations(detachedWork);');
     const restoreIndex = finalizer.indexOf('finishTerminal();');

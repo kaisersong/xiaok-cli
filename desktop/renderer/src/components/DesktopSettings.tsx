@@ -4622,24 +4622,26 @@ function AboutPane() {
 const SEARCH_PROVIDERS: Array<{
   key: ConnectorsSearchProvider;
   label: string;
-  descKey: 'searchDuckduckgoDesc' | 'searchFirecrawlDesc' | 'searchTavilyDesc' | 'searchBraveDesc';
+  descKey: 'searchDuckduckgoDesc' | 'searchFirecrawlDesc' | 'searchTavilyDesc' | 'searchBraveDesc' | 'searchDeepseekDesc';
   notImplemented?: boolean;
 }> = [
   { key: 'duckduckgo', label: 'DuckDuckGo', descKey: 'searchDuckduckgoDesc' },
   { key: 'firecrawl', label: 'Firecrawl', descKey: 'searchFirecrawlDesc' },
   { key: 'tavily', label: 'Tavily', descKey: 'searchTavilyDesc' },
   { key: 'brave', label: 'Brave Search', descKey: 'searchBraveDesc' },
+  { key: 'deepseek', label: 'DeepSeek', descKey: 'searchDeepseekDesc' },
 ];
 
 const FETCH_PROVIDERS: Array<{
   key: ConnectorsFetchProvider;
   label: string;
-  descKey: 'fetchBasicDesc' | 'fetchJinaDesc' | 'fetchFirecrawlDesc';
+  descKey: 'fetchBasicDesc' | 'fetchJinaDesc' | 'fetchFirecrawlDesc' | 'fetchDeepseekDesc';
   notImplemented?: boolean;
 }> = [
   { key: 'basic', label: 'Basic', descKey: 'fetchBasicDesc' },
   { key: 'jina', label: 'Jina Reader', descKey: 'fetchJinaDesc' },
   { key: 'firecrawl', label: 'Firecrawl', descKey: 'fetchFirecrawlDesc' },
+  { key: 'deepseek', label: 'DeepSeek', descKey: 'fetchDeepseekDesc' },
 ];
 
 function maskApiKey(key: string): string {
@@ -5057,6 +5059,11 @@ function ToolsPane() {
                         ds={t.desktopSettings}
                       />
                     )}
+                    {checked && opt.key === 'deepseek' && (
+                      <div className="mt-2 text-xs text-[var(--c-text-secondary)]">
+                        {t.desktopSettings.deepseekKeyFromModelConfigHint}
+                      </div>
+                    )}
                   </div>
                 </label>
               </Card>
@@ -5109,6 +5116,11 @@ function ToolsPane() {
                         onChange={v => setDraft(d => d ? { ...d, fetch: { ...d.fetch, firecrawlApiKey: v } } : d)}
                         ds={t.desktopSettings}
                       />
+                    )}
+                    {checked && opt.key === 'deepseek' && (
+                      <div className="mt-2 text-xs text-[var(--c-text-secondary)]">
+                        {t.desktopSettings.deepseekKeyFromModelConfigHint}
+                      </div>
                     )}
                   </div>
                 </label>

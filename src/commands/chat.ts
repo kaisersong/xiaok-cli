@@ -137,7 +137,7 @@ import { FileTranscriptLogger } from '../ui/transcript.js';
 import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
 import { openTranscriptPager, spawnPagerProcess, type TranscriptPagerStatus } from '../ui/transcript-pager.js';
 import { detectImageProtocol, readImageDimensions, renderInlineImageBlock, formatImageFallbackLine } from '../ui/image-renderer.js';
-import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
+import { handleFatalError, registerCrashOutputRestorer, setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
 import { createTerminalOutputRouter } from './terminal-output-router.js';
@@ -3384,6 +3384,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   inputReader.setTranscriptLogger(transcriptLogger);
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  const restoreCapturedOutput = () => {
+    setStreamErrorHandler(null);
+    try { process.stdout.write = originalStdoutWrite; } catch {}
+    try { process.stderr.write = originalStderrWrite; } catch {}
+  };
   const isBrokenPipeError = (error: unknown): boolean => (
     typeof error === 'object'
     && error !== null
@@ -3414,6 +3419,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (terminalUiSuspended && !terminalUiFallbackStream) return true;
     return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream! : 'stderr', chunk, ...args);
   }) as typeof process.stderr.write;
+  const unregisterCrashOutput = registerCrashOutputRestorer(restoreCapturedOutput);
+  // Bootstrap may fail before the full terminal owner below is installed.
+  finishTerminal = () => { unregisterCrashOutput(); restoreCapturedOutput(); };
 
   const releaseRawInputMode = retainRawInputModeForSession();
   let disposeInterruptHandlers = () => {};
@@ -4097,9 +4105,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     try { releaseRawInputMode(); } catch {}
     if (handleResize) process.stdout.off('resize', handleResize);
     skillCatalogWatcher?.close();
-    setStreamErrorHandler(null);
-    process.stdout.write = originalStdoutWrite;
-    process.stderr.write = originalStderrWrite;
+    unregisterCrashOutput();
+    restoreCapturedOutput();
     try { statusBar.destroy(); } catch {}
     disposeInterruptHandlers();
   };
@@ -5059,7 +5066,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     try {
       await finalizeChat();
       if (signalExit) await signalExit;
-    } finally { removeSignalHandlers(); }
+    } finally {
+      try { finishTerminal(); } finally { removeSignalHandlers(); }
+    }
 
   }
 }
@@ -5174,10 +5183,7 @@ export function registerChatCommands(program: Command): void {
           writeError(error.code);
           process.exit(1);
         }
-        const { reportCrash } = await import('../utils/crash-reporter.js');
-        const path = await reportCrash(error);
-        writeError(`运行中断，崩溃报告已保存: ${path}`);
-        process.exit(1);
+        await handleFatalError(error);
       }
     });
 }

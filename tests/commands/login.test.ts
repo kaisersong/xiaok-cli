@@ -179,7 +179,7 @@ describe('xiaok login command', () => {
     expect(saved.defaultModelId).toBe('deepseek-default');
     expect(saved.models['deepseek-default']).toMatchObject({
       provider: 'deepseek',
-      model: 'deepseek-v4-pro',
+      model: 'deepseek-flash',
     });
     expect(result).toEqual({ status: 'saved', providerId: 'deepseek' });
     expect(probeMock).toHaveBeenCalledOnce();

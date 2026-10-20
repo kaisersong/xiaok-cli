@@ -167,8 +167,8 @@ export interface MeResponse {
 // Config types
 export interface CaptchaConfig { enabled: boolean; }
 export interface MemoryConfig { enabled: boolean; }
-export type ConnectorsSearchProvider = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
-export type ConnectorsFetchProvider = 'basic' | 'jina' | 'firecrawl';
+export type ConnectorsSearchProvider = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'deepseek' | 'searxng';
+export type ConnectorsFetchProvider = 'basic' | 'jina' | 'firecrawl' | 'deepseek';
 export type ConnectorsConfig = import('../../../shared/connectors-ipc-contract.js').ConnectorsConfigDto;
 export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
 export type ConnectorsProviderRuntime = import('../../../shared/connectors-ipc-contract.js').ConnectorsRuntimeDto;

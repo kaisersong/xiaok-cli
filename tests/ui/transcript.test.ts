@@ -24,6 +24,18 @@ describe('transcript logger', () => {
     expect(normalizeTranscriptChunk('\r\x1b[2K\x1b[36m> /ka\x1b[0m\n')).toBe('> /ka\n');
   });
 
+  it('ignores late stdout and stderr after close without reopening the sealed transcript', async () => {
+    const logger = await FileTranscriptLogger.open('sess_late_output', dir);
+    logger.recordOutput('stdout', 'before close\n');
+    logger.close();
+    const filePath = join(dir, 'sess_late_output.jsonl');
+    const sealed = readFileSync(filePath, 'utf8');
+    expect(() => logger.recordOutput('stdout', 'late stdout\n')).not.toThrow();
+    expect(() => logger.recordOutput('stderr', 'late stderr\n')).not.toThrow();
+    expect(readFileSync(filePath, 'utf8')).toBe(sealed);
+    expect(() => logger.record({ type: 'input_key', key: 'x', timestamp: 1 })).toThrow('transcript_writer_closed');
+  });
+
   it('writes jsonl transcript events for output and input actions', async () => {
     const logger = await FileTranscriptLogger.open('sess_test', dir);
 

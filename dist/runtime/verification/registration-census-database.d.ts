@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import type { VerificationOwner } from './proof-authority.js';
 export declare const REGISTRATION_TABLE_KEYS: Readonly<{
     readonly verification_owner_dependencies: "parent_key";
     readonly owner_enrollment_intents: "logical_owner_key";
@@ -18,7 +19,7 @@ export declare const REGISTRATION_TABLE_KEYS: Readonly<{
 }>;
 /** Per-call full SQL census only. No row/permission/clock/current result crosses a checkpoint. */
 export declare function createRegistrationCensusDatabase(db: Database): Readonly<{
-    begin(): {
+    begin: () => {
         evidence: {
             master: Record<string, any>[];
             columns: Record<string, Record<string, any>[]>;
@@ -28,4 +29,8 @@ export declare function createRegistrationCensusDatabase(db: Database): Readonly
         groups(table: keyof typeof REGISTRATION_TABLE_KEYS, lookups: readonly string[]): Map<string, Record<string, any>[]>;
         finish(): void;
     };
+    collectFixedRegistrationData: (raw: VerificationOwner) => {
+        vector: Record<string, any>[];
+        evidence: unknown;
+    } | undefined;
 }> | undefined;
