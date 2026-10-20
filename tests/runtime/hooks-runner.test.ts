@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
+import { win32 } from 'node:path';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
@@ -236,6 +237,87 @@ describe('hooks runner', () => {
     expect(result.ok).toBe(true);
     expect(result.decision).toBeUndefined();
     expect(result.message).toBeUndefined();
+  });
+});
+
+describe('Windows owned hook tree and pipe drain', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(spawn).mockReset();
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('SystemRoot', 'C:\\Windows');
+  });
+  afterEach(() => {
+    if (platform) Object.defineProperty(process, 'platform', platform);
+    vi.mocked(spawn).mockReset();
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+  function start() {
+    const child = Object.assign(createMockChild({ noExit: true }), { pid: 43210, exitCode: null, signalCode: null });
+    const killer = createMockChild({ noExit: true });
+    const spawnMock = vi.mocked(spawn) as any;
+    spawnMock.mockReturnValueOnce(child).mockReturnValueOnce(killer);
+    const runner = createHooksRunner({ pre: [{ command: 'owned-hook', tools: ['write'] }], timeoutMs: 50 });
+    const running = runner.runPreHooks('write', {});
+    return { child, killer, runner, running, spawnMock };
+  }
+
+  it('targets only the original live shell tree and joins the termination helper after hook pipes close', async () => {
+    const f = start();
+    let settled = false;void f.running.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.spawnMock).toHaveBeenLastCalledWith(win32.join('C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', '43210', '/T', '/F'], { shell: false, stdio: 'ignore', windowsHide: true });
+    expect(f.child.kill).not.toHaveBeenCalled();
+    f.child.emit('exit', 1);f.child.emit('close', 1, null);
+    const closing = f.runner.closeAndDrain().then(() => undefined, error => error);
+    await vi.advanceTimersByTimeAsync(0);expect(settled).toBe(false);
+    f.killer.emit('close', 0, null);
+    expect(await f.running).toMatchObject({ ok: false });
+    expect((await closing).message).toBe('hook_physical_drain_unconfirmed');
+  });
+
+  it('does not equate taskkill completion or shell exit with inherited pipe closure', async () => {
+    const f = start();let settled = false;void f.running.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(50);
+    f.child.emit('exit', 1);f.killer.emit('close', 0, null);
+    await vi.advanceTimersByTimeAsync(0);expect(settled).toBe(false);
+    f.child.emit('close', 1, null);
+    expect(await f.running).toMatchObject({ ok: false });
+    await expect(f.runner.closeAndDrain()).rejects.toThrow('hook_physical_drain_unconfirmed');
+  });
+
+  it('retains the original timeout and termination-helper failure instead of claiming cleanup', async () => {
+    const f = start(), failure = Error('original_taskkill_launch_failure');
+    await vi.advanceTimersByTimeAsync(50);
+    f.killer.emit('error', failure);f.killer.emit('close', null, null);f.child.emit('close', 1, null);
+    await f.running;
+    const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error.errors[0]).toBeInstanceOf(AggregateError);
+    expect(error.errors[0].errors).toContain(failure);
+    expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook timeout after 50ms');
+    expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_windows_tree_termination_failed:null');
+  });
+
+  it('starts one owned tree termination when owner abort and timeout both occur', async () => {
+    const f = start();await vi.advanceTimersByTimeAsync(0);
+    const closing = f.runner.closeAndDrain().then(() => undefined, error => error);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.spawnMock).toHaveBeenCalledTimes(2);
+    f.child.emit('close', 1, null);f.killer.emit('close', 0, null);
+    await f.running;expect((await closing).message).toBe('hook_physical_drain_unconfirmed');
+  });
+
+  it('never sends a completed shell PID to taskkill while descendant-held pipes remain unknown', async () => {
+    const f = start();let settled = false;void f.running.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);f.child.emit('exit', 0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(f.spawnMock).toHaveBeenCalledTimes(1);expect(settled).toBe(false);
+    f.child.emit('close', 0, null);await f.running;
+    const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+    expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_windows_process_tree_unconfirmed');
   });
 });
 

@@ -605,6 +605,7 @@ export class ToolRegistry {
     }
 
     const initialPolicyRevision = this.permissionManager.getRevision();
+    let continuationPolicyRevision = initialPolicyRevision;
     const decision = await this.permissionManager.check(registeredName, cloneToolInput(input));
     context?.signal?.throwIfAborted();
     if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision()) return stop(changedError, 'invalidated');
@@ -736,11 +737,19 @@ export class ToolRegistry {
         context?.signal?.throwIfAborted();
         return stop(`Error: ${permissionRequest?.message ?? `权限不足: ${name}`}`, 'denied');
       }
-      const approved = permissionRequest?.decision === 'allow'
-        ? true
-        : await this.options.onPrompt(registeredName, cloneToolInput(input), { tool, context });
+      let approved: boolean | ToolPermissionGrant;
+      if (permissionRequest?.decision === 'allow') approved = true;
+      else {
+        const promptToken = Object.freeze({});
+        const result = await this.permissionManager.runPromptAuthorization(promptToken, registeredName, cloneToolInput(input),
+          () => this.options.onPrompt(registeredName, cloneToolInput(input), { tool, context }));
+        context?.signal?.throwIfAborted();
+        if (authorityChanged() || result.continuationRevision === undefined) return stop(changedError, 'invalidated');
+        approved = result.value;
+        continuationPolicyRevision = result.continuationRevision;
+      }
       context?.signal?.throwIfAborted();
-      if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision()) return stop(changedError, 'invalidated');
+      if (authorityChanged() || continuationPolicyRevision !== this.permissionManager.getRevision()) return stop(changedError, 'invalidated');
       permissionGrant = snapshotToolPermissionGrant(approved);
       if (approved !== true && !permissionGrant) {
         if (this.options.hookInputMode === 'direct-callback' && this.options.hooksRunner) {
@@ -819,7 +828,7 @@ export class ToolRegistry {
       preHookResult = await this.options.hooksRunner?.runPreHooks(registeredName, cloneToolInput(input));
     }
     context?.signal?.throwIfAborted();
-    if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision()) return stop(changedError, 'invalidated');
+    if (authorityChanged() || continuationPolicyRevision !== this.permissionManager.getRevision()) return stop(changedError, 'invalidated');
     if (preHookResult && !preHookResult.ok) {
       return stop(`Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`, 'blocked');
     }

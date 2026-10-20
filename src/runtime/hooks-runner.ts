@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
+import { win32 } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Hook event types — aligned with Claude Code hook_event_name schema
@@ -399,10 +400,57 @@ function executeCommand(
       stdio: 'pipe',
     });
     const remember = (error: unknown) => { errors.add(error); };
+    let rootExited = false, treeTerminationRequested = false, treePending = false, settled = false;
+    let terminal: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    const finish = () => {
+      const closed = terminal;
+      if (!closed || treePending || settled) return;
+      settled = true;
+      if (closed.signal && !errors.size) remember(new Error(`hook terminated by ${closed.signal}`));
+      const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
+      if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
+      else if (errors.size) reject(signal.reason);
+      else resolve({ exitCode: closed.code ?? 1, stdout, stderr });
+    };
     const terminate = () => {
       try {
         if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
-        else child.kill('SIGTERM');
+        else if (process.platform !== 'win32') child.kill('SIGTERM');
+        else {
+          if (treeTerminationRequested) return;
+          treeTerminationRequested = true;
+          // A completed shell PID cannot identify an extant descendant tree.
+          if (rootExited || child.exitCode != null || child.signalCode != null) {
+            remember(new Error('hook_windows_process_tree_unconfirmed'));
+            return;
+          }
+          const pid = child.pid, systemRoot = process.env.SystemRoot;
+          // A failed spawn has no PID/tree; still join its original close/error.
+          if (pid === undefined) { child.kill('SIGTERM'); return; }
+          if (!Number.isSafeInteger(pid) || pid <= 0 || !systemRoot || !win32.isAbsolute(systemRoot)) {
+            remember(new Error('hook_windows_process_tree_identity_unconfirmed'));
+            child.kill('SIGTERM');
+            return;
+          }
+          // Only this original, still-live shell PID is addressed. No shell,
+          // image-name matching, caller environment override, or detached killer.
+          treePending = true;
+          try {
+            const killer = spawn(win32.join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], {
+              shell: false, stdio: 'ignore', windowsHide: true,
+            });
+            killer.on('error', remember);
+            killer.once('close', code => {
+              if (code !== 0) remember(new Error(`hook_windows_tree_termination_failed:${String(code)}`));
+              treePending = false;
+              finish();
+            });
+          } catch (error) {
+            treePending = false;
+            remember(error);
+            finish();
+          }
+        }
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error);
       }
@@ -414,6 +462,7 @@ function executeCommand(
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') remember(error); });
     child.on('error', remember);
+    child.once('exit', () => { rootExited = true; });
     // exit does not prove stdio or descendants have ended.
     child.once('close', (code, terminationSignal) => {
       clearTimeout(timer); signal.removeEventListener('abort', abort);
@@ -421,11 +470,8 @@ function executeCommand(
         try { process.kill(-child.pid, 0); remember(new Error('hook_process_group_unconfirmed')); }
         catch (error) { if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error); }
       }
-      if (terminationSignal && !errors.size) remember(new Error(`hook terminated by ${terminationSignal}`));
-      const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
-      if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
-      else if (errors.size) reject(signal.reason);
-      else resolve({ exitCode: code ?? 1, stdout, stderr });
+      terminal = { code, signal: terminationSignal };
+      finish();
     });
     child.stdin.end(payloadJson);
     if (signal.aborted) abort();
