@@ -1,3 +1,4 @@
+import { ModelTextRepetitionGuard } from './model-text-repetition.js';
 export function resolveModelRecoveryPolicy(env = process.env) {
     const number = (raw, fallback) => raw?.trim() && Number.isFinite(Number(raw)) && Number(raw) >= 0 ? Number(raw) : fallback;
     return { windowMs: number(env.XIAOK_MODEL_RECOVERY_WINDOW_MS, 30 * 60_000),
@@ -58,6 +59,7 @@ export async function* recoverModelStream(input) {
             throw exhausted();
         const owned = new AbortController();
         const signal = AbortSignal.any([input.signal, owned.signal]);
+        const textGuard = new ModelTextRepetitionGuard();
         let iterator;
         let completed = false;
         try {
@@ -74,6 +76,8 @@ export async function* recoverModelStream(input) {
                     completed = true;
                     return;
                 }
+                if (next.value.type === 'text')
+                    textGuard.append(next.value.delta);
                 if (next.value.type === 'done')
                     completed = true;
                 yield next.value;

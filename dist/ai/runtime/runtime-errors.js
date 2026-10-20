@@ -1,4 +1,5 @@
 import { isAbortError } from './abort-utils.js';
+import { MODEL_TEXT_REPETITION_CODE } from './model-text-repetition.js';
 import { formatKimiProviderRequestError, getKimiProviderRequestDiagnostic } from './provider-request-error.js';
 export function normalizeRuntimeError(error) {
     if (isAbortError(error)) {
@@ -24,6 +25,9 @@ export function normalizeRuntimeError(error) {
         return { code: 'model_failed', message: formatKimiProviderRequestError(providerDiagnostic), retryable: providerDiagnostic.retryable };
     }
     const transportCode = typeof errorCode === 'string' ? errorCode : '';
+    if (transportCode === MODEL_TEXT_REPETITION_CODE || message === MODEL_TEXT_REPETITION_CODE) {
+        return { code: 'model_failed', message: MODEL_TEXT_REPETITION_CODE, retryable: false };
+    }
     if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(transportCode)
         || /502|503|timeout|ECONNRESET|ETIMEDOUT|EPIPE|Bad gateway|Premature close|terminated|socket hang up|network|fetch failed/i.test(message)) {
         return { code: 'model_failed', message, retryable: true };

@@ -3121,6 +3121,7 @@ export interface LocaleStrings {
     modelAuthFailed: string;
     modelServiceFailed: string;
     modelConnectionFailed: string;
+    modelTextRepetition: string;
     modelUsageLimitReached: (resetAt?: string) => string;
     cuProcessing: string;
     cuSettingsOpened: string;
