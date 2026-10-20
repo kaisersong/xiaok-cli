@@ -450,6 +450,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     try { bootstrapAbort.abort(finalizationReason); freezeIngress(); } catch (error) { finalizationErrors.push(error); }
     return finalization;
   };
+  const finalizeChatWithDiagnostics = async (): Promise<void> => {
+    try { await finalizeChat(); }
+    catch (error) {
+      try { log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) }); } catch {}
+      throw error;
+    }
+  };
   type ExitSignal = 'sigint' | 'sighup' | 'sigterm' | 'stdin_end';
   let signalExit: Promise<void> | undefined;
   let finishTerminal = () => {};
@@ -5057,11 +5064,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (commandDirective === 'exit') break;
     }
   } finally {
-    try { await finalizeChat(); }
-    catch (error) {
-      try { log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) }); } catch {}
-      throw error;
-    } finally { finishTerminal(); }
+    try { await finalizeChatWithDiagnostics(); } finally { finishTerminal(); }
 
   }
   } finally {
