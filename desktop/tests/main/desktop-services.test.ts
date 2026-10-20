@@ -692,7 +692,6 @@ describe('desktop services', () => {
     const owned = await openOwnedWorkflowNormalCase({
       project: { id: 'proj-workflow', name: 'Workflow project', goal: 'Verify workflow' },
       issuer: 'po_generated',
-      issuedAt: 1,
       tasks: [{
         title: 'Write final report',
         acceptanceCriteria: '必须包含真实 workflow run ID。',
@@ -737,7 +736,7 @@ describe('desktop services', () => {
       targetParticipantId: 'xiaok-worker',
     });
 
-    expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-workflow-po-generated-task-workflow-1');
+    expect(receivedPrompt).toContain(`真实 workflow run ID 是 ${owned.handoff.workflowRunId}`);
     expect(result.output?.artifacts).toEqual([
       { path: 'artifacts/workflow-final-report.md', kind: 'markdown', label: 'workflow-final-report.md' },
     ]);
@@ -749,7 +748,6 @@ describe('desktop services', () => {
     const owned = await openOwnedWorkflowNormalCase({
       project: { id: 'proj-project-workflow', name: 'Workflow project', goal: 'Deliver whole project' },
       issuer: 'po_generated_project',
-      issuedAt: 1,
       tasks: [{ title: '收集资料' }, { title: '生成最终报告' }],
     });
     let services: ReturnType<typeof createDesktopServices> | undefined;
@@ -790,7 +788,7 @@ describe('desktop services', () => {
 
     expect(receivedPrompt).toContain('执行整个项目');
     expect(receivedPrompt).toContain('最终项目交付物');
-    expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-project-workflow-po-generated-project-workflow-1');
+    expect(receivedPrompt).toContain(`真实 workflow run ID 是 ${owned.handoff.workflowRunId}`);
     expect(receivedPrompt).not.toContain('sourceTask 是唯一工作范围');
     expect(result.output?.artifacts).toEqual([
       { path: 'artifacts/project-final-report.md', kind: 'markdown', label: 'project-final-report.md' },

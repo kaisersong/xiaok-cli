@@ -1,3 +1,4 @@
+// @vitest-environment node
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));

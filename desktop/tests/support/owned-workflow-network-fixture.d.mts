@@ -24,7 +24,6 @@ export interface OwnedWorkflowNetworkFixtureOptions {
   prompt?: string;
   label?: string;
   tasks?: OwnedWorkflowTaskInput[];
-  issuedAt?: number;
 }
 /** Fields established by the existing real Hub issuer; other persisted data stays unknown. */
 export interface OwnedWorkflowNodeDispatch extends KSwarmWorkflowNodeHandoff {

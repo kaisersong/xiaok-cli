@@ -1,3 +1,4 @@
+// @vitest-environment node
 import type {ToolRegistry as ToolRegistryType} from '../../../src/ai/tools/index.js';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';

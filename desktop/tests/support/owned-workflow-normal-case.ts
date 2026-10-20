@@ -5,8 +5,8 @@ import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../elect
 import type {createDesktopServices} from '../../electron/desktop-services.js';
 type OwnedWorkflowNormalCaseOptions={project:{id:string;name:string;goal:string}}&(
  {issuer?:never;workflowName:string;prompt:string;label:string;phaseTitle:string}|
- {issuer:'po_generated';tasks:[OwnedWorkflowTaskInput];issuedAt?:number}|
- {issuer:'po_generated_project';tasks:OwnedWorkflowTaskInput[];issuedAt?:number}
+ {issuer:'po_generated';tasks:[OwnedWorkflowTaskInput]}|
+ {issuer:'po_generated_project';tasks:OwnedWorkflowTaskInput[]}
 );
 /** Test-only setup uses a genuine Hub issuer/factory; never grants permission to a caller. */
 export async function openOwnedWorkflowNormalCase(options:OwnedWorkflowNormalCaseOptions) {

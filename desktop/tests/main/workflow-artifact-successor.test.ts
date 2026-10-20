@@ -1,3 +1,4 @@
+// @vitest-environment node
 import {afterEach, expect, it, vi} from 'vitest';
 import {createServer} from 'node:http';
 import {mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';

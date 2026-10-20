@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {lstatSync, mkdirSync, readFileSync, realpathSync, statSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
-import {ToolRegistry} from '../../ai/tools/index.js';
+import type {ToolRegistry} from '../../ai/tools/index.js';
 import {createReadTool} from '../../ai/tools/read.js';
 import {createWriteTool} from '../../ai/tools/write.js';
 import {createEditTool} from '../../ai/tools/edit.js';
@@ -111,6 +111,7 @@ export function isNativeWorkflowArtifactCheckpoint(checkpoint:NativeWorkflowRest
  */
 export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWorkflowRestrictionCheckpoint):Promise<{registry:ToolRegistry;tools:Tool[]}> {
  const stored=checkpoints.get(checkpoint);if(!stored?.artifactOnly)denied();
+ const {ToolRegistry:WorkflowToolRegistry}=await import('../../ai/tools/index.js');
  const current=await facts(stored.port,stored.binding);if(current.fingerprint!==stored.fingerprint)denied();
  const root=stored.root,artifacts=join(root,'artifacts');
  mkdirSync(artifacts,{recursive:true});
@@ -124,9 +125,9 @@ export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWork
  assertPaths();
  let constructing=true,installing=true,closed=false;
  const tools:Tool[]=[],owned=new Set<Tool>();
- // Defined here so the ToolRegistry -> checkpoint import cycle has no eager
- // class inheritance while either module is still initializing.
- class ArtifactRegistry extends ToolRegistry {
+ // Import the canonical owner only at execution time, after checkpoint brand
+ // validation. Re-read facts after that await before constructing any tools.
+ class ArtifactRegistry extends WorkflowToolRegistry {
   constructor(){super({autoMode:true,capabilitySearch:false},[]);this.sealRegistryOptions();}
   protected preflightToolRegistration(tool:Tool):void {if(!constructing&&(!installing||!owned.has(tool)))denied();super.preflightToolRegistration(tool);}
   registerDeferredTool():never {return denied();}
