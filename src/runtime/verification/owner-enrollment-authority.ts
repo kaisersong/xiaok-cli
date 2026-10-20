@@ -465,6 +465,7 @@ export function createOwnerEnrollmentAuthority(input:{
  function registrationReadVector(owner:VerificationOwner,activation?:{owner:VerificationOwner;invocations:readonly unknown[]},originalIntent?:ReturnType<typeof parseIntentContractEnrollment>):Record<string,any>[]{
   assertNativeSqliteArrayConstruction();
   if(registrationDatabase){
+   if(activation===undefined&&originalIntent===undefined){const data=registrationDatabase.collectFixedRegistrationData(owner);if(data){registrationEvidence.set(data.vector,data.evidence);return data.vector;}}
    const census=registrationDatabase.begin(),root=json(owner),pending=[root],identities=new Map<string,VerificationOwner>(),dependencies=new Map<string,Record<string,any>[]>();
    if(isIntentContractOwner(owner)){
     const receipt=census.groups('owner_enrollment_intent_contracts',[root]).get(root)![0];
