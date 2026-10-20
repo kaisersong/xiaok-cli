@@ -59,3 +59,13 @@ jobs:
             ${{ runner.temp }}/signed99-worker-cpu/evidence/vitest.json
             ${{ runner.temp }}/signed99-worker-cpu/evidence/process.json
             ${{ runner.temp }}/signed99-worker-cpu/evidence/validation.json
+      - name: Upload schema-only process control metadata
+        if: ${{ always() && steps.signed99_cpu.outputs.control_metadata_safe == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed99-worker-cpu-control-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/signed99-worker-cpu/control/process.json
+            ${{ runner.temp }}/signed99-worker-cpu/control/validation.json
