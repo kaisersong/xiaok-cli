@@ -1,6 +1,31 @@
+import {types as sourceInputTypes} from 'node:util';
+import type {ContinuityStore} from './context-continuity/store.js';
+import {assertDesktopSyncSourceControls,desktopCanonicalSourceIdentityData,type DesktopSyncDevice} from './context-continuity/sync-device-runtime.js';
+import {assertOriginalCanonicalSourceState,assertOriginalCanonicalSourceDraft,assertOriginalCanonicalSourceMetadataStage,finishOriginalCanonicalSourceBootstrap,abortOriginalCanonicalSourceBootstrap,type CapturedCanonicalSourceState,type CapturedCanonicalSourceDraft} from './context-continuity/sync-canonical-store-owner.js';
+import {captureCanonicalExportData} from './context-continuity/sync-canonical-export-data.js';
+import {freezeCanonicalExportOrigins,assertFrozenCanonicalExportOrigins} from './context-continuity/sync-canonical-export-freeze.js';
+import type {CanonicalSyncBatch,CanonicalSyncScope} from './context-continuity/sync-canonical-codec.js';
+import {captureOriginalTaskSnapshotSourceReader} from '../../src/runtime/task-host/snapshot-store.js';
+import {captureInvocationDrain,type DesktopModelInvocation,type DesktopRootInvocationFactory} from './desktop-model-invocation.js';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import {isUnavailableProjection,isUnavailableActivity,unavailableProjection,unavailableActivity} from '../../src/runtime/conversation-activity/disclosure.js';
+import { readCurrentActivityTask } from '../../src/runtime/conversation-activity/task-identity.js';
+import { assertLegacyTaskFilesOwned } from './context-continuity/legacy-files.js';
+import { createContextResolverTool, createHistorySearchTool } from './context-continuity/tool.js';
 import { createDesktopMemoryLlm, getActiveMemoryEmbeddingModel } from './memory-distillation.js';
+import {effectSnapshotHash,digest as continuityDigest} from './context-continuity/store.js';
+import {DesktopInputQueue} from './context-continuity/input-queue.js';
+import {originalDesktopRuntimeSourceContext, DesktopContextContinuity } from './context-continuity/runtime.js';
+import { openAuthOwner, AuthOwnerController, type AuthOwnerHandle } from './context-continuity/auth-owner.js';
+import { createTaskHistoryReader } from './context-continuity/task-history-reader.js';
+import { createTaskPresentationReader, readPreparedTaskPresentation } from './context-continuity/task-presentation.js';
+import { createGoalDisclosure } from './context-continuity/goal-disclosure.js';
+import { createGoalEgress } from './context-continuity/goal-egress.js';
+import type { GoalControlReceipt } from '../shared/goal-control.js';
+import type { PublicTaskInput } from '../shared/context-continuity-types.js';
 import { MODEL_REGISTRY } from '../../src/ai/memory/model-registry.js';
 import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
+import {resolveDesktopProfile,type DesktopProfileIdentity} from './context-continuity/profile.js';
 import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
 import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
@@ -17,7 +42,7 @@ import {createRoomToolRegistry,runRoomWorkspaceExecutor,roomUnsupportedCapabilit
 import {assembleRoomWorkspaceContext,resolveRoomWorkspaceContextLimit,type RoomWorkspaceContextSources} from './room-workspace-context.js';
 import { CodexTaskBridge, LOCAL_CODEX_MODEL } from './codex-task-bridge.js';
 import type { NativeActor } from './codex-native-service.js';
-import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
+import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync, lstatSync } from 'node:fs';
 import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync, mkdir as mkdirAsync, mkdtemp, rm as rmAsync } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
@@ -52,7 +77,7 @@ import type {
   ProviderModelVariant,
 } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
-import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
+import { FileTaskSnapshotStore, recoverTaskSnapshotSync } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
 import { loadCustomAgents } from '../../src/ai/agents/loader.js';
 import { PermissionManager } from '../../src/ai/permissions/manager.js';
@@ -790,6 +815,7 @@ export interface DesktopModelProviderView {
 }
 
 export interface DesktopModelEntryView {
+  unavailableReason?:'native_execution_gate_unavailable';
   projectAgentSelectable?: boolean;
   id: string;
   provider: string;
@@ -898,7 +924,47 @@ function sanitizeSystemOnePatch(input: DesktopSaveSystemOneConfigInput | undefin
   return patch;
 }
 
+export interface DesktopCanonicalSourceMetadata {
+ readonly kind:'original-desktop-source-proof-data';readonly storeState:CapturedCanonicalSourceState;
+ readonly scopes:readonly Readonly<CanonicalSyncScope>[];readonly manifestHash:string;readonly versionCount:number;readonly payloadHashes:readonly string[];
+}
+const canonicalSourceProofs=new WeakMap<object,{services:object;device:DesktopSyncDevice;assert:()=>{metadata:DesktopCanonicalSourceMetadata;batches:ReadonlyArray<Readonly<CanonicalSyncBatch>>}}>();
+function originalCanonicalSource(services:object,device:DesktopSyncDevice,proof:object){const entry=canonicalSourceProofs.get(proof);if(!entry||entry.services!==services||entry.device!==device)throw new Error('canonical_runtime_source_unavailable');return entry.assert();}
+/** Source proof only; the fixed main friend must also join the actual raw job. */
+export function assertOriginalDesktopCanonicalSource(services:object,device:DesktopSyncDevice,proof:object):DesktopCanonicalSourceMetadata{return originalCanonicalSource(services,device,proof).metadata;}
+export function readOriginalDesktopCanonicalSource(services:object,device:DesktopSyncDevice,proof:object):ReadonlyArray<Readonly<CanonicalSyncBatch>>{return originalCanonicalSource(services,device,proof).batches;}
+
+export interface DesktopCanonicalSourceDraftMetadata extends Omit<DesktopCanonicalSourceMetadata,'kind'|'storeState'>{
+ readonly kind:'original-desktop-source-draft-data';readonly storeState:CapturedCanonicalSourceDraft;
+}
+const canonicalSourceDrafts=new WeakMap<object,{services:object;device:DesktopSyncDevice;store:ContinuityStore;metadataStage:()=>void;promote:(component:object)=>object;assert:()=>{metadata:DesktopCanonicalSourceDraftMetadata;batches:ReadonlyArray<Readonly<CanonicalSyncBatch>>}}>();
+/** Main bootstrap draft only. Final source assertion/read never accepts this map. */
+export function assertOriginalDesktopCanonicalSourceDraft(services:object,device:DesktopSyncDevice,proof:object):DesktopCanonicalSourceDraftMetadata{
+ const entry=canonicalSourceDrafts.get(proof);if(!entry||entry.services!==services||entry.device!==device)throw new Error('canonical_runtime_source_draft_unavailable');return entry.assert().metadata;
+}
+
+export function assertOriginalDesktopCanonicalSourceDraftForStore(store:ContinuityStore,services:object,device:DesktopSyncDevice,proof:object):DesktopCanonicalSourceDraftMetadata{
+ const entry=canonicalSourceDrafts.get(proof);if(!entry||entry.store!==store)throw new Error('canonical_runtime_source_draft_unavailable');return assertOriginalDesktopCanonicalSourceDraft(services,device,proof);
+}
+/** Fixed metadata friend only; requires the exact original write-stage first. */
+export function assertOriginalDesktopCanonicalSourceDraftMetadataStage(store:ContinuityStore,services:object,device:DesktopSyncDevice,proof:object,stage:object):void{
+ const entry=canonicalSourceDrafts.get(proof);if(!entry||entry.store!==store||entry.services!==services||entry.device!==device)throw new Error('canonical_runtime_source_draft_unavailable');
+ assertOriginalCanonicalSourceMetadataStage(store,device,services,proof,stage);entry.metadataStage();assertOriginalCanonicalSourceMetadataStage(store,device,services,proof,stage);
+}
+
 export function createDesktopServices(options: DesktopServicesOptions) {
+  const originalRunner=options.runner;
+  // Probe before any store constructor can create these legacy execution-owner
+  // roots. Old Room runs need not have a FileTaskSnapshotStore checkpoint.
+  let legacyEffectOwnerPresent = false;
+  let legacyEffectInventoryError: unknown;
+  for (const relative of ['goals/goals.sqlite', 'artifact-workspace/workspace.sqlite', 'multi-agent/groups.sqlite',
+    'codex-native.sqlite', 'codex-task-routes.sqlite', 'continuity.sqlite', 'tasks/snapshots']) {
+    for (const suffix of relative.endsWith('.sqlite') ? ['', '-wal', '-shm', '-journal'] : ['']) {
+      try { lstatSync(join(options.dataRoot, ...relative.split('/')) + suffix); legacyEffectOwnerPresent = true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') legacyEffectInventoryError = error; }
+    }
+  }
   let roomTimedActions:TimedActionService|undefined;
   const getManagedPythonCommand = options.getManagedPythonCommand;
   const officeDocumentParser = createOfficeDocumentParser({
@@ -909,7 +975,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     maxBytes: 50 * 1024 * 1024,
     now: options.now,
   });
-  const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
+  const canonicalSourceTaskRoot=join(options.dataRoot,'tasks');
+  const snapshotStore = new FileTaskSnapshotStore(canonicalSourceTaskRoot);
+  const canonicalSourceReader=captureOriginalTaskSnapshotSourceReader(snapshotStore,canonicalSourceTaskRoot);
+  let profileIdentity:DesktopProfileIdentity|null=null;
+  try{profileIdentity=resolveDesktopProfile(options.dataRoot);}catch{console.warn('[context-continuity] profile identity unavailable');}
+  // Lazy single AuthOwner worker (pinned binary, xiaok-auth-owner-v1). The
+  // facade is the only renderer-facing surface and is token-free by type.
+  const authOwnerRef: { handle?: Promise<AuthOwnerHandle> } = {};
+  const authOwnerOpen = () => {
+    authOwnerRef.handle ??= openAuthOwner({
+      stateRoot: options.dataRoot,
+      profileId: profileIdentity?.profileId ?? 'default',
+      dataRoot: options.dataRoot,
+      authOwnerBinary: process.env.XIAOK_AUTH_OWNER_BINARY,
+      resourcesRoot: process.env.XIAOK_AUTH_OWNER_RESOURCES ?? process.resourcesPath,
+      appVersion: process.env.XIAOK_APP_VERSION ?? '0',
+    }).catch(error => { authOwnerRef.handle = undefined; throw error; });
+    return authOwnerRef.handle;
+  };
+  const authOwnerFacade = {
+    status: async () => (await authOwnerOpen()).controller.reconcileLoginState(),
+    startLogin: async () => { const handle = await authOwnerOpen(); return handle.controller.startLogin(); },
+    cancelLogin: async () => { const handle = await authOwnerOpen(); return handle.controller.cancelLogin(); },
+    logout: async () => { const handle = await authOwnerOpen(); return handle.controller.logout(); },
+  };
+  const contextContinuity = new DesktopContextContinuity(options.dataRoot, id => snapshotStore.recoverTask(id),profileIdentity,authOwnerFacade);
+  contextContinuity.requireEffectInventory();
   const conversationRooms = new ConversationRoomService({ dataRoot: options.dataRoot });
   let activityStore: ConversationActivityStore | undefined;
   let activityService: ConversationActivityApi | undefined;
@@ -927,7 +1019,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if (activityAttachFailure !== undefined) throw new Error('activity_owner_unavailable');
   };
   let activityRoomClient: ConversationProjectRoomClient | undefined;
-  const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
+  const activityEnabled = !originalRunner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
     readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),
     ...(activityEnabled ? { activityHooks: {
@@ -976,7 +1068,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const coordinateRunner = (runner: TaskRunner): TaskRunner => input => (
     executionCoordinator.run(input.signal, () => runner(input))
   );
-  const goalStore = new SqliteGoalStore(join(options.dataRoot, 'goals', 'goals.sqlite'));
+  const goalStore = new SqliteGoalStore(join(options.dataRoot, 'goals', 'goals.sqlite'), { requireReadProvenance: true });
   const goalChangedListeners = new Set<(input: { threadId: string; goal: DesktopGoalProjection }) => void>();
   const goalTaskPreparedListeners = new Set<(input: PreparedGoalTask) => void>();
   const artifactWorkspaceStore = new ArtifactWorkspaceStore({
@@ -988,34 +1080,64 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
   let goalCoordinator: DesktopGoalCoordinator | undefined;
+  let goalDisclosure: ReturnType<typeof createGoalDisclosure> | undefined;
+  let goalEgress: ReturnType<typeof createGoalEgress> | undefined;
   const tools = buildToolList();
-  const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools);
+  const settledLocalExecutors = new Map<Tool, Tool['execute']>();
+  const registry = new DesktopOwnedToolRegistry({ autoMode: true, settledLocalExecutors }, tools);
   const staticGatewayNames = new Set(options.pluginProviderRuntime ? createAllHostGateways(options.pluginProviderRuntime).map(tool => tool.definition.name) : []);
   const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
-  const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
+  const multiAgentProfileId = profileIdentity?.profileId??'profile_identity_unavailable';
+  const goalReadActor = Object.freeze({ requestSource: 'user' as const, actorId: `desktop-user:${multiAgentProfileId}` });
   const multiAgentWorkspaceId = createHash('sha256').update(multiAgentCwd).digest('hex');
-  const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, admitThread: async threadId => {
+  const multiAgentStore = originalRunner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'));
+  const initializeProfileOwner=()=>{
+    if(!profileIdentity)throw new Error('profile_identity_unavailable');
+    multiAgentStore?.claimBootOwnership();
+    if(profileIdentity.legacyProfileId)multiAgentStore?.migrateProfileIdentity(profileIdentity.legacyProfileId,profileIdentity.profileId);
+  };
+  const assertContinuityHistoryRead = async (taskId: string, conversationId?: string): Promise<void> => {
+    contextContinuity.assertTaskHistoryReadable(taskId, conversationId);
+    const snapshot = await snapshotStore.recoverTask(taskId);
+    if (snapshot?.context?.threadId && snapshot.context.threadId !== conversationId) throw new Error('not_readable');
+  };
+  const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore,
+    initializeOwner:initializeProfileOwner,...(profileIdentity?.legacyProfileId?{migrateFromProfileId:`desktop-user:${profileIdentity.legacyProfileId}`} : {}),
+    resolveOwnedHistory: (taskId, context) => contextContinuity.assembleOwnedHistory(taskId, context),
+    assertHistoryRead: assertContinuityHistoryRead,
+    onHistoryLoaded: (taskId, sources, conversationId) => contextContinuity.recordLoadedHistory(taskId, sources, conversationId),
+    assertContextAdmission: taskId => contextContinuity.assertTaskReadable(taskId),
+    acquireNativeContext:(taskId,routes)=>contextContinuity.acquireNativeContext(taskId,routes),
+    assertNativeExecutionAvailable:()=>contextContinuity.assertNativeExecutionAvailable(),
+    onTaskPrepared: (input, taskId) => contextContinuity.bindPrepared(input, taskId, id => snapshotStore.recoverTask(id), undefined, 'native_codex'),
+    onExecutionSettled: (snapshot, receipt) => contextContinuity.capture(snapshot, receipt),
+    onPersistedEvent: input => { if (['result','error','task_cancelled','task_terminal'].includes(input.event.type)) contextContinuity.capture(input.snapshot); },
+    admitThread: async threadId => {
     await multiAgentReady;
     const revision=multiAgentService?.assertExecutionAdmission(threadId);
     await prepareMultiAgentThread(threadId);
     const revalidate=()=>{multiAgentService?.assertExecutionAdmission(threadId,revision);};
     revalidate(); return revalidate;
   } });
+  contextContinuity.configureDeletionGuard(()=>codexTasks.assertDeletionSafe());
   const modelSnapshot = (config: Config): DesktopModelConfigSnapshot => {
     const snapshot = createModelConfigSnapshot(config);
     snapshot.configuredDefaultModelId = config.defaultModelId;
     snapshot.providers.push({ id: LOCAL_CODEX_MODEL, label: 'Codex', type: 'custom', protocol: 'openai_responses', apiKeyConfigured: false });
-    snapshot.models.push({ projectAgentSelectable: false, id: LOCAL_CODEX_MODEL, provider: LOCAL_CODEX_MODEL, model: LOCAL_CODEX_MODEL, label: 'Codex', isDefault: codexTasks.selected() });
+    snapshot.models.push({ unavailableReason:'native_execution_gate_unavailable',projectAgentSelectable: false, id: LOCAL_CODEX_MODEL, provider: LOCAL_CODEX_MODEL, model: LOCAL_CODEX_MODEL, label: 'Codex', isDefault: codexTasks.selected() });
     if (codexTasks.selected()) { snapshot.defaultModelId=LOCAL_CODEX_MODEL; snapshot.defaultProvider=LOCAL_CODEX_MODEL; for (const model of snapshot.models) model.isDefault=model.id===LOCAL_CODEX_MODEL; }
     return snapshot;
   };
   // Unknown injected runners and every non-local host remain ordinary.
-  const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'));
   const multiAgentCatalog = multiAgentStore ? new DesktopToolCatalogBridge({ registry, workspaceId: multiAgentWorkspaceId,
     getService: () => multiAgentService }) : undefined;
   const multiAgentWorktrees = multiAgentStore ? new DesktopMultiAgentWorktrees({ store: multiAgentStore }) : undefined;
   let multiAgentRuntime: DesktopMultiAgentRuntime | undefined;
   const multiAgentService = multiAgentStore ? new DesktopMultiAgentService({ store: multiAgentStore, coordinator: executionCoordinator,
+    beforeStartup:initializeProfileOwner,
+    requireContentPolicy: true,
+    authorizeContentRead: threadId => contextContinuity.assertConversationContentReadable(threadId),
+    authorizeAgentContent: input => contextContinuity.consumeAgentContent(input),
     worktrees: multiAgentWorktrees,
     executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
       actorId: `desktop-user:${multiAgentProfileId}` }),
@@ -1041,6 +1163,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await goalCoordinator.handleRecoveredHostTerminal(input);
     },
     beforeThreadDeletion: async threadId => {
+      contextContinuity.assertConversationDeletionSafe(threadId);
       const deletion = multiAgentStore?.getThread(threadId)?.deletionReceipt;
       if (deletion && activityService) {
         activityService.handleThreadDeletion(threadId, deletion.operationId);
@@ -1796,7 +1919,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     artifactGenerationRoot,
     leaseId => artifactWorkspaceStore.getLease(leaseId)?.requestedKind,
   );
-  const artifactGenerationRegistry = new ToolRegistry({ autoMode: true }, artifactGenerationTools);
+  const artifactGenerationRegistry = new ToolRegistry({ autoMode: true,requireEffectGuard:true }, artifactGenerationTools);
   artifactGenerationRegistry.registerTool(createArtifactWorkspacePluginProducerTool({
     generationRoot: artifactGenerationRoot,
     resolveRequestedKind: leaseId => artifactWorkspaceStore.getLease(leaseId)?.requestedKind,
@@ -1815,6 +1938,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     required: ['brief_json'],
   }));
+  const contextResolver = createContextResolverTool(() => contextContinuity.port());
+  settledLocalExecutors.set(contextResolver, contextResolver.execute);
+  registry.registerTool(contextResolver);
+  const historySearch = createHistorySearchTool(() => contextContinuity.port());
+  settledLocalExecutors.set(historySearch, historySearch.execute);
+  registry.registerTool(historySearch);
   const defaultDesktopRunner = createDesktopModelRunnerWithRegistry(
     registry,
     tools,
@@ -1823,6 +1952,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     materialRegistry,
     kswarmCreateProjectToolOptions,
     {
+      authorizeContext: taskId => contextContinuity.assertTaskReadable(taskId),
+      recordUnprovenEffect:(taskId,id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name),
+      inheritContext: (sourceTaskId, receiverTaskId) => contextContinuity.inheritTaskContext(sourceTaskId, receiverTaskId),
       officeToMarkdown: input => officeDocumentParser.parse(input),
       ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
       ...(multiAgentRuntime ? { multiAgent: { runtime: multiAgentRuntime, service: multiAgentService!, catalog: multiAgentCatalog!, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } } : {}),
@@ -1837,17 +1969,61 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     kswarmCreateProjectToolOptions,
     {
       restrictedArtifactGeneration: true,
+      authorizeContext: taskId => contextContinuity.assertTaskReadable(taskId),
+      recordUnprovenEffect:(taskId,id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name),
       officeToMarkdown: input => officeDocumentParser.parse(input),
     },
   );
   const localChatDescriptor = Object.freeze({ kind: 'localChat' as const, multiAgent: Boolean(multiAgentRuntime), invoke: defaultDesktopRunner });
   const localGoalDescriptor = Object.freeze({ kind: 'localGoal' as const, multiAgent: Boolean(multiAgentRuntime), invoke: defaultDesktopRunner });
-  const ordinaryRunner = coordinateRunner(options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
+  const ordinaryRunner = coordinateRunner(originalRunner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
     ? restrictedArtifactRunner(input) : defaultDesktopRunner(input)));
+  type InputSubmission={inputId:string;active:boolean;consumed:boolean};
+  let inputQueue:DesktopInputQueue|undefined;const legacyUserQueueHints=new Set<string>();
+  const inputSubmissions=new AsyncLocalStorage<InputSubmission>();
+  const inputExecutionScopes=new AsyncLocalStorage<{actor:NativeActor;authority:string;active:boolean}>();
+  const actualInputExecutionAuthority=():string=>{
+    return continuityDigest(['input-execution-v1',multiAgentProfileId,multiAgentWorkspaceId,multiAgentService?.captureInputPermissionRevision()??'standalone']);
+  };
+  const withInputExecutionAuthority=async<T>(actor:NativeActor|undefined,action:()=>Promise<T>):Promise<T>=>{
+    if(!actor)return action();
+    if(actor.requestSource!=='user'||actor.actorId!==`desktop-user:${multiAgentProfileId}`)throw new Error('input_user_required');
+    const current=inputExecutionScopes.getStore();if(current?.active&&current.actor===actor)return action();
+    const scope={actor,authority:actualInputExecutionAuthority(),active:true};
+    try{return await inputExecutionScopes.run(scope,action);}finally{scope.active=false;}
+  };
+
+  const inputTerminals=new Map<string,Parameters<DesktopGoalCoordinator['handlePersistedTaskEvent']>[0]>();
+  const inputGoalSettlements=new Set<Promise<void>>();let inputSettlementsClosed=false;
+  const readSettledGoalTerminal=(event:Parameters<DesktopGoalCoordinator['handlePersistedTaskEvent']>[0])=>{
+    if(event.event.type!=='task_terminal'||!Number.isSafeInteger(event.eventIndex)||event.eventIndex<0)throw new Error('goal_source_unsettled');
+    const snapshot=snapshotStore.inspectPersistedTaskSync(event.taskId);
+    if(!snapshot||snapshot.taskId!==event.taskId||snapshot.sessionId!==event.snapshot.sessionId||snapshot.status!==event.event.status||continuityDigest(snapshot.events[event.eventIndex])!==continuityDigest(event.event)||continuityDigest(snapshot.events.slice(0,event.eventIndex+1))!==continuityDigest(event.snapshot.events.slice(0,event.eventIndex+1)))throw new Error('goal_source_unsettled');
+    const p=contextContinuity.port();
+    if(p.service.store.db.prepare('SELECT status FROM conversation_inputs WHERE task_id=?').get(event.taskId)?.status!=='completed')throw new Error('goal_source_unsettled');
+    p.service.assertHistorySourceClosed(event.taskId,snapshot);
+    const receipt=p.service.store.db.prepare('SELECT * FROM source_settlements WHERE task_id=?').get(event.taskId);
+    if(!receipt||receipt.source_epoch!==snapshot.sessionId||receipt.event_count!==snapshot.events.length||receipt.prefix_hash!==continuityDigest(snapshot.events))throw new Error('goal_source_unsettled');
+    return {...event,snapshot};
+  };
+  const scheduleInputGoalSettlement=(event:Parameters<DesktopGoalCoordinator['handlePersistedTaskEvent']>[0]):void=>{
+    if(inputSettlementsClosed)return;
+    // The actual terminal producer starts new owner work, outside the spent user submission.
+    const job=inputSubmissions.exit(()=>Promise.resolve().then(()=>inputSettlementsClosed?undefined:(async()=>{await inputQueue?.syncGoal(event.snapshot.context?.threadId??'');if(!inputSettlementsClosed){const current=readSettledGoalTerminal(event);await goalCoordinator!.handlePersistedTaskEvent(current);}})()));
+    inputGoalSettlements.add(job);void job.catch(error=>console.warn('[goal] input settlement failed:',error instanceof Error?error.message:String(error))).finally(()=>{inputGoalSettlements.delete(job);inputQueue?.wakeAll();});
+  };
+  const preparedInputOrigins=new WeakMap<object,InputSubmission>();
+  const userInputFlights=new Map<string,Promise<{taskId:string;understanding?:TaskUnderstanding}>>();
   let hostDeliveryAuthority: DesktopHostDeliveryAuthority | undefined;
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
+    onWorkReleased:()=>inputQueue?.wakeAll(),
+    readPendingInputIdentity:id=>contextContinuity.inputs().readPendingIdentity(id),
+    authorizeInputPreparation:(id,identity,input)=>contextContinuity.inputs().assertPreparation(id,identity,input),
+    authorizeInputAdmission:snapshot=>contextContinuity.assertInputAdmission(snapshot),
+    beforePrepareTask: async () => { await multiAgentReady; },
+    onPreparedSnapshot: snapshot => contextContinuity.registerGuardedSnapshot(snapshot),
     runner: input => {
       const prepared = multiAgentStore?.getRootBinding(input.taskId);
       if (!prepared) return ordinaryRunner(input);
@@ -1855,8 +2031,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!descriptor.multiAgent || input.executionScope && input.executionScope.kind !== 'goal_turn') return Promise.reject(new Error('unsupported multi-agent runner'));
       return multiAgentService!.runRoot(input, context => descriptor.invoke(input, context));
     },
+    resolveOwnedHistory: (taskId, context) => contextContinuity.assembleOwnedHistory(taskId, context),
+    assertHistoryRead: assertContinuityHistoryRead,
+    onHistoryLoaded: (taskId, sources, conversationId) => contextContinuity.recordLoadedHistory(taskId, sources, conversationId),
     authorizePreparation: (taskId, marker) => { if (!multiAgentService) throw new Error('multi_agent_unsupported_runner'); multiAgentService.assertHostPreparation(taskId, marker); },
-    assertTaskAdmission: snapshot => multiAgentService?.assertHostAdmission(snapshot),
+    assertTaskAdmission: snapshot => { contextContinuity.assertTaskReadable(snapshot.taskId); return multiAgentService?.assertHostAdmission(snapshot); },
     decideCancellation: (snapshot, reason) => multiAgentService?.decideHostCancellation(snapshot, reason) ?? Promise.resolve({ hostAbortAllowed: true }),
     getExecutionPolicy: snapshot => ({ deliveryRepair: multiAgentStore?.getRootBinding(snapshot.taskId) ? 'explicit' : 'automatic' }),
     onDeliveryReport: async report => {
@@ -1869,9 +2048,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
-    // Use timestamp + random suffix to ensure unique taskId across app restarts.
-    createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    // Reserve a fresh task identity across app restarts.
+    createTaskId: () => `task_${randomUUID()}`,
+    onExecutionSettled: async snapshot => {contextContinuity.capture(snapshot, { physicallySettled: true });await contextContinuity.settleInput(snapshot);const terminal=inputTerminals.get(snapshot.taskId);if(terminal){inputTerminals.delete(snapshot.taskId);scheduleInputGoalSettlement(terminal);}},
     onPersistedEvent: async input => {
+      if (['result','error','task_cancelled','task_terminal'].includes(input.event.type)) contextContinuity.capture(input.snapshot);
       if (input.event.type === 'task_terminal' && multiAgentService && hostDeliveryAuthority) {
         try { await multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority, taskId: input.taskId }); }
         catch (error) { console.warn('[conversation-activity] run reconciliation failed:', error instanceof Error ? error.message : 'activity_run_pending'); }
@@ -1883,16 +2064,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           console.warn('[artifact-workspace] task event projection failed:', error instanceof Error ? error.message : String(error));
         }
       }
-      if (goalCoordinator) {
-        try {
-          await goalCoordinator.handlePersistedTaskEvent(input);
-        } catch (error) {
-          console.warn('[goal] task event settlement failed:', error instanceof Error ? error.message : String(error));
-        }
+      if (goalCoordinator&&!inputSettlementsClosed&&input.event.type==='task_terminal') {
+        const p=contextContinuity.port();
+        if(p.service.store.db.prepare('SELECT 1 FROM conversation_inputs WHERE task_id=?').get(input.taskId)){
+          try{const current=readSettledGoalTerminal(input);scheduleInputGoalSettlement(current);}catch{inputTerminals.set(input.taskId,input);}
+        }else try{await inputSubmissions.exit(()=>goalCoordinator!.handlePersistedTaskEvent(input));}catch(error){console.warn('[goal] task event settlement failed:',error instanceof Error?error.message:String(error));}
       }
     },
   });
 
+  contextContinuity.configureInputOwner({host,materialRegistry,snapshotStore,
+    captureExecutionAuthority:()=>{const scope=inputExecutionScopes.getStore();if(scope){if(!scope.active)throw new Error('input_execution_authority_unavailable');return scope.authority;}return actualInputExecutionAuthority();},
+    assertExecutionAuthority:(authority,threadId)=>{if(authority!==actualInputExecutionAuthority())throw new Error('input_execution_authority_changed');multiAgentService?.assertExecutionAdmission(threadId);},
+    assertPreparationFailure:reservation=>{multiAgentService?.assertFailedInputPreparation(host,reservation);},
+    authorizePreparedInput:(inputId,input)=>{
+    const origin=preparedInputOrigins.get(input);if(!origin||!origin.active||!origin.consumed||origin.inputId!==inputId||inputSubmissions.getStore()!==origin)throw new Error('prepared_origin_missing');
+    preparedInputOrigins.delete(input);
+  }});
   const prepareMultiAgentThread = async (threadId: string): Promise<void> => {
     await multiAgentReady;
     await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user');
@@ -1905,16 +2093,28 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if (!multiAgentStore?.getThread(threadId)) await prepareMultiAgentThread(threadId);
   };
   const localTaskHost = {
-    prepareTask: async (input: TaskCreateInput) => {
-      let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
-      if (multiAgentService && (!input.executionScope || input.executionScope.kind === 'goal_turn')) {
-        await multiAgentReady;
-        const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
-        await prepareMultiAgentThread(threadId);
-        prepared = await multiAgentService.prepareRoot(host, threadId, input);
-      } else {
-        prepared = await host.prepareTask(input);
+    prepareTask: async (input: TaskCreateInput, publicInput?: PublicTaskInput) => {
+      const submission=inputSubmissions.getStore();let reservation:ReturnType<typeof host.reserveTaskIdentity>|undefined;
+      const usesMultiAgent=!!multiAgentService&&(!input.executionScope||input.executionScope.kind==='goal_turn');
+      const threadId=input.context?.threadId??`local_${randomUUID()}`;
+      if(usesMultiAgent){await multiAgentReady;await prepareMultiAgentThread(threadId);}
+      let claimInput:(()=>Promise<void>)|undefined;
+      if(submission){
+        if(!submission.active||submission.consumed)throw new Error('input_submission_consumed');submission.consumed=true;
+        preparedInputOrigins.set(input,submission);
+        try{reservation=await host.restorePendingInputIdentity(submission.inputId);}catch(error){preparedInputOrigins.delete(input);throw error;}
+        claimInput=async()=>{const actual=await contextContinuity.inputs().claim(submission.inputId,input);if(actual.reservation!==reservation)throw new Error('input_identity_conflict');};
       }
+      let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
+      try{
+        if(usesMultiAgent)prepared=await multiAgentService!.prepareRoot(host,threadId,input,reservation,claimInput);
+        else{if(claimInput)await claimInput();prepared=await host.prepareTask(input,reservation?{reservation}:undefined);}
+      }catch(error){
+        if(submission){try{contextContinuity.inputs().finalizePreparationFailure(submission.inputId);}catch{try{contextContinuity.inputs().markClaimUnknown(submission.inputId);}catch{/* Preserve the original uncertain claim. */}}}
+        throw error;
+      }finally{preparedInputOrigins.delete(input);}
+      try { await contextContinuity.bindPrepared(input, prepared.taskId, id => host.inspectTask(id), publicInput); }
+      catch (error) { await host.cancelTask(prepared.taskId, 'continuity_binding_failed'); throw error; }
       if (currentExecutionLane() === 'foreground') {
         await conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
         conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
@@ -1926,6 +2126,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   goalCoordinator = new DesktopGoalCoordinator({
     store: goalStore,
     taskHost: localTaskHost,
+    requireReadProvenance: true,
+    assertPreparedTaskCurrent: prepared => {
+      if (!goalDisclosure) throw new Error('goal_content_unavailable');
+      goalDisclosure.assertTaskCurrent(prepared.taskId);
+    },
+    capturePreparedSourceEpoch: async (taskId, scope) => {
+      const snapshot = await host.inspectTask(taskId), actual = snapshot?.executionScope;
+      if (!snapshot || snapshot.taskId !== taskId || !snapshot.sessionId || snapshot.context?.threadId !== scope.threadId
+        || actual?.kind !== 'goal_turn' || actual.goalId !== scope.goalId || actual.epoch !== scope.epoch
+        || actual.goalTurnId !== scope.goalTurnId || actual.threadId !== scope.threadId || actual.origin !== scope.origin) throw new Error('goal_provenance_unavailable');
+      return snapshot.sessionId;
+    },
+    captureGoalRead: (threadId, value) => {
+      if (!goalDisclosure) throw new Error('goal_content_unavailable');
+      goalDisclosure.capture(threadId, value, goalReadActor);
+    },
+    assertGoalReadCurrent: (threadId, value, receiverTaskId) => {
+      if (!goalDisclosure) throw new Error('goal_content_unavailable');
+      goalDisclosure.assertValueCurrent(threadId, value, goalReadActor);
+      if (receiverTaskId) {
+        const binding = goalStore.getTaskBinding(receiverTaskId);
+        if (value && (!binding || binding.goalId !== value.state.goalId || binding.epoch !== value.state.epoch)) throw new Error('goal_content_unavailable');
+        goalDisclosure.assertTaskCurrent(receiverTaskId);
+      }
+    },
+    hasPendingUserInput:(threadId,exceptTaskId)=>legacyUserQueueHints.has(threadId)||!!contextContinuity.port().service.store.db.prepare("SELECT 1 FROM conversation_inputs WHERE conversation_id=? AND status NOT IN ('completed','cancelled','failed_not_started') AND task_id<>? LIMIT 1").get(threadId,exceptTaskId??''),
+    preparePublicTask: (input, publicInput) => localTaskHost.prepareTask(input, publicInput),
     multiAgent: multiAgentService,
     prepareThread: prepareMultiAgentThread,
     authorizeRecoveredDelivery: input => {
@@ -1935,15 +2162,48 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     instanceId: `desktop_${randomUUID()}`,
     now: options.now,
     publishGoalChanged: input => {
-      for (const listener of goalChangedListeners) listener(input);
+      try { if (!goalDisclosure) return; goalDisclosure.capture(input.threadId, input.goal, goalReadActor); }
+      catch { return; }
+      for (const listener of goalChangedListeners) {
+        try { goalDisclosure!.assertValueCurrent(input.threadId, input.goal, goalReadActor); listener(input); }
+        catch { console.warn('[goal] projection_delivery_unavailable'); }
+      }
     },
     publishGoalTaskPrepared: input => {
-      for (const listener of goalTaskPreparedListeners) listener(input);
+      try { if (!goalEgress) return; goalEgress.recordPrepared(input); } catch { return; }
+      for (const listener of goalTaskPreparedListeners) {
+        try { goalEgress.assertPrepared(input, goalReadActor); listener(input); }
+        catch { console.warn('[goal] prepared_delivery_unavailable'); }
+      }
     },
   });
   // Goal construction only installs its owner; recovery can now await its real
   // receipt before the same ready Promise opens any local task admission.
-  const multiAgentReady = multiAgentService?.initialize(host) ?? Promise.resolve();
+  const multiAgentReady = (multiAgentService?.initialize(host) ?? Promise.resolve()).then(() =>
+    contextContinuity.auditEffectInventory(async () => {
+      if (legacyEffectInventoryError !== undefined) throw new Error('task_inventory_unavailable');
+      return snapshotStore.inspectPersistedInventory();
+    }, legacyEffectOwnerPresent));
+  const activityResultManifests=new WeakMap<object,readonly string[]>();
+  const requireOwnedActivityWatch=(watchId:string)=>{
+    const watch=activityStore?.getWatch(watchId),thread=watch&&multiAgentStore?.getThread(watch.origin.threadId);
+    if(!watch||watch.origin.profileId!==multiAgentProfileId||watch.origin.workspaceId!==multiAgentWorkspaceId||!thread||thread.profileId!==multiAgentProfileId||thread.workspaceId!==watch.origin.workspaceId||(thread.deleteState??'none')!=='none')throw new Error('activity_source_forbidden');
+    return watch;
+  };
+  const assertActivityWorkCurrent=(watchId:string):void=>{
+    const watch=requireOwnedActivityWatch(watchId);if(watch.source!=='task_host')throw new Error('activity_source_forbidden');
+    const actual=readCurrentActivityTask(options.dataRoot,watch);
+    const execution=multiAgentStore?.getThread(actual.context!.threadId!);
+    if(execution&&(execution.profileId!==multiAgentProfileId||execution.workspaceId!==watch.origin.workspaceId||(execution.deleteState??'none')!=='none'))throw new Error('activity_source_forbidden');
+    try{contextContinuity.assertTaskReadable(watch.workId);}catch{throw new Error('activity_source_forbidden');}
+  };
+  const rememberActivityResult=<T>(result:T,watchIds:string[]):T=>{
+    const manifest=Object.freeze([...new Set(watchIds)]);for(const id of manifest)assertActivityWorkCurrent(id);
+    if(result&&typeof result==='object')activityResultManifests.set(result,manifest);return result;
+  };
+  const assertActivityResultCurrent=(result:unknown):void=>{
+    if(result&&typeof result==='object')for(const id of activityResultManifests.get(result)??[])assertActivityWorkCurrent(id);
+  };
   const installActivityGroupSubscription = () => {
     if (!multiAgentStore || unsubscribeActivityGroups) return;
     unsubscribeActivityGroups = multiAgentStore.subscribe(event => {
@@ -1962,10 +2222,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         })().catch(error => console.warn('[conversation-activity] agent event failed:', error instanceof Error ? error.message : 'activity_group_unavailable'));
       });
   };
-  if (activityEnabled && multiAgentStore) {
+  if (activityEnabled && multiAgentStore && profileIdentity) {
     try {
       activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { now: options.now });
+      if(profileIdentity.legacyProfileId)activityStore.migrateProfileIdentity(profileIdentity.legacyProfileId,profileIdentity.profileId);
       activityService = new ConversationActivityService({ store: activityStore, profileId: multiAgentProfileId,
+        canDiscloseWork: watch => {
+          // Only the native task adapter currently supplies a complete immutable
+          // task identity. Other projections await trusted producer manifests.
+          if(watch.source!=='task_host')return false;
+          try{assertActivityWorkCurrent(watch.watchId);return true;}catch{return false;}
+        },
         notify: options.notifyConversationActivity,
         actorId: `desktop-user:${multiAgentProfileId}`, getThread: threadId => { const thread = multiAgentStore.getThread(threadId); return thread ? {
           profileId: thread.profileId, threadId: thread.threadId, workspaceId: thread.workspaceId, deleteState: thread.deleteState ?? 'none',
@@ -1973,7 +2240,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         canObserveWork: async watch => {
           if (watch.source === 'task_host') {
             const snapshot = (await resolveScopedTaskHost(watch.workId, host).recoverTask(watch.workId)).snapshot;
-            return snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
+            return snapshot.sessionId===watch.sourceDataEpoch&&snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
           }
           if (watch.source === 'agent_group') return multiAgentStore.requireGroup(watch.workId).threadId === watch.origin.threadId;
           if (watch.source === 'mcp') return activityMcp?.canObserve(watch) ?? false;
@@ -1997,6 +2264,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         groupMembers: runId => multiAgentStore.getActivityMembers(runId),
         onError: error => console.warn('[conversation-activity-source]', error instanceof Error ? error.message : 'activity_source_failed') });
       activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+        assertReadCurrent: () => { throw new Error('activity_source_forbidden'); },
         originThread: async taskId => {
           const parent = activityStore!.listWatches().find(watch => watch.source === 'task_host' && watch.workId === taskId);
           if (parent) return parent.origin.threadId;
@@ -2012,7 +2280,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   }
 
-  let multiAgentStartupReady = !multiAgentService;
+  let multiAgentStartupReady = false;
   if (multiAgentService) hostDeliveryAuthority = multiAgentService.bindHostDeliveryOwner(host);
   // Keep initialization failure observable by every admission path, without an
   // unhandled rejection when the window has not submitted its first task yet.
@@ -2022,21 +2290,49 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }, () => {});
   // Ready callers must enter Goal synchronously so its original permission
   // revision is captured before any queued revoke/regrant can run.
-  const afterLocalRecovery = <T>(action: () => Promise<T>): Promise<T> => (
-    multiAgentStartupReady ? action() : multiAgentReady.then(action)
-  );
+  const afterLocalRecovery = <T>(action: () => Promise<T>): Promise<T> => {
+    if(!profileIdentity)return Promise.reject(new Error('profile_identity_unavailable'));
+    return multiAgentStartupReady ? action() : multiAgentReady.then(action);
+  };
   // The local host already creates this ID for unthreaded Chat. Capture it at
   // the public admission boundary so Goal can fence the same request across IO.
   const localChatContext = (context?: TaskCreateContext): TaskCreateContext | undefined => (
     multiAgentService ? { ...context, threadId: context?.threadId || `local_${randomUUID()}` } : context
   );
+  const assertUserInputActor=(actor:NativeActor|undefined,inputId?:string):void=>{
+    if(actor&&(actor.requestSource!=='user'||actor.actorId!==`desktop-user:${multiAgentProfileId}`)||inputId&&!actor)throw new Error('input_user_required');
+  };
+  const admitSubmittedUserTask=async(input:TaskCreateInput,inputId?:string):Promise<{taskId:string;understanding?:TaskUnderstanding}>=>{
+    const threadId=input.context?.threadId,port=contextContinuity.port();
+    if(!threadId||!port.service.getConversation(port.actor,threadId))return goalCoordinator.admitUserTask(input);
+    const stableId=inputId??`input_${randomUUID()}`,journal=contextContinuity.inputs(),accepted=await journal.submit(port.actor,{inputId:stableId,input});
+    const inFlight=userInputFlights.get(stableId);if(inFlight)return inFlight;
+    if(accepted.status==='claimed'||accepted.status==='completed')return journal.readAcceptedTask(stableId);
+    if(accepted.status==='failed_not_started')throw new Error('input_preparation_failed');
+    if(accepted.status!=='pending')throw new Error('input_execution_unknown');
+    legacyUserQueueHints.delete(threadId);
+    const previous=userInputFlights.get(stableId);if(previous)return previous;
+    const submission:InputSubmission={inputId:stableId,active:true,consumed:false};
+    const pending=inputSubmissions.run(submission,()=>goalCoordinator.admitUserTask(input));userInputFlights.set(stableId,pending);
+    try{return await pending;}finally{submission.active=false;if(userInputFlights.get(stableId)===pending)userInputFlights.delete(stableId);}
+  };
+  inputQueue=new DesktopInputQueue({get service(){return contextContinuity.port().service;},get actor(){return contextContinuity.port().actor;},host,
+    journal:()=>contextContinuity.inputs(),withUserRequest:withInputExecutionAuthority,ready:async()=>{await multiAgentReady;},prepare:(input,id)=>inputExecutionScopes.exit(()=>conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode,threadId:input.context?.threadId},{requestSource:'user'},()=>admitSubmittedUserTask(input,id)))),
+    observeGoalPending:(threadId,pending)=>goalCoordinator!.observeUserQueuePending(threadId,pending),
+    onReconciled:(_inputId,taskId)=>{const terminal=inputTerminals.get(taskId);if(terminal){try{const current=readSettledGoalTerminal(terminal);inputTerminals.delete(taskId);scheduleInputGoalSettlement(current);}catch{/* Keep the original terminal pending until its receipt is complete. */}}},
+    setGoalPending:async(threadId,pending)=>{if(threadId)await inputSubmissions.exit(()=>goalCoordinator!.setUserQueuePending({threadId,pending}));},
+    readSource:id=>snapshotStore.inspectPersistedTaskSync(id),
+  });
   const unsubscribeMultiAgentGoal = multiAgentStore?.subscribe(event => {
     if (!['status', 'result', 'message_consumed'].includes(event.kind)) return;
     const threadId = multiAgentStore.requireGroup(event.groupId).threadId;
     // Same durable source as the Agents panel; no renderer/Goal polling owner.
     void goalCoordinator!.getGoal(threadId).then(goal => {
-      if (goal) for (const listener of goalChangedListeners) listener({ threadId, goal });
-    }).catch(error => console.warn('[goal] child projection failed:', error instanceof Error ? error.message : String(error)));
+      if (goal) for (const listener of goalChangedListeners) {
+        try { goalEgress!.assertBroadcast({ threadId, goal }, goalReadActor); listener({ threadId, goal }); }
+        catch { console.warn('[goal] child_projection_unavailable'); }
+      }
+    }).catch(() => console.warn('[goal] child_projection_unavailable'));
   });
   for (const tool of createGoalTools(goalCoordinator.createRegistryGoalToolHost())) {
     registry.registerTool(tool);
@@ -2081,17 +2377,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
     const execution = { clock: undefined as KSwarmExecutionClock | undefined };
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths });
-    const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
+    const scopedRegistry = new ToolRegistry({ autoMode: true,requireEffectGuard:true }, scopedTools);
     const scopedHost = new InProcessTaskRuntimeHost({
       // This scoped owner is bounded by the KSwarm queue/run clocks.
       taskIdleTimeoutMs: 0,
       materialRegistry,
       snapshotStore,
+      beforePrepareTask: async () => { await multiAgentReady; },
+      onPreparedSnapshot: snapshot => contextContinuity.registerGuardedSnapshot(snapshot),
+      onExecutionSettled: snapshot => contextContinuity.capture(snapshot, { physicallySettled: true }),
       runner: input => withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
         execution.clock = new KSwarmExecutionClock(10 * 60 * 1000);
         execution.clock.start();
         await taskOptions.onStarted?.();
-        return (options.runner ?? createDesktopModelRunnerWithRegistry(
+        return (originalRunner ?? createDesktopModelRunnerWithRegistry(
         scopedRegistry,
         scopedTools,
         options.dataRoot,
@@ -2099,6 +2398,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         materialRegistry,
         kswarmCreateProjectToolOptions,
         {
+          recordUnprovenEffect:(taskId,id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name),
           cwd:workspaceRoot,
           getProjectModel: () => resolveProjectAgentModel(participantId),
           officeToMarkdown: input => officeDocumentParser.parse(input),
@@ -2119,9 +2419,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
   const createCollaborationRoomTaskRunner = () => {
     const roomTools=buildToolList();
-    const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools});
+    const roomRegistry=createRoomToolRegistry({mode:'discussion',requireEffectGuard:true,tools:roomTools});
     connectorsService.bindTools(roomRegistry);
-    return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
+    return {registry:roomRegistry,runner:originalRunner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true,recordUnprovenEffect:(taskId,id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name)})};
   };
 
   async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string, workspace?:RoomWorkspaceRunOptions,discussionSignal?:AbortSignal): Promise<{ text: string }> {
@@ -2180,11 +2480,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if(workspace) {
         let modelBinding:Promise<ReturnType<typeof resolveRuntimeModelBinding>>|undefined;
         const getModelBinding=()=>modelBinding??=loadConfig().then(config=>resolveRuntimeModelBinding(config));
-        return await runRoomWorkspaceExecutor({...workspace,prompt,
+        return await runRoomWorkspaceExecutor({...workspace,prompt,requireEffectGuard:true,
         materials:materials.map(item=>materialRegistry.get(item.materialId)).filter((item):item is MaterialRecord=>Boolean(item)),
         onTaskCreated:taskId=>{registeredTaskIds.add(taskId);registerRoomHistoryCapability(taskId,{roomId:envelope.roomId,claimToken});},
-        createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
-          {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
+        createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return originalRunner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
+          {recordUnprovenEffect:(taskId,id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name),cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
       });
       }
       const discussion=createCollaborationRoomTaskRunner();
@@ -2324,7 +2624,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const getProjectModel = () => resolveProjectAgentModel(targetParticipantId || context.logicalAgentId);
     const getModelBinding=()=>binding??=getProjectModel().then(model=>model.binding);
     const prompt=[`KSwarm project task ${handoff.task.id}`,`Project: ${handoff.project.name}`,`Goal: ${handoff.project.goal}`,`Task: ${handoff.task.title}`,handoff.task.brief??'',handoff.task.acceptanceCriteria??'',`Required outputs: ${JSON.stringify(handoff.task.requiredOutputs??[])}`,`Write deliverables to the administrator-selected artifacts directory: ${handoff.project.artifactsDir}. No directory name implies acceptance. Report actual output references, not success claims.`].join('\n');
-    const result=await runRoomWorkspaceExecutor({...workspace,prompt,port:{...workspace.port,
+    const result=await runRoomWorkspaceExecutor({...workspace,prompt,requireEffectGuard:true,port:{...workspace.port,
       async submitManifest(current,manifest){
         manifests.set(current.claimId,manifest);
         if(current.claimId===context.claimId){
@@ -2333,8 +2633,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           await workspace.port.submitManifest(current,{summary:manifest.summary,artifacts});
         }
       },
-    },createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
-      {cwd:input.cwd,getProjectModel,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
+    },createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return originalRunner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
+      {recordUnprovenEffect:(taskId,id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name),cwd:input.cwd,getProjectModel,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
     });
     return {summary:result.text,artifacts:[...manifests.values()].flatMap(m=>m.artifacts)};
   }
@@ -2688,6 +2988,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               snapshot: recovered.snapshot,
               lookup,
               statusTool: workflowStatusTool,
+              recordUnprovenEffect:(id,name)=>contextContinuity.recordUnprovenEffect(taskId,id,name),
             })
           : recovered.snapshot;
       })();
@@ -2702,25 +3003,249 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   };
 
-  const authorizeLocalTaskActor = async (taskId: string, actor: NativeActor): Promise<void> => {
+  let localTaskReadsClosed=false;
+  const taskReadScopes=new WeakMap<object,Map<string,Readonly<{actorId:string;threadId:string|undefined;sourceEpoch:string|undefined}>>>();
+  const assertLocalTaskIdentity=(taskId:string,actor:NativeActor):void=>{
     if (actor?.requestSource !== 'user' || actor.actorId !== `desktop-user:${multiAgentProfileId}`) throw new Error('task_actor_forbidden');
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(taskId)) throw new Error('invalid_task_id');
+  };
+  const assertLocalTaskScope=(threadId:string|undefined):void=>{
+    const thread=threadId?multiAgentStore?.getThread(threadId):null;
+    if(thread&&(thread.profileId!==multiAgentProfileId||thread.workspaceId!==multiAgentWorkspaceId||(thread.deleteState??'none')!=='none'))throw new Error('task_scope_forbidden');
+  };
+  const assertLocalTaskReadCurrent=(taskId:string,actor:NativeActor):void=>{
+    assertLocalTaskIdentity(taskId,actor);
+    if(localTaskReadsClosed||!multiAgentStartupReady)throw new Error('task_read_fence_unavailable');
+    const scope=taskReadScopes.get(actor)?.get(taskId);
+    if(!scope||scope.actorId!==actor.actorId)throw new Error('task_read_fence_unavailable');
+    assertLocalTaskScope(scope.threadId);contextContinuity.assertTaskReadable(taskId);
+  };
+  const authorizeLocalTaskActor = async (taskId: string, actor: NativeActor, mode: 'read' | 'control' = 'read'): Promise<void> => {
+    assertLocalTaskIdentity(taskId,actor);
+    if(mode==='read')taskReadScopes.get(actor)?.delete(taskId);
     await multiAgentReady;
+    if (mode === 'read') contextContinuity.assertTaskReadable(taskId);
     const snapshot = await snapshotStore.recoverTask(taskId);
     const threadId = snapshot?.context?.threadId;
-    const thread = threadId ? multiAgentStore?.getThread(threadId) : null;
-    if (thread && (thread.profileId !== multiAgentProfileId || (thread.deleteState ?? 'none') !== 'none')) throw new Error('task_scope_forbidden');
+    assertLocalTaskIdentity(taskId,actor);assertLocalTaskScope(threadId);
+    if(mode==='read'){
+      if(localTaskReadsClosed||!multiAgentStartupReady)throw new Error('task_read_fence_unavailable');
+      contextContinuity.assertTaskReadable(taskId);
+      const scopes=taskReadScopes.get(actor)??new Map();scopes.set(taskId,Object.freeze({actorId:actor.actorId,threadId,sourceEpoch:snapshot?.sessionId}));taskReadScopes.set(actor,scopes);
+    }
   };
 
-  return {
+  contextContinuity.configureScopePolicy(id => {
+    const binding = multiAgentStore?.getThread(id);
+    if (!binding) return 'readable';
+    if (binding.profileId !== multiAgentProfileId || binding.workspaceId !== multiAgentWorkspaceId) return 'blocked';
+    return binding.deleteState === 'deleted' ? 'deleted' : (binding.deleteState ?? 'none') === 'none' ? 'readable' : 'blocked';
+  });
+  contextContinuity.configureLegacy(async (taskId, threadId) => {
+    await multiAgentReady;
+    const binding = multiAgentStore?.getThread(threadId);
+    if (binding && (binding.profileId !== multiAgentProfileId || binding.workspaceId !== multiAgentWorkspaceId || (binding.deleteState ?? 'none') !== 'none')) throw new Error('not_readable');
+    if (taskId.startsWith('task_codex_')) throw new Error('source_offline'); // Legacy native views are bounded; pre-trim import is handled by its adapter.
+    if (host.activeExecutionCount() > 0 || (await host.inspectActiveTasks()).some(task => task.taskId === taskId)) throw new Error('blocked_unsettled');
+    const before = assertLegacyTaskFilesOwned(options.dataRoot, taskId, Boolean(binding));
+    const snapshot = await new FileTaskSnapshotStore(join(options.dataRoot, 'tasks')).recoverTask(taskId);
+    if (!snapshot || snapshot.context?.threadId !== threadId || snapshot.executionScope && (snapshot.executionScope.kind !== 'goal_turn' || snapshot.executionScope.threadId !== threadId)) throw new Error('not_readable');
+    if (before !== assertLegacyTaskFilesOwned(options.dataRoot, taskId, Boolean(binding))) throw new Error('stale_manifest');
+    return { snapshot, publicPrompt: snapshot.executionScope ? '' : snapshot.prompt, includeUser: !snapshot.executionScope, sourceKind: 'desktop_task' };
+  });
+  void contextContinuity.reconcile();
+  void multiAgentReady.then(()=>contextContinuity.restoreMcpAfterOwnerReady()).catch(()=>console.warn('[context-continuity] MCP endpoint unavailable'));
+  const historyActor = Object.freeze({ requestSource: 'user' as const, actorId: `desktop-user:${multiAgentProfileId}` });
+  const assertGoalAccess = (threadId: string, actor: NativeActor): void => {
+    assertLocalTaskIdentity('goal_read', actor);
+    if (localTaskReadsClosed || !multiAgentStartupReady || !profileIdentity) throw new Error('goal_content_unavailable');
+    assertLocalTaskScope(threadId);
+  };
+  goalDisclosure = createGoalDisclosure({
+    store: goalStore,
+    assertAccess: assertGoalAccess,
+    assertLiveProjection: (threadId, value) => goalCoordinator.assertLiveProjection(threadId, value),
+    readTask: taskId => recoverTaskSnapshotSync(join(options.dataRoot, 'tasks'), taskId),
+    assertTaskReadable: snapshot => {
+      if (localTaskReadsClosed || !multiAgentStartupReady || !profileIdentity) throw new Error('goal_content_unavailable');
+      assertLocalTaskScope(snapshot.context?.threadId); contextContinuity.assertTaskReadable(snapshot.taskId);
+    },
+  });
+  goalEgress = createGoalEgress({ disclosure: goalDisclosure, assertAccess: assertGoalAccess,
+    assertOrigin: (threadId, value) => goalDisclosure!.assertValueCurrent(threadId, value, goalReadActor),
+    assertPrepared: value => goalCoordinator.assertPreparedCurrent(value) });
+  const mutateGoal = <T extends { goal: DesktopGoalProjection; preparedTask: PreparedGoalTask }>(
+    threadId: string, actor: NativeActor, action: () => Promise<T>,
+  ): Promise<T> => afterLocalRecovery(async () => {
+    assertGoalAccess(threadId, actor);
+    const value = await action();
+    goalEgress!.recordReply(threadId, value, actor);
+    return value;
+  });
+  const taskHistoryBatches = createTaskHistoryReader({
+    ready: async () => { if (localTaskReadsClosed) throw new Error('task_history_unavailable'); await multiAgentReady; },
+    assertOwnerCurrent: () => {
+      if (localTaskReadsClosed || !multiAgentStartupReady || !profileIdentity) throw new Error('task_history_unavailable');
+    },
+    inspect: () => snapshotStore.inspectPersistedInventory(),
+    authorize: taskId => authorizeLocalTaskActor(taskId, historyActor),
+    readCurrent: taskId => recoverTaskSnapshotSync(join(options.dataRoot, 'tasks'), taskId),
+    assertSnapshotCurrent: snapshot => {
+      assertLocalTaskReadCurrent(snapshot.taskId, historyActor);
+      const admitted = taskReadScopes.get(historyActor)?.get(snapshot.taskId);
+      if (!admitted || admitted.sourceEpoch !== snapshot.sessionId || admitted.threadId !== snapshot.context?.threadId) throw new Error('task_history_unavailable');
+      assertLocalTaskScope(snapshot.context?.threadId);
+    },
+  });
+  const taskHistory = Object.freeze({ ...taskHistoryBatches, ...createTaskPresentationReader({
+    ready: async () => { if (localTaskReadsClosed) throw new Error('task_history_unavailable'); await multiAgentReady; },
+    assertOwnerCurrent: () => {
+      if (localTaskReadsClosed || !multiAgentStartupReady || !profileIdentity) throw new Error('task_history_unavailable');
+    },
+    authorize: (taskId, actor) => authorizeLocalTaskActor(taskId, actor),
+    readCurrent: taskId => recoverTaskSnapshotSync(join(options.dataRoot, 'tasks'), taskId),
+    assertSnapshotCurrent: (snapshot, actor) => {
+      assertLocalTaskReadCurrent(snapshot.taskId, actor);
+      const admitted = taskReadScopes.get(actor)?.get(snapshot.taskId);
+      if (!admitted || admitted.sourceEpoch !== snapshot.sessionId || admitted.threadId !== snapshot.context?.threadId) throw new Error('task_history_unavailable');
+      assertLocalTaskScope(snapshot.context?.threadId);
+    },
+    readPresentation: snapshot => readPreparedTaskPresentation(contextContinuity.port().service, snapshot),
+  }) });
+  const creationReplies=new WeakMap<object,{actor:NativeActor;taskId:string;epoch:string;hash:string;understanding:string}>();
+  const assertCreationReply=(reply:{taskId:string;understanding?:TaskUnderstanding},actor:NativeActor):void=>{
+    const proof=creationReplies.get(reply);if(!proof||proof.actor!==actor||proof.taskId!==reply.taskId||proof.hash!==JSON.stringify(reply))throw new Error('task_creation_proof_unavailable');
+    assertLocalTaskReadCurrent(reply.taskId,actor);
+    const snapshot=recoverTaskSnapshotSync(join(options.dataRoot,'tasks'),reply.taskId);
+    if(!snapshot||snapshot.taskId!==reply.taskId||snapshot.sessionId!==proof.epoch||JSON.stringify(snapshot.understanding)!==proof.understanding)throw new Error('task_creation_proof_unavailable');
+    const p=contextContinuity.port();if(snapshot.context?.threadId&&p.service.getConversation(p.actor,snapshot.context.threadId))readPreparedTaskPresentation(p.service,snapshot);
+  };
+  const publishCreation=async<T extends {taskId:string;understanding?:TaskUnderstanding}>(pending:Promise<T>,actor?:NativeActor):Promise<T>=>{
+    const produced=await pending;if(!actor)return produced;
+    // Each real request owns its exact reply even when one producer flight is shared.
+    const reply={...produced,...(produced.understanding===undefined?{}:{understanding:structuredClone(produced.understanding)})};
+    await authorizeLocalTaskActor(reply.taskId,actor);
+    const snapshot=recoverTaskSnapshotSync(join(options.dataRoot,'tasks'),reply.taskId);
+    if(!snapshot||snapshot.taskId!==reply.taskId||reply.understanding!==undefined&&JSON.stringify(snapshot.understanding)!==JSON.stringify(reply.understanding))throw new Error('task_creation_proof_unavailable');
+    creationReplies.set(reply,{actor,taskId:reply.taskId,epoch:snapshot.sessionId,hash:JSON.stringify(reply),understanding:JSON.stringify(snapshot.understanding)});
+    assertCreationReply(reply,actor);return reply;
+  };
+  // Restore durable scheduling even when no window opens the conversation.
+  if(existsSync(join(options.dataRoot,'continuity.sqlite')))void inputQueue.start().catch(()=>console.warn('[context-continuity] input recovery unavailable'));
+  const sourceReady=()=>{if(originalRunner||localTaskReadsClosed||!multiAgentStartupReady)throw new Error('canonical_runtime_source_unavailable');};
+  const prepareCanonicalSource=(device:DesktopSyncDevice,input:readonly string[]):object=>{
+    sourceReady();const context=originalDesktopRuntimeSourceContext(contextContinuity),{service,actor,store}=context;
+    const initial=store.captureCanonicalSourceState(device,input),initialState=assertOriginalCanonicalSourceState(store,device,initial),ids=initialState.conversationIds;
+    const identity=desktopCanonicalSourceIdentityData(device);
+    if(identity.identityHash!==initialState.deviceIdentityHash||identity.deviceId!==initialState.deviceId||identity.logicalProfileId!==initialState.deviceLogicalProfileId)throw new Error('canonical_runtime_source_unavailable');
+    const scopes=Object.freeze(ids.map(conversationId=>Object.freeze({rootKeyId:identity.rootKeyId,syncGroupId:identity.syncGroupId,logicalProfileId:identity.logicalProfileId,conversationId,branchId:'canonical-v1'})));
+    const currentSnapshots=():TaskSnapshot[]=>{
+      const snapshots:TaskSnapshot[]=[],seen=new Set<string>();
+      for(const id of ids)for(const row of store.db.prepare('SELECT task_id,revoked FROM task_bindings WHERE conversation_id=? ORDER BY task_id').all(id)){
+        const taskId=String(row.task_id);if(row.revoked||seen.has(taskId))throw new Error('canonical_runtime_source_unavailable');seen.add(taskId);
+        const snapshot=canonicalSourceReader.inspectSync(taskId);if(!snapshot||snapshot.taskId!==taskId||snapshot.context?.threadId!==id)throw new Error('canonical_runtime_source_unavailable');snapshots.push(snapshot);
+      }
+      return snapshots;
+    };
+    const snapshots=currentSnapshots(),snapshotHashes=snapshots.map(snapshot=>effectSnapshotHash(snapshot)),batches=captureCanonicalExportData(service,actor,scopes,snapshots),payloadHashes=Object.freeze(batches.map(batch=>continuityDigest(batch)));
+    assertOriginalCanonicalSourceState(store,device,initial);sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');
+    const frozen=freezeCanonicalExportOrigins(service,actor,scopes,snapshots);
+    const component=store.captureCanonicalSourceState(device,ids),storeState=assertOriginalCanonicalSourceState(store,device,component);
+    const metadata:DesktopCanonicalSourceMetadata=Object.freeze({kind:'original-desktop-source-proof-data',storeState,scopes,manifestHash:frozen.manifestHash,versionCount:frozen.versionCount,payloadHashes});
+    let unavailable=false;
+    const assert=()=>{
+      if(unavailable)throw new Error('canonical_runtime_source_unavailable');
+      try{
+      sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');assertOriginalCanonicalSourceState(store,device,component);
+      const current=currentSnapshots();if(current.length!==snapshotHashes.length||current.some((snapshot,i)=>effectSnapshotHash(snapshot)!==snapshotHashes[i]))throw new Error('canonical_runtime_source_changed');
+      const actual=captureCanonicalExportData(service,actor,scopes,current);if(actual.length!==payloadHashes.length||actual.some((batch,i)=>continuityDigest(batch)!==payloadHashes[i]))throw new Error('canonical_runtime_source_changed');
+      assertFrozenCanonicalExportOrigins(service,actor,scopes,current,frozen);assertOriginalCanonicalSourceState(store,device,component);
+      sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');return{metadata,batches:actual};
+      }catch(error){unavailable=true;throw error;}
+    };
+    assert();const proof=Object.freeze({kind:'original-desktop-source-proof'});canonicalSourceProofs.set(proof,{services:desktopServices,device,assert});return proof;
+  };
+  const prepareBootstrapDraft=(device:DesktopSyncDevice,input:readonly string[],expected?:Readonly<{manifestHash:string;versionCount:number}>):object=>{
+    sourceReady();const context=originalDesktopRuntimeSourceContext(contextContinuity),{service,actor,store}=context;
+    const initial=store.captureCanonicalSourceDraft(device,input),initialState=assertOriginalCanonicalSourceDraft(store,device,initial),ids=initialState.conversationIds;
+    const identity=desktopCanonicalSourceIdentityData(device);
+    if(identity.identityHash!==initialState.deviceIdentityHash||identity.deviceId!==initialState.deviceId||identity.logicalProfileId!==initialState.deviceLogicalProfileId)throw new Error('canonical_runtime_source_unavailable');
+    const scopes=Object.freeze(ids.map(conversationId=>Object.freeze({rootKeyId:identity.rootKeyId,syncGroupId:identity.syncGroupId,logicalProfileId:identity.logicalProfileId,conversationId,branchId:'canonical-v1'})));
+    const currentSnapshots=():TaskSnapshot[]=>{
+      const snapshots:TaskSnapshot[]=[],seen=new Set<string>();
+      for(const id of ids)for(const row of store.db.prepare('SELECT task_id,revoked FROM task_bindings WHERE conversation_id=? ORDER BY task_id').all(id)){
+        const taskId=String(row.task_id);if(row.revoked||seen.has(taskId))throw new Error('canonical_runtime_source_unavailable');seen.add(taskId);
+        const snapshot=canonicalSourceReader.inspectSync(taskId);if(!snapshot||snapshot.taskId!==taskId||snapshot.context?.threadId!==id)throw new Error('canonical_runtime_source_unavailable');snapshots.push(snapshot);
+      }
+      return snapshots;
+    };
+    const snapshots=currentSnapshots(),snapshotHashes=snapshots.map(snapshot=>effectSnapshotHash(snapshot)),batches=captureCanonicalExportData(service,actor,scopes,snapshots),payloadHashes=Object.freeze(batches.map(batch=>continuityDigest(batch)));
+    assertOriginalCanonicalSourceDraft(store,device,initial);sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');
+    const frozen=expected?assertFrozenCanonicalExportOrigins(service,actor,scopes,snapshots,expected):freezeCanonicalExportOrigins(service,actor,scopes,snapshots);
+    const component=store.captureCanonicalSourceDraft(device,ids),storeState=assertOriginalCanonicalSourceDraft(store,device,component);
+    const metadata:DesktopCanonicalSourceDraftMetadata=Object.freeze({kind:'original-desktop-source-draft-data',storeState,scopes,manifestHash:frozen.manifestHash,versionCount:frozen.versionCount,payloadHashes});
+    let unavailable=false,registered:object|undefined;
+    const assert=()=>{
+      if(unavailable)throw new Error('canonical_runtime_source_unavailable');
+      try{
+      sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');registered?assertOriginalCanonicalSourceState(store,device,registered):assertOriginalCanonicalSourceDraft(store,device,component);
+      const current=currentSnapshots();if(current.length!==snapshotHashes.length||current.some((snapshot,i)=>effectSnapshotHash(snapshot)!==snapshotHashes[i]))throw new Error('canonical_runtime_source_changed');
+      const actual=captureCanonicalExportData(service,actor,scopes,current);if(actual.length!==payloadHashes.length||actual.some((batch,i)=>continuityDigest(batch)!==payloadHashes[i]))throw new Error('canonical_runtime_source_changed');
+      assertFrozenCanonicalExportOrigins(service,actor,scopes,current,frozen);registered?assertOriginalCanonicalSourceState(store,device,registered):assertOriginalCanonicalSourceDraft(store,device,component);
+      sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');const currentMetadata=registered?Object.freeze({...metadata,kind:'original-desktop-source-proof-data' as const,storeState:assertOriginalCanonicalSourceState(store,device,registered)}):metadata;return{metadata:currentMetadata,batches:actual};
+      }catch(error){unavailable=true;throw error;}
+    };
+    const metadataStage=()=>{
+      if(unavailable||registered)throw new Error('canonical_runtime_source_draft_unavailable');
+      try{sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');const current=currentSnapshots();if(current.length!==snapshotHashes.length||current.some((snapshot,i)=>effectSnapshotHash(snapshot)!==snapshotHashes[i]))throw new Error('canonical_runtime_source_changed');sourceReady();if(originalDesktopRuntimeSourceContext(contextContinuity)!==context)throw new Error('canonical_runtime_source_unavailable');}
+      catch(error){unavailable=true;throw error;}
+    };
+    assert();const proof=Object.freeze({kind:'original-desktop-source-draft'});
+    canonicalSourceDrafts.set(proof,{services:desktopServices,device,store,metadataStage,assert:()=>{if(registered)throw new Error('canonical_runtime_source_draft_unavailable');return assert()as {metadata:DesktopCanonicalSourceDraftMetadata;batches:ReadonlyArray<Readonly<CanonicalSyncBatch>>};},promote:(component:object)=>{
+      if(registered||unavailable)throw new Error('canonical_runtime_source_draft_unavailable');assertOriginalCanonicalSourceState(store,device,component);registered=component;
+      const current=assert();if(current.metadata.kind!=='original-desktop-source-proof-data')throw new Error('canonical_runtime_source_unavailable');
+      const result=Object.freeze({kind:'original-desktop-source-proof'});canonicalSourceProofs.set(result,{services:desktopServices,device,assert:()=>assert()as {metadata:DesktopCanonicalSourceMetadata;batches:ReadonlyArray<Readonly<CanonicalSyncBatch>>}});canonicalSourceDrafts.delete(proof);return result;
+    }});return proof;
+  };
+  const prepareCanonicalSourceDraft=(device:DesktopSyncDevice,input:readonly string[]):object=>prepareBootstrapDraft(device,input);
+  const bootstrapCanonicalSource=async(device:DesktopSyncDevice,input:readonly string[],source:{requestSource:'user'|'agent'|'scheduler'}):Promise<object>=>{
+    if(!source||typeof source!=='object'||sourceInputTypes.isProxy(source)||Object.getOwnPropertySymbols(source).length||![Object.prototype,null].includes(Object.getPrototypeOf(source)))throw new Error('canonical_source_bootstrap_request_denied');
+    const fields=Object.getOwnPropertyDescriptors(source),field=fields.requestSource;
+    if(Object.keys(fields).length!==1||!field?.enumerable||!('value'in field)||field.value!=='user')throw new Error('canonical_source_bootstrap_request_denied');
+    const draft=prepareBootstrapDraft(device,input),context=originalDesktopRuntimeSourceContext(contextContinuity),metadata=assertOriginalDesktopCanonicalSourceDraftForStore(context.store,desktopServices,device,draft);
+    const controls=await device.captureCanonicalSourceControls(metadata.scopes.map(scope=>({conversationId:scope.conversationId,branchId:scope.branchId})),{requestSource:'user'});
+    assertOriginalDesktopCanonicalSourceDraftForStore(context.store,desktopServices,device,draft);
+    const token=await context.store.bootstrapCanonicalSource(device,desktopServices,draft,controls);
+    try{
+      const post=prepareBootstrapDraft(device,metadata.storeState.conversationIds,{manifestHash:metadata.manifestHash,versionCount:metadata.versionCount}),entry=canonicalSourceDrafts.get(post);if(!entry)throw new Error('canonical_runtime_source_unavailable');
+      const component=finishOriginalCanonicalSourceBootstrap(context.store,device,desktopServices,post,controls,token),proof=entry.promote(component);
+      assertOriginalDesktopCanonicalSource(desktopServices,device,proof);assertDesktopSyncSourceControls(device,controls);assertOriginalDesktopCanonicalSource(desktopServices,device,proof);return proof;
+    }catch(error){abortOriginalCanonicalSourceBootstrap(context.store,device,token);throw error;}
+  };
+  const desktopServices={
+    prepareCanonicalSource,prepareCanonicalSourceDraft,bootstrapCanonicalSource,
+    continuity: contextContinuity,
+    inputQueue,
+    taskSubmissions:Object.freeze({assertReply:assertCreationReply,withUserRequest:withInputExecutionAuthority}),
+    taskHistory,
     multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
     async disposeMultiAgent(): Promise<void> {
+      localTaskReadsClosed=true;inputSettlementsClosed=true;
+      await inputQueue?.close();
+      await Promise.allSettled([...inputGoalSettlements]);inputTerminals.clear();
       activityMcp?.dispose();
       unsubscribeActivityGroups?.(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
       await codexTasks.dispose();
       unsubscribeMultiAgentGoal?.();
       await multiAgentApprovals?.dispose();
       await multiAgentService?.dispose(); multiAgentCatalog?.dispose();
+      // Only a graceful settlement lets durable stores close; anything else
+      // is auditable and propagates so shutdown cannot mask a failed drain.
+      const handle = await authOwnerRef.handle;
+      authOwnerRef.handle = undefined;
+      const settlement = await handle?.closeAndDrain();
+      if (settlement) AuthOwnerController.assertCloseSettlement(settlement);
+      await contextContinuity.close();
       // A never-settled owner still needs its journal until process exit.
       if (executionCoordinator.snapshot().active === 0 && !multiAgentService?.runtimeStatus().blocked) multiAgentStore?.close();
     },
@@ -3151,14 +3676,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return { success: true, message: `技能 ${skillName} 已卸载` };
     },
     async createTaskWithFiles(input: {
+      inputId?:string;
       prompt: string;
       filePaths: string[];
       context?: TaskCreateContext;
     }, nativeActor?: NativeActor): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
       const nativeSelected=codexTasks.selected();
       if(nativeSelected) codexTasks.authorize(nativeActor);
-      return afterLocalRecovery(async () => {
+      if(!nativeSelected)assertUserInputActor(nativeActor,input.inputId);
+      return publishCreation(withInputExecutionAuthority(nativeSelected?undefined:nativeActor,()=>afterLocalRecovery(async () => {
         const context = nativeSelected ? input.context : localChatContext(input.context);
+        if(!nativeSelected&&nativeActor&&context?.threadId){
+          const p=contextContinuity.port();if(p.service.getConversation(p.actor,context.threadId)){
+            const inputId=input.inputId??`input_${randomUUID()}`,journal=contextContinuity.inputs(),accepted=await journal.submitFiles(p.actor,{inputId,prompt:input.prompt,filePaths:input.filePaths,context});
+            const inFlight=userInputFlights.get(inputId);if(inFlight)return inFlight;
+            if(accepted.status==='claimed'||accepted.status==='completed')return journal.readAcceptedTask(inputId);
+            if(accepted.status==='failed_not_started')throw new Error('input_preparation_failed');
+    if(accepted.status!=='pending')throw new Error('input_execution_unknown');
+            const pending=journal.readPendingPayload(inputId);
+            return conversationRooms.withUserRequest({prompt:input.prompt},{requestSource:'user'},()=>conversationProjects.withUserRequest({prompt:input.prompt,threadId:context.threadId},{requestSource:'user'},()=>admitSubmittedUserTask(pending,inputId)));
+          }
+        }
         const permissionRevision = !nativeSelected && context?.threadId ? multiAgentService?.assertExecutionAdmission(context.threadId) : undefined;
         mkdirSync(options.dataRoot, { recursive: true });
         const taskId = `task_${Date.now().toString(36)}`;
@@ -3182,7 +3720,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor)
           : conversationRooms.withUserRequest({prompt:input.prompt},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, threadId: context?.threadId }, { requestSource: 'user' },
             () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context })));
-      });
+      })),nativeActor);
     },
     async getModelConfig() {
       return modelSnapshot(await loadConfig());
@@ -3190,6 +3728,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async saveModelConfig(input: DesktopSaveModelConfigInput, nativeActor?: NativeActor) {
       if(input.modelId===LOCAL_CODEX_MODEL){
         if(nativeActor?.requestSource!=='user'||nativeActor.actorId!==`desktop-user:${multiAgentProfileId}`)throw new Error('native_access_denied');
+        contextContinuity.assertNativeExecutionAvailable();
         codexTasks.select(true);return modelSnapshot(await loadConfig());
       }
       const config = await loadConfig();
@@ -3422,10 +3961,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       repairModelConfigDefault(config);
       await saveConfig(config);
     },
-    createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
-      if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
-      return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
-        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
+    createTask: (input: Parameters<typeof host.createTask>[0]&{inputId?:string}, nativeActor?: NativeActor) => {
+      if(codexTasks.selected())return codexTasks.create(input,nativeActor);
+      assertUserInputActor(nativeActor,input.inputId);
+      const pending=withInputExecutionAuthority(nativeActor,()=>conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>
+        conversationProjects.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode,threadId:input.context?.threadId},{requestSource:'user'},()=>
+          afterLocalRecovery(()=>{
+            const {inputId,...taskInput}=input;
+            const actual=multiAgentService?{...taskInput,context:localChatContext(taskInput.context)}:taskInput;
+            if(!nativeActor&&actual.context?.threadId)legacyUserQueueHints.delete(actual.context.threadId);
+            return nativeActor?admitSubmittedUserTask(actual,inputId):goalCoordinator.admitUserTask(actual);
+          }))));
+      return publishCreation(pending,nativeActor);
     },
     /** Main-only binding; never exposed through preload or a model tool. */
     bindConversationRoomCreator: (creator: (input:Record<string,unknown>,context:{requestSource:'user';signal?:AbortSignal})=>Promise<unknown>) => conversationRooms.bindCreator(creator),
@@ -3450,6 +3997,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         activityService = new ConversationActivityAttachedService(client, `desktop-user:${multiAgentProfileId}`);
         activitySources = new ConversationActivityAttachedSources(client);
         activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+          assertReadCurrent: () => { throw new Error('activity_source_forbidden'); },
           externalObserver: connection => connection.activityEndpoint?.config.type !== 'stdio',
           endpointReady: async connection => {
             const endpoint = connection.activityEndpoint;
@@ -3476,14 +4024,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return attempt;
     },
     conversationActivity: activityEnabled && multiAgentStore ? {
+      assertResultCurrent: assertActivityResultCurrent,
       mcpInputs: async (watchId: string, actor: ActivityActor) => { await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
       mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
       mcpCancel: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
-      unread: (actor: ActivityActor) => activityService!.unreadThreads(actor),
+      unread: async (actor: ActivityActor) => { const result=await activityService!.unreadThreads(actor);const threads=new Set(result.map(row=>row.threadId));return rememberActivityResult(result,(activityStore?.listWatches()??[]).filter(w=>w.source==='task_host'&&threads.has(w.origin.threadId)).map(w=>w.watchId)); },
       read: (threadId: string, through: number, actor: ActivityActor) => activityService!.markRead(threadId, through, actor),
       overview: (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => activityService!.subscribeOverview(actor, callback),
-      getWork: (watchId: string, actor: ActivityActor) => activityService!.getWork(watchId, actor),
-      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
+      getWork: async (watchId: string, actor: ActivityActor) => { const result=await activityService!.getWork(watchId,actor);if(isUnavailableProjection(result.projection))return {watch:requireOwnedActivityWatch(watchId),projection:unavailableProjection(result.projection)};return rememberActivityResult(result,[watchId]); },
+      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); const result=await activityService!.listActivities(threadId,actor,page);const ids:string[]=[];const views=result.map(row=>{if(row.threadId!==threadId||requireOwnedActivityWatch(row.watchId).origin.threadId!==threadId)throw new Error('activity_source_forbidden');if(isUnavailableActivity(row))return unavailableActivity(row);ids.push(row.watchId);return row;});return rememberActivityResult(views,ids); },
       subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
       reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
       stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
@@ -3527,26 +4076,42 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       return task;
     })),
-    getGoal: (threadId: string) => goalCoordinator.getGoal(threadId),
-    createGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest) => {
-      const requestId = parseGoalRequestId(input.requestId);
-      return afterLocalRecovery(() => goalCoordinator.createGoal({ ...input, requestId }));
+    getGoal: async (threadId: string) => {
+      await multiAgentReady;
+      const value = await goalCoordinator.getGoal(threadId);
+      goalDisclosure!.assertValueCurrent(threadId, value, goalReadActor);
+      return value;
     },
-    pauseGoal: (threadId: string) => goalCoordinator.pauseGoal({ threadId }),
-    resumeGoal: (input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest) => {
+    goalOutput: Object.freeze({ captureRead: goalEgress.captureRead, assertRead: goalEgress.assertRead,
+      assertReply: goalEgress.assertReply, assertBroadcast: goalEgress.assertBroadcast,
+      assertPrepared: goalEgress.assertPrepared, assertAccess: goalEgress.assertAccess }),
+    createGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest, actor: NativeActor = goalReadActor) => {
       const requestId = parseGoalRequestId(input.requestId);
-      return afterLocalRecovery(() => goalCoordinator.resumeGoal({ ...input, requestId }));
+      return mutateGoal(input.threadId, actor, () => goalCoordinator.createGoal({ ...input, requestId }));
     },
-    cancelGoal: (threadId: string) => goalCoordinator.cancelGoal({ threadId }),
-    replaceGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest) => {
+    pauseGoal: (threadId: string, actor: NativeActor = goalReadActor): Promise<GoalControlReceipt> => afterLocalRecovery(async () => {
+      assertGoalAccess(threadId, actor);
+      const result = await goalCoordinator.pauseGoal({ threadId });
+      return { threadId, status: 'paused', revision: result.state.revision };
+    }),
+    resumeGoal: (input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest, actor: NativeActor = goalReadActor) => {
       const requestId = parseGoalRequestId(input.requestId);
-      return afterLocalRecovery(() => goalCoordinator.replaceGoal({ ...input, requestId }));
+      return mutateGoal(input.threadId, actor, () => goalCoordinator.resumeGoal({ ...input, requestId }));
     },
-    ackGoalTaskAttached: (input: { threadId: string; attachmentId: string }) => (
-      afterLocalRecovery(() => goalCoordinator.ackGoalTaskAttached(input))
+    cancelGoal: (threadId: string, actor: NativeActor = goalReadActor): Promise<GoalControlReceipt> => afterLocalRecovery(async () => {
+      assertGoalAccess(threadId, actor);
+      const result = await goalCoordinator.cancelGoal({ threadId });
+      return { threadId, status: 'cancelled', revision: result.state.revision };
+    }),
+    replaceGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest, actor: NativeActor = goalReadActor) => {
+      const requestId = parseGoalRequestId(input.requestId);
+      return mutateGoal(input.threadId, actor, () => goalCoordinator.replaceGoal({ ...input, requestId }));
+    },
+    ackGoalTaskAttached: (input: { threadId: string; attachmentId: string }, actor: NativeActor = goalReadActor) => (
+      afterLocalRecovery(() => { assertGoalAccess(input.threadId, actor); return goalCoordinator.ackGoalTaskAttached(input); })
     ),
-    setGoalUserQueuePending: (input: { threadId: string; pending: boolean }) => (
-      goalCoordinator.setUserQueuePending(input)
+    setGoalUserQueuePending: (input: { threadId: string; pending: boolean }, actor: NativeActor = goalReadActor) => (
+      afterLocalRecovery(() => { assertGoalAccess(input.threadId, actor);if(input.pending)legacyUserQueueHints.add(input.threadId);else legacyUserQueueHints.delete(input.threadId);return goalCoordinator.setUserQueuePending(input); })
     ),
     subscribeGoalChanged(listener: (input: { threadId: string; goal: DesktopGoalProjection }) => void) {
       goalChangedListeners.add(listener);
@@ -3565,15 +4130,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     runKSwarmReviewSubmission,
     runKSwarmPlanApproved,
     authorizeTaskRead: authorizeLocalTaskActor,
+    assertTaskReadCurrent:assertLocalTaskReadCurrent,
+    authorizeTaskControl: (taskId: string, actor: NativeActor) => authorizeLocalTaskActor(taskId, actor, 'control'),
+    subscribeTaskRecords: (taskId:string, options?:{ sinceIndex?: number; signal?: AbortSignal }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTaskRecords(taskId, options),
     subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number; signal?: AbortSignal }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTask(taskId,sinceIndex),
     answerQuestion: async (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => {
       if (codexTasks.owns(input.taskId)) return codexTasks.answer(input, nativeActor);
-      if (nativeActor) await authorizeLocalTaskActor(input.taskId, nativeActor);
+      if (nativeActor) await authorizeLocalTaskActor(input.taskId, nativeActor, input.answer.type === 'choice' && input.answer.choiceId === 'deny' ? 'control' : 'read');
       return resolveScopedTaskHost(input.taskId, host).answerQuestion(input);
     },
     cancelTask: async (taskId:string, reasonOrActor?:string|NativeActor) => {
       if (codexTasks.owns(taskId)) return codexTasks.cancel(taskId, typeof reasonOrActor === 'string' ? undefined : reasonOrActor);
-      if (reasonOrActor && typeof reasonOrActor !== 'string') await authorizeLocalTaskActor(taskId, reasonOrActor);
+      if (reasonOrActor && typeof reasonOrActor !== 'string') await authorizeLocalTaskActor(taskId, reasonOrActor, 'control');
       return resolveScopedTaskHost(taskId, host).cancelTask(taskId, typeof reasonOrActor === 'string' ? reasonOrActor : undefined);
     },
     async getActiveTask(): Promise<{ taskId: string } | null> {
@@ -3589,7 +4157,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return null;
     },
     async recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }> {
-      try { return await (codexTasks.owns(taskId) ? codexTasks.host.recoverTask(taskId) : recoverTaskWithWorkflowArtifacts(taskId)); }
+      await multiAgentReady;
+      contextContinuity.assertTaskReadable(taskId);
+      let recovered: { snapshot: TaskSnapshot; recoveredFromTaskId?: string };
+      try { recovered = await (codexTasks.owns(taskId) ? codexTasks.host.recoverTask(taskId) : recoverTaskWithWorkflowArtifacts(taskId)); }
       catch (error) {
         // Only a physically missing legacy task may use this read-only fallback.
         // Existing-but-unreadable/protected tasks retain their original error.
@@ -3597,8 +4168,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const snapshot = await findLegacyTaskHistory({ root: join(options.dataRoot, 'tasks'), prompt: legacyPrompt,
           read: id => snapshotStore.recoverTask(id) });
         if (!snapshot) throw error;
-        return { snapshot, recoveredFromTaskId: snapshot.taskId };
+        recovered = { snapshot, recoveredFromTaskId: snapshot.taskId };
       }
+      // Internal consumers (Loop, mobile and derived readers) also call this
+      // service directly. A pre-IO check cannot authorize the recovered body.
+      if (localTaskReadsClosed || !multiAgentStartupReady) throw new Error('task_read_fence_unavailable');
+      assertLocalTaskScope(recovered.snapshot.context?.threadId);
+      contextContinuity.assertTaskReadable(taskId);
+      contextContinuity.assertTaskReadable(recovered.snapshot.taskId);
+      return recovered;
     },
     async recoverStaleTasks(): Promise<void> {
       await multiAgentReady;
@@ -3901,7 +4479,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return registry.getToolDefinitions();
     },
     async executeTool(name: string, input: Record<string, unknown>) {
-      return registry.executeTool(name, input);
+      // Main-local manual/test invocation, not a qualified TaskHost run. An
+      // unbound unknown effect conservatively holds profile-wide deletion.
+      const taskId = `task_manual_tool_${randomUUID()}`, invocationId = randomUUID();
+      return registry.executeTool(name, input, {
+        taskId, recordUnprovenEffect: toolName => {
+          if (localTaskReadsClosed) throw new Error('continuity_unavailable');
+          contextContinuity.recordUnprovenEffect(taskId, invocationId, toolName);
+        },
+      } as ToolExecutionContext);
     },
     getDataRoot() {
       return options.dataRoot;
@@ -3914,6 +4500,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return initialPlanBootstrapQueue.enqueue(input);
     },
   };
+  return desktopServices;
 }
 
 function buildComputerUseNeedsEnablementError(): ComputerUseUnavailableError {
@@ -5844,6 +6431,7 @@ async function streamDesktopToolLoopFinalization(input: {
   prepareRequest?: DesktopTaskRequestPreparer;
   projectModel?: ProjectAgentModel;
   beforeRequest?: () => Promise<void>;
+  assertContextAdmission?:()=>void;
   deadline?: number;
   adapter: Pick<ModelAdapter, 'stream'> & { getCapabilities?(): Partial<import('../../src/ai/runtime/model-capabilities.js').ModelCapabilities> };
   apiMessages: Message[];
@@ -5890,6 +6478,7 @@ async function streamDesktopToolLoopFinalization(input: {
       connectionRecovering = false;
       await input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:input.turnId,state:'running'});
     }
+    input.assertContextAdmission?.();throwIfAborted(input.signal);
     if (chunk.type === 'text') {
       const lastBlock = assistantBlocks[assistantBlocks.length - 1];
       if (lastBlock?.type === 'text') {
@@ -5919,7 +6508,7 @@ async function streamDesktopToolLoopFinalization(input: {
       continue;
     }
   }
-  throwIfAborted(input.signal);
+  input.assertContextAdmission?.();throwIfAborted(input.signal);
   if (!reply.trim()) {
     throw new Error('desktop_tool_loop_finalization_empty');
   }
@@ -5940,6 +6529,11 @@ interface ToolLoopStrategies {
 }
 
 interface ToolLoopContext {
+  requireEffectGuard?:boolean;
+  recordUnprovenEffect?:(invocationId:string,toolName:string)=>void;
+  authorizeContext?: () => void;
+  authorizeResult?:()=>void;
+  contextReaderTaskId?: string;
   finalizeProjectProposal?: (proposal: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
   projectModel?: ProjectAgentModel;
   canResumeSummary?: () => boolean;
@@ -6121,8 +6715,12 @@ async function recoverHistoricalWorkflowStatusArtifacts(input: {
   snapshot: TaskSnapshot;
   lookup: HistoricalWorkflowStatusLookup;
   statusTool: Tool;
+  recordUnprovenEffect:(invocationId:string,toolName:string)=>void;
 }): Promise<TaskSnapshot> {
   try {
+    // This direct historical call has no live run proving async closure. Its main
+    // durable marker precedes the call and cannot be cleared by the timeout race.
+    input.recordUnprovenEffect('historical-status:'+randomUUID(),input.statusTool.definition.name);
     const result = await withWorkflowArtifactRecoveryTimeout(
       Promise.resolve(input.statusTool.execute({
         projectId: input.lookup.projectId,
@@ -6264,6 +6862,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<Awaited<
 
 async function prepareDesktopLoopRequest(ctx: ToolLoopContext, streamOptions: StreamOptions, canCompact: boolean, inputTokens: number): Promise<Message[]> {
   throwIfAborted(ctx.signal);
+  ctx.authorizeContext?.();
   await ctx.roomExecution?.authorize();
   const roomInput=ctx.roomExecution?.takePendingInput?.();
   if(roomInput)ctx.messages.push({role:'user',content:[{type:'text',text:roomInput}]});
@@ -6382,7 +6981,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     let connectionRecovering = false;
     for await (const chunk of (ctx.projectModel ? ctx.projectModel.stream : streamDesktopTaskRecovery)({
       adapter: ctx.adapter,
-      beforeRequest: ctx.roomExecution?.authorize,
+      beforeRequest: async () => { await ctx.roomExecution?.authorize(); ctx.authorizeContext?.(); },
       messages: apiMessages,
       tools: ctx.allToolDefs,
       systemPrompt: ctx.systemPrompt,
@@ -6418,6 +7017,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       await ctx.emitRuntimeEvent({type:'execution_progress',sessionId:ctx.sessionId,turnId:ctx.turnId});
       ctx.onActivity?.({ phase: chunk.type === 'thinking' ? 'thinking' : chunk.type === 'tool_use' ? 'tool' : 'model',
         ...(chunk.type === 'tool_use' ? { toolName: chunk.name } : {}) });
+      (ctx.authorizeResult??ctx.authorizeContext)?.();throwIfAborted(ctx.signal);
       if (chunk.type === 'text') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
         if (lastBlock?.type === 'text') {
@@ -6448,7 +7048,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         }
       }
     }
-    throwIfAborted(ctx.signal);
+    (ctx.authorizeResult??ctx.authorizeContext)?.();throwIfAborted(ctx.signal);
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
     const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
     if (toolCalls.length === 0) {
@@ -6457,8 +7057,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       }
       if (ctx.mailbox && !toolResultsAwaitingFinalResponse) {
         const decision = await ctx.mailbox.trySealTurn({ limitReached: iteration >= maxIterations });
-        if (decision.kind === 'continue') continue;
         if (decision.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply, maxIterations, iteration, budget.source);
+        (ctx.authorizeResult??ctx.authorizeContext)?.();throwIfAborted(ctx.signal);
+        if (decision.kind === 'continue') continue;
         finishedNormally = true;
       }
       if (!ctx.mailbox && !toolResultsAwaitingFinalResponse) finishedNormally = true;
@@ -6467,6 +7068,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     const toolResults: MessageBlock[] = [];
     for (const toolCall of toolCalls) {
       throwIfAborted(ctx.signal);
+      ctx.authorizeContext?.();
       totalToolCalls++;
       const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, ctx.sessionId);
       const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
@@ -6563,6 +7165,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         ? { ...projectedToolContext, onToolInvocationStarted: () => { invoked = true; } }
         : projectedToolContext;
       const monitoredToolContext:ToolExecutionContext={...toolContext,
+        assertContextAdmission: ctx.authorizeContext,
+        recordUnprovenEffect:ctx.recordUnprovenEffect?name=>ctx.recordUnprovenEffect!(toolCall.id,name):undefined,
+        contextReaderTaskId: ctx.contextReaderTaskId??ctx.taskId,
         modelSupportsImageInput,
         emitToolImage: toolImages.emit,
         onExecutionHealth: state => {void ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,invocationId:toolCall.id,state}).catch(error=>console.warn('[execution-health] status delivery failed',error));},
@@ -6570,6 +7175,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       };
       if(Object.isFrozen(projectedToolContext))Object.freeze(monitoredToolContext);
       let execution: Awaited<ReturnType<typeof executeDesktopTaskTool>>;
+      if(ctx.requireEffectGuard&&typeof monitoredToolContext.recordUnprovenEffect!=='function')throw new Error('context_effect_guard_unavailable');
       try { execution = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
         registry: ctx.registry,
         taskId: ctx.taskId,
@@ -6757,7 +7363,8 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     });
     const finalized = await streamDesktopToolLoopFinalization({
       projectModel: ctx.projectModel,
-      beforeRequest: ctx.roomExecution?.authorize,
+      assertContextAdmission:ctx.authorizeResult??ctx.authorizeContext,
+      beforeRequest: async () => { await ctx.roomExecution?.authorize(); ctx.authorizeContext?.(); },
       deadline: ctx.taskDeadline,
       adapter: ctx.adapter,
       apiMessages: await prepareDesktopLoopRequest(ctx, streamOptions, true, lastRequestInputTokens),
@@ -6779,6 +7386,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
       },
     });
+    (ctx.authorizeResult??ctx.authorizeContext)?.();throwIfAborted(ctx.signal);
     reply += finalized.reply;
     ctx.messages.push({ role: 'assistant', content: finalized.assistantBlocks });
   }
@@ -6787,8 +7395,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     const exhausted = iteration >= maxIterations;
     const decision = await ctx.mailbox?.trySealTurn({ outcome: exhausted ? 'failed' : 'completed', limitReached: true });
     if (exhausted || decision?.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply, maxIterations, iteration, budget.source);
+    (ctx.authorizeResult??ctx.authorizeContext)?.();throwIfAborted(ctx.signal);
   }
 
+  (ctx.authorizeResult??ctx.authorizeContext)?.();throwIfAborted(ctx.signal);
   return {
     reply,
     totalToolCalls,
@@ -7666,6 +8276,10 @@ export function createDesktopModelRunnerWithRegistry(
   materialRegistry: MaterialRegistry,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
   runnerOptions: {
+    authorizeContext?: (taskId: string) => void;
+    openInvocation?: DesktopRootInvocationFactory;
+    recordUnprovenEffect?:(taskId:string,invocationId:string,toolName:string)=>void;
+    inheritContext?: (sourceTaskId: string, receiverTaskId: string | undefined) => void;
     cwd?:string;
     getProjectModel?: () => Promise<ProjectAgentModel>;
     roomDiscussion?:boolean;
@@ -7724,7 +8338,12 @@ export function createDesktopModelRunnerWithRegistry(
     });
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }, rootContext) => {
+  return async (input, rootContext) => {
+    let invocation:DesktopModelInvocation|undefined,drainInvocation:(()=>Promise<void>)|undefined;
+    let disposeRootScope:(()=>void)|undefined;
+    let assertSuccessfulReturn:(()=>void)|undefined;
+    try {
+    const { taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }=input;
     const pendingRoomImages:MessageBlock[]=[];
     if(runnerOptions.roomExecution)registry.registerTool({permission:'safe',definition:{name:'read_workspace_material',description:'Read a document or image downloaded into the current collaboration workspace. Use file_path relative to the workspace. Images are supplied to the model visually; documents return extracted text. Paths outside the workspace are forbidden.',inputSchema:{type:'object',properties:{file_path:{type:'string'},maxChars:{type:'number'}},required:['file_path']}},async execute(input,context){
       const record=await materialRegistry.importMaterial({taskId,sourcePath:String(input.file_path),role:'customer_material',roleSource:'auto'});
@@ -7735,6 +8354,16 @@ export function createDesktopModelRunnerWithRegistry(
     if (rootContext && !runnerOptions.multiAgent) throw new Error('unsupported multi-agent runner context');
     if (rootContext) runnerOptions.multiAgent!.service.assertInvocation(rootContext.actor);
     const signal = rootContext?.signal ?? hostSignal;
+    const assertCurrent=()=>{
+      throwIfAborted(signal);runnerOptions.authorizeContext?.(taskId);
+      if(rootContext)runnerOptions.multiAgent!.service.assertInvocation(rootContext.actor,rootContext);
+      throwIfAborted(signal);if(deadlineMs!==undefined&&Date.now()>=deadlineMs)throw new Error('task_watchdog_timeout');
+    };
+    const assertResult=()=>{
+      throwIfAborted(signal);runnerOptions.authorizeContext?.(taskId);
+      if(rootContext)runnerOptions.multiAgent!.service.assertResultCurrent(rootContext);
+      throwIfAborted(signal);if(deadlineMs!==undefined&&Date.now()>=deadlineMs)throw new Error('task_watchdog_timeout');
+    };assertSuccessfulReturn=assertResult;
     const turnId = rootContext?.turnId ?? `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -7797,13 +8426,18 @@ export function createDesktopModelRunnerWithRegistry(
       : '';
 
     const config = await loadConfig();
+    if(runnerOptions.openInvocation&&(runnerOptions.getProjectModel||runnerOptions.roomExecution))throw new Error('model_invocation_route_conflict');
     const projectModel = await runnerOptions.getProjectModel?.();
     const binding = projectModel?.binding ?? await runnerOptions.roomExecution?.getModelBinding?.() ?? resolveRuntimeModelBinding(config);
     const profileId = resolveDesktopHarnessProfileId(binding);
     if (isStrictKimiK3ProfileId(profileId)) {
       validateStrictDesktopHistory(hostHistory);
     }
-    const adapter = projectModel?.adapter ?? createAdapterFromBinding(binding);
+    if(runnerOptions.openInvocation){
+      assertCurrent();invocation=await runnerOptions.openInvocation(input,binding);
+      drainInvocation=captureInvocationDrain(invocation);assertCurrent();
+    }
+    const adapter = invocation ? invocation.adapter : projectModel?.adapter ?? createAdapterFromBinding(binding);
     const skillDebugEnabled = config.skillDebug ?? false;
 
     // Stage analysis for debug mode
@@ -7835,12 +8469,18 @@ export function createDesktopModelRunnerWithRegistry(
       multi.catalog.authorizeRoot(rootContext);
       systemPrompt += `\n\n${getDesktopDelegationPolicy()}\n\nChildren share the selected model, have separate history and working directories, and stay within inherited tool policy. Root context: ${JSON.stringify({ groupId: rootContext.groupId, agentId: rootContext.agentId, cwd: rootContext.cwd })}`;
       const agents = await loadCustomAgents(undefined, rootContext.cwd);
-      scopedRegistry = multi.runtime.bindRoot(rootContext, { adapter, systemPrompt, catalog: multi.catalog.catalog,
+      scopedRegistry = multi.runtime.bindRoot(rootContext, { adapter, openChildInvocation:invocation?.openChildInvocation, systemPrompt, catalog: multi.catalog.catalog,
+        authorizeContext: () => runnerOptions.authorizeContext?.(taskId),
+        recordUnprovenEffect:runnerOptions.recordUnprovenEffect,
+        authorizeTaskSource: sourceTaskId => { if (sourceTaskId) runnerOptions.authorizeContext?.(sourceTaskId); },
+        inheritContext: receiverTaskId => runnerOptions.inheritContext?.(taskId, receiverTaskId),
         policy: multi.catalog.catalog.snapshotPolicy(), workspaceId: multi.workspaceId, materialIds: materials.map(item => item.materialId),
         registryOptions: {
+          requireEffectGuard:true,
           autoMode: (permissionMode ?? 'auto') === 'auto', permissionManager: new PermissionManager({ mode: permissionMode ?? 'auto' }),
         }, materials, materialRegistry, skillCatalog, dataRoot, agents, emitRuntimeEvent, maxIterations: maxToolLoopIterations,
       });
+      const originalDispose=scopedRegistry.dispose;disposeRootScope=()=>originalDispose.call(scopedRegistry);
     }
     const invocationRegistry = scopedRegistry?.registry ?? registry;
     const allToolDefs = !rootContext && materials && materials.length > 0
@@ -7862,12 +8502,17 @@ export function createDesktopModelRunnerWithRegistry(
       { type: 'text', text: userText },
       ...imageBlocks,
     ];
-    const messages = buildDesktopProviderMessages(adapter, hostHistory, userContent);
+    const providerMessages = buildDesktopProviderMessages(adapter, hostHistory, userContent);
+    const messages = invocation?.prepareCheckpoint ? invocation.prepareCheckpoint(providerMessages) : providerMessages;
 
     const pendingUsageWrites: Promise<void>[] = [];
     let loopResult: Awaited<ReturnType<typeof runDesktopToolLoop>>;
     try {
       loopResult = await runDesktopToolLoop({
+      requireEffectGuard:true,
+      recordUnprovenEffect:runnerOptions.recordUnprovenEffect?(id,name)=>runnerOptions.recordUnprovenEffect!(taskId,id,name):undefined,
+      authorizeContext: assertCurrent,
+      authorizeResult:assertResult,
       adapter,
       projectModel,
       systemPrompt,
@@ -7896,6 +8541,7 @@ export function createDesktopModelRunnerWithRegistry(
       officeToMarkdown: runnerOptions.officeToMarkdown,
       emitRuntimeEvent: async event => {
         if (rootContext && (event.type === 'assistant_delta' || event.type === 'artifact_recorded')) await runnerOptions.multiAgent!.service.recordRuntimeEvent(rootContext, event);
+        if(event.type==='assistant_delta'||event.type==='artifact_recorded')assertResult();
         await emitRuntimeEvent(event);
       },
       skillInvocation,
@@ -7923,14 +8569,16 @@ export function createDesktopModelRunnerWithRegistry(
     } catch (error) {
       await Promise.allSettled(pendingUsageWrites);
       throw error;
-    } finally { scopedRegistry?.dispose(); }
+    } finally { const dispose=disposeRootScope;disposeRootScope=undefined;dispose?.(); }
     await Promise.all(pendingUsageWrites);
+    assertResult();
 
     const { reply, totalToolCalls, totalInputTokens, totalOutputTokens, referenceReads } = loopResult;
     skillNamesDetected = loopResult.skillNamesDetected.length > 0 ? loopResult.skillNamesDetected : skillNamesDetected;
     skillTriggerType = loopResult.skillTriggerType !== 'auto' ? loopResult.skillTriggerType : skillTriggerType;
     skillInvocation = loopResult.skillInvocation ?? skillInvocation;
 
+    assertResult();
     await emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
     if (skillNamesDetected.length > 0) {
       try {
@@ -7957,6 +8605,8 @@ export function createDesktopModelRunnerWithRegistry(
         details: `tool_calls=${totalToolCalls} refs_read=${referenceReads} tokens=${totalInputTokens}`,
       });
     }
+    } finally { try{const dispose=disposeRootScope;disposeRootScope=undefined;dispose?.();}finally{await drainInvocation?.();} }
+    assertSuccessfulReturn?.();
   };
 }
 

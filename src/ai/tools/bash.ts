@@ -92,6 +92,7 @@ export function createBashTool(options: BashApprovalOptions = {}): Tool {
       const shell = process.platform === 'win32' ? 'cmd' : 'sh';
       // cmd consumes shell text, not CRT-escaped argv. /s strips only our outer quotes.
       const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', `"${command}"`] : ['-c', command];
+      context?.recordUnprovenEffect?.('bash');
       const child = spawn(shell, shellArgs, {
         cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
         windowsVerbatimArguments: process.platform === 'win32',
@@ -218,6 +219,7 @@ export function createInteractiveBashTool(run: Tool['execute'], options: BashApp
     if (!/\bsudo\b/.test(command)) return tool.execute(input, context);
     const risk = classifyBashCommand(command);
     if (risk.level === 'block' && !options.isYolo?.()) return `Error: 命令被安全策略拦截: ${risk.reason}`;
+    context?.recordUnprovenEffect?.('bash');
     return run(input, context);
   } };
 }

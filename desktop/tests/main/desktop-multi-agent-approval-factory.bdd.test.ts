@@ -9,6 +9,7 @@ import { authorizationFixture, authorizationRequest, deferred, failNextApprovalC
 import type { MultiAgentGroupSnapshot } from '../../shared/multi-agent-types.js';
 import type { MultiAgentCommandSequencer } from '../../electron/desktop-multi-agent-mailbox.js';
 import { DesktopMultiAgentWorktrees } from '../../electron/desktop-multi-agent-worktrees.js';
+import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
 
 // Source-mode Vitest has no fixed .js artifact. Only resolve that URL to the
@@ -255,7 +256,11 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
     expect(JSON.stringify(decision)).toMatch(/invalid|expired|cancel|already|unknown|deleted|not.found|revok|closed|unavailable/i);
     expect(existsSync(f.effect)).toBe(false);
     f.release.resolve();
-    await vi.waitFor(async () => expect(['completed', 'failed', 'cancelled', 'interrupted']).toContain((await f.services.recoverTask(f.task.taskId)).snapshot.status));
+    if (action === 'thread-delete') {
+      await expect(f.services.recoverTask(f.task.taskId)).rejects.toThrow('task_scope_forbidden');
+      const ownSnapshots = new FileTaskSnapshotStore(join(f.root, 'data', 'tasks'));
+      await vi.waitFor(async () => expect(['completed', 'failed', 'cancelled', 'interrupted']).toContain((await ownSnapshots.recoverTask(f.task.taskId))?.status));
+    } else await vi.waitFor(async () => expect(['completed', 'failed', 'cancelled', 'interrupted']).toContain((await f.services.recoverTask(f.task.taskId)).snapshot.status));
     expect(existsSync(f.effect)).toBe(false);
   });
 

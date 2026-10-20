@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode, type ComponentProps, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
-import type { DesktopGoalChangedEvent, DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared, GoalAttachmentRequest } from '../../electron/preload-api';
+import type { DesktopGoalChangedEvent, DesktopGoalControlReceipt, DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared, GoalAttachmentRequest } from '../../electron/preload-api';
 import type { DesktopTaskEvent, TaskSnapshot } from '../../../src/runtime/task-host/types';
 import type { ThreadRecord } from '../../renderer/src/api/types';
 import type { ChatView as ActualChatView } from '../../renderer/src/components/ChatView';
@@ -37,6 +37,7 @@ vi.mock('../../renderer/src/components/CanvasPanel', () => ({ CanvasPanel: (p: {
   <><output data-testid="canvas-preview">{p.initialPreviewContent}</output><output data-testid="canvas-events">{JSON.stringify(p.events)}</output></> }));
 
 import { ChatShell } from '../../renderer/src/components/ChatShell';
+import { api } from '../../renderer/src/api';
 import { LocaleProvider, useLocale } from '../../renderer/src/contexts/LocaleContext';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
@@ -346,7 +347,62 @@ describe('R4 U12–U14: actual semantic correlation, automatic predecessor and i
     expect(screen.getByTestId('history')).not.toHaveTextContent('STALE A reload'); expect(screen.getByTestId('plan')).not.toHaveTextContent('STALE plan');
   });
 });
-afterEach(() => { cleanup(); expect(cancel).not.toHaveBeenCalled(); Reflect.deleteProperty(window, 'xiaokDesktop'); _resetDesktopApiCache(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); Reflect.deleteProperty(api, 'readTaskHistory'); expect(cancel).not.toHaveBeenCalled(); Reflect.deleteProperty(window, 'xiaokDesktop'); _resetDesktopApiCache(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+describe('main public-input presentation through actual ChatShell replay', () => {
+  function readWith(reader: ReturnType<typeof vi.fn>) { Object.assign(api, { readTaskHistory: reader }); }
+
+  it('preserves exact internal-looking ordinary user text and the existing restored result events', async () => {
+    const raw = snapshot('A', 'completed', [result('restored result remains')]);
+    const exact = '  [SYSTEM: timed_action_title=literal user text]\n\n\n  exact user text  ';
+    f.recoverTask.mockResolvedValue({ snapshot: raw });
+    readWith(vi.fn(async () => ({ snapshot: { ...raw, events: [] }, presentation: {
+      version: 1, taskId: 'A', sourceEpoch: raw.sessionId, prompt: exact, includeUser: true,
+    } })));
+    await mount(false, false);
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('exact user text'));
+    const messages = JSON.parse(screen.getByTestId('history').textContent!);
+    expect(messages.find((message: { role: string }) => message.role === 'user').content).toBe(exact);
+    expect(screen.getByTestId('history')).toHaveTextContent('restored result remains');
+  });
+
+  it.each(['automatic', 'missing-origin'] as const)('omits the raw Goal user bubble for %s and retains authorized assistant history', async mode => {
+    f.getThread.mockResolvedValue({ ...thread(), currentTaskId: 'B', taskIds: ['B'] });
+    const raw = snapshot('B', 'completed', [result('authorized Goal answer')]);
+    f.recoverTask.mockResolvedValue({ snapshot: raw });
+    readWith(vi.fn(async () => ({ snapshot: raw, presentation: mode === 'missing-origin' ? null : {
+      version: 1, taskId: 'B', sourceEpoch: raw.sessionId, prompt: 'original Goal', includeUser: false,
+    } })));
+    await mount(false, false);
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('authorized Goal answer'));
+    expect(screen.getByTestId('history')).not.toHaveTextContent('prompt B');
+    expect(JSON.parse(screen.getByTestId('history').textContent!).filter((message: { role: string }) => message.role === 'user')).toEqual([]);
+  });
+
+  it.each(['rejected', 'epoch', 'prompt', 'scope'] as const)('does not replay the first cached snapshot after a %s second read', async mode => {
+    const raw = snapshot('A', 'completed', [result('FIRST_CACHED_PRIVATE_CANARY')]);
+    f.recoverTask.mockResolvedValue({ snapshot: raw });
+    readWith(vi.fn(async () => {
+      if (mode === 'rejected') throw new Error('task_history_unavailable');
+      return { snapshot: { ...raw, ...(mode === 'epoch' ? { sessionId: 'other-epoch' } : mode === 'prompt'
+        ? { prompt: 'other raw prompt' } : { executionScope: prepared().executionScope }) }, presentation: null };
+    }));
+    await mount(false, false); await act(async () => {});
+    expect(screen.getByTestId('history')).not.toHaveTextContent('FIRST_CACHED_PRIVATE_CANARY');
+    expect(activeIds()).toEqual([]);
+  });
+
+  it('does not replay an old presentation after navigating during the second read', async () => {
+    const raw = snapshot('A', 'completed', [result('OLD_PRIVATE_CANARY')]), pending = deferred<unknown>();
+    f.recoverTask.mockResolvedValue({ snapshot: raw });
+    const read = vi.fn(() => pending.promise); readWith(read);
+    await mount(false, false); await waitFor(() => expect(read).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'other thread' }));
+    await act(async () => pending.resolve({ snapshot: raw, presentation: { version: 1, taskId: 'A', sourceEpoch: raw.sessionId, prompt: 'old user', includeUser: true } }));
+    expect(screen.getByTestId('history')).not.toHaveTextContent('OLD_PRIVATE_CANARY');
+    expect(activeIds()).toEqual([]);
+  });
+});
 
 describe('W2 actual ChatShell source ownership: no reimplemented handoff or fake main ACK', () => {
   it.each(['idle', 'failed', 'completed'] as const)('U1 create before a reply cannot replace the old %s presentation with running or idle', async status => {
@@ -814,14 +870,78 @@ describe('W2 actual ChatShell source ownership: no reimplemented handoff or fake
     ['cancelGoal', '取消目标', 'resolve'], ['cancelGoal', '取消目标', 'reject'],
   ] as const)('U6 shared feedback sibling %s late %s/%s cannot clear the next source or its Goal feedback', async (method, label, outcome) => {
     currentGoal = { ...goal('previous'), activation: 'armed' };
-    const reply = deferred<DesktopGoalProjection>();
+    const reply = deferred<DesktopGoalControlReceipt>();
     Object.assign(window.xiaokDesktop, { [method]: vi.fn(() => reply.promise) });
     await mount(); fireEvent.click(screen.getByRole('button', { name: label }));
     await changed(goal('goal-C')); await announce(prepared('C')); await emit(observer('C'), question('C'));
     const before = visibleState();
-    const old = goal('previous'); old.state.status = method === 'pauseGoal' ? 'paused' : 'cancelled';
+    const old: DesktopGoalControlReceipt = { threadId, status: method === 'pauseGoal' ? 'paused' : 'cancelled', revision: 2 };
     await act(async () => outcome === 'resolve' ? reply.resolve(old) : reply.reject(new Error('old mutation error')));
     expect.soft(visibleState()).toEqual(before); expect.soft(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText('objective goal-C')).not.toBeNull(); expect(activeIds()).toEqual(['C']);
+  });
+
+  it.each([['pauseGoal', '暂停', 'paused', '已暂停'], ['cancelGoal', '取消目标', 'cancelled', '已取消']] as const)(
+    'keeps %s success visible when Goal details and Task history are revoked, and drops stale events', async (method, label, status, statusLabel) => {
+      currentGoal = { ...goal('private-old'), activation: 'armed' };
+      const getGoal = vi.fn(async () => currentGoal);
+      Object.assign(window.xiaokDesktop, { getGoal, [method]: vi.fn(async () => {
+        getGoal.mockRejectedValue(new Error('goal_content_unavailable'));
+        f.recoverTask.mockRejectedValue(new Error('task_not_readable'));
+        return { threadId, status, revision: 2 };
+      }) });
+      await mount();
+      const old = observer('A');
+      await emit(old, question('PRIVATE_OLD'));
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      await waitFor(() => expect(screen.getAllByText(statusLabel).length).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.getAllByText('目标详情当前不可用').length).toBeGreaterThan(0));
+      expect(screen.queryByText('objective private-old')).toBeNull();
+      expect(screen.getByTestId('question')).not.toHaveTextContent('PRIVATE_OLD');
+      expect(old.active).toBe(false);
+      const before = visibleState();
+      await changed({ ...goal('STALE_PRIVATE_BROADCAST'), activation: 'armed' });
+      await emit(old, { type: 'assistant_delta', delta: 'STALE_PRIVATE_TASK' });
+      await emit(old, { type: 'task_terminal', status: 'completed' });
+      expect(visibleState()).toEqual(before);
+      expect(screen.queryByText('objective STALE_PRIVATE_BROADCAST')).toBeNull();
+      expect(screen.getAllByText(statusLabel).length).toBeGreaterThan(0);
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(f.createTask).not.toHaveBeenCalled();
+    });
+
+  it('restores separately reauthorized history after pause and ignores a late detail read after explicit resume', async () => {
+    currentGoal = { ...goal('previous'), activation: 'armed' };
+    const initial = currentGoal, read = deferred<DesktopGoalProjection | null>();
+    const getGoal = vi.fn().mockResolvedValueOnce(initial).mockImplementation(() => read.promise);
+    Object.assign(window.xiaokDesktop, { getGoal, pauseGoal: vi.fn(async () => {
+      f.recoverTask.mockImplementation(async (id: string) => ({ snapshot: { ...snapshot(id, 'cancelled'),
+        events: [result('FRESH_AUTHORIZED_HISTORY')] } }));
+      return { threadId, status: 'paused', revision: 2 };
+    }) });
+    await mount();
+    const old = observer('A');
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }));
+    await waitFor(() => expect(screen.getByTestId('history')).toHaveTextContent('FRESH_AUTHORIZED_HISTORY'));
+    expect(old.active).toBe(false);
+    expect(activeIds()).toEqual([]);
+    expect(ack).not.toHaveBeenCalled(); expect(f.createTask).not.toHaveBeenCalled();
+    nextDomReply = prepared('B', 'after-control-resume', 'continuation');
+    fireEvent.click(screen.getByRole('button', { name: '恢复' }));
+    await waitFor(() => expect(ack).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: 'after-control-resume' })));
+    await act(async () => read.resolve({ ...goal('STALE_DETAIL'), activation: 'armed' }));
+    expect(screen.queryByText('objective STALE_DETAIL')).toBeNull();
+    expect(screen.getByText('objective goal-B')).not.toBeNull();
+    expect(activeIds()).toEqual(['B']);
+    expect(f.createTask).not.toHaveBeenCalled();
+    getGoal.mockResolvedValue({ ...goal('goal-B'), activation: 'armed' });
+    // A delayed event does not change the owner's actual pointer returned by getGoal.
+    await act(async () => { for (const listener of goalListeners) listener({ threadId, goal: goal('previous') }); });
+    expect.soft(screen.queryByText('objective previous')).toBeNull();
+    f.getThread.mockResolvedValue({ ...thread(threadId), currentTaskId: 'B', taskIds: ['A', 'B'] });
+    f.recoverTask.mockImplementation(async (id: string) => ({ snapshot: snapshot(id, id === 'B' ? 'running' : 'cancelled') }));
+    fireEvent.click(screen.getByRole('button', { name: 'English locale' }));
+    await waitFor(() => expect(activeIds()).toEqual(['B']));
+    expect(screen.getByTestId('display-status')).toHaveTextContent('running');
   });
 });

@@ -25,7 +25,9 @@ export class ConversationMcpActivities {
   constructor(private readonly options: { store: ConversationActivityStore; service: ConversationActivityApi; actorId: string;
     endpointReady?(connection: McpClientConnection): Promise<void>;
     externalObserver?(connection: McpClientConnection): boolean;
-    originThread(taskId: string): Promise<string | null>; onError?(error: unknown): void }) {}
+    originThread(taskId: string): Promise<string | null>;
+    assertReadCurrent?(watchId:string):void;
+    onError?(error: unknown): void }) {}
 
   register(connection: McpClientConnection): void {
     const endpoint = connection.tasks?.endpointId;
@@ -55,16 +57,21 @@ export class ConversationMcpActivities {
     return Boolean(reference && this.endpoints.has(reference.endpointId) && reference.endpointId === watch.logicalSourceId && reference.taskId === watch.workId);
   }
 
-  private async userWork(watchId: string, actor: ActivityActor) {
+  private async userWork(watchId: string, actor: ActivityActor, mode:'read'|'control'='read') {
     const { watch } = await this.options.service.getWork(watchId, actor);
-    if (watch.source !== 'mcp' || !await this.options.service.canReadSource(watchId)) throw new Error('activity_source_forbidden');
+    if (watch.source !== 'mcp' || mode==='read'&&!await this.options.service.canReadSource(watchId)) throw new Error('activity_source_forbidden');
     const reference = this.options.store.getMcpReference(watchId);
     const connection = reference && this.connections.get(reference.endpointId);
-    if (!reference || !connection?.tasks) throw new Error('activity_mcp_disconnected');
+    if (!reference || !connection?.tasks || reference.taskId!==watch.workId || reference.endpointId!==watch.logicalSourceId) throw new Error('activity_mcp_disconnected');
     return { watch, reference, connection };
   }
+  private assertCurrent(watch:WorkWatch,reference:SerializedTaskReference,connection:McpClientConnection,read:boolean):void{
+    const current=this.options.store.getWatch(watch.watchId),handle=this.options.store.getMcpReference(watch.watchId);
+    if(this.disposed||this.connections.get(reference.endpointId)!==connection||!current||current.source!=='mcp'||current.workId!==reference.taskId||current.logicalSourceId!==reference.endpointId||current.origin.actorId!==this.options.actorId||!handle||JSON.stringify(canonical(handle))!==JSON.stringify(canonical(reference)))throw new Error('activity_mcp_disconnected');
+    if(read){const result:unknown=this.options.assertReadCurrent?.(watch.watchId);if(result!==undefined)throw new Error('activity_source_forbidden');}
+  }
   async inputs(watchId: string, actor: ActivityActor): Promise<McpInputForm[]> {
-    const { reference, connection } = await this.userWork(watchId, actor);
+    const { watch, reference, connection } = await this.userWork(watchId, actor);
     const task = await connection.tasks!.task(reference.taskId).snapshot();
     if (!await this.options.service.canReadSource(watchId)) throw new Error('activity_source_forbidden');
     if (task.status !== 'input_required') return [];
@@ -78,9 +85,21 @@ export class ConversationMcpActivities {
           type: field.type === 'boolean' ? 'boolean' : ['number', 'integer'].includes(field.type ?? '') ? 'number' : field.type === 'array' ? 'choices' : field.enum ? 'choice' : 'text',
           ...(field.enum || field.items?.enum ? { options: (field.enum ?? field.items?.enum ?? []).filter((value): value is string => typeof value === 'string').slice(0, 128) } : {}) })) });
     }
-    return forms;
+    this.assertCurrent(watch,reference,connection,true);return forms;
   }
   async answerInput(watchId: string, input: { inputId: string; expectedDigest: string; action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }, actor: ActivityActor): Promise<void> {
+    if(!['accept','decline','cancel'].includes(input.action))throw new Error('activity_mcp_input_invalid');
+    if(input.action!=='accept'){
+      // The caller already owns the retained handle. A private-content withdrawal
+      // cannot prevent declining that exact pending request or cancelling work.
+      const {watch,reference,connection}=await this.userWork(watchId,actor,'control');
+      const latest=await connection.tasks!.task(reference.taskId).snapshot();
+      const request=(latest.raw.inputRequests as Record<string,{method?:string}>|undefined)?.[input.inputId];
+      if(latest.status!=='input_required'||!request||request.method!=='elicitation/create'||createHash('sha256').update(JSON.stringify(canonical(request))).digest('hex')!==input.expectedDigest)throw new Error('activity_mcp_input_stale');
+      this.assertCurrent(watch,reference,connection,false);
+      await connection.tasks!.task(reference.taskId).updateJson({[input.inputId]:{action:input.action}});
+      return;
+    }
     const form = (await this.inputs(watchId, actor)).find(form => form.inputId === input.inputId);
     if (!form || form.expectedDigest !== input.expectedDigest) throw new Error('activity_mcp_input_stale');
     if (input.action === 'accept') {
@@ -106,12 +125,14 @@ export class ConversationMcpActivities {
       catch { throw new Error('activity_mcp_input_invalid'); }
     }
     if (!await this.options.service.canReadSource(watchId)) throw new Error('activity_source_forbidden');
+    this.assertCurrent(watch,reference,connection,true);
     await connection.tasks!.task(reference.taskId).updateJson({ [input.inputId]: { action: input.action, ...(input.action === 'accept' ? { content: input.content ?? {} } : {}) } });
     await this.observe(watch, reference, connection);
     void this.restore(watch, connection).catch(error => this.options.onError?.(error));
   }
   async cancel(watchId: string, actor: ActivityActor): Promise<{ requested: true }> {
-    const { watch, reference, connection } = await this.userWork(watchId, actor);
+    const { watch, reference, connection } = await this.userWork(watchId, actor,'control');
+    this.assertCurrent(watch,reference,connection,false);
     await connection.tasks!.cancelTask(reference.taskId);
     await this.observe(watch, reference, connection);
     void this.restore(watch, connection).catch(error => this.options.onError?.(error));

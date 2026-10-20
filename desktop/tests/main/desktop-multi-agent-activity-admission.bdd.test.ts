@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { activityFixture, barrier, nativeAuthorizer, rootRequest, serviceSite, spawnChunk, sqliteFault, tick, writeChunk, type Cleanup } from '../fixtures/multi-agent-activity-failure.js';
 import type { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
+import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 
 describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission callers', () => {
   const cleanup: Cleanup = [];
@@ -139,7 +140,13 @@ describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission call
     } catch (error) { result = error; }
     expect(result).toBeInstanceOf(Error); expect.soft(frozenBeforeRefusal).toBeUndefined(); expect.soft(f.live().frozen).toBeUndefined();
     expect(f.context.signal.reason).toBe(rootReason); expect(f.busy.signal.reason).toBe(childReason);
-    f.busyRelease.release(); f.rootRelease.release(); await f.settled(f.taskId); await observedLifecycle;
+    f.busyRelease.release(); f.rootRelease.release();
+    if (operation === 'delete') {
+      await expect(f.services.recoverTask(f.taskId)).rejects.toThrow('task_scope_forbidden');
+      const ownSnapshots = new FileTaskSnapshotStore(join(f.root, 'data', 'tasks'));
+      await vi.waitFor(async () => expect(['completed', 'failed', 'cancelled']).toContain((await ownSnapshots.recoverTask(f.taskId))?.status));
+    } else await f.settled(f.taskId);
+    await observedLifecycle;
     expect(existsSync(f.effect)).toBe(false); expect(f.live().frozen).toBeUndefined();
   });
 

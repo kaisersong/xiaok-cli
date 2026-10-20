@@ -1,4 +1,23 @@
 import { createExecutionHealthMonitor, resolveExecutionIdleMs } from './execution-health.js';
+/** Invalid async host checks still own their promise, including recorder failure. */
+export function settleUnexpectedHostCheck(value, context) {
+    if (value === undefined)
+        return;
+    return (async () => {
+        let recordingError;
+        try {
+            context?.recordUnprovenEffect?.('local_operation_check_not_synchronous');
+        }
+        catch (error) {
+            recordingError = error;
+        }
+        try {
+            await value;
+        }
+        catch { /* Reject below after the actual check settled. */ }
+        throw recordingError ?? new Error('local_operation_check_not_synchronous');
+    })();
+}
 /** Cancellation requests do not settle this promise; the actual tool must exit. */
 export async function runMonitoredTool(options) {
     const { context } = options;
@@ -51,6 +70,13 @@ export async function runMonitoredTool(options) {
         // monitoring may add callbacks/signal composition, not thaw that contract.
         if (monitoredContext && Object.isFrozen(context))
             Object.freeze(monitoredContext);
+        const unexpectedCheck = settleUnexpectedHostCheck(context?.assertContextAdmission?.(), context);
+        if (unexpectedCheck)
+            await unexpectedCheck;
+        if (options.admitEffect)
+            options.admitEffect();
+        else
+            context?.recordUnprovenEffect?.(options.name);
         const result = await options.run(monitoredContext);
         owned.signal.throwIfAborted();
         context?.signal?.throwIfAborted();

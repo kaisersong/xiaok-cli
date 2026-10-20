@@ -20,10 +20,12 @@ import type { IpcMainInvokeEvent } from 'electron';
 // assigns unchanged; `any[]` is deliberate and matches the upstream typing.
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 export type IpcHandlerListener = (event: IpcMainInvokeEvent, ...args: any[]) => unknown;
+export type IpcOutputFence = (result:unknown,event:IpcMainInvokeEvent)=>void;
 
 /** The narrow surface every registration site receives. */
 export interface IpcHandleRegistrar {
-  handle(channel: string, listener: IpcHandlerListener): void;
+  readonly handlesOutputFence?: boolean;
+  handle(channel: string, listener: IpcHandlerListener, assertOutputCurrent?:IpcOutputFence): void;
 }
 
 /** Minimal shape of the raw Electron ipcMain we depend on. */
@@ -139,6 +141,8 @@ export class DesktopShutdownGate {
  * through it takes a gate token for the duration of the handler.
  */
 export class ShutdownAwareIpcMain implements IpcHandleRegistrar {
+  readonly handlesOutputFence=true;
+  private readonly pendingFencedEvents=new WeakSet<object>();
   private readonly channels = new Set<string>();
 
   constructor(
@@ -151,16 +155,30 @@ export class ShutdownAwareIpcMain implements IpcHandleRegistrar {
     return [...this.channels].sort();
   }
 
-  handle(channel: string, listener: IpcHandlerListener): void {
+  handle(channel: string, listener: IpcHandlerListener, assertOutputCurrent?:IpcOutputFence): void {
     if (this.channels.has(channel)) {
       throw new Error(`duplicate ipc channel registration: ${channel}`);
     }
     this.channels.add(channel);
     this.rawIpcMain.handle(channel, (async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
       const token = this.gate.acquire('ipc', channel);
+      let ownsEvent=false;
       try {
-        return await listener(event, ...args);
+        if(assertOutputCurrent){
+          if(!event||typeof event!=='object'||this.pendingFencedEvents.has(event))throw new Error('ipc_output_event_reused');
+          this.pendingFencedEvents.add(event);ownsEvent=true;
+        }
+        const result=await listener(event,...args);
+        const checked:unknown=assertOutputCurrent?.(result,event);
+        if(checked!==undefined){
+          // Invalid async fences never authorize a reply, but still own any
+          // promise they started until it settles. Keep the shutdown token.
+          try{await checked;}catch{/* Reject the contract below. */}
+          throw new Error('ipc_output_fence_invalid');
+        }
+        return result;
       } finally {
+        if(ownsEvent)this.pendingFencedEvents.delete(event);
         token.release();
       }
     }) as never);

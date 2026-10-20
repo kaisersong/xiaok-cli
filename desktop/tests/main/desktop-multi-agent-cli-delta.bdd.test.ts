@@ -15,6 +15,7 @@ import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from '../../electr
 import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
+import { continuityEffects } from '../fixtures/continuity-effects.js';
 
 describe('BDD: CLI delta reaches the actual Desktop child tool surface', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
@@ -27,6 +28,7 @@ describe('BDD: CLI delta reaches the actual Desktop child tool surface', () => {
     { name: 'empty intersection cannot expand', selected: ['Write'], preset: ['read', 'grep'], reads: false },
   ])('Given $name, When a real child tries Read/Grep/write, Then discovered tools and actual permissions agree', async scenario => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-ma-cli-delta-')); cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+    const effects = continuityEffects(root); cleanup.push(() => effects.close());
     const source = join(root, 'fixture.ts'), forbidden = join(root, 'forbidden.txt'); writeFileSync(source, 'export const REAL_READ_GREP_SENTINEL = 42;\n');
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite')); cleanup.push(() => store.close());
     let runtime!: DesktopMultiAgentRuntime;
@@ -53,7 +55,7 @@ describe('BDD: CLI delta reaches the actual Desktop child tool surface', () => {
         const agents: CustomAgentDef[] = scenario.preset === undefined ? [] : [{ name: 'preset', systemPrompt: 'read only', allowedTools: scenario.preset }];
         const scope = runtime.bindRoot(context, { adapter, catalog: catalog.catalog, policy: catalog.catalog.snapshotPolicy(), systemPrompt: 'Inspect',
           workspaceId: 'workspace', materialIds: [], permissionRevision: 0, registryOptions: { autoMode: true }, materials: [], materialRegistry,
-          skillCatalog: createSkillCatalog(undefined, root), dataRoot: root, agents, emitRuntimeEvent: input.emitRuntimeEvent, maxIterations: 3 });
+          skillCatalog: createSkillCatalog(undefined, root), dataRoot: root, agents, emitRuntimeEvent: input.emitRuntimeEvent, maxIterations: 3, recordUnprovenEffect: effects.record });
         try {
           const result = await scope.registry.executeTool('spawn_agent', { task_name: 'inspect', message: 'Inspect fixture', tools: scenario.selected,
             ...(scenario.preset === undefined ? {} : { agent: 'preset' }) });
@@ -71,5 +73,6 @@ describe('BDD: CLI delta reaches the actual Desktop child tool surface', () => {
     expect(JSON.stringify(grep)).toMatch(scenario.reads ? /REAL_READ_GREP_SENTINEL/ : /Error|unknown/i);
     expect(toolNames[0].includes('read')).toBe(scenario.reads); expect(toolNames[0].includes('grep')).toBe(scenario.reads);
     expect(toolNames[0]).not.toContain('write'); expect(existsSync(forbidden)).toBe(false);
+    if (scenario.reads) expect(effects.count()).toBeGreaterThan(0);
   });
 });

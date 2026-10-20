@@ -11,6 +11,8 @@ export declare class ActivityNativeIdentityRepository {
         workspaceRoot?: string;
     });
     getThread(threadId: string): ActivityThreadIdentity | null;
+    /** Permission query preserves foreign rows instead of filtering them into null. */
+    continuityScope(threadId: string, workspaceId: string): 'readable' | 'blocked' | 'deleted';
     authorizeProducer(threadId: string, instanceId?: string | undefined): boolean;
     close(): void;
 }

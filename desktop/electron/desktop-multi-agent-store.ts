@@ -210,6 +210,21 @@ export class DesktopMultiAgentStore {
   close(): void { if (!this.closed) { this.closed = true; this.listeners.clear(); this.db.close(); } }
   isClosed(): boolean { return this.closed; }
 
+  /** Boot owner only. Move authority domains without rewriting historical actors or receipts. */
+  migrateProfileIdentity(legacyProfileId:string,profileId:string):void {
+    if(!this.ownerClaimed)throw new Error('multi_agent_owner_unknown');
+    if(!/^[a-f0-9]{64}$/.test(legacyProfileId)||!/^\w{8}-\w{4}-4\w{3}-[89ab]\w{3}-\w{12}$/.test(profileId))throw new Error('profile_identity_unavailable');
+    this.transaction(()=>{
+      this.db.exec('CREATE TABLE IF NOT EXISTS profile_identity_migrations(old_profile TEXT PRIMARY KEY,new_profile TEXT NOT NULL,committed_at INTEGER NOT NULL)');
+      const prior=this.db.prepare('SELECT new_profile FROM profile_identity_migrations WHERE old_profile=?').get(legacyProfileId);
+      if(prior){if(prior.new_profile!==profileId||this.db.prepare('SELECT 1 FROM thread_bindings WHERE profile_id=? UNION ALL SELECT 1 FROM workspace_execution_authorizations WHERE profile_id=? LIMIT 1').get(legacyProfileId,legacyProfileId))throw new Error('profile_migration_conflict');return;}
+      if(this.db.prepare('SELECT 1 FROM workspace_execution_authorizations a JOIN workspace_execution_authorizations b ON a.workspace_id=b.workspace_id WHERE a.profile_id=? AND b.profile_id=?').get(legacyProfileId,profileId))throw new Error('profile_migration_conflict');
+      this.db.prepare('UPDATE thread_bindings SET profile_id=? WHERE profile_id=?').run(profileId,legacyProfileId);
+      this.db.prepare('UPDATE workspace_execution_authorizations SET profile_id=? WHERE profile_id=?').run(profileId,legacyProfileId);
+      this.db.prepare('INSERT INTO profile_identity_migrations VALUES(?,?,?)').run(legacyProfileId,profileId,this.now());
+    });
+  }
+
   /** Main-only startup admission. Closing SQLite does not release a JS owner. */
   claimBootOwnership(pid = process.pid): void {
     if (this.ownerClaimed) return;
@@ -472,6 +487,11 @@ export class DesktopMultiAgentStore {
     ) LIMIT 1`).get(threadId));
   }
 
+  /** Safety proof, distinct from the display predicate that hides root-only groups. */
+  threadHasAnyGroup(threadId: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM groups WHERE thread_id=? LIMIT 1').get(threadId));
+  }
+
   goalChildReadiness(groupId: string): 'ready' | 'waiting_children' | 'children_need_attention' {
     const failed = this.db.prepare(`SELECT 1 FROM messages m JOIN agents a ON a.group_id=m.group_id AND a.agent_id=m.sender_agent_id
       WHERE m.group_id=? AND m.delivery_state<>'context_applied' AND a.parent_id IS NOT NULL AND (
@@ -649,7 +669,7 @@ export class DesktopMultiAgentStore {
     });
   }
 
-  sendMessage(groupId: string, input: { sender: MultiAgentSender; receiverId: string; text: string; kind?: MultiAgentMessage['kind']; contentId?: string; truncated?: boolean }, settlement = false): MultiAgentMessage {
+  sendMessage(groupId: string, input: { sender: MultiAgentSender; receiverId: string; text: string; kind?: MultiAgentMessage['kind']; contentId?: string; truncated?: boolean; sourceTaskId?: string }, settlement = false): MultiAgentMessage {
     return this.transaction(() => {
       if (settlement && (input.sender.kind !== 'agent' || input.kind !== 'result' && input.kind !== 'error')) throw new Error('invalid settlement handoff');
       this.assertWritable(groupId, settlement);
@@ -665,6 +685,7 @@ export class DesktopMultiAgentStore {
       }
       const message: MultiAgentMessage = {
         messageId: randomUUID(), groupId, sender: input.sender, receiverId: input.receiverId,
+        sourceTaskId: input.sourceTaskId,
         kind: input.kind ?? 'message', preview: input.text, contentId: input.contentId,
         truncated: input.truncated ?? false, deliveryState: 'unread', claimId: null, turnId: null, createdAt: this.now(),
       };
@@ -752,11 +773,11 @@ export class DesktopMultiAgentStore {
     });
   }
 
-  putContent(groupId: string, agentId: string, text: string, settlement = false): MultiAgentContent {
+  putContent(groupId: string, agentId: string, text: string, settlement = false, sourceTaskId?: string): MultiAgentContent {
     this.assertWritable(groupId, settlement);
     const clipped = truncateMultiAgentText(text, MAX_CONTENT_BYTES);
     const bytes = Buffer.from(clipped.text, 'utf8');
-    const content: MultiAgentContent = { contentId: randomUUID(), groupId, agentId, utf8Text: clipped.text, byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), truncated: clipped.truncated };
+    const content: MultiAgentContent = { contentId: randomUUID(), groupId, agentId, sourceTaskId, utf8Text: clipped.text, byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), truncated: clipped.truncated };
     this.write('contents', groupId, { content_id: content.contentId }, { group_id: groupId, agent_id: agentId }, content, false);
     return content;
   }

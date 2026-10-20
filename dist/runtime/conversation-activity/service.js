@@ -1,6 +1,8 @@
+import { unavailableProjection, unavailableActivity } from './disclosure.js';
 /** Owned by the host, with actor and thread identity supplied by main's registry. */
 export class ConversationActivityService {
     options;
+    disclosureManifests = new WeakMap();
     subscribers = new Set();
     timer;
     disposed = false;
@@ -33,7 +35,32 @@ export class ConversationActivityService {
         // Recheck the local admission fence after suspended authorization IO.
         if (this.thread(watch.origin.threadId).workspaceId !== watch.origin.workspaceId)
             throw new Error('activity_thread_forbidden');
-        return allowed;
+        return allowed === true && this.disclosureAllowed(watch);
+    }
+    disclosureAllowed(watch) {
+        try {
+            return !this.disposed && (!this.options.canDiscloseWork || this.options.canDiscloseWork(watch) === true);
+        }
+        catch {
+            return false;
+        }
+    }
+    assertSourceReadCurrent(watchId) {
+        const watch = this.options.store.getWatch(watchId);
+        if (!watch || watch.origin.profileId !== this.options.profileId || this.thread(watch.origin.threadId).workspaceId !== watch.origin.workspaceId || !this.disclosureAllowed(watch))
+            throw new Error('activity_source_forbidden');
+    }
+    disclosed(result, watchIds) {
+        for (const id of watchIds)
+            this.assertSourceReadCurrent(id);
+        this.disclosureManifests.set(result, Object.freeze([...new Set(watchIds)]));
+        return result;
+    }
+    /** Actual owner socket/host return calls this again after its last await. */
+    assertResultCurrent(result) {
+        if (result && typeof result === 'object')
+            for (const id of this.disclosureManifests.get(result) ?? [])
+                this.assertSourceReadCurrent(id);
     }
     async prepareAssociation(input, actor) {
         this.assertUser(actor);
@@ -132,7 +159,7 @@ export class ConversationActivityService {
     async listActivities(threadId, actor, page) {
         this.assertUser(actor);
         this.thread(threadId);
-        const rows = [];
+        const rows = [], disclosures = new Set();
         const limit = page?.limit ?? 100;
         let afterLocalSeq = page?.afterLocalSeq ?? 0;
         const permission = new Map();
@@ -144,15 +171,15 @@ export class ConversationActivityService {
                     const watch = this.options.store.getWatch(row.watchId);
                     permission.set(row.watchId, Boolean(watch && await this.visible(watch)));
                 }
-                if (permission.get(row.watchId))
+                if (permission.get(row.watchId)) {
                     rows.push(row);
+                    disclosures.add(row.watchId);
+                }
                 else if (!unavailable.has(row.watchId)) {
                     // A scope-local warning preserves the user's own watch without
                     // exposing source text, outcome, evidence or unread counts.
                     unavailable.add(row.watchId);
-                    rows.push({ ...row, activityId: `unavailable:${row.watchId}`, kind: 'diagnostic', projection: { ...row.projection,
-                            executionState: 'accepted', businessOutcome: 'unknown', freshness: 'unavailable', summary: undefined,
-                            evidenceRefs: [], sourceSequence: 0, lastProgressAt: null, lastHeartbeatAt: null, lastReportAt: null, errorCode: 'activity_source_forbidden' } });
+                    rows.push(unavailableActivity(row));
                 }
                 if (rows.length >= limit)
                     break;
@@ -162,7 +189,7 @@ export class ConversationActivityService {
             afterLocalSeq = batch.at(-1).localSeq;
         }
         this.thread(threadId);
-        return rows;
+        return this.disclosed(rows, [...disclosures]);
     }
     subscribe(threadId, actor, handler) {
         this.assertUser(actor);
@@ -185,9 +212,8 @@ export class ConversationActivityService {
         this.thread(watch.origin.threadId);
         const projection = this.options.store.getProjection(watchId);
         if (await this.visible(watch))
-            return { watch, projection };
-        return { watch, projection: { ...projection, executionState: 'accepted', businessOutcome: 'unknown',
-                freshness: 'unavailable', summary: undefined, evidenceRefs: [], lastProgressAt: null, lastHeartbeatAt: null, errorCode: 'activity_source_forbidden' } };
+            return this.disclosed({ watch, projection }, [watchId]);
+        return { watch, projection: unavailableProjection(projection) };
     }
     async markRead(threadId, throughLocalSeq, actor) {
         this.assertUser(actor);
@@ -203,16 +229,18 @@ export class ConversationActivityService {
     }
     async unreadThreads(actor) {
         this.assertUser(actor);
-        const counts = new Map();
+        const counts = new Map(), watchIds = [];
         for (const row of this.options.store.unreadByWatch(this.options.profileId)) {
             try {
                 const watch = this.options.store.getWatch(row.watchId);
-                if (watch && await this.visible(watch))
+                if (watch && await this.visible(watch)) {
                     counts.set(row.threadId, (counts.get(row.threadId) ?? 0) + row.count);
+                    watchIds.push(row.watchId);
+                }
             }
             catch { /* Revoked/deleted scopes have no visible unread metadata. */ }
         }
-        return [...counts].map(([threadId, count]) => ({ threadId, count }));
+        return this.disclosed([...counts].map(([threadId, count]) => ({ threadId, count })), watchIds);
     }
     async publish(change) {
         const pending = this.pendingChanges.get(change.threadId);
@@ -296,7 +324,7 @@ export class ConversationActivityService {
             return;
         for (const watchId of [...authorized]) {
             try {
-                this.thread(this.options.store.getWatch(watchId).origin.threadId);
+                this.assertSourceReadCurrent(watchId);
             }
             catch {
                 authorized.delete(watchId);
@@ -339,7 +367,7 @@ export class ConversationActivityService {
                 if (!this.options.store.claimNotification(activity.activityId))
                     continue;
                 const current = this.options.store.getWatch(activity.watchId);
-                if (visible && current?.status === 'active' && current.preference !== 'quiet' && current.generation === watch?.generation) {
+                if (visible && current && this.disclosureAllowed(current) && current.status === 'active' && current.preference !== 'quiet' && current.generation === watch?.generation) {
                     try {
                         status = await this.options.notify(activity, current);
                     }

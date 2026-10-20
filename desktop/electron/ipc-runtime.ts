@@ -56,6 +56,8 @@ export function registerIpcHandler<I, O>(opts: {
   rolloutRound: 1 | 2 | 3;
   riskTags?: RiskTag[];
   handler: (input: I, event: IpcMainInvokeEvent) => Promise<O>;
+  /** Host-owned synchronous fence after every await and contract check. */
+  assertOutputCurrent?: (result:O,event:IpcMainInvokeEvent)=>void;
 }): void {
   const registrar = opts.registrar ?? ipcMainImpl;
   if (!registrar) {
@@ -84,8 +86,17 @@ export function registerIpcHandler<I, O>(opts: {
       const r = (opts.output as any).safeParse(result);
       if (!r.success) return { ok: false, error: 'ipc_contract_violation' };
     }
+    const fenced:unknown=opts.assertOutputCurrent?.(result,event);
+    if(fenced!==undefined){
+      try{await fenced;}catch{/* A broken asynchronous fence never authorizes output. */}
+      throw new Error('ipc_output_fence_invalid');
+    }
     return result;
-  });
+  },
+    ...(opts.assertOutputCurrent
+      ? [(result: unknown, event: IpcMainInvokeEvent) =>
+          opts.assertOutputCurrent!(result as O, event) as void]
+      : []));
   owned.set(opts.channel, entry);
   registrations.set(registrar, owned);
   IPC_SCHEMA_REGISTRY.set(opts.channel, entry);

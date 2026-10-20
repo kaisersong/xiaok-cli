@@ -1,3 +1,6 @@
+import type {ConversationQueueView} from '../../../shared/conversation-inputs';
+import type { TaskEventCoordinate } from '../../../shared/context-continuity-types';
+import { publicTaskMessageKey } from '../../../shared/context-continuity-projection';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
@@ -5,7 +8,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { GoalBar } from './GoalBar';
-import type { DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared } from '../../../electron/preload-api';
+import type { DesktopGoalControlReceipt, DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared } from '../../../electron/preload-api';
 import type { GoalInput } from '../../../../src/runtime/goal/types';
 import { attachPreparedGoalTask } from '../lib/goal-task-attachment';
 import { CanvasPanel } from './CanvasPanel';
@@ -22,6 +25,8 @@ import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
+import { recoverForDisplay } from '../lib/recover-for-display';
+import type { TaskPublicPresentation } from '../../../shared/task-history';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
 import { getStreamingRenderDelay } from '../lib/streaming-render-policy';
@@ -258,6 +263,9 @@ export function ChatShell() {
   const admissionPending = useRef<typeof renderScope | null>(null);
   useLayoutEffect(() => {
     liveRenderScope.current = renderScope;
+    setGoal(null);
+    setGoalControl(null);
+    goalReadBarrier.current = null;
     return () => {
       liveRenderScope.current = null;
       for (const release of renderScope.attachmentObservers) release();
@@ -288,6 +296,9 @@ export function ChatShell() {
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
+  const [goalControl, setGoalControl] = useState<DesktopGoalControlReceipt | null>(null);
+  const goalReadBarrier = useRef<{ attempt: GoalAttempt; sequence: number } | null>(null);
+  const [historyRefresh, setHistoryRefresh] = useState<{ scope: DisplayScope; attempt: GoalAttempt } | null>(null);
   const [goalLoading, setGoalLoading] = useState(false);
   const [goalError, setGoalError] = useState<string | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -310,6 +321,7 @@ export function ChatShell() {
   const [queuedPrompt, setQueuedPrompt] = useState<{
     text: string;
     files: Array<{ filePath: string; name: string }>;
+    inputId?:string;durable?:boolean;
   } | null>(null);
   const goalAttemptRef = useRef<GoalAttempt | null>(null);
   const displaySourceRef = useRef<DisplaySource | null>(null);
@@ -324,8 +336,13 @@ export function ChatShell() {
   const beginGoalAttempt = useCallback((request = false) => {
     const attempt: GoalAttempt = { scope: renderScope, ...(request ? { requestId: crypto.randomUUID() } : {}) };
     goalAttemptRef.current = attempt;
+    if (goalReadBarrier.current?.attempt.scope === renderScope) goalReadBarrier.current = { attempt, sequence: 0 };
     return attempt;
   }, [renderScope]);
+  const [queueFailure,setQueueFailure]=useState<{scope:DisplayScope;message:string}|null>(null);
+  const durableQueueRows=useRef<ConversationQueueView['items']>([]);
+  const durableQueueRefresh=useRef<()=>Promise<void>>(async()=>{});
+  const durableQueueRequest=useRef<{scope:DisplayScope;key:string;inputId:string;pending:boolean}|null>(null);
   const queuedDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
@@ -377,11 +394,13 @@ export function ChatShell() {
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
 
-  const handleEvent = useCallback((rawEvent: { type: string }, source: DisplaySource) => {
+  const handleEvent = useCallback((rawEvent: { type: string }, source: DisplaySource, coordinate?: TaskEventCoordinate) => {
     const event = rawEvent as DesktopTaskEvent;
     if (!acceptsSource(source) || source.streamEnded) return;
-    source.eventCount += 1;
+    if (coordinate && coordinate.taskId !== source.sourceTaskId) return;
+    source.eventCount = coordinate ? coordinate.eventIndex + 1 : source.eventCount + 1;
     const sourceTaskId = source.sourceTaskId;
+    const publicEventMessageKey = coordinate ? publicTaskMessageKey('assistant', coordinate.eventIndex) : undefined;
     const live = !source.terminalSeen;
     if (event.type === 'task_terminal') {
       source.terminalSeen = true;
@@ -452,6 +471,7 @@ export function ChatShell() {
         if (partialText.trim()) {
           setMessages(prev => [...prev, {
             id: `msg-${Date.now()}-assistant-cancelled`,
+              contextSource: publicEventMessageKey ? { sourceId: sourceTaskId, sourceMessageId: publicEventMessageKey } : undefined,
             role: 'assistant',
             content: partialText,
           }]);
@@ -496,6 +516,7 @@ export function ChatShell() {
             source.resultSummaryInHistory = finalContent;
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
+              contextSource: publicEventMessageKey ? { sourceId: sourceTaskId, sourceMessageId: publicEventMessageKey } : undefined,
               role: 'assistant',
               content: finalContent,
             }]);
@@ -516,6 +537,7 @@ export function ChatShell() {
             source.resultSummaryInHistory = finalText;
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
+              contextSource: publicEventMessageKey ? { sourceId: sourceTaskId, sourceMessageId: publicEventMessageKey } : undefined,
               role: 'assistant',
               content: finalText,
             }]);
@@ -677,6 +699,7 @@ export function ChatShell() {
             ...retainedMessages,
             ...(partialText ? [{
               id: `msg-${Date.now()}-partial`,
+              contextSource: publicEventMessageKey ? { sourceId: sourceTaskId, sourceMessageId: publicEventMessageKey } : undefined,
               role: 'assistant' as const,
               content: partialText,
             }] : []),
@@ -758,6 +781,19 @@ export function ChatShell() {
       ? previous : next);
   }, []);
 
+  const refreshControlledGoal = useCallback(async () => {
+    const barrier = goalReadBarrier.current, desktop = getDesktopApi();
+    if (!barrier || !desktop || !currentAttempt(barrier.attempt) || !barrier.attempt.scope.taskId) return;
+    const sequence = ++barrier.sequence;
+    const current = () => goalReadBarrier.current === barrier && barrier.sequence === sequence && currentAttempt(barrier.attempt);
+    try {
+      const value = await desktop.getGoal(barrier.attempt.scope.taskId);
+      if (current()) { applyGoal(value); setGoalError(null); }
+    } catch {
+      if (current()) { setGoal(null); setGoalError(t.goalBar.detailsUnavailable); }
+    }
+  }, [applyGoal, currentAttempt, t.goalBar.detailsUnavailable]);
+
   const runGoalAttempt = useCallback(async (attempt: GoalAttempt, action: () => Promise<void>) => {
     if (!currentAttempt(attempt)) return;
     setGoalLoading(true);
@@ -826,7 +862,7 @@ export function ChatShell() {
           isCandidateCurrent: () => currentAttempt(attempt) && (!predecessor || displaySourceRef.current === predecessor),
           updateThreadTaskId: api.updateThreadTaskId,
           subscribeTask: (id, handler) => retainObserver(source, api.subscribeTask(id, handler)),
-          onEvent: event => handleEvent(event as DesktopTaskEvent, source),
+          onEvent: (event, coordinate) => handleEvent(event as DesktopTaskEvent, source, coordinate),
           onSubscribed: release => promoteSource(source, release, true),
           ackGoalTaskAttached: input => { work.ackInvoked = true; return desktop.ackGoalTaskAttached(input); },
         });
@@ -851,14 +887,18 @@ export function ChatShell() {
     setGoalLoading(true);
     setGoalError(null);
     void desktop.getGoal(taskId).then(value => {
-      if (initialCurrent()) applyGoal(value);
+      if (!initialCurrent()) return;
+      if (goalReadBarrier.current?.attempt.scope === renderScope) void refreshControlledGoal();
+      else applyGoal(value);
     }).catch(error => {
       if (initialCurrent()) setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
     }).finally(() => {
       if (initialCurrent()) setGoalLoading(false);
     });
     const unsubscribeChanged = desktop.onGoalChanged(event => {
-      if (live && liveRenderScope.current === renderScope && event.threadId === taskId) applyGoal(event.goal);
+      if (!live || liveRenderScope.current !== renderScope || event.threadId !== taskId) return;
+      if (goalReadBarrier.current?.attempt.scope === renderScope) void refreshControlledGoal();
+      else applyGoal(event.goal);
     });
     const unsubscribePrepared = desktop.onGoalTaskPrepared(prepared => {
       if (!live || liveRenderScope.current !== renderScope || !validPrepared(prepared)) return;
@@ -895,16 +935,17 @@ export function ChatShell() {
       unsubscribeChanged();
       unsubscribePrepared();
     };
-  }, [applyGoal, attachGoalTask, beginGoalAttempt, currentAttempt, renderScope, runGoalAttempt, taskId, t.chatShell.taskCreateFailed, validPrepared]);
+  }, [applyGoal, attachGoalTask, beginGoalAttempt, currentAttempt, refreshControlledGoal, renderScope, runGoalAttempt, taskId, t.chatShell.taskCreateFailed, validPrepared]);
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean, presentation?: TaskPublicPresentation | null): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
-    if (addPromptAsUser && snapshot?.prompt) {
-      const display = parseScheduledTaskPromptDisplay(snapshot.prompt);
+    const publicPrompt = presentation === undefined ? snapshot.prompt : presentation?.includeUser ? presentation.prompt : undefined;
+    if (addPromptAsUser && publicPrompt) {
+      const display = presentation ? { displayPrompt: publicPrompt, notice: undefined } : parseScheduledTaskPromptDisplay(publicPrompt);
       if (display.notice) {
         msgs.push({
           id: `msg-scheduled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -915,6 +956,7 @@ export function ChatShell() {
       }
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        contextSource: snapshot.taskId ? { sourceId: snapshot.taskId, sourceMessageId: publicTaskMessageKey('user') } : undefined,
         role: 'user',
         content: formatUserMessageContent(display.displayPrompt, snapshot.materials, t.chatShell.attachmentLabel),
       });
@@ -929,7 +971,7 @@ export function ChatShell() {
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
       const replayArtifacts: ArtifactSummary[] = [];
-      for (const ev of snapshot.events) {
+      for (const [eventIndex, ev] of snapshot.events.entries()) {
         if (ev.type === 'task_terminal') {
           terminalSeen = true;
           continue;
@@ -1008,6 +1050,7 @@ export function ChatShell() {
           if (partialText.trim()) {
             msgs.push({
               id: `msg-assistant-cancelled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              contextSource: snapshot.taskId ? { sourceId: snapshot.taskId, sourceMessageId: publicTaskMessageKey('assistant', eventIndex) } : undefined,
               role: 'assistant',
               content: partialText,
             });
@@ -1019,6 +1062,7 @@ export function ChatShell() {
           if (accumulated.trim()) {
             msgs.push({
               id: `msg-assistant-partial-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              contextSource: snapshot.taskId ? { sourceId: snapshot.taskId, sourceMessageId: publicTaskMessageKey('assistant', eventIndex) } : undefined,
               role: 'assistant',
               content: accumulated,
             });
@@ -1048,6 +1092,7 @@ export function ChatShell() {
           if (accumulated || r.summary) {
             msgs.push({
               id: `msg-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              contextSource: snapshot.taskId ? { sourceId: snapshot.taskId, sourceMessageId: publicTaskMessageKey('assistant', eventIndex) } : undefined,
               role: 'assistant',
               content: assistantContent,
             });
@@ -1058,7 +1103,7 @@ export function ChatShell() {
             result: resultWithArtifacts,
             generatedFiles: collectGeneratedFilesForTurn(snapshot.events || [], [resultWithArtifacts.summary, assistantContent]),
           });
-          if (resultCard) msgs.push(resultCard);
+          if (resultCard) msgs.push({ ...resultCard, contextSource: snapshot.taskId ? { sourceId: snapshot.taskId, sourceMessageId: publicTaskMessageKey('result', eventIndex) } : undefined });
           lastResult = resultWithArtifacts;
         }
       }
@@ -1151,10 +1196,11 @@ export function ChatShell() {
     setStatus('idle');
     setLoadError(null);
     const storedDraft = readStoredThreadDraft(taskId);
-    setPrompt(draftPrompt || '');
+    const refreshing = historyRefresh?.scope === renderScope && historyRefresh.attempt === capturedIntent;
+    if (!refreshing) setPrompt(draftPrompt || '');
 
     // If we have an initialPrompt from WelcomePage, pre-populate
-    if (initialPrompt) {
+    if (initialPrompt && !refreshing) {
       setMessages([{
         id: `msg-initial-user`,
         role: 'user',
@@ -1169,8 +1215,8 @@ export function ChatShell() {
 
       if (threadData) {
         titleLockedRef.current = Boolean(threadData.title?.trim());
-        const allTaskIds = (threadData.taskIds && threadData.taskIds.length > 0) ? threadData.taskIds
-          : threadData.currentTaskId ? [threadData.currentTaskId] : [];
+        const allTaskIds = [...new Set([...(threadData.taskIds ?? []), ...(threadData.legacyTaskIds ?? []), ...(threadData.currentTaskId ? [threadData.currentTaskId] : [])])];
+        if (initialPrompt && allTaskIds[0]) setMessages(previous => previous.map(message => message.id === 'msg-initial-user' ? { ...message, contextSource: { sourceId: allTaskIds[0], sourceMessageId: publicTaskMessageKey('user') } } : message));
         const isEmptyHelpThread = allTaskIds.length === 0 && !initialPrompt;
         if (isEmptyHelpThread) {
           if (draftPrompt) {
@@ -1199,20 +1245,24 @@ export function ChatShell() {
           if (!loadCurrent()) return;
 
           try {
-            const { snapshot, recoveredFromTaskId } = await api.recoverTask(tid, allTaskIds.length === 1 ? threadData.title ?? undefined : undefined);
+            const { snapshot, presentation, recoveredFromTaskId } = await recoverForDisplay(api, tid,
+              allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent);
             if (!loadCurrent()) return;
             if (snapshot) {
-              if (!titleLockedRef.current && snapshot.prompt?.trim()) {
+              if (refreshing && snapshot.taskId !== tid) throw new Error('task_identity_mismatch');
+              const titlePrompt = presentation === undefined ? snapshot.prompt : presentation?.includeUser ? presentation.prompt : undefined;
+              if (!titleLockedRef.current && titlePrompt?.trim()) {
                 titleLockedRef.current = true;
-                api.updateThreadTitle(taskId, snapshot.prompt.trim().slice(0, 40)).catch(() => {});
+                api.updateThreadTitle(taskId, titlePrompt.trim().slice(0, 40)).catch(() => {});
               }
               if (recoveredFromTaskId) allMessages.push({ id: `history-recovery-${tid}`, role: 'assistant', content: t.chatShell.historyRecovered(recoveredFromTaskId) });
-              console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
+              console.log(`[ChatShell] Replaying task=${tid} status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
-              const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
+              const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt || refreshing));
               const { msgs: replayMsgs, result: replayResult, events: replayEvents, toolStepsMsgId: replayToolStepsMsgId } = replaySnapshot(
                 { ...snapshot, taskId: snapshot.taskId || tid },
                 addPrompt,
+                presentation,
               );
               console.log(`[ChatShell] Replayed task=${tid} → ${replayMsgs.length} msgs, addPrompt=${addPrompt}`);
               allMessages.push(...replayMsgs);
@@ -1263,13 +1313,13 @@ export function ChatShell() {
         if (lastResult) {
           setResult(lastResult);
         }
-        setStatus(lastStatus);
+        setStatus(refreshing ? 'idle' : lastStatus);
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
             executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
-            terminalSeen: lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: false };
+            terminalSeen: refreshing || lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: refreshing };
         }
-        if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
+        if (!refreshing && lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
           // Guard: if effect was cleaned up during async gap (StrictMode), don't subscribe
           if (!loadCurrent()) return;
           // Rebind live tool-steps refs to the message replay already created, so the
@@ -1282,7 +1332,7 @@ export function ChatShell() {
           const source = loadedSource!;
           const release = retainObserver(source, api.subscribeTask(
             lastTaskIdForSub,
-            (event) => handleEvent(event, source),
+            (event, coordinate) => handleEvent(event, source, coordinate),
             lastSubSinceIndex,
           ));
           if (!loadCurrent()) { release(); return; }
@@ -1322,25 +1372,43 @@ export function ChatShell() {
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
     if (!trimmed && files.length === 0) return;
     beginGoalAttempt();
-    setGoalLoading(false);
-    setGoalError(null);
+    setGoalLoading(false);setGoalError(null);
+    const desktop=getDesktopApi();
+    if(taskId&&typeof desktop?.enqueueConversationInput==='function'&&typeof desktop.listConversationInputs==='function'){
+      const value=trimmed||t.chatInput.processFiles,key=JSON.stringify([value,files.map(file=>file.filePath)]),previous=durableQueueRequest.current;
+      const request=previous?.scope===renderScope&&previous.key===key?previous:{scope:renderScope,key,inputId:`input_${crypto.randomUUID()}`,pending:true};request.pending=true;durableQueueRequest.current=request;
+      setQueuedPrompt({text:value,files,inputId:request.inputId,durable:true});
+      void desktop.enqueueConversationInput({inputId:request.inputId,conversationId:taskId,prompt:value,filePaths:files.map(file=>file.filePath)}).then(async()=>{
+        request.pending=false;if(durableQueueRequest.current===request)durableQueueRequest.current=null;
+        if(liveRenderScope.current===renderScope)await durableQueueRefresh.current();
+      }).catch(error=>{
+        request.pending=false;if(liveRenderScope.current!==renderScope)return;
+        if(durableQueueRequest.current===request){setGoalError(sanitizeUserFacingErrorMessage(error,t.chatShell.taskCreateFailed));setPrompt(current=>current||value);}
+        void durableQueueRefresh.current();
+      });
+      return;
+    }
     log.info(queuedPrompt ? 'queued_prompt_replace' : 'queued_prompt_submit', JSON.stringify({
       threadId: taskId,
       status,
       length: trimmed.length,
     }));
     setQueuedPrompt({ text: trimmed || t.chatInput.processFiles, files });
-    const desktop = getDesktopApi();
     if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: true });
-  }, [beginGoalAttempt, queuedPrompt, status, taskId, t.chatInput.processFiles]);
+  }, [beginGoalAttempt, queuedPrompt, status, taskId, renderScope,t.chatInput.processFiles,t.chatShell.taskCreateFailed]);
 
   const cancelQueuedPrompt = useCallback(() => {
+    const desktop=getDesktopApi();
+    if(taskId&&typeof desktop?.cancelConversationInput==='function'){
+      const first=durableQueueRows.current.find(row=>row.status==='pending');if(!first)return;
+      void desktop.cancelConversationInput({conversationId:taskId,inputId:first.inputId}).then(()=>durableQueueRefresh.current()).catch(error=>{if(liveRenderScope.current===renderScope)setGoalError(sanitizeUserFacingErrorMessage(error,t.chatShell.taskCreateFailed));});return;
+    }
     if (queuedPrompt) {
       log.info('queued_prompt_cancel', JSON.stringify({
         threadId: taskId,
@@ -1349,12 +1417,51 @@ export function ChatShell() {
       }));
     }
     setQueuedPrompt(null);
-    const desktop = getDesktopApi();
     if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: false });
-  }, [queuedPrompt, status, taskId]);
+  }, [queuedPrompt, status, taskId,renderScope,t.chatShell.taskCreateFailed]);
+
+  useEffect(() => {
+    const refresh = () => { if (taskId) void api.getThread(taskId).then(record => { if (record?.id === threadRef.current?.id) { threadRef.current = record; setThread(record); } }).catch(() => {}); };
+    window.addEventListener('xiaok:legacy-claimed', refresh);
+    return () => window.removeEventListener('xiaok:legacy-claimed', refresh);
+  }, [taskId]);
+
+  useEffect(()=>{
+    const desktop=getDesktopApi();if(!taskId||typeof desktop?.listConversationInputs!=='function'||typeof desktop.onConversationInputsChanged!=='function')return;
+    let live=true,generation=0,retries=0;let retryTimer:ReturnType<typeof setTimeout>|undefined;
+    const refresh=async()=>{
+      const ticket=++generation,capturedIntent=goalAttemptRef.current;
+      try{
+        const view=await desktop.listConversationInputs({conversationId:taskId});
+        if(!live||liveRenderScope.current!==renderScope||ticket!==generation||view.conversationId!==taskId)return;
+        retries=0;durableQueueRows.current=view.items;
+        setQueueFailure(view.failedInput?{scope:renderScope,message:t.contextContinuity.queuePreparationFailed+'\n'+(view.failedInput.unavailable?t.contextContinuity.queueInputUnavailable:view.failedInput.prompt)}:null);
+        const pending=view.items.filter(row=>row.status==='pending');
+        setQueuedPrompt(previous=>pending.length?{text:(view.pauseReason==='execution_authorization_changed'?t.contextContinuity.queueAuthorizationChanged+'\n':view.pauseReason==='input_unavailable'?t.contextContinuity.queueInputUnavailable+'\n':'')+pending.map(row=>row.unavailable?t.contextContinuity.queueInputUnavailable:row.prompt).join('\n'),files:[],inputId:pending[0]!.inputId,durable:true}
+          :durableQueueRequest.current?.scope===renderScope&&durableQueueRequest.current.pending?previous
+          :view.pauseReason?{text:view.pauseReason==='input_unavailable'?t.contextContinuity.queueInputUnavailable:t.contextContinuity.queueUnknown,files:[],durable:true}:previous?.durable?null:previous);
+        const initialization=initializationRef.current;if(initialization?.scope===renderScope)await initialization.promise;
+        if(!live||liveRenderScope.current!==renderScope||ticket!==generation||goalAttemptRef.current!==capturedIntent)return;
+        if(view.currentTaskId&&threadRef.current?.id===taskId&&view.currentTaskId!==threadRef.current.currentTaskId){
+          const actual=await api.getThread(taskId);if(!live||ticket!==generation||liveRenderScope.current!==renderScope||goalAttemptRef.current!==capturedIntent||actual?.id!==taskId||!actual.currentTaskId)return;
+          threadRef.current=actual;setThread(actual);const attempt=capturedIntent??beginGoalAttempt();setHistoryRefresh({scope:renderScope,attempt});
+        }
+      }catch(error){
+        if(!live||ticket!==generation||liveRenderScope.current!==renderScope)return;
+        setQueueFailure(null);
+        if(String(error).includes('input_queue_changed')&&retries++<2){retryTimer=setTimeout(()=>{void refresh();},10);return;}
+        setGoalError(sanitizeUserFacingErrorMessage(error,t.chatShell.taskCreateFailed));
+      }
+    };
+    durableQueueRefresh.current=refresh;
+    const refreshCurrent=()=>{setQueueFailure(null);void refresh();};
+    const unsubscribe=desktop.onConversationInputsChanged(event=>{if(event.conversationId===taskId)refreshCurrent();});window.addEventListener('focus',refreshCurrent);void refresh();
+    return()=>{live=false;generation++;unsubscribe();window.removeEventListener('focus',refreshCurrent);if(retryTimer)clearTimeout(retryTimer);if(durableQueueRefresh.current===refresh)durableQueueRefresh.current=async()=>{};durableQueueRows.current=[];};
+  },[taskId,renderScope,beginGoalAttempt,t.contextContinuity.queueUnknown,t.contextContinuity.queueAuthorizationChanged,t.contextContinuity.queuePreparationFailed,t.contextContinuity.queueInputUnavailable,t.chatShell.taskCreateFailed]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId || admissionPending.current === renderScope) return false;
+    if (thread?.coverage === 'unclaimed' || thread?.legacyTaskIds?.length) { setGoalError(t.contextContinuity.legacyMustClaim); return false; }
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {
@@ -1409,18 +1516,17 @@ export function ChatShell() {
       let newTaskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
-        const result = await createGoalAwareTaskWithRetry(() => api.createTaskWithFiles({
-          prompt: text, filePaths, context: submitContext,
-        }));
+        const request={prompt:text,filePaths,context:submitContext};
+        const result = await createGoalAwareTaskWithRetry(() => api.createTaskWithFiles(request));
         newTaskId = result.taskId;
       } else {
-        const result = await createGoalAwareTaskWithRetry(() => api.createTask({
-          prompt: text, materials: [], context: submitContext,
-        }));
+        const request={prompt:text,materials:[],context:submitContext};
+        const result = await createGoalAwareTaskWithRetry(() => api.createTask(request));
         newTaskId = result.taskId;
       }
       if (!current()) return false;
 
+      setMessages(previous => previous.map(message => message.id === userMsg.id ? { ...message, contextSource: { sourceId: newTaskId, sourceMessageId: publicTaskMessageKey('user') } } : message));
       // Update thread with new taskId
       await api.updateThreadTaskId(taskId, newTaskId);
       if (!current()) return false;
@@ -1433,7 +1539,7 @@ export function ChatShell() {
 
       const source: DisplaySource = { scope: renderScope, sourceTaskId: newTaskId, intentOwner: attempt,
         eventCount: 0, terminalSeen: false, streamEnded: false };
-      const release = retainObserver(source, api.subscribeTask(newTaskId, event => handleEvent(event, source)));
+      const release = retainObserver(source, api.subscribeTask(newTaskId, (event, coordinate) => handleEvent(event, source, coordinate)));
       if (!current()) { release(); return false; }
       promoteSource(source, release, false);
     } catch (e) {
@@ -1531,15 +1637,31 @@ export function ChatShell() {
   };
 
   const runGoalMutation = async (
-    action: () => Promise<DesktopGoalProjection>,
+    action: () => Promise<DesktopGoalControlReceipt>,
     clearTaskPresentation = false,
   ) => {
     const attempt = beginGoalAttempt();
     await runGoalAttempt(attempt, async () => {
       const next = await action();
       if (!currentAttempt(attempt)) return;
-      applyGoal(next);
+      if (next?.threadId !== taskId || !['paused', 'cancelled'].includes(next.status) || !Number.isSafeInteger(next.revision) || next.revision < 1) throw new Error('invalid_goal_control_reply');
+      goalReadBarrier.current = { attempt, sequence: 0 };
+      setGoal(null);
+      setGoalControl(next);
+      // Invalidate the old observer before clearing its data. Only fresh,
+      // authorized recoveries may repopulate history after this control.
+      const previous = displaySourceRef.current;
+      displaySourceRef.current = null;
+      previous?.release?.();
+      unsubRef.current?.(); unsubRef.current = null;
+      mountGenRef.current++;
       if (clearTaskPresentation) clearCancelledTaskPresentation();
+      resultRef.current = null; setResult(null); setMessages([]); setCurrentQuestion(null); setPlanSteps([]);
+      currentTaskEventsRef.current = []; allEventsRef.current = [];
+      toolStepsMsgIdRef.current = null; toolStepsActiveRef.current = false;
+      setCanvasOpen(false); setCanvasPreviewFile(undefined); setCanvasPreviewContent(undefined); setCanvasSourceArtifact(undefined);
+      setHistoryRefresh({ scope: renderScope, attempt });
+      void refreshControlledGoal();
     });
   };
 
@@ -1551,6 +1673,8 @@ export function ChatShell() {
       || reply.goal?.state.goalId !== prepared.goalRef.goalId || reply.goal.state.epoch !== prepared.executionScope.epoch) {
       throw new Error('invalid_goal_attachment_reply');
     }
+    goalReadBarrier.current = { attempt, sequence: 0 };
+    setGoalControl(null);
     applyGoal(reply.goal);
     if (objective) setMessages(previous => [...previous, {
       id: `msg-${Date.now()}-goal-user`, role: 'user', content: objective,
@@ -1607,6 +1731,7 @@ export function ChatShell() {
   const handleSubmitRef = useRef(handleSubmit);
   handleSubmitRef.current = handleSubmit;
   useEffect(() => {
+    if(typeof getDesktopApi()?.enqueueConversationInput==='function')return;
     if (queuedPrompt && (status === 'idle' || status === 'completed')) {
       const queued = queuedPrompt;
       log.info('queued_prompt_drain_start', JSON.stringify({
@@ -1713,12 +1838,13 @@ export function ChatShell() {
     return collectGeneratedFilesForTurn(currentTaskEventsRef.current, textsToScan);
   })();
 
-  const showGoalPanel = goal !== null || state?.createGoal === true;
+  const showGoalPanel = goal !== null || goalControl?.threadId === taskId || state?.createGoal === true;
   const showTaskPanel = planSteps.length > 0 || showGoalPanel;
   const goalContent = showGoalPanel ? (
     <GoalBar
       key={taskId}
       goal={goal}
+      controlStatus={goalControl && goalControl.threadId === taskId ? goalControl.status : undefined}
       initialEditing={state?.createGoal === true}
       loading={goalLoading}
       error={goalError}
@@ -1797,6 +1923,7 @@ export function ChatShell() {
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ChatView
+        contextNavigation={location.search}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
@@ -1813,7 +1940,8 @@ export function ChatShell() {
         onSubmit={handleSubmit}
         onQueue={queuePrompt}
         queuedText={queuedPrompt?.text ?? null}
-        onCancelQueue={cancelQueuedPrompt}
+        inputError={queueFailure?.scope===renderScope?queueFailure.message:null}
+        onCancelQueue={queuedPrompt?.durable&&!durableQueueRows.current.some(row=>row.status==='pending')?undefined:cancelQueuedPrompt}
         onAnswer={handleAnswer}
         onCancel={handleCancel}
         onComputerUseAction={handleComputerUseAction}

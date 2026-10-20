@@ -22,6 +22,14 @@ export class ActivityNativeIdentityRepository {
     const identity = readNativeSessionIdentity(join(this.options.path, `${threadId}.json`));
     return identity?.sessionId === threadId && (!this.options.workspaceRoot || resolve(identity.cwd) === resolve(this.options.workspaceRoot)) ? { threadId, profileId: this.options.profileId, workspaceId: resolve(identity.cwd), deleteState: 'none' } : null;
   }
+  /** Permission query preserves foreign rows instead of filtering them into null. */
+  continuityScope(threadId:string,workspaceId:string):'readable'|'blocked'|'deleted'{
+    if(!this.db)throw new Error('activity_native_scope_unavailable');
+    const row=this.db.prepare('SELECT profile_id,workspace_id,delete_state FROM thread_bindings WHERE thread_id=?').get(threadId);
+    if(!row)return 'readable'; // Same explicit unbound-legacy rule as main.
+    if(row.profile_id!==this.options.profileId||row.workspace_id!==workspaceId)return 'blocked';
+    return row.delete_state==='deleted'?'deleted':row.delete_state==='none'?'readable':'blocked';
+  }
   authorizeProducer(threadId: string, instanceId = this.options.instanceId): boolean {
     const thread = this.getThread(threadId); if (!thread || thread.deleteState !== 'none') return false;
     if (this.db) return true;

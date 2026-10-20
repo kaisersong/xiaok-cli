@@ -107,6 +107,21 @@ describe('BDD: real multi-agent service behind authenticated semantic IPC', () =
     expect(f.store.listMessages(f.group.groupId, f.rootId)).toEqual([]);
   });
 
+  it('returns only the fixed negative-control receipt when a replayed durable result contains private diagnostics', async () => {
+    const f = setup();
+    const host = new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(f.root, 'tasks')),
+      materialRegistry: new MaterialRegistry({ workspaceRoot: join(f.root, 'materials'), maxBytes: 1024 }), runner: vi.fn() });
+    await f.service.initialize(host);
+    f.store.putAgent(f.group.groupId, { id: 'child-negative', parentId: f.rootId, taskName: 'child', canonicalName: '/root/child', depth: 1, status: 'completed', turn: 1 });
+    const input = { threadId: 'thread', groupId: f.group.groupId, agentId: 'child-negative', operationId: 'negative-replay', expectedTurn: 99 };
+    expect(await f.invoke('interruptAgent', input)).toMatchObject({ state: 'completed', outcome: 'rejected', error: 'stale_expected_turn' });
+    const stored = f.store.getOperation(f.group.groupId, input.operationId)!;
+    f.store.putOperation({ ...stored, result: { ...stored.result, debugSummary: 'NEGATIVE_PRIVATE_CANARY', error: 'NEGATIVE_PRIVATE_CANARY' } });
+    const result = await f.invoke('interruptAgent', input);
+    expect(result).toMatchObject({ operationId: input.operationId, state: 'completed', outcome: 'rejected', error: 'multi_agent_control_failed' });
+    expect(JSON.stringify(result)).not.toContain('NEGATIVE_PRIVATE_CANARY');
+  });
+
   it('A10/U3 Given an installed subscription, When a snapshot is returned and a later event arrives, Then all channels carry its subscription ID and navigation revokes only the viewer', async () => {
     const fixture = setup();
     const result = await fixture.invoke('subscribeMultiAgents', { threadId: 'thread', subscriptionId: 'subscription-1', afterSeq: 0 }) as { subscriptionId: string; snapshot: { lastSeq: number } };

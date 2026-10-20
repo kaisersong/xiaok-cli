@@ -5,10 +5,11 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { createPreloadApi, type FullDesktopApi } from '../../electron/preload-api.js';
+const receivers = vi.hoisted(() => ({ windows: [] as unknown[] }));
 
 vi.mock('electron', () => ({
   app: { getPath: () => join(tmpdir(), 'xiaok-goal-source-ipc') },
-  BrowserWindow: { getAllWindows: () => [], fromWebContents: () => undefined },
+  BrowserWindow: { getAllWindows: () => receivers.windows, fromWebContents: () => undefined },
   clipboard: { read: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
@@ -60,14 +61,16 @@ async function setup(kind: 'typed' | 'packaged') {
     createGoal: vi.fn(async (_input: unknown) => result),
     replaceGoal: vi.fn(async (_input: unknown) => result),
     resumeGoal: vi.fn(async (_input: unknown) => result),
+    goalOutput: { assertReply: vi.fn(), assertPrepared: vi.fn() },
     subscribeGoalTaskPrepared: (handler: (payload: unknown) => void) => { publish = handler; return () => {}; },
   };
   let publish!: (payload: unknown) => void;
   const window = { isDestroyed: () => false, once: vi.fn(), webContents: { id: 1,
     send: (channel: string, payload: unknown) => emitter.emit(channel, {}, payload) } };
+  receivers.windows = [window];
   await registerDesktopIpc({ handle: (channel: string, handler: (event: unknown, input: unknown) => unknown) => {
     handlers.set(channel, handler);
-  } } as never, window as never, service as never);
+  } } as never, window as never, service as never, { multiAgentAuthorize: () => ({ actorId: 'desktop-user:test' }) });
   return { api: api!, service, result, prepared, publish: (payload: unknown) => publish(payload), emitter,
     invoke: (method: Method, input: unknown) => (api![method] as (value: unknown) => Promise<unknown>)(input) };
 }
@@ -76,13 +79,13 @@ describe.each(['typed', 'packaged'] as const)('W2-P2 %s Goal source transport', 
   it.each(methods)('%s admits the canonical request id through the actual semantic IPC parser', async (method) => {
     const f = await setup(kind), input = { ...inputFor(method), requestId };
     await expect(f.invoke(method, input)).resolves.toEqual(f.result);
-    expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input);
+    expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input, { actorId: 'desktop-user:test', requestSource: 'user' });
   });
 
   it.each(methods)('%s preserves the existing omitted-id caller contract', async method => {
     const f = await setup(kind), input = inputFor(method);
     await expect(f.invoke(method, input)).resolves.toEqual(f.result);
-    expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input);
+    expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input, { actorId: 'desktop-user:test', requestSource: 'user' });
   });
 
   it.each(methods)('%s rejects malformed ids before entering the service', async method => {

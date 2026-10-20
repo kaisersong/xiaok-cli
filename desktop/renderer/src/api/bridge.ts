@@ -1,3 +1,5 @@
+import type { TaskEventCoordinate } from '../../../shared/context-continuity-types';
+import type { TaskHistoryRead } from '../../../shared/task-history';
 import { createLogger } from '../lib/logger';
 import type {
   AvailableModelView,
@@ -176,6 +178,22 @@ function threadTaskIdentity(thread: ThreadRecord | null): string {
   return JSON.stringify(thread ? [thread.currentTaskId ?? null, thread.taskIds ?? []] : null);
 }
 
+async function inspectThreadState(id: string): Promise<'active' | 'missing' | 'blocked' | 'deleted' | undefined> {
+  const owner = getDesktopApi(); if (!owner?.inspectContextConversations) return undefined;
+  const state = (await owner.inspectContextConversations({ conversationIds: [id] }))[0];
+  if (!state || state.id !== id) throw new Error('continuity_unavailable'); return state.state;
+}
+async function filterLegacyThreadCandidates(records: ThreadRecord[]): Promise<ThreadRecord[]> {
+  const owner = getDesktopApi(); if (!owner?.inspectContextConversations) return records;
+  const hidden = new Set<string>();
+  for (let start = 0; start < records.length; start += 200) {
+    const ids = records.slice(start, start + 200).map(row => row.id);
+    const states = await owner.inspectContextConversations({ conversationIds: ids });
+    if (states.length !== ids.length || states.some((row, index) => row.id !== ids[index])) throw new Error('continuity_unavailable');
+    states.forEach(row => { if (row.state !== 'missing') hidden.add(row.id); });
+  }
+  return records.filter(row => !hidden.has(row.id));
+}
 // Local storage keys for starred threads
 const STARRED_KEY = 'xiaok-desktop:starred-threads';
 
@@ -196,13 +214,17 @@ function setStarredIds(ids: Set<string>): void {
 // API Bridge: Maps Xiaok Go backend API to xiaok Electron IPC
 // ============================================================
 
+const submissionIds=new WeakMap<object,string>();
+function stableSubmissionId(input:{inputId?:string}):string{const id=input.inputId??submissionIds.get(input)??`input_${crypto.randomUUID()}`;submissionIds.set(input,id);return id;}
+
 async function createTaskWithRetry(input: {
+  inputId?:string;
   prompt: string;
   materials: Array<{ materialId: string; role?: MaterialRole }>;
   context?: TaskCreateContext;
   retries?: number;
 }): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
-  return await window.xiaokDesktop.createTask(input);
+  return await window.xiaokDesktop.createTask({...input,inputId:stableSubmissionId(input)});
 }
 
 const log = createLogger('api-bridge');
@@ -231,6 +253,8 @@ export const api = {
   // Thread API (IndexedDB)
   // ---------------------
   async createThread(input: { title?: string }): Promise<ThreadRecord> {
+    const owner = getDesktopApi();
+    if (owner?.createContextConversation) return withThreadCompatibility(await owner.createContextConversation({ operationId: crypto.randomUUID(), ...input }));
     const now = Date.now();
     const thread: ThreadRecord = {
       id: crypto.randomUUID(),
@@ -250,12 +274,24 @@ export const api = {
   },
 
   async getThread(id: string): Promise<ThreadRecord | null> {
+    const owner = getDesktopApi();
+    const state = await inspectThreadState(id); if (state === 'deleted') return null; if (state === 'blocked') throw new Error('not_readable');
+    if (owner?.getContextConversation) { const record = await owner.getContextConversation({ conversationId: id }); if (record) {
+      const candidates: string[] = []; let offset: number | undefined;
+      if (record.coverage === 'partial' && owner.getLegacyThreadMetadata) do {
+        const page = await owner.getLegacyThreadMetadata({ legacyThreadId: id, offset, limit: 100 });
+        if (!page) break;
+        candidates.push(...page.taskIds); if (page.nextOffset !== undefined && page.nextOffset <= (offset ?? 0)) throw new Error('invalid_cursor'); offset = page.nextOffset;
+      } while (offset !== undefined);
+      return withThreadCompatibility({ ...record, legacyTaskIds: [...new Set(candidates)].filter(taskId => !record.taskIds.includes(taskId)) });
+    } }
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
     return withThreadCompatibility({
       ...result,
       currentTaskId: result.currentTaskId ?? null,
       taskIds: result.taskIds ?? [],
+      ...(owner?.getContextConversation ? { coverage: 'unclaimed' as const } : {}),
     });
   },
 
@@ -264,7 +300,15 @@ export const api = {
     before?: string;
     mode?: ThreadMode;
   }): Promise<ThreadRecord[]> {
-    const all = await withStore('readonly', (store) => store.getAll());
+    const all = await filterLegacyThreadCandidates(await withStore('readonly', (store) => store.getAll()));
+    const owner = getDesktopApi();
+    if (owner?.listContextConversations) {
+      let before: string | undefined;
+      do { const page = await owner.listContextConversations({ limit: 200, before });
+        for (const record of page) { const index = all.findIndex(t => t.id === record.id); if (index >= 0) all[index] = record; else all.push(record); }
+        before = page.length === 200 ? page.at(-1)?.id : undefined;
+      } while (before);
+    }
     // Sort by createdAt descending
     all.sort((a, b) => b.createdAt - a.createdAt);
     const normalized = all.map(t => withThreadCompatibility({
@@ -283,6 +327,9 @@ export const api = {
   },
 
   async updateThreadTitle(id: string, title: string): Promise<void> {
+    const state = await inspectThreadState(id); if (state === 'deleted' || state === 'blocked') throw new Error('not_readable');
+    const owner = getDesktopApi();
+    if (owner?.getContextConversation && await owner.getContextConversation({ conversationId: id })) { await owner.updateContextConversation({ conversationId: id, patch: { title } }); return; }
     await mutateStoredThread(id, thread => {
       if (!thread) throw new Error('thread_not_found');
       return { ...withoutThreadCompatibility(thread), title, updatedAt: Date.now() };
@@ -293,6 +340,9 @@ export const api = {
     id: string,
     state: { starred?: boolean; gtdBucket?: ThreadRecord['gtdBucket']; mode?: ThreadMode; sidebar_work_folder?: string | null }
   ): Promise<void> {
+    const ownership = await inspectThreadState(id); if (ownership === 'deleted' || ownership === 'blocked') throw new Error('not_readable');
+    const owner = getDesktopApi();
+    if (owner?.getContextConversation && await owner.getContextConversation({ conversationId: id })) { await owner.updateContextConversation({ conversationId: id, patch: state }); return; }
     await mutateStoredThread(id, thread => {
     if (!thread) throw new Error('thread_not_found');
     if (state.starred !== undefined) {
@@ -308,6 +358,11 @@ export const api = {
   },
 
   async updateThreadTaskId(id: string, taskId: string): Promise<void> {
+    const state = await inspectThreadState(id); if (state === 'deleted' || state === 'blocked') throw new Error('not_readable');
+    const owner = getDesktopApi();
+    if (owner?.getContextConversation) { const record = await owner.getContextConversation({ conversationId: id }); if (record) {
+      if (!record.taskIds.includes(taskId)) throw new Error('source_binding_conflict'); return;
+    } }
     await mutateStoredThread(id, thread => {
       if (!thread) throw new Error('thread_not_found');
       if (thread.deletionPending && (!(thread.taskIds ?? []).includes(taskId) || thread.currentTaskId !== taskId)) throw new Error('thread_deletion_pending');
@@ -321,6 +376,15 @@ export const api = {
       const desktop = getDesktopApi();
       if (!desktop?.getMultiAgentThreadDeletion || !desktop.deleteMultiAgentThread) {
         throw new Error('thread_deletion_unavailable');
+      }
+      const mainRecord = await desktop.getContextConversation?.({ conversationId: id });
+      if (mainRecord) {
+        const snapshot = await desktop.getMultiAgentThreadDeletion({ threadId: id });
+        const result = snapshot.deleteState === 'deleted' ? snapshot.operation : await desktop.deleteMultiAgentThread({ threadId: id, expectedThreadRevision: snapshot.threadRevision,
+          operationId: `delete:${snapshot.threadRevision}:${crypto.randomUUID()}`, confirmTerminate: true });
+        if (result?.state !== 'completed') throw new Error(result?.state === 'cleanup_pending' ? 'thread_deletion_pending' : 'thread_deletion_unknown');
+        if (await desktop.getContextConversation({ conversationId: id })) throw new Error('thread_deletion_pending');
+        return;
       }
       const thread = await api.getThread(id), identity = threadTaskIdentity(thread);
       const snapshot = await desktop.getMultiAgentThreadDeletion({ threadId: id });
@@ -359,7 +423,7 @@ export const api = {
   },
 
   async searchThreads(query: string): Promise<ThreadRecord[]> {
-    const all = await withStore('readonly', (store) => store.getAll());
+    const all = await api.listThreads({ limit: Number.MAX_SAFE_INTEGER });
     const lower = query.toLowerCase();
     return all.filter(
       (t) => t.title?.toLowerCase().includes(lower)
@@ -367,19 +431,47 @@ export const api = {
   },
 
   // ---------------------
-  // Starred API (localStorage)
+  // Main owns claimed conversation metadata; legacy browser state is display-only.
   // ---------------------
   async listStarredThreadIds(): Promise<string[]> {
+    const owner=getDesktopApi();
+    if(owner?.listContextConversations){
+      const ids=new Set<string>();let before:string|undefined;
+      do{const page=await owner.listContextConversations({limit:200,before});
+        for(const row of page)if(row.starred)ids.add(row.id);
+        const next=page.length===200?page.at(-1)?.id:undefined;
+        if(next&&next===before)throw new Error('invalid_cursor');before=next;
+      }while(before);
+      // Unclaimed legacy stars remain visible without becoming main-owned data.
+      if(owner.inspectContextConversations){
+        const legacy=[...getStarredIds()];
+        for(let offset=0;offset<legacy.length;offset+=200){
+          const states=await owner.inspectContextConversations({conversationIds:legacy.slice(offset,offset+200)});
+          for(const row of states)if(row.state==='missing')ids.add(row.id);
+        }
+      }
+      return [...ids];
+    }
     return [...getStarredIds()];
   },
 
   async starThread(id: string): Promise<void> {
+    const owner=getDesktopApi();
+    if(owner?.getContextConversation){
+      if(!await owner.getContextConversation({conversationId:id}))throw new Error('legacy_claim_required');
+      await owner.updateContextConversation({conversationId:id,patch:{starred:true}});return;
+    }
     const ids = getStarredIds();
     ids.add(id);
     setStarredIds(ids);
   },
 
   async unstarThread(id: string): Promise<void> {
+    const owner=getDesktopApi();
+    if(owner?.getContextConversation){
+      if(!await owner.getContextConversation({conversationId:id}))throw new Error('legacy_claim_required');
+      await owner.updateContextConversation({conversationId:id,patch:{starred:false}});return;
+    }
     const ids = getStarredIds();
     ids.delete(id);
     setStarredIds(ids);
@@ -389,6 +481,7 @@ export const api = {
   // Run API (IPC via DesktopApi)
   // ---------------------
   async createTask(input: {
+    inputId?:string;
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     context?: TaskCreateContext;
@@ -400,19 +493,20 @@ export const api = {
   },
 
   async createTaskWithFiles(input: {
+    inputId?:string;
     prompt: string;
     filePaths: string[];
     context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     log.info('createTaskWithFiles', JSON.stringify({ prompt: input.prompt, filesCount: input.filePaths.length }));
-    const result = await window.xiaokDesktop.createTaskWithFiles(input);
+    const result = await window.xiaokDesktop.createTaskWithFiles({...input,inputId:stableSubmissionId(input)});
     log.info('createTaskWithFiles ok', JSON.stringify({ taskId: result.taskId }));
     return result;
   },
 
   subscribeTask(
     taskId: string,
-    handler: (event: DesktopTaskEvent) => void,
+    handler: (event: DesktopTaskEvent, source?: TaskEventCoordinate) => void,
     sinceIndex?: number
   ): () => void {
     log.info('subscribeTask', taskId);
@@ -447,6 +541,12 @@ export const api = {
     const r = await window.xiaokDesktop.recoverTask(taskId, legacyPrompt);
     log.info('recoverTask ok', JSON.stringify({ status: r?.snapshot?.status }));
     return r;
+  },
+  async readTaskHistory(taskId: string): Promise<TaskHistoryRead> {
+    return window.xiaokDesktop.readTaskHistory(taskId);
+  },
+  hasTaskHistoryPresentation(): boolean {
+    return typeof window.xiaokDesktop?.readTaskHistory === 'function';
   },
 
   async getLoopDefinitions(): Promise<LoopDefinitionView[]> {

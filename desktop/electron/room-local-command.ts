@@ -20,6 +20,8 @@ export function createRoomLocalCommandTool(options:{cwd:string;onCleanupPending:
     const env={...process.env};
     env.PATH=[...(env.PATH??'').split(delimiter),join(homedir(),'.local','node','bin'),join(homedir(),'.local','bin'),join(homedir(),'.npm-global','bin'),'/opt/homebrew/bin','/usr/local/bin'].filter(Boolean).join(delimiter);
     for(const key of Object.keys(env))if(/^(INTENT_BROKER_|KSWARM_|NODE_OPTIONS$|NODE_PATH$)/.test(key))delete env[key];
+    if(typeof context?.recordUnprovenEffect!=='function')throw new Error('context_effect_guard_unavailable');
+    context.recordUnprovenEffect('bash');
     const child=spawn('/bin/sh',['-c',command],{cwd:options.cwd,env,detached:true,stdio:['ignore','pipe','pipe']});
     let output='',exitCode:number|null=null,error:Error|undefined;
     const limit=Math.min(100000,Math.max(1000,Number(input.max_chars)||12000));

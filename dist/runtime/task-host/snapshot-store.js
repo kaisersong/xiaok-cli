@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { appendFile, mkdir, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
+import { readFileSync, lstatSync } from 'node:fs';
+import { appendFile, lstat, mkdir, open, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 const CHECKPOINT_META_KEY = '__xiaokJournal';
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -34,6 +34,168 @@ export class FileTaskSnapshotStore {
                 this.taskWriteQueues.delete(snapshot.taskId);
             }
         }
+    }
+    validateIdentity(taskId) { if (!/^[A-Za-z0-9_-]{1,256}$/.test(taskId))
+        throw new Error('task_identity_conflict'); }
+    async assertIdentityFilesAbsent(taskId) {
+        this.validateIdentity(taskId);
+        if (this.cache.has(taskId))
+            throw new Error('task_identity_conflict');
+        for (const path of [this.snapshotPath(taskId), this.journalPath(taskId)]) {
+            try {
+                await lstat(path);
+            }
+            catch (error) {
+                if (isNodeErrorCode(error, 'ENOENT'))
+                    continue;
+                throw error;
+            }
+            throw new Error('task_identity_conflict');
+        }
+    }
+    /** Absence is about raw checkpoint AND journal, never a cached/null aggregate. */
+    async assertUnusedTaskIdentity(taskId) {
+        if (this.taskWriteQueues.has(taskId))
+            throw new Error('task_identity_conflict');
+        await this.assertIdentityFilesAbsent(taskId);
+        if (this.taskWriteQueues.has(taskId) || this.cache.has(taskId))
+            throw new Error('task_identity_conflict');
+    }
+    /** Final negative check; never sufficient without the actual original Host attempt. */
+    assertUnusedTaskIdentitySync(taskId) {
+        this.validateIdentity(taskId);
+        if (this.taskWriteQueues.has(taskId) || this.cache.has(taskId))
+            throw new Error('task_identity_conflict');
+        for (const path of [this.snapshotPath(taskId), this.journalPath(taskId)]) {
+            try {
+                lstatSync(path);
+            }
+            catch (error) {
+                if (isNodeErrorCode(error, 'ENOENT'))
+                    continue;
+                throw error;
+            }
+            throw new Error('task_identity_conflict');
+        }
+    }
+    /** Initial Task creation cannot rename over another host's committed identity. */
+    async createTaskSnapshot(snapshot) {
+        this.validateIdentity(snapshot.taskId);
+        const previous = this.taskWriteQueues.get(snapshot.taskId) ?? Promise.resolve();
+        const run = previous.catch(() => undefined).then(async () => {
+            await mkdir(this.snapshotDir(), { recursive: true });
+            const directory = await lstat(this.snapshotDir());
+            if (!directory.isDirectory() || directory.isSymbolicLink())
+                throw new Error('task_identity_conflict');
+            await this.assertIdentityFilesAbsent(snapshot.taskId);
+            const encoded = JSON.stringify({ ...snapshot, [CHECKPOINT_META_KEY]: { version: 1, lastSequence: 0, checkpointEventCount: snapshot.events.length } }, null, 2);
+            let file;
+            try {
+                file = await open(this.snapshotPath(snapshot.taskId), 'wx', 0o600);
+            }
+            catch (error) {
+                if (isNodeErrorCode(error, 'EEXIST'))
+                    throw new Error('task_identity_conflict');
+                throw error;
+            }
+            try {
+                await file.writeFile(encoded, 'utf8');
+                await file.sync();
+            }
+            finally {
+                await file.close();
+            }
+            this.diagnostics.onWrite?.('checkpoint', Buffer.byteLength(encoded));
+            this.cache.set(snapshot.taskId, { snapshot, sequence: 0, checkpointEventCount: snapshot.events.length, sealed: true });
+            await this.syncIndexForTransition(undefined, snapshot);
+        });
+        const tracked = run.catch(() => undefined);
+        this.taskWriteQueues.set(snapshot.taskId, tracked);
+        try {
+            await run;
+        }
+        finally {
+            if (this.taskWriteQueues.get(snapshot.taskId) === tracked)
+                this.taskWriteQueues.delete(snapshot.taskId);
+        }
+    }
+    /** Final synchronous owner fence: no cached prefix and no await after reading. */
+    inspectPersistedTaskSync(taskId) {
+        this.validateIdentity(taskId);
+        if (this.taskWriteQueues.has(taskId))
+            throw new Error('blocked_unsettled');
+        for (const path of [this.rootDir, this.snapshotDir()]) {
+            const stat = lstatSync(path);
+            if (!stat.isDirectory() || stat.isSymbolicLink() || typeof process.getuid === 'function' && stat.uid !== process.getuid())
+                throw new Error('blocked_unsettled');
+        }
+        for (const path of [this.snapshotPath(taskId), this.journalPath(taskId)]) {
+            let stat;
+            try {
+                stat = lstatSync(path);
+            }
+            catch (error) {
+                if (isNodeErrorCode(error, 'ENOENT'))
+                    continue;
+                throw error;
+            }
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || typeof process.getuid === 'function' && stat.uid !== process.getuid())
+                throw new Error('blocked_unsettled');
+        }
+        return recoverTaskSnapshotSync(this.rootDir, taskId);
+    }
+    /** Current durable source, bypassing the execution cache. */
+    async inspectPersistedTask(taskId) {
+        this.validateIdentity(taskId);
+        const pending = this.taskWriteQueues.get(taskId);
+        if (pending)
+            await pending;
+        return (await this.loadSnapshotState(taskId))?.snapshot ?? null;
+    }
+    /** Complete read-only owner inventory, independent of the active index. Never skips corrupt/orphan rows. */
+    async inspectPersistedInventory() {
+        let stat;
+        try {
+            stat = await lstat(this.snapshotDir());
+        }
+        catch (error) {
+            if (error.code === 'ENOENT')
+                return [];
+            throw error;
+        }
+        if (!stat.isDirectory() || stat.isSymbolicLink() || typeof process.getuid === 'function' && stat.uid !== process.getuid())
+            throw new Error('task_inventory_unavailable');
+        const ids = new Set(), directory = await opendir(this.snapshotDir());
+        for await (const entry of directory) {
+            if (!entry.isFile() || entry.isSymbolicLink())
+                throw new Error('task_inventory_unavailable');
+            const fileStat = await lstat(join(this.snapshotDir(), entry.name));
+            if (!fileStat.isFile() || fileStat.isSymbolicLink() || fileStat.nlink !== 1 || typeof process.getuid === 'function' && fileStat.uid !== process.getuid())
+                throw new Error('task_inventory_unavailable');
+            // Interrupted atomic checkpoint temp files were never committed; journals are not temp files.
+            if (/\.[0-9]+\.[0-9]+\.[a-z0-9]+\.tmp$/.test(entry.name))
+                continue;
+            const suffix = entry.name.endsWith('.journal.jsonl') ? '.journal.jsonl' : entry.name.endsWith('.json') ? '.json' : null;
+            if (!suffix)
+                throw new Error('task_inventory_unavailable');
+            const id = entry.name.slice(0, -suffix.length);
+            if (!/^[A-Za-z0-9_-]{1,256}$/.test(id))
+                throw new Error('task_inventory_unavailable');
+            ids.add(id);
+        }
+        const snapshots = [];
+        for (const id of ids) {
+            const pending = this.taskWriteQueues.get(id);
+            if (pending)
+                await pending;
+            // Owner recovery may already have populated the execution cache. The
+            // inventory certifies current durable files, never that cached prefix.
+            const snapshot = (await this.loadSnapshotState(id))?.snapshot;
+            if (!snapshot || snapshot.taskId !== id || !snapshot.sessionId)
+                throw new Error('task_inventory_unavailable');
+            snapshots.push(snapshot);
+        }
+        return snapshots;
     }
     async getActiveTasks() {
         const index = await this.loadIndex();

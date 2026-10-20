@@ -60,6 +60,10 @@ export function buildToolList(
 }
 
 export interface RegistryOptions {
+  /** Main-owned exact implementations whose local work is fully awaited. */
+  settledLocalExecutors?: ReadonlyMap<Tool, Tool['execute']>;
+  /** Desktop main requires a durable effect guard; CLI keeps its existing host contract. */
+  requireEffectGuard?: boolean;
   toolIdleTimeoutMs?: number;
   capabilityRegistry?: CapabilityRegistry;
   /** Child discovery must not advertise tools owned only by other registries. */
@@ -88,8 +92,15 @@ export interface ToolObservation {
   ok: boolean;
 }
 
+const settledLocalTools = new WeakMap<Tool, () => boolean>();
+/** Query only: names, permission hints and copied objects cannot qualify. */
+export function isSettledLocalTool(tool: Tool): boolean {
+  return settledLocalTools.get(tool)?.() === true;
+}
+
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
+  private readonly effectGuardSources = new WeakMap<Tool, Tool>();
   private deferredTools = new Map<string, ToolDefinition>();
   private canonicalToolNames = new Map<string, string>();
   private permissionManager: PermissionManager;
@@ -103,6 +114,7 @@ export class ToolRegistry {
   }
 
   constructor(options: RegistryOptions, tools?: Tool[]) {
+    if(options.requireEffectGuard&&options.hooksRunner)throw new Error('context_effect_hook_unavailable');
     this.toolIdleTimeoutMs = resolveExecutionIdleMs(options.toolIdleTimeoutMs === undefined ? process.env.XIAOK_TOOL_IDLE_TIMEOUT_MS : String(options.toolIdleTimeoutMs));
     const mode = options.permissionManager
       ? options.permissionManager.getMode()
@@ -129,6 +141,21 @@ export class ToolRegistry {
 
   registerTool(tool: Tool): void {
     if (this.disposed) throw new Error('tool registry is disposed');
+    if(this.options.requireEffectGuard){
+      const source=tool,execute=tool.execute;
+      const eligible = source.permission === 'safe'
+        && this.options.settledLocalExecutors?.get(source) === execute
+        && !this.options.hooksRunner && !this.options.onToolObserved && !this.options.protectedOutputGuard;
+      tool={...tool,async execute(input,context){
+        if(typeof context?.recordUnprovenEffect!=='function')throw new Error('context_effect_guard_unavailable');
+        if(!isSettledLocalTool(tool)) context.recordUnprovenEffect(source.definition.name);
+        return execute.call(source,input,context);
+      }};
+      const wrapped=tool, wrappedExecute=tool.execute;
+      if(eligible) settledLocalTools.set(wrapped,()=>source.execute===execute && source.permission==='safe'
+        && wrapped.execute===wrappedExecute && wrapped.permission==='safe');
+      this.effectGuardSources.set(tool,source);
+    }
     this.tools.set(tool.definition.name, tool);
     this.canonicalToolNames.set(getCanonicalToolId(tool.definition.name), tool.definition.name);
     this.options.capabilityRegistry?.register({
@@ -171,7 +198,8 @@ export class ToolRegistry {
   }
 
   unregisterTool(name: string, expected?: Tool): void {
-    if (expected && this.tools.get(name) !== expected) return;
+    const current=this.tools.get(name);
+    if (expected && current !== expected && (!current||this.effectGuardSources.get(current)!==expected)) return;
     this.tools.delete(name);
     this.deferredTools.delete(name);
     this.options.capabilityRegistry?.unregister(name, this);
@@ -293,6 +321,7 @@ export class ToolRegistry {
     const registeredName = this.canonicalToolNames.get(canonicalToolId) ?? name;
     const tool = this.tools.get(registeredName);
     if (!tool) return `Error: 未知工具: ${name}`;
+    let localAdmission = isSettledLocalTool(tool);
 
     const validation = validateToolInput(tool.definition.inputSchema, input);
     if (!validation.valid) {
@@ -316,6 +345,11 @@ export class ToolRegistry {
     }
 
     if (decision === 'prompt' && tool.permission !== 'safe') {
+      if (localAdmission) {
+        if (typeof context?.recordUnprovenEffect !== 'function') throw new Error('context_effect_guard_unavailable');
+        context.recordUnprovenEffect(name);
+      }
+      localAdmission = false;
       const permissionRequest = await this.options.hooksRunner?.runHooks('PermissionRequest', {
         tool_name: tool.definition.name,
         input,
@@ -332,7 +366,9 @@ export class ToolRegistry {
       }
       const approved = permissionRequest?.decision === 'allow'
         ? true
-        : await this.options.onPrompt(tool.definition.name, input, { tool, context });
+        // The Desktop catalog owns the original registration identity. The
+        // effect wrapper remains the captured execution/currentness boundary.
+        : await this.options.onPrompt(tool.definition.name, input, { tool: this.effectGuardSources.get(tool) ?? tool, context });
       context?.signal?.throwIfAborted();
       if (isToolPermissionGrant(approved)) permissionGrant = approved;
       if (approved !== true && !permissionGrant) {
@@ -391,6 +427,9 @@ export class ToolRegistry {
         if(Object.isFrozen(context))Object.freeze(invocationContext);
       }
       const rawResult = await runMonitoredTool({name,context:invocationContext,
+        admitEffect: () => {
+          if(!localAdmission || !isSettledLocalTool(tool)) invocationContext?.recordUnprovenEffect?.(name);
+        },
         idleMs:tool.executionPolicy?.idleTimeoutMs ?? this.toolIdleTimeoutMs,
         waitsForUser:tool.executionPolicy?.waitsForUser,
         run: ctx => tool.execute(input,ctx),

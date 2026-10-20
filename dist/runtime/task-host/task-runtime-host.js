@@ -1,5 +1,5 @@
 import { createExecutionHealthMonitor, resolveExecutionIdleMs } from '../execution-health.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
 import { collectArtifactEvidence, buildCompletionEvidenceContext, evidenceForExpectation, shouldRequireArtifactEvidence, hasClarificationResult, isEmptyDelivery } from './delivery-pure.js';
@@ -104,6 +104,10 @@ export class InProcessTaskRuntimeHost {
     subscribers = new Map();
     mutationChains = new Map();
     cancellingTaskIds = new Set();
+    cancellationBodies = new Map();
+    cancellationObservers = new Map();
+    cancellationBodyFailures = new Set();
+    preparationObligations = new Map();
     cancellationPromises = new Map();
     cancellationSettlements = new Map();
     assistantDeltaFlushes = new Map();
@@ -120,6 +124,11 @@ export class InProcessTaskRuntimeHost {
     pendingTerminalPersistedEvents = new Map();
     stoppedAcceptingReason = null;
     identityReservations = new WeakSet();
+    inputIdentityOrigins = new WeakMap();
+    inputIdentityRestorations = new Map();
+    preparingTaskIds = new Set();
+    inputPreparationTasks = new Set();
+    inputPreparationAttempts = new WeakMap();
     admissionPromises = new Map();
     deliveryVerifier = new DeliveryVerifier();
     /** Failure fallback only. Successful delivery always rereads and verifies. */
@@ -138,65 +147,236 @@ export class InProcessTaskRuntimeHost {
         this.multiAgentRecovery = ready;
         void ready.catch(() => undefined);
     }
+    /** Main wiring check; copying DTOs never establishes an input owner. */
+    assertInputOwnerDependencies(snapshotStore, materialRegistry) {
+        if (snapshotStore !== this.options.snapshotStore || materialRegistry !== this.options.materialRegistry)
+            throw new Error('input_owner_dependency_mismatch');
+    }
     /** No filesystem/index write and no runnable task until prepareTask commits. */
     reserveTaskIdentity() {
         if (this.stoppedAcceptingReason)
             throw new Error(`shutting_down: ${this.stoppedAcceptingReason}`);
-        const reservation = Object.freeze({ taskId: this.options.createTaskId?.() ?? `task_${randomUUID()}`, reservationId: randomUUID() });
+        const reservation = Object.freeze({ taskId: this.options.createTaskId?.() ?? `task_${randomUUID()}`, reservationId: randomUUID(), sessionId: this.createSessionId() });
         this.identityReservations.add(reservation);
         return reservation;
     }
-    async prepareTask(input, preparation) {
-        let marker;
-        const taskId = preparation?.reservation?.taskId ?? this.createTaskId();
-        if (preparation) {
-            if (!this.identityReservations.has(preparation.reservation))
-                throw new Error('invalid or consumed task identity reservation');
-            if (!this.options.authorizePreparation)
-                throw new Error('multi_agent_preparation_not_supported');
-            marker = { ...preparation.marker };
-            this.options.authorizePreparation(taskId, marker);
-            this.identityReservations.delete(preparation.reservation);
-        }
-        if (input.permissionMode) {
-            this.permissionModes.set(taskId, input.permissionMode);
-        }
-        if (input.watchdogMs !== undefined && Number.isFinite(input.watchdogMs) && input.watchdogMs > 0) {
-            this.taskWatchdogs.set(taskId, input.watchdogMs);
-        }
-        if (input.maxToolLoopIterations !== undefined && Number.isFinite(input.maxToolLoopIterations) && input.maxToolLoopIterations > 0) {
-            this.maxToolLoopIterations.set(taskId, input.maxToolLoopIterations);
-        }
-        const sessionId = this.createSessionId();
-        const materials = input.materials.map((item) => {
-            const record = this.options.materialRegistry.get(item.materialId);
-            if (!record) {
-                throw new Error(`unknown material: ${item.materialId}`);
+    async readPendingInput(inputId) {
+        if (!this.options.readPendingInputIdentity || typeof inputId !== 'string' || !inputId || inputId.length > 256)
+            throw new Error('input_identity_unavailable');
+        const raw = this.options.readPendingInputIdentity(inputId);
+        if (raw && typeof raw.then === 'function') {
+            try {
+                await raw;
             }
-            return item.role ? { ...record, role: item.role } : record;
-        });
-        const understanding = buildTaskUnderstanding({ prompt: input.prompt, materials });
-        const contextHistory = await this.resolveContextHistory(taskId, input.context);
-        this.taskHistories.set(taskId, contextHistory.history);
-        const snapshot = {
-            taskId,
-            sessionId,
-            status: 'understanding',
-            prompt: input.prompt,
-            materials: materials.map((material) => this.options.materialRegistry.toView(material)),
-            understanding,
-            events: [],
-            context: contextHistory.audit,
-            executionScope: input.executionScope,
-            ...(marker ? { multiAgentPreparation: marker } : {}),
-            usage: { inputTokens: 0, outputTokens: 0, known: false },
-            createdAt: this.now(),
-            updatedAt: this.now(),
-        };
-        await this.saveSnapshot(snapshot);
-        await this.appendEvent(taskId, { type: 'task_started', taskId });
-        await this.appendEvent(taskId, { type: 'understanding_updated', understanding });
-        return { taskId, understanding };
+            catch { /* A deferred owner read cannot grant identity. */ }
+            throw new Error('input_identity_unavailable');
+        }
+        if (!raw || typeof raw !== 'object' || Object.getOwnPropertySymbols(raw).length || Object.getOwnPropertyNames(raw).sort().join(',') !== 'revision,sessionId,taskId')
+            throw new Error('input_identity_unavailable');
+        const result = {};
+        for (const key of ['taskId', 'sessionId', 'revision']) {
+            const property = Object.getOwnPropertyDescriptor(raw, key);
+            if (!property || !('value' in property) || typeof property.value !== 'string' || !property.value || property.value.length > 256 || /[\u0000-\u001f]/u.test(property.value))
+                throw new Error('input_identity_unavailable');
+            result[key] = property.value;
+        }
+        if (!/^[A-Za-z0-9_-]{1,256}$/.test(result.taskId))
+            throw new Error('input_identity_unavailable');
+        return Object.freeze(result);
+    }
+    async bindPendingInputIdentity(inputId, reservation) {
+        if (!this.identityReservations.has(reservation) || this.inputIdentityOrigins.has(reservation))
+            throw new Error('invalid or consumed input reservation');
+        const first = await this.readPendingInput(inputId);
+        if (first.taskId !== reservation.taskId || first.sessionId !== reservation.sessionId)
+            throw new Error('input_identity_conflict');
+        await this.options.snapshotStore.assertUnusedTaskIdentity(first.taskId);
+        const current = await this.readPendingInput(inputId);
+        if (JSON.stringify(first) !== JSON.stringify(current) || !this.identityReservations.has(reservation) || this.inputIdentityOrigins.has(reservation))
+            throw new Error('input_identity_conflict');
+        this.inputIdentityOrigins.set(reservation, { inputId, identity: first });
+    }
+    restorePendingInputIdentity(inputId) {
+        const pending = this.inputIdentityRestorations.get(inputId);
+        if (pending)
+            return pending;
+        const run = (async () => {
+            const first = await this.readPendingInput(inputId);
+            await this.options.snapshotStore.assertUnusedTaskIdentity(first.taskId);
+            const current = await this.readPendingInput(inputId);
+            if (JSON.stringify(first) !== JSON.stringify(current) || this.preparingTaskIds.has(first.taskId))
+                throw new Error('input_identity_conflict');
+            const reservation = Object.freeze({ taskId: first.taskId, sessionId: first.sessionId, reservationId: randomUUID() });
+            this.identityReservations.add(reservation);
+            this.inputIdentityOrigins.set(reservation, { inputId, identity: first });
+            return reservation;
+        })();
+        this.inputIdentityRestorations.set(inputId, run);
+        void run.catch(() => { if (this.inputIdentityRestorations.get(inputId) === run)
+            this.inputIdentityRestorations.delete(inputId); });
+        return run;
+    }
+    assertInputPreparation(reservation, input) {
+        const origin = reservation && this.inputIdentityOrigins.get(reservation);
+        if (!origin)
+            return;
+        if (!this.options.authorizeInputPreparation)
+            throw new Error('input_preparation_unavailable');
+        const checked = this.options.authorizeInputPreparation(origin.inputId, origin.identity, input);
+        if (checked !== undefined)
+            return this.rejectDeferredInputAuthority(checked, 'input_preparation_unavailable');
+    }
+    async rejectDeferredInputAuthority(value, reason) {
+        try {
+            await value;
+        }
+        catch { /* Deferred owner decisions never grant execution. */ }
+        throw new Error(reason);
+    }
+    assertInputAdmission(snapshot) {
+        if (!this.options.authorizeInputAdmission) {
+            if (snapshot.inputPreparation)
+                throw new Error('input_admission_unavailable');
+            return;
+        }
+        const checked = this.options.authorizeInputAdmission(snapshot);
+        if (checked !== undefined)
+            return this.rejectDeferredInputAuthority(checked, 'input_admission_unavailable');
+    }
+    /** Negative fact from this boot's original exited attempt, never inferred from a DTO/file. */
+    consumeFailedInputPreparation(inputId, reservation, revision, preparedHash) {
+        const attempt = this.inputPreparationAttempts.get(reservation), origin = this.inputIdentityOrigins.get(reservation);
+        if (!attempt || !origin || attempt.inputId !== inputId || origin.inputId !== inputId || attempt.identity.revision !== revision || attempt.inputHash !== preparedHash || attempt.identity.taskId !== reservation.taskId || attempt.identity.sessionId !== reservation.sessionId || !attempt.failed || !attempt.settled || attempt.writeAttempted || attempt.consumed || this.identityReservations.has(reservation) || this.pendingWorkTaskIds().includes(reservation.taskId) || this.admissionPromises.has(reservation.taskId))
+            throw new Error('input_never_started_proof_unavailable');
+        this.options.snapshotStore.assertUnusedTaskIdentitySync(reservation.taskId);
+        attempt.consumed = true;
+    }
+    async prepareTask(input, preparation) {
+        const reservation = preparation?.reservation, origin = reservation && this.inputIdentityOrigins.get(reservation);
+        let attempt;
+        if (origin && reservation) {
+            if (!this.identityReservations.has(reservation) || this.inputPreparationAttempts.has(reservation))
+                throw new Error('invalid or consumed task identity reservation');
+            attempt = { inputId: origin.inputId, identity: origin.identity, inputHash: createHash('sha256').update(JSON.stringify(input)).digest('hex'), failed: false, settled: false, writeAttempted: false, consumed: false };
+            this.inputPreparationAttempts.set(reservation, attempt);
+            this.inputPreparationTasks.add(reservation.taskId);
+            this.identityReservations.delete(reservation);
+        }
+        try {
+            await this.options.beforePrepareTask?.();
+            let marker;
+            const taskId = reservation?.taskId ?? this.createTaskId();
+            if (this.preparingTaskIds.has(taskId) || this.executionPromises.has(taskId) || this.activeExecutions.has(taskId))
+                throw new Error('task_identity_conflict');
+            if (preparation) {
+                if (!reservation || !attempt && !this.identityReservations.has(reservation))
+                    throw new Error('invalid or consumed task identity reservation');
+                if (preparation.marker) {
+                    if (!this.options.authorizePreparation)
+                        throw new Error('multi_agent_preparation_not_supported');
+                    marker = { ...preparation.marker };
+                    this.options.authorizePreparation(taskId, marker);
+                }
+                else if (!this.inputIdentityOrigins.has(reservation))
+                    throw new Error('input_preparation_unavailable');
+                this.identityReservations.delete(reservation);
+            }
+            this.preparingTaskIds.add(taskId);
+            let finishPreparation;
+            const preparing = new Promise(resolve => { finishPreparation = resolve; });
+            this.preparationObligations.set(taskId, preparing);
+            try {
+                {
+                    const rejected = this.assertInputPreparation(reservation, input);
+                    if (rejected)
+                        await rejected;
+                }
+                await this.options.snapshotStore.assertUnusedTaskIdentity(taskId);
+                if (input.permissionMode) {
+                    this.permissionModes.set(taskId, input.permissionMode);
+                }
+                if (input.watchdogMs !== undefined && Number.isFinite(input.watchdogMs) && input.watchdogMs > 0) {
+                    this.taskWatchdogs.set(taskId, input.watchdogMs);
+                }
+                if (input.maxToolLoopIterations !== undefined && Number.isFinite(input.maxToolLoopIterations) && input.maxToolLoopIterations > 0) {
+                    this.maxToolLoopIterations.set(taskId, input.maxToolLoopIterations);
+                }
+                const sessionId = reservation?.sessionId ?? this.createSessionId();
+                const materials = input.materials.map((item) => {
+                    const record = this.options.materialRegistry.get(item.materialId);
+                    if (!record) {
+                        throw new Error(`unknown material: ${item.materialId}`);
+                    }
+                    return item.role ? { ...record, role: item.role } : record;
+                });
+                const understanding = buildTaskUnderstanding({ prompt: input.prompt, materials });
+                const contextHistory = await this.resolveContextHistory(taskId, input.context);
+                this.taskHistories.set(taskId, contextHistory.history);
+                const snapshot = {
+                    taskId,
+                    sessionId,
+                    status: 'understanding',
+                    prompt: input.prompt,
+                    materials: materials.map((material) => this.options.materialRegistry.toView(material)),
+                    understanding,
+                    events: [],
+                    context: contextHistory.audit,
+                    executionScope: input.executionScope,
+                    ...(marker ? { multiAgentPreparation: marker } : {}),
+                    ...(reservation && this.inputIdentityOrigins.has(reservation) ? { inputPreparation: { inputId: this.inputIdentityOrigins.get(reservation).inputId, inputRevision: this.inputIdentityOrigins.get(reservation).identity.revision } } : {}),
+                    usage: { inputTokens: 0, outputTokens: 0, known: false },
+                    createdAt: this.now(),
+                    updatedAt: this.now(),
+                };
+                {
+                    const rejected = this.assertInputPreparation(reservation, input);
+                    if (rejected)
+                        await rejected;
+                }
+                await this.options.snapshotStore.assertUnusedTaskIdentity(taskId);
+                if (attempt)
+                    attempt.writeAttempted = true;
+                await this.options.snapshotStore.createTaskSnapshot(snapshot);
+                {
+                    const rejected = this.assertInputPreparation(reservation, input);
+                    if (rejected)
+                        await rejected;
+                }
+                await this.options.onPreparedSnapshot?.(snapshot);
+                await this.appendEvent(taskId, { type: 'task_started', taskId });
+                await this.appendEvent(taskId, { type: 'understanding_updated', understanding });
+                {
+                    const rejected = this.assertInputPreparation(reservation, input);
+                    if (rejected)
+                        await rejected;
+                }
+                return { taskId, understanding };
+            }
+            finally {
+                this.preparingTaskIds.delete(taskId);
+                if (this.preparationObligations.get(taskId) === preparing)
+                    this.preparationObligations.delete(taskId);
+                finishPreparation();
+                const origin = reservation && this.inputIdentityOrigins.get(reservation);
+                if (origin)
+                    this.inputIdentityRestorations.delete(origin.inputId);
+                this.notifyWorkReleased(taskId);
+            }
+        }
+        catch (error) {
+            if (attempt)
+                attempt.failed = true;
+            throw error;
+        }
+        finally {
+            if (attempt && reservation) {
+                attempt.settled = true;
+                this.inputPreparationTasks.delete(reservation.taskId);
+                this.identityReservations.delete(reservation);
+                this.inputIdentityRestorations.delete(attempt.inputId);
+                this.notifyWorkReleased(reservation.taskId);
+            }
+        }
     }
     async startTask(taskId) {
         // The duplicate guard runs inside startTrackedExecution, before its first
@@ -218,6 +398,8 @@ export class InProcessTaskRuntimeHost {
      * here, so `drain()` observes a real map rather than a second counter.
      */
     startTrackedExecution(taskId) {
+        if (this.preparingTaskIds.has(taskId) || this.inputPreparationTasks.has(taskId))
+            throw new Error('task_preparation_incomplete');
         if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId)) {
             throw new Error(`task already started: ${taskId}`);
         }
@@ -225,9 +407,12 @@ export class InProcessTaskRuntimeHost {
             throw new Error(`shutting_down: ${this.stoppedAcceptingReason}`);
         }
         const token = this.options.acquireExecutionToken?.(taskId) ?? null;
-        const admission = this.options.assertTaskAdmission
-            ? this.requireSnapshot(taskId).then(snapshot => this.options.assertTaskAdmission(snapshot))
-            : Promise.resolve();
+        const admission = this.requireSnapshot(taskId).then(async (snapshot) => {
+            await this.options.assertTaskAdmission?.(snapshot);
+            const rejected = this.assertInputAdmission(snapshot);
+            if (rejected)
+                await rejected;
+        });
         this.admissionPromises.set(taskId, admission);
         const execPromise = admission.then(() => this.executeTask(taskId))
             .catch(() => undefined)
@@ -235,6 +420,7 @@ export class InProcessTaskRuntimeHost {
             this.executionPromises.delete(taskId);
             this.admissionPromises.delete(taskId);
             token?.release();
+            this.notifyWorkReleased(taskId);
         }));
         this.executionPromises.set(taskId, execPromise);
         return execPromise;
@@ -262,6 +448,14 @@ export class InProcessTaskRuntimeHost {
     inFlightTaskIds() {
         return [...new Set([...this.executionPromises.keys(), ...this.activeExecutions.keys()])];
     }
+    /** Main-only busy inventory; missing snapshots stay unknown to consumers. */
+    pendingWorkTaskIds() { return [...new Set([...this.inFlightTaskIds(), ...this.cancellationPromises.values(), ...this.preparationObligations.keys(), ...this.inputPreparationTasks])]; }
+    notifyWorkReleased(taskId) { try {
+        this.options.onWorkReleased?.(taskId);
+    }
+    catch (error) {
+        console.warn('[task-host] release observer failed:', error instanceof Error ? error.message : String(error));
+    } }
     /** Main routing fact, including admitted work waiting for its execution lane. */
     ownsLiveExecution(taskId) {
         return this.executionPromises.has(taskId) || this.activeExecutions.has(taskId);
@@ -343,8 +537,19 @@ export class InProcessTaskRuntimeHost {
         }
     }
     async answerQuestion(input) {
-        if (this.options.assertTaskAdmission)
-            await this.options.assertTaskAdmission(await this.requireSnapshot(input.taskId));
+        const snapshot = await this.requireSnapshot(input.taskId);
+        if (!this.questions.getCurrent(input.taskId))
+            this.rehydrateWaitingQuestion(snapshot);
+        const pending = this.questions.getCurrent(input.taskId);
+        const negativeApproval = pending?.questionId === input.answer.questionId && pending.kind === 'assumption_approval'
+            && pending.choices?.some(choice => choice.id === 'deny') && input.answer.type === 'choice' && input.answer.choiceId === 'deny';
+        if (!negativeApproval && this.options.assertTaskAdmission)
+            await this.options.assertTaskAdmission(snapshot);
+        if (!negativeApproval) {
+            const rejected = this.assertInputAdmission(snapshot);
+            if (rejected)
+                await rejected;
+        }
         const result = this.questions.answer(input.taskId, input.answer);
         if (result.status === 'not_found') {
             throw new Error(`question not found: ${input.answer.questionId}`);
@@ -363,17 +568,62 @@ export class InProcessTaskRuntimeHost {
     cancelTask(taskId, reason = 'user_cancelled') {
         const existing = this.cancellationSettlements.get(taskId);
         const joined = existing && !existing.settled ? existing : undefined;
-        const promise = Promise.resolve().then(() => this.cancelTaskOwned(taskId, reason, joined)).finally(() => {
+        const raw = Promise.resolve().then(() => this.cancelTaskOwned(taskId, reason, joined)).catch(error => { this.cancellationBodyFailures.add(taskId); throw error; });
+        this.cancellationBodies.set(raw, taskId);
+        void raw.finally(() => this.cancellationBodies.delete(raw)).catch(() => undefined);
+        const promise = raw.then(() => this.observeCancelledWithoutExecution(taskId)).finally(() => {
             this.cancellationPromises.delete(promise);
             if (!this.executionPromises.has(taskId) && ![...this.cancellationPromises.values()].includes(taskId)) {
                 this.cancellationSettlements.delete(taskId);
+                this.cancellationBodyFailures.delete(taskId);
                 this.cancellingTaskIds.delete(taskId);
                 this.assistantDeltaFlushes.delete(taskId);
                 this.runtimeEventErrors.delete(taskId);
             }
+            this.notifyWorkReleased(taskId);
         });
         this.cancellationPromises.set(promise, taskId);
         return promise;
+    }
+    observeCancelledWithoutExecution(taskId) {
+        const existing = this.cancellationObservers.get(taskId);
+        if (existing)
+            return existing;
+        const pendingBodies = () => [...this.cancellationBodies].filter(([, id]) => id === taskId).map(([body]) => body);
+        const run = (async () => {
+            while (this.options.onExecutionSettled && !this.executionPromises.has(taskId) && !this.activeExecutions.has(taskId)) {
+                const bodies = pendingBodies();
+                if (bodies.length) {
+                    await Promise.allSettled(bodies);
+                    continue;
+                }
+                const preparing = this.preparationObligations.get(taskId);
+                if (preparing) {
+                    await preparing;
+                    continue;
+                }
+                if (this.cancellationBodyFailures.has(taskId))
+                    return;
+                const snapshot = await this.inspectTask(taskId);
+                if (pendingBodies().length || this.preparationObligations.has(taskId))
+                    continue;
+                if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId) || this.cancellationBodyFailures.has(taskId))
+                    return;
+                if (snapshot && TERMINAL_STATUSES.has(snapshot.status)) {
+                    try {
+                        await this.options.onExecutionSettled(snapshot);
+                    }
+                    catch (error) {
+                        console.warn('[task-host] cancellation observer failed:', error instanceof Error ? error.message : String(error));
+                    }
+                }
+                return;
+            }
+        })();
+        this.cancellationObservers.set(taskId, run);
+        void run.finally(() => { if (this.cancellationObservers.get(taskId) === run)
+            this.cancellationObservers.delete(taskId); }).catch(() => undefined);
+        return run;
     }
     async cancelTaskOwned(taskId, reason, joined) {
         const snapshot = await this.requireSnapshot(taskId);
@@ -601,8 +851,20 @@ export class InProcessTaskRuntimeHost {
                 }
                 // An explicit stop can enter during a real read. Recheck before the
                 // synchronous physical release, not only before that read began.
-                if (!pendingCancellations().length)
-                    break;
+                if (!pendingCancellations().length) {
+                    try {
+                        const current = this.options.onExecutionSettled ? await this.inspectTask(taskId) : null;
+                        if (pendingCancellations().length)
+                            continue;
+                        if (current && TERMINAL_STATUSES.has(current.status))
+                            await this.options.onExecutionSettled?.(current);
+                    }
+                    catch (error) {
+                        console.warn('[task-host] settlement observer failed:', error instanceof Error ? error.message : String(error));
+                    }
+                    if (!pendingCancellations().length)
+                        break;
+                }
             }
         }
         finally {
@@ -818,6 +1080,11 @@ export class InProcessTaskRuntimeHost {
         try {
             if (this.activeExecutions.get(taskId) !== execution || controller.signal.aborted || this.cancellingTaskIds.has(taskId))
                 return;
+            {
+                const rejected = this.assertInputAdmission(snapshot);
+                if (rejected)
+                    await rejected;
+            }
             await this.options.runner({
                 taskId,
                 sessionId: snapshot.sessionId,
@@ -853,11 +1120,21 @@ export class InProcessTaskRuntimeHost {
                 // Layer 3: Deliverable Gate — check if all requested deliverables were produced
                 // A sealed multi-agent root cannot be reentered by a model-backed gate
                 // or an implicit repair turn. Its built-in evidence check still runs.
+                {
+                    const rejected = this.assertInputAdmission(latest);
+                    if (rejected)
+                        await rejected;
+                }
                 const gatePass = await runDeliverableGate(latest, policy?.deliveryRepair === 'explicit' ? undefined : this.options.completionGate, controller.signal);
                 if (!gatePass && !this.cancellingTaskIds.has(taskId)) {
                     if (policy?.deliveryRepair === 'explicit')
                         throw new Error('needs_explicit_followup');
                     // Retry once with a resume prompt
+                    {
+                        const rejected = this.assertInputAdmission(latest);
+                        if (rejected)
+                            await rejected;
+                    }
                     await this.options.runner({
                         taskId,
                         sessionId: snapshot.sessionId,
@@ -1150,6 +1427,9 @@ export class InProcessTaskRuntimeHost {
             .catch(error => console.warn('[task-host] cancellation decision failed; host not aborted:', error instanceof Error ? error.message : String(error)));
     }
     async resolveContextHistory(currentTaskId, context) {
+        const owned = await this.options.resolveOwnedHistory?.(currentTaskId, context);
+        if (owned)
+            return owned;
         if (!context) {
             return { history: [] };
         }
@@ -1161,6 +1441,8 @@ export class InProcessTaskRuntimeHost {
                 skipped.push({ taskId, reason: 'self' });
                 continue;
             }
+            // A denied dependency is a blocked mandatory context, never a silently skipped history item.
+            await this.options.assertHistoryRead?.(taskId, context.threadId);
             try {
                 const snapshot = await this.options.snapshotStore.recoverTask(taskId);
                 if (!snapshot) {
@@ -1175,6 +1457,8 @@ export class InProcessTaskRuntimeHost {
         }
         const built = buildHistoryFromTaskSnapshots(snapshots, { currentTaskId });
         const threadId = normalizeContextId(context.threadId);
+        // Commit derived-context dependencies before handing any loaded history to execution.
+        await this.options.onHistoryLoaded?.(currentTaskId, snapshots.filter(snapshot => built.loadedTaskIds.includes(snapshot.taskId)), threadId);
         return {
             history: built.history,
             audit: {

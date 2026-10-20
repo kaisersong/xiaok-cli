@@ -27,6 +27,7 @@ const watch = z.object({
 const workView = z.object({ watch, projection: activity.shape.projection }).strict();
 
 export interface ConversationActivityIpcService {
+  assertResultCurrent?(result:unknown):void;
   mcpInputs?(watchId: string, actor: ActivityActor): Promise<unknown>;
   mcpAnswer?(watchId: string, input: { inputId: string; expectedDigest: string; action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }, actor: ActivityActor): Promise<void>;
   mcpCancel?(watchId: string, actor: ActivityActor): Promise<{ requested: true }>;
@@ -47,18 +48,49 @@ export function registerConversationActivityIpc(
   const subscriptions = new Map<string, () => void>();
   const pendingSubscriptions = new Map<string, symbol>();
   let disposed = false;
+  const invocations=new WeakMap<IpcMainInvokeEvent,{actorId?:string;value?:unknown;ready:boolean;checks:number;stop?:()=>void}>();
   const actor = (event: IpcMainInvokeEvent): ActivityActor => {
     const identity = authorize(event);
-    if (!identity) throw new Error('activity_actor_forbidden');
+    if (!identity||disposed) throw new Error('activity_actor_forbidden');
+    const invocation=invocations.get(event);
+    if(invocation){
+      if(invocation.actorId!==undefined&&invocation.actorId!==identity.actorId)throw new Error('activity_actor_forbidden');
+      invocation.actorId=identity.actorId;
+    }
     return { ...identity, requestSource: 'user' };
   };
   const get = () => { if (!service) throw new Error('activity_unavailable'); return service; };
   const register = <I, O>(channel: string, input: z.ZodType<I>, output: z.ZodType<O>, handler: (input: I, event: IpcMainInvokeEvent) => Promise<O>) =>
-    registerIpcHandler({ registrar, channel, input, output, handler, sourceFile: 'conversation-activity-ipc.ts', rolloutRound: 3, riskTags: ['internal-mutation'] });
+    registerIpcHandler({ registrar, channel, input, output,
+      handler:async(input,event)=>{
+        if(invocations.has(event))throw new Error('ipc_output_event_reused');
+        const invocation:{actorId?:string;value?:unknown;ready:boolean;checks:number;stop?:()=>void}={ready:false,checks:0};
+        if(channel==='desktop:activity:subscribe'||channel==='desktop:activity:overview'){
+          const subscriptionId=(input as {subscriptionId:string}).subscriptionId;
+          invocation.stop=()=>{const key=`${event.sender.id}:${subscriptionId}`;pendingSubscriptions.delete(key);subscriptions.get(key)?.();};
+        }
+        invocations.set(event,invocation);
+        try{const result=await handler(input,event);invocation.value=result;invocation.ready=true;return result;}
+        catch(error){invocation.stop?.();invocations.delete(event);throw error;}
+      },
+      assertOutputCurrent:(result,event)=>{
+        const invocation=invocations.get(event);let keep=false;
+        try{
+          if(!invocation?.ready||invocation.value!==result||!invocation.actorId||actor(event).actorId!==invocation.actorId)throw new Error('activity_actor_forbidden');
+          const checked:unknown=get().assertResultCurrent?.(result);
+          if(checked!==undefined){invocation.stop?.();return checked as never;}
+          invocation.checks++;keep=Boolean(registrar.handlesOutputFence)&&invocation.checks<2;
+        }catch(error){invocation?.stop?.();throw error;}
+        finally{if(!keep)invocations.delete(event);}
+      },sourceFile:'conversation-activity-ipc.ts',rolloutRound:3,riskTags:['internal-mutation']});
+  const canSend=(event:IpcMainInvokeEvent,actorId:string,key:string):boolean=>{
+    try{if(!disposed&&!event.sender.isDestroyed()&&authorize(event)?.actorId===actorId)return true;}catch{/* End this view only. */}
+    pendingSubscriptions.delete(key);subscriptions.get(key)?.();return false;
+  };
 
   register('desktop:activity:list', z.object({ threadId: key, afterLocalSeq: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(), z.array(activity),
     async (input, event) => get().list(input.threadId, actor(event), { afterLocalSeq: input.afterLocalSeq, limit: input.limit }));
-  register('desktop:activity:work', z.object({ watchId: key }).strict(), workView, async (input, event) => workView.parse(await get().getWork(input.watchId, actor(event))));
+  register('desktop:activity:work', z.object({ watchId: key }).strict(), workView, async (input, event) => await get().getWork(input.watchId, actor(event)) as z.infer<typeof workView>);
   const field = z.object({ key, title: z.string().max(256), type: z.enum(['text','number','boolean','choice','choices']), required: z.boolean(), options: z.array(z.string().max(4096)).max(128).optional() }).strict();
   register('desktop:activity:mcpInputs', z.object({ watchId: key }).strict(), z.array(z.object({ inputId: key, expectedDigest: key, prompt: z.string().max(1024), fields: z.array(field).max(32) }).strict()).max(32), async (input, event) => {
     const handler = get().mcpInputs; if (!handler) throw new Error('activity_mcp_unavailable'); return handler(input.watchId, actor(event)) as Promise<any>;
@@ -79,7 +111,7 @@ export function registerConversationActivityIpc(
     const token = Symbol('activity-subscription'); pendingSubscriptions.set(subscriptionKey, token);
     let dispose: () => void;
     try { dispose = await get().subscribe(input.threadId, identity, change => {
-      if (!sender.isDestroyed()) sender.send('desktop:activity:changed', change);
+      if(canSend(event,identity.actorId,subscriptionKey))sender.send('desktop:activity:changed',change);
     }); } catch (error) {
       if (pendingSubscriptions.get(subscriptionKey) === token) pendingSubscriptions.delete(subscriptionKey);
       throw error;
@@ -98,7 +130,7 @@ export function registerConversationActivityIpc(
     const identity = actor(event), sender = event.sender, subscriptionKey = `${sender.id}:${input.subscriptionId}`;
     subscriptions.get(subscriptionKey)?.();
     const token = Symbol('activity-overview'); pendingSubscriptions.set(subscriptionKey, token);
-    const stop = await get().overview(identity, change => { if (!sender.isDestroyed()) sender.send('desktop:activity:changed', change); });
+    const stop = await get().overview(identity, change => {if(canSend(event,identity.actorId,subscriptionKey))sender.send('desktop:activity:changed',change);});
     if (disposed || sender.isDestroyed() || pendingSubscriptions.get(subscriptionKey) !== token) { stop(); return; }
     const cleanup = () => { stop(); pendingSubscriptions.delete(subscriptionKey); subscriptions.delete(subscriptionKey); sender.removeListener('destroyed', cleanup); };
     subscriptions.set(subscriptionKey, cleanup); sender.once('destroyed', cleanup);

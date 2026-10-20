@@ -22,6 +22,20 @@ export declare class FileTaskSnapshotStore {
     private readonly cache;
     constructor(rootDir: string, diagnostics?: TaskSnapshotStoreDiagnostics);
     save(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<void>;
+    private validateIdentity;
+    private assertIdentityFilesAbsent;
+    /** Absence is about raw checkpoint AND journal, never a cached/null aggregate. */
+    assertUnusedTaskIdentity(taskId: string): Promise<void>;
+    /** Final negative check; never sufficient without the actual original Host attempt. */
+    assertUnusedTaskIdentitySync(taskId: string): void;
+    /** Initial Task creation cannot rename over another host's committed identity. */
+    createTaskSnapshot(snapshot: TaskSnapshot): Promise<void>;
+    /** Final synchronous owner fence: no cached prefix and no await after reading. */
+    inspectPersistedTaskSync(taskId: string): TaskSnapshot | null;
+    /** Current durable source, bypassing the execution cache. */
+    inspectPersistedTask(taskId: string): Promise<TaskSnapshot | null>;
+    /** Complete read-only owner inventory, independent of the active index. Never skips corrupt/orphan rows. */
+    inspectPersistedInventory(): Promise<TaskSnapshot[]>;
     getActiveTasks(): Promise<ActiveTaskRef[]>;
     /** @deprecated Use getActiveTasks() — kept for backward compat */
     getActiveTask(): Promise<ActiveTaskRef | null>;

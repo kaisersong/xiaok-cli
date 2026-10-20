@@ -1,5 +1,6 @@
 import { registerMemoryDistillationIpc, getActiveMemoryEmbeddingModel, selectMemoryEmbeddingModel } from './memory-distillation.js';
 import { registerConversationActivityIpc } from './conversation-activity-ipc.js';
+import { registerContextContinuityIpc } from './context-continuity/ipc.js';
 import {z, type ZodSchema} from 'zod';
 import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
 import {absoluteFilePath, filePathInput, saveFileInput, openFileResult, readFileResult, saveFileResult} from './file-ipc-schemas.js';
@@ -122,7 +123,12 @@ function sanitizeTaskContext(raw: unknown): { threadId?: string; taskIds?: strin
   };
 }
 
+function sanitizeInputId(raw:unknown):string|undefined{
+  if(raw===undefined)return undefined;
+  if(typeof raw!=='string'||!/^[A-Za-z0-9_-]{1,256}$/.test(raw))throw new Error('invalid_input_id');return raw;
+}
 function sanitizeTaskCreateInput(raw: unknown): {
+  inputId?:string;
   prompt: string;
   materials: Array<{ materialId: string; role?: 'customer_material' | 'product_material' | 'template_material' | 'unknown' }>;
   context?: { threadId?: string; taskIds?: string[] };
@@ -145,7 +151,8 @@ function sanitizeTaskCreateInput(raw: unknown): {
     };
   });
   const context = sanitizeTaskContext(input.context);
-  return { prompt: input.prompt, materials, ...(context ? { context } : {}) };
+  const inputId=sanitizeInputId(input.inputId);
+  return { prompt: input.prompt, materials, ...(inputId?{inputId}:{}),...(context ? { context } : {}) };
 }
 
 const ARTIFACT_WORKSPACE_ALLOWED_FIELDS = {
@@ -766,7 +773,26 @@ export async function registerDesktopIpc(
     if (!actor) throw new Error('task_actor_forbidden');
     return { ...actor, requestSource: 'user' as const };
   };
+  const assertGoalSender = (event: IpcMainInvokeEvent, actor: ReturnType<typeof taskActor>) => {
+    if (options.multiAgentAuthorize?.(event)?.actorId !== actor.actorId) throw new Error('goal_actor_forbidden');
+  };
+  const deferredReads=new WeakMap<IpcMainInvokeEvent,{value:unknown;check:()=>void}>();
+  const deferRead=<T>(event:IpcMainInvokeEvent,value:T,check:()=>void):T=>{
+    if(ipcMain.handlesOutputFence){
+      if(deferredReads.has(event))throw new Error('ipc_output_event_reused');
+      deferredReads.set(event,{value,check});
+    }
+    return value;
+  };
+  const assertDeferredRead=(value:unknown,event:IpcMainInvokeEvent):void=>{
+    const read=deferredReads.get(event);
+    try{if(!read||read.value!==value)throw new Error('ipc_output_proof_unavailable');return read.check();}
+    finally{deferredReads.delete(event);}
+  };
+  registerContextContinuityIpc(ipcMain, services.continuity ? () => services.continuity.port() : null,
+    event => Boolean(options.multiAgentAuthorize?.(event)));
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
+    onThreadDeleted: id => services.continuity?.forgetDeletedConversation(id),
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
   });
   const { createAliyunLiveTranscriptionRegistry } = await import('./meeting-aliyun-live-transcriber.js');
@@ -798,26 +824,44 @@ export async function registerDesktopIpc(
       if (!target.isDestroyed()) target.webContents.send('desktop:artifactWorkspace:changed', change);
     }
   });
+  const unsubscribeInputChanges=services.inputQueue?.subscribe(conversationId=>{
+    const targets=typeof BrowserWindow?.getAllWindows==='function'?BrowserWindow.getAllWindows():[window];
+    for(const target of targets)try{if(target.isDestroyed())continue;const event={sender:target.webContents,senderFrame:target.webContents.mainFrame} as IpcMainInvokeEvent,actor=taskActor(event);services.inputQueue!.assertPointer(conversationId,actor);if(options.multiAgentAuthorize?.(event)?.actorId!==actor.actorId)continue;target.webContents.send('desktop:inputs:changed',{conversationId});}catch{/* No private queue pointer for an unavailable receiver. */}
+  });
   const unsubscribeGoalChanges = services.subscribeGoalChanged?.((change) => {
     const targets = typeof BrowserWindow?.getAllWindows === 'function'
       ? BrowserWindow.getAllWindows()
       : [window];
-    for (const target of targets.length > 0 ? targets : [window]) {
-      if (!target.isDestroyed()) target.webContents.send('desktop:goal:changed', change);
+    for (const target of targets) {
+      try {
+        if (target.isDestroyed()) continue;
+        const event = { sender: target.webContents, senderFrame: target.webContents.mainFrame } as IpcMainInvokeEvent;
+        const actor = taskActor(event);
+        assertGoalSender(event, actor);
+        services.goalOutput.assertBroadcast(change, actor);
+        target.webContents.send('desktop:goal:changed', change);
+      } catch { /* Private content is unavailable to this actual receiver. */ }
     }
   });
   const unsubscribeGoalTaskPrepared = services.subscribeGoalTaskPrepared?.((prepared) => {
     const targets = typeof BrowserWindow?.getAllWindows === 'function'
       ? BrowserWindow.getAllWindows()
       : [window];
-    for (const target of targets.length > 0 ? targets : [window]) {
-      if (!target.isDestroyed()) target.webContents.send('desktop:goal:taskPrepared', prepared);
+    for (const target of targets) {
+      try {
+        if (target.isDestroyed()) continue;
+        const event = { sender: target.webContents, senderFrame: target.webContents.mainFrame } as IpcMainInvokeEvent;
+        const actor = taskActor(event);
+        assertGoalSender(event, actor);
+        services.goalOutput.assertPrepared(prepared, actor);
+        target.webContents.send('desktop:goal:taskPrepared', prepared);
+      } catch { /* Routing is sent only for a current, authorized attachment. */ }
     }
   });
   const disposeApplicationViews = () => {
     disposeMultiAgentViews();
     unsubscribeArtifactWorkspaceChanges?.();
-    unsubscribeGoalChanges?.();
+    unsubscribeGoalChanges?.();unsubscribeInputChanges?.();
     unsubscribeGoalTaskPrepared?.();
   };
   options.registerLifetimeDisposer?.(disposeApplicationViews);
@@ -1032,22 +1076,44 @@ export async function registerDesktopIpc(
     log('info', 'importMaterial ok');
     return r;
   });
+  const queueKey=z.string().min(1).max(256);
+  const queueHandler=<I>(schema:z.ZodType<I>,run:(input:I,actor:ReturnType<typeof taskActor>,check:()=>void)=>Promise<object>)=>async(event:IpcMainInvokeEvent,raw:unknown)=>{
+    const actor=taskActor(event),check=()=>{if(options.multiAgentAuthorize?.(event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');};
+    if(!services.inputQueue)throw new Error('input_queue_unavailable');const input=schema.parse(raw),result=await run(input,actor,check);check();services.inputQueue.assertReply(result,actor);return deferRead(event,result,()=>{check();services.inputQueue!.assertReply(result,actor);});
+  };
+  ipcMain.handle('desktop:inputs:enqueue',queueHandler(z.object({inputId:queueKey,conversationId:queueKey,prompt:z.string().min(1).max(1024*1024),filePaths:z.array(z.string().max(4096)).max(64).optional()}).strict(),async(input,actor,check)=>services.inputQueue!.withUserRequest(actor,async()=>{const filePaths=await expandSelectedMaterialPaths(input.filePaths??[]);check();return services.inputQueue!.enqueue({...input,filePaths},actor);})),assertDeferredRead);
+  ipcMain.handle('desktop:inputs:list',queueHandler(z.object({conversationId:queueKey}).strict(),(input,actor)=>services.inputQueue!.list(input,actor)),assertDeferredRead);
+  ipcMain.handle('desktop:inputs:cancel',queueHandler(z.object({conversationId:queueKey,inputId:queueKey}).strict(),(input,actor)=>services.inputQueue!.cancel(input,actor)),assertDeferredRead);
   ipcMain.handle('desktop:createTask', async (_event, input) => {
     log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
-    const r = await services.createTask(sanitizeTaskCreateInput(input), options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    const actor=taskActor(_event);
+    const r = await services.createTask(sanitizeTaskCreateInput(input),actor);
+    if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
+    services.taskSubmissions.assertReply(r,actor);
     log('info', 'createTask ok', { taskId: r?.taskId });
-    return r;
-  });
-  ipcMain.handle('desktop:goal:get', async (_event, input) => (
-    services.getGoal(parseGoalThreadId(input?.threadId))
-  ));
-  ipcMain.handle('desktop:goal:create', async (_event, input) => (
-    services.createGoal(parseGoalInput(input, 'create'))
-  ));
-  ipcMain.handle('desktop:goal:pause', async (_event, input) => (
-    services.pauseGoal(parseGoalThreadId(input?.threadId))
-  ));
-  ipcMain.handle('desktop:goal:resume', async (_event, input) => {
+    return deferRead(_event,r,()=>{if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');services.taskSubmissions.assertReply(r,actor);});
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:get', async (event, input) => {
+    const threadId = parseGoalThreadId(input?.threadId), actor = taskActor(event);
+    const value = await services.getGoal(threadId);
+    const captured = services.goalOutput.captureRead(threadId, value, actor);
+    assertGoalSender(event, actor);
+    services.goalOutput.assertRead(captured.receipt, value, actor);
+    return deferRead(event,value,()=>{assertGoalSender(event,actor);return services.goalOutput.assertRead(captured.receipt,value,actor);});
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:create', async (event, input) => {
+    const parsed = parseGoalInput(input, 'create'), actor = taskActor(event);
+    const value = await services.createGoal(parsed, actor);
+    assertGoalSender(event, actor); services.goalOutput.assertReply(value, actor);
+    return deferRead(event,value,()=>{assertGoalSender(event,actor);return services.goalOutput.assertReply(value,actor);});
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:pause', async (event, input) => {
+    const threadId = parseGoalThreadId(input?.threadId), actor = taskActor(event);
+    const value = await services.pauseGoal(threadId, actor);
+    assertGoalSender(event, actor);
+    return deferRead(event,{ threadId, status: 'paused' as const, revision: value.revision },()=>assertGoalSender(event,actor));
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:resume', async (event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_resume_input');
     const fields = Object.keys(input).filter(key => !['threadId', 'turnLimit', 'requestId'].includes(key));
     if (fields.length > 0) throw new Error(`invalid_goal_field:${fields[0]}`);
@@ -1056,43 +1122,60 @@ export async function registerDesktopIpc(
     if (turnLimit !== undefined && (!Number.isSafeInteger(turnLimit) || turnLimit < 1 || turnLimit > 50)) {
       throw new Error('invalid_goal_turn_limit');
     }
-    return services.resumeGoal({
+    const actor = taskActor(event);
+    const value = await services.resumeGoal({
       threadId: parseGoalThreadId(input.threadId),
       ...(requestId === undefined ? {} : { requestId }),
       ...(turnLimit === undefined ? {} : { turnLimit }),
-    });
-  });
-  ipcMain.handle('desktop:goal:cancel', async (_event, input) => (
-    services.cancelGoal(parseGoalThreadId(input?.threadId))
-  ));
-  ipcMain.handle('desktop:goal:replace', async (_event, input) => (
-    services.replaceGoal(parseGoalInput(input, 'replace'))
-  ));
-  ipcMain.handle('desktop:goal:ackTaskAttached', async (_event, input) => {
+    }, actor);
+    assertGoalSender(event, actor); services.goalOutput.assertReply(value, actor);
+    return deferRead(event,value,()=>{assertGoalSender(event,actor);return services.goalOutput.assertReply(value,actor);});
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:cancel', async (event, input) => {
+    const threadId = parseGoalThreadId(input?.threadId), actor = taskActor(event);
+    const value = await services.cancelGoal(threadId, actor);
+    assertGoalSender(event, actor);
+    return deferRead(event,{ threadId, status: 'cancelled' as const, revision: value.revision },()=>assertGoalSender(event,actor));
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:replace', async (event, input) => {
+    const parsed = parseGoalInput(input, 'replace'), actor = taskActor(event);
+    const value = await services.replaceGoal(parsed, actor);
+    assertGoalSender(event, actor); services.goalOutput.assertReply(value, actor);
+    return deferRead(event,value,()=>{assertGoalSender(event,actor);return services.goalOutput.assertReply(value,actor);});
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:ackTaskAttached', async (event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_attachment');
     const attachmentId = typeof input.attachmentId === 'string' ? input.attachmentId.trim() : '';
     if (!attachmentId || attachmentId.length > 200) throw new Error('invalid_goal_attachment');
-    return services.ackGoalTaskAttached({
+    const actor = taskActor(event);
+    await services.ackGoalTaskAttached({
       threadId: parseGoalThreadId(input.threadId), attachmentId,
-    });
-  });
-  ipcMain.handle('desktop:goal:setUserQueuePending', async (_event, input) => {
+    }, actor);
+    assertGoalSender(event, actor);
+    return deferRead(event,undefined,()=>assertGoalSender(event,actor));
+  },assertDeferredRead);
+  ipcMain.handle('desktop:goal:setUserQueuePending', async (event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.pending !== 'boolean') {
       throw new Error('invalid_goal_queue_state');
     }
-    return services.setGoalUserQueuePending({
+    const actor = taskActor(event);
+    await services.setGoalUserQueuePending({
       threadId: parseGoalThreadId(input.threadId), pending: input.pending,
-    });
-  });
+    }, actor);
+    assertGoalSender(event, actor);
+    return deferRead(event,undefined,()=>assertGoalSender(event,actor));
+  },assertDeferredRead);
   ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
-    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+    const actor = taskActor(_event);
+    if (input.answer?.type === 'choice' && input.answer.choiceId === 'deny') await services.authorizeTaskControl(input.taskId, actor);
+    else await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'answerQuestion', { taskId: input?.taskId });
     const r = await services.answerQuestion(input, actor);
     log('info', 'answerQuestion ok');
     return r;
   });
   ipcMain.handle('desktop:cancelTask', async (_event, input) => {
-    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+    const actor = taskActor(_event); await services.authorizeTaskControl(input.taskId, actor);
     log('info', 'cancelTask', { taskId: input?.taskId });
     await services.cancelTask(input.taskId, actor);
     log('info', 'cancelTask ok');
@@ -1102,16 +1185,36 @@ export async function registerDesktopIpc(
     const r = await services.getActiveTask();
     if (r) await services.authorizeTaskRead(r.taskId, actor);
     log('debug', 'getActiveTask', { taskId: r?.taskId ?? null });
-    return r;
-  });
+    if(r)services.assertTaskReadCurrent(r.taskId,actor);
+    return deferRead(_event,r,()=>{
+      if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
+      if(r)return services.assertTaskReadCurrent(r.taskId,actor);
+    });
+  },assertDeferredRead);
   ipcMain.handle('desktop:recoverTask', async (_event, input) => {
     const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'recoverTask', { taskId: input?.taskId });
     const r = await services.recoverTask(input.taskId, typeof input.legacyPrompt === 'string' ? input.legacyPrompt : undefined);
     await services.authorizeTaskRead(r.snapshot.taskId, actor);
     log('info', 'recoverTask ok', { status: r?.snapshot?.status });
-    return r;
-  });
+    services.assertTaskReadCurrent(r.snapshot.taskId,actor);
+    return deferRead(_event,r,()=>{
+      if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
+      return services.assertTaskReadCurrent(r.snapshot.taskId,actor);
+    });
+  },assertDeferredRead);
+  ipcMain.handle('desktop:readTaskHistory', async (event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(name => name !== 'taskId')
+      || typeof input.taskId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(input.taskId)) throw new Error('invalid_task_history_request');
+    const actor = taskActor(event);
+    const value = await services.taskHistory.readTask(input.taskId, actor);
+    if (options.multiAgentAuthorize?.(event)?.actorId !== actor.actorId) throw new Error('task_actor_forbidden');
+    services.taskHistory.assertTaskCurrent(value, actor);
+    return deferRead(event,value,()=>{
+      if(options.multiAgentAuthorize?.(event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
+      return services.taskHistory.assertTaskCurrent(value,actor);
+    });
+  },assertDeferredRead);
   ipcMain.handle('desktop:openArtifact', async (_event, input) => {
     log('info', 'openArtifact', { artifactId: input?.artifactId });
     return services.openArtifact(input.artifactId);
@@ -1209,14 +1312,15 @@ export async function registerDesktopIpc(
 
     void (async () => {
       try {
-        const stream = sinceIndex !== undefined
-          ? services.subscribeTask(taskId, { sinceIndex, signal: controller.signal })
-          : services.subscribeTask(taskId, { signal: controller.signal });
+        const subscribe = services.subscribeTaskRecords?.bind(services) ?? services.subscribeTask.bind(services);
+        const stream = subscribe(taskId, { ...(sinceIndex !== undefined ? { sinceIndex } : {}), signal: controller.signal });
         for await (const event of stream) {
           if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
           await services.authorizeTaskRead(taskId, actor);
+          if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
+          services.assertTaskReadCurrent(taskId,actor);
           target.send(`desktop:taskEvent:${taskId}`, event);
         }
         log('info', 'subscribeTask stream ended', { taskId });
@@ -1301,16 +1405,24 @@ export async function registerDesktopIpc(
       throw new Error('invalid_task_files_input');
     }
     if (input.filePaths.some((value: unknown) => typeof value !== 'string')) throw new Error('invalid_task_file_path');
+    const actor=taskActor(_event);
+    const inputId=sanitizeInputId(input.inputId);
+    return services.taskSubmissions.withUserRequest(actor,async()=>{
     const expanded = await expandSelectedMaterialPaths(input.filePaths);
     const context = sanitizeTaskContext(input.context);
+    if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
     const r = await services.createTaskWithFiles({
       prompt: input.prompt,
       filePaths: expanded,
+      ...(inputId?{inputId}:{}),
       ...(context ? { context } : {}),
-    }, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    },actor);
+    if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');
+    services.taskSubmissions.assertReply(r,actor);
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
-    return r;
-  });
+    return deferRead(_event,r,()=>{if(options.multiAgentAuthorize?.(_event)?.actorId!==actor.actorId)throw new Error('task_actor_forbidden');services.taskSubmissions.assertReply(r,actor);});
+    });
+  },assertDeferredRead);
   ipcMain.handle('desktop:getSkillStats', async () => {
     try {
       return await services.getSkillStats();

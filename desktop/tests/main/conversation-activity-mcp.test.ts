@@ -14,9 +14,9 @@ describe('MCP durable conversation origin and recovery', () => {
   function fixture() {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-mcp-activity-')); cleanup.push(() => rmSync(root, { recursive: true, force: true }));
     const store = new ConversationActivityStore(join(root, 'activity.sqlite')); cleanup.push(() => store.close());
-    let mcp!: ConversationMcpActivities;
+    let mcp!: ConversationMcpActivities, allowed = true;
     const service = new ConversationActivityService({ store, profileId: 'profile', actorId: 'user',
-      getThread: threadId => ({ threadId, profileId: 'profile', workspaceId: 'workspace', deleteState: 'none' }), canObserveWork: watch => mcp.canObserve(watch) });
+      getThread: threadId => ({ threadId, profileId: 'profile', workspaceId: 'workspace', deleteState: 'none' }), canObserveWork: watch => allowed && mcp.canObserve(watch) });
     cleanup.push(() => service.dispose());
     mcp = new ConversationMcpActivities({ store, service, actorId: 'user', originThread: async taskId => taskId === 'authorized-task' ? 'origin' : null });
     cleanup.push(() => mcp.dispose());
@@ -25,7 +25,7 @@ describe('MCP durable conversation origin and recovery', () => {
     const update = vi.fn(async () => {}), cancel = vi.fn(async () => {});
     const connection = { client: {}, tasks: { endpointId: 'server-one', capabilities: { execution: true }, cancelTask: cancel, task: () => ({ updateJson: update, snapshot: async () => ({ ...raw, raw, retentionMs: 1000, ttl: 1000, extensions: {} }) }) } } as unknown as McpClientConnection;
     mcp.register(connection);
-    return { store, service, mcp, connection, raw, update, cancel };
+    return { store, service, mcp, connection, raw, update, cancel, revoke: () => { allowed = false; } };
   }
   const reference = { endpointId: 'server-one', generation: 'v2' as const, taskId: 'remote-task', originalOperation: 'tools/call' as const };
   it('persists the handle with the original conversation and deduplicates notification/query outcomes without equating isError with success', async () => {
@@ -76,4 +76,18 @@ describe('MCP durable conversation origin and recovery', () => {
     expect(f.store.getProjection('mcp:invocation')?.executionState).toBe('running');
     expect(f.cancel).toHaveBeenCalledOnce();
   });
+  it('keeps authenticated cancel and decline available after private source reads are withdrawn', async () => {
+    const f=fixture(), observer=(await f.mcp.observer('authorized-task','invocation',f.connection))!;
+    await observer.handle(reference);Object.assign(f.raw,{status:'input_required',inputRequests:{question:{method:'elicitation/create',params:{message:'private canary',requestedSchema:{type:'object',properties:{},required:[]}}}}});
+    const actor={requestSource:'user' as const,actorId:'user'},[form]=await f.mcp.inputs('mcp:invocation',actor);f.revoke();
+    expect((await f.service.getWork('mcp:invocation',actor)).projection.summary).toBeUndefined();
+    await expect(f.mcp.inputs('mcp:invocation',actor)).rejects.toThrow('activity_source_forbidden');
+    await expect(f.mcp.answerInput('mcp:invocation',{inputId:'question',expectedDigest:form.expectedDigest,action:'accept'},actor)).rejects.toThrow('activity_source_forbidden');
+    expect(f.update).not.toHaveBeenCalled();
+    await expect(f.mcp.answerInput('mcp:invocation',{inputId:'question',expectedDigest:form.expectedDigest,action:'decline'},actor)).resolves.toBeUndefined();
+    expect(f.update).toHaveBeenCalledWith({question:{action:'decline'}});
+    await expect(f.mcp.cancel('mcp:invocation',actor)).resolves.toEqual({requested:true});expect(f.cancel).toHaveBeenCalledOnce();
+    await expect(f.mcp.cancel('mcp:invocation',{requestSource:'agent',actorId:'user'})).rejects.toThrow('activity_actor_forbidden');
+  });
+
 });

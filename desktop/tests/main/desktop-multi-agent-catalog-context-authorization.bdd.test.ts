@@ -13,6 +13,7 @@ import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-co
 import { DesktopMultiAgentService, type DesktopAgentExecutionContext } from '../../electron/desktop-multi-agent-service.js';
 import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from '../../electron/desktop-multi-agent-catalog-bridge.js';
 import { DesktopMultiAgentRuntime, type DesktopAgentRuntimeBinding } from '../../electron/desktop-multi-agent-runtime.js';
+import { continuityEffects } from '../fixtures/continuity-effects.js';
 
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { resolve, promise }; };
 
@@ -23,6 +24,7 @@ describe('BDD W12: actual service contexts authorize bridge and runtime scopes',
   async function setup() {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-catalog-context-'));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+    const effects = continuityEffects(root); cleanup.push(() => effects.close());
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite')); cleanup.push(() => store.close());
     const entered = deferred<DesktopAgentExecutionContext>(), release = deferred<void>(), childEntered = deferred<DesktopAgentExecutionContext>();
     const childModelEntered = deferred<void>(), childRelease = deferred<void>();
@@ -66,9 +68,10 @@ describe('BDD W12: actual service contexts authorize bridge and runtime scopes',
       catalog: bridge.catalog, policy: bridge.catalog.snapshotPolicy(), workspaceId: 'workspace', materialIds: [], permissionRevision,
       registryOptions: { autoMode: true }, materials: [], skillCatalog: createSkillCatalog(undefined, root), dataRoot: root,
       agents: [], systemPrompt: 'test', emitRuntimeEvent: async () => {},
+      recordUnprovenEffect: effects.record,
     });
     return { root, store, service, runtime, bridge, context, authorize, binding, effect, childEntered, childModelEntered,
-      childSession: () => childSession!, host, taskId: prepared.taskId };
+      childSession: () => childSession!, host, taskId: prepared.taskId, effects, effectContext: effects.context(prepared.taskId) };
   }
 
   it.each(['missing', 'copy', 'actor-copy', 'foreign-fields'] as const)('W12 bridge rejects %s context before issuing any slot authorization', async kind => {
@@ -78,16 +81,16 @@ describe('BDD W12: actual service contexts authorize bridge and runtime scopes',
     expect(() => f.authorize(candidate)).toThrow(); expect(f.effect).not.toHaveBeenCalled();
     const scope = f.bridge.catalog.createScopedRegistry(f.bridge.catalog.snapshotPolicy(), { ...f.context,
       workspaceId: 'workspace', materialIds: [], deadlineAt: f.context.effectiveDeadline }, { autoMode: true });
-    try { await scope.registry.executeTool('probe', {}); expect(f.effect).not.toHaveBeenCalled(); } finally { scope.dispose(); }
+    try { await scope.registry.executeTool('probe', {}, f.effectContext); expect(f.effect).not.toHaveBeenCalled(); } finally { scope.dispose(); }
   });
 
   it('W12 a real root authorizes actual slots and a retained stopped root cannot authorize a replacement', async () => {
     const f = await setup(); f.authorize(f.context);
     const scope = f.runtime.bindRoot(f.context, f.binding());
-    try { expect(await scope.registry.executeTool('probe', {})).toBe('real-bound-effect'); }
+    try { expect(await scope.registry.executeTool('probe', {}, f.effectContext)).toBe('real-bound-effect'); }
     finally { scope.dispose(); }
     await f.host.cancelTask(f.taskId);
-    expect(() => f.authorize(f.context)).toThrow(); expect(f.effect).toHaveBeenCalledTimes(1);
+    expect(() => f.authorize(f.context)).toThrow(); expect(f.effect).toHaveBeenCalledTimes(1); expect(f.effects.count(f.taskId)).toBeGreaterThan(0);
   });
 
   it('W12 root and child scopes read their actual context revision, never the inherited legacy binding revision', async () => {
@@ -99,7 +102,7 @@ describe('BDD W12: actual service contexts authorize bridge and runtime scopes',
     });
     const scope = f.runtime.bindRoot(f.context, f.binding(f.context.permissionRevision + 17));
     try {
-      expect(await scope.registry.executeTool('probe', {})).toBe('real-bound-effect');
+      expect(await scope.registry.executeTool('probe', {}, f.effectContext)).toBe('real-bound-effect');
       const spawned = await scope.registry.executeTool('spawn_agent', { task_name: 'revision_child', message: 'finish', fork_context: false },
         { toolInvocationId: 'actual-child', messages: [] } as unknown as ToolExecutionContext);
       expect(JSON.parse(spawned)).toMatchObject({ targetAgentId: expect.any(String) });
@@ -117,7 +120,7 @@ describe('BDD W12: actual service contexts authorize bridge and runtime scopes',
     expect(() => f.runtime.bindRoot({ ...f.context }, f.binding())).toThrow(/context/);
     expect(f.effect).not.toHaveBeenCalled();
     const scope = f.runtime.bindRoot(f.context, f.binding());
-    try { expect(await scope.registry.executeTool('probe', {})).toBe('real-bound-effect'); }
+    try { expect(await scope.registry.executeTool('probe', {}, f.effectContext)).toBe('real-bound-effect'); }
     finally { scope.dispose(); }
   });
 

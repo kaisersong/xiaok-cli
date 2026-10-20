@@ -66,6 +66,16 @@ describe('BDD: identity-based capability policy and real scoped ToolRegistry', (
     } finally { handle.dispose(); }
   });
 
+  it('checks the context fence again after the asynchronous opaque journal and before the actual effect', async () => {
+    const catalog = new DesktopCapabilityCatalog(), effect = vi.fn(async () => 'effect'); let valid = true;
+    publish(catalog, 'mcp', entry('opaque', effect));
+    const handle = catalog.createScopedRegistry(catalog.snapshotPolicy(), { groupId: 'g', agentId: 'a', turnId: 't', cwd: process.cwd(), workspaceId: 'w1', materialIds: [], permissionRevision: 0, signal: new AbortController().signal, deadlineAt: Date.now() + 10000, beforeOpaqueInvocation: async () => { valid = false; } }, { autoMode: true });
+    try {
+      const result = await handle.registry.executeTool('opaque', {}, { assertContextAdmission: () => { if (!valid) throw new Error('context_revoked'); } } as never);
+      expect(result).toContain('context_revoked'); expect(effect).not.toHaveBeenCalled();
+    } finally { handle.dispose(); }
+  });
+
   it('A38 Given the same owner but a new slot, When it adopts a revoked name, Then child authority is still not inherited', async () => {
     const catalog = new DesktopCapabilityCatalog();
     const first = publish(catalog, 'owner-a', entry('cap'));

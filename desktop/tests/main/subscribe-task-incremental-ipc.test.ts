@@ -41,6 +41,7 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     const subscribeCalls: Array<{ taskId: string; options: unknown }> = [];
     const services = {
       authorizeTaskRead: vi.fn(async () => {}),
+      assertTaskReadCurrent:vi.fn(()=>{}),
       getDataRoot: () => join(rootDir, 'data'),
       async *subscribeTask(taskId: string, options?: { sinceIndex?: number; signal?: AbortSignal }) {
         subscribeCalls.push({ taskId, options });
@@ -104,6 +105,23 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     }
     expect(h.subscribeCalls).toEqual([]); expect(h.services.authorizeTaskRead).not.toHaveBeenCalled();
   });
+  it('uses owner control authorization for cancellation and a negative approval, never revoked-content read authorization', async () => {
+    const h = makeHarness([]), control = vi.fn(async () => {}), cancel = vi.fn(async () => {}), answer = vi.fn(async () => {});
+    h.services.authorizeTaskRead.mockRejectedValue(new Error('not_readable'));
+    Object.assign(h.services, { authorizeTaskControl: control, cancelTask: cancel, answerQuestion: answer });
+    await registerDesktopIpc(h.ipcMain as never, h.window as never, h.services as never, h.options);
+    await expect(h.handlers.get('desktop:cancelTask')!({}, { taskId: 'own' })).resolves.toBeUndefined();
+    await expect(h.handlers.get('desktop:answerQuestion')!({}, { taskId: 'own', answer: { questionId: 'approval', type: 'choice', choiceId: 'deny' } })).resolves.toBeUndefined();
+    expect(control).toHaveBeenCalledTimes(2); expect(cancel).toHaveBeenCalledOnce(); expect(answer).toHaveBeenCalledOnce();
+    await expect(h.handlers.get('desktop:answerQuestion')!({}, { taskId: 'own', answer: { questionId: 'approval', type: 'choice', choiceId: 'approve' } })).rejects.toThrow('not_readable');
+  });
+  it('checks a synchronous current fence at actual send after async authorization returns',async()=>{
+    const h=makeHarness([{type:'result'}]);let calls=0,revoked=false;
+    h.services.authorizeTaskRead.mockImplementation(async()=>{if(++calls===2)queueMicrotask(()=>{revoked=true;});});
+    const current=vi.fn(()=>{if(revoked)throw new Error('not_readable');});Object.assign(h.services,{assertTaskReadCurrent:current});
+    await registerDesktopIpc(h.ipcMain as never,h.window as never,h.services as never,h.options);await h.handlers.get('desktop:subscribeTask')!({},{taskId:'task_race'});await flush();expect(current).toHaveBeenCalled();expect(h.sent).toEqual([]);
+  });
+
   it('releases the exact subscriber without an old disposer aborting its replacement', async () => {
     const h = makeHarness([]), signals: AbortSignal[] = [];
     h.services.subscribeTask = async function* (_task, options) {

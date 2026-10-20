@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
+import { digest, effectSnapshotHash } from './context-continuity/store.js';
 import type {
   GoalCommitInput,
   GoalDocument,
@@ -37,8 +39,10 @@ export interface GoalContextTask {
 
 export class SqliteGoalStore implements GoalStore {
   private readonly db: DatabaseSync;
+  private readonly requireReadProvenance: boolean;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, options: { requireReadProvenance?: boolean } = {}) {
+    this.requireReadProvenance = options.requireReadProvenance === true;
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('pragma journal_mode = WAL');
@@ -55,6 +59,42 @@ export class SqliteGoalStore implements GoalStore {
       'select current_goal_id from goal_sessions where session_id = ?',
     ).get(sessionId) as GoalPointerRow | undefined;
     return pointer ? this.loadGoalById(pointer.current_goal_id) : null;
+  }
+
+  /** Missing pointer is distinct from a damaged or missing pointed-to Goal. */
+  readDisclosureDocument(sessionId: string): GoalDocument | null {
+    const pointer = this.db.prepare('select current_goal_id from goal_sessions where session_id = ?').get(sessionId) as GoalPointerRow | undefined;
+    if (!pointer) return null;
+    const document = this.loadGoalById(pointer.current_goal_id);
+    if (!document || document.state.sessionId !== sessionId || document.state.goalId !== pointer.current_goal_id) throw new Error('goal_content_unavailable');
+    return document;
+  }
+
+  hasUserInputSource(state: GoalState): boolean {
+    const row = this.db.prepare('select content_hash, policy_version from goal_user_input_sources where goal_id=? and epoch=?').get(state.goalId, state.epoch);
+    return row?.policy_version === 1 && row.content_hash === goalUserInputHash(state);
+  }
+
+  readTaskSource(taskId: string): { sourceEpoch: string; scopeHash: string } | null {
+    const row = this.db.prepare('select source_epoch,scope_hash,policy_version from goal_task_read_sources where task_id=?').get(taskId);
+    return row?.policy_version === 1 ? { sourceEpoch: String(row.source_epoch), scopeHash: String(row.scope_hash) } : null;
+  }
+
+  recordTurnSource(taskId: string, snapshot: TaskSnapshot): void {
+    const binding = this.getTaskBinding(taskId), source = this.readTaskSource(taskId), scope = snapshot.executionScope;
+    if (!binding || !source || snapshot.taskId !== taskId || source.sourceEpoch !== snapshot.sessionId
+      || snapshot.context?.threadId !== binding.threadId || scope?.kind !== 'goal_turn'
+      || scope.goalId !== binding.goalId || scope.epoch !== binding.epoch || scope.goalTurnId !== binding.goalTurnId
+      || scope.threadId !== binding.threadId || scope.origin !== binding.origin || source.scopeHash !== goalBindingHash(binding)
+      || !['completed', 'failed', 'cancelled'].includes(snapshot.status)) throw new Error('goal_content_unavailable');
+    const hash = effectSnapshotHash(snapshot), previous = this.readTurnSource(binding.goalId, binding.epoch, binding.goalTurnId);
+    if (previous && (previous.taskId !== taskId || previous.sourceEpoch !== snapshot.sessionId || previous.snapshotHash !== hash)) throw new Error('goal_content_unavailable');
+    this.db.prepare('insert or ignore into goal_turn_read_sources values(?,?,?,?,?,?,1)').run(binding.goalId, binding.epoch, binding.goalTurnId, taskId, snapshot.sessionId, hash);
+  }
+
+  readTurnSource(goalId: string, epoch: number, turnId: string): { taskId: string; sourceEpoch: string; snapshotHash: string } | null {
+    const row = this.db.prepare('select task_id,source_epoch,snapshot_hash,policy_version from goal_turn_read_sources where goal_id=? and epoch=? and turn_id=?').get(goalId, epoch, turnId);
+    return row?.policy_version === 1 ? { taskId: String(row.task_id), sourceEpoch: String(row.source_epoch), snapshotHash: String(row.snapshot_hash) } : null;
   }
 
   loadGoalById(goalId: string): GoalDocument | null {
@@ -78,10 +118,10 @@ export class SqliteGoalStore implements GoalStore {
           goalId,
         ),
       };
-    } catch (error) {
+    } catch {
       console.error('[goal-store] persisted Goal is unavailable', {
         goalId,
-        error: error instanceof Error ? error.message : String(error),
+        error: 'goal_content_unavailable',
       });
       return null;
     }
@@ -95,6 +135,9 @@ export class SqliteGoalStore implements GoalStore {
 
   async commit(input: GoalCommitInput): Promise<void> {
     this.transaction(() => {
+      if (this.requireReadProvenance) for (const turn of input.turns) {
+        if (!this.readTurnSource(turn.goalId, turn.epoch, turn.turnId)) throw new Error('goal_content_unavailable');
+      }
       const pointer = this.db.prepare(
         'select current_goal_id from goal_sessions where session_id = ?',
       ).get(input.sessionId) as GoalPointerRow | undefined;
@@ -139,6 +182,12 @@ export class SqliteGoalStore implements GoalStore {
         }
       }
 
+      if (this.requireReadProvenance && input.events.some(event => event.actor === 'user'
+        && ['created', 'replaced'].includes(event.type) && event.goalId === input.next.goalId && event.revision === input.next.revision)) {
+        const hash = goalUserInputHash(input.next), prior = this.db.prepare('select content_hash,policy_version from goal_user_input_sources where goal_id=? and epoch=?').get(input.next.goalId, input.next.epoch);
+        if (prior && (prior.content_hash !== hash || prior.policy_version !== 1)) throw new Error('goal_content_unavailable');
+        this.db.prepare('insert or ignore into goal_user_input_sources values(?,?,?,1)').run(input.next.goalId, input.next.epoch, hash);
+      }
       const insertEvent = this.db.prepare(`
         insert into goal_events(event_id, session_id, goal_id, revision, event_json, recorded_at)
         values (?, ?, ?, ?, ?, ?)
@@ -166,10 +215,12 @@ export class SqliteGoalStore implements GoalStore {
     });
   }
 
-  bindTask(input: Omit<GoalTaskBinding, 'ordinal'>): GoalTaskBinding {
+  bindTask(input: Omit<GoalTaskBinding, 'ordinal'> & { sourceDataEpoch?: string }): GoalTaskBinding {
     return this.transaction(() => {
       this.assertTaskIdAvailable(input.taskId);
-      const record = { ...input, ordinal: this.nextThreadOrdinal(input.threadId) };
+      const { sourceDataEpoch, ...binding } = input;
+      if (this.requireReadProvenance && (typeof sourceDataEpoch !== 'string' || !sourceDataEpoch)) throw new Error('goal_content_unavailable');
+      const record = { ...binding, ordinal: this.nextThreadOrdinal(input.threadId) };
       this.db.prepare(`
         insert into goal_thread_tasks(
           binding_id, goal_id, epoch, goal_turn_id, thread_id, task_id, origin, ordinal, attached_at
@@ -178,6 +229,7 @@ export class SqliteGoalStore implements GoalStore {
         randomUUID(), record.goalId, record.epoch, record.goalTurnId, record.threadId,
         record.taskId, record.origin, record.ordinal, record.attachedAt,
       );
+      if (sourceDataEpoch) this.db.prepare('insert into goal_task_read_sources values(?,?,?,1)').run(record.taskId, sourceDataEpoch, goalBindingHash(record));
       return record;
     });
   }
@@ -365,8 +417,28 @@ export class SqliteGoalStore implements GoalStore {
       );
       create index if not exists goal_thread_context_tasks_thread
         on goal_thread_context_tasks(thread_id, ordinal);
+      create table if not exists goal_user_input_sources (
+        goal_id text not null, epoch integer not null, content_hash text not null, policy_version integer not null,
+        primary key(goal_id, epoch)
+      );
+      create table if not exists goal_task_read_sources (
+        task_id text primary key, source_epoch text not null, scope_hash text not null, policy_version integer not null
+      );
+      create table if not exists goal_turn_read_sources (
+        goal_id text not null, epoch integer not null, turn_id text not null, task_id text not null,
+        source_epoch text not null, snapshot_hash text not null, policy_version integer not null,
+        primary key(goal_id, epoch, turn_id)
+      );
     `);
   }
+}
+
+export function goalUserInputHash(state: GoalState): string {
+  return digest([1, state.sessionId, state.goalId, state.epoch, state.objective, state.completionCriterion ?? null, state.expectedEvidenceKinds]);
+}
+
+export function goalBindingHash(binding: Omit<GoalTaskBinding, 'ordinal' | 'attachedAt'>): string {
+  return digest([1, binding.taskId, binding.goalId, binding.epoch, binding.goalTurnId, binding.threadId, binding.origin]);
 }
 
 function parseGoalState(raw: string): GoalState {

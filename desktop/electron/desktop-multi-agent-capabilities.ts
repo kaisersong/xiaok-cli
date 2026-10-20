@@ -3,6 +3,8 @@ import type { PermissionClass, Tool, ToolDefinition, ToolExecutionContext, ToolP
 import { isToolPermissionGrant, ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
 import { getCanonicalToolId } from '../../src/ai/tools/tool-identity.js';
 import { MULTI_AGENT_TOOL_NAMES } from '../../src/ai/tools/multi-agent.js';
+import { isKnownLocalBindingFactory } from './desktop-local-operation-bindings.js';
+import { settleUnexpectedHostCheck } from '../../src/runtime/tool-execution-health.js';
 import type { ExecutionAuthorizationSnapshot } from '../shared/multi-agent-types.js';
 
 type Source = 'user' | 'agent' | 'scheduler';
@@ -46,6 +48,8 @@ export interface DesktopScopedRegistry {
   dispose(): void;
 }
 interface ScopeRecord {
+  settledLocalExecutors: Map<Tool, Tool['execute']>;
+  allowSettledLocal: boolean;
   handle: DesktopScopedRegistry; controller: AbortController; active: boolean;
   policy: Map<string, DesktopCapabilityScope>; tools: Map<string, Tool>;
   invalidations: Set<{ current(): boolean; listener(reason: 'descriptor_changed' | 'scope_disposed'): void }>;
@@ -191,7 +195,9 @@ export class DesktopCapabilityCatalog {
     const controller = new AbortController();
     const authority = Object.freeze({ ...input, materialIds: Object.freeze([...input.materialIds]), signal: AbortSignal.any([input.signal, controller.signal]) });
     let record!: ScopeRecord;
+    const settledLocalExecutors = new Map<Tool, Tool['execute']>();
     const registry = new ToolRegistry({ ...options, agentId: authority.agentId,
+      settledLocalExecutors,
       // Never pass the broad global CapabilityRegistry into a scoped tool_search.
       capabilityRegistry: undefined,
       onPrompt: (name, rawInput, invocation) => this.approve(record, name, rawInput, options.onPrompt, invocation),
@@ -204,7 +210,8 @@ export class DesktopCapabilityCatalog {
         this.scopes.delete(record); record.tools.clear(); registry.dispose();
       },
     };
-    record = { handle, controller, active: true, policy: new Map(ceiling), tools: new Map(), invalidations: new Set() };
+    record = { handle, controller, active: true, policy: new Map(ceiling), tools: new Map(), invalidations: new Set(),
+      settledLocalExecutors, allowSettledLocal: !options.onPrompt && !options.hooksRunner && !options.onToolObserved && !options.protectedOutputGuard };
     this.scopes.add(record); this.refresh(record);
     return handle;
   }
@@ -239,29 +246,45 @@ export class DesktopCapabilityCatalog {
     }
     for (const [name, { key, descriptor }] of desired) {
       if (record.tools.has(name)) continue;
+      const localInvoke = record.allowSettledLocal && descriptor.permission === 'safe' && isKnownLocalBindingFactory(descriptor.bindInvocation)
+        ? descriptor.bindInvocation(record.handle.authority) : undefined;
       const tool: Tool & { capabilityId: string } = {
         definition: { ...descriptor.definition, name }, permission: descriptor.permission, capabilityId: descriptor.capabilityId,
         execute: async (input, context) => {
           const authority = record.handle.authority;
           if (authority.signal.aborted) throw authority.signal.reason;
           if (Date.now() >= authority.deadlineAt) throw new DOMException('invocation deadline exceeded', 'AbortError');
-          authority.assertCurrent?.();
+          if (localInvoke) {
+            const unexpected = settleUnexpectedHostCheck(authority.assertCurrent?.(), context);
+            if (unexpected) await unexpected;
+          } else authority.assertCurrent?.();
           if (this.descriptors.get(key) !== descriptor || !this.available(record, key, descriptor)) throw new Error('capability revoked or scope changed');
-          if (!descriptor.verifiedReadOnly) await authority.beforeOpaqueInvocation?.();
+          if (!localInvoke && !descriptor.verifiedReadOnly) await authority.beforeOpaqueInvocation?.();
           // The journal may be asynchronous. Recheck authority before the effect.
           authority.signal.throwIfAborted(); context?.signal?.throwIfAborted();
           if (Date.now() >= authority.deadlineAt) throw new DOMException('invocation deadline exceeded', 'AbortError');
-          authority.assertCurrent?.(); context?.assertPermissionApproval?.();
+          if (localInvoke) {
+            for (const check of [() => authority.assertCurrent?.(), () => context?.assertPermissionApproval?.(), () => context?.assertContextAdmission?.()]) {
+              const unexpected = settleUnexpectedHostCheck(check(), context);
+              if (unexpected) await unexpected;
+            }
+          } else { authority.assertCurrent?.(); context?.assertPermissionApproval?.(); context?.assertContextAdmission?.(); }
           if (this.descriptors.get(key) !== descriptor || !this.available(record, key, descriptor)) throw new Error('capability revoked or scope changed');
-          const invoke = descriptor.bindInvocation(authority);
+          const invoke = localInvoke ?? descriptor.bindInvocation(authority);
           const boundContext: ToolExecutionContext | undefined = context ? { ...context,
             signal: AbortSignal.any([authority.signal, ...(context.signal ? [context.signal] : [])]),
             session: { ...context.session, cwd: authority.cwd },
           } : undefined;
-          context?.onToolInvocationStarted?.();
+          if (localInvoke) {
+            for (const check of [() => context?.onToolInvocationStarted?.(), () => context?.assertContextAdmission?.()]) {
+              const unexpected = settleUnexpectedHostCheck(check(), context);
+              if (unexpected) await unexpected;
+            }
+          } else { context?.onToolInvocationStarted?.(); context?.assertContextAdmission?.(); }
           return invoke(input, boundContext);
         },
       };
+      if(localInvoke) record.settledLocalExecutors.set(tool,tool.execute);
       record.tools.set(name, tool); record.handle.registry.registerTool(tool);
     }
   }

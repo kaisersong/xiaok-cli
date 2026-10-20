@@ -7,9 +7,14 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  cliArchive:{open:string;close:string;notice:string;loading:string;failed:string;retry:string;empty:string;unavailable:string;more:string;preview:(count:number)=>string;claim:string;imported:(count:number)=>string};
+  historySearch: { keepGrant:string; keepNotice:string; saving:string; open:string; close:string; query:string; submit:string; searching:string; coverage:string; consent:string; consentNotice:string; consentFailed:string; failed:string; empty:string; reference:string };
+  contextContinuity: {
+    queueAuthorizationChanged: string; queuePreparationFailed: string; queueInputUnavailable: string; queueUnknown: string; effectUnsettled: string; mcpResetPort: string; mcpConnect: string; mcpNotice: string; mcpListening: string; mcpDisabled: string; mcpUnavailable: string; mcpIssue: string; mcpConfig: string; mcpOneTime: string; mcpCopy: string; mcpCopied: string; mcpStart: string; mcpStop: string; mcpRevoke: string; navigationNotice: string; legacyTitle: string; legacyNotice: (count: number) => string; archiveUnknown: string; legacyUnavailable: string; claimArchive: string; inspectLegacy: string; legacyMustClaim: string; copyConversation: string; copyMessage: string; copied: string; copyFailed: string; reference: string; expand: string; more: string; attach: string; revoke: string; unavailable: string; openSource: string; snapshot: (revision: number) => string };
   diffView: { showFull: string };
   roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
+  nativeContinuityUnavailable:string;
   executionHealth: Record<'running' | 'waiting' | 'recovering' | 'cleanup_pending', string>;
   multiAgent: {
     approvals: { title: string; pending: (count: number) => string; approve: string; approveForTask: string; taskScope: string; details: string; deny: string; query: string;
@@ -3076,6 +3081,7 @@ export interface LocaleStrings {
     statusComplete: string;
     statusCancelled: string;
     statusDisarmed: string;
+    detailsUnavailable: string;
     budgetExhausted: string;
     showDetails: string;
     hideDetails: string;

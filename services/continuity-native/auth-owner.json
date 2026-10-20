@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 1,
+  "upstreamCommit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "baselineSamplingPatchSHA256": "6e9407a35382f0a15220522c5fd479d3fe56b79e1163990116bd758c38382974",
+  "additionalPatchApplication": "apply only after baseline sampling restricted.patch, do NOT also apply auth-snapshot.patch; this includes that primitive",
+  "cargoFeature": "xiaok-auth-owner-only",
+  "previousQualification": {
+    "scope": "historical 51-file File Vault/config slice only",
+    "record": "native-auth-stdout-patch-reproduction-v1/previous-auth-owner.json",
+    "consensus": "native-auth-vault-implementation-main-review-v2/consensus.json",
+    "officialRecipe": {
+      "verification": "native-auth-official-recipe-vault-current-v3-verification.json",
+      "artifact": "native-auth-official-recipe-vault-current-v3-artifact.json",
+      "binarySHA256": "d657d1df21d6b8b74c727f63154366a086ef0c7fc4e97f8dd4f5831911d38ec1",
+      "nativeTests": {
+        "pass": 52,
+        "fail": 0,
+        "skip": 0
+      },
+      "scope": "exact 51-file File Vault candidate only; no final stdout/profile/worker/Harness qualification"
+    }
+  },
+  "scope": "native AuthOwner File Vault/config/one-shot private delivery/final nonblocking stdout + v5 ingress overload fix + bounded oversize-id echo + per-line raw frame budget candidate; synthetic OAuth only; implementation/official recipe qualification pending; NOT real-user OAuth/main-worker stdin/full Harness/whole v10",
+  "additionalPatchSHA256": "dcc1840de528c12e003625a438f79515279300b018dfc62618317ec62d8efba0",
+  "source": [
+    {
+      "path": "codex-rs/Cargo.lock",
+      "originalSHA256": "765110795bf3385d734bf1acfcae77660d29a6c678d5b77015d7ffe49f26e69f",
+      "currentSHA256": "fbaf158804adb4196bf816ef288db6f4bce8e52887545342b4897735c15a595a"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/Cargo.toml",
+      "originalSHA256": "eed16bab0bada46556378b378820cc51c73f09db677802e9de14c652ef13b92d",
+      "currentSHA256": "b44920524f5e08c45380bbc3d5e937d85c7d745da49b25baeb39de3bdc7e1f99"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/lib.rs",
+      "originalSHA256": "60ccfaa6e8f3319966fb86150f51722ed9160e1fcf92aced3a8a326d287efd5f",
+      "currentSHA256": "72586c62a6ea2aae9b0d7763bc0536b74e9e64020bb5fee3033587eb95a79975"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+      "originalSHA256": "e25ebb90bf79be79def79ebf2dd704057577fa9806710fbea0ee240a909d0dc1",
+      "currentSHA256": "e2a83efd484f5d8a6114ddc3313c06f5b15497c43fcaec8d33715df75c69c06d"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/rpc.rs",
+      "originalSHA256": "78c516097c55b665e375807be6dcdceba232805c9ae9fa48420b0a537f0df705",
+      "currentSHA256": "96cacab48cd640aa632b56948e9ea813bd93411dcf0e8af25734d134e2c01a17"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/xiaok_auth_snapshot.rs",
+      "originalSHA256": null,
+      "currentSHA256": "8024d2cf74aeaada1e39791bb2e3337d258f90f3002a49fffa8c26959a126992"
+    },
+    {
+      "path": "codex-rs/app-server-transport/Cargo.toml",
+      "originalSHA256": "bfa7635164e851f166b7e12b07f890802ce8e1dee2fdd36eada21e9cf8f79237",
+      "currentSHA256": "f9eb7175622edf55fbba2a6454accead07ebf740dd34caf292d1b37751cb2dac"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/lib.rs",
+      "originalSHA256": "5da669d70451916afa4548b58a9bc023652e944b503011f8576ce4df36c45d6a",
+      "currentSHA256": "b740e251902be3c20463d4084d66654023f71d7ebb604c1024251d5b4f5921c4"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/outgoing_message.rs",
+      "originalSHA256": "bf66cbcd78a92152312d09270cd6cedfa52b935d825e47ac4f8f1ee584dccad3",
+      "currentSHA256": "b7ad6120f240176cb079b39edf42f25fce30c8ef2d54b0d875747c786879c06d"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/transport/mod.rs",
+      "originalSHA256": "3d9696a60255f90404ffd00864b426242963f1ea54fe0d54eb635574ec6e08e8",
+      "currentSHA256": "cbf54ef1d4fb3f6907571eb8354dc16577333dfef89fad82b7e3597833b1244b"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/transport/remote_control/client_tracker.rs",
+      "originalSHA256": "eb962402dfa0dcd44de5f433ecb91db44ae2f07077e6680c38bb077e24ae874e",
+      "currentSHA256": "41fde77e43ab649b94f9b220a3dc06ca779f2fc80f58c344a96b816732475a82"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/transport/stdio.rs",
+      "originalSHA256": "e4f83304498aec2e9ccad9ad3a0af66965ab93508a4a6923f993731adcd69c19",
+      "currentSHA256": "8191d3c126e22c99bc22341bc07e09c0eb6c31361ee7f5e33ba9b448b939490e"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/transport/websocket.rs",
+      "originalSHA256": "e1a5fe9b1bb865daa376bac587b3afdec0e791e4d83926a4432ecb3b046a98dd",
+      "currentSHA256": "291178d6877cabaa0eafd7070f24044c8f0ec927dc31f439990a87d50e08be5c"
+    },
+    {
+      "path": "codex-rs/app-server-transport/src/xiaok_auth_ingress_tests.rs",
+      "originalSHA256": null,
+      "currentSHA256": "4571c219ebeed6f643003bc2bf5936d53e842c649fbf127c8987e6f440925b6d"
+    },
+    {
+      "path": "codex-rs/app-server/Cargo.toml",
+      "originalSHA256": "aa76caa0c20df461c2f0e59e9f9a512571afda4b3cb6f02a2031482c72135b51",
+      "currentSHA256": "0a9ded2c08b27fc68432940de5327979d863cd7dab5dcc7bd1004b0db66b9fc7"
+    },
+    {
+      "path": "codex-rs/app-server/src/account_notifications.rs",
+      "originalSHA256": "0ddd334e79409f9f0f031c0e7c0fd989f3a95e5ec05a5bbbb4027fa51d36b3ef",
+      "currentSHA256": "05762a97c8887126de7dd8ffda4fd3cb07866688abf0e44aec125c1f80acef35"
+    },
+    {
+      "path": "codex-rs/app-server/src/config_manager.rs",
+      "originalSHA256": "927505ae44571eea6bb975f8f7870dd9a0fd4780c4a788f20b0dfc9151f6fa87",
+      "currentSHA256": "d9e9405e255c4c3e9db053244b259f78d01192356a0e14b3a578b1bce3bf8034"
+    },
+    {
+      "path": "codex-rs/app-server/src/extensions.rs",
+      "originalSHA256": "e097740f3c33cf84456283ea59a4409e48e10c00d61937604e9fe6474e3ef518",
+      "currentSHA256": "d5098b4902eaf35bd84b3e42795db018f4aac8572bd5e4ccb75ae74855493609"
+    },
+    {
+      "path": "codex-rs/app-server/src/gateway_oauth_notifications.rs",
+      "originalSHA256": "4402f098eb554edc8947c7494534ea30ad005f240ce4853693b52d2be5f363c8",
+      "currentSHA256": "98c8bcd5db2a55be91dd160917f283f9434ec8f87ba43d3fcdeeedde8741f444"
+    },
+    {
+      "path": "codex-rs/app-server/src/in_process.rs",
+      "originalSHA256": "f676d9a932866a6aee763013648a163356468a2ab052b773f2b208c37bc7f651",
+      "currentSHA256": "8748a4d4d6fe711b671454ceccd0ef4eeeb23c1d729296ac46ea45b55d03fec3"
+    },
+    {
+      "path": "codex-rs/app-server/src/lib.rs",
+      "originalSHA256": "a6ec995fa87cd2aa8d248c1adbb1bb18c0a6221cfcb9fc127a535369318412df",
+      "currentSHA256": "566941e48fee633110a68ef013bfb5b06877c6a3f0fc50086a2bbcb8c3ea4e44"
+    },
+    {
+      "path": "codex-rs/app-server/src/main.rs",
+      "originalSHA256": "f1b75bc84f9e3cb4b306f627b7a4b310006f18a37c4145185fbef3a7446b7bd0",
+      "currentSHA256": "0c48f003a9c83a470141a5361ce679e8c6db602294c5c9ee29bff8221a1881ac"
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor.rs",
+      "originalSHA256": "848b494880441c18483a2d540c8f9c0ce5c7b380f6673e404cd914a13ae8f67b",
+      "currentSHA256": "7627e0f118d16e248b79168b6f9362e49784fcb0af03bde9ec03c8156dfd857b"
+    },
+    {
+      "path": "codex-rs/app-server/src/message_processor_tracing_tests.rs",
+      "originalSHA256": "992a311a88c748868a0ae070c97b8cfefbddfe45f21e0b3a18ad8318796af0cc",
+      "currentSHA256": "cd80f432e12e3a341a5b102f9b7553ee7f16e0844e496dbf106942af535a4c31"
+    },
+    {
+      "path": "codex-rs/app-server/src/models_refresh_worker.rs",
+      "originalSHA256": "645ed9c9915eb74dfa33434f55d686489a3cd6b6f9cb303f9944cdf80e8f1da3",
+      "currentSHA256": "8be6672402558eaa3f5886582dabbda3f12060f01263d0e3b8ca313d0279b1e6"
+    },
+    {
+      "path": "codex-rs/app-server/src/otel_reloader.rs",
+      "originalSHA256": "c92e8c2288a15e385dc2a6d5e571da3d4d81edee54b84825dd2630a7991f4e7a",
+      "currentSHA256": "d7da0f350e1e0da9721439b156c3fec5552300194a9a18320f6d376aaaad838a"
+    },
+    {
+      "path": "codex-rs/app-server/src/outgoing_message.rs",
+      "originalSHA256": "b16156e72d8a33a1087896bfd211b22094c3ef3e69a2331a7fed8c0530dd657a",
+      "currentSHA256": "f3050c86a8343b5ff5ca328c42d87241883d359ab211c3a380bdf412f6b03361"
+    },
+    {
+      "path": "codex-rs/app-server/src/request_processors/account_processor.rs",
+      "originalSHA256": "fa0f3132af310c9eaa2355fcd57886d1e02db24ca7d8e996d445f55708d576cc",
+      "currentSHA256": "a40f016558bffee859ee3ae3dfb8d69997c8bd0655b4f1599f4ab967339be0a5"
+    },
+    {
+      "path": "codex-rs/app-server/src/skills_watcher.rs",
+      "originalSHA256": "da819589121bb78fce6aa72f0cf2a86908d821e5fb9c43fe0c799a5f960541dd",
+      "currentSHA256": "7ed3eb8e523bf4da4559c2f3720842886449786f07fdbcbaab98cd64f6ae90a3"
+    },
+    {
+      "path": "codex-rs/app-server/src/transport.rs",
+      "originalSHA256": "5e88d3210a738216a1c8e1dd678a947a8991a486b729685e4089a6a36aa769c8",
+      "currentSHA256": "1f2c1ed47ea626c13c4d3681bc4577790ef3484aacbd4ec208cfd5eaf9d6df17"
+    },
+    {
+      "path": "codex-rs/app-server/src/transport_tests.rs",
+      "originalSHA256": "97509b99afdf88cd5d2a17727d5630092d8633a33f2fafc338f4b64acf17b7ab",
+      "currentSHA256": "27ababa76a6b4dbc0a04069c641a4f2586e4a4ea4efbc948228395d443a1057e"
+    },
+    {
+      "path": "codex-rs/app-server/src/turn_cost_worker.rs",
+      "originalSHA256": "880e8442a155112e6f7383418879cda6896cbc3a6bc931480b236972757e8e92",
+      "currentSHA256": "96bf0e0813d78d2a92e48690dcfb4d8fd06198dd226f42595b3ecc7a62d6b213"
+    },
+    {
+      "path": "codex-rs/app-server/src/user_verification_test_support.rs",
+      "originalSHA256": "a90d78644adf1b4da415e044e00ed6953cda2cb423d301745ffb83b58677b53a",
+      "currentSHA256": "1b9c948ac782c60c45ef9bf6378b91e21d7f1c5cea522b749ccc4cf08274c424"
+    },
+    {
+      "path": "codex-rs/app-server/src/xiaok_auth_outgoing_tests.rs",
+      "originalSHA256": null,
+      "currentSHA256": "1e99ba8760e40f9d963745994c005797b201858681e1b0196c1bfdb7d56929db"
+    },
+    {
+      "path": "codex-rs/app-server/src/xiaok_auth_owner.rs",
+      "originalSHA256": null,
+      "currentSHA256": "39bf70e9987b33316a17021ea8a7efd38e2a6a3995ea67597ae77cdec9e2f0d0"
+    },
+    {
+      "path": "codex-rs/app-server/src/xiaok_auth_stdio.rs",
+      "originalSHA256": null,
+      "currentSHA256": "a6a89ac7c372a333574265e8b5a6181180a53fcee87d2f456535eb9f89927995"
+    },
+    {
+      "path": "codex-rs/app-server/src/xiaok_auth_stdio_tests.rs",
+      "originalSHA256": null,
+      "currentSHA256": "01ec2786ad574f6b120dd4aba038375404d939e0d320e541f83c20e6bd9c88b5"
+    },
+    {
+      "path": "codex-rs/app-server/src/xiaok_main_bridge.rs",
+      "originalSHA256": "f758ffa2811deecd7297712d5fc031ec67e0cb8e0a59ceb8582eea98935726d8",
+      "currentSHA256": "12055010b2ff45f209b7e85019b7e502a779a202bee470486a495fcbe17f521a"
+    },
+    {
+      "path": "codex-rs/cloud-config/src/backend.rs",
+      "originalSHA256": "4d8a3c88aecdb2d26d6980fbcbcb3e2e3a4628977f1a791192b03600efe27ae5",
+      "currentSHA256": "885c1228de8609f06abaf17db0d72d52513a3428f16e3b726cb65da22212241a"
+    },
+    {
+      "path": "codex-rs/cloud-config/src/cache.rs",
+      "originalSHA256": "934b99f195e59f636bc7af18b8476c69b022a7855915189869771eac73b5e5e2",
+      "currentSHA256": "80215c969bb926f0b9a8abff2ff5781e4c77c26c37c74e757a8e1b941caa2075"
+    },
+    {
+      "path": "codex-rs/cloud-config/src/service.rs",
+      "originalSHA256": "2341643db8b7496c24b3dfd636c8777a6a666992adbc10c530998f25986b5cc4",
+      "currentSHA256": "265a9ae7fdaa2327e1de8a783678c0d84cf8015702ec836143e48a91ad9dbf78"
+    },
+    {
+      "path": "codex-rs/cloud-config/src/validation.rs",
+      "originalSHA256": "69bae58b1fbe9de62b05eb45878477ccf92c08ccb0d834fad4337338ac87d013",
+      "currentSHA256": "bfe554e511da7f9f89bd922fde25c6a95c03e540c10756271587bcb85c890e8e"
+    },
+    {
+      "path": "codex-rs/config/Cargo.toml",
+      "originalSHA256": "b0656312318ec8c4edabb57d62ad301aa952ab498950dcc73e47665b7c46150a",
+      "currentSHA256": "ae8f197be3e2d2b83c1f1a255bbb538098744e2160efcde6d8738c07ca499b95"
+    },
+    {
+      "path": "codex-rs/config/src/config_toml.rs",
+      "originalSHA256": "aaf8e8e8531f9ef6d854c99af8cd690227ff353f4c930cc64e22ddf5e20f7d84",
+      "currentSHA256": "db07c7e0df9766e4964b1a99732db0f37be9c833afeb4179e4bdee25b7aa0548"
+    },
+    {
+      "path": "codex-rs/config/src/diagnostics.rs",
+      "originalSHA256": "fad30053b1cbeba82230d7182f41cf0ac2fcdea1cd1f9eed640f8879a33b7e32",
+      "currentSHA256": "e2308782f521c7da1dc2f689fd1b5641c4cd31a17fe677ddf8a8aa4364464c5e"
+    },
+    {
+      "path": "codex-rs/config/src/lib.rs",
+      "originalSHA256": "99082e0a494ef440151c0fcd269eb4f8d72cce32aed59a3ac7c3a476d7741e87",
+      "currentSHA256": "a5a494d0f12f4680919e948df4d9242a18a4eeaf7ec34294fb4180a43cc03abc"
+    },
+    {
+      "path": "codex-rs/config/src/loader/layer_io.rs",
+      "originalSHA256": "a090443bc10317e086cd552c29ec4558917bdade0b397abd5229f81f93042022",
+      "currentSHA256": "502db0fa5efad88fc0d144278514ab43e4ee5fdf00a4e261298d4566b90de0f5"
+    },
+    {
+      "path": "codex-rs/config/src/loader/macos.rs",
+      "originalSHA256": "36dd560f67b3b45bf3d63f4e2b962571456c12dc2f9ca55304f8729d49bee0c5",
+      "currentSHA256": "98f01e549c9ddbf2c6b964010e863e3a53f72196210914bf4ceb49bedee042c1"
+    },
+    {
+      "path": "codex-rs/config/src/skills_config.rs",
+      "originalSHA256": "df7e8bcd53b9aef6309a930a25203bfb052345b71091b4e2000e200dedeb2d6b",
+      "currentSHA256": "daaaca3e1ac312ad9b4bc20e8e337bcbc0866325ca393feb887b09cc565f0412"
+    },
+    {
+      "path": "codex-rs/core/src/config/managed_features.rs",
+      "originalSHA256": "74726f6190890f804eca1dcf722922db2c3e494fb9afd42d2cd9e9b3edf565be",
+      "currentSHA256": "7c2e52878437ec08bed011cf5ac3c388af5257efb4d1d6ba615c59f57ded1592"
+    },
+    {
+      "path": "codex-rs/core/src/config/mod.rs",
+      "originalSHA256": "32babb117ff4bf0dc08050c4a755f5996f57f51fcebb82595c81648420394259",
+      "currentSHA256": "cc5c455dfa9ea4852a68b7f9e884ea365c011d611eb6f7a8f2d43a32c1f4bfa9"
+    },
+    {
+      "path": "codex-rs/core/src/config/otel.rs",
+      "originalSHA256": "6af9794a087b90c87356a31a9110064632205a1b2efd336b2fce10ac648990be",
+      "currentSHA256": "62476f1893230527cc0b4e6987d6d89e9c4705d70dda8ed8022bde93ff6e5fb3"
+    },
+    {
+      "path": "codex-rs/core/src/config/permissions.rs",
+      "originalSHA256": "cda9109f6a5405dbf2abbe7d53883b755419c5b6d0b3e7f5834c65710db3479a",
+      "currentSHA256": "2df54835fdf30fef82ff79d2031cb1272ada08be6b9b47bb491d66eff64428e0"
+    },
+    {
+      "path": "codex-rs/core/src/config/requirements.rs",
+      "originalSHA256": "756ba19bc88333f9b2a3f05fd4214d91c77d42900f4c3548af98a47725566543",
+      "currentSHA256": "6924c09c35fa125b497f54e6c0f7bc346c4200d0c07eb8c881ae0fd1e977e5db"
+    },
+    {
+      "path": "codex-rs/ext/extension-api/Cargo.toml",
+      "originalSHA256": "6bb08a37d2035b0560a29120f4113a770fb5412dd0a0a3df6952bd20cad06f80",
+      "currentSHA256": "d19a6b7c1e79e9bb800779f4a92beacffdc337e37f70562a0c5232a29c653e6a"
+    },
+    {
+      "path": "codex-rs/ext/extension-api/src/lib.rs",
+      "originalSHA256": "282c98a920e5c787f6a5cd1771b1757af5caa22d509e3f37c2f8cfdafdbc1b61",
+      "currentSHA256": "218de65ae65141a00045250ad1ba0a2ba9b6747f6d57914179a3445b4eea6fbc"
+    },
+    {
+      "path": "codex-rs/login/Cargo.toml",
+      "originalSHA256": "56f70c2fa40e353ead788e74077b5b25e3f6707f8809b1f9af95aef69ec51673",
+      "currentSHA256": "d330def01fb0a5c5ded89d83c5808bf778a91def406c0b038ea156cbbbc3b96d"
+    },
+    {
+      "path": "codex-rs/login/src/auth/change_state_tests.rs",
+      "originalSHA256": "29e34efa639220398bc30b95bc5cac87a9a86c3f30a0923000f14f4b15807121",
+      "currentSHA256": "cb37fb79684e97147b511bc20d5998b34fc30eae6fd4df212cb53534224987b6"
+    },
+    {
+      "path": "codex-rs/login/src/auth/manager.rs",
+      "originalSHA256": "d2081e3e4f2f339a7a1aa52ea62d8485e7785c2b0a12dde1a7f470019d56dc2a",
+      "currentSHA256": "e978392aa0a37eb8a8fb2ff2fc095ca6e0fa025b2748841859faa1c8a48ff9ca"
+    },
+    {
+      "path": "codex-rs/login/src/auth/mod.rs",
+      "originalSHA256": "5d72ae39f74e2ed944b13bab4dbaab03d5e0ae1a5ec908d14cf4513606fe7b83",
+      "currentSHA256": "5259253cedea6f4e220382062976b846f6421fe79a7975e8f8943c258c370892"
+    },
+    {
+      "path": "codex-rs/login/src/auth/storage.rs",
+      "originalSHA256": "7a975b9db5d6d92a3997285bccb3d357acea709d63a71c3a8b8169eb2539d77b",
+      "currentSHA256": "74b0a849c8349576ac8aa92c733e3fb388baa011a6e976b3d897fcead0409d20"
+    },
+    {
+      "path": "codex-rs/login/src/auth/xiaok_snapshot_tests.rs",
+      "originalSHA256": null,
+      "currentSHA256": "fc8395b4681a2a054e06075ed5d622e290940e2f82280735388231588800feac"
+    },
+    {
+      "path": "codex-rs/login/src/auth/xiaok_vault.rs",
+      "originalSHA256": null,
+      "currentSHA256": "b4e7732359b3b5428a95f7ae5285d7ec5eeeda78b3dc004805dfd0d7057c46a2"
+    },
+    {
+      "path": "codex-rs/login/src/auth/xiaok_vault_tests.rs",
+      "originalSHA256": null,
+      "currentSHA256": "5b68701ca83a730b7252ef413cca6118779bb002ef39dcb816e210db9bd274ef"
+    },
+    {
+      "path": "codex-rs/login/src/device_code_auth.rs",
+      "originalSHA256": "a66f531d5cc5257ba99ec796f69e02f78bab1812bbde57b5aa809237910b3829",
+      "currentSHA256": "becfee540f18236d50a55d6352f1fae35456990f0b948c4a255cbdfa41fff779"
+    },
+    {
+      "path": "codex-rs/login/src/lib.rs",
+      "originalSHA256": "c83451696298640d03f5d27a86943358bd811fbba610265aa8ccbb20f446af5a",
+      "currentSHA256": "f69d368066eb94e8375b847ddd45a8f01c70ded73138211c6051a8cb5c05cd75"
+    },
+    {
+      "path": "codex-rs/login/src/server.rs",
+      "originalSHA256": "d586cdea172ee51784e6a33f1a972bf623c99b15b0217e4fea1a112811f225b4",
+      "currentSHA256": "93f098c02b98b8429bf80d1d78ff50701ba7c79bbf5d67bef0ecbd17c8710009"
+    }
+  ],
+  "sourceRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "reproductionRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/stdout-v5c-patch-baseline-mncoceln/codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "exactPatchCheckAndApplyMatched": true,
+  "syntheticFileVaultTestsPassed": false,
+  "physicalManagedOAuthQualified": false,
+  "privateVaultAndLifetimeLockQualified": false,
+  "workerCredentialLeaseAndFinalStdinQualified": false,
+  "fullHarnessQualified": false,
+  "wholeGoalConsensus": false,
+  "officialRecipeEndToEndQualified": false,
+  "finalStdoutCredentialGateQualified": true,
+  "implementationReview": {
+    "status": "CONSENSUS APPROVE (Codex/Kimi/Zcode independently, tests not run by reviewers)",
+    "scope": "original-native-auth-final-stdout-implementation-v4",
+    "sha256": "842e85e01466c78a8dd6e9d29330abc9061da5afb5c0531c03167a69ccfe9e1c",
+    "consensus": "native-auth-final-stdout-implementation-review-v4/consensus.json",
+    "qualification": "84-file freeze: final stdout + v5 ingress fix + bounded oversize-id echo + per-line raw frame budget; not real-user OAuth/worker stdin lease/full Harness/whole v10",
+    "priorBlockedScopesRetained": [
+      "original-native-auth-final-stdout-implementation-v1",
+      "original-native-auth-final-stdout-implementation-v2",
+      "original-native-auth-final-stdout-implementation-v3"
+    ]
+  },
+  "officialRecipe": {
+    "status": "passed end-to-end on this exact source/tests/patch",
+    "buildRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/xiaok-auth-owner-build-mFBVFF",
+    "recipeSHA256": "0c82a7666562ccaed1187f929090234f0ff1ead7822e4e1cd2831589d7ef88aa",
+    "verification": "native-auth-official-recipe-stdout-v5-v6-process.json",
+    "artifact": "xiaok-auth-owner-build-mFBVFF/artifact.json",
+    "binarySHA256": "5319f2e03161415f75a88ccf251fc43fbc9a86c62481e2f8430f6b831cd54c6c",
+    "testsSHA256": "68db274d1d2af63d87a492ba505ec3d1e5b34a891d617eaf3cfd595f28d7f4e9",
+    "nativeTests": {
+      "pass": 61,
+      "fail": 0,
+      "skip": 0
+    },
+    "scope": "final stdout candidate AuthOwner slice only; no real-user OAuth/main-worker stdin/full-Harness/whole-v10 qualification"
+  },
+  "knownOpenFinalStdoutRed": {
+    "records": [
+      "native-auth-stdout-physical-pipe-red-v1.log",
+      "native-auth-stdout-ingress-overload-red-v1/stdout.log",
+      "native-auth-stdout-ingress-unit-red-v1/xiaok_auth_ingress.log"
+    ],
+    "status": "all recorded REDs closed by the consensus candidate (7/7 stdout + 54/54 serial + units + official recipe 61/61); retained as history, do not re-run as new RED"
+  },
+  "designReview": {
+    "base": {
+      "scope": "original-native-auth-final-stdout-design-v4",
+      "sha256": "6b01ca6bef81db4102cc0f03b90876407048c28c90f9dc97abcdca9b4ff4d07a",
+      "status": "Kimi and Zcode independently APPROVE design-to-tests-to-production only",
+      "evidence": "native-auth-final-stdout-design-main-review-v4/"
+    },
+    "ingressIncrement": {
+      "scope": "original-native-auth-final-stdout-design-v5",
+      "sha256": "1bc930438008eb2e4f808d983f400dcdcab007fce15c27f637783ff60edab79e",
+      "status": "Codex/Kimi/Zcode independently APPROVE design-to-RED-to-production only; production change now included in this patch",
+      "evidence": "native-auth-final-stdout-design-main-review-v5/"
+    },
+    "priorBlockedImplementation": {
+      "scope": "original-native-auth-final-stdout-implementation-v1",
+      "sha256": "5c52e8aa013a0046f7c199765f27a945c3b041b4146500605cfb59158e4671ea",
+      "verdict": "BLOCK (Codex P1 lower ingress Full(Request) overload bypass; Kimi reason independently overruled by all three seats)",
+      "evidence": "native-auth-final-stdout-implementation-review-v1/",
+      "thirdBlockedCandidate": {
+        "scope": "original-native-auth-final-stdout-implementation-v3",
+        "sha256": "253290a0db5c5de7caa71682babc0b606846afa335eef55eed5d8d193acb9e15",
+        "verdict": "Codex BLOCK (pre-split cumulative buffer budget; fixed by this candidate); Kimi APPROVE; Zcode APPROVE; not consensus, tickets retained",
+        "evidence": "native-auth-final-stdout-implementation-review-v3/"
+      }
+    },
+    "generatedAt": "2026-10-19T06:45:20.690044+00:00",
+    "rawReaderPerLineBudgetIncrement": {
+      "origin": "implementation review v3 Codex BLOCK finding (P2): the raw reader checked buffered.len() > MAX_FRAME before splitting lines, so two individually legal lines whose newline arrived in a later read chunk were misjudged as one over-long line and physically closed, violating the preserved fixed-error/alive-until-EOF contract and making the outcome depend on read chunking",
+      "change": "the budget is now checked per completed line (a genuinely over-1MiB line still closes physically) and only on the incomplete tail since the last newline after draining complete lines, matching the approved <=1MiB original buffer semantics; adjacent complete lines never sum into the budget",
+      "status": "presented to implementation review v4 for independent admission; not pre-approved by any design ticket"
+    }
+  }
+}

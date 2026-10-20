@@ -1,6 +1,6 @@
 import { createExecutionHealthMonitor, resolveExecutionIdleMs } from '../execution-health.js';
 import type { RuntimeEvent } from '../events.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
 import { collectArtifactEvidence, buildCompletionEvidenceContext, evidenceForExpectation, shouldRequireArtifactEvidence, hasClarificationResult, isEmptyDelivery } from './delivery-pure.js';
@@ -41,6 +41,7 @@ export interface HistoryMessage {
   role: 'user' | 'assistant';
   content: string;
 }
+export interface OwnedTaskHistory { history: HistoryMessage[]; audit?: TaskContextAudit }
 
 export interface TaskRunnerInput {
   taskId: string;
@@ -75,7 +76,11 @@ export interface TaskExecutionPolicy {
 export interface TaskIdentityReservation {
   readonly taskId: string;
   readonly reservationId: string;
+  readonly sessionId: string;
 }
+
+/** Only the fixed main input owner supplies these identity facts. */
+export interface PendingTaskInputIdentity {taskId:string;sessionId:string;revision:string}
 
 export interface TaskCancellationDecision {
   hostAbortAllowed: boolean;
@@ -90,9 +95,20 @@ export interface InProcessTaskRuntimeHostOptions {
   now?: () => number;
   createTaskId?: () => string;
   createSessionId?: () => string;
+  readPendingInputIdentity?: (inputId:string)=>PendingTaskInputIdentity|null;
+  authorizeInputPreparation?: (inputId:string,identity:PendingTaskInputIdentity,input:TaskCreateInput)=>void;
+  /** Fixed actual input owner; persisted preparation metadata is only a hint. */
+  authorizeInputAdmission?: (snapshot:TaskSnapshot)=>void;
   taskWatchdogMs?: number;
   taskIdleTimeoutMs?: number;
+  beforePrepareTask?:()=>Promise<void>;
+  onPreparedSnapshot?:(snapshot:TaskSnapshot)=>Promise<void>|void;
   onPersistedEvent?: (input: PersistedTaskEvent) => Promise<void> | void;
+  /** Main-owned observation after runner, buffered writes and cancellation IO exit.
+   * The execution promise stays tracked by drain until this observer exits. */
+  onExecutionSettled?: (snapshot: TaskSnapshot) => Promise<void> | void;
+  /** Notification only, after the original preparation/cancel/execution obligation releases. */
+  onWorkReleased?: (taskId:string)=>void;
   aheGuards?: {
     artifactEvidence?: boolean;
     recoveryContinuity?: boolean;
@@ -107,6 +123,9 @@ export interface InProcessTaskRuntimeHostOptions {
   acquireExecutionToken?: (taskId: string) => { release(): void };
   getExecutionPolicy?: (snapshot: TaskSnapshot) => TaskExecutionPolicy;
   authorizePreparation?: (taskId: string, marker: TaskMultiAgentPreparation) => void;
+  assertHistoryRead?: (taskId: string, conversationId: string | undefined) => Promise<void> | void;
+  onHistoryLoaded?: (taskId: string, sources: TaskSnapshot[], conversationId: string | undefined) => Promise<void> | void;
+  resolveOwnedHistory?: (taskId: string, context: TaskCreateContext | undefined) => Promise<OwnedTaskHistory | null> | OwnedTaskHistory | null;
   assertTaskAdmission?: (snapshot: TaskSnapshot) => Promise<void> | void;
   decideCancellation?: (snapshot: TaskSnapshot, reason: string) => Promise<TaskCancellationDecision>;
   /** Fixed main-owned adapter; the exact durable report is the checking ACK. */
@@ -290,6 +309,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly subscribers = new Map<string, Set<LiveSubscription>>();
   private readonly mutationChains = new Map<string, Promise<void>>();
   private readonly cancellingTaskIds = new Set<string>();
+  private readonly cancellationBodies=new Map<Promise<void>,string>();
+  private readonly cancellationObservers=new Map<string,Promise<void>>();
+  private readonly cancellationBodyFailures=new Set<string>();
+  private readonly preparationObligations=new Map<string,Promise<void>>();
   private readonly cancellationPromises = new Map<Promise<void>, string>();
   private readonly cancellationSettlements = new Map<string, CancellationSettlement>();
   private readonly assistantDeltaFlushes = new Map<string, AssistantDeltaFlush>();
@@ -306,6 +329,11 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly pendingTerminalPersistedEvents = new Map<string, PersistedTaskEvent>();
   private stoppedAcceptingReason: string | null = null;
   private readonly identityReservations = new WeakSet<TaskIdentityReservation>();
+  private readonly inputIdentityOrigins=new WeakMap<TaskIdentityReservation,{inputId:string;identity:PendingTaskInputIdentity}>();
+  private readonly inputIdentityRestorations=new Map<string,Promise<TaskIdentityReservation>>();
+  private readonly preparingTaskIds=new Set<string>();
+  private readonly inputPreparationTasks=new Set<string>();
+  private readonly inputPreparationAttempts=new WeakMap<TaskIdentityReservation,{inputId:string;identity:PendingTaskInputIdentity;inputHash:string;failed:boolean;settled:boolean;writeAttempted:boolean;consumed:boolean}>();
   private readonly admissionPromises = new Map<string, Promise<void>>();
   private readonly deliveryVerifier = new DeliveryVerifier();
   /** Failure fallback only. Successful delivery always rereads and verifies. */
@@ -325,26 +353,101 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     void ready.catch(() => undefined);
   }
 
+  /** Main wiring check; copying DTOs never establishes an input owner. */
+  assertInputOwnerDependencies(snapshotStore:FileTaskSnapshotStore,materialRegistry:MaterialRegistry):void{
+    if(snapshotStore!==this.options.snapshotStore||materialRegistry!==this.options.materialRegistry)throw new Error('input_owner_dependency_mismatch');
+  }
+
   /** No filesystem/index write and no runnable task until prepareTask commits. */
   reserveTaskIdentity(): TaskIdentityReservation {
     if (this.stoppedAcceptingReason) throw new Error(`shutting_down: ${this.stoppedAcceptingReason}`);
-    const reservation = Object.freeze({ taskId: this.options.createTaskId?.() ?? `task_${randomUUID()}`, reservationId: randomUUID() });
+    const reservation = Object.freeze({ taskId: this.options.createTaskId?.() ?? `task_${randomUUID()}`, reservationId: randomUUID(),sessionId:this.createSessionId() });
     this.identityReservations.add(reservation);
     return reservation;
   }
 
+  private async readPendingInput(inputId:string):Promise<PendingTaskInputIdentity>{
+    if(!this.options.readPendingInputIdentity||typeof inputId!=='string'||!inputId||inputId.length>256)throw new Error('input_identity_unavailable');
+    const raw:unknown=this.options.readPendingInputIdentity(inputId);
+    if(raw&&typeof (raw as Promise<unknown>).then==='function'){try{await raw;}catch{/* A deferred owner read cannot grant identity. */}throw new Error('input_identity_unavailable');}
+    if(!raw||typeof raw!=='object'||Object.getOwnPropertySymbols(raw).length||Object.getOwnPropertyNames(raw).sort().join(',')!=='revision,sessionId,taskId')throw new Error('input_identity_unavailable');
+    const result={} as PendingTaskInputIdentity;
+    for(const key of ['taskId','sessionId','revision'] as const){const property=Object.getOwnPropertyDescriptor(raw,key);if(!property||!('value'in property)||typeof property.value!=='string'||!property.value||property.value.length>256||/[\u0000-\u001f]/u.test(property.value))throw new Error('input_identity_unavailable');result[key]=property.value;}
+    if(!/^[A-Za-z0-9_-]{1,256}$/.test(result.taskId))throw new Error('input_identity_unavailable');return Object.freeze(result);
+  }
+
+  async bindPendingInputIdentity(inputId:string,reservation:TaskIdentityReservation):Promise<void>{
+    if(!this.identityReservations.has(reservation)||this.inputIdentityOrigins.has(reservation))throw new Error('invalid or consumed input reservation');
+    const first=await this.readPendingInput(inputId);
+    if(first.taskId!==reservation.taskId||first.sessionId!==reservation.sessionId)throw new Error('input_identity_conflict');
+    await this.options.snapshotStore.assertUnusedTaskIdentity(first.taskId);
+    const current=await this.readPendingInput(inputId);
+    if(JSON.stringify(first)!==JSON.stringify(current)||!this.identityReservations.has(reservation)||this.inputIdentityOrigins.has(reservation))throw new Error('input_identity_conflict');
+    this.inputIdentityOrigins.set(reservation,{inputId,identity:first});
+  }
+
+  restorePendingInputIdentity(inputId:string):Promise<TaskIdentityReservation>{
+    const pending=this.inputIdentityRestorations.get(inputId);if(pending)return pending;
+    const run=(async()=>{
+      const first=await this.readPendingInput(inputId);await this.options.snapshotStore.assertUnusedTaskIdentity(first.taskId);const current=await this.readPendingInput(inputId);
+      if(JSON.stringify(first)!==JSON.stringify(current)||this.preparingTaskIds.has(first.taskId))throw new Error('input_identity_conflict');
+      const reservation=Object.freeze({taskId:first.taskId,sessionId:first.sessionId,reservationId:randomUUID()});this.identityReservations.add(reservation);this.inputIdentityOrigins.set(reservation,{inputId,identity:first});return reservation;
+    })();
+    this.inputIdentityRestorations.set(inputId,run);void run.catch(()=>{if(this.inputIdentityRestorations.get(inputId)===run)this.inputIdentityRestorations.delete(inputId);});return run;
+  }
+
+  private assertInputPreparation(reservation:TaskIdentityReservation|undefined,input:TaskCreateInput):void|Promise<never>{
+    const origin=reservation&&this.inputIdentityOrigins.get(reservation);if(!origin)return;
+    if(!this.options.authorizeInputPreparation)throw new Error('input_preparation_unavailable');
+    const checked:unknown=this.options.authorizeInputPreparation(origin.inputId,origin.identity,input);
+    if(checked!==undefined)return this.rejectDeferredInputAuthority(checked,'input_preparation_unavailable');
+  }
+
+  private async rejectDeferredInputAuthority(value:unknown,reason:string):Promise<never>{
+    try{await value;}catch{/* Deferred owner decisions never grant execution. */}throw new Error(reason);
+  }
+
+  private assertInputAdmission(snapshot:TaskSnapshot):void|Promise<never>{
+    if(!this.options.authorizeInputAdmission){if(snapshot.inputPreparation)throw new Error('input_admission_unavailable');return;}
+    const checked:unknown=this.options.authorizeInputAdmission(snapshot);
+    if(checked!==undefined)return this.rejectDeferredInputAuthority(checked,'input_admission_unavailable');
+  }
+
+  /** Negative fact from this boot's original exited attempt, never inferred from a DTO/file. */
+  consumeFailedInputPreparation(inputId:string,reservation:TaskIdentityReservation,revision:string,preparedHash:string):void{
+    const attempt=this.inputPreparationAttempts.get(reservation),origin=this.inputIdentityOrigins.get(reservation);
+    if(!attempt||!origin||attempt.inputId!==inputId||origin.inputId!==inputId||attempt.identity.revision!==revision||attempt.inputHash!==preparedHash||attempt.identity.taskId!==reservation.taskId||attempt.identity.sessionId!==reservation.sessionId||!attempt.failed||!attempt.settled||attempt.writeAttempted||attempt.consumed||this.identityReservations.has(reservation)||this.pendingWorkTaskIds().includes(reservation.taskId)||this.admissionPromises.has(reservation.taskId))throw new Error('input_never_started_proof_unavailable');
+    this.options.snapshotStore.assertUnusedTaskIdentitySync(reservation.taskId);attempt.consumed=true;
+  }
+
   async prepareTask(input: TaskCreateInput, preparation?: {
-    reservation: TaskIdentityReservation; marker: TaskMultiAgentPreparation;
+    reservation: TaskIdentityReservation; marker?: TaskMultiAgentPreparation;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
-    let marker: TaskMultiAgentPreparation | undefined;
-    const taskId = preparation?.reservation?.taskId ?? this.createTaskId();
-    if (preparation) {
-      if (!this.identityReservations.has(preparation.reservation)) throw new Error('invalid or consumed task identity reservation');
-      if (!this.options.authorizePreparation) throw new Error('multi_agent_preparation_not_supported');
-      marker = { ...preparation.marker };
-      this.options.authorizePreparation(taskId, marker);
-      this.identityReservations.delete(preparation.reservation);
+    const reservation=preparation?.reservation,origin=reservation&&this.inputIdentityOrigins.get(reservation);
+    let attempt:ReturnType<typeof this.inputPreparationAttempts.get>;
+    if(origin&&reservation){
+      if(!this.identityReservations.has(reservation)||this.inputPreparationAttempts.has(reservation))throw new Error('invalid or consumed task identity reservation');
+      attempt={inputId:origin.inputId,identity:origin.identity,inputHash:createHash('sha256').update(JSON.stringify(input)).digest('hex'),failed:false,settled:false,writeAttempted:false,consumed:false};
+      this.inputPreparationAttempts.set(reservation,attempt);this.inputPreparationTasks.add(reservation.taskId);this.identityReservations.delete(reservation);
     }
+    try{
+    await this.options.beforePrepareTask?.();
+    let marker: TaskMultiAgentPreparation | undefined;
+    const taskId = reservation?.taskId ?? this.createTaskId();
+    if(this.preparingTaskIds.has(taskId)||this.executionPromises.has(taskId)||this.activeExecutions.has(taskId))throw new Error('task_identity_conflict');
+    if (preparation) {
+      if (!reservation||!attempt&&!this.identityReservations.has(reservation)) throw new Error('invalid or consumed task identity reservation');
+      if(preparation.marker){
+        if (!this.options.authorizePreparation) throw new Error('multi_agent_preparation_not_supported');
+        marker = { ...preparation.marker };this.options.authorizePreparation(taskId, marker);
+      }else if(!this.inputIdentityOrigins.has(reservation))throw new Error('input_preparation_unavailable');
+      this.identityReservations.delete(reservation);
+    }
+    this.preparingTaskIds.add(taskId);
+    let finishPreparation!:()=>void;const preparing=new Promise<void>(resolve=>{finishPreparation=resolve;});this.preparationObligations.set(taskId,preparing);
+    try{
+    {const rejected=this.assertInputPreparation(reservation,input);if(rejected)await rejected;}
+    await this.options.snapshotStore.assertUnusedTaskIdentity(taskId);
     if (input.permissionMode) {
       this.permissionModes.set(taskId, input.permissionMode);
     }
@@ -354,7 +457,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (input.maxToolLoopIterations !== undefined && Number.isFinite(input.maxToolLoopIterations) && input.maxToolLoopIterations > 0) {
       this.maxToolLoopIterations.set(taskId, input.maxToolLoopIterations);
     }
-    const sessionId = this.createSessionId();
+    const sessionId = reservation?.sessionId??this.createSessionId();
     const materials = input.materials.map((item) => {
       const record = this.options.materialRegistry.get(item.materialId);
       if (!record) {
@@ -376,15 +479,24 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       context: contextHistory.audit,
       executionScope: input.executionScope,
       ...(marker ? { multiAgentPreparation: marker } : {}),
+      ...(reservation&&this.inputIdentityOrigins.has(reservation)?{inputPreparation:{inputId:this.inputIdentityOrigins.get(reservation)!.inputId,inputRevision:this.inputIdentityOrigins.get(reservation)!.identity.revision}}:{}),
       usage: { inputTokens: 0, outputTokens: 0, known: false },
       createdAt: this.now(),
       updatedAt: this.now(),
     };
 
-    await this.saveSnapshot(snapshot);
+    {const rejected=this.assertInputPreparation(reservation,input);if(rejected)await rejected;}
+    await this.options.snapshotStore.assertUnusedTaskIdentity(taskId);
+    if(attempt)attempt.writeAttempted=true;
+    await this.options.snapshotStore.createTaskSnapshot(snapshot);
+    {const rejected=this.assertInputPreparation(reservation,input);if(rejected)await rejected;}
+    await this.options.onPreparedSnapshot?.(snapshot);
     await this.appendEvent(taskId, { type: 'task_started', taskId });
     await this.appendEvent(taskId, { type: 'understanding_updated', understanding });
+    {const rejected=this.assertInputPreparation(reservation,input);if(rejected)await rejected;}
     return { taskId, understanding };
+    }finally{this.preparingTaskIds.delete(taskId);if(this.preparationObligations.get(taskId)===preparing)this.preparationObligations.delete(taskId);finishPreparation();const origin=reservation&&this.inputIdentityOrigins.get(reservation);if(origin)this.inputIdentityRestorations.delete(origin.inputId);this.notifyWorkReleased(taskId);}
+    }catch(error){if(attempt)attempt.failed=true;throw error;}finally{if(attempt&&reservation){attempt.settled=true;this.inputPreparationTasks.delete(reservation.taskId);this.identityReservations.delete(reservation);this.inputIdentityRestorations.delete(attempt.inputId);this.notifyWorkReleased(reservation.taskId);}}
   }
 
   async startTask(taskId: string): Promise<void> {
@@ -408,6 +520,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
    * here, so `drain()` observes a real map rather than a second counter.
    */
   private startTrackedExecution(taskId: string): Promise<void> {
+    if(this.preparingTaskIds.has(taskId)||this.inputPreparationTasks.has(taskId))throw new Error('task_preparation_incomplete');
     if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId)) {
       throw new Error(`task already started: ${taskId}`);
     }
@@ -415,16 +528,17 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       throw new Error(`shutting_down: ${this.stoppedAcceptingReason}`);
     }
     const token = this.options.acquireExecutionToken?.(taskId) ?? null;
-    const admission = this.options.assertTaskAdmission
-      ? this.requireSnapshot(taskId).then(snapshot => this.options.assertTaskAdmission!(snapshot))
-      : Promise.resolve();
+    const admission = this.requireSnapshot(taskId).then(async snapshot=>{
+      await this.options.assertTaskAdmission?.(snapshot);
+      const rejected=this.assertInputAdmission(snapshot);if(rejected)await rejected;
+    });
     this.admissionPromises.set(taskId, admission);
     const execPromise = admission.then(() => this.executeTask(taskId))
       .catch(() => undefined)
       .finally(() => this.finalizeExecution(taskId, () => {
           this.executionPromises.delete(taskId);
           this.admissionPromises.delete(taskId);
-          token?.release();
+          token?.release();this.notifyWorkReleased(taskId);
       }));
     this.executionPromises.set(taskId, execPromise);
     return execPromise;
@@ -456,6 +570,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   inFlightTaskIds(): string[] {
     return [...new Set([...this.executionPromises.keys(), ...this.activeExecutions.keys()])];
   }
+
+  /** Main-only busy inventory; missing snapshots stay unknown to consumers. */
+  pendingWorkTaskIds():string[]{return [...new Set([...this.inFlightTaskIds(),...this.cancellationPromises.values(),...this.preparationObligations.keys(),...this.inputPreparationTasks])];}
+  private notifyWorkReleased(taskId:string):void{try{this.options.onWorkReleased?.(taskId);}catch(error){console.warn('[task-host] release observer failed:',error instanceof Error?error.message:String(error));}}
 
   /** Main routing fact, including admitted work waiting for its execution lane. */
   ownsLiveExecution(taskId: string): boolean {
@@ -526,7 +644,13 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   async answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void> {
-    if (this.options.assertTaskAdmission) await this.options.assertTaskAdmission(await this.requireSnapshot(input.taskId));
+    const snapshot = await this.requireSnapshot(input.taskId);
+    if (!this.questions.getCurrent(input.taskId)) this.rehydrateWaitingQuestion(snapshot);
+    const pending = this.questions.getCurrent(input.taskId);
+    const negativeApproval = pending?.questionId === input.answer.questionId && pending.kind === 'assumption_approval'
+      && pending.choices?.some(choice => choice.id === 'deny') && input.answer.type === 'choice' && input.answer.choiceId === 'deny';
+    if (!negativeApproval && this.options.assertTaskAdmission) await this.options.assertTaskAdmission(snapshot);
+    if(!negativeApproval){const rejected=this.assertInputAdmission(snapshot);if(rejected)await rejected;}
     const result = this.questions.answer(input.taskId, input.answer);
     if (result.status === 'not_found') {
       throw new Error(`question not found: ${input.answer.questionId}`);
@@ -548,17 +672,44 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   cancelTask(taskId: string, reason = 'user_cancelled'): Promise<void> {
     const existing = this.cancellationSettlements.get(taskId);
     const joined = existing && !existing.settled ? existing : undefined;
-    const promise = Promise.resolve().then(() => this.cancelTaskOwned(taskId, reason, joined)).finally(() => {
+    const raw=Promise.resolve().then(()=>this.cancelTaskOwned(taskId,reason,joined)).catch(error=>{this.cancellationBodyFailures.add(taskId);throw error;});
+    this.cancellationBodies.set(raw,taskId);
+    void raw.finally(()=>this.cancellationBodies.delete(raw)).catch(()=>undefined);
+    const promise=raw.then(()=>this.observeCancelledWithoutExecution(taskId)).finally(() => {
       this.cancellationPromises.delete(promise);
       if (!this.executionPromises.has(taskId) && ![...this.cancellationPromises.values()].includes(taskId)) {
         this.cancellationSettlements.delete(taskId);
+        this.cancellationBodyFailures.delete(taskId);
         this.cancellingTaskIds.delete(taskId);
         this.assistantDeltaFlushes.delete(taskId);
         this.runtimeEventErrors.delete(taskId);
       }
+      this.notifyWorkReleased(taskId);
     });
     this.cancellationPromises.set(promise, taskId);
     return promise;
+  }
+
+  private observeCancelledWithoutExecution(taskId:string):Promise<void>{
+    const existing=this.cancellationObservers.get(taskId);if(existing)return existing;
+    const pendingBodies=()=>[...this.cancellationBodies].filter(([,id])=>id===taskId).map(([body])=>body);
+    const run=(async()=>{
+      while(this.options.onExecutionSettled&&!this.executionPromises.has(taskId)&&!this.activeExecutions.has(taskId)){
+        const bodies=pendingBodies();if(bodies.length){await Promise.allSettled(bodies);continue;}
+        const preparing=this.preparationObligations.get(taskId);if(preparing){await preparing;continue;}
+        if(this.cancellationBodyFailures.has(taskId))return;
+        const snapshot=await this.inspectTask(taskId);
+        if(pendingBodies().length||this.preparationObligations.has(taskId))continue;
+        if(this.executionPromises.has(taskId)||this.activeExecutions.has(taskId)||this.cancellationBodyFailures.has(taskId))return;
+        if(snapshot&&TERMINAL_STATUSES.has(snapshot.status)){
+          try{await this.options.onExecutionSettled(snapshot);}catch(error){console.warn('[task-host] cancellation observer failed:',error instanceof Error?error.message:String(error));}
+        }
+        return;
+      }
+    })();
+    this.cancellationObservers.set(taskId,run);
+    void run.finally(()=>{if(this.cancellationObservers.get(taskId)===run)this.cancellationObservers.delete(taskId);}).catch(()=>undefined);
+    return run;
   }
 
   private async cancelTaskOwned(taskId: string, reason: string, joined?: CancellationSettlement): Promise<void> {
@@ -741,7 +892,16 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         }
         // An explicit stop can enter during a real read. Recheck before the
         // synchronous physical release, not only before that read began.
-        if (!pendingCancellations().length) break;
+        if (!pendingCancellations().length) {
+          try {
+            const current = this.options.onExecutionSettled ? await this.inspectTask(taskId) : null;
+            if (pendingCancellations().length) continue;
+            if (current && TERMINAL_STATUSES.has(current.status)) await this.options.onExecutionSettled?.(current);
+          } catch (error) {
+            console.warn('[task-host] settlement observer failed:', error instanceof Error ? error.message : String(error));
+          }
+          if (!pendingCancellations().length) break;
+        }
       }
     } finally {
       this.taskHistories.delete(taskId);
@@ -953,6 +1113,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
     try {
       if (this.activeExecutions.get(taskId) !== execution || controller.signal.aborted || this.cancellingTaskIds.has(taskId)) return;
+      {const rejected=this.assertInputAdmission(snapshot);if(rejected)await rejected;}
       await this.options.runner({
         taskId,
         sessionId: snapshot.sessionId,
@@ -987,11 +1148,13 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         // Layer 3: Deliverable Gate — check if all requested deliverables were produced
         // A sealed multi-agent root cannot be reentered by a model-backed gate
         // or an implicit repair turn. Its built-in evidence check still runs.
+        {const rejected=this.assertInputAdmission(latest);if(rejected)await rejected;}
         const gatePass = await runDeliverableGate(latest,
           policy?.deliveryRepair === 'explicit' ? undefined : this.options.completionGate, controller.signal);
         if (!gatePass && !this.cancellingTaskIds.has(taskId)) {
           if (policy?.deliveryRepair === 'explicit') throw new Error('needs_explicit_followup');
           // Retry once with a resume prompt
+          {const rejected=this.assertInputAdmission(latest);if(rejected)await rejected;}
           await this.options.runner({
             taskId,
             sessionId: snapshot.sessionId,
@@ -1266,6 +1429,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     currentTaskId: string,
     context: TaskCreateContext | undefined,
   ): Promise<{ history: HistoryMessage[]; audit?: TaskContextAudit }> {
+    const owned = await this.options.resolveOwnedHistory?.(currentTaskId, context);
+    if (owned) return owned;
     if (!context) {
       return { history: [] };
     }
@@ -1278,6 +1443,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         skipped.push({ taskId, reason: 'self' });
         continue;
       }
+      // A denied dependency is a blocked mandatory context, never a silently skipped history item.
+      await this.options.assertHistoryRead?.(taskId, context.threadId);
       try {
         const snapshot = await this.options.snapshotStore.recoverTask(taskId);
         if (!snapshot) {
@@ -1292,6 +1459,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
     const built = buildHistoryFromTaskSnapshots(snapshots, { currentTaskId });
     const threadId = normalizeContextId(context.threadId);
+    // Commit derived-context dependencies before handing any loaded history to execution.
+    await this.options.onHistoryLoaded?.(currentTaskId, snapshots.filter(snapshot => built.loadedTaskIds.includes(snapshot.taskId)), threadId);
     return {
       history: built.history,
       audit: {

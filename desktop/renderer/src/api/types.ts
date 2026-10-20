@@ -1,4 +1,5 @@
 export type { GoalAttachmentRequest, GoalAttachmentSource } from '../../../shared/goal-attachment';
+export type { TaskHistoryRead, TaskPublicPresentation } from '../../../shared/task-history';
 export type {
   ArtifactWorkspaceEventName,
   ArtifactWorkspaceFeatureAccess,
@@ -49,6 +50,9 @@ export type CollaborationMode = ThreadMode;
 export type ThreadGtdBucket = 'inbox' | 'todo' | 'waiting' | 'someday' | 'archived';
 
 export interface ThreadRecord {
+  coverage?: 'complete' | 'partial' | 'unclaimed';
+  /** Display/import candidates only; never execution ownership or model history. */
+  legacyTaskIds?: string[];
   /** Local association reservation only; main owns execution/deletion status. */
   deletionPending?: boolean;
   id: string;

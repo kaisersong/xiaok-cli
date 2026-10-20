@@ -7,6 +7,10 @@ import { type WorkspaceToolOptions } from './read.js';
 import { type BashApprovalOptions } from './bash.js';
 export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[], bashApproval?: BashApprovalOptions): Tool[];
 export interface RegistryOptions {
+    /** Main-owned exact implementations whose local work is fully awaited. */
+    settledLocalExecutors?: ReadonlyMap<Tool, Tool['execute']>;
+    /** Desktop main requires a durable effect guard; CLI keeps its existing host contract. */
+    requireEffectGuard?: boolean;
     toolIdleTimeoutMs?: number;
     capabilityRegistry?: CapabilityRegistry;
     /** Child discovery must not advertise tools owned only by other registries. */
@@ -37,8 +41,11 @@ export interface ToolObservation {
     result: string;
     ok: boolean;
 }
+/** Query only: names, permission hints and copied objects cannot qualify. */
+export declare function isSettledLocalTool(tool: Tool): boolean;
 export declare class ToolRegistry {
     private tools;
+    private readonly effectGuardSources;
     private deferredTools;
     private canonicalToolNames;
     private permissionManager;

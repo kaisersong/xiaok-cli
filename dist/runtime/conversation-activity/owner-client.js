@@ -1,6 +1,7 @@
 import { createConnection } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { activityOwnerAddress, readActivityOwnerCredentials, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES } from './owner-protocol.js';
+import { readProtectedOwnerQualification } from './owner-qualification.js';
 /** Authenticated attachment. A lost mutation response is never replayed. */
 export class ConversationActivityOwnerClient {
     role;
@@ -11,14 +12,18 @@ export class ConversationActivityOwnerClient {
     connecting;
     buffer = '';
     disposed = false;
+    qualification;
+    statusOnly;
     disconnectListeners = new Set();
     onDisconnect(listener) { this.disconnectListeners.add(listener); return () => { this.disconnectListeners.delete(listener); }; }
     pending = new Map();
     subscriptions = new Map();
-    constructor(dataRoot, role, instanceId) {
+    constructor(dataRoot, role, instanceId, options) {
         this.role = role;
         this.instanceId = instanceId;
         this.address = activityOwnerAddress(dataRoot);
+        this.statusOnly = options?.statusOnly === true;
+        this.qualification = options?.qualification ? Object.freeze({ ...options.qualification }) : this.statusOnly ? undefined : readProtectedOwnerQualification(this.address.dataRoot);
     }
     connect() {
         if (this.disposed)
@@ -27,6 +32,8 @@ export class ConversationActivityOwnerClient {
             return Promise.resolve();
         if (this.connecting)
             return this.connecting;
+        if (!this.statusOnly && !this.qualification)
+            this.qualification = readProtectedOwnerQualification(this.address.dataRoot);
         const credentials = readActivityOwnerCredentials(this.address);
         const pending = new Promise((resolve, reject) => {
             const socket = createConnection(this.address.socketPath);
@@ -60,7 +67,16 @@ export class ConversationActivityOwnerClient {
                         return;
                     }
                     if (!admitted) {
-                        if (message.type !== 'hello' || message.protocol !== ACTIVITY_OWNER_PROTOCOL || message.rootHash !== this.address.rootHash || typeof message.ownerEpoch !== 'string') {
+                        const expected = this.qualification;
+                        if (message.type !== 'hello' || message.protocol !== ACTIVITY_OWNER_PROTOCOL || message.rootHash !== this.address.rootHash || typeof message.ownerEpoch !== 'string' || !message.ownerEpoch) {
+                            clearTimeout(timeout);
+                            reject(new Error('activity_owner_qualification_unavailable'));
+                            socket.destroy();
+                            return;
+                        }
+                        if (expected && (message.generation !== expected.generation || message.profileId !== expected.profileId || message.configDigest !== expected.configDigest || message.ready !== true)) {
+                            clearTimeout(timeout);
+                            reject(new Error('activity_owner_qualification_unavailable'));
                             socket.destroy();
                             return;
                         }
@@ -133,6 +149,8 @@ export class ConversationActivityOwnerClient {
         return pending;
     }
     async request(method, params = {}) {
+        if (this.statusOnly && method !== 'status')
+            throw new Error('activity_owner_probe_method_forbidden');
         await this.connect();
         if (this.pending.size >= 64)
             throw new Error('activity_client_request_capacity');

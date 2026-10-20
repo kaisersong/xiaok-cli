@@ -3,10 +3,15 @@ import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  cliArchive:{open:'导入 CLI 历史',close:'收起 CLI 导入',notice:'导入本机 CLI 已保存的用户和助手文字。历史可能不完整，执行状态未确认；导入后可搜索并单独授权固定引用。',loading:'正在读取 CLI 历史…',failed:'来源已变化、格式不支持或暂不可读取。请重新检查。',retry:'重新检查',empty:'没有找到 CLI 历史。',unavailable:'暂不可导入',more:'下一批会话',preview:count=>`将导入 ${count} 条历史消息（部分历史），以下为预览：`,claim:'导入这些历史消息',imported:count=>`已导入 ${count} 条历史消息，可在上方搜索后授权引用。`},
+  historySearch: {keepGrant:'保留此引用授权',keepNotice:'关闭历史搜索后，仍允许本会话读取此固定引用。',saving:'正在保存授权…',open:'搜索聊天历史',close:'关闭历史搜索',query:'历史关键词',submit:'搜索',searching:'搜索中…',coverage:'在已采集的用户和助手消息中匹配关键词。',consent:'允许本会话的 Agent 检索我的私人聊天历史',consentNotice:'Agent 默认仅搜索本会话和已授权引用。关闭此开关会撤销搜索自动授予的读取权限。',consentFailed:'历史检索授权暂不可用，请重新打开后重试。',failed:'历史暂不可检索，请重试。',empty:'没有匹配的聊天记录。',reference:'历史引用'},
+  contextContinuity: {
+    queueAuthorizationChanged: '执行权限已变化，请取消此条后重新提交。', queuePreparationFailed: '准备失败，未执行。你可以重新提交此请求：', queueInputUnavailable: '附件或历史来源暂不可读取，队列已暂停。待处理消息可取消后重新提交。', queueUnknown: '之前的任务状态未确认，队列已暂停。', effectUnsettled: '此消息对应的执行尚未确认全部结束；自动接续和删除暂不可用。', mcpResetPort: '更换端口并撤销所有外部凭证', mcpConnect: '连接外部 Agent', mcpNotice: '仅允许外部 Agent 读取此处已授权的固定引用。配置由你主动交给目标客户端，不会发送到聊天。', mcpListening: '本机上下文服务已开启', mcpDisabled: '本机上下文服务未开启', mcpUnavailable: '本机服务或授权暂不可用，请重试。', mcpIssue: '生成一次性 MCP 配置', mcpConfig: '一次性 MCP 配置', mcpOneTime: '密钥仅在此展示一次。关闭后需要重新生成；可随时撤销凭证。', mcpCopy: '复制 MCP 配置', mcpCopied: '已复制 MCP 配置', mcpStart: '开启本机服务', mcpStop: '关闭本机服务', mcpRevoke: '撤销外部读取凭证', navigationNotice: "打开引用不会授权其他会话。需要接续时，将链接粘贴到目标聊天并明确授权。", legacyTitle: '旧会话认领', legacyNotice: count => `还有 ${count} 条旧任务来源待核验；每批最多检查 100 条。`, archiveUnknown: '确认后仅允许引用这些历史证据；执行是否真正结束仍未确认。', legacyUnavailable: '来源暂不可核验、仍在执行或已变化。请稍后重新检查。', claimArchive: '确认认领这些历史证据', inspectLegacy: '检查旧会话来源', legacyMustClaim: '请先核验并认领剩余旧会话来源，再继续任务。', copyConversation: '复制会话引用', copyMessage: '复制消息引用', copied: '已复制引用', copyFailed: '引用尚不可用，请稍后重试或认领旧会话', reference: '历史引用', expand: '展开引用', more: '继续读取', attach: '允许当前会话读取', revoke: '撤销当前授权', unavailable: '引用不可读取、已删除或授权已撤销', openSource: '前往原消息', snapshot: revision => `固定快照 · 版本 ${revision}` },
   diffView: { showFull: '展开完整差异' },
   roomWorkspace: roomWorkspaceZh,
   executionHealth: {running:'执行中',waiting:'等待确认后继续',recovering:'连接恢复中',cleanup_pending:'已请求停止，等待实际执行退出并清理资源'},
   localCodex: "本地 Codex",
+  nativeContinuityUnavailable:"原生 Codex 的执行结算尚未完成验证，暂不可用于上下文接续。",
   multiAgent: {
     approvals: { title: '工具审批', pending: count => `${count} 项待审批`, approve: '仅批准本次', approveForTask: '本任务内自动批准相同操作', details: '审批校验详情', taskScope: '仅限本任务、当前智能体、同一工具和工作目录，且参数完全相同；参数变化仍需确认。任务结束或重启后失效，停止任务可撤销。', deny: '拒绝本次', query: '查询审批操作',
       viewInput: '查看本次参数', nextInput: '读取下一页参数', inputLoading: '正在读取参数…', inputFailed: '参数读取或校验失败，请手动重读。',
@@ -3174,6 +3179,7 @@ export const zh: LocaleStrings = {
     statusComplete: "已完成",
     statusCancelled: "已取消",
     statusDisarmed: "待恢复",
+    detailsUnavailable: "目标详情当前不可用",
     budgetExhausted: "轮次预算已用完",
     showDetails: "展开目标详情",
     hideDetails: "收起目标详情",

@@ -73,6 +73,12 @@ export interface ToolExecutionContext {
     /** Main-only, one-invocation guard installed by ToolRegistry after approval.
      * Never tool input, an IPC credential, or a reusable permission grant. */
     assertPermissionApproval?: () => void;
+    /** Main-owned current-context fence, installed after provider projection. */
+    assertContextAdmission?: () => void;
+    /** Trusted host durable effect admission, bound to this task/invocation; never model input. */
+    recordUnprovenEffect?: (toolName: string) => void;
+    /** Main-bound real task for continuity reads; a managed child's agentId is not a task binding. */
+    contextReaderTaskId?: string;
     /** Desktop scoped dispatch observer, appended only after provider projection.
      * Not an input field or permission; called at the actual bound invocation. */
     onToolInvocationStarted?: () => void;

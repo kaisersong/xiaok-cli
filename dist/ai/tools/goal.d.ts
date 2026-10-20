@@ -1,6 +1,7 @@
 import type { Tool, ToolExecutionContext } from '../../types.js';
 export interface GoalToolHost {
     getGoal(context?: ToolExecutionContext): Promise<unknown> | unknown;
+    assertReadCurrent?(value: unknown, context?: ToolExecutionContext): void;
     requestComplete(summary: string, context?: ToolExecutionContext): Promise<{
         accepted: boolean;
         reason?: string;

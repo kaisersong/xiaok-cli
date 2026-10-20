@@ -8,7 +8,14 @@ export function createGoalTools(host) {
                 inputSchema: { type: 'object', properties: {}, additionalProperties: false },
             },
             async execute(_input, context) {
-                return JSON.stringify(await host.getGoal(context));
+                const value = await host.getGoal(context), encoded = JSON.stringify(value);
+                const checked = host.assertReadCurrent?.(value, context);
+                if (checked !== undefined) {
+                    if (checked instanceof Promise)
+                        void checked.catch(() => undefined);
+                    throw new Error('goal_content_unavailable');
+                }
+                return encoded;
             },
         },
         {

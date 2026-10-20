@@ -31,6 +31,7 @@ export declare class ConversationActivityOwnerHost {
         dataRoot: string;
         profileId: string;
         actorId: string;
+        migrateFromProfileId?: string;
         now?(): number;
         idle?(): void;
         env?: NodeJS.ProcessEnv;
@@ -43,6 +44,7 @@ export declare class ConversationActivityOwnerHost {
         sourceControl?(method: string, params: Record<string, unknown>): Promise<unknown>;
         getThread(threadId: string): ActivityThreadIdentity | null;
         canObserveWork(watch: WorkWatch): Promise<boolean> | boolean;
+        canDiscloseWork?(watch: WorkWatch): boolean;
         authorizeProducer(threadId: string, instanceId?: string): boolean;
         notify?: ConstructorParameters<typeof ConversationActivityService>[0]['notify'];
         stopWatch?(watchId: string): void;

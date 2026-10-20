@@ -1,0 +1,796 @@
+diff --git a/codex-rs/login/src/auth/manager.rs b/codex-rs/login/src/auth/manager.rs
+--- a/codex-rs/login/src/auth/manager.rs
++++ b/codex-rs/login/src/auth/manager.rs
+@@ -16,6 +16,7 @@
+ use std::sync::OnceLock;
+ use std::sync::RwLock;
+ use std::sync::Weak;
++use std::sync::atomic::AtomicBool;
+ use std::sync::atomic::AtomicU64;
+ use std::sync::atomic::Ordering;
+ use std::time::Duration;
+@@ -1792,13 +1793,178 @@
+     }
+ }
+ 
++/// Owned auth-only projection. No Deserialize/Default or public constructor:
++/// a response DTO cannot manufacture an original manager snapshot.
++pub struct XiaokManagedAuthSnapshot {
++    tuple: XiaokAuthTuple,
++    pin: XiaokAuthPin,
++    state: AuthChangeState,
++    incarnation: Arc<()>,
++}
++impl Debug for XiaokManagedAuthSnapshot {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("XiaokManagedAuthSnapshot")
++            .field("credential_generation", &self.state.generation)
++            .field("owner_generation", &self.state.owner_generation)
++            .finish_non_exhaustive()
++    }
++}
++impl XiaokManagedAuthSnapshot {
++    pub fn access_token(&self) -> &str {
++        &self.tuple.access_token
++    }
++    pub fn account_id(&self) -> &str {
++        &self.tuple.account_id
++    }
++    pub fn user_id(&self) -> &str {
++        &self.tuple.user_id
++    }
++    pub fn plan(&self) -> Option<&str> {
++        self.tuple.plan.as_deref()
++    }
++    pub fn credential_generation(&self) -> u64 {
++        self.state.generation
++    }
++    pub fn owner_generation(&self) -> u64 {
++        self.state.owner_generation
++    }
++}
++#[derive(Clone, PartialEq, Eq)]
++struct XiaokAuthOwner {
++    mode: &'static str,
++    account_id: String,
++    user_id: String,
++}
++#[derive(Clone, PartialEq, Eq)]
++struct XiaokAuthPin {
++    commitment: [u8; 32],
++    owner: XiaokAuthOwner,
++}
++struct XiaokAuthTuple {
++    mode: &'static str,
++    access_token: String,
++    account_id: String,
++    user_id: String,
++    plan: Option<String>,
++}
++fn xiaok_auth_unavailable() -> std::io::Error {
++    std::io::Error::other("xiaok_auth_unavailable")
++}
++fn xiaok_token_field(value: &str, limit: usize) -> std::io::Result<String> {
++    if value.is_empty()
++        || value.len() > limit
++        || value.trim() != value
++        || value.chars().any(char::is_control)
++    {
++        return Err(xiaok_auth_unavailable());
++    }
++    Ok(value.to_owned())
++}
++fn xiaok_auth_tuple(auth: &CodexAuth, managed_only: bool) -> std::io::Result<XiaokAuthTuple> {
++    let (state, mode, expected_mode) = match auth {
++        CodexAuth::Chatgpt(auth) => (&auth.state, "chatgpt", AuthMode::Chatgpt),
++        CodexAuth::ChatgptAuthTokens(auth) if !managed_only => (
++            &auth.state,
++            "chatgptAuthTokens",
++            AuthMode::ChatgptAuthTokens,
++        ),
++        _ => return Err(xiaok_auth_unavailable()),
++    };
++    // Exactly one nested acquisition for ALL exported fields. Do not call the
++    // original per-field getters while holding this Mutex.
++    let locked = state
++        .auth_dot_json
++        .lock()
++        .map_err(|_| xiaok_auth_unavailable())?;
++    let data = locked.as_ref().ok_or_else(xiaok_auth_unavailable)?;
++    if data.resolved_mode() != expected_mode || data.last_refresh.is_none() {
++        return Err(xiaok_auth_unavailable());
++    }
++    let tokens = data.tokens.as_ref().ok_or_else(xiaok_auth_unavailable)?;
++    let access_token = xiaok_token_field(&tokens.access_token, 65536)?;
++    let account_id = xiaok_token_field(
++        tokens
++            .account_id
++            .as_deref()
++            .ok_or_else(xiaok_auth_unavailable)?,
++        256,
++    )?;
++    let user_id = xiaok_token_field(
++        tokens
++            .id_token
++            .chatgpt_user_id
++            .as_deref()
++            .ok_or_else(xiaok_auth_unavailable)?,
++        256,
++    )?;
++    if tokens.id_token.chatgpt_account_id.as_deref() != Some(account_id.as_str()) {
++        return Err(xiaok_auth_unavailable());
++    }
++    let plan = tokens
++        .id_token
++        .get_chatgpt_plan_type_raw()
++        .map(|value| xiaok_token_field(&value, 256))
++        .transpose()?;
++    Ok(XiaokAuthTuple {
++        mode,
++        access_token,
++        account_id,
++        user_id,
++        plan,
++    })
++}
++impl XiaokAuthTuple {
++    fn pin(&self) -> XiaokAuthPin {
++        use sha2::Digest;
++        let encoded = serde_json::json!([
++            "xiaok/managed-auth-export-tuple/v1",
++            self.mode,
++            self.access_token,
++            self.account_id,
++            self.user_id,
++            self.plan
++        ]);
++        XiaokAuthPin {
++            commitment: sha2::Sha256::digest(encoded.to_string().as_bytes()).into(),
++            owner: XiaokAuthOwner {
++                mode: self.mode,
++                account_id: self.account_id.clone(),
++                user_id: self.user_id.clone(),
++            },
++        }
++    }
++}
++fn xiaok_committed_pin(auth: Option<&CodexAuth>) -> Option<XiaokAuthPin> {
++    auth.and_then(|auth| xiaok_auth_tuple(auth, false).ok())
++        .map(|tuple| tuple.pin())
++}
++
+ /// Internal cached auth state.
+ #[derive(Clone)]
+ struct CachedAuth {
++    change_state: AuthChangeState,
++    xiaok_export_pin: Option<XiaokAuthPin>,
++    xiaok_incarnation: Arc<()>,
++    xiaok_uncommitted: Arc<AtomicBool>,
++    xiaok_counter_exhausted: bool,
+     auth: Option<CodexAuth>,
+     /// Permanent refresh failure cached for the current auth snapshot so
+     /// later refresh attempts for the same credentials fail fast without network.
+     permanent_refresh_failure: Option<AuthScopedRefreshFailure>,
++}
++
++impl CachedAuth {
++    fn new(auth: Option<CodexAuth>) -> Self {
++        Self {
++            change_state: AuthChangeState::default(),
++            xiaok_export_pin: xiaok_committed_pin(auth.as_ref()),
++            xiaok_incarnation: Arc::new(()),
++            xiaok_uncommitted: Arc::new(AtomicBool::new(false)),
++            xiaok_counter_exhausted: false,
++            auth,
++            permanent_refresh_failure: None,
++        }
++    }
+ }
+ 
+ #[derive(Clone)]
+@@ -2196,10 +2362,7 @@
+         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
+         Self {
+             codex_home,
+-            inner: RwLock::new(CachedAuth {
+-                auth: managed_auth,
+-                permanent_refresh_failure: None,
+-            }),
++            inner: RwLock::new(CachedAuth::new(managed_auth)),
+             auth_change_tx,
+             auth_change_state_tx: watch::channel(AuthChangeState::default()).0,
+             workspace_routing_resolver: OnceLock::new(),
+@@ -2227,10 +2390,7 @@
+ 
+     /// Create an AuthManager with an optional CodexAuth, for testing only.
+     pub(crate) fn from_optional_auth_for_testing(auth: Option<CodexAuth>) -> Arc<Self> {
+-        let cached = CachedAuth {
+-            auth,
+-            permanent_refresh_failure: None,
+-        };
++        let cached = CachedAuth::new(auth);
+         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
+ 
+         Arc::new(Self {
+@@ -2258,10 +2418,7 @@
+ 
+     /// Create an AuthManager with a specific CodexAuth and codex home, for testing only.
+     pub fn from_auth_for_testing_with_home(auth: CodexAuth, codex_home: PathBuf) -> Arc<Self> {
+-        let cached = CachedAuth {
+-            auth: Some(auth),
+-            permanent_refresh_failure: None,
+-        };
++        let cached = CachedAuth::new(Some(auth));
+         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
+         Arc::new(Self {
+             codex_home,
+@@ -2292,10 +2449,7 @@
+         auth: CodexAuth,
+         agent_identity_authapi_base_url: String,
+     ) -> Arc<Self> {
+-        let cached = CachedAuth {
+-            auth: Some(auth),
+-            permanent_refresh_failure: None,
+-        };
++        let cached = CachedAuth::new(Some(auth));
+         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
+         Arc::new(Self {
+             codex_home: PathBuf::from("non-existent"),
+@@ -2328,10 +2482,7 @@
+         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
+         Arc::new(Self {
+             codex_home: PathBuf::from("non-existent"),
+-            inner: RwLock::new(CachedAuth {
+-                auth: None,
+-                permanent_refresh_failure: None,
+-            }),
++            inner: RwLock::new(CachedAuth::new(None)),
+             auth_change_tx,
+             auth_change_state_tx: watch::channel(AuthChangeState::default()).0,
+             workspace_routing_resolver: OnceLock::new(),
+@@ -2362,6 +2513,75 @@
+             .read()
+             .ok()
+             .and_then(|cached| cached.auth.clone())
++    }
++
++    /// Synchronous original-manager export only. A refresh is a separate
++    /// original async Result, never an implicit stale-cache fallback here.
++    pub fn xiaok_managed_auth_snapshot(&self) -> std::io::Result<XiaokManagedAuthSnapshot> {
++        let guard = self.inner.read().map_err(|_| xiaok_auth_unavailable())?;
++        let tuple = self.xiaok_current_managed_tuple(&guard)?;
++        Ok(XiaokManagedAuthSnapshot {
++            pin: tuple.pin(),
++            tuple,
++            state: guard.change_state,
++            incarnation: guard.xiaok_incarnation.clone(),
++        })
++    }
++    pub fn xiaok_assert_snapshot_current(
++        &self,
++        original: &XiaokManagedAuthSnapshot,
++    ) -> std::io::Result<()> {
++        let guard = self.inner.read().map_err(|_| xiaok_auth_unavailable())?;
++        if !Arc::ptr_eq(&guard.xiaok_incarnation, &original.incarnation)
++            || guard.change_state != original.state
++        {
++            return Err(xiaok_auth_unavailable());
++        }
++        let current = self.xiaok_current_managed_tuple(&guard)?;
++        if current.pin() != original.pin {
++            return Err(xiaok_auth_unavailable());
++        }
++        Ok(())
++    }
++    fn xiaok_current_managed_tuple(&self, guard: &CachedAuth) -> std::io::Result<XiaokAuthTuple> {
++        if guard.xiaok_counter_exhausted
++            || guard.xiaok_uncommitted.load(Ordering::SeqCst)
++            || guard.permanent_refresh_failure.is_some()
++        {
++            return Err(xiaok_auth_unavailable());
++        }
++        let auth = guard.auth.as_ref().ok_or_else(xiaok_auth_unavailable)?;
++        let tuple = xiaok_auth_tuple(auth, true).map_err(|_| {
++            if matches!(auth, CodexAuth::Chatgpt(_)) {
++                guard.xiaok_uncommitted.store(true, Ordering::SeqCst);
++            }
++            xiaok_auth_unavailable()
++        })?;
++        if guard.xiaok_export_pin.as_ref() != Some(&tuple.pin()) {
++            guard.xiaok_uncommitted.store(true, Ordering::SeqCst);
++            return Err(xiaok_auth_unavailable());
++        }
++        // Match the original login/workspace policy using this owned tuple;
++        // original getters would reacquire the nested token lock separately.
++        let forced_workspaces = self
++            .forced_chatgpt_workspace_id
++            .read()
++            .map_err(|_| xiaok_auth_unavailable())?
++            .clone();
++        let method_allowed = self.managed_auth_policy.allows_login_method(
++            ForcedLoginMethod::Chatgpt,
++            self.forced_login_method,
++            forced_workspaces.as_deref(),
++        );
++        let workspaces = self
++            .managed_auth_policy
++            .effective_chatgpt_workspaces(forced_workspaces.as_deref());
++        if !method_allowed
++            || workspaces.is_some_and(|workspaces| !workspaces.contains(&tuple.account_id))
++        {
++            return Err(xiaok_auth_unavailable());
++        }
++        Ok(tuple)
+     }
+ 
+     /// Subscribes to cached auth changes that can affect request recovery.
+@@ -2626,12 +2846,24 @@
+ 
+     fn set_cached_auth(&self, new_auth: Option<CodexAuth>) -> bool {
+         if let Ok(mut guard) = self.inner.write() {
++            let next_pin = xiaok_committed_pin(new_auth.as_ref());
++            let pin_changed = guard.xiaok_export_pin != next_pin;
++            let had_uncommitted = guard.xiaok_uncommitted.load(Ordering::SeqCst);
+             let previous = guard.auth.as_ref();
+-            let changed = !AuthManager::auths_equal(previous, new_auth.as_ref());
++            let changed = !AuthManager::auths_equal(previous, new_auth.as_ref())
++                || pin_changed
++                || had_uncommitted;
+             let auth_changed_for_refresh =
+-                !Self::auths_equal_for_refresh(previous, new_auth.as_ref());
+-            let owner_changed =
+-                auth_changed_for_refresh && !same_owner(previous, new_auth.as_ref());
++                !Self::auths_equal_for_refresh(previous, new_auth.as_ref())
++                    || pin_changed
++                    || had_uncommitted;
++            let pin_owner_changed = pin_changed
++                && match (&guard.xiaok_export_pin, &next_pin) {
++                    (Some(old), Some(next)) => old.owner != next.owner,
++                    _ => true,
++                };
++            let owner_changed = auth_changed_for_refresh
++                && (pin_owner_changed || !same_owner(previous, new_auth.as_ref()));
+             if owner_changed {
+                 self.auth_route_config
+                     .application_network_policy()
+@@ -2640,16 +2872,38 @@
+             if auth_changed_for_refresh {
+                 guard.permanent_refresh_failure = None;
+             }
++            let legacy_next = if auth_changed_for_refresh {
++                (*self.auth_change_tx.borrow()).checked_add(1)
++            } else {
++                None
++            };
++            if auth_changed_for_refresh {
++                let next_generation = guard.change_state.generation.checked_add(1);
++                let next_owner = if owner_changed {
++                    guard.change_state.owner_generation.checked_add(1)
++                } else {
++                    Some(guard.change_state.owner_generation)
++                };
++                match (next_generation, next_owner, legacy_next) {
++                    (Some(generation), Some(owner_generation), Some(_)) => {
++                        guard.change_state = AuthChangeState {
++                            generation,
++                            owner_generation,
++                        }
++                    }
++                    _ => guard.xiaok_counter_exhausted = true,
++                }
++            }
+             tracing::info!("Reloaded auth, changed: {changed}");
+             guard.auth = new_auth;
++            guard.xiaok_export_pin = next_pin;
++            // Only this original setter can clear observed nested uncertainty;
++            // its new credential revision prevents an old snapshot reviving.
++            guard.xiaok_uncommitted.store(false, Ordering::SeqCst);
+             if auth_changed_for_refresh {
+-                self.auth_change_state_tx.send_modify(|state| {
+-                    state.generation += 1;
+-                    if owner_changed {
+-                        state.owner_generation += 1;
+-                    }
+-                });
+-                self.auth_change_tx.send_modify(|revision| *revision += 1);
++                self.auth_change_state_tx.send_replace(guard.change_state);
++                self.auth_change_tx
++                    .send_replace(legacy_next.unwrap_or(u64::MAX));
+             }
+             changed
+         } else {
+@@ -3130,3 +3384,7 @@
+ #[cfg(test)]
+ #[path = "account_user_id_tests.rs"]
+ mod account_user_id_tests;
++
++#[cfg(test)]
++#[path = "xiaok_snapshot_tests.rs"]
++mod xiaok_snapshot_tests;
+diff --git a/codex-rs/login/src/auth/xiaok_snapshot_tests.rs b/codex-rs/login/src/auth/xiaok_snapshot_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/login/src/auth/xiaok_snapshot_tests.rs
+@@ -0,0 +1,382 @@
++use super::*;
++use base64::Engine;
++use std::sync::mpsc;
++use std::thread;
++
++fn managed(user: &str, account: &str, token: &str) -> CodexAuth {
++    let claims = serde_json::json!({"https://api.openai.com/auth":{"chatgpt_user_id":user,"chatgpt_account_id":account},"jti":token});
++    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
++    let CodexAuth::ChatgptAuthTokens(external) = CodexAuth::from_external_chatgpt_tokens(
++        &format!("header.{payload}.signature"),
++        account,
++        None,
++    )
++    .unwrap() else {
++        panic!("fixture mode");
++    };
++    {
++        let mut value = external.state.auth_dot_json.lock().unwrap();
++        let data = value.as_mut().unwrap();
++        data.auth_mode = Some(AuthMode::Chatgpt);
++        data.tokens.as_mut().unwrap().id_token.chatgpt_account_id = Some(account.to_string());
++    }
++    CodexAuth::Chatgpt(ChatgptAuth {
++        state: external.state,
++        storage: create_auth_storage(
++            PathBuf::from("xiaok-synthetic-private-memory-only"),
++            AuthCredentialsStoreMode::Ephemeral,
++            AuthKeyringBackendKind::default(),
++        ),
++    })
++}
++
++#[test]
++fn xiaok_auth_snapshot_rejects_empty_external_and_nonmanaged_modes() {
++    let empty = AuthManager::from_optional_auth_for_testing(None);
++    assert_eq!(
++        empty.xiaok_managed_auth_snapshot().unwrap_err().to_string(),
++        "xiaok_auth_unavailable"
++    );
++    let api = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("SYNTHETIC_API_CANARY"));
++    assert!(api.xiaok_managed_auth_snapshot().is_err());
++    let CodexAuth::Chatgpt(auth) = managed("user-a", "account-a", "SYNTHETIC_ACCESS_CANARY") else {
++        unreachable!()
++    };
++    let external =
++        AuthManager::from_auth_for_testing(CodexAuth::ChatgptAuthTokens(ChatgptAuthTokens {
++            state: auth.state,
++        }));
++    assert!(external.xiaok_managed_auth_snapshot().is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_is_one_owned_tuple_and_debug_redacts_bearer() {
++    let manager = AuthManager::from_auth_for_testing(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_ACCESS_CANARY",
++    ));
++    let snapshot = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(snapshot.account_id(), "account-a");
++    assert_eq!(snapshot.user_id(), "user-a");
++    assert!(snapshot.access_token().starts_with("header."));
++    assert!(!format!("{snapshot:?}").contains(snapshot.access_token()));
++    manager.xiaok_assert_snapshot_current(&snapshot).unwrap();
++    manager.set_cached_auth(Some(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_NEXT_CANARY",
++    )));
++    assert!(manager.xiaok_assert_snapshot_current(&snapshot).is_err());
++    let rotated = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(rotated.credential_generation(), 1);
++    assert_eq!(rotated.owner_generation(), 0);
++    manager.set_cached_auth(Some(managed(
++        "user-b",
++        "account-b",
++        "SYNTHETIC_OWNER_CANARY",
++    )));
++    assert!(manager.xiaok_assert_snapshot_current(&rotated).is_err());
++    let changed = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(changed.credential_generation(), 2);
++    assert_eq!(changed.owner_generation(), 1);
++}
++
++#[test]
++fn xiaok_auth_snapshot_nested_change_cannot_bypass_original_commit_or_revive_old_snapshot() {
++    let auth = managed("user-a", "account-a", "SYNTHETIC_OLD_CANARY");
++    let manager = AuthManager::from_auth_for_testing(auth.clone());
++    let old = manager.xiaok_managed_auth_snapshot().unwrap();
++    let CodexAuth::Chatgpt(ref value) = auth else {
++        unreachable!()
++    };
++    value
++        .state
++        .auth_dot_json
++        .lock()
++        .unwrap()
++        .as_mut()
++        .unwrap()
++        .tokens
++        .as_mut()
++        .unwrap()
++        .access_token = "SYNTHETIC_NESTED_CHANGE_CANARY".to_string();
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++    manager.set_cached_auth(Some(auth));
++    let committed = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(committed.credential_generation(), 1);
++    assert_eq!(committed.owner_generation(), 0);
++    assert_eq!(committed.access_token(), "SYNTHETIC_NESTED_CHANGE_CANARY");
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_permanent_failure_and_counter_overflow_fail_closed() {
++    let auth = managed("user-a", "account-a", "SYNTHETIC_FAILURE_CANARY");
++    let manager = AuthManager::from_auth_for_testing(auth.clone());
++    let old = manager.xiaok_managed_auth_snapshot().unwrap();
++    manager.record_permanent_refresh_failure_if_unchanged(
++        &auth,
++        &RefreshTokenFailedError::new(RefreshTokenFailedReason::Other, "synthetic".to_string()),
++    );
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++    manager.set_cached_auth(Some(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_RECOVERED_CANARY",
++    )));
++    manager.inner.write().unwrap().change_state.generation = u64::MAX;
++    manager.set_cached_auth(Some(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_OVERFLOW_CANARY",
++    )));
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_waits_for_original_inner_write_and_watch_publish() {
++    let manager = AuthManager::from_auth_for_testing(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_BEFORE_CANARY",
++    ));
++    let receiver = manager.auth_change_state_receiver();
++    let held_watch = receiver.borrow();
++    let writer_manager = manager.clone();
++    let writer = thread::spawn(move || {
++        writer_manager.set_cached_auth(Some(managed(
++            "user-b",
++            "account-b",
++            "SYNTHETIC_AFTER_CANARY",
++        )))
++    });
++    let deadline = Instant::now() + Duration::from_secs(5);
++    while manager.inner.try_read().is_ok() {
++        assert!(Instant::now() < deadline);
++        thread::yield_now();
++    }
++    let (tx, rx) = mpsc::channel();
++    let reader_manager = manager.clone();
++    let reader = thread::spawn(move || {
++        tx.send(reader_manager.xiaok_managed_auth_snapshot())
++            .unwrap()
++    });
++    assert!(matches!(
++        rx.recv_timeout(Duration::from_millis(30)),
++        Err(mpsc::RecvTimeoutError::Timeout)
++    ));
++    drop(held_watch);
++    assert!(writer.join().unwrap());
++    let result = rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
++    reader.join().unwrap();
++    assert_eq!(result.account_id(), "account-b");
++    assert_eq!(result.user_id(), "user-b");
++    assert_eq!(result.credential_generation(), 1);
++    assert_eq!(result.owner_generation(), 1);
++}
++
++#[test]
++fn xiaok_auth_snapshot_real_concurrent_owner_switch_never_mixes_token_and_account() {
++    let auth_a = managed("user-a", "account-a", "SYNTHETIC_A_CANARY");
++    let auth_b = managed("user-b", "account-b", "SYNTHETIC_B_CANARY");
++    let token_a = auth_a.get_token().unwrap();
++    let token_b = auth_b.get_token().unwrap();
++    let manager = AuthManager::from_auth_for_testing(auth_a.clone());
++    let writer_manager = manager.clone();
++    let writer = thread::spawn(move || {
++        for i in 0..500 {
++            writer_manager.set_cached_auth(Some(if i % 2 == 0 {
++                auth_b.clone()
++            } else {
++                auth_a.clone()
++            }));
++        }
++    });
++    for _ in 0..1000 {
++        let value = manager.xiaok_managed_auth_snapshot().unwrap();
++        if value.access_token() == token_a {
++            assert_eq!(value.account_id(), "account-a");
++            assert_eq!(value.user_id(), "user-a");
++        } else {
++            assert_eq!(value.access_token(), token_b);
++            assert_eq!(value.account_id(), "account-b");
++            assert_eq!(value.user_id(), "user-b");
++        }
++    }
++    writer.join().unwrap();
++}
++
++#[test]
++fn xiaok_auth_snapshot_same_tuple_noop_and_foreign_manager_rejected() {
++    let auth = managed("user-a", "account-a", "SYNTHETIC_IDENTICAL_CANARY");
++    let one = AuthManager::from_auth_for_testing(auth.clone());
++    let two = AuthManager::from_auth_for_testing(auth.clone());
++    let snapshot = one.xiaok_managed_auth_snapshot().unwrap();
++    one.set_cached_auth(Some(auth));
++    let next = one.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(next.credential_generation(), 0);
++    assert_eq!(next.owner_generation(), 0);
++    assert!(two.xiaok_assert_snapshot_current(&snapshot).is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_missing_fields_workspace_mismatch_and_policy_are_denied() {
++    for field in ["account", "user", "workspace", "access", "last_refresh"] {
++        let auth = managed("user-a", "account-a", "SYNTHETIC_FIELDS_CANARY");
++        let CodexAuth::Chatgpt(ref inner) = auth else {
++            unreachable!()
++        };
++        {
++            let mut value = inner.state.auth_dot_json.lock().unwrap();
++            let data = value.as_mut().unwrap();
++            if field == "last_refresh" {
++                data.last_refresh = None;
++            } else {
++                let tokens = data.tokens.as_mut().unwrap();
++                match field {
++                    "account" => tokens.account_id = Some(" ".to_string()),
++                    "user" => tokens.id_token.chatgpt_user_id = None,
++                    "workspace" => tokens.id_token.chatgpt_account_id = Some("foreign".to_string()),
++                    "access" => tokens.access_token.clear(),
++                    _ => unreachable!(),
++                }
++            }
++        }
++        let manager = AuthManager::from_auth_for_testing(auth);
++        assert!(manager.xiaok_managed_auth_snapshot().is_err(), "{field}");
++    }
++    let manager = AuthManager::from_auth_for_testing(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_POLICY_CANARY",
++    ));
++    let old = manager.xiaok_managed_auth_snapshot().unwrap();
++    *manager.forced_chatgpt_workspace_id.write().unwrap() = Some(vec!["foreign".to_string()]);
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_nested_owner_change_needs_original_setter_and_new_owner_generation() {
++    let auth = managed("user-a", "account-a", "SYNTHETIC_OWNER_A_CANARY");
++    let manager = AuthManager::from_auth_for_testing(auth.clone());
++    let old = manager.xiaok_managed_auth_snapshot().unwrap();
++    let CodexAuth::Chatgpt(ref inner) = auth else {
++        unreachable!()
++    };
++    {
++        let mut value = inner.state.auth_dot_json.lock().unwrap();
++        let tokens = value.as_mut().unwrap().tokens.as_mut().unwrap();
++        tokens.account_id = Some("account-b".to_string());
++        tokens.id_token.chatgpt_account_id = Some("account-b".to_string());
++        tokens.id_token.chatgpt_user_id = Some("user-b".to_string());
++    }
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    manager.set_cached_auth(Some(auth));
++    let next = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(next.account_id(), "account-b");
++    assert_eq!(next.user_id(), "user-b");
++    assert_eq!(next.credential_generation(), 1);
++    assert_eq!(next.owner_generation(), 1);
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_observed_nested_change_cannot_revive_by_fileless_restore() {
++    let auth = managed("user-a", "account-a", "SYNTHETIC_RESTORE_CANARY");
++    let manager = AuthManager::from_auth_for_testing(auth.clone());
++    let old = manager.xiaok_managed_auth_snapshot().unwrap();
++    let token = old.access_token().to_string();
++    let CodexAuth::Chatgpt(ref inner) = auth else {
++        unreachable!()
++    };
++    inner
++        .state
++        .auth_dot_json
++        .lock()
++        .unwrap()
++        .as_mut()
++        .unwrap()
++        .tokens
++        .as_mut()
++        .unwrap()
++        .access_token = "SYNTHETIC_CHANGED_CANARY".to_string();
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    inner
++        .state
++        .auth_dot_json
++        .lock()
++        .unwrap()
++        .as_mut()
++        .unwrap()
++        .tokens
++        .as_mut()
++        .unwrap()
++        .access_token = token;
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++    manager.set_cached_auth(Some(auth));
++    let next = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(next.credential_generation(), 1);
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++}
++
++#[test]
++fn xiaok_auth_snapshot_all_revision_overflows_are_sticky_without_wraparound() {
++    for field in ["credential", "owner", "legacy"] {
++        let manager = AuthManager::from_auth_for_testing(managed(
++            "user-a",
++            "account-a",
++            "SYNTHETIC_MAX_CANARY",
++        ));
++        let old = manager.xiaok_managed_auth_snapshot().unwrap();
++        match field {
++            "credential" => manager.inner.write().unwrap().change_state.generation = u64::MAX,
++            "owner" => manager.inner.write().unwrap().change_state.owner_generation = u64::MAX,
++            "legacy" => {
++                manager.auth_change_tx.send_replace(u64::MAX);
++            }
++            _ => unreachable!(),
++        }
++        manager.set_cached_auth(Some(managed(
++            "user-b",
++            "account-b",
++            "SYNTHETIC_OVERFLOW_CANARY",
++        )));
++        assert!(manager.xiaok_managed_auth_snapshot().is_err(), "{field}");
++        assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++        manager.set_cached_auth(Some(managed(
++            "user-a",
++            "account-a",
++            "SYNTHETIC_POST_MAX_CANARY",
++        )));
++        assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    }
++}
++
++#[test]
++fn xiaok_auth_snapshot_poisoned_workspace_policy_cannot_become_unrestricted() {
++    let manager = AuthManager::from_auth_for_testing(managed(
++        "user-a",
++        "account-a",
++        "SYNTHETIC_POISON_CANARY",
++    ));
++    let old = manager.xiaok_managed_auth_snapshot().unwrap();
++    *manager.forced_chatgpt_workspace_id.write().unwrap() = Some(vec!["foreign".to_string()]);
++    assert!(manager.xiaok_managed_auth_snapshot().is_err());
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        let _guard = manager.forced_chatgpt_workspace_id.write().unwrap();
++        panic!("synthetic policy lock poison");
++    }));
++    assert!(panic.is_err());
++    assert!(
++        manager.xiaok_managed_auth_snapshot().is_err(),
++        "failed policy read must never become unrestricted"
++    );
++    assert!(manager.xiaok_assert_snapshot_current(&old).is_err());
++}
