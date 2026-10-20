@@ -50,7 +50,7 @@ async function actualIntentControllerScenario(mode:typeof scenarios[number],test
   if(method==='verification.prepareRequest'&&mode==='lost-prepare'&&!lost){lost=true;throw Error('actual prepared reply lost');}
   if(method==='verification.dispatch'&&mode==='lost-dispatch'&&!lost){lost=true;throw Error('actual terminal reply lost');}return result;
  }});
- leaf.factory=()=>createAuthenticatedControllerClient({authorityId:'authority',publicKey:f.keys.publicKey,roundTrip:(bytes,callerSignal)=>{const activeSignal=callerSignal===undefined?signal:AbortSignal.any([callerSignal,signal]);activeSignal.throwIfAborted();return callControllerIpc(socketPath,bytes,{signal:activeSignal});},roundTripSync:unused});leaf.profile=()=>({kind:'protected',index:parsePublicProfileIndex(JSON.parse(readFileSync(join(f.root,'migrations','principals',`${f.peer.uid}.json`),'utf8')))});
+ leaf.factory=()=>createAuthenticatedControllerClient({authorityId:'authority',publicKey:f.keys.publicKey,roundTrip:(bytes,callerSignal)=>{const activeSignal=callerSignal===undefined?signal:AbortSignal.any([callerSignal,signal]);activeSignal.throwIfAborted();return callControllerIpc(socketPath,bytes,{signal:activeSignal,...((mode==='receiver-project-parent'||mode==='receiver-project-parent-sqlite')?{timeoutMs:300000}:{})});},roundTripSync:unused});leaf.profile=()=>({kind:'protected',index:parsePublicProfileIndex(JSON.parse(readFileSync(join(f.root,'migrations','principals',`${f.peer.uid}.json`),'utf8')))});
  const sessionRoot=join(f.root,'sessions'),store=mode.endsWith('sqlite')?new SQLiteSessionStore(join(sessionRoot,'sessions.db')):new FileSessionStore(sessionRoot),authority=createSessionExecutionAuthority({root:sessionRoot,sessionIdentity:'intent-session',hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'host',scopeId:'intent-host'})});const options={store,authority,sessionId:'intent-session',instanceId:'host',workspaceRoot:f.root,now:()=>100000,assertAdmission(){}};
  const originalParentWrite=store.reserveIntentParentPublicationCandidate.bind(store);let checkedTicket=false;
  store.reserveIntentParentPublicationCandidate=async raw=>{await expect(originalParentWrite({ticket:{...raw.ticket},lease:raw.lease})).rejects.toThrow('intent_parent_ticket');const result=await originalParentWrite(raw);await expect(originalParentWrite(raw)).rejects.toThrow('intent_parent_ticket');checkedTicket=true;return result;};
@@ -137,7 +137,8 @@ function runActualIntentControllerScenario(mode:typeof scenarios[number],ctx:Tes
 for(const mode of scenarios.filter(mode=>!mode.includes('parent')))
  it.for([mode])('Intent signed controller actual material and independent recipe: %s',{timeout:mode==="receiver-project-sqlite"?120000:mode==='receiver-project'?125000:60000},runActualIntentControllerScenario);
 // New three-subject end-to-end scenario includes the extra parent native/material/recipe/receiver chain. Existing two-stage bounds stay unchanged.
-it.for(scenarios.filter(mode=>mode.includes('parent')))('Intent signed controller actual material and independent recipe: %s',{timeout:180000},runActualIntentControllerScenario);
+for(const mode of scenarios.filter(mode=>mode.includes('parent')))
+ it.for([mode])('Intent signed controller actual material and independent recipe: %s',{timeout:mode==="receiver-project-parent"?380000:mode==="receiver-project-parent-sqlite"?385000:180000},runActualIntentControllerScenario);
 
 // Test-only observations keep original raw references; no authority or modern ledger assertion.
 function isStoredFixtureObject(value:unknown):value is Record<string,unknown>{

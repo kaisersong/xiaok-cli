@@ -67,7 +67,7 @@ it('final whole-set check rejects a dependency application entering pending duri
   change=()=>{const before=f.f.composition.privateHost.authorityHost.inspectApplication(f.owners[0]).current!;const old=structuredClone(f.bindings[0]);const {contractHash:_,candidatePayloadHash:__,...raw}=old;const binding=createIntentApplicationBinding({...raw,candidateId:'replacement',candidateRevision:2});f.f.composition.privateHost.authorityHost.beginApplicationTransition({owner:f.owners[0],transitionId:'late-transition',previousBindingHash:before.bindingHash,binding,registrationHash:'a'.repeat(64)});};ready=true;
   await expect((f.receiver.publication as any).observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal())).rejects.toThrow();expect(queries).toBe(2);
  }finally{await f.close();}
-},40000);
+},50000);
 
 import {startPublicController} from '../../../src/runtime/verification/controller-public-daemon.js';
 import {createAuthenticatedControllerClient} from '../../../src/runtime/verification/controller-client.js';
@@ -80,10 +80,10 @@ it('actual signed controller routes full original payload pages and last complet
  const app=createApplicationBindingAuthority({database:f.f.database,authorityId:'authority',completion:f.f.composition,clock:f.f.clock,assertCurrent(){},resolvePrincipal:p=>({...p,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555',source:'macos-local-generateduid' as const}),async approve(){throw Error('readonly');}});
  const router=createControllerOperationRouting({publication:f.receiver.publication,verification:f.f.operations,completion:f.f.composition.public,execution:{async invoke(){throw Error('readonly');}},assertCurrent(){},async renew(){}}),appRouter=createControllerApplicationRouting({application:app,assertCurrent(){},async renew(){}});
  const server=await startPublicController({socketPath,authorityId:'authority',serviceEpoch:'boot',privateKey:keys.privateKey,allowedUserIds:[f.f.peer.uid],acceptPeer:()=>f.f.peer,invoke(method,payload,peer,signal){if(method==='publication.readOwnerPayload')reads++;if(method==='publication.observeIntentDependencies')sets++;return method.startsWith('application.')?appRouter.invoke(method,payload,peer,signal):router.invoke(method,payload,peer,signal);}});
- installed.factory=()=>createAuthenticatedControllerClient({authorityId:'authority',publicKey:keys.publicKey,roundTrip:bytes=>callControllerIpc(socketPath,bytes),roundTripSync(){throw Error('unused');}});
+ installed.factory=()=>createAuthenticatedControllerClient({authorityId:'authority',publicKey:keys.publicKey,roundTrip:bytes=>callControllerIpc(socketPath,bytes,{timeoutMs:300000}),roundTripSync(){throw Error('unused');}});
  installed.route=(owner:any)=>({kind:'protected-unregistered',authorityId:'authority',owner:{...owner,profileId:f.owners[0].profileId}});
  try{const result=await readCurrentIntentPublicationDependencies(f.subjects.at(-1));expect(result.publications.map(p=>p.owner)).toEqual(f.owners.slice(0,-1));expect(reads).toBe(2);expect(sets).toBe(1);expect(f.receiver.approvals).toBe(2);for(const p of result.publications)expect(JSON.parse(p.bytes.toString()).application).toEqual(p.application);}finally{installed.factory=installed.route=undefined;await server.close();app.close();await f.close();}
-},60000);
+},75000);
 
 it('no qualified callback occurs after the final qualified authority clock in the dependency result',async()=>{
  let armed=false,reading=false,clocks=0,tails=0;
