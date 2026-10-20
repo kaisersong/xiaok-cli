@@ -20,6 +20,7 @@
  *   });
  */
 
+import { normalizeEnhancedKeys } from './keyboard-protocol.js';
 import { boldCyan, dim, bold, cyan } from './render.js';
 import { getDisplayWidth } from './display-width.js';
 import { MarkdownRenderer } from './markdown.js';
@@ -303,7 +304,7 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
 
     function onKey(data: string | Buffer) {
       if (settled) return;
-      const input = typeof data === 'string' ? data : data.toString('utf8');
+      const input = normalizeEnhancedKeys(Buffer.isBuffer(data) ? data : Buffer.from(data)).toString('utf8');
       // A stdin data event is a byte batch, not a single key. Keep CSI sequences
       // and multi-digit numbers intact, then apply the keys in arrival order.
       const keys = input.match(/\x1b\[[0-?]*[ -/]*[@-~]|\d+|[\r\n \x1b\x03\x7f\x08]/g) ?? [];
