@@ -336,9 +336,10 @@ describe('Windows owned hook tree and pipe drain', () => {
   });
 
   it('does not transfer a joined timeout fact to another raw promise reusing the exact error object', async () => {
-    const f = start(), originalToString = Error.prototype.toString;
+    const errorPrototype: { toString(): string } = Error.prototype;
+    const f = start(), originalToString = errorPrototype.toString;
     let timeoutError: Error | undefined;
-    const rendering = vi.spyOn(Error.prototype, 'toString').mockImplementation(function(this: Error) {
+    const rendering = vi.spyOn(errorPrototype, 'toString').mockImplementation(function(this: Error) {
       if (this.message === 'hook timeout after 50ms') timeoutError = this;
       return originalToString.call(this);
     });
