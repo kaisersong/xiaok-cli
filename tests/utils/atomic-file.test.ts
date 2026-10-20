@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, openSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, openSync, fsyncSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -91,15 +91,42 @@ describe('writeFileAtomicallySync', () => {
   it('strict publication propagates an ancestor flush failure after a newly-created directory', () => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-atomic-strict-')); roots.push(root);
     const target = join(root, 'new', 'nested', 'state.json'); const opens: string[] = [];
-    expect(() => writeFileAtomicallySync(target, '{}', { requireDirectorySync: true, operations: {
+    // Model POSIX directory descriptors independently of the host's directory-fsync support.
+    const directoryDescriptor = -1;
+    expect(() => writeFileAtomicallySync(target, '{}', { platform: 'darwin', requireDirectorySync: true, operations: {
       openSync: ((path, flags, mode) => {
         opens.push(String(path));
         if (String(path) === dirname(root)) throw Object.assign(new Error('ancestor directory unsupported'), { code: 'ENOTSUP' });
+        if (flags === 'r') return directoryDescriptor;
         return openSync(path, flags, mode);
       }) as typeof openSync,
+      fsyncSync: (fd) => { if (fd !== directoryDescriptor) fsyncSync(fd); },
+      closeSync: (fd) => { if (fd !== directoryDescriptor) closeSync(fd); },
     } })).toThrow('ancestor directory unsupported');
     expect(opens).toContain(root); expect(opens).toContain(dirname(root));
     expect(readFileSync(target, 'utf8')).toBe('{}');
+  });
+
+  it('strict publication rejects Windows before filesystem operations', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-atomic-windows-')); roots.push(root);
+    const target = join(root, 'state.json');
+    writeFileSync(target, '{"value":"old"}', 'utf8');
+    const unexpectedOperation = vi.fn(() => { throw new Error('unexpected filesystem operation'); });
+    const operations: AtomicFileOperations = {
+      mkdirSync: unexpectedOperation,
+      openSync: unexpectedOperation,
+      writeFileSync: unexpectedOperation,
+      fsyncSync: unexpectedOperation,
+      closeSync: unexpectedOperation,
+      renameSync: unexpectedOperation,
+      unlinkSync: unexpectedOperation,
+    };
+
+    expect(() => writeFileAtomicallySync(target, '{}', {
+      platform: 'win32', requireDirectorySync: true, operations,
+    })).toThrow('directory sync durability unsupported on Windows');
+    expect(unexpectedOperation).not.toHaveBeenCalled();
+    expect(readFileSync(target, 'utf8')).toBe('{"value":"old"}');
   });
 
 });

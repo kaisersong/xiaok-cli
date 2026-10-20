@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
 import { win32 } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 // ---------------------------------------------------------------------------
 // Hook event types — aligned with Claude Code hook_event_name schema
@@ -388,6 +389,11 @@ type CommandClosureRecord = {
 };
 const commandClosureFacts = new WeakMap<Promise<unknown>, CommandClosureRecord>();
 
+// New, private physical cleanup latency after the original child/stdio close.
+// This does not extend the hook's business timeout or authorize another signal.
+const COMMAND_GROUP_CLEANUP_WINDOW_MS = 250;
+const COMMAND_GROUP_REPROBE_INTERVAL_MS = 10;
+
 function executeCommand(
   config: CommandHookConfig,
   timeoutMs: number,
@@ -400,6 +406,12 @@ function executeCommand(
   let resolve!: (result: CommandResult) => void, reject!: (error: unknown) => void;
   const raw = new Promise<CommandResult>((yes, no) => { resolve = yes; reject = no; });
   commandClosureFacts.set(raw, closure);
+  let groupPollTimer: ReturnType<typeof setTimeout> | undefined;
+  let groupDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearGroupTimers = () => {
+    clearTimeout(groupPollTimer); clearTimeout(groupDeadlineTimer);
+    groupPollTimer = undefined; groupDeadlineTimer = undefined;
+  };
   try {
     signal.throwIfAborted();
     let stdout = '', stderr = '';
@@ -415,12 +427,13 @@ function executeCommand(
     const originalPid = child.pid;
     const positivePid = originalPid !== undefined && Number.isSafeInteger(originalPid) && originalPid > 0 ? originalPid : undefined;
     const remember = (error: unknown) => { errors.add(error); };
-    let rootExited = false, treeTerminationRequested = false, treePending = false, settled = false;
+    let rootExited = false, childClosed = false, treeTerminationRequested = false, treePending = false, settled = false;
+    let groupPending = false;
     let groupGone = false, treeSucceeded = false;
     let terminal: { code: number | null; signal: NodeJS.Signals | null } | undefined;
     const finish = () => {
       const closed = terminal;
-      if (!closed || treePending || settled) return;
+      if (!closed || treePending || groupPending || settled) return;
       settled = true;
       if (closed.signal && !errors.size) remember(new Error(`hook terminated by ${closed.signal}`));
       const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
@@ -435,7 +448,60 @@ function executeCommand(
       else if (errors.size) reject(signal.reason);
       else resolve({ exitCode: closed.code ?? 1, stdout, stderr });
     };
+    const observeClosedGroup = (pgid: number) => {
+      groupPending = true;
+      const fail = (error: unknown) => {
+        if (!groupPending) return;
+        clearGroupTimers(); groupPending = false; remember(error); finish();
+      };
+      const unconfirmed = () => fail(new Error('hook_process_group_unconfirmed'));
+      let lastClock: number | undefined;
+      const clock = (): number | undefined => {
+        try {
+          const now = performance.now();
+          if (!Number.isFinite(now) || now < 0 || now > Number.MAX_SAFE_INTEGER - COMMAND_GROUP_CLEANUP_WINDOW_MS
+            || (lastClock !== undefined && now < lastClock)) {
+            fail(new Error('hook_process_group_clock_invalid'));
+            return undefined;
+          }
+          lastClock = now;
+          return now;
+        } catch (error) { fail(error); return undefined; }
+      };
+      const started = clock();
+      if (started === undefined) return;
+      const deadline = started + COMMAND_GROUP_CLEANUP_WINDOW_MS;
+      // Independent hard stop also bounds polling if the clock stops advancing.
+      // Neither timer nor the absolute monotonic deadline is reset by a probe.
+      groupDeadlineTimer = setTimeout(unconfirmed, COMMAND_GROUP_CLEANUP_WINDOW_MS);
+      const probe = () => {
+        if (!groupPending) return;
+        groupPollTimer = undefined;
+        const before = clock();
+        if (before === undefined) return;
+        if (before >= deadline) { unconfirmed(); return; }
+        let absent = false;
+        try { process.kill(-pgid, 0); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') { fail(error); return; }
+          absent = true;
+        }
+        const after = clock();
+        if (after === undefined) return;
+        // Even an ESRCH observed across the boundary cannot be backdated.
+        if (after >= deadline) { unconfirmed(); return; }
+        if (absent) {
+          clearGroupTimers(); groupPending = false; groupGone = true; finish();
+        } else {
+          groupPollTimer = setTimeout(probe, Math.min(COMMAND_GROUP_REPROBE_INTERVAL_MS, deadline - after));
+        }
+      };
+      probe();
+    };
     const terminate = () => {
+      // Raw completion may still await readonly group observation. A late
+      // abort/timer must never signal a closed or potentially recycled PID.
+      if (childClosed) return;
       try {
         if (!windows && positivePid !== undefined) process.kill(-positivePid, 'SIGTERM');
         else if (!windows) child.kill('SIGTERM');
@@ -479,9 +545,9 @@ function executeCommand(
         if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error);
       }
     };
-    const abort = () => { remember(signal.reason); terminate(); };
+    const abort = () => { if (childClosed) return; remember(signal.reason); terminate(); };
     signal.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(() => { remember(closure.timeoutError); terminate(); }, timeoutMs);
+    const timer = setTimeout(() => { if (childClosed) return; remember(closure.timeoutError); terminate(); }, timeoutMs);
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') remember(error); });
@@ -489,20 +555,15 @@ function executeCommand(
     child.once('exit', () => { rootExited = true; });
     // exit does not prove stdio or descendants have ended.
     child.once('close', (code, terminationSignal) => {
+      childClosed = true;
       clearTimeout(timer); signal.removeEventListener('abort', abort);
-      if (!windows && positivePid !== undefined) {
-        try { process.kill(-positivePid, 0); remember(new Error('hook_process_group_unconfirmed')); }
-        catch (error) {
-          if ((error as NodeJS.ErrnoException)?.code === 'ESRCH') groupGone = true;
-          else remember(error);
-        }
-      }
       terminal = { code, signal: terminationSignal };
-      finish();
+      if (!windows && positivePid !== undefined) observeClosedGroup(positivePid);
+      else finish();
     });
     child.stdin.end(payloadJson);
     if (signal.aborted) abort();
-  } catch (error) { reject(error); }
+  } catch (error) { clearGroupTimers(); reject(error); }
   return raw;
 }
 
