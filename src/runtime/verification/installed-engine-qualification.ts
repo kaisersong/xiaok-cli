@@ -43,7 +43,15 @@ grep -Eq '^Seccomp:[[:space:]]+2$' /proc/self/status
 [ "$(cat /sys/fs/cgroup/memory.max)" = 268435456 ]
 [ "$(cat /sys/fs/cgroup/memory.swap.max)" = 0 ]
 [ "$(cat /sys/fs/cgroup/cpu.max)" = '100000 100000' ]
-[ "$(ls /sys/class/net)" = lo ]
+# The original test consumes substitution stdout, not the ls exit status.
+probe_interfaces=$(ls /sys/class/net) || :
+if [ "$probe_interfaces" = lo ]; then
+  :
+else
+  probe_interface_status=$?
+  (printf 'qualification_probe_interfaces stage=loopback_only exit=%s begin\\n%s\\nqualification_probe_interfaces end\\n' "$probe_interface_status" "$probe_interfaces") >&2 || :
+  exit "$probe_interface_status"
+fi
 [ ! -S /var/run/docker.sock ]
 [ ! -S /run/xiaok-engine/docker.sock ]
 [ ! -e '/Library/Application Support/xiaok-verification' ]

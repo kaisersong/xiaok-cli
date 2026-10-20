@@ -1985,7 +1985,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     prepareReservedTask: async (input:TaskCreateInput,reservation:import('../../src/runtime/task-host/task-runtime-host.js').TaskIdentityReservation)=>{
       await multiAgentReady;const threadId=input.context?.threadId;if(!threadId)throw Error('background_fresh_thread_required');
-      await prepareMultiAgentThread(threadId);return multiAgentService!.prepareRoot(host,threadId,input,reservation);
+      if(!multiAgentService)return host.prepareReservedTask(input,reservation);
+      await prepareMultiAgentThread(threadId);return multiAgentService.prepareRoot(host,threadId,input,reservation);
     },
     startTask: host.startTask.bind(host), cancelTask: host.cancelTask.bind(host),
   };
