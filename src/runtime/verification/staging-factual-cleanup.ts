@@ -1,3 +1,4 @@
+import {persistInstalledMaintenanceRequest,type InstalledCleanupCommandFacts} from './installed-maintenance-handoff.js';
 import {readMaintenanceExecution,type createInstalledMaintenanceExecution} from './maintenance-execution.js';
 import{createHash}from'node:crypto';
 import type{Database}from'better-sqlite3';
@@ -5,6 +6,8 @@ import{canonicalVerificationJson as json}from'./protocol.js';
 import{assertControllerMaterialPipelineDatabase,type createControllerMaterialPipeline}from'./material-pipeline.js';
 import{assertDockerRunnerDatabase,type createDockerRunner}from'../isolated-execution/docker-runner.js';
 import type{QuiescenceAuthority,QuiescenceExpectation,PhysicalQuiescenceReceipt}from'../isolated-execution/physical-quiescence.js';
+const stagingHandoffCommands=new WeakMap<object,InstalledCleanupCommandFacts>();
+export function inspectStagingCleanupHandoffCommand(command:object):InstalledCleanupCommandFacts|undefined{return stagingHandoffCommands.get(command);}
 function sync(value:unknown){if(value!==undefined){void Promise.resolve(value).catch(()=>{});throw Error('staging_cleanup_sync');}}
 /** Host-only factual cleanup of an expired/retired staging copy. It cannot delete
  * original run archives or grant a semantic verdict. No public RPC is installed. */
@@ -15,6 +18,11 @@ export function createStagingFactualCleanup(input:{database:Database;materials:R
  const admission=new AbortController();let active:Promise<void>|undefined,deletionStarted=false;
  let busy=false,window:undefined|{resourceId:string;scopeDigest:string;inventoryHash:string;receipts:{expected:QuiescenceExpectation;receipt:object}[]};
  function current(){sync(currentPort());assertControllerMaterialPipelineDatabase(materials,db);assertDockerRunnerDatabase(raw,db);if(db.inTransaction)throw Error('staging_cleanup_outer_transaction');}
+ function handoff(resourceId:string,action:'request'|'ack'){
+  const row=db.prepare<[string],{record_json:string;state:string}>('SELECT record_json,state FROM broker_staging_intents WHERE resource_id=?').get(resourceId);if(!row)throw Error('staging_cleanup_resource');const record=JSON.parse(row.record_json);
+  if(action==='ack'&&(row.state!=='deleted'||db.prepare<[string],{state:string}>('SELECT state FROM verification_blob_reservations WHERE resource_id=?').get(resourceId)?.state!=='released'))throw Error('staging_cleanup_handoff_incomplete');
+  const command=Object.freeze({}),facts:InstalledCleanupCommandFacts={source:materials,database:db,kind:'material',resourceId,expected:null,allocations:[record.allocation],action,...(action==='ack'?{evidence:json(row)}:{})};stagingHandoffCommands.set(command,facts);try{persistInstalledMaintenanceRequest(command);}finally{stagingHandoffCommands.delete(command);}
+ }
  function scope(resourceId:string){const row=db.prepare('SELECT scope_digest,record_json,state FROM broker_staging_intents WHERE resource_id=?').get(resourceId) as {scope_digest:string;record_json:string;state:string}|undefined;if(!row||!['prepared','ready','published','deleting','deleted'].includes(row.state))throw Error('staging_cleanup_resource');const r=JSON.parse(row.record_json);if(r.allocation?.resourceId!==resourceId||r.directory!==resourceId||r.manifest?.scopeDigest!==row.scope_digest||r.allocation?.scopeDigest!==row.scope_digest)throw Error('staging_cleanup_resource');return row.scope_digest;}
  function inventory(){current();if(maintenance)return maintenance.inventory();const hash=createHash('sha256'),expected:QuiescenceExpectation[]=[],ids=new Set<string>();
   for(const row of db.prepare('SELECT execution_id,resources_json FROM docker_runner_resources ORDER BY execution_id').all() as {execution_id:string;resources_json:string}[]){const r=JSON.parse(row.resources_json);if(r.expected?.executionIdentity!==row.execution_id)throw Error('staging_cleanup_inventory');const record=raw.readExecution(r.expected);if(record.state!=='terminal')throw Error('staging_cleanup_nonterminal');if(json(record.expected)!==json(r.expected))throw Error('staging_cleanup_inventory');ids.add(row.execution_id);expected.push(Object.freeze({...record.expected}));hash.update(json(row)+'\n');}
@@ -23,7 +31,7 @@ export function createStagingFactualCleanup(input:{database:Database;materials:R
  function assertCleanup(resourceId:string){current();const w=window;if(!w||w.resourceId!==resourceId)throw Error('staging_cleanup_window');if(scope(resourceId)!==w.scopeDigest)throw Error('staging_cleanup_scope');sync(inactive(w.scopeDigest));if(inventory().hash!==w.inventoryHash)throw Error('staging_cleanup_inventory_changed');for(const x of w.receipts)sync(assertReceipt(x.receipt,x.expected));current();}
  async function clean(resourceId:string,signal:AbortSignal){current();if(busy)throw Error('staging_cleanup_busy');busy=true;try{signal?.throwIfAborted();const scopeDigest=scope(resourceId);sync(inactive(scopeDigest));inventory();await ensure(signal);current();signal?.throwIfAborted();const before=inventory(),receipts:{expected:QuiescenceExpectation;receipt:object}[]=[];
    for(const expected of before.expected){signal?.throwIfAborted();const receipt=await inspect(expected);sync(assertReceipt(receipt,expected));receipts.push({expected,receipt});}
-   signal?.throwIfAborted();window={resourceId,scopeDigest,inventoryHash:before.hash,receipts};assertCleanup(resourceId);deletionStarted=true;remove(resourceId);
+   signal?.throwIfAborted();window={resourceId,scopeDigest,inventoryHash:before.hash,receipts};assertCleanup(resourceId);handoff(resourceId,'request');deletionStarted=true;remove(resourceId);handoff(resourceId,'ack');
   }finally{window=undefined;busy=false;}}
  async function sweepOnce(){current();admission.signal.throwIfAborted();if(active){lastOutcome='deferred';lastError='staging_cleanup_busy';return;}
   const find=(after:string)=>db.prepare("SELECT resource_id FROM broker_staging_intents WHERE state IN ('prepared','ready','published','deleting') AND resource_id>? ORDER BY resource_id LIMIT 1").get(after) as {resource_id:string}|undefined;

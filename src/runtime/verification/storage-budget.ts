@@ -26,6 +26,8 @@ export function assertVerificationDatabaseBudget(db: Database, options: { additi
     ['material_mount_plan_handoffs', ['authorization_id', 'handoff_id', 'record_json', 'state'], false],
     ['broker_staging_intents', ['record_json', 'state', 'scope_digest']],
     ['docker_runner_resources', ['resources_json']],
+    ['verification_maintenance_handoffs', ['authority_id','origin_epoch','phase','claim_epoch','items_hash','close_attempt_id']],
+    ['verification_maintenance_handoff_items', ['authority_id','origin_epoch','item_id','target_json','target_hash','outcome','evidence_hash']],
     ['execution_attempts', ['proposal_json', 'state', 'container_id']],
     ['controller_grants', ['principal_id', 'request_source', 'method', 'payload_hash', 'secret_hash', 'state']],
     ['completion_access_grants', ['owner_key', 'principal', 'secret_hash', 'service_epoch', 'method', 'payload_hash', 'source', 'state'], false],

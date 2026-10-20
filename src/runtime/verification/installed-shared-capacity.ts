@@ -1,7 +1,7 @@
 import {assertInstalledStackCapacityComponent} from './installed-execution-stack.js';
 import {readBlobCapacityIssuer} from './blob-capacity-issuer.js';
 import {readInstalledCapacityAuthority,assertInstalledCapacityAuthorityLifetime,claimInstalledCapacityLayer,finishInstalledSharedCapacityLayer,failInstalledCapacityLayer} from './installed-controller.js';
-import {readMaintenanceExecution,assertMaintenanceProbeDeleted} from './maintenance-execution.js';
+import {assertMaintenanceExecutionDatabase,assertMaintenanceProbeDeleted} from './maintenance-execution.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {createSharedBlobCapacity} from './shared-blob-capacity.js';
 import {createAuthorityBlobBudget} from './authority-blob-budget.js';
@@ -30,7 +30,7 @@ export function assertInstalledSharedCapacity(owner:object,lifetime:InstalledCon
 export function registerInstalledCapacityIssuer(owner:object,slot:Slot,component:object,engine?:Awaited<ReturnType<typeof initializeInstalledMacEngine>>,construction?:object){
  if(!construction)throw Error('installed_capacity_construction');assertInstalledStackCapacityComponent(construction,owner,slot,component,engine);
  const entry=owners.get(owner);if(!entry)throw Error('installed_capacity_identity');entry.current();const db=entry.database;
- if(slot==='qualification'){if(!engine)throw Error('installed_capacity_engine');assertInstalledEngineQualificationIdentity(component,engine,db);}else if(slot==='materials')assertControllerMaterialPipelineDatabase(component,db);else if(slot==='execution')assertDockerRunnerDatabase(component,db);else if(slot==='transcripts')assertExecutionTranscriptStoreDatabase(component,db);else if(slot==='runs')assertProtectedRunLedgerDatabase(component,db);else if(slot==='maintenance-probe')readMaintenanceExecution(component,db);else throw Error('installed_capacity_slot');
+ if(slot==='qualification'){if(!engine)throw Error('installed_capacity_engine');assertInstalledEngineQualificationIdentity(component,engine,db);}else if(slot==='materials')assertControllerMaterialPipelineDatabase(component,db);else if(slot==='execution')assertDockerRunnerDatabase(component,db);else if(slot==='transcripts')assertExecutionTranscriptStoreDatabase(component,db);else if(slot==='runs')assertProtectedRunLedgerDatabase(component,db);else if(slot==='maintenance-probe')assertMaintenanceExecutionDatabase(component,db);else throw Error('installed_capacity_slot');
  const old=entry.slots.get(slot);if(old){if(old.component!==component)throw Error('installed_capacity_issuer_replaced');return;}
  entry.slots.set(slot,{component});
 }
