@@ -1391,6 +1391,9 @@ export interface LocaleStrings {
     chatCompactThresholdLate: string;
     chatCompactKeepLabel: string;
     chatCompactKeepDesc: string;
+    harnessOptimizationTitle: string;
+    harnessOptimizationUnavailable: string;
+    harnessOptimizationReadError: string;
     chatCompactSave: string;
     chatCompactSaving: string;
     chatCompactSaved: string;

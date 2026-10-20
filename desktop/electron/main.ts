@@ -1,4 +1,5 @@
 import { scheduledRunPresentation } from './scheduled-run-presentation.js';
+import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -669,7 +670,9 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       platform: process.platform, executablePath: process.execPath, resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
     }) : undefined;
+  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
     notifyConversationActivity: async activity => {
@@ -979,6 +982,12 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   }
 
   shutdownAwareIpc.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
+  registerHarnessOptimizationIpc(shutdownAwareIpc, services, event => {
+    return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
+      && event.senderFrame === mainWindow.webContents.mainFrame
+      && isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer })
+      ? harnessUserActor : null;
+  });
   shutdownAwareIpc.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));
   shutdownAwareIpc.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
   shutdownAwareIpc.handle('desktop:testConnectorProvider', (_event, kind) => services.testConnectorProvider(kind));

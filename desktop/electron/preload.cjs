@@ -436,6 +436,11 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
     };
   },
   getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig'),
+  getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig'),
+  saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input),
+  setHarnessOptimizationEnabled: enabled => ipcRenderer.invoke('desktop:setHarnessOptimizationEnabled', enabled),
+  revokeHarnessOptimizationGrants: input => ipcRenderer.invoke('desktop:revokeHarnessOptimizationGrants', input),
+  resetOptimizationClockGuard: input => ipcRenderer.invoke('desktop:resetOptimizationClockGuard', input),
   saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input),
   listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes'),
   testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind),
