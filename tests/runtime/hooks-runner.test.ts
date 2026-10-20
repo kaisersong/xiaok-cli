@@ -254,18 +254,21 @@ describe('Windows owned hook tree and pipe drain', () => {
     vi.unstubAllEnvs();
     vi.useRealTimers();
   });
-  function start() {
+  function start(finalHookAdmission?: () => Record<string, unknown> | undefined) {
     const child = Object.assign(createMockChild({ noExit: true }), { pid: 43210, exitCode: null, signalCode: null });
     const killer = createMockChild({ noExit: true });
     const spawnMock = vi.mocked(spawn) as any;
     spawnMock.mockReturnValueOnce(child).mockReturnValueOnce(killer);
-    const runner = createHooksRunner({ pre: [{ command: 'owned-hook', tools: ['write'] }], timeoutMs: 50 });
+    const runner = createHooksRunner({ pre: [{ command: 'owned-hook', tools: ['write'] }], timeoutMs: 50, finalHookAdmission });
     const running = runner.runPreHooks('write', {});
     return { child, killer, runner, running, spawnMock };
   }
 
   it('targets only the original live shell tree and joins the termination helper after hook pipes close', async () => {
-    const f = start();
+    const admission = vi.fn(() => ({ reason: 'original-host-final-admission' }));
+    const f = start(admission);
+    await vi.advanceTimersByTimeAsync(0);
+    f.child.pid = 54321;
     let settled = false;void f.running.then(() => { settled = true; });
     await vi.advanceTimersByTimeAsync(50);
     expect(f.spawnMock).toHaveBeenLastCalledWith(win32.join('C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', '43210', '/T', '/F'], { shell: false, stdio: 'ignore', windowsHide: true });
@@ -273,9 +276,11 @@ describe('Windows owned hook tree and pipe drain', () => {
     f.child.emit('exit', 1);f.child.emit('close', 1, null);
     const closing = f.runner.closeAndDrain().then(() => undefined, error => error);
     await vi.advanceTimersByTimeAsync(0);expect(settled).toBe(false);
+    expect(admission).not.toHaveBeenCalled();
     f.killer.emit('close', 0, null);
     expect(await f.running).toMatchObject({ ok: false });
-    expect((await closing).message).toBe('hook_physical_drain_unconfirmed');
+    expect(await closing).toBeUndefined();
+    expect(admission).toHaveBeenCalledTimes(1);
   });
 
   it('does not equate taskkill completion or shell exit with inherited pipe closure', async () => {
@@ -285,7 +290,7 @@ describe('Windows owned hook tree and pipe drain', () => {
     await vi.advanceTimersByTimeAsync(0);expect(settled).toBe(false);
     f.child.emit('close', 1, null);
     expect(await f.running).toMatchObject({ ok: false });
-    await expect(f.runner.closeAndDrain()).rejects.toThrow('hook_physical_drain_unconfirmed');
+    await expect(f.runner.closeAndDrain()).resolves.toBeUndefined();
   });
 
   it('retains the original timeout and termination-helper failure instead of claiming cleanup', async () => {
@@ -307,7 +312,7 @@ describe('Windows owned hook tree and pipe drain', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(f.spawnMock).toHaveBeenCalledTimes(2);
     f.child.emit('close', 1, null);f.killer.emit('close', 0, null);
-    await f.running;expect((await closing).message).toBe('hook_physical_drain_unconfirmed');
+    expect(await f.running).toMatchObject({ ok: false });expect(await closing).toBeUndefined();
   });
 
   it('never sends a completed shell PID to taskkill while descendant-held pipes remain unknown', async () => {
@@ -318,6 +323,68 @@ describe('Windows owned hook tree and pipe drain', () => {
     f.child.emit('close', 0, null);await f.running;
     const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
     expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_windows_process_tree_unconfirmed');
+  });
+
+  it('retains a helper error even when its subsequent close reports zero', async () => {
+    const f = start(), failure = Error('hook timeout after 50ms');
+    await vi.advanceTimersByTimeAsync(50);
+    f.killer.emit('error', failure);f.killer.emit('close', 0, null);f.child.emit('close', 1, null);
+    expect(await f.running).toMatchObject({ ok: false });
+    const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+    expect(error.errors[0].errors).toContain(failure);
+    expect(error.errors[0].errors).toHaveLength(2);
+  });
+
+  it('does not transfer a joined timeout fact to another raw promise reusing the exact error object', async () => {
+    const f = start(), originalToString = Error.prototype.toString;
+    let timeoutError: Error | undefined;
+    const rendering = vi.spyOn(Error.prototype, 'toString').mockImplementation(function(this: Error) {
+      if (this.message === 'hook timeout after 50ms') timeoutError = this;
+      return originalToString.call(this);
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(50);
+      f.killer.emit('close', 0, null);f.child.emit('close', 1, null);
+      expect(await f.running).toMatchObject({ ok: false });
+    } finally { rendering.mockRestore(); }
+    if (!timeoutError) throw Error('original_timeout_not_observed');
+    const second = createMockChild({ noExit: true });
+    f.spawnMock.mockReturnValueOnce(second);
+    const running = f.runner.runPreHooks('write', {});await vi.advanceTimersByTimeAsync(0);
+    second.emit('error', timeoutError);second.emit('close', 1, null);await running;
+    const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+    expect(error.errors).toEqual([timeoutError]);expect(error.errors[0]).toBe(timeoutError);
+  });
+
+  it('retains a synchronous producer-start failure on its registered raw promise', async () => {
+    const failure = Error('original_spawn_throw');
+    vi.mocked(spawn).mockImplementationOnce(() => { throw failure; });
+    const runner = createHooksRunner({ pre: [{ command: 'owned-hook', tools: ['write'] }] });
+    expect(await runner.runPreHooks('write', {})).toMatchObject({ ok: false });
+    const error = await runner.closeAndDrain().then(() => undefined, value => value);
+    expect(error.errors).toEqual([failure]);expect(error.errors[0]).toBe(failure);
+  });
+
+  it.each(['ESRCH', 'EPERM', 'alive'] as const)('qualifies a POSIX timeout only after the original group probe proves absence: %s', async probe => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const failure = Object.assign(Error('original_group_probe'), { code: probe });
+    const kill = vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+      if (signal === 0 && probe !== 'alive') throw failure;
+      return true;
+    });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(0);f.child.pid = 54321;
+      await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      expect(await f.running).toMatchObject({ ok: false });
+      expect(kill).toHaveBeenCalledWith(-43210, 'SIGTERM');expect(kill).toHaveBeenCalledWith(-43210, 0);
+      if (probe === 'ESRCH') await expect(f.runner.closeAndDrain()).resolves.toBeUndefined();
+      else {
+        const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+        expect(error).toBeInstanceOf(AggregateError);
+        if (probe === 'EPERM') expect(error.errors[0].errors).toContain(failure);
+        else expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_unconfirmed');
+      }
+    } finally { kill.mockRestore(); }
   });
 });
 

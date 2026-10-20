@@ -3,7 +3,7 @@
 // workers and spawned `.ts` entries by path (e.g. tests/support/*.mjs, src/**/controller-entry.ts
 // spawned with `--import tsx`). Without this copy those paths only exist in dev, not in .test-dist.
 import { cp, mkdir } from 'node:fs/promises';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, stat, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -60,5 +60,20 @@ const nativeRel = join('desktop', 'native', 'artifact-export-helper');
 await mkdir(join(out, nativeRel), { recursive: true });
 for (const name of ['go.mod', 'main.go', 'identity_unix.go', 'identity_windows.go']) {
   await cp(join(root, nativeRel, name), join(out, nativeRel, name));
+}
+
+// The emitted reader resolves its real Windows absence pair beside itself,
+// independently of dist/. Reuse the build verifier and its atomic publisher.
+// Builder-only fixtures have no emitted reader and need no runtime carrier.
+let hasWindowsAbsenceReader = false;
+try {
+  await lstat(join(out, 'src', 'runtime', 'verification', 'windows-installation-absence.js'));
+  hasWindowsAbsenceReader = true;
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
+if (hasWindowsAbsenceReader) {
+  const { copyWindowsAbsence } = await import('./verification/copy-windows-absence.mjs');
+  copyWindowsAbsence(root, { target: 'sandbox' });
 }
 console.log(`copy-test-assets: tests=${testsCopied} srcTs=${srcCopied} scripts=${scriptsCopied} nativeSources=4`);

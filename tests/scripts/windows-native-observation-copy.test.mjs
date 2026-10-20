@@ -86,3 +86,37 @@ test('stale canonical core header rejects before any first-target output',()=>wi
 test('a missing optional reader with no native source or destination remains a no-op',()=>withFixture(f=>{fs.unlinkSync(f.reader);assert.equal(run(f).status,0);absent(f);}));
 test('a missing optional reader still validates present sources without copying them',()=>withFixture(f=>{fs.unlinkSync(f.reader);artifact(f,'x64');artifact(f,'arm64');assert.equal(run(f).status,0);absent(f);}));
 test('a missing optional reader cannot hide a stale present source',()=>withFixture(f=>{fs.unlinkSync(f.reader);artifact(f,'x64');const file=path.join(f.directory('x64'),names[1]);const m=JSON.parse(fs.readFileSync(file));m.sourceSha256='0'.repeat(64);fs.writeFileSync(file,JSON.stringify(m));assert.notEqual(run(f).status,0);absent(f);}));
+
+
+function sandboxReader(f) {
+  const reader=path.join(f.root,'.test-dist/src/runtime/verification/windows-installation-absence.js');
+  fs.mkdirSync(path.dirname(reader),{recursive:true});fs.writeFileSync(reader,'// emitted sandbox reader');
+  return arch=>path.join(path.dirname(reader),'native',`win32-${arch}`);
+}
+test('sandbox carrier copies the same verified pair adjacent to the emitted src reader without touching CLI output',()=>withFixture(f=>{
+  const destination=sandboxReader(f);artifact(f,'x64');artifact(f,'arm64');
+  const r=run(f,{options:{target:'sandbox'}});assert.equal(r.status,0,r.message);
+  for(const arch of ['x64','arm64'])for(const name of names)assert.deepEqual(fs.readFileSync(path.join(destination(arch),name)),fs.readFileSync(path.join(f.directory(arch),name)));
+  absent(f);
+}));
+test('sandbox carrier validates both targets before publishing a first-target native pair',()=>withFixture(f=>{
+  const destination=sandboxReader(f);artifact(f,'x64');artifact(f,'arm64');
+  const json=path.join(f.directory('arm64'),names[1]),manifest=JSON.parse(fs.readFileSync(json));manifest.sha256='0'.repeat(64);fs.writeFileSync(json,JSON.stringify(manifest));
+  assert.notEqual(run(f,{options:{target:'sandbox'}}).status,0);
+  for(const arch of ['x64','arm64'])assert.equal(fs.existsSync(destination(arch)),false);
+  absent(f);
+}));
+test('sandbox and Desktop carrier modes cannot be combined',()=>withFixture(f=>{
+  const r=run(f,{options:{target:'sandbox',desktop:true}});assert.notEqual(r.status,0);assert.equal(r.calls,0);absent(f);
+}));
+
+test('actual test asset build invokes the sandbox carrier and preserves the CLI destination',()=>withFixture(f=>{
+  const destination=sandboxReader(f);artifact(f,'x64');artifact(f,'arm64');
+  fs.mkdirSync(path.join(f.root,'tests'),{recursive:true});
+  const builder=path.join(f.root,'scripts/copy-test-assets.mjs');fs.copyFileSync(path.join(repository,'scripts/copy-test-assets.mjs'),builder);
+  const native=path.join(f.root,'desktop/native/artifact-export-helper');fs.mkdirSync(native,{recursive:true});
+  for(const name of ['go.mod','main.go','identity_unix.go','identity_windows.go'])fs.copyFileSync(path.join(repository,'desktop/native/artifact-export-helper',name),path.join(native,name));
+  const result=spawnSync(process.execPath,[builder],{cwd:f.root,encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr);
+  for(const arch of ['x64','arm64'])for(const name of names)assert.deepEqual(fs.readFileSync(path.join(destination(arch),name)),fs.readFileSync(path.join(f.directory(arch),name)));
+  absent(f);
+}));

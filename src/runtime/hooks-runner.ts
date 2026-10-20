@@ -381,6 +381,9 @@ function interpretExitCode(
 // Executors
 // ---------------------------------------------------------------------------
 
+type CommandClosureRecord = { timeoutError: Error; joinedTimeout: boolean };
+const commandClosureFacts = new WeakMap<Promise<unknown>, CommandClosureRecord>();
+
 function executeCommand(
   config: CommandHookConfig,
   timeoutMs: number,
@@ -388,19 +391,27 @@ function executeCommand(
   signal: AbortSignal,
   extraEnv?: Record<string, string>,
 ): Promise<CommandResult> {
-  signal.throwIfAborted();
-  return new Promise<CommandResult>((resolve, reject) => {
+  const closure = { timeoutError: new Error(`hook timeout after ${timeoutMs}ms`), joinedTimeout: false };
+  let resolve!: (result: CommandResult) => void, reject!: (error: unknown) => void;
+  const raw = new Promise<CommandResult>((yes, no) => { resolve = yes; reject = no; });
+  commandClosureFacts.set(raw, closure);
+  try {
+    signal.throwIfAborted();
     let stdout = '', stderr = '';
     const errors = new Set<unknown>();
+    const windows = process.platform === 'win32';
     const child = spawn(config.command, [], {
       shell: config.shell || true,
-      detached: process.platform !== 'win32',
+      detached: !windows,
       windowsHide: true,
       env: { ...process.env, ...extraEnv, XIAOK_HOOK_PAYLOAD: payloadJson },
       stdio: 'pipe',
     });
+    const originalPid = child.pid;
+    const positivePid = originalPid !== undefined && Number.isSafeInteger(originalPid) && originalPid > 0 ? originalPid : undefined;
     const remember = (error: unknown) => { errors.add(error); };
     let rootExited = false, treeTerminationRequested = false, treePending = false, settled = false;
+    let groupGone = false, treeSucceeded = false;
     let terminal: { code: number | null; signal: NodeJS.Signals | null } | undefined;
     const finish = () => {
       const closed = terminal;
@@ -408,14 +419,17 @@ function executeCommand(
       settled = true;
       if (closed.signal && !errors.size) remember(new Error(`hook terminated by ${closed.signal}`));
       const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
+      if (unknown.length === 1 && unknown[0] === closure.timeoutError && (windows ? treeSucceeded : groupGone)) {
+        closure.joinedTimeout = true;
+      }
       if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
       else if (errors.size) reject(signal.reason);
       else resolve({ exitCode: closed.code ?? 1, stdout, stderr });
     };
     const terminate = () => {
       try {
-        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
-        else if (process.platform !== 'win32') child.kill('SIGTERM');
+        if (!windows && positivePid !== undefined) process.kill(-positivePid, 'SIGTERM');
+        else if (!windows) child.kill('SIGTERM');
         else {
           if (treeTerminationRequested) return;
           treeTerminationRequested = true;
@@ -424,7 +438,7 @@ function executeCommand(
             remember(new Error('hook_windows_process_tree_unconfirmed'));
             return;
           }
-          const pid = child.pid, systemRoot = process.env.SystemRoot;
+          const pid = originalPid, systemRoot = process.env.SystemRoot;
           // A failed spawn has no PID/tree; still join its original close/error.
           if (pid === undefined) { child.kill('SIGTERM'); return; }
           if (!Number.isSafeInteger(pid) || pid <= 0 || !systemRoot || !win32.isAbsolute(systemRoot)) {
@@ -442,6 +456,7 @@ function executeCommand(
             killer.on('error', remember);
             killer.once('close', code => {
               if (code !== 0) remember(new Error(`hook_windows_tree_termination_failed:${String(code)}`));
+              else treeSucceeded = true;
               treePending = false;
               finish();
             });
@@ -457,7 +472,7 @@ function executeCommand(
     };
     const abort = () => { remember(signal.reason); terminate(); };
     signal.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(() => { remember(new Error(`hook timeout after ${timeoutMs}ms`)); terminate(); }, timeoutMs);
+    const timer = setTimeout(() => { remember(closure.timeoutError); terminate(); }, timeoutMs);
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') remember(error); });
@@ -466,16 +481,20 @@ function executeCommand(
     // exit does not prove stdio or descendants have ended.
     child.once('close', (code, terminationSignal) => {
       clearTimeout(timer); signal.removeEventListener('abort', abort);
-      if (process.platform !== 'win32' && child.pid) {
-        try { process.kill(-child.pid, 0); remember(new Error('hook_process_group_unconfirmed')); }
-        catch (error) { if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error); }
+      if (!windows && positivePid !== undefined) {
+        try { process.kill(-positivePid, 0); remember(new Error('hook_process_group_unconfirmed')); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code === 'ESRCH') groupGone = true;
+          else remember(error);
+        }
       }
       terminal = { code, signal: terminationSignal };
       finish();
     });
     child.stdin.end(payloadJson);
     if (signal.aborted) abort();
-  });
+  } catch (error) { reject(error); }
+  return raw;
 }
 
 function executeHttp(config: HttpHookConfig, timeoutMs: number, payloadJson: string, signal: AbortSignal): Promise<CommandResult> {
@@ -565,7 +584,10 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
   const own = <T>(work: Promise<T>): Promise<T> => {
     pending.add(work);
     void work.then(() => pending.delete(work), error => {
-      pending.delete(work); if (error !== closeReason) failures.add(error);
+      const closure = commandClosureFacts.get(work);
+      const joinedTimeout = closure?.joinedTimeout === true && error === closure.timeoutError;
+      if (error !== closeReason && !joinedTimeout) failures.add(error);
+      pending.delete(work);
     });
     return work;
   };
