@@ -53,18 +53,28 @@ export class ConversationMcpActivities {
         const reference = this.options.store.getMcpReference(watch.watchId);
         return Boolean(reference && this.endpoints.has(reference.endpointId) && reference.endpointId === watch.logicalSourceId && reference.taskId === watch.workId);
     }
-    async userWork(watchId, actor) {
+    async userWork(watchId, actor, mode = 'read') {
         const { watch } = await this.options.service.getWork(watchId, actor);
-        if (watch.source !== 'mcp' || !await this.options.service.canReadSource(watchId))
+        if (watch.source !== 'mcp' || mode === 'read' && !await this.options.service.canReadSource(watchId))
             throw new Error('activity_source_forbidden');
         const reference = this.options.store.getMcpReference(watchId);
         const connection = reference && this.connections.get(reference.endpointId);
-        if (!reference || !connection?.tasks)
+        if (!reference || !connection?.tasks || reference.taskId !== watch.workId || reference.endpointId !== watch.logicalSourceId)
             throw new Error('activity_mcp_disconnected');
         return { watch, reference, connection };
     }
+    assertCurrent(watch, reference, connection, read) {
+        const current = this.options.store.getWatch(watch.watchId), handle = this.options.store.getMcpReference(watch.watchId);
+        if (this.disposed || this.connections.get(reference.endpointId) !== connection || !current || current.source !== 'mcp' || current.workId !== reference.taskId || current.logicalSourceId !== reference.endpointId || current.origin.actorId !== this.options.actorId || !handle || JSON.stringify(canonical(handle)) !== JSON.stringify(canonical(reference)))
+            throw new Error('activity_mcp_disconnected');
+        if (read) {
+            const result = this.options.assertReadCurrent?.(watch.watchId);
+            if (result !== undefined)
+                throw new Error('activity_source_forbidden');
+        }
+    }
     async inputs(watchId, actor) {
-        const { reference, connection } = await this.userWork(watchId, actor);
+        const { watch, reference, connection } = await this.userWork(watchId, actor);
         const task = await connection.tasks.task(reference.taskId).snapshot();
         if (!await this.options.service.canReadSource(watchId))
             throw new Error('activity_source_forbidden');
@@ -81,9 +91,24 @@ export class ConversationMcpActivities {
                     type: field.type === 'boolean' ? 'boolean' : ['number', 'integer'].includes(field.type ?? '') ? 'number' : field.type === 'array' ? 'choices' : field.enum ? 'choice' : 'text',
                     ...(field.enum || field.items?.enum ? { options: (field.enum ?? field.items?.enum ?? []).filter((value) => typeof value === 'string').slice(0, 128) } : {}) })) });
         }
+        this.assertCurrent(watch, reference, connection, true);
         return forms;
     }
     async answerInput(watchId, input, actor) {
+        if (!['accept', 'decline', 'cancel'].includes(input.action))
+            throw new Error('activity_mcp_input_invalid');
+        if (input.action !== 'accept') {
+            // The caller already owns the retained handle. A private-content withdrawal
+            // cannot prevent declining that exact pending request or cancelling work.
+            const { watch, reference, connection } = await this.userWork(watchId, actor, 'control');
+            const latest = await connection.tasks.task(reference.taskId).snapshot();
+            const request = latest.raw.inputRequests?.[input.inputId];
+            if (latest.status !== 'input_required' || !request || request.method !== 'elicitation/create' || createHash('sha256').update(JSON.stringify(canonical(request))).digest('hex') !== input.expectedDigest)
+                throw new Error('activity_mcp_input_stale');
+            this.assertCurrent(watch, reference, connection, false);
+            await connection.tasks.task(reference.taskId).updateJson({ [input.inputId]: { action: input.action } });
+            return;
+        }
         const form = (await this.inputs(watchId, actor)).find(form => form.inputId === input.inputId);
         if (!form || form.expectedDigest !== input.expectedDigest)
             throw new Error('activity_mcp_input_stale');
@@ -121,12 +146,14 @@ export class ConversationMcpActivities {
         }
         if (!await this.options.service.canReadSource(watchId))
             throw new Error('activity_source_forbidden');
+        this.assertCurrent(watch, reference, connection, true);
         await connection.tasks.task(reference.taskId).updateJson({ [input.inputId]: { action: input.action, ...(input.action === 'accept' ? { content: input.content ?? {} } : {}) } });
         await this.observe(watch, reference, connection);
         void this.restore(watch, connection).catch(error => this.options.onError?.(error));
     }
     async cancel(watchId, actor) {
-        const { watch, reference, connection } = await this.userWork(watchId, actor);
+        const { watch, reference, connection } = await this.userWork(watchId, actor, 'control');
+        this.assertCurrent(watch, reference, connection, false);
         await connection.tasks.cancelTask(reference.taskId);
         await this.observe(watch, reference, connection);
         void this.restore(watch, connection).catch(error => this.options.onError?.(error));

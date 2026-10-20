@@ -1,3 +1,5 @@
+import {captureInvocationDrain,type DesktopChildInvocationFactory,type DesktopModelInvocation} from './desktop-model-invocation.js';
+import {isOwnedNativeModelAdapter} from './context-continuity/native-model-session.js';
 import type { Message, ModelAdapter } from '../../src/types.js';
 import type { ManagedAgentRunContext, ManagedAgentSession } from '../../src/ai/agents/multi-agent-coordinator.js';
 import type { ToolRegistry } from '../../src/ai/tools/index.js';
@@ -30,7 +32,13 @@ export function buildDesktopAgentFork(adapter: object, parent: readonly Message[
 }
 
 export interface DesktopManagedAgentSessionOptions {
+  authorizeContext?: () => void;
+  recordUnprovenEffect?:(context:import('./desktop-multi-agent-service.js').DesktopAgentExecutionContext,id:string,name:string)=>void;
+  inheritContext?: (receiverTaskId: string | undefined) => void;
   adapter: Pick<ModelAdapter, 'stream'>;
+  openInvocation?:DesktopChildInvocationFactory;
+  assertInvocation?:(context:DesktopAgentExecutionContext)=>void;
+  assertResult?:(context:DesktopAgentExecutionContext)=>void;
   systemPrompt: string;
   parentMessages?: readonly Message[];
   forkContext?: boolean;
@@ -59,6 +67,8 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
   private scope?: ReturnType<DesktopManagedAgentSessionOptions['createRegistry']>;
   private disposal?: Promise<void>;
   private closed = false;
+  private invocationFailure?:unknown;
+  private invocationUncertain=false;
   private lastTurn = 0;
   private lastTurnId?: string;
 
@@ -70,24 +80,48 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
   }
 
   run(message: string, signal?: AbortSignal, activity?: ManagedAgentRunContext): Promise<string> {
+    if(this.invocationUncertain)return Promise.reject(this.invocationFailure);
     if (this.closed) return Promise.reject(new Error('desktop_agent_session_closed'));
     if (this.running) return Promise.reject(new Error('desktop_agent_session_busy'));
     if (signal?.aborted) return Promise.reject(signal.reason);
     // Install the execution promise before any provider/registry code can run.
     const execution = Promise.resolve().then(async () => {
+      this.lifetime.signal.throwIfAborted();
       const context = this.options.getTurnContext();
+      this.options.inheritContext?.(context.sourceTaskId);
       if (context.turn <= this.lastTurn || context.turnId === this.lastTurnId) throw new Error('desktop_agent_turn_already_started');
       this.lastTurn = context.turn; this.lastTurnId = context.turnId;
       const boundSignal = AbortSignal.any([this.lifetime.signal, context.signal, ...(signal ? [signal] : [])]);
-      boundSignal.throwIfAborted();
+      const assertCurrent=()=>{
+        boundSignal.throwIfAborted();this.options.authorizeContext?.();this.options.assertInvocation?.(context);
+        boundSignal.throwIfAborted();if(Date.now()>=context.effectiveDeadline)throw new Error('desktop_agent_deadline_exceeded');
+      };
+      const assertResult=()=>{
+        boundSignal.throwIfAborted();this.options.authorizeContext?.();
+        (this.options.assertResult??this.options.assertInvocation)?.(context);
+        boundSignal.throwIfAborted();if(Date.now()>=context.effectiveDeadline)throw new Error('desktop_agent_deadline_exceeded');
+      };assertCurrent();
+      let reply:string;
+      let invocation:DesktopModelInvocation|undefined,drainInvocation:(()=>Promise<void>)|undefined;
+      try {
       this.scope = this.options.createRegistry(context, boundSignal);
       this.messages.push({ role: 'user', content: [{ type: 'text', text: message }] });
       const sessionId = `desktop_agent_${context.groupId}_${context.agentId}`;
       const intentId = `${context.turnId}:intent`;
       activity?.onActivity({ phase: 'model' });
-      try {
+        assertCurrent();
+        if(this.options.openInvocation){
+          try{invocation=await this.options.openInvocation(context,boundSignal);drainInvocation=captureInvocationDrain(invocation);}catch(error){this.invocationUncertain=true;this.invocationFailure=error;throw error;}
+          assertCurrent();
+          if(invocation.prepareCheckpoint)this.messages=invocation.prepareCheckpoint(this.messages);
+        }else if(isOwnedNativeModelAdapter(this.options.adapter))throw new Error('native_child_invocation_factory_unavailable');
         const result = await runDesktopToolLoop({
-          adapter: this.options.adapter,
+          authorizeContext: assertCurrent,
+          authorizeResult:assertResult,
+          requireEffectGuard:!!this.options.recordUnprovenEffect,
+          recordUnprovenEffect:this.options.recordUnprovenEffect?(id,name)=>this.options.recordUnprovenEffect!(context,id,name):undefined,
+          contextReaderTaskId: context.sourceTaskId,
+          adapter: invocation?.adapter ?? this.options.adapter,
           systemPrompt: `${this.options.systemPrompt}\n\nAgent context: ${JSON.stringify({ agentId: context.agentId, groupId: context.groupId, cwd: context.cwd, forkMode: this.fork.mode, truncated: this.fork.truncated })}`,
           messages: this.messages, allToolDefs: this.scope.registry.getToolDefinitions(), registry: this.scope.registry,
           signal: boundSignal, taskDeadline: context.effectiveDeadline, sessionId, turnId: context.turnId, intentId, stepId: `${intentId}:reply`, taskId: context.agentId,
@@ -101,23 +135,30 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
             if (event.type === 'tool_finished') await this.options.onToolFinished?.(context, {
               executionEventId: randomUUID(), toolName: event.toolName, ok: event.ok,
             });
+            if(event.type==='assistant_delta'||event.type==='artifact_recorded')assertResult();
             await this.options.emitRuntimeEvent(event, context);
           },
           strategies: { compact: { enabled: false, shouldCompact: () => false, doCompact: async () => {} },
             buildApiView: messages => messages, processToolResult: result => result.slice(0, 50_000),
             trackAutoProgress: false, trackReferenceReads: false, emitSkillArtifactTrace: false },
         });
-        return result.reply;
+        reply=result.reply;
       } finally {
-        this.scope?.dispose(); this.scope = undefined;
+        try{this.scope?.dispose();}finally{this.scope=undefined;if(drainInvocation)await this.finishInvocation(drainInvocation);}
       }
+      assertResult();return reply;
     });
     this.running = execution;
     void execution.finally(() => { if (this.running === execution) this.running = undefined; }).catch(() => {});
     return execution;
   }
 
+  private async finishInvocation(drain:()=>Promise<void>):Promise<void>{
+    try{await drain();}catch(error){this.invocationUncertain=true;this.invocationFailure=error;throw error;}
+  }
+
   async suspend(): Promise<void> {
+    if(this.invocationUncertain)throw this.invocationFailure;
     if (this.running) throw new Error('cannot suspend an active Desktop session');
     this.scope?.dispose(); this.scope = undefined;
   }
@@ -132,6 +173,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
       // Deliberately remains pending for an uncooperative provider/tool. The
       // service owns bounded close acknowledgement and the global blocked gate.
       await this.running?.catch(() => {});
+      if(this.invocationUncertain)throw this.invocationFailure;
       await this.options.releaseResources?.();
       this.messages = [];
     })();

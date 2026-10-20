@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+const receivers = vi.hoisted(() => ({ windows: [] as unknown[] }));
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/xiaok-goal-ipc-test' },
   BrowserWindow: {
-    getAllWindows: () => [],
+    getAllWindows: () => receivers.windows,
     fromWebContents: () => undefined,
   },
   clipboard: { read: vi.fn() },
@@ -27,9 +28,13 @@ describe('desktop Goal IPC', () => {
     };
     let goalChanged: ((input: unknown) => void) | undefined;
     let taskPrepared: ((input: unknown) => void) | undefined;
+    // Parser/wiring contract only. Actual owner proofs are exercised by the
+    // real Task->Goal producer tests, never these explicit no-op callbacks.
     const services = {
       getDataRoot: () => '/tmp/xiaok-goal-ipc-test',
       createTask: vi.fn(async (input: unknown) => input),
+      // Wiring-only fixture; real creation receipts use actual services in input-ipc.
+      taskSubmissions:{assertReply:vi.fn(),withUserRequest:(_actor:unknown,action:()=>unknown)=>action()},
       getGoal: vi.fn(async (threadId: string) => ({ threadId })),
       createGoal: vi.fn(async (input: unknown) => input),
       pauseGoal: vi.fn(async (threadId: string) => ({ threadId })),
@@ -38,12 +43,14 @@ describe('desktop Goal IPC', () => {
       replaceGoal: vi.fn(async (input: unknown) => input),
       ackGoalTaskAttached: vi.fn(async () => undefined),
       setGoalUserQueuePending: vi.fn(async () => undefined),
+      goalOutput: { assertReply: vi.fn(), assertBroadcast: vi.fn(), assertPrepared: vi.fn() },
       subscribeGoalChanged(listener: (input: unknown) => void) { goalChanged = listener; return () => undefined; },
       subscribeGoalTaskPrepared(listener: (input: unknown) => void) { taskPrepared = listener; return () => undefined; },
     };
+    receivers.windows = [window];
     await registerDesktopIpc({
       handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler),
-    } as never, window as never, services as never);
+    } as never, window as never, services as never, { multiAgentAuthorize: () => ({ actorId: 'desktop-user:test' }) });
 
     await expect(handlers.get('desktop:goal:create')?.({}, {
       threadId: 'thread_1', objective: '完成任务', expectedEvidenceKinds: ['answer'], turnLimit: 4,
@@ -54,14 +61,14 @@ describe('desktop Goal IPC', () => {
     });
     expect(services.createGoal).toHaveBeenCalledWith({
       threadId: 'thread_1', objective: '完成任务', expectedEvidenceKinds: ['answer'], turnLimit: 4,
-    });
+    }, { actorId: 'desktop-user:test', requestSource: 'user' });
     await handlers.get('desktop:createTask')?.({}, {
       prompt: 'hello', materials: [], context: { threadId: 'thread_1' },
       executionScope: { kind: 'goal_turn', goalId: 'forged' }, permissionMode: 'auto',
     });
     expect(services.createTask).toHaveBeenCalledWith({
       prompt: 'hello', materials: [], context: { threadId: 'thread_1' },
-    }, undefined);
+    }, { actorId: 'desktop-user:test', requestSource: 'user' });
 
     goalChanged?.({ threadId: 'thread_1', goal: { state: { status: 'active' } } });
     taskPrepared?.({ threadId: 'thread_1', attachmentId: 'attachment_1', taskId: 'task_1' });
@@ -69,5 +76,6 @@ describe('desktop Goal IPC', () => {
       { channel: 'desktop:goal:changed', payload: { threadId: 'thread_1', goal: { state: { status: 'active' } } } },
       { channel: 'desktop:goal:taskPrepared', payload: { threadId: 'thread_1', attachmentId: 'attachment_1', taskId: 'task_1' } },
     ]);
+    receivers.windows = [];
   });
 });

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PersistedTaskEvent } from '../../../src/runtime/task-host/task-runtime-host.js';
 import type { TaskCreateInput, TaskSnapshot } from '../../../src/runtime/task-host/types.js';
+import type { PublicTaskInput } from '../../shared/context-continuity-types.js';
 import { DesktopGoalCoordinator } from '../../electron/desktop-goal-coordinator.js';
 import { SqliteGoalStore } from '../../electron/goal-store-sqlite.js';
 
@@ -32,26 +33,39 @@ describe('DesktopGoalCoordinator', () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
-  function setup(existingStore?: SqliteGoalStore) {
+  function setup(existingStore?: SqliteGoalStore, publicAdapter = false, now = () => 100) {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-desktop-goal-'));
     roots.push(root);
     const store = existingStore ?? new SqliteGoalStore(join(root, 'goals.db'));
     const host = new FakeTaskHost();
+    const preparePublicTask = vi.fn((input: TaskCreateInput, _publicInput: PublicTaskInput) => host.prepareTask(input));
     const prepared: unknown[] = [];
     const changed: unknown[] = [];
     let attachmentSequence = 0;
     const coordinator = new DesktopGoalCoordinator({
       store,
       taskHost: host,
+      ...(publicAdapter ? { preparePublicTask } : {}),
       instanceId: 'desktop_1',
-      now: () => 100,
+      now,
       createAttachmentId: () => `attachment_${++attachmentSequence}`,
       publishGoalTaskPrepared: event => prepared.push(event),
       publishGoalChanged: event => changed.push(event),
       attachmentTimeoutMs: 30_000,
     });
-    return { store, host, coordinator, prepared, changed };
+    return { store, host, coordinator, prepared, changed, preparePublicTask };
   }
+
+  it('refuses an expired ACK before the delayed timeout callback has run', async () => {
+    let now = 100;
+    const { coordinator, host, store } = setup(undefined, false, () => now);
+    try {
+      const created = await coordinator.createGoal({ threadId: 'expired-thread', objective: 'answer', expectedEvidenceKinds: ['answer'], turnLimit: 2 });
+      now = created.preparedTask.expiresAt;
+      await expect(coordinator.ackGoalTaskAttached({ threadId: 'expired-thread', attachmentId: created.preparedTask.attachmentId })).rejects.toThrow(/expired|admissible|unavailable/);
+      expect(host.started).toEqual([]);
+    } finally { coordinator.disarmAll(); store.close(); }
+  });
 
   it('prepares and binds a Goal task before exact attachment ack starts it', async () => {
     const { coordinator, host, prepared } = setup();
@@ -73,6 +87,23 @@ describe('DesktopGoalCoordinator', () => {
       threadId: 'thread_1', attachmentId: created.preparedTask.attachmentId,
     });
     expect(host.started).toEqual([created.preparedTask.taskId]);
+  });
+
+  it('passes public original input separately from the Goal transport wrapper and marks continuations synthetic', async () => {
+    const { coordinator, host, preparePublicTask: spy } = setup(undefined, true);
+    const created = await coordinator.createGoal({ threadId: 'thread_public', objective: 'original objective', expectedEvidenceKinds: ['answer'], turnLimit: 3 });
+    expect(host.prepared[0].input.prompt).toContain('[system_trigger: goal_continuation]');
+    expect((spy.mock.calls as unknown[][])[0][1]).toEqual({ prompt: 'original objective', includeUser: true });
+    await coordinator.ackGoalTaskAttached({ threadId: 'thread_public', attachmentId: created.preparedTask.attachmentId });
+    await coordinator.handlePersistedTaskEvent(persistedTerminal(created.preparedTask.taskId, created.preparedTask.executionScope, 'completed'));
+    expect((spy.mock.calls as unknown[][])[1][1]).toEqual({ prompt: 'original objective', includeUser: false });
+  });
+
+  it('does not retry preparation through the legacy host when the named public adapter fails', async () => {
+    const { coordinator, host, preparePublicTask } = setup(undefined, true);
+    preparePublicTask.mockRejectedValueOnce(new Error('binding unavailable'));
+    await expect(coordinator.createGoal({ threadId: 'thread_fail', objective: 'objective', expectedEvidenceKinds: ['answer'] })).rejects.toThrow('binding unavailable');
+    expect(preparePublicTask).toHaveBeenCalledOnce(); expect(host.prepared).toEqual([]);
   });
 
   it('settles only on durable terminal, then prepares one continuation without starting it', async () => {

@@ -97,6 +97,7 @@ import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
 import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
 import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
 import { ensureRoomWorkspaceProtocol } from './room-workspace-protocol.js';
+import { ContextLinkNavigation, registerContextProtocol } from './context-continuity/navigation.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -1819,6 +1820,12 @@ function restoreOrCreateWindow(): void {
 }
 
 const packagedKimiSmokeResultPath = process.env.XIAOK_KIMI_PACKAGED_SMOKE_RESULT;
+const contextNavigation = new ContextLinkNavigation({
+  open: async () => { const window = await createWindow(); restoreExistingWindow(window); return { getURL: () => window.webContents.getURL(), loadURL: url => window.loadURL(url) }; },
+  isTrusted: url => isTrustedDesktopRendererUrl(url, { rendererFile: join(__dirname, '../../../renderer/index.html'), devServer: process.env.XIAOK_DESKTOP_DEV_SERVER }),
+});
+const flushContextNavigation = () => { void contextNavigation.flush().catch(() => debugMain('context-navigation:unavailable')); };
+app.on('open-url', (event, url) => { if (contextNavigation.accept(url)) { event.preventDefault(); if (app.isReady()) flushContextNavigation(); } });
 
 if (packagedKimiSmokeResultPath) {
   app.whenReady().then(async () => {
@@ -1844,6 +1851,8 @@ if (packagedKimiSmokeResultPath) {
       registered: protocolRegistered,
     });
     const launchProtocolUrl = findIntentBrokerProtocolUrl(process.argv);
+    registerContextProtocol(app, process.platform);
+    process.argv.some(argument => contextNavigation.accept(argument));
     if (launchProtocolUrl) {
       debugMain('intent-broker-protocol:launch', { url: launchProtocolUrl });
     }
@@ -1854,11 +1863,12 @@ if (packagedKimiSmokeResultPath) {
         app.dock.setIcon(nativeImage.createFromPath(iconPath));
       }
     }
-    void createWindow();
+    void createWindow().then(flushContextNavigation);
   }).catch((error) => {
     console.error('[main] whenReady failed:', error);
   });
   app.on('second-instance', (_event, commandLine) => {
+    if (commandLine.some(argument => contextNavigation.accept(argument))) { flushContextNavigation(); return; }
     const protocolUrl = findIntentBrokerProtocolUrl(commandLine);
     debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
     restoreOrCreateWindow();

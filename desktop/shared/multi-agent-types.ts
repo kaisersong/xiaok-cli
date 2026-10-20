@@ -90,6 +90,7 @@ export interface DesktopAgentSnapshot {
   cleanupError?: string;
   lastResult?: string;
   resultContentId?: string;
+  resultSourceTaskId?: string;
   sourceTaskId?: string;
   hostDeliveryStatus?: HostDeliveryRecord['status'];
   guardFailure?: GuardFailure;
@@ -121,6 +122,8 @@ export interface DesktopMultiAgentGroup {
 }
 
 export interface MultiAgentMessage {
+  /** Immutable main-owned origin, independent of the sender's later turns. */
+  sourceTaskId?: string;
   messageId: string;
   groupId: string;
   sender: MultiAgentSender;
@@ -261,6 +264,7 @@ export interface MultiAgentDesktopAPI {
 }
 
 export interface MultiAgentContent {
+  sourceTaskId?: string;
   contentId: string; groupId: string; agentId: string; utf8Text: string;
   byteLength: number; sha256: string; truncated: boolean;
 }

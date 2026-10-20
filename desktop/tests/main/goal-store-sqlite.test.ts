@@ -142,4 +142,21 @@ describe('SqliteGoalStore', () => {
     rawCheck.close();
     reopened.close();
   });
+
+  it('does not copy a damaged private Goal body into its parse-error diagnostic', async () => {
+    const { dbPath, store, service, context } = setup();
+    const created = await service.create(context(null), { objective: 'answer', expectedEvidenceKinds: ['answer'], turnLimit: 2 });
+    store.close();
+    const raw = new DatabaseSync(dbPath), damaged = '{"KCANARY":undefined}';
+    try { raw.prepare('update goals set state_json=? where goal_id=?').run(damaged, created.goalId); } finally { raw.close(); }
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {}), reopened = new SqliteGoalStore(dbPath);
+    try {
+      await expect(reopened.load('thread_1')).resolves.toBeNull();
+      expect(error).toHaveBeenCalled();
+      expect(JSON.stringify(error.mock.calls)).not.toContain('KCANARY');
+      const check = new DatabaseSync(dbPath);
+      try { expect(check.prepare('select state_json from goals where goal_id=?').get(created.goalId)?.state_json).toBe(damaged); }
+      finally { check.close(); }
+    } finally { reopened.close(); error.mockRestore(); }
+  });
 });

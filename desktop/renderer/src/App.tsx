@@ -2,6 +2,7 @@ import { Navigate, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { WelcomePage } from './components/WelcomePage';
 import { ChatShell } from './components/ChatShell';
+import { ContextReferenceLanding } from './components/ContextReferenceLanding';
 import { AutomationsPage } from './components/automations/AutomationsPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
 import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
@@ -22,6 +23,7 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route index element={<WelcomePage />} />
           <Route path="t/:taskId" element={<ChatShell />} />
+          <Route path="context/:refId" element={<ContextReferenceLanding />} />
           <Route path="scheduled" element={<Navigate to="/automations/schedules" replace />} />
           <Route path="automations" element={<AutomationsPage />} />
           <Route path="automations/:tab" element={<AutomationsPage />} />

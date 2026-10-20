@@ -93,12 +93,13 @@ class RoomToolRegistry extends ToolRegistry {
     private readonly observedHashes = new Map<string, string>();
     constructor(private readonly roomOptions: {
         mode: 'discussion' | 'workspace';
+        requireEffectGuard?:boolean;
         tools: Tool[];
         context?: RoomWorkspaceExecutionContext;
         port?: WorkspaceExecutionPort;
         allowedTools?: string[];
     }) {
-        super({ autoMode: true }, []);
+        super({ autoMode: true,requireEffectGuard:roomOptions.requireEffectGuard }, []);
         this.allowed = new Set(roomOptions.mode === 'workspace' ? workspaceNames : discussionNames);
         if(roomOptions.mode==='workspace'&&roomOptions.context?.localCommandsAllowed&&process.platform!=='win32')this.allowed.add('bash');
         if (roomOptions.allowedTools !== undefined) {
@@ -205,6 +206,7 @@ export function createRoomToolRegistry(options: ConstructorParameters<typeof Roo
  * main owns durable claims; this scope only reports facts after real promises. */
 export async function runRoomWorkspaceExecutor(options: RoomWorkspaceRunOptions & {
     prompt: string;
+    requireEffectGuard?:boolean;
     materials?: MaterialRecord[];
     createRunner(input: RoomRunnerFactoryInput): TaskRunner;
     onTaskCreated?: (taskId: string) => void;
@@ -243,7 +245,7 @@ export async function runRoomWorkspaceExecutor(options: RoomWorkspaceRunOptions 
     signal.addEventListener('abort', onAbort, { once: true });
     async function turn(context: RoomWorkspaceExecutionContext, agentId: string, prompt: string, turnSignal: AbortSignal, history: HistoryMessage[], runContext?: ManagedAgentRunContext, allowedTools?: string[]): Promise<string> {
         const combined = AbortSignal.any([signal, turnSignal]);
-        const registry = createRoomToolRegistry({ mode: 'workspace', tools: buildToolList(undefined, { cwd: context.effectiveCwd }), context, port: options.port, allowedTools });
+        const registry = createRoomToolRegistry({ mode: 'workspace',requireEffectGuard:options.requireEffectGuard, tools: buildToolList(undefined, { cwd: context.effectiveCwd }), context, port: options.port, allowedTools });
         const tools = createMultiAgentTools({ coordinator, callerId: agentId, agents: [], createSession: async ({ identity, agentDef }) => {
                 if (agentDef.model || agentDef.modelCapability || agentDef.isolation === 'worktree')
                     throw new Error('workspace_child_override_unsupported');

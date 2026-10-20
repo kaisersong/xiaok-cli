@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { createMobileDisclosureGate, encodeStrictMobileJson, MobileDisclosureError, type MobileDisclosureOptions } from './mobile-disclosure.js';
 
 export type MobileDesktopHealth = 'online' | 'degraded' | 'offline';
 
@@ -68,7 +69,7 @@ export type MobileEvent =
 
 export type MobileApprovalDecision = 'approve' | 'reject';
 
-export interface MobileGatewayOptions {
+export interface MobileGatewayOptions extends MobileDisclosureOptions {
   host?: string;
   port?: number;
   desktopName: string;
@@ -204,6 +205,7 @@ export function buildMobilePairingPayload(input: {
 }
 
 export function createMobileGateway(options: MobileGatewayOptions): MobileGateway {
+  const disclosure = createMobileDisclosureGate(options);
   const configuredHost = options.host ?? '0.0.0.0';
   const configuredPort = options.port ?? 47891;
   let server: Server | null = null;
@@ -230,7 +232,8 @@ export function createMobileGateway(options: MobileGatewayOptions): MobileGatewa
           sendJson(response, 401, { error: 'unauthorized' });
           return;
         }
-        sendJson(response, 200, await buildSnapshot(options));
+        const snapshot = await buildSnapshot(options);
+        sendJson(response, 200, snapshot, () => disclosure.assert('snapshot', snapshot), disclosure.protected);
         return;
       }
 
@@ -249,7 +252,7 @@ export function createMobileGateway(options: MobileGatewayOptions): MobileGatewa
           sendJson(response, 404, { error: 'artifact_preview_not_found' });
           return;
         }
-        sendJson(response, 200, preview);
+        sendJson(response, 200, preview, () => disclosure.assert('artifact.preview', preview), disclosure.protected);
         return;
       }
 
@@ -267,7 +270,7 @@ export function createMobileGateway(options: MobileGatewayOptions): MobileGatewa
         const events = options.sendMessage
           ? await options.sendMessage(text)
           : defaultChatEvents(text);
-        sendJson(response, 200, { events });
+        sendJson(response, 200, { events }, () => disclosure.assert('chat.send', events), disclosure.protected);
         return;
       }
 
@@ -287,7 +290,7 @@ export function createMobileGateway(options: MobileGatewayOptions): MobileGatewa
             return;
           }
           const approval = await options.respondToApproval({ id, decision });
-          sendJson(response, 200, { approval });
+          sendJson(response, 200, { approval }, () => disclosure.assert('approval.respond', approval), disclosure.protected);
           return;
         }
         sendJson(response, 403, { error: 'desktop_confirmation_required' });
@@ -296,7 +299,11 @@ export function createMobileGateway(options: MobileGatewayOptions): MobileGatewa
 
       sendJson(response, 404, { error: 'not_found' });
     } catch (error) {
-      sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
+      if (error instanceof MobileDisclosureError) {
+        sendJson(response, 403, { error: 'mobile_content_unavailable' });
+      } else {
+        sendJson(response, 500, { error: disclosure.protected ? 'mobile_request_unavailable' : error instanceof Error ? error.message : String(error) });
+      }
     }
   }
 
@@ -557,12 +564,15 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
 }
 
-function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
+function sendJson(response: ServerResponse, statusCode: number, body: unknown, beforeWrite?: () => void, protectedBody = false): void {
+  const encoded = protectedBody ? encodeStrictMobileJson(body) : JSON.stringify(body);
+  beforeWrite?.();
+  if (protectedBody && encodeStrictMobileJson(body) !== encoded) throw new MobileDisclosureError();
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
   });
-  response.end(JSON.stringify(body));
+  response.end(encoded);
 }
 
 function buildStatus(running: boolean, host: string, port: number): MobileGatewayStatus {

@@ -18,6 +18,7 @@ export interface ActivityChange {
 /** Owned by the host, with actor and thread identity supplied by main's registry. */
 export declare class ConversationActivityService {
     private readonly options;
+    private readonly disclosureManifests;
     private readonly subscribers;
     private timer;
     private disposed;
@@ -31,12 +32,19 @@ export declare class ConversationActivityService {
         actorId: string;
         getThread(threadId: string): ActivityThreadIdentity | null;
         canObserveWork(watch: WorkWatch): Promise<boolean> | boolean;
+        /** Fixed host policy, synchronous; protected hosts always provide it. */
+        canDiscloseWork?(watch: WorkWatch): boolean;
         notify?(activity: ConversationActivity, watch: WorkWatch): Promise<'shown' | 'suppressed' | 'failed'>;
         onError?(error: unknown): void;
     });
     private assertUser;
     private thread;
     private visible;
+    private disclosureAllowed;
+    assertSourceReadCurrent(watchId: string): void;
+    private disclosed;
+    /** Actual owner socket/host return calls this again after its last await. */
+    assertResultCurrent(result: unknown): void;
     prepareAssociation(input: {
         threadId: string;
         operationId: string;

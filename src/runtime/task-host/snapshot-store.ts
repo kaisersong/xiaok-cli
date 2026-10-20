@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { appendFile, mkdir, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
+import { readFileSync,lstatSync } from 'node:fs';
+import { appendFile, lstat, mkdir, open, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ActiveTaskRef, DesktopTaskEvent, TaskSnapshot } from './types.js';
 
@@ -56,28 +56,132 @@ const TERMINAL_STATUSES = new Set<TaskSnapshot['status']>(['completed', 'failed'
  * Terminal transitions materialize the complete historical TaskSnapshot so
  * older readers keep seeing completed tasks without understanding journals.
  */
+export interface OriginalTaskSnapshotSourceReader {inspectSync(taskId:string):TaskSnapshot|null;}
+let captureSourceReader:(store:FileTaskSnapshotStore,expectedRoot:string)=>OriginalTaskSnapshotSourceReader;
+/** Original read-only source owner; no callback/provider or execution receipt. */
+export function captureOriginalTaskSnapshotSourceReader(store:FileTaskSnapshotStore,expectedRoot:string):OriginalTaskSnapshotSourceReader{return captureSourceReader(store,expectedRoot);}
+
 export class FileTaskSnapshotStore {
   private indexWriteQueue: Promise<void> = Promise.resolve();
-  private readonly taskWriteQueues = new Map<string, Promise<void>>();
+  readonly #taskWriteQueues = new Map<string, Promise<void>>();
+  readonly #rootDir:string;
   private readonly cache = new Map<string, CachedSnapshot>();
 
   constructor(
-    private readonly rootDir: string,
+    rootDir: string,
     private readonly diagnostics: TaskSnapshotStoreDiagnostics = {},
-  ) {}
+  ) {this.#rootDir=rootDir;}
+  static {
+    const originalInspect=FileTaskSnapshotStore.prototype.inspectPersistedTaskSync;
+    captureSourceReader=(store,expectedRoot)=>{
+      if(!store||typeof store!=='object'||!(#rootDir in store)||store.#rootDir!==expectedRoot)throw new Error('snapshot_source_owner_unavailable');
+      return Object.freeze({inspectSync:(taskId:string)=>originalInspect.call(store,taskId)});
+    };
+  }
 
   async save(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<void> {
-    const previous = this.taskWriteQueues.get(snapshot.taskId) ?? Promise.resolve();
+    const previous = this.#taskWriteQueues.get(snapshot.taskId) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(() => this.saveSerial(snapshot, expectedPrevious));
     const tracked = run.catch(() => undefined);
-    this.taskWriteQueues.set(snapshot.taskId, tracked);
+    this.#taskWriteQueues.set(snapshot.taskId, tracked);
     try {
       await run;
     } finally {
-      if (this.taskWriteQueues.get(snapshot.taskId) === tracked) {
-        this.taskWriteQueues.delete(snapshot.taskId);
+      if (this.#taskWriteQueues.get(snapshot.taskId) === tracked) {
+        this.#taskWriteQueues.delete(snapshot.taskId);
       }
     }
+  }
+
+  private validateIdentity(taskId:string):void{if(!/^[A-Za-z0-9_-]{1,256}$/.test(taskId))throw new Error('task_identity_conflict');}
+
+  private async assertIdentityFilesAbsent(taskId:string):Promise<void>{
+    this.validateIdentity(taskId);
+    if(this.cache.has(taskId))throw new Error('task_identity_conflict');
+    for(const path of [this.snapshotPath(taskId),this.journalPath(taskId)]){
+      try{await lstat(path);}catch(error){if(isNodeErrorCode(error,'ENOENT'))continue;throw error;}
+      throw new Error('task_identity_conflict');
+    }
+  }
+
+  /** Absence is about raw checkpoint AND journal, never a cached/null aggregate. */
+  async assertUnusedTaskIdentity(taskId:string):Promise<void>{
+    if(this.#taskWriteQueues.has(taskId))throw new Error('task_identity_conflict');
+    await this.assertIdentityFilesAbsent(taskId);
+    if(this.#taskWriteQueues.has(taskId)||this.cache.has(taskId))throw new Error('task_identity_conflict');
+  }
+
+  /** Final negative check; never sufficient without the actual original Host attempt. */
+  assertUnusedTaskIdentitySync(taskId:string):void{
+    this.validateIdentity(taskId);if(this.#taskWriteQueues.has(taskId)||this.cache.has(taskId))throw new Error('task_identity_conflict');
+    for(const path of [this.snapshotPath(taskId),this.journalPath(taskId)]){try{lstatSync(path);}catch(error){if(isNodeErrorCode(error,'ENOENT'))continue;throw error;}throw new Error('task_identity_conflict');}
+  }
+
+  /** Initial Task creation cannot rename over another host's committed identity. */
+  async createTaskSnapshot(snapshot:TaskSnapshot):Promise<void>{
+    this.validateIdentity(snapshot.taskId);
+    const previous=this.#taskWriteQueues.get(snapshot.taskId)??Promise.resolve();
+    const run=previous.catch(()=>undefined).then(async()=>{
+      await mkdir(this.snapshotDir(),{recursive:true});const directory=await lstat(this.snapshotDir());
+      if(!directory.isDirectory()||directory.isSymbolicLink())throw new Error('task_identity_conflict');
+      await this.assertIdentityFilesAbsent(snapshot.taskId);
+      const encoded=JSON.stringify({...snapshot,[CHECKPOINT_META_KEY]:{version:1,lastSequence:0,checkpointEventCount:snapshot.events.length} satisfies CheckpointPersistence},null,2);
+      let file;
+      try{file=await open(this.snapshotPath(snapshot.taskId),'wx',0o600);}
+      catch(error){if(isNodeErrorCode(error,'EEXIST'))throw new Error('task_identity_conflict');throw error;}
+      try{await file.writeFile(encoded,'utf8');await file.sync();}finally{await file.close();}
+      this.diagnostics.onWrite?.('checkpoint',Buffer.byteLength(encoded));
+      this.cache.set(snapshot.taskId,{snapshot,sequence:0,checkpointEventCount:snapshot.events.length,sealed:true});
+      await this.syncIndexForTransition(undefined,snapshot);
+    });
+    const tracked=run.catch(()=>undefined);this.#taskWriteQueues.set(snapshot.taskId,tracked);
+    try{await run;}finally{if(this.#taskWriteQueues.get(snapshot.taskId)===tracked)this.#taskWriteQueues.delete(snapshot.taskId);}
+  }
+
+  /** Final synchronous owner fence: no cached prefix and no await after reading. */
+  inspectPersistedTaskSync(taskId:string):TaskSnapshot|null{
+    if(!/^[A-Za-z0-9_-]{1,256}$/.test(taskId))throw new Error('task_identity_conflict');
+    if(this.#taskWriteQueues.has(taskId))throw new Error('blocked_unsettled');
+    const snapshots=join(this.#rootDir,'snapshots');
+    for(const path of [this.#rootDir,snapshots]){const stat=lstatSync(path);if(!stat.isDirectory()||stat.isSymbolicLink()||typeof process.getuid==='function'&&stat.uid!==process.getuid())throw new Error('blocked_unsettled');}
+    for(const path of [join(snapshots,taskId+'.json'),join(snapshots,taskId+'.journal.jsonl')]){
+      let stat;try{stat=lstatSync(path);}catch(error){if(isNodeErrorCode(error,'ENOENT'))continue;throw error;}
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||typeof process.getuid==='function'&&stat.uid!==process.getuid())throw new Error('blocked_unsettled');
+    }
+    return recoverTaskSnapshotSync(this.#rootDir,taskId);
+  }
+
+  /** Current durable source, bypassing the execution cache. */
+  async inspectPersistedTask(taskId:string):Promise<TaskSnapshot|null>{
+    this.validateIdentity(taskId);const pending=this.#taskWriteQueues.get(taskId);if(pending)await pending;
+    return (await this.loadSnapshotState(taskId))?.snapshot??null;
+  }
+
+  /** Complete read-only owner inventory, independent of the active index. Never skips corrupt/orphan rows. */
+  async inspectPersistedInventory():Promise<TaskSnapshot[]>{
+    let stat;
+    try{stat=await lstat(this.snapshotDir());}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return [];throw error;}
+    if(!stat.isDirectory()||stat.isSymbolicLink()||typeof process.getuid==='function'&&stat.uid!==process.getuid())throw new Error('task_inventory_unavailable');
+    const ids=new Set<string>(),directory=await opendir(this.snapshotDir());
+    for await(const entry of directory){
+      if(!entry.isFile()||entry.isSymbolicLink())throw new Error('task_inventory_unavailable');
+      const fileStat=await lstat(join(this.snapshotDir(),entry.name));
+      if(!fileStat.isFile()||fileStat.isSymbolicLink()||fileStat.nlink!==1||typeof process.getuid==='function'&&fileStat.uid!==process.getuid())throw new Error('task_inventory_unavailable');
+      // Interrupted atomic checkpoint temp files were never committed; journals are not temp files.
+      if(/\.[0-9]+\.[0-9]+\.[a-z0-9]+\.tmp$/.test(entry.name))continue;
+      const suffix=entry.name.endsWith('.journal.jsonl')?'.journal.jsonl':entry.name.endsWith('.json')?'.json':null;
+      if(!suffix)throw new Error('task_inventory_unavailable');
+      const id=entry.name.slice(0,-suffix.length);if(!/^[A-Za-z0-9_-]{1,256}$/.test(id))throw new Error('task_inventory_unavailable');ids.add(id);
+    }
+    const snapshots:TaskSnapshot[]=[];
+    for(const id of ids){
+      const pending=this.#taskWriteQueues.get(id);if(pending)await pending;
+      // Owner recovery may already have populated the execution cache. The
+      // inventory certifies current durable files, never that cached prefix.
+      const snapshot=(await this.loadSnapshotState(id))?.snapshot;
+      if(!snapshot||snapshot.taskId!==id||!snapshot.sessionId)throw new Error('task_inventory_unavailable');snapshots.push(snapshot);
+    }
+    return snapshots;
   }
 
   async getActiveTasks(): Promise<ActiveTaskRef[]> {
@@ -93,7 +197,7 @@ export class FileTaskSnapshotStore {
 
   async recoverTask(taskId: string, options?: TaskSnapshotReadOptions): Promise<TaskSnapshot | null> {
     options?.signal.throwIfAborted();
-    const pendingWrite = this.taskWriteQueues.get(taskId);
+    const pendingWrite = this.#taskWriteQueues.get(taskId);
     if (pendingWrite) await waitSnapshotRead(() => pendingWrite, options);
     options?.signal.throwIfAborted();
     const cached = this.cache.get(taskId);
@@ -291,7 +395,7 @@ export class FileTaskSnapshotStore {
   }
 
   private async saveIndex(index: SnapshotIndex): Promise<void> {
-    await mkdir(this.rootDir, { recursive: true });
+    await mkdir(this.#rootDir, { recursive: true });
     const target = this.indexPath();
     const tmp = this.tempPath(target);
     const encoded = JSON.stringify(index, null, 2);
@@ -300,10 +404,10 @@ export class FileTaskSnapshotStore {
     this.diagnostics.onWrite?.('index', Buffer.byteLength(encoded, 'utf8'));
   }
 
-  private snapshotDir(): string { return join(this.rootDir, 'snapshots'); }
+  private snapshotDir(): string { return join(this.#rootDir, 'snapshots'); }
   private snapshotPath(taskId: string): string { return join(this.snapshotDir(), `${taskId}.json`); }
   private journalPath(taskId: string): string { return join(this.snapshotDir(), `${taskId}.journal.jsonl`); }
-  private indexPath(): string { return join(this.rootDir, 'active-task.json'); }
+  private indexPath(): string { return join(this.#rootDir, 'active-task.json'); }
   private tempPath(target: string): string {
     return `${target}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   }

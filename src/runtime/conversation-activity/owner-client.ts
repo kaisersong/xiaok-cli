@@ -2,6 +2,7 @@ import { createConnection, type Socket } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { activityOwnerAddress, readActivityOwnerCredentials, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES, type ActivityClientRole } from './owner-protocol.js';
 import type { ActivityChange } from './service.js';
+import {readProtectedOwnerQualification,type ActivityOwnerQualification} from './owner-qualification.js';
 
 /** Authenticated attachment. A lost mutation response is never replayed. */
 export class ConversationActivityOwnerClient {
@@ -11,16 +12,22 @@ export class ConversationActivityOwnerClient {
   private connecting?: Promise<void>;
   private buffer = '';
   private disposed = false;
+  private qualification?:ActivityOwnerQualification;
+  private readonly statusOnly:boolean;
   private readonly disconnectListeners = new Set<(ownerEpoch: string) => void>();
   onDisconnect(listener: (ownerEpoch: string) => void): () => void { this.disconnectListeners.add(listener); return () => { this.disconnectListeners.delete(listener); }; }
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void; timer: ReturnType<typeof setTimeout>; socket: Socket }>();
   private readonly subscriptions = new Map<string, { threadId: string | null; handler: (change: ActivityChange) => void }>();
-  constructor(dataRoot: string, private readonly role: ActivityClientRole, private readonly instanceId?: string) { this.address = activityOwnerAddress(dataRoot); }
+  constructor(dataRoot: string, private readonly role: ActivityClientRole, private readonly instanceId?: string, options?:{statusOnly?:true;qualification?:ActivityOwnerQualification}) {
+    this.address = activityOwnerAddress(dataRoot);this.statusOnly=options?.statusOnly===true;
+    this.qualification=options?.qualification?Object.freeze({...options.qualification}):this.statusOnly?undefined:readProtectedOwnerQualification(this.address.dataRoot);
+  }
 
   connect(): Promise<void> {
     if (this.disposed) return Promise.reject(new Error('activity_client_disposed'));
     if (this.socket && this.ownerEpoch) return Promise.resolve();
     if (this.connecting) return this.connecting;
+    if(!this.statusOnly&&!this.qualification)this.qualification=readProtectedOwnerQualification(this.address.dataRoot);
     const credentials = readActivityOwnerCredentials(this.address);
     const pending = new Promise<void>((resolve, reject) => {
       const socket = createConnection(this.address.socketPath); this.socket = socket; socket.setEncoding('utf8');
@@ -39,7 +46,11 @@ export class ConversationActivityOwnerClient {
           let message: Record<string, unknown>;
           try { message = JSON.parse(line); } catch { socket.destroy(); return; }
           if (!admitted) {
-            if (message.type !== 'hello' || message.protocol !== ACTIVITY_OWNER_PROTOCOL || message.rootHash !== this.address.rootHash || typeof message.ownerEpoch !== 'string') { socket.destroy(); return; }
+            const expected=this.qualification;
+            if (message.type !== 'hello' || message.protocol !== ACTIVITY_OWNER_PROTOCOL || message.rootHash !== this.address.rootHash || typeof message.ownerEpoch !== 'string'||!message.ownerEpoch) { clearTimeout(timeout);reject(new Error('activity_owner_qualification_unavailable'));socket.destroy(); return; }
+            if(expected&&(message.generation!==expected.generation||message.profileId!==expected.profileId||message.configDigest!==expected.configDigest||message.ready!==true)){
+              clearTimeout(timeout);reject(new Error('activity_owner_qualification_unavailable'));socket.destroy();return;
+            }
             admitted = true; clearTimeout(timeout); this.ownerEpoch = message.ownerEpoch; epoch = message.ownerEpoch; resolve();
             // Replaying subscriptions is read-only. Mutations are never replayed.
             queueMicrotask(() => { for (const [subscriptionId, subscription] of this.subscriptions) {
@@ -70,6 +81,7 @@ export class ConversationActivityOwnerClient {
   }
 
   async request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if(this.statusOnly&&method!=='status')throw new Error('activity_owner_probe_method_forbidden');
     await this.connect();
     if (this.pending.size >= 64) throw new Error('activity_client_request_capacity');
     const id = randomUUID(), encoded = JSON.stringify({ type: 'request', id, method, params }) + '\n';

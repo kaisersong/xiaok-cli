@@ -9,10 +9,12 @@ const verifyPackagedMainFreshness = require('./verify-packaged-main-freshness.cj
 const verifyPackagedRuntimeDependencies = require('./verify-packaged-runtime-dependencies.cjs');
 const packBundledRuntimes = require('./pack-bundled-runtimes.cjs');
 const verifyPackagedServiceContracts = require('./verify-packaged-service-contracts.cjs');
+const verifyPackagedContinuityResources = require('./verify-packaged-continuity-resources.cjs');
 
 module.exports = async function afterPack(context) {
   await verifyPackagedMainFreshness(context);
   await verifyPackagedRuntimeDependencies(context);
+  await verifyPackagedContinuityResources(context);
   await verifyPackagedServiceContracts(context);
   await packBundledRuntimes(context);
 };

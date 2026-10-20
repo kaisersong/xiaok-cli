@@ -1,0 +1,1939 @@
+diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
+--- a/codex-rs/Cargo.lock
++++ b/codex-rs/Cargo.lock
+@@ -276,7 +276,7 @@
+ 
+ [[package]]
+ name = "app_test_support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1895,7 +1895,7 @@
+ 
+ [[package]]
+ name = "codex-agent-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -1907,7 +1907,7 @@
+ 
+ [[package]]
+ name = "codex-agent-graph-store"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-state",
+@@ -1922,7 +1922,7 @@
+ 
+ [[package]]
+ name = "codex-agent-identity"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1942,7 +1942,7 @@
+ 
+ [[package]]
+ name = "codex-agent-message-board-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -1965,7 +1965,7 @@
+ 
+ [[package]]
+ name = "codex-agent-message-board-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "caseless",
+@@ -1988,7 +1988,7 @@
+ 
+ [[package]]
+ name = "codex-agent-roles"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-config",
+  "codex-file-system",
+@@ -2001,7 +2001,7 @@
+ 
+ [[package]]
+ name = "codex-analytics"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-app-server-protocol",
+  "codex-git-utils",
+@@ -2024,7 +2024,7 @@
+ 
+ [[package]]
+ name = "codex-ansi-escape"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "ansi-to-tui",
+  "pretty_assertions",
+@@ -2035,7 +2035,7 @@
+ 
+ [[package]]
+ name = "codex-api"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "assert_matches",
+@@ -2073,7 +2073,7 @@
+ 
+ [[package]]
+ name = "codex-app-server"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2187,7 +2187,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-app-server",
+  "codex-app-server-protocol",
+@@ -2214,7 +2214,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-daemon"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "blake3",
+@@ -2240,7 +2240,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-protocol"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-app-server-protocol-noop-macros",
+@@ -2274,11 +2274,11 @@
+ 
+ [[package]]
+ name = "codex-app-server-protocol-noop-macros"
+-version = "0.0.0"
++version = "0.162.1"
+ 
+ [[package]]
+ name = "codex-app-server-test-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2300,7 +2300,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-transport"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "axum",
+  "base64 0.22.1",
+@@ -2342,7 +2342,7 @@
+ 
+ [[package]]
+ name = "codex-apply-patch"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -2362,7 +2362,7 @@
+ 
+ [[package]]
+ name = "codex-arg0"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-apply-patch",
+@@ -2386,7 +2386,7 @@
+ 
+ [[package]]
+ name = "codex-async-utils"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "rand 0.9.3",
+@@ -2396,7 +2396,7 @@
+ 
+ [[package]]
+ name = "codex-attachment-store"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "serde",
+@@ -2406,7 +2406,7 @@
+ 
+ [[package]]
+ name = "codex-aws-auth"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "aws-config",
+  "aws-credential-types",
+@@ -2432,7 +2432,7 @@
+ 
+ [[package]]
+ name = "codex-backend-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-api",
+@@ -2452,7 +2452,7 @@
+ 
+ [[package]]
+ name = "codex-backend-openapi-models"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "serde",
+  "serde_json",
+@@ -2461,7 +2461,7 @@
+ 
+ [[package]]
+ name = "codex-build-info"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-install-context",
+  "pretty_assertions",
+@@ -2474,7 +2474,7 @@
+ 
+ [[package]]
+ name = "codex-bwrap"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "cc",
+  "libc",
+@@ -2483,7 +2483,7 @@
+ 
+ [[package]]
+ name = "codex-chatgpt"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2505,7 +2505,7 @@
+ 
+ [[package]]
+ name = "codex-cli"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2607,7 +2607,7 @@
+ 
+ [[package]]
+ name = "codex-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-http-client",
+  "eventsource-stream",
+@@ -2621,7 +2621,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "async-stream",
+@@ -2645,7 +2645,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-config"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -2671,7 +2671,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2704,7 +2704,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2719,7 +2719,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks-mock-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "chrono",
+  "codex-cloud-tasks-client",
+@@ -2728,7 +2728,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-code-mode-protocol",
+  "codex-http-client",
+@@ -2751,7 +2751,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-host"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -2780,7 +2780,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-protocol"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "glob",
+@@ -2798,7 +2798,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-runtime"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-code-mode-protocol",
+@@ -2816,11 +2816,11 @@
+ 
+ [[package]]
+ name = "codex-collaboration-mode-templates"
+-version = "0.0.0"
++version = "0.162.1"
+ 
+ [[package]]
+ name = "codex-config"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -2870,7 +2870,7 @@
+ 
+ [[package]]
+ name = "codex-config-schema"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2879,7 +2879,7 @@
+ 
+ [[package]]
+ name = "codex-connectors"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -2901,7 +2901,7 @@
+ 
+ [[package]]
+ name = "codex-connectors-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-connectors",
+  "codex-core-plugins",
+@@ -2915,7 +2915,7 @@
+ 
+ [[package]]
+ name = "codex-context-fragments"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -2925,7 +2925,7 @@
+ 
+ [[package]]
+ name = "codex-core"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3067,7 +3067,7 @@
+ 
+ [[package]]
+ name = "codex-core-api"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-analytics",
+  "codex-app-server-protocol",
+@@ -3090,7 +3090,7 @@
+ 
+ [[package]]
+ name = "codex-core-plugin-common"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "semver",
+@@ -3101,7 +3101,7 @@
+ 
+ [[package]]
+ name = "codex-core-plugins"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3158,7 +3158,7 @@
+ 
+ [[package]]
+ name = "codex-diagnostics"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -3166,7 +3166,7 @@
+ 
+ [[package]]
+ name = "codex-exec"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -3218,7 +3218,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3287,7 +3287,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-protocol"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-file-system",
+@@ -3304,7 +3304,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-test-support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-exec-server",
+@@ -3319,7 +3319,7 @@
+ 
+ [[package]]
+ name = "codex-execpolicy"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3337,7 +3337,7 @@
+ 
+ [[package]]
+ name = "codex-experimental-api-macros"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -3346,7 +3346,7 @@
+ 
+ [[package]]
+ name = "codex-extension-api"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-api",
+  "codex-config",
+@@ -3368,7 +3368,7 @@
+ 
+ [[package]]
+ name = "codex-extension-items"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "pretty_assertions",
+@@ -3380,7 +3380,7 @@
+ 
+ [[package]]
+ name = "codex-external-agent-migration"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "chrono",
+  "codex-analytics",
+@@ -3410,7 +3410,7 @@
+ 
+ [[package]]
+ name = "codex-features"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-network-proxy",
+  "codex-protocol",
+@@ -3424,7 +3424,7 @@
+ 
+ [[package]]
+ name = "codex-feedback"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -3451,7 +3451,7 @@
+ 
+ [[package]]
+ name = "codex-file-search"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3467,7 +3467,7 @@
+ 
+ [[package]]
+ name = "codex-file-system"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "bytes",
+  "codex-protocol",
+@@ -3479,7 +3479,7 @@
+ 
+ [[package]]
+ name = "codex-file-watcher"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "notify",
+  "pretty_assertions",
+@@ -3490,7 +3490,7 @@
+ 
+ [[package]]
+ name = "codex-git-attribution"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-backend-client",
+  "codex-extension-api",
+@@ -3503,7 +3503,7 @@
+ 
+ [[package]]
+ name = "codex-git-utils"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3531,7 +3531,7 @@
+ 
+ [[package]]
+ name = "codex-goal-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3556,7 +3556,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-context"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-context-fragments",
+  "codex-history",
+@@ -3568,7 +3568,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-reviewer"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3593,7 +3593,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-v2"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3630,7 +3630,7 @@
+ 
+ [[package]]
+ name = "codex-history"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-protocol",
+@@ -3642,7 +3642,7 @@
+ 
+ [[package]]
+ name = "codex-history-notes-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-analytics",
+  "codex-client",
+@@ -3667,7 +3667,7 @@
+ 
+ [[package]]
+ name = "codex-home"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-extension-api",
+  "codex-utils-absolute-path",
+@@ -3679,7 +3679,7 @@
+ 
+ [[package]]
+ name = "codex-hooks"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "async-channel",
+@@ -3707,7 +3707,7 @@
+ 
+ [[package]]
+ name = "codex-http-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "bytes",
+  "codex-utils-cargo-bin",
+@@ -3743,7 +3743,7 @@
+ 
+ [[package]]
+ name = "codex-image-generation-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -3771,7 +3771,7 @@
+ 
+ [[package]]
+ name = "codex-install-context"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "codex-utils-home-dir",
+@@ -3784,7 +3784,7 @@
+ 
+ [[package]]
+ name = "codex-keyring-store"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "keyring",
+  "pretty_assertions",
+@@ -3795,7 +3795,7 @@
+ 
+ [[package]]
+ name = "codex-linux-sandbox"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "clap",
+  "codex-core",
+@@ -3824,7 +3824,7 @@
+ 
+ [[package]]
+ name = "codex-lmstudio"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-core",
+  "codex-http-client",
+@@ -3838,7 +3838,7 @@
+ 
+ [[package]]
+ name = "codex-login"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -3884,7 +3884,7 @@
+ 
+ [[package]]
+ name = "codex-mcp"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3924,7 +3924,7 @@
+ 
+ [[package]]
+ name = "codex-mcp-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -3957,7 +3957,7 @@
+ 
+ [[package]]
+ name = "codex-memories-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-core",
+  "codex-extension-api",
+@@ -3979,7 +3979,7 @@
+ 
+ [[package]]
+ name = "codex-memories-read"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -3989,7 +3989,7 @@
+ 
+ [[package]]
+ name = "codex-memories-write"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4026,7 +4026,7 @@
+ 
+ [[package]]
+ name = "codex-mermaid"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "insta",
+  "pretty_assertions",
+@@ -4035,7 +4035,7 @@
+ 
+ [[package]]
+ name = "codex-message-history"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-config",
+  "memchr",
+@@ -4049,7 +4049,7 @@
+ 
+ [[package]]
+ name = "codex-model-provider"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -4083,7 +4083,7 @@
+ 
+ [[package]]
+ name = "codex-model-provider-info"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-client",
+  "codex-protocol",
+@@ -4101,7 +4101,7 @@
+ 
+ [[package]]
+ name = "codex-models-manager"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "chrono",
+  "codex-http-client",
+@@ -4120,7 +4120,7 @@
+ 
+ [[package]]
+ name = "codex-mxc-sandbox"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "appcontainer_common",
+@@ -4142,7 +4142,7 @@
+ 
+ [[package]]
+ name = "codex-network-proxy"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4191,7 +4191,7 @@
+ 
+ [[package]]
+ name = "codex-ollama"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "assert_matches",
+  "async-stream",
+@@ -4211,7 +4211,7 @@
+ 
+ [[package]]
+ name = "codex-otel"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "bytes",
+  "chrono",
+@@ -4248,7 +4248,7 @@
+ 
+ [[package]]
+ name = "codex-otel-trace-websocket"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4259,7 +4259,7 @@
+ 
+ [[package]]
+ name = "codex-plugin"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-config",
+  "codex-core-plugin-common",
+@@ -4274,7 +4274,7 @@
+ 
+ [[package]]
+ name = "codex-process-hardening"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -4282,7 +4282,7 @@
+ 
+ [[package]]
+ name = "codex-prompts"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-collaboration-mode-templates",
+@@ -4299,7 +4299,7 @@
+ 
+ [[package]]
+ name = "codex-protocol"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chardetng",
+@@ -4344,7 +4344,7 @@
+ 
+ [[package]]
+ name = "codex-queue-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -4365,7 +4365,7 @@
+ 
+ [[package]]
+ name = "codex-realtime-webrtc"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-build-info",
+@@ -4384,7 +4384,7 @@
+ 
+ [[package]]
+ name = "codex-response-debug-context"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -4395,7 +4395,7 @@
+ 
+ [[package]]
+ name = "codex-responses-api-proxy"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4412,7 +4412,7 @@
+ 
+ [[package]]
+ name = "codex-rmcp-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4463,7 +4463,7 @@
+ 
+ [[package]]
+ name = "codex-rollout"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4494,7 +4494,7 @@
+ 
+ [[package]]
+ name = "codex-rollout-trace"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-code-mode",
+@@ -4510,7 +4510,7 @@
+ 
+ [[package]]
+ name = "codex-sandboxing"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-mxc-sandbox",
+@@ -4538,7 +4538,7 @@
+ 
+ [[package]]
+ name = "codex-secrets"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "age",
+  "anyhow",
+@@ -4559,7 +4559,7 @@
+ 
+ [[package]]
+ name = "codex-shell-command"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4582,7 +4582,7 @@
+ 
+ [[package]]
+ name = "codex-shell-escalation"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4602,7 +4602,7 @@
+ 
+ [[package]]
+ name = "codex-skills"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -4619,7 +4619,7 @@
+ 
+ [[package]]
+ name = "codex-skills-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "assert_matches",
+  "blake3",
+@@ -4657,7 +4657,7 @@
+ 
+ [[package]]
+ name = "codex-state"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4684,7 +4684,7 @@
+ 
+ [[package]]
+ name = "codex-stdio-to-uds"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-uds",
+@@ -4696,7 +4696,7 @@
+ 
+ [[package]]
+ name = "codex-tcp-tunnel"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -4717,7 +4717,7 @@
+ 
+ [[package]]
+ name = "codex-terminal-detection"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "tracing",
+@@ -4725,7 +4725,7 @@
+ 
+ [[package]]
+ name = "codex-test-binary-support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-arg0",
+  "tempfile",
+@@ -4733,7 +4733,7 @@
+ 
+ [[package]]
+ name = "codex-thread-manager-sample"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4744,7 +4744,7 @@
+ 
+ [[package]]
+ name = "codex-thread-store"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "chrono",
+  "codex-app-server-protocol",
+@@ -4775,7 +4775,7 @@
+ 
+ [[package]]
+ name = "codex-tools"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "bitflags 2.13.1",
+  "codex-code-mode",
+@@ -4801,7 +4801,7 @@
+ 
+ [[package]]
+ name = "codex-tui"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -4927,7 +4927,7 @@
+ 
+ [[package]]
+ name = "codex-uds"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "async-io",
+  "libc",
+@@ -4941,7 +4941,7 @@
+ 
+ [[package]]
+ name = "codex-user-verification"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "core-foundation 0.10.1",
+@@ -4961,7 +4961,7 @@
+ 
+ [[package]]
+ name = "codex-utils-absolute-path"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "dirs",
+  "dunce",
+@@ -4975,14 +4975,14 @@
+ 
+ [[package]]
+ name = "codex-utils-approval-presets"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-audio"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-protocol",
+@@ -4996,7 +4996,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cache"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "lru",
+  "sha1 0.10.6",
+@@ -5005,7 +5005,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cargo-bin"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "assert_cmd",
+  "runfiles",
+@@ -5014,7 +5014,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cli"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "clap",
+  "codex-protocol",
+@@ -5026,15 +5026,15 @@
+ 
+ [[package]]
+ name = "codex-utils-elapsed"
+-version = "0.0.0"
++version = "0.162.1"
+ 
+ [[package]]
+ name = "codex-utils-fuzzy-match"
+-version = "0.0.0"
++version = "0.162.1"
+ 
+ [[package]]
+ name = "codex-utils-git-discovery"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-git-utils",
+  "codex-utils-absolute-path",
+@@ -5047,7 +5047,7 @@
+ 
+ [[package]]
+ name = "codex-utils-home-dir"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dirs",
+@@ -5057,7 +5057,7 @@
+ 
+ [[package]]
+ name = "codex-utils-image"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-cache",
+@@ -5071,7 +5071,7 @@
+ 
+ [[package]]
+ name = "codex-utils-json-to-toml"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "serde_json",
+@@ -5080,7 +5080,7 @@
+ 
+ [[package]]
+ name = "codex-utils-oss"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-core",
+  "codex-lmstudio",
+@@ -5090,7 +5090,7 @@
+ 
+ [[package]]
+ name = "codex-utils-output-truncation"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -5100,7 +5100,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dunce",
+@@ -5111,7 +5111,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path-uri"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-absolute-path",
+@@ -5127,7 +5127,7 @@
+ 
+ [[package]]
+ name = "codex-utils-plugins"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-exec-server",
+  "codex-exec-server-protocol",
+@@ -5141,7 +5141,7 @@
+ 
+ [[package]]
+ name = "codex-utils-process"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "tokio",
+@@ -5149,7 +5149,7 @@
+ 
+ [[package]]
+ name = "codex-utils-pty"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-utils-cargo-bin",
+@@ -5168,7 +5168,7 @@
+ 
+ [[package]]
+ name = "codex-utils-readiness"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "assert_matches",
+  "thiserror 2.0.18",
+@@ -5178,7 +5178,7 @@
+ 
+ [[package]]
+ name = "codex-utils-redacted-string"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "schemars 0.8.22",
+  "serde",
+@@ -5186,14 +5186,14 @@
+ 
+ [[package]]
+ name = "codex-utils-rustls-provider"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "rustls",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-sandbox-summary"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-absolute-path",
+@@ -5203,7 +5203,7 @@
+ 
+ [[package]]
+ name = "codex-utils-sleep-inhibitor"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "core-foundation 0.9.4",
+  "libc",
+@@ -5213,14 +5213,14 @@
+ 
+ [[package]]
+ name = "codex-utils-stream-parser"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-string"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "regex-lite",
+@@ -5230,14 +5230,14 @@
+ 
+ [[package]]
+ name = "codex-utils-template"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-v8-poc"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "v8",
+@@ -5245,7 +5245,7 @@
+ 
+ [[package]]
+ name = "codex-voice-host"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-install-context",
+@@ -5272,7 +5272,7 @@
+ 
+ [[package]]
+ name = "codex-web-search-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-api",
+  "codex-core",
+@@ -5294,7 +5294,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-auth"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5313,7 +5313,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-http-client",
+  "codex-utils-rustls-provider",
+@@ -5329,7 +5329,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5359,7 +5359,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-service"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-cloud-config",
+@@ -5376,14 +5376,14 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-test-support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "dirs",
+ ]
+ 
+ [[package]]
+ name = "codex-workload-identity"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-http-client",
+  "pretty_assertions",
+@@ -5398,7 +5398,7 @@
+ 
+ [[package]]
+ name = "codex-worktree"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-git-utils",
+@@ -5639,7 +5639,7 @@
+ 
+ [[package]]
+ name = "core_test_support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
+--- a/codex-rs/app-server/Cargo.toml
++++ b/codex-rs/app-server/Cargo.toml
+@@ -23,6 +23,9 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++xiaok-main-bridge-only = ["codex-core/xiaok-main-bridge-only", "codex-extension-api/xiaok-main-bridge-only"]
+ 
+ [dependencies]
+ codex-utils-process = { workspace = true }
+diff --git a/codex-rs/app-server/src/config_manager.rs b/codex-rs/app-server/src/config_manager.rs
+--- a/codex-rs/app-server/src/config_manager.rs
++++ b/codex-rs/app-server/src/config_manager.rs
+@@ -79,6 +79,19 @@
+         arg0_paths: Arg0DispatchPaths,
+         thread_config_loader: Arc<dyn ThreadConfigLoader>,
+     ) -> Self {
++        let mut loader_overrides = loader_overrides;
++        let mut cli_overrides = cli_overrides;
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            // Dedicated private home is selected by main before this first config load.
++            loader_overrides.ignore_project_config = true;
++            loader_overrides.ignore_user_and_project_exec_policy_rules = true;
++            loader_overrides.packaged_defaults_path = None;
++            loader_overrides.user_config_path = None;
++            loader_overrides.managed_config_path = Some(codex_home.join("disabled-host-settings").join("managed.toml"));
++            loader_overrides.system_config_path = Some(codex_home.join("disabled-host-settings").join("system.toml"));
++            cli_overrides.clear();
++        }
++        let strict_config = strict_config || codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY;
+         let network_policy = codex_http_client::NetworkPolicyController::default();
+         Self {
+             codex_home,
+diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
+--- a/codex-rs/app-server/src/lib.rs
++++ b/codex-rs/app-server/src/lib.rs
+@@ -93,6 +93,7 @@
+     )
+ }
+ 
++mod xiaok_main_bridge;
+ mod analytics_utils;
+ mod app_info;
+ mod app_server_tracing;
+@@ -504,6 +505,22 @@
+     auth: WebsocketAuthSettings,
+     runtime_options: AppServerRuntimeOptions,
+ ) -> IoResult<AppServerExit> {
++    let strict_config = strict_config || codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY;
++    let mut runtime_options = runtime_options;
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        if !matches!(&transport, AppServerTransport::Stdio) || std::env::var("XIAOK_NATIVE_ISOLATED_V1").as_deref() != Ok("1") {
++            return Err(std::io::Error::new(ErrorKind::PermissionDenied, "xiaok_native_private_stdio_required"));
++        }
++        let home = find_codex_home()?;
++        let expected = std::fs::canonicalize(home.join("workspace"))?;
++        if std::fs::canonicalize(std::env::current_dir()?)? != expected {
++            return Err(std::io::Error::new(ErrorKind::PermissionDenied, "xiaok_native_private_cwd_required"));
++        }
++        runtime_options.plugin_startup_tasks = PluginStartupTasks::Skip;
++        runtime_options.remote_control_startup_mode = RemoteControlStartupMode::DisabledEphemeral;
++        runtime_options.code_mode_host_transport = CodeModeHostTransport::Local;
++        runtime_options.managed_daemon = false;
++    }
+     #[cfg(target_os = "windows")]
+     let _registered_core = codex_windows_sandbox::registered_core_requested();
+     let managed_daemon = matches!(&transport, AppServerTransport::UnixSocket { .. })
+diff --git a/codex-rs/app-server/src/main.rs b/codex-rs/app-server/src/main.rs
+--- a/codex-rs/app-server/src/main.rs
++++ b/codex-rs/app-server/src/main.rs
+@@ -77,8 +77,24 @@
+ }
+ 
+ fn main() -> anyhow::Result<()> {
+-    let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
+-    arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        let mut args = std::env::args_os();
++        let argv0 = args.next().unwrap_or_default();
++        let name = std::path::Path::new(&argv0).file_name().and_then(|name| name.to_str());
++        let allowed_name = if cfg!(windows) { "codex-app-server.exe" } else { "codex-app-server" };
++        let remaining: Vec<_> = args.collect();
++        if name != Some(allowed_name)
++            || !(remaining.is_empty() || remaining == [std::ffi::OsString::from("--strict-config")])
++        {
++            anyhow::bail!("xiaok_native_entrypoint_forbidden");
++        }
++    }
++    let remote_control_disabled = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        true
++    } else {
++        codex_app_server::take_remote_control_disabled_env()
++    };
++    let run = move |arg0_paths: Arg0DispatchPaths| async move {
+         let AppServerArgs {
+             config_overrides,
+             code_mode_host,
+@@ -133,7 +149,30 @@
+             std::process::exit(0);
+         }
+         Ok(())
+-    })
++    };
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        // Never enter upstream helper dispatch, dotenv loading or PATH alias setup.
++        // Match the pinned upstream runtime's 16 MiB main/worker stack budget.
++        let handle = std::thread::Builder::new()
++            .name("xiaok-native-main".to_string())
++            .stack_size(16 * 1024 * 1024)
++            .spawn(move || -> anyhow::Result<()> {
++                tokio::runtime::Builder::new_multi_thread()
++                    .enable_all()
++                    .thread_stack_size(16 * 1024 * 1024)
++                    .build()?
++                    .block_on(run(Arg0DispatchPaths {
++                        codex_self_exe: Some(std::env::current_exe()?),
++                        ..Default::default()
++                    }))
++            })?;
++        match handle.join() {
++            Ok(result) => result,
++            Err(payload) => std::panic::resume_unwind(payload),
++        }
++    } else {
++        arg0_dispatch_or_else(run)
++    }
+ }
+ 
+ fn disable_managed_config_from_debug_env() -> bool {
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -937,6 +937,7 @@
+         outbound_initialized: Option<&AtomicBool>,
+         request_context: RequestContext,
+     ) -> Result<(), JSONRPCErrorError> {
++        crate::xiaok_main_bridge::validate_request(&codex_request)?;
+         let connection_id = connection_request_id.connection_id;
+         if let ClientRequest::Initialize { request_id, params } = codex_request {
+             let connection_initialized = self
+diff --git a/codex-rs/app-server/src/request_processors/initialize_processor.rs b/codex-rs/app-server/src/request_processors/initialize_processor.rs
+--- a/codex-rs/app-server/src/request_processors/initialize_processor.rs
++++ b/codex-rs/app-server/src/request_processors/initialize_processor.rs
+@@ -209,7 +209,9 @@
+             }
+         }
+ 
+-        let user_agent = get_codex_user_agent();
++        let user_agent = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            format!("{}; {}", get_codex_user_agent(), codex_extension_api::XIAOK_RESTRICTION_VERSION)
++        } else { get_codex_user_agent() };
+         let response = InitializeResponse {
+             user_agent,
+             codex_home,
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -1541,6 +1541,7 @@
+                 });
+             }
+         };
++        crate::xiaok_main_bridge::bind_thread(thread_id.to_string())?;
+         let session_telemetry = thread.session_telemetry();
+         session_telemetry.record_startup_phase(
+             "thread_start_create_thread",
+diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
+--- a/codex-rs/core/Cargo.toml
++++ b/codex-rs/core/Cargo.toml
+@@ -10,6 +10,9 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++xiaok-main-bridge-only = ["codex-extension-api/xiaok-main-bridge-only"]
+ 
+ [dependencies]
+ codex-utils-process = { workspace = true }
+diff --git a/codex-rs/core/src/mcp.rs b/codex-rs/core/src/mcp.rs
+--- a/codex-rs/core/src/mcp.rs
++++ b/codex-rs/core/src/mcp.rs
+@@ -193,6 +193,7 @@
+         context: McpServerContributionContext<'_, Config>,
+         disabled_plugin_ids: &[String],
+     ) -> SelectedPluginSnapshot {
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return SelectedPluginSnapshot::default(); }
+         let roots = context
+             .ready_selected_capability_roots()
+             .unwrap_or_default();
+@@ -233,6 +234,18 @@
+         disabled_plugin_ids: &[String],
+     ) -> McpRuntimeProjection {
+         let config = context.config();
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            // Pure data conversion only; never visit a plugin/contributor before this return.
++            let mut empty = config.to_mcp_config_with_loaded_plugins(&codex_core_plugins::PluginLoadOutcome::default(), []);
++            empty.mcp_server_catalog = Default::default();
++            empty.connector_snapshot = Default::default();
++            empty.apps_enabled = false;
++            empty.skill_mcp_dependency_install_enabled = false;
++            empty.server_permission_profiles.clear();
++            empty.environment_cwds.clear();
++            empty.environment_use_mxc.clear();
++            return McpRuntimeProjection { config: empty, plugins_available: false, selected_plugins: Default::default() };
++        }
+         let mut selected_plugin_connector_sources = Vec::new();
+         let mut selected_plugin_registrations = Vec::new();
+         let mut selected_plugins = Vec::new();
+@@ -450,6 +463,7 @@
+ 
+     /// Returns config- and plugin-backed servers without runtime contributions.
+     pub async fn configured_servers(&self, config: &Config) -> HashMap<String, McpServerConfig> {
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return HashMap::new(); }
+         let mcp_config = config.to_mcp_config(self.plugins_manager.as_ref()).await;
+         configured_mcp_servers(&mcp_config)
+     }
+diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
+--- a/codex-rs/core/src/session/mod.rs
++++ b/codex-rs/core/src/session/mod.rs
+@@ -4236,13 +4236,15 @@
+             developer_sections
+                 .push(DeveloperInstructions::new(developer_instructions).render_fragment());
+         }
+-        let loaded_plugins = self
+-            .services
+-            .plugins_manager
+-            .plugins_for_config(&turn_context.config.plugins_config_input())
+-            .await
+-            .without_plugins(&turn_context.disabled_plugin_ids);
+-        let recommended_plugin_candidates = if turn_context
++        let loaded_plugins = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            codex_core_plugins::PluginLoadOutcome::default()
++        } else {
++            self.services.plugins_manager
++                .plugins_for_config(&turn_context.config.plugins_config_input())
++                .await
++                .without_plugins(&turn_context.disabled_plugin_ids)
++        };
++        let recommended_plugin_candidates = if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && turn_context
+             .config
+             .features
+             .plugin_recommendations_enabled()
+@@ -5138,6 +5140,7 @@
+     environment: Option<&TurnEnvironment>,
+     disabled_plugin_ids: &[String],
+ ) -> HooksConfig {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return HooksConfig::default(); }
+     let (hook_shell_program, hook_shell_argv) = environment
+         .and_then(|environment| environment.shell.as_ref())
+         .map(|shell| {
+diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
+--- a/codex-rs/core/src/session/session.rs
++++ b/codex-rs/core/src/session/session.rs
+@@ -634,7 +634,7 @@
+     session_source: &SessionSource,
+ ) -> Vec<SkillError> {
+     // Guardian does not consume skills, including the legacy empty-registry catalog.
+-    if crate::guardian::is_basic_session_source(session_source) {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY || crate::guardian::is_basic_session_source(session_source) {
+         return Vec::new();
+     }
+     let plugins_input = config.plugins_config_input();
+@@ -1165,7 +1165,7 @@
+             .unwrap_or_else(|| session_configuration.cwd().to_path_buf());
+         let auth_and_mcp_fut = async move {
+             let auth = mcp_auth.await;
+-            if config_for_mcp.features.plugin_recommendations_enabled() {
++            if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && config_for_mcp.features.plugin_recommendations_enabled() {
+                 let plugins_config = config_for_mcp.plugins_config_input();
+                 let auth_for_prewarm = auth.clone();
+                 // Fetch the catalog while MCP and plugin/skill initialization continue.
+@@ -1438,7 +1438,7 @@
+                 );
+             let use_executor_shell_snapshots =
+                 prefer_executor_shell_snapshots && !credential_broker_active;
+-            let shell_snapshot = if config.features.enabled(Feature::ShellSnapshot)
++            let shell_snapshot = if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && config.features.enabled(Feature::ShellSnapshot)
+                 && (!use_executor_shell_snapshots || credential_broker_available)
+             {
+                 let snapshot_credential_broker = credential_broker_available.then(|| {
+diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -930,7 +930,7 @@
+     turn_context: &TurnContext,
+     user_input: &[UserInput],
+ ) -> (Vec<String>, Vec<crate::plugins::PluginCapabilitySummary>) {
+-    if crate::guardian::is_basic_session_source(&turn_context.session_source) {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY || crate::guardian::is_basic_session_source(&turn_context.session_source) {
+         return (Vec::new(), Vec::new());
+     }
+ 
+@@ -1741,6 +1741,9 @@
+     sess: &Session,
+     turn_context: &TurnContext,
+ ) -> PreparedToolRecommendations {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        return PreparedToolRecommendations { auth: None, endpoint_candidates: None };
++    }
+     let loaded_plugins = sess
+         .services
+         .plugins_manager
+diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
+--- a/codex-rs/core/src/thread_manager.rs
++++ b/codex-rs/core/src/thread_manager.rs
+@@ -2116,7 +2116,23 @@
+             mut reserved_thread_id,
+             disabled_plugin_ids,
+         } = options;
+-        let inherited_environments = captured_environments.or(inherited_environments);
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && !matches!(&initial_history, InitialHistory::New) {
++            return Err(CodexErr::InvalidRequest("xiaok_main_bridge_new_thread_required".to_string()));
++        }
++        let inherited_environments = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { None } else { captured_environments.or(inherited_environments) };
++        let inherited_instructions = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { None } else { inherited_instructions };
++        let client_mcp_extensions = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Default::default() } else { client_mcp_extensions };
++        let turn_extension_init = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Default::default() } else { turn_extension_init };
++        let environment_requests = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Some(Vec::new()) } else { environment_requests };
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            thread_extension_init = Default::default();
++            thread_extension_init.insert(codex_extension_api::SessionIsolation::Isolated);
++            thread_extension_init.insert(codex_extension_api::ToolPolicy {
++                allowed_tools: Some(vec![codex_extension_api::ToolName::namespaced("xiaok", "invoke")]),
++                expose_additional_permissions: false,
++                ..Default::default()
++            });
++        }
+         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
+         // Older callers and saved reviewers identify isolation through their source.
+         // New internal callers supply an explicit runtime policy before startup.
+@@ -2330,7 +2346,7 @@
+             skills_service: Arc::clone(&self.skills_service),
+             plugins_manager: Arc::clone(&self.plugins_manager),
+             mcp_manager,
+-            code_mode_session_provider: Arc::clone(&self.code_mode_session_provider),
++            code_mode_session_provider: if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Arc::new(DisabledCodeModeSessionProvider) } else { Arc::clone(&self.code_mode_session_provider) },
+             extensions,
+             conversation_history: initial_history,
+             disabled_plugin_ids,
+diff --git a/codex-rs/core/src/tools/mod.rs b/codex-rs/core/src/tools/mod.rs
+--- a/codex-rs/core/src/tools/mod.rs
++++ b/codex-rs/core/src/tools/mod.rs
+@@ -73,6 +73,7 @@
+ }
+ 
+ pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return ToolMode::Direct; }
+     model_info.tool_mode.unwrap_or_else(|| {
+         if turn_context.config.features.enabled(Feature::CodeModeOnly) {
+             ToolMode::CodeModeOnly
+diff --git a/codex-rs/core/src/tools/spec_plan.rs b/codex-rs/core/src/tools/spec_plan.rs
+--- a/codex-rs/core/src/tools/spec_plan.rs
++++ b/codex-rs/core/src/tools/spec_plan.rs
+@@ -706,6 +706,7 @@
+ }
+ 
+ pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return false; }
+     let features = turn_context.config.features.get();
+     features.enabled(Feature::ToolSuggest)
+         && features.enabled(Feature::Apps)
+diff --git a/codex-rs/ext/extension-api/Cargo.toml b/codex-rs/ext/extension-api/Cargo.toml
+--- a/codex-rs/ext/extension-api/Cargo.toml
++++ b/codex-rs/ext/extension-api/Cargo.toml
+@@ -12,6 +12,9 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++xiaok-main-bridge-only = []
+ 
+ [dependencies]
+ codex-api = { workspace = true }
+diff --git a/codex-rs/ext/extension-api/src/lib.rs b/codex-rs/ext/extension-api/src/lib.rs
+--- a/codex-rs/ext/extension-api/src/lib.rs
++++ b/codex-rs/ext/extension-api/src/lib.rs
+@@ -4,6 +4,10 @@
+ mod session_isolation;
+ mod state;
+ mod tool_policy;
++
++/// Dedicated binary ceiling, fixed at build time and never relaxed by config/RPC.
++pub const XIAOK_MAIN_BRIDGE_ONLY: bool = cfg!(feature = "xiaok-main-bridge-only");
++pub const XIAOK_RESTRICTION_VERSION: &str = "xiaok-main-bridge-v1";
+ mod turn_admission;
+ mod user_instructions;
+ 
+diff --git a/codex-rs/ext/extension-api/src/tool_policy.rs b/codex-rs/ext/extension-api/src/tool_policy.rs
+--- a/codex-rs/ext/extension-api/src/tool_policy.rs
++++ b/codex-rs/ext/extension-api/src/tool_policy.rs
+@@ -33,6 +33,11 @@
+ 
+ impl ToolPolicy {
+     pub fn allows(&self, tool: &ToolName) -> bool {
++        if crate::XIAOK_MAIN_BRIDGE_ONLY
++            && !(tool.namespace.as_deref() == Some("xiaok") && tool.name == "invoke")
++        {
++            return false;
++        }
+         self.allowed_tools.as_ref().is_none_or(|tools| {
+             tools.iter().any(|allowed| {
+                 allowed.name == tool.name
+diff --git a/codex-rs/app-server/src/xiaok_main_bridge.rs b/codex-rs/app-server/src/xiaok_main_bridge.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server/src/xiaok_main_bridge.rs
+@@ -0,0 +1,68 @@
++//! Dedicated, build-time RPC ceiling. Server responses to original dynamic calls remain intact.
++use codex_app_server_protocol::{ClientRequest, JSONRPCErrorError};
++use serde_json::Value;
++use std::sync::{OnceLock, atomic::{AtomicBool, Ordering}};
++static STARTED: AtomicBool = AtomicBool::new(false);
++static THREAD: OnceLock<String> = OnceLock::new();
++fn deny() -> JSONRPCErrorError { JSONRPCErrorError { code: -32600, message: "xiaok_main_bridge_rpc_forbidden".to_string(), data: None } }
++fn fields(value: &Value, allowed: &[&str]) -> Result<(), JSONRPCErrorError> {
++    let object = value.as_object().ok_or_else(deny)?;
++    if object.iter().any(|(key, value)| !value.is_null() && !allowed.contains(&key.as_str())) { return Err(deny()); }
++    Ok(())
++}
++fn text_input(params: &Value) -> Result<(), JSONRPCErrorError> {
++    let input = params.get("input").and_then(Value::as_array).ok_or_else(deny)?;
++    if input.is_empty() || input.len() > 64 { return Err(deny()); }
++    for item in input {
++        fields(item, &["type", "text", "text_elements"])?;
++        if item["type"] != "text" || !item["text"].is_string() { return Err(deny()); }
++        if item.get("text_elements").is_some_and(|value| !value.is_array() || !value.as_array().is_some_and(Vec::is_empty)) { return Err(deny()); }
++    }
++    Ok(())
++}
++pub(crate) fn bind_thread(id: String) -> Result<(), JSONRPCErrorError> {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { THREAD.set(id).map_err(|_| deny())?; }
++    Ok(())
++}
++pub(crate) fn validate_request(request: &ClientRequest) -> Result<(), JSONRPCErrorError> {
++    if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return Ok(()); }
++    let wire = serde_json::to_value(request).map_err(|_| deny())?;
++    let method = wire["method"].as_str().ok_or_else(deny)?;
++    let params = &wire["params"];
++    match method {
++        "initialize" => {
++            fields(params, &["clientInfo", "capabilities"])?;
++            fields(&params["clientInfo"], &["name", "title", "version"])?;
++            if let Some(capabilities) = params.get("capabilities") {
++                fields(capabilities, &["experimentalApi", "requestAttestation"])?;
++                if capabilities.get("requestAttestation").is_some_and(|value| *value != Value::Bool(false)) { return Err(deny()); }
++            }
++        },
++        "account/read" => {
++            fields(params, &["refreshToken"])?;
++            if params.get("refreshToken").is_some_and(|value| *value != Value::Bool(false)) { return Err(deny()); }
++        },
++        "model/list" => { fields(params, &["cursor", "limit", "includeHidden"])?; },
++        "thread/start" => {
++            fields(params, &["model", "ephemeral", "environments", "dynamicTools"])?;
++            if params["ephemeral"] != true || params["environments"] != serde_json::json!([]) { return Err(deny()); }
++            let tools = params["dynamicTools"].as_array().ok_or_else(deny)?;
++            if tools.len() != 1 || tools[0]["type"] != "namespace" || tools[0]["name"] != "xiaok" { return Err(deny()); }
++            let functions = tools[0]["tools"].as_array().ok_or_else(deny)?;
++            if functions.len() != 1 || functions[0]["type"] != "function" || functions[0]["name"] != "invoke" { return Err(deny()); }
++            if STARTED.swap(true, Ordering::SeqCst) { return Err(deny()); }
++        },
++        "turn/start" | "turn/steer" | "turn/interrupt" => {
++            let allowed: &[&str] = match method {
++                "turn/start" => &["threadId", "input", "clientUserMessageId"],
++                "turn/steer" => &["threadId", "expectedTurnId", "input"],
++                _ => &["threadId", "turnId"],
++            };
++            fields(params, allowed)?;
++            if params["threadId"].as_str() != THREAD.get().map(String::as_str) || THREAD.get().is_none() { return Err(deny()); }
++            if method != "turn/interrupt" { text_input(params)?; }
++        },
++        _ => return Err(deny()),
++    }
++    Ok(())
++}
+diff --git a/codex-rs/ext/extension-api/tests/main_bridge_only.rs b/codex-rs/ext/extension-api/tests/main_bridge_only.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/ext/extension-api/tests/main_bridge_only.rs
+@@ -0,0 +1,24 @@
++#![cfg(feature = "xiaok-main-bridge-only")]
++use codex_extension_api::{ToolName, ToolPolicy};
++#[test]
++fn dedicated_process_policy_rejects_every_non_bridge_tool_even_if_explicitly_allowed() {
++    let names = [
++        ToolName::plain("shell"), ToolName::plain("exec_command"),
++        ToolName::plain("apply_patch"), ToolName::plain("js"),
++        ToolName::namespaced("functions", "exec_command"),
++        ToolName::namespaced("node_repl", "js"),
++        ToolName::namespaced("code_mode", "exec"),
++        ToolName::namespaced("code_mode", "wait"),
++        ToolName::namespaced("agent", "spawn_agent"),
++        ToolName::plain("xiaok.invoke"),
++        ToolName::namespaced("xiaok", "invoke_other"),
++        ToolName::namespaced("mcp__xiaok", "invoke"),
++    ];
++    for name in names {
++        assert!(!ToolPolicy::default().allows(&name), "default registry must reject {name:?}");
++        let forged = ToolPolicy { allowed_tools: Some(vec![name.clone()]), ..Default::default() };
++        assert!(!forged.allows(&name), "explicit policy cannot relax dedicated process {name:?}");
++    }
++    assert!(ToolPolicy::default().allows(&ToolName::namespaced("xiaok", "invoke")));
++    assert!(!ToolPolicy { allowed_tools: Some(vec![]), ..Default::default() }.allows(&ToolName::namespaced("xiaok", "invoke")));
++}

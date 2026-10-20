@@ -62,6 +62,7 @@ export class ConversationActivityOwnerHost {
     }
   }
   constructor(private readonly options: { dataRoot: string; profileId: string; actorId: string;
+    migrateFromProfileId?:string;
     now?(): number; idle?(): void; env?: NodeJS.ProcessEnv;
     setInterval?: typeof setInterval; clearInterval?: typeof clearInterval;
     configDigest?: string; ready?(): boolean;
@@ -70,6 +71,7 @@ export class ConversationActivityOwnerHost {
     sourceControl?(method: string, params: Record<string, unknown>): Promise<unknown>;
     getThread(threadId: string): ActivityThreadIdentity | null;
     canObserveWork(watch: WorkWatch): Promise<boolean> | boolean;
+    canDiscloseWork?(watch:WorkWatch):boolean;
     authorizeProducer(threadId: string, instanceId?: string): boolean;
     notify?: ConstructorParameters<typeof ConversationActivityService>[0]['notify'];
     stopWatch?(watchId: string): void; watchBound?(watchId: string): Promise<void> | void;
@@ -80,6 +82,7 @@ export class ConversationActivityOwnerHost {
     this.unattendedMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_MAX_UNATTENDED_MS, ACTIVITY_OWNER_MAX_UNATTENDED_MS);
     this.address = activityOwnerAddress(options.dataRoot);
     this.store = new ConversationActivityStore(join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.database));
+    try{if(options.migrateFromProfileId)this.store.migrateProfileIdentity(options.migrateFromProfileId,options.profileId);}catch(error){this.store.close();throw error;}
     this.actor = { requestSource: 'user' as const, actorId: options.actorId };
     this.service = new ConversationActivityService({ ...options, store: this.store });
   }
@@ -119,7 +122,8 @@ export class ConversationActivityOwnerHost {
             try { message = JSON.parse(line); } catch { socket.destroy(); return; }
             if (!client.role) {
               try { client.role = authenticateActivityClient(credentials, message); client.instanceId = (message as { instanceId?: string }).instanceId; clearTimeout(handshake); this.lastActivity = this.unattendedSince = this.now();
-                this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch }); }
+                this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch,
+                  generation:ACTIVITY_OWNER_GENERATION,profileId:this.options.profileId,configDigest:this.options.configDigest,ready:this.options.ready?.()??true }); }
               catch { socket.destroy(); return; }
             } else void this.request(client, message);
           }
@@ -152,6 +156,7 @@ export class ConversationActivityOwnerHost {
     try {
       if (client.role === 'user' && !USER_METHODS.has(method)) throw new Error('activity_method_forbidden');
       const result = await this.dispatch(client, method, params);
+      this.service.assertResultCurrent(result);
       if (client.active) this.send(client, { type: 'result', id, result });
     } catch (error) { this.send(client, { type: 'error', id, code: error instanceof Error ? error.message.slice(0, 256) : 'activity_request_failed' }); }
     finally { client.pending--; this.pending--; this.lastActivity = this.now(); }

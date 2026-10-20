@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "upstreamCommit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "sourceUrl": "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "sourceSha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
+  "compilerVersion": "1.95.0",
+  "targetTriple": "aarch64-apple-darwin",
+  "restrictionVersion": "xiaok-main-bridge-v1",
+  "cargoFeature": "xiaok-main-bridge-only",
+  "qualifiedPlatforms": ["darwin-arm64"],
+  "patchSha256": "6e9407a35382f0a15220522c5fd479d3fe56b79e1163990116bd758c38382974",
+  "originalFiles": {
+    "codex-rs/Cargo.lock": "49fe417bcafe3f69f1f6636e23274f90d37e75e388127a76888c39001a4f8117",
+    "codex-rs/app-server/Cargo.toml": "b42b0fcb26e284d66c32411f8995512337e3a826a8aefcd2ae6bad7e5e708b0c",
+    "codex-rs/app-server/src/config_manager.rs": "34b20e0c750cf2628f3a9a9bfd548cb227730814462ef59dc9edd7785478a66e",
+    "codex-rs/app-server/src/lib.rs": "b4c6b019d3ed6e5511abc997a725f466a0377c055ea09d2db8535f9275697c47",
+    "codex-rs/app-server/src/main.rs": "6c027c0307379f7426f25812e4422d5740ac6a128a28a51bcf79267516457ced",
+    "codex-rs/app-server/src/message_processor.rs": "5e17343f7c7129dc09a77300771dcd93119192c5cb39a3f4d1e29a547fec34ed",
+    "codex-rs/app-server/src/request_processors/initialize_processor.rs": "4535560b07ab10d1538acd461560a55c1bdf0c9b4049e72775d6b770421f117f",
+    "codex-rs/app-server/src/request_processors/thread_processor.rs": "2c40a6db590c9823a6775b28c2e125544583246318ce038166d28fb57a10ab29",
+    "codex-rs/core/Cargo.toml": "9eb742e8253e80b764c30b71e52345adcf766e09de0104a39b0b908528ec82da",
+    "codex-rs/core/src/mcp.rs": "099b96d1c028799acf3e5000fb684638e070bb2e2c3ad1735b4ea4a43a5f0946",
+    "codex-rs/core/src/session/mod.rs": "5e94b4e8fc9fea7314169e7e29e88a96acbe7f9d0ec5e50a6a60de2d7ffc88df",
+    "codex-rs/core/src/session/session.rs": "0179bec86da0526042f5f9a26fcc6f03b018833aa7fc26f56ec83ccd51fdc9a9",
+    "codex-rs/core/src/session/turn.rs": "b8d16ea9290835e8f901b4708e34a8722a74a096b0c5532706deb09765770b11",
+    "codex-rs/core/src/thread_manager.rs": "3b613970b46385d16c423b130a92fcb2749478aaa385d668b9e2ae38133b6e0b",
+    "codex-rs/core/src/tools/mod.rs": "510635e3ae67e4c63e1feaf6d645f25dc2590f54391645dddeec0a84c1d17616",
+    "codex-rs/core/src/tools/spec_plan.rs": "db040c0c07160af64bebd5a7a5071658cb7ff58db341edd70e2795958b1d07f3",
+    "codex-rs/ext/extension-api/Cargo.toml": "fc9696d53a84326f578afc6cfa1084d083026dcfceb631df1db59f85cbf3b6ce",
+    "codex-rs/ext/extension-api/src/lib.rs": "0ba9a6299da1e8914af856d396b844b3aa5784ec05270b8d39ddef513d04d711",
+    "codex-rs/ext/extension-api/src/tool_policy.rs": "909df60dd82a289a4fb7ae7083f56d6018e75cc1942880be14f2f51bc5e33f42"
+  },
+  "newFiles": [
+    "codex-rs/app-server/src/xiaok_main_bridge.rs",
+    "codex-rs/ext/extension-api/tests/main_bridge_only.rs"
+  ]
+}

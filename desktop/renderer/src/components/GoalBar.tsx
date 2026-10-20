@@ -5,6 +5,7 @@ import { useLocale } from '../contexts/LocaleContext';
 
 export interface GoalBarProps {
   goal: DesktopGoalProjection | null;
+  controlStatus?: 'paused' | 'cancelled';
   loading?: boolean;
   error?: string | null;
   initialEditing?: boolean;
@@ -15,7 +16,7 @@ export interface GoalBarProps {
   onCancel?: () => void | Promise<void>;
 }
 
-export function GoalBar({ goal, loading, error, initialEditing = false, onCreate, onReplace, onPause, onResume, onCancel }: GoalBarProps) {
+export function GoalBar({ goal, controlStatus, loading, error, initialEditing = false, onCreate, onReplace, onPause, onResume, onCancel }: GoalBarProps) {
   const { t } = useLocale();
   const [editing, setEditing] = useState(initialEditing);
   const [replaceMode, setReplaceMode] = useState(false);
@@ -59,6 +60,14 @@ export function GoalBar({ goal, loading, error, initialEditing = false, onCreate
 
   if (!state || editing) {
     if (!editing) {
+      if (controlStatus) return <div className="goal-panel text-xs">
+        <p role="status" aria-live="polite">{controlStatus === 'paused' ? t.goalBar.statusPaused : t.goalBar.statusCancelled}</p>
+        {error ? <p className="mt-1 text-[var(--c-text-secondary)]">{error}</p> : null}
+        <div className="mt-2 flex gap-2">
+          {controlStatus === 'paused' && onResume ? <button type="button" disabled={loading} onClick={() => void onResume()}>{t.goalBar.resume}</button> : null}
+          <button type="button" disabled={loading} onClick={() => { setReplaceMode(controlStatus === 'paused' && Boolean(onReplace)); setEditing(true); }}>{controlStatus === 'paused' ? t.goalBar.replaceGoal : t.goalBar.createGoal}</button>
+        </div>
+      </div>;
       return <div className="goal-panel goal-panel--empty"><button type="button" onClick={() => { setReplaceMode(false); setEditing(true); }} className="text-xs font-medium text-[var(--c-accent)]">{t.goalBar.createGoal}</button></div>;
     }
     const evidenceOptions: Array<[GoalEvidenceKind, string]> = [

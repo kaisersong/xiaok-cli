@@ -17,6 +17,8 @@ export declare class ConversationActivityStore {
         readOnly?: boolean;
     });
     private transaction;
+    /** The constructor's lifetime exclusive lock is held before any domain is changed. */
+    migrateProfileIdentity(legacyProfileId: string, profileId: string): void;
     prepareAssociation(input: {
         operationId: string;
         creationIdempotencyKey: string;

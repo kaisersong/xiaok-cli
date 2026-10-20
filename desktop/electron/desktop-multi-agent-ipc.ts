@@ -1,5 +1,6 @@
 import type { DesktopMultiAgentService, DesktopMultiAgentUserAccess, DesktopWorkspaceUserAccess } from './desktop-multi-agent-service.js';
 import type { MultiAgentEnvelope } from '../shared/multi-agent-types.js';
+import { projectMultiAgentControl, projectMultiAgentDeletion } from './desktop-multi-agent-disclosure.js';
 
 export interface MultiAgentIpcSender {
   id: number; mainFrame: object; isDestroyed(): boolean; send(channel: string, data: unknown): void;
@@ -12,13 +13,23 @@ interface Subscription { sender: MultiAgentIpcSender; id: string; access: Deskto
 
 /** The Electron adapter must authenticate an exact main-known renderer URL. */
 export function registerDesktopMultiAgentIpc(
-  ipc: { handle(channel: string, handler: (event: MultiAgentIpcEvent, input: unknown) => unknown): void },
+  ipc: { readonly handlesOutputFence?:boolean;handle(channel: string, handler: (event: MultiAgentIpcEvent, input: unknown) => unknown,assertOutputCurrent?:(result:unknown,event:MultiAgentIpcEvent)=>void): void },
   boundary: MultiAgentIpcBoundary | null | undefined,
-  options: { authorize(event: MultiAgentIpcEvent): { actorId: string } | null },
+  options: { authorize(event: MultiAgentIpcEvent): { actorId: string } | null; onThreadDeleted?(threadId: string): void },
 ): () => void {
   const subscriptions = new Map<string, Subscription>();
   const viewers = new Map<number, { sender: MultiAgentIpcSender; navigation: (...args: any[]) => void; destroyed: () => void }>();
   let disposed = false;
+  const deferred=new WeakMap<MultiAgentIpcEvent,{value:unknown;check:()=>void}>();
+  const defer=<T>(event:MultiAgentIpcEvent,value:T,check:()=>void):T=>{
+    if(ipc.handlesOutputFence){if(deferred.has(event))throw new Error('ipc_output_event_reused');deferred.set(event,{value,check});}
+    return value;
+  };
+  const assertDeferred=(value:unknown,event:MultiAgentIpcEvent):void=>{
+    const read=deferred.get(event);
+    try{if(!read||read.value!==value)throw new Error('multi_agent_read_manifest_unavailable');return read.check();}
+    finally{deferred.delete(event);}
+  };
   const authenticate = (event: MultiAgentIpcEvent) => {
     const principal = !disposed && !event.sender.isDestroyed() && event.senderFrame === event.sender.mainFrame && options.authorize(event);
     if (!principal) throw new Error('multi_agent_unauthorized_sender');
@@ -49,7 +60,8 @@ export function registerDesktopMultiAgentIpc(
     if (value === undefined && fallback !== undefined) return fallback;
     if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error('invalid multi-agent integer'); return value as number;
   };
-  const handler = (key: string, fields: string[], action: (input: Record<string, unknown>, access: DesktopMultiAgentUserAccess, event: MultiAgentIpcEvent) => unknown) => {
+  const handler = (key: string, fields: string[], action: (input: Record<string, unknown>, access: DesktopMultiAgentUserAccess, event: MultiAgentIpcEvent) => unknown,
+    purpose: 'read' | 'control' = 'read') => {
     ipc.handle(`desktop:${key}`, async (event, raw) => {
       authenticate(event); const input = record(raw, fields);
       if (!boundary) throw new Error('multi_agent_unsupported_runner');
@@ -58,12 +70,35 @@ export function registerDesktopMultiAgentIpc(
       await boundary.service.registerThreadWithOwnership({ threadId, profileId: boundary.profileId, workspaceId: boundary.workspaceId, cwd: boundary.cwd }, 'user');
       authenticate(event);
       const access = boundary.service.createUserAccess({ requestSource: 'user', actorId: principal.actorId, threadId, profileId: boundary.profileId, workspaceId: boundary.workspaceId });
-      const result = await action(input, access, event);
-      authenticate(event);
-      if (result !== undefined && Buffer.byteLength(JSON.stringify(result)) > 64 * 1024) throw new Error('multi_agent_wire_limit_exceeded');
-      return result;
-    });
+      const selected = (result: unknown): unknown => {
+        if (key !== 'subscribeMultiAgents') return result;
+        const wrapper = record(result, ['subscriptionId', 'snapshot']);
+        if (wrapper.subscriptionId !== input.subscriptionId) throw new Error('multi_agent_read_manifest_unavailable');
+        return wrapper.snapshot;
+      };
+      try {
+        const captured = purpose === 'read' ? boundary.service.captureUserRead(access, () => action(input, access, event), selected) : undefined;
+        const rawResult = await (captured ? captured.result : action(input, access, event));
+        const result = captured ? rawResult : key === 'getMultiAgentThreadDeletion' ? projectMultiAgentDeletion(rawResult) : projectMultiAgentControl(rawResult);
+        if (authenticate(event).actorId !== principal.actorId) throw new Error('multi_agent_unauthorized_sender');
+        if (result !== undefined && Buffer.byteLength(JSON.stringify(result)) > 64 * 1024) throw new Error('multi_agent_wire_limit_exceeded');
+        if (captured) boundary.service.assertUserReadCurrent(captured.receipt, access, selected(result));
+        return defer(event,result,()=>{
+          try{
+            if(authenticate(event).actorId!==principal.actorId)throw new Error('multi_agent_unauthorized_sender');
+            if(captured){
+              const checked:unknown=boundary.service.assertUserReadCurrent(captured.receipt,access,selected(result));
+              if(checked!==undefined){if(key==='subscribeMultiAgents')remove(`${event.sender.id}:${id(input.subscriptionId)!}`);return checked as never;}
+            }
+          }catch(error){if(key==='subscribeMultiAgents')remove(`${event.sender.id}:${id(input.subscriptionId)!}`);throw error;}
+        });
+      } catch (error) {
+        if (key === 'subscribeMultiAgents') remove(`${event.sender.id}:${id(input.subscriptionId)!}`);
+        throw error;
+      }
+    },assertDeferred);
   };
+  const controlHandler = (key: string, fields: string[], action: (input: Record<string, unknown>, access: DesktopMultiAgentUserAccess, event: MultiAgentIpcEvent) => unknown) => handler(key, fields, action, 'control');
   const workspaceHandler = (key: string, fields: string[], action: (input: Record<string, unknown>, access: DesktopWorkspaceUserAccess, event: MultiAgentIpcEvent) => unknown) => {
     ipc.handle(`desktop:${key}`, async (event, raw) => {
       authenticate(event); const input = record(raw, fields);
@@ -75,8 +110,8 @@ export function registerDesktopMultiAgentIpc(
       const result = await action(input, access, event);
       authenticate(event);
       if (result !== undefined && Buffer.byteLength(JSON.stringify(result)) > 64 * 1024) throw new Error('multi_agent_wire_limit_exceeded');
-      return result;
-    });
+      return defer(event,result,()=>{if(authenticate(event).actorId!==principal.actorId)throw new Error('multi_agent_unauthorized_sender');});
+    },assertDeferred);
   };
   workspaceHandler('getLocalExecutionAuthorization', [], (_input, access) => boundary!.service.getExecutionAuthorizationForUser({ access, requestSource: 'user' }));
   workspaceHandler('getLocalExecutionWorkspace', [], (_input, access) => boundary!.service.getExecutionWorkspaceForUser({ access, requestSource: 'user' }));
@@ -113,7 +148,7 @@ export function registerDesktopMultiAgentIpc(
     access, requestSource: 'user', groupId: id(input.groupId)!, approvalId: id(input.approvalId)!,
     ...(input.inputOffset === undefined ? {} : { inputOffset: integer(input.inputOffset) }),
   }));
-  handler('decideMultiAgentApproval', [...scope, 'approvalId', 'operationId', 'decision'], (input, access) => {
+  controlHandler('decideMultiAgentApproval', [...scope, 'approvalId', 'operationId', 'decision'], (input, access) => {
     if (input.decision !== 'approve' && input.decision !== 'approve_for_task' && input.decision !== 'deny') throw new Error('invalid approval decision');
     return boundary!.service.decideApproval({ access, requestSource: 'user', groupId: id(input.groupId)!,
       approvalId: id(input.approvalId)!, operationId: id(input.operationId)!, decision: input.decision });
@@ -124,24 +159,26 @@ export function registerDesktopMultiAgentIpc(
   handler('getAgentContent', [...scope, 'contentId', 'offset'], (input, access) => boundary!.service.readContent({ access, groupId: id(input.groupId)!, contentId: id(input.contentId)!, offset: integer(input.offset, 0) }));
   handler('getMultiAgentOperation', [...scope, 'operationId'], (input, access) => boundary!.service.readOperation({ access, groupId: id(input.groupId)!, operationId: id(input.operationId)! }));
   handler('getMultiAgentResources', [...scope, 'cursor'], (input, access) => boundary!.service.readResources({ access, groupId: id(input.groupId)!, cursor: id(input.cursor, true) }));
-  handler('resolveMultiAgentResource', [...scope, 'resourceId', 'action', 'operationId'], (input, access) => {
+  controlHandler('resolveMultiAgentResource', [...scope, 'resourceId', 'action', 'operationId'], (input, access) => {
     if (input.action !== 'keep' && input.action !== 'retryCleanup') throw new Error('invalid resource action');
     return boundary!.service.resolveResource({ access, requestSource: 'user', groupId: id(input.groupId)!, resourceId: id(input.resourceId)!, action: input.action, operationId: id(input.operationId)! });
   });
-  handler('resetMultiAgentGroup', ['threadId', 'expectedGroupId', 'confirmTerminate', 'operationId'], (input, access) => {
+  controlHandler('resetMultiAgentGroup', ['threadId', 'expectedGroupId', 'confirmTerminate', 'operationId'], async (input, access) => {
     if (input.confirmTerminate !== true) throw new Error('group reset requires explicit confirmation');
     return boundary!.service.resetGroup({ access, requestSource: 'user', expectedGroupId: input.expectedGroupId === null ? null : id(input.expectedGroupId)!,
       confirmTerminate: true, operationId: id(input.operationId)! });
   });
-  handler('getMultiAgentThreadDeletion', ['threadId'], (_input, access) => boundary!.service.readThreadDeletion({ access }));
-  handler('deleteMultiAgentThread', ['threadId', 'expectedThreadRevision', 'confirmTerminate', 'operationId'], (input, access) => {
+  controlHandler('getMultiAgentThreadDeletion', ['threadId'], (input, access) => { const result = boundary!.service.readThreadDeletion({ access }); if (result.deleteState === 'deleted' && result.operation?.state === 'completed') options.onThreadDeleted?.(id(input.threadId)!); return result; });
+  controlHandler('deleteMultiAgentThread', ['threadId', 'expectedThreadRevision', 'confirmTerminate', 'operationId'], async (input, access) => {
     if (input.confirmTerminate !== true) throw new Error('thread deletion requires explicit confirmation');
-    return boundary!.service.deleteThread({ access, requestSource: 'user', operationId: id(input.operationId)!,
+    const result = await boundary!.service.deleteThread({ access, requestSource: 'user', operationId: id(input.operationId)!,
       expectedThreadRevision: integer(input.expectedThreadRevision), confirmTerminate: true });
+    if (result.state === 'completed') options.onThreadDeleted?.(id(input.threadId)!);
+    return result;
   });
   for (const [name, method, needsMessage] of [
     ['sendAgentMessage', 'userSend', true], ['followupAgent', 'userFollowup', true], ['interruptAgent', 'userInterrupt', false], ['closeAgent', 'userClose', false],
-  ] as const) handler(name, [...scope, 'agentId', 'operationId', 'expectedTurn', ...(needsMessage ? ['message'] : [])], (input, access) => {
+  ] as const) controlHandler(name, [...scope, 'agentId', 'operationId', 'expectedTurn', ...(needsMessage ? ['message'] : [])], (input, access) => {
     const control = { access, requestSource: 'user' as const, groupId: id(input.groupId)!, agentId: id(input.agentId)!, operationId: id(input.operationId)!, expectedTurn: integer(input.expectedTurn) };
     if (needsMessage) {
       if (typeof input.message !== 'string' || Buffer.byteLength(input.message) > 16 * 1024) throw new Error('invalid multi-agent message');

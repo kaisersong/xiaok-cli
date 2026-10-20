@@ -1,5 +1,6 @@
 import { registerMemoryDistillationIpc } from '../../electron/memory-distillation.js';
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
+import { registerContextContinuityIpc } from '../../electron/context-continuity/ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
 import { registerRoomWorkspaceIpc } from '../../electron/room-workspace-ipc.js';
@@ -52,6 +53,16 @@ const ARTIFACT_WORKSPACE_CHANNEL_BY_KEY = Object.fromEntries(
 describe('preload API contract', () => {
   it('exposes only task-semantic APIs', () => {
     expect(PRELOAD_API_KEYS).toEqual([
+      'getAuthOwnerStatus',
+      'startAuthOwnerLogin',
+      'cancelAuthOwnerLogin',
+      'logoutAuthOwner',
+      'getContextMcpStatus',
+      'setContextMcpEnabled',
+      'resetContextMcpPort',
+      'issueContextMcpConfig',
+      'listExternalContextReaders',
+      'revokeExternalContextReader',
       'getModelConfig',
       'saveModelConfig',
       'updateModelRuntimeOptions',
@@ -74,6 +85,27 @@ describe('preload API contract', () => {
       'importMaterial',
       'createTask',
       'createTaskWithFiles',
+      'inspectContextConversations',
+  'getContextGrant',
+  'importLegacyThreadMetadata',
+  'getLegacyThreadMetadata',
+  'previewLegacyContext',
+    'claimLegacyContext',
+    'listCliArchives',
+    'previewCliArchive',
+    'claimCliArchive',
+    'createContextConversation',
+      'getContextConversation',
+      'listContextConversations',
+      'updateContextConversation',
+      'createContextReference',
+      'resolveContextReference',
+      'enqueueConversationInput','listConversationInputs','cancelConversationInput','onConversationInputsChanged',
+      'searchContextHistory',
+      'getHistorySearchConsent',
+      'setHistorySearchConsent',
+      'attachContextReference',
+      'revokeContextGrant',
       'subscribeTask',
       'getConversationActivities',
       'getConversationActivityUnread',
@@ -125,6 +157,7 @@ describe('preload API contract', () => {
       'cancelTask',
       'getActiveTask',
       'recoverTask',
+      'readTaskHistory',
       'openArtifact',
       'openFileInSystemApp',
       'readFileContent',
@@ -992,6 +1025,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerMemoryDistillationIpc({ handle: channel => { channels.add(channel); } }, {}, () => false);
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
+  registerContextContinuityIpc({ handle: channel => { channels.add(channel); } }, null, () => false);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'/g;

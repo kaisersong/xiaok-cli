@@ -1,7 +1,8 @@
 import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import {activityOwnerConfigDigest} from './owner-config.js';
+export {activityOwnerConfigDigest} from './owner-config.js';
 import { WebSocket } from 'ws';
 import { ConversationActivityOwnerHost } from './owner-host.js';
 import { ActivityNativeIdentityRepository } from './native-identity.js';
@@ -11,6 +12,9 @@ import { ActivityOwnerMcp } from './owner-mcp.js';
 import { z } from 'zod';
 import { showActivityOwnerNotification } from './owner-notification.js';
 import { ActivitySourceSupervisor, type ActivityManagedSource } from './source-supervisor.js';
+import {loadContinuityProfile,resolveDesktopProfile} from '../context-continuity/profile.js';
+import {ContinuityPolicyReader} from '../context-continuity/policy-reader.js';
+import {readCurrentActivityTask} from './task-identity.js';
 
 export interface ActivityOwnerConfig {
   schemaVersion: 1; dataRoot: string; profileId: string; actorId: string;
@@ -18,18 +22,15 @@ export interface ActivityOwnerConfig {
   managedSources?: ActivityManagedSource[];
   kswarm?: { url: string; mutationToken: string; brokerUrl: string; roomToken: string };
 }
-export function activityOwnerConfigDigest(config: ActivityOwnerConfig): string {
-  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
-    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
-  // Environment is launch input, not the identity of a running owner.
-  const digestConfig = { ...config, managedSources: config.managedSources?.map(({ env: _env, ...source }) => source) };
-  return createHash('sha256').update(JSON.stringify(canonical(digestConfig))).digest('hex');
-}
-
 /** Private configuration is supplied by the verified native bootstrap owner. */
 export async function startConversationActivityOwner(config: ActivityOwnerConfig, options: { idle?(): void } = {}) {
   if (config.schemaVersion !== 1) throw new Error('activity_owner_config_unsupported');
   createPrivateActivityDirectory(config.dataRoot);
+  let legacyProfileId:string|undefined;
+  if(config.identity.kind==='desktop'){
+    if(loadContinuityProfile(config.dataRoot,{requireExisting:true})!==config.profileId||config.actorId!==`desktop-user:${config.profileId}`)throw new Error('activity_owner_profile_mismatch');
+    const profile=resolveDesktopProfile(config.dataRoot);if(profile.profileId!==config.profileId)throw new Error('activity_owner_profile_mismatch');legacyProfileId=profile.legacyProfileId;
+  }
   const identity = new ActivityNativeIdentityRepository({ ...config.identity, profileId: config.profileId });
   const tasks = new ActivityTaskSnapshotReader(join(config.dataRoot, 'tasks'));
   const groups = config.identity.kind === 'desktop' ? new ActivityNativeGroupReader(config.identity.path) : undefined;
@@ -44,6 +45,7 @@ export async function startConversationActivityOwner(config: ActivityOwnerConfig
   };
   const ks = config.kswarm;
   const host = new ConversationActivityOwnerHost({ dataRoot: config.dataRoot, profileId: config.profileId, actorId: config.actorId, configDigest: activityOwnerConfigDigest(config),
+    migrateFromProfileId:legacyProfileId,
     idle: options.idle,
     disconnected: clientId => mcp.disconnected(clientId),
     mcpRequest: async (method, params, clientId) => {
@@ -66,7 +68,7 @@ export async function startConversationActivityOwner(config: ActivityOwnerConfig
     },
     getThread: threadId => identity.getThread(threadId), authorizeProducer: (threadId, instanceId) => identity.authorizeProducer(threadId, instanceId),
     canObserveWork: async watch => {
-      if (watch.source === 'task_host') return (await tasks.snapshot(watch.workId))?.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
+      if (watch.source === 'task_host') { const snapshot=await tasks.snapshot(watch.workId);return snapshot?.sessionId===watch.sourceDataEpoch&&snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId); }
       if (watch.source === 'mcp') return mcp?.canObserve(watch) ?? false;
       if (watch.source === 'agent_group') return groups?.groupThread(watch.workId) === watch.origin.threadId;
       if (watch.source !== 'kswarm' || !ks) return false;
@@ -74,6 +76,15 @@ export async function startConversationActivityOwner(config: ActivityOwnerConfig
       if (!routing.ok || routing.sourceDataEpoch !== watch.sourceDataEpoch || typeof routing.roomId !== 'string') return false;
       const room = await request(ks.brokerUrl, `/rooms/${encodeURIComponent(routing.roomId)}`, { 'x-intent-broker-room-token': ks.roomToken });
       return room.ok !== false && Boolean(room.room);
+    }, canDiscloseWork: watch => {
+      if(config.identity.kind!=='desktop')return true; // Independently owned standalone CLI activity.
+      if(watch.source!=='task_host')return false;
+      try{
+        const actual=readCurrentActivityTask(config.dataRoot,watch);
+        const policy=new ContinuityPolicyReader({dataRoot:config.dataRoot,profileId:config.profileId,scope:id=>identity.continuityScope(id,watch.origin.workspaceId)});
+        if(identity.continuityScope(actual.context!.threadId!,watch.origin.workspaceId)!=='readable')return false;
+        policy.assertTaskReadable(watch.workId);return true;
+      }catch{return false;}
     }, stopWatch: watchId => { sources?.stopWatch(watchId); mcp?.activities.stopWatch(watchId); }, watchBound: async watchId => { await sources?.startWatch(watchId); const watch = host.store.getWatch(watchId); if (watch?.source === 'mcp') mcp.bound(watch); },
     sourceHint: (source, workId) => source === 'kswarm' ? sources.refreshProject(workId, true) : sources.refreshGroup(workId, true), onError: () => {} });
   sources = new ConversationActivitySources({ store: host.store, service: host.service,

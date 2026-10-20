@@ -1,8 +1,22 @@
 import type {ToolExecutionContext} from '../types.js';
 import {createExecutionHealthMonitor,resolveExecutionIdleMs} from './execution-health.js';
+
+/** Invalid async host checks still own their promise, including recorder failure. */
+export function settleUnexpectedHostCheck(value: unknown, context?: ToolExecutionContext): Promise<never> | undefined {
+  if (value === undefined) return;
+  return (async () => {
+    let recordingError: unknown;
+    try { context?.recordUnprovenEffect?.('local_operation_check_not_synchronous'); }
+    catch (error) { recordingError = error; }
+    try { await value; } catch { /* Reject below after the actual check settled. */ }
+    throw recordingError ?? new Error('local_operation_check_not_synchronous');
+  })();
+}
 /** Cancellation requests do not settle this promise; the actual tool must exit. */
 export async function runMonitoredTool<T>(options: {
   name:string; context?:ToolExecutionContext; idleMs?:number; waitsForUser?:boolean;
+  /** Host-owned invocation admission, never carried by ToolExecutionContext. */
+  admitEffect?():void;
   run(context?:ToolExecutionContext):Promise<T>;
 }):Promise<T> {
   const {context}=options;
@@ -30,6 +44,10 @@ export async function runMonitoredTool<T>(options: {
     // The strict provider projection freezes its public snapshot. Trusted
     // monitoring may add callbacks/signal composition, not thaw that contract.
     if(monitoredContext&&Object.isFrozen(context))Object.freeze(monitoredContext);
+    const unexpectedCheck = settleUnexpectedHostCheck(context?.assertContextAdmission?.(), context);
+    if (unexpectedCheck) await unexpectedCheck;
+    if(options.admitEffect) options.admitEffect();
+    else context?.recordUnprovenEffect?.(options.name);
     const result=await options.run(monitoredContext);
     owned.signal.throwIfAborted();context?.signal?.throwIfAborted();return result;
   }catch(error){owned.signal.throwIfAborted();throw error;}

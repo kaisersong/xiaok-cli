@@ -1,4 +1,4 @@
-import type { DesktopMailboxPort, MultiAgentDrainedBatch } from '../shared/multi-agent-types.js';
+import type { DesktopMailboxPort, MultiAgentDrainedBatch, MultiAgentMessage } from '../shared/multi-agent-types.js';
 import type { DesktopMultiAgentStore } from './desktop-multi-agent-store.js';
 
 /** One group, one short command queue. Execution and cleanup promises never own it. */
@@ -38,10 +38,12 @@ type SealResult = Awaited<ReturnType<DesktopMailboxPort['trySealTurn']>>;
 /** Durable input owner shared by root and child Desktop loops. No second inbox. */
 export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
   private sealed?: SealResult;
+  private claims = new Map<string, MultiAgentMessage[]>();
   constructor(private readonly options: {
     store: DesktopMultiAgentStore; groupId: string; agentId: string; turnId: string;
     commands: MultiAgentCommandSequencer;
     assertCurrent(): void;
+    authorizeMessages?(messages: MultiAgentMessage[]): void;
     beforeSeal?(): void;
     onSeal(outcome: SealOutcome): void;
   }) {}
@@ -49,12 +51,18 @@ export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
   drainInput(): Promise<MultiAgentDrainedBatch> {
     return this.options.commands.run(() => {
       this.assertActive();
-      return this.options.store.drainInput(this.options.groupId, this.options.agentId, this.options.turnId);
+      const batch = this.options.store.drainInput(this.options.groupId, this.options.agentId, this.options.turnId);
+      try { this.options.authorizeMessages?.(batch.messages); }
+      catch (error) { if (batch.claimId) this.options.store.returnClaim(this.options.groupId, batch.claimId, this.options.turnId); throw error; }
+      if (batch.claimId) this.claims.set(batch.claimId, batch.messages);
+      return batch;
     });
   }
   confirmApplied(claimId: string): Promise<void> {
     return this.options.commands.run(() => {
       this.assertActive();
+      const messages = this.claims.get(claimId); if (!messages) throw new Error('stale message claim or turn');
+      this.options.authorizeMessages?.(messages);
       this.options.store.confirmApplied(this.options.groupId, claimId, this.options.turnId);
     });
   }

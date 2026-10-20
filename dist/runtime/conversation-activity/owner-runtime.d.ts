@@ -1,3 +1,4 @@
+export { activityOwnerConfigDigest } from './owner-config.js';
 import { ConversationActivityOwnerHost } from './owner-host.js';
 import { ActivitySourceSupervisor, type ActivityManagedSource } from './source-supervisor.js';
 export interface ActivityOwnerConfig {
@@ -18,7 +19,6 @@ export interface ActivityOwnerConfig {
         roomToken: string;
     };
 }
-export declare function activityOwnerConfigDigest(config: ActivityOwnerConfig): string;
 /** Private configuration is supplied by the verified native bootstrap owner. */
 export declare function startConversationActivityOwner(config: ActivityOwnerConfig, options?: {
     idle?(): void;

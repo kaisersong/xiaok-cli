@@ -106,6 +106,24 @@ export class SessionProbe {
   }
   create() { return this.#bind('thread/start', { ephemeral: false }); }
   resume(threadId: string) { return this.#bind('thread/resume', { threadId }); }
+  /** No work is sent when native could read revocable context through an unmanaged external tool. */
+  async assertNoExternalTools():Promise<void>{
+    const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
+    const response=await this.#request('config/read',{includeLayers:false,cwd:this.options.cwd}),config=response?.config;
+    if(!record(config)||!record(config.features)||['apps','multi_agent','goals','hooks','memories','remote_plugin'].some(feature=>(config.features as Record<string,unknown>)[feature]!==false))throw new Error('native_capabilities_unknown');
+    for(const field of ['mcp_servers','plugins','apps']){
+      const entries=config[field];if(entries===undefined||entries===null)continue;
+      if(!record(entries)||Object.values(entries).some(entry=>!record(entry)||entry.enabled!==false))throw new Error('native_external_tools_unsupported');
+    }
+    const plugins=await this.#request('plugin/list',{cwds:[this.options.cwd],forceRefetch:false});
+    if(!Array.isArray(plugins?.marketplaces)||!Array.isArray(plugins.marketplaceLoadErrors)||plugins.marketplaceLoadErrors.length||
+      plugins.marketplaces.some((marketplace:unknown)=>!record(marketplace)||!Array.isArray(marketplace.plugins)||
+        marketplace.plugins.some((plugin:unknown)=>!record(plugin)||typeof plugin.installed!=='boolean'||plugin.enabled!==false)))throw new Error('native_external_tools_unsupported');
+    if(this.threadId){
+      const inventory=await this.#request('mcpServerStatus/list',{threadId:this.threadId,detail:'toolsAndAuthOnly',limit:1});
+      if(!Array.isArray(inventory?.data)||inventory.data.length||inventory.nextCursor!==null)throw new Error('native_external_tools_unsupported');
+    }
+  }
   async start(text: string) {
     this.#assert(); if (!this.threadId) throw new Error('no bound thread');
     if (this.#starting || this.activeTurnId) throw new Error('active turn already exists');

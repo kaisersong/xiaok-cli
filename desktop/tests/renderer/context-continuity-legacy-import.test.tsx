@@ -1,0 +1,21 @@
+import { afterEach, it, expect, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
+import { LegacyContextImport } from '../../renderer/src/components/LegacyContextImport';
+const state = vi.hoisted(() => ({ desktop: null as Record<string, unknown> | null }));
+vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => state.desktop }));
+afterEach(() => { cleanup(); state.desktop = null; });
+it('previews only after user action and claims the exact inspected manifest in a separate action', async () => {
+  const importLegacyThreadMetadata = vi.fn(async () => {}), claimLegacyContext = vi.fn(async () => ({}));
+  const previewLegacyContext = vi.fn(async () => ({ previewId: 'preview', manifestHash: 'hash', coverage: 'partial', sources: [{ taskId: 'task_old', preview: 'verified old input', messageCount: 1, status: 'completed' }] }));
+  state.desktop = { importLegacyThreadMetadata, previewLegacyContext, claimLegacyContext };
+  const refreshed = vi.fn();
+  render(<LocaleProvider><LegacyContextImport thread={{ id: 'legacy', title: 'old', coverage: 'unclaimed', taskIds: ['task_old'] } as never} onClaimed={refreshed} /></LocaleProvider>);
+  expect(previewLegacyContext).not.toHaveBeenCalled(); expect(claimLegacyContext).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '检查旧会话来源' }));
+  await screen.findByText('verified old input'); expect(importLegacyThreadMetadata).toHaveBeenCalledWith(expect.objectContaining({ legacyThreadId: 'legacy', taskIds: ['task_old'] }));
+  expect(claimLegacyContext).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '确认认领这些历史证据' }));
+  await waitFor(() => expect(claimLegacyContext).toHaveBeenCalledWith({ previewId: 'preview', expectedManifestHash: 'hash', operationId: expect.any(String) }));
+  expect(refreshed).toHaveBeenCalledOnce();
+});

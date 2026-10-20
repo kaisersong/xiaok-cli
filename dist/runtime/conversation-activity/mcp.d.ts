@@ -22,11 +22,13 @@ export declare class ConversationMcpActivities {
         endpointReady?(connection: McpClientConnection): Promise<void>;
         externalObserver?(connection: McpClientConnection): boolean;
         originThread(taskId: string): Promise<string | null>;
+        assertReadCurrent?(watchId: string): void;
         onError?(error: unknown): void;
     });
     register(connection: McpClientConnection): void;
     canObserve(watch: WorkWatch): boolean;
     private userWork;
+    private assertCurrent;
     inputs(watchId: string, actor: ActivityActor): Promise<McpInputForm[]>;
     answerInput(watchId: string, input: {
         inputId: string;

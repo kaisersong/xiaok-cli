@@ -244,6 +244,8 @@ export interface TaskSnapshot {
   context?: TaskContextAudit;
   executionScope?: TaskExecutionScope;
   multiAgentPreparation?: TaskMultiAgentPreparation;
+  /** Hint only: actual main input owner must independently authorize admission. */
+  inputPreparation?: {inputId:string;inputRevision:string};
   hostDelivery?: HostDeliveryRecord;
   usage?: TaskUsage;
   createdAt: number;

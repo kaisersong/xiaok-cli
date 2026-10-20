@@ -3,12 +3,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodexNativeService } from '../../electron/codex-native-service';
+import {DatabaseSync} from 'node:sqlite';
 
 class FakeClient {
   threadId: string | null = null; activeTurnId: string | null = null; pid = 1; exited = false;
   options: any; n = 0; steers: string[] = []; approvals: any[] = [];
   constructor(options: any) { this.options = options; }
   async connect() {}
+  async assertNoExternalTools() {}
   async create() { this.threadId = 'native-1'; return { thread: {id:this.threadId} }; }
   async resume(id: string) { this.threadId = id; }
   async start(text: string) { this.activeTurnId = 'turn-' + ++this.n; this.emit('turn/started',{thread:{},turn:{id:this.activeTurnId,status:'inProgress'}}); return {turnId:this.activeTurnId}; }
@@ -19,6 +21,12 @@ class FakeClient {
   request(method: string, params: any = {}) { if(method==='item/fileChange/requestApproval')this.emit('item/started',{item:{id:'i',type:'fileChange',changes:[{path:'file',diff:'+test'}]}}); return this.options.onApproval({id:1,method,params:{threadId:this.threadId,turnId:this.activeTurnId,itemId:'i',...params}}); }
 }
 const user = { requestSource:'user' as const, actorId:'user-1' };
+it('will not resume a prior qualification that allowed unmanaged delegation or automatic continuation',async()=>{
+ const s=await setup();let next:CodexNativeService|undefined;
+ try{const row=await s.service.create(user,s.dir);await s.service.dispose();const db=new DatabaseSync(join(s.dir,'native.sqlite'));db.exec('UPDATE codex_native_context_qualifications SET safety_version=1');db.close();
+  next=new CodexNativeService({dbPath:join(s.dir,'native.sqlite'),profileId:user.actorId,createClient:o=>new FakeClient(o) as any});await expect(next.send(user,row.id,'work')).rejects.toThrow('native_context_unqualified');
+ }finally{await next?.dispose();await s.cleanup();}
+});
 async function setup() {
  const dir=mkdtempSync(join(tmpdir(),'native-service-')); const clients:FakeClient[]=[];
  const service=new CodexNativeService({dbPath:join(dir,'native.sqlite'),profileId:'user-1',createClient:(options:any)=>{const c=new FakeClient(options);clients.push(c);return c as any;},approvalTimeoutMs:40});
@@ -89,3 +97,17 @@ it('an uncertain RPC result is visible as unknown rather than an unsent cancella
  await expect(s.service.send(user,row.id,'possibly delivered')).rejects.toThrow(/timeout/);
  expect(s.service.get(user,row.id).messages[0].state).toBe('unknown');
 }finally{await s.cleanup();}});
+it('refuses an unmanaged MCP/app/plugin capability before any work turn is sent',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'native-external-gate-'));let client!:FakeClient;
+ const service=new CodexNativeService({dbPath:join(dir,'store.sqlite'),profileId:user.actorId,createClient:options=>{client=new FakeClient(options);client.assertNoExternalTools=async()=>{throw new Error('native_external_tools_unsupported');};return client as any;}});
+ try{await expect(service.create(user,dir)).rejects.toThrow('native_external_tools_unsupported');expect(client.n).toBe(0);}finally{await service.dispose();rmSync(dir,{recursive:true,force:true});}
+});
+it('does not resume an old native thread whose historical external-tool qualification is unknown',async()=>{
+ const s=await setup();let next:CodexNativeService|undefined;
+ try{
+  const row=await s.service.create(user,s.dir);await s.service.dispose();
+  const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(s.dir,'native.sqlite'));db.exec('DELETE FROM codex_native_context_qualifications');db.close();
+  next=new CodexNativeService({dbPath:join(s.dir,'native.sqlite'),profileId:user.actorId,createClient:options=>new FakeClient(options) as any});
+  await expect(next.send(user,row.id,'do not reuse hidden old history')).rejects.toThrow('native_context_unqualified');
+ }finally{await next?.dispose();await s.cleanup();}
+});

@@ -188,12 +188,21 @@ export class GoalService {
         }
     }
     event(state, context, type) {
+        // Only new, actual control transitions carry a fixed control proof. Do not
+        // infer provenance for old persisted states or copy arbitrary derived reasons.
+        const reason = type === 'paused' && state.status === 'paused'
+            && (context.requestSource === 'user' && ['user_paused', 'permission_revoked'].includes(state.terminalReason ?? '')
+                || context.requestSource === 'runtime' && ['permission_revoked', 'thread_attachment_timeout'].includes(state.terminalReason ?? ''))
+            || type === 'cancelled' && state.status === 'cancelled'
+                && context.requestSource === 'user' && state.terminalReason === 'user_cancelled'
+            ? state.terminalReason : undefined;
         return {
             eventId: `goal_event_${randomUUID()}`,
             goalId: state.goalId,
             revision: state.revision,
             type,
             actor: context.requestSource,
+            ...(reason ? { reason } : {}),
             recordedAt: this.now(),
         };
     }

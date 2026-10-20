@@ -8,6 +8,12 @@
       "schemes": [
         "intent-broker"
       ]
+    },
+    {
+      "name": "xiaok context references",
+      "schemes": [
+        "xiaok"
+      ]
     }
   ],
   "directories": {
@@ -163,6 +169,60 @@
     {
       "from": "THIRD_PARTY_NOTICES.md",
       "to": "THIRD_PARTY_NOTICES.md"
+    },
+    {
+      "from": "../services/continuity-sync/src",
+      "to": "services/continuity-sync/src",
+      "filter": [
+        "**/*.mjs"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/package.json",
+      "to": "services/continuity-sync/package.json"
+    },
+    {
+      "from": "../services/continuity-device/src",
+      "to": "services/continuity-device/src",
+      "filter": [
+        "**/*.mjs"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/package.json",
+      "to": "services/continuity-device/package.json"
+    },
+    {
+      "from": "../services/continuity-sync/node_modules/libsodium",
+      "to": "services/continuity-sync/node_modules/libsodium",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/node_modules/libsodium-wrappers",
+      "to": "services/continuity-sync/node_modules/libsodium-wrappers",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/node_modules/@napi-rs/keyring",
+      "to": "services/continuity-device/node_modules/@napi-rs/keyring",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/node_modules/@napi-rs/keyring-darwin-arm64",
+      "to": "services/continuity-device/node_modules/@napi-rs/keyring-darwin-arm64",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "resources/continuity-auth/darwin-arm64/codex-app-server",
+      "to": "continuity-auth/darwin-arm64/codex-app-server"
     }
   ],
   "publish": {

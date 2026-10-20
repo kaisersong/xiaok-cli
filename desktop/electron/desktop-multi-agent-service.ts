@@ -22,6 +22,12 @@ export interface DesktopAgentActor { readonly groupId: string; readonly agentId:
 export interface DesktopAgentSessionSeed { readonly seedId: string }
 export interface DesktopMultiAgentUserAccess { readonly accessId: string }
 export interface DesktopWorkspaceUserAccess { readonly accessId: string }
+export interface DesktopMultiAgentReadReceipt { readonly receiptId: string }
+interface UserReadManifest {
+  access: DesktopMultiAgentUserAccess; threadId: string; groupIds: readonly string[];
+  result: unknown; safeDeletedEmpty: boolean;
+  deleteState: 'none' | 'delete_pending' | 'deleted';
+}
 interface WorkspaceUserAccessState { actorId: string; profileId: string; workspaceId: string; active: boolean }
 interface PendingAuthorization {
   request: ExecutionAuthorizationRetry; requestHash: string; actorId: string;
@@ -49,10 +55,15 @@ export interface DesktopAgentExecutionContext {
 }
 export interface DesktopMultiAgentServiceOptions {
   store: DesktopMultiAgentStore;
+  requireContentPolicy?: boolean;
+  /** Fixed main policy. These callbacks never accept renderer/model identities. */
+  authorizeContentRead?(threadId: string): void;
+  authorizeAgentContent?(input: { threadId: string; receiverTaskId?: string; sourceTaskIds: Array<string | undefined> }): void;
   coordinator: DesktopExecutionCoordinator;
   worktrees?: DesktopMultiAgentWorktrees;
   /** One immutable main-owned execution domain; never renderer supplied. */
   executionDomain?: { profileId: string; workspaceId: string; cwd: string; actorId: string };
+  beforeStartup?():void;
   /** Main-only restoration of an already-persisted, independently authorized launch workspace. */
   authorizeHistoricalThreadDomain?(thread: MultiAgentThreadBinding): boolean;
   onExecutionAuthorizationChanged?(snapshot: ExecutionAuthorizationSnapshot): void;
@@ -155,6 +166,9 @@ export class DesktopMultiAgentService {
     tasks: Map<string, { promise: Promise<void>; executionObserved: boolean; state: 'pending' | 'confirmed' | 'failed' }> }>();
   private readonly goalDecisions = new Set<string>();
   private readonly userAccess = new WeakMap<DesktopMultiAgentUserAccess, UserAccessState>();
+  private readonly readReceipts = new WeakMap<DesktopMultiAgentReadReceipt, UserReadManifest>();
+  private readCapture?: { access: DesktopMultiAgentUserAccess; manifest?: UserReadManifest };
+  private readonly protectedContentReads: boolean;
   private readonly workspaceUserAccess = new WeakMap<DesktopWorkspaceUserAccess, WorkspaceUserAccessState>();
   private readonly authorizationCommands = new MultiAgentCommandSequencer();
   private readonly authorizationListeners = new Set<{ access: DesktopWorkspaceUserAccess; listener: (snapshot: ExecutionAuthorizationSnapshot & { pendingOperation?: ExecutionAuthorizationRetry }) => void }>();
@@ -171,6 +185,7 @@ export class DesktopMultiAgentService {
   private readonly pendingHostDeliveries = new Set<string>();
   private readonly deliveryRecoveryOwners = new WeakMap<HostDeliveryRecoveryAuthority, DeliveryRecoveryOwner>();
   private readonly recoveryPending = new Set<Promise<unknown>>();
+  private readonly failedInputPreparations=new WeakMap<ReturnType<InProcessTaskRuntimeHost['reserveTaskIdentity']>,{host:InProcessTaskRuntimeHost;group:LiveGroup;preparation:RootPreparation}>();
   private bootQuiesced = false;
   private shutdownOwnerChecksReady = false;
   private disposed = false;
@@ -181,6 +196,8 @@ export class DesktopMultiAgentService {
   private activityReconcilePending?: Promise<void>;
 
   constructor(private readonly options: DesktopMultiAgentServiceOptions) {
+    if (options.requireContentPolicy && typeof options.authorizeContentRead !== 'function') throw new Error('multi_agent_content_policy_unavailable');
+    this.protectedContentReads = options.requireContentPolicy === true || typeof options.authorizeContentRead === 'function';
     this.grace = options.closeGraceMs ?? 500;
     options.coordinator.setReady(false);
     this.unsubscribeStore = options.store.subscribe(event => this.publish(event));
@@ -206,6 +223,12 @@ export class DesktopMultiAgentService {
       throw new Error('invalid_workspace_user_authority');
     }
     return state;
+  }
+
+  /** Freeze user intent during recovery; this never authorizes execution. */
+  captureInputPermissionRevision():number {
+    if(this.disposed||!this.authorization||this.authorization.persistenceState!=='confirmed')throw new Error('input_execution_authority_unavailable');
+    return this.authorization.permissionRevision;
   }
 
   getExecutionAuthorization(): ExecutionAuthorizationSnapshot {
@@ -517,6 +540,18 @@ export class DesktopMultiAgentService {
 
   assertInvocation(actor: DesktopAgentActor, context?: DesktopAgentExecutionContext): void { this.requireActor(actor, 'agent', context); }
 
+  /** Existing result delivery while the original live owner unwinds after seal.
+   * Never permission for another model request, factory, tool or mutation. */
+  assertResultCurrent(context:DesktopAgentExecutionContext):void {
+    const state=context&&this.actors.get(context.actor),group=state?.group;
+    const current=group&&(context.agentId===`root_${group.id}`?group.root?.context:group.children.get(context.agentId)?.context);
+    if(!state||!group||!state.active||state.context!==context||this.groups.get(group.id)!==group||current!==context||context.signal.aborted
+      ||context.memberTicket.released||group.lease?.epoch!==context.memberTicket.epoch||Date.now()>=context.effectiveDeadline)throw new Error('stale or invalid multi-agent result owner');
+    if(state.sealed&&state.outcome!=='completed')throw new Error('multi_agent_result_not_completed');
+    this.assertExecutionAuthorization(context.permissionRevision);this.assertWritable(group);
+  }
+
+
   presentation(input: { actor: DesktopAgentActor; requestSource: Source; target: string }): Pick<DesktopAgentSnapshot, 'presentationOrdinal'> {
     const state = this.requireActor(input.actor, input.requestSource);
     return { presentationOrdinal: this.resolveTarget(state, input.target).presentationOrdinal };
@@ -753,7 +788,7 @@ export class DesktopMultiAgentService {
   getApproval(input: Parameters<DesktopMultiAgentApprovalTransport['getApproval']>[0]) {
     this.assertApprovalUserAccess(input.access, input.requestSource, input.groupId);
     if (!this.approvalTransport) throw new Error('approval_transport_unavailable');
-    return this.approvalTransport.getApproval(input);
+    return this.recordUserRead(input.access, this.approvalTransport.getApproval(input), [input.groupId]);
   }
   decideApproval(input: Parameters<DesktopMultiAgentApprovalTransport['decideApproval']>[0]) {
     this.assertApprovalUserAccess(input.access, input.requestSource, input.groupId);
@@ -889,9 +924,69 @@ export class DesktopMultiAgentService {
     return access;
   }
 
+  /** Capture exactly one synchronous production read, including a null result.
+   * The receipt is main-local authority; neither DTO fields nor IDs issue it. */
+  captureUserRead<T>(access: DesktopMultiAgentUserAccess, read: () => T,
+    select: (result: T) => unknown = value => value): { result: T; receipt: DesktopMultiAgentReadReceipt } {
+    if (this.readCapture) throw new Error('multi_agent_read_capture_nested');
+    const capture: NonNullable<DesktopMultiAgentService['readCapture']> = { access };
+    this.readCapture = capture;
+    try {
+      const result = read();
+      if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('multi_agent_read_capture_async');
+      const selected = select(result), manifest = capture.manifest;
+      if (!manifest || !Object.is(selected, manifest.result)) throw new Error('multi_agent_read_manifest_unavailable');
+      const receipt = Object.freeze({ receiptId: randomUUID() });
+      this.readReceipts.set(receipt, manifest);
+      return { result, receipt };
+    } finally { this.readCapture = undefined; }
+  }
+
+  assertUserReadCurrent(receipt: DesktopMultiAgentReadReceipt, access: DesktopMultiAgentUserAccess, result: unknown): void {
+    const manifest = this.readReceipts.get(receipt);
+    if (!manifest || manifest.access !== access || !Object.is(result, manifest.result)) throw new Error('multi_agent_read_manifest_unavailable');
+    this.assertUserReadManifest(manifest);
+  }
+
+  private recordUserRead<T>(access: DesktopMultiAgentUserAccess, result: T, groupIds: string[], safeDeletedEmpty = false): T {
+    const scope = this.requireUserAccess(access);
+    const manifest: UserReadManifest = { access, threadId: scope.threadId,
+      groupIds: Object.freeze([...new Set(groupIds)]), result, safeDeletedEmpty,
+      deleteState: this.options.store.getThread(scope.threadId)!.deleteState ?? 'none' };
+    this.assertUserReadManifest(manifest);
+    if (this.readCapture) {
+      if (this.readCapture.access !== access || this.readCapture.manifest) throw new Error('multi_agent_read_capture_mismatch');
+      this.readCapture.manifest = manifest;
+    }
+    return result;
+  }
+
+  private assertUserReadManifest(manifest: UserReadManifest): void {
+    const scope = this.requireUserAccess(manifest.access), thread = this.options.store.getThread(scope.threadId)!;
+    if (scope.threadId !== manifest.threadId) throw new Error('user access scope mismatch');
+    if ((thread.deleteState ?? 'none') !== manifest.deleteState) throw new Error('not_readable');
+    if (manifest.safeDeletedEmpty) {
+      if (thread.deleteState !== 'deleted' || thread.activeGroupId || this.options.store.threadHasAnyGroup(thread.threadId)) throw new Error('not_readable');
+      return;
+    } else if (this.protectedContentReads && (thread.deleteState ?? 'none') !== 'none') throw new Error('not_readable');
+    for (const groupId of manifest.groupIds) this.requireUserAccess(manifest.access, groupId);
+    const result: unknown = this.options.authorizeContentRead?.(scope.threadId);
+    if (result !== undefined) throw new Error('not_readable');
+  }
+
   getSnapshot(input: { access: DesktopMultiAgentUserAccess; groupId?: string }): MultiAgentGroupSnapshot {
     const scope = this.requireUserAccess(input.access, input.groupId);
     const thread = this.options.store.getThread(scope.threadId)!;
+    if (thread.deleteState === 'deleted') {
+      const empty: MultiAgentGroupSnapshot = {
+        threadId: thread.threadId, activeGroupId: null, threadRevision: thread.threadRevision ?? 0,
+        threadDeleteState: 'deleted', hasAgentHistory: false, group: null, root: null,
+        agents: [], residentAgents: [], nextAgentCursor: null, lastSeq: 0,
+        counts: { total: 0, running: 0, completed: 0, failed: 0, unread: 0 }, pendingApprovalCount: 0,
+      };
+      return this.recordUserRead(input.access, empty, [], true);
+    }
+    this.options.authorizeContentRead?.(scope.threadId);
     const groupId = input.groupId ?? thread.activeGroupId;
     const storedGroup = groupId ? this.options.store.requireGroup(groupId) : null;
     const live = groupId ? this.groups.get(groupId) : undefined;
@@ -915,7 +1010,7 @@ export class DesktopMultiAgentService {
       counts: group ? this.options.store.agentCounts(group.groupId) : { total: 0, running: 0, completed: 0, failed: 0, unread: 0 },
       ...(this.runtimeBlockedReason ? { runtimeError: this.runtimeBlockedReason } : {}),
       ...(pendingApprovals?.length ? { pendingApprovals } : {}),
-      pendingApprovalCount: activeFailure || thread.deleteState === 'deleted' ? 0 : activeApprovals?.pendingApprovalCount ?? 0,
+      pendingApprovalCount: activeFailure ? 0 : activeApprovals?.pendingApprovalCount ?? 0,
       ...(activeFailure ? { approvalFailure: activeFailure } : {}),
     };
     // The exact worst legal subscription envelope adds 1,569 bytes. Only
@@ -931,13 +1026,15 @@ export class DesktopMultiAgentService {
       }
       if (Buffer.byteLength(encodeMultiAgentRow(snapshot)) > 65_536 - 1_569) throw new Error('multi_agent_wire_limit_exceeded');
     }
-    this.assertWire(snapshot); return snapshot;
+    this.assertWire(snapshot);
+    return this.recordUserRead(input.access, snapshot, [groupId, thread.activeGroupId].filter((id): id is string => Boolean(id)));
   }
 
   readAgents(input: { access: DesktopMultiAgentUserAccess; groupId: string; cursor?: string }): MultiAgentPage<DesktopAgentSnapshot> {
-    this.requireUserAccess(input.access, input.groupId);
+    const accessScope = this.requireUserAccess(input.access, input.groupId);
+    this.options.authorizeContentRead?.(accessScope.threadId);
     const group = this.options.store.requireGroup(input.groupId), page = this.options.store.listAgents(input.groupId, input.cursor);
-    const result = { ...page, items: page.items.map(agent => this.projectAgentForRead(group, agent)!) }; this.assertWire(result); return result;
+    const result = { ...page, items: page.items.map(agent => this.projectAgentForRead(group, agent)!) }; this.assertWire(result); return this.recordUserRead(input.access, result, [input.groupId]);
   }
 
   private projectAgentForRead(group: DesktopMultiAgentGroup, agent: DesktopAgentSnapshot | null): DesktopAgentSnapshot | null {
@@ -952,10 +1049,11 @@ export class DesktopMultiAgentService {
 
   listGroups(input: { access: DesktopMultiAgentUserAccess; cursor?: string }) {
     const scope = this.requireUserAccess(input.access);
-    const page = this.options.store.listGroups(scope.threadId, input.cursor, 50, { onlyWithChildren: true }); this.assertWire(page); return page;
+    const page = this.options.store.listGroups(scope.threadId, input.cursor, 50, { onlyWithChildren: true }); this.assertWire(page); return this.recordUserRead(input.access, page, page.items.map(group => group.groupId));
   }
   readEvents(input: { access: DesktopMultiAgentUserAccess; groupId: string; afterSeq: number; limit?: number }) {
-    this.requireUserAccess(input.access, input.groupId);
+    const accessScope = this.requireUserAccess(input.access, input.groupId);
+    this.options.authorizeContentRead?.(accessScope.threadId);
     if (!Number.isSafeInteger(input.afterSeq) || input.afterSeq < 0) throw new Error('invalid event cursor');
     const candidates = this.options.store.readEvents(input.groupId, input.afterSeq, input.limit ?? 100);
     const items: typeof candidates = []; let bytes = 0;
@@ -967,22 +1065,25 @@ export class DesktopMultiAgentService {
     if (candidates.length && !items.length) throw new Error('multi_agent_event_wire_limit_exceeded');
     const nextAfterSeq = items.at(-1)?.seq ?? input.afterSeq;
     const headSeq = this.options.store.requireGroup(input.groupId).lastSeq;
-    const page = { items, nextAfterSeq, headSeq, hasMore: nextAfterSeq < headSeq }; this.assertWire(page); return page;
+    const page = { items, nextAfterSeq, headSeq, hasMore: nextAfterSeq < headSeq }; this.assertWire(page); return this.recordUserRead(input.access, page, [input.groupId]);
   }
   readContent(input: { access: DesktopMultiAgentUserAccess; groupId: string; contentId: string; offset: number }) {
-    this.requireUserAccess(input.access, input.groupId);
+    const accessScope = this.requireUserAccess(input.access, input.groupId);
+    this.options.authorizeContentRead?.(accessScope.threadId);
     // Leave space for base64 expansion and the transport/subscription envelope.
-    const page = this.options.store.readContent(input.groupId, input.contentId, input.offset, 44 * 1024); this.assertWire(page); return page;
+    const page = this.options.store.readContent(input.groupId, input.contentId, input.offset, 44 * 1024); this.assertWire(page); return this.recordUserRead(input.access, page, [input.groupId]);
   }
   readOperation(input: { access: DesktopMultiAgentUserAccess; groupId: string; operationId: string }) {
-    this.requireUserAccess(input.access, input.groupId);
+    const accessScope = this.requireUserAccess(input.access, input.groupId);
+    this.options.authorizeContentRead?.(accessScope.threadId);
     let operation = this.options.store.getOperation(input.groupId, input.operationId);
     if (operation && (operation.applyState === 'unknown' || this.uncertainOperations.has(`${input.groupId}:${input.operationId}`))) operation = { ...operation, applyState: 'unknown', result: { ...operation.result, state: 'unknown' } };
-    this.assertWire(operation); return operation;
+    this.assertWire(operation); return this.recordUserRead(input.access, operation, [input.groupId]);
   }
   readResources(input: { access: DesktopMultiAgentUserAccess; groupId: string; cursor?: string }) {
-    this.requireUserAccess(input.access, input.groupId);
-    const page = this.options.store.listResources(input.groupId, input.cursor); this.assertWire(page); return page;
+    const accessScope=this.requireUserAccess(input.access,input.groupId);
+    this.options.authorizeContentRead?.(accessScope.threadId);
+    const page = this.options.store.listResources(input.groupId, input.cursor); this.assertWire(page); return this.recordUserRead(input.access, page, [input.groupId]);
   }
 
   subscribe(access: DesktopMultiAgentUserAccess, listener: (envelope: MultiAgentEnvelope) => void): () => void {
@@ -1432,6 +1533,7 @@ export class DesktopMultiAgentService {
       try {
         const scope = this.requireUserAccess(subscription.access, 'groupId' in envelope ? envelope.groupId : undefined);
         if ('threadId' in envelope && envelope.threadId !== scope.threadId) continue;
+        this.options.authorizeContentRead?.(scope.threadId);
         subscription.listener(envelope);
       } catch { /* A failed or foreign subscriber cannot affect live execution. */ }
     }
@@ -1591,6 +1693,7 @@ export class DesktopMultiAgentService {
 
   private async reconcileStartup(host: InProcessTaskRuntimeHost): Promise<void> {
     this.options.store.claimBootOwnership();
+    this.options.beforeStartup?.();
     if (this.options.executionDomain) {
       const { profileId, workspaceId } = this.options.executionDomain;
       const row = this.options.store.initializeWorkspaceAuthorization({ profileId, workspaceId });
@@ -1736,7 +1839,7 @@ export class DesktopMultiAgentService {
     } finally { this.deliveryRecoveryOwners.delete(authority); }
   }
 
-  async prepareRoot(host: InProcessTaskRuntimeHost, threadId: string, input: TaskCreateInput): Promise<{ taskId: string }> {
+  async prepareRoot(host: InProcessTaskRuntimeHost, threadId: string, input: TaskCreateInput, inputReservation?:ReturnType<InProcessTaskRuntimeHost['reserveTaskIdentity']>,admitInput?:()=>Promise<void>): Promise<{ taskId: string }> {
     const lane = currentExecutionLane();
     this.assertReady();
     const permissionRevision = this.assertExecutionAuthorization();
@@ -1751,7 +1854,7 @@ export class DesktopMultiAgentService {
     const durable = previousGroup ?? store.createGroup(threadId, permissionRevision);
     if (!previousGroup) this.publishGroupChanged(threadId, null, durable.groupId);
     const group = this.liveGroup(durable.groupId);
-    const reservation = host.reserveTaskIdentity();
+    const reservation = inputReservation??host.reserveTaskIdentity();
     const preparation = await group.commands.run(() => {
       this.assertWritable(group);
       if (group.root) throw new Error('multi_agent_root_busy');
@@ -1779,7 +1882,9 @@ export class DesktopMultiAgentService {
       group.root = root;
       return root;
     });
+    let preparationFailed=false,compensationFailed=false;
     try {
+      if(admitInput)await admitInput();
       await host.prepareTask(input, { reservation, marker: this.marker(preparation.binding) });
       await group.commands.run(() => {
         this.assertWritable(group);
@@ -1795,7 +1900,7 @@ export class DesktopMultiAgentService {
       });
       return { taskId: reservation.taskId };
     } catch (error) {
-      preparation.controller.abort(error);
+      preparationFailed=true;preparation.controller.abort(error);
       preparation.ticket?.release();
       try {
         await group.commands.run(() => {
@@ -1805,11 +1910,11 @@ export class DesktopMultiAgentService {
             store.putAgent(group.id, { ...rootAgent, status: 'interrupted', resourcesReleased: false, cleanupPending: true, activationState: 'prepared' }, true);
           });
         });
-      } catch { this.freezeGroup(group, 'multi_agent_preparation_compensation_failed'); }
+      } catch { compensationFailed=true;this.freezeGroup(group, 'multi_agent_preparation_compensation_failed'); }
       try {
         const checkpoint = await host.inspectTask(reservation.taskId);
         if (checkpoint?.multiAgentPreparation) await host.abandonMultiAgentPreparation({ requestSource: 'scheduler', taskId: reservation.taskId, expectedMarker: this.marker(preparation.binding) });
-      } catch { this.freezeGroup(group, 'multi_agent_host_compensation_failed'); }
+      } catch { compensationFailed=true;this.freezeGroup(group, 'multi_agent_host_compensation_failed'); }
       throw error;
     } finally {
       await group.commands.run(() => {
@@ -1825,9 +1930,18 @@ export class DesktopMultiAgentService {
             store.markActivityRunUnknown(runId, 'preparation_abandoned');
           });
           group.root = undefined;
-        } catch { this.freezeGroup(group, 'multi_agent_preparation_compensation_failed'); }
+        } catch { compensationFailed=true;this.freezeGroup(group, 'multi_agent_preparation_compensation_failed'); }
       });
+      if(preparationFailed&&!compensationFailed&&!preparation.started&&!preparation.request&&!preparation.ticket&&!preparation.context&&group.root!==preparation&&!preparation.preparing)this.failedInputPreparations.set(reservation,{host,group,preparation});
     }
+  }
+
+  /** Original root preparation compensation, not logical resourcesReleased alone. */
+  assertFailedInputPreparation(host:InProcessTaskRuntimeHost,reservation:ReturnType<InProcessTaskRuntimeHost['reserveTaskIdentity']>):void{
+    const proof=this.failedInputPreparations.get(reservation),store=this.options.store;
+    if(!proof||proof.host!==host||this.disposed||store.isClosed()||proof.group.root===proof.preparation||proof.preparation.preparing||proof.preparation.started||proof.preparation.request||proof.preparation.ticket||proof.preparation.context||!proof.preparation.controller.signal.aborted)throw new Error('input_ma_failure_proof_unavailable');
+    const binding=store.getRootBinding(reservation.taskId),expected=proof.preparation.binding,run=store.getActivityRun(`root:${reservation.taskId}`),member=store.getActivityMembers(`root:${reservation.taskId}`).find(item=>item.memberId===expected.rootTurnId),agent=store.getAgent(expected.groupId,`root_${expected.groupId}`);
+    if(!binding||binding.sourceTaskId!==reservation.taskId||binding.bootId!==store.bootId||binding.phase!=='abandoned'||binding.status!=='interrupted'||encodeMultiAgentRow(this.marker(binding))!==encodeMultiAgentRow(this.marker(expected))||run?.rootTaskId!==reservation.taskId||run.sourceUnavailable!=='preparation_abandoned'||!member?.physicalSettled||member.state!=='settled'||member.turnId!==expected.rootTurnId||agent?.sourceTaskId!==reservation.taskId||agent.turnId!==expected.rootTurnId||agent.executionActive||agent.runtimeResident||agent.sessionResident||!agent.resourcesReleased||agent.cleanupPending)throw new Error('input_ma_failure_proof_unavailable');
   }
 
   assertHostPreparation(taskId: string, marker: TaskMultiAgentPreparation): void {
@@ -2068,7 +2182,7 @@ export class DesktopMultiAgentService {
       const target = this.resolveTarget(state, input.target);
       if (target.status === 'closed') throw new Error('target is closed');
       return this.mutate(state.group, input, 'send', { target: target.id, message: input.message }, () => {
-        const message = this.options.store.sendMessage(state.group.id, { sender: { kind: 'agent', agentId: state.context.agentId }, receiverId: target.id, text: input.message });
+        const message = this.options.store.sendMessage(state.group.id, { sender: { kind: 'agent', agentId: state.context.agentId }, sourceTaskId: state.context.sourceTaskId, receiverId: target.id, text: input.message });
         return { operationId: input.operationId, state: 'applied', targetAgentId: target.id, messageId: message.messageId };
       });
     });
@@ -2143,6 +2257,7 @@ export class DesktopMultiAgentService {
     const inspect = (): DesktopAgentWaitResult | undefined => {
       this.requireActor(input.actor, input.requestSource);
       const agents = targets.map(id => this.requireOwnedAgent(state.group, id));
+      this.authorizeAgentResults(state, agents);
       let future = false;
       for (const agent of agents) {
         const pending = state.group.children.get(agent.id)?.followups ?? [];
@@ -2180,7 +2295,16 @@ export class DesktopMultiAgentService {
 
   list(input: { actor: DesktopAgentActor; requestSource: Source; cursor?: string }): MultiAgentPage<DesktopAgentSnapshot> {
     const state = this.requireActor(input.actor, input.requestSource);
-    return this.options.store.listAgents(state.group.id, input.cursor, undefined, undefined, query => this.persistenceIO(state.group, query));
+    const page = this.options.store.listAgents(state.group.id, input.cursor, undefined, undefined, query => this.persistenceIO(state.group, query));
+    this.authorizeAgentResults(state, page.items); return page;
+  }
+
+  private authorizeAgentResults(state: ActorState, agents: DesktopAgentSnapshot[]): void {
+    const sources = agents.flatMap(agent => [
+      ...(agent.lastResult || agent.resultSummary || agent.error ? [agent.resultSourceTaskId] : []),
+      ...(agent.taskSummary ? [agent.sourceTaskId] : []),
+    ]);
+    this.options.authorizeAgentContent?.({ threadId: this.options.store.requireGroup(state.group.id).threadId, receiverTaskId: state.context.sourceTaskId, sourceTaskIds: sources });
   }
 
   async close(input: AgentRequest & { target: string }): Promise<MultiAgentControlResult> {
@@ -2285,7 +2409,7 @@ export class DesktopMultiAgentService {
           let receiver = this.requireAgent(group.id, item.callerId);
           while (receiver.status === 'closed' && receiver.parentId) receiver = this.requireAgent(group.id, receiver.parentId);
           const message = receiver.status !== 'closed' ? this.options.store.sendMessage(group.id, {
-            sender: { kind: 'agent', agentId: child.id }, receiverId: receiver.id, kind: 'error',
+            sender: { kind: 'agent', agentId: child.id }, sourceTaskId: item.sourceTaskId, receiverId: receiver.id, kind: 'error',
             text: JSON.stringify({ code: 'followup_cancelled', agentId: child.id, operationId: item.operationId,
               expectedTurn: item.expectedTurn, reason: truncateMultiAgentText(reason.message, 512).text }),
           }, true) : undefined;
@@ -2402,6 +2526,8 @@ export class DesktopMultiAgentService {
     const state: ActorState = { context, group, active: true, sealed: false };
     this.actors.set(actor, state);
     context.mailbox = new DesktopMultiAgentTurnMailbox({ store: this.options.store, groupId: group.id, agentId, turnId, commands: group.commands,
+      authorizeMessages: messages => this.options.authorizeAgentContent?.({ threadId: this.options.store.requireGroup(group.id).threadId, receiverTaskId: context.sourceTaskId,
+        sourceTaskIds: messages.filter(message => message.sender.kind === 'agent').map(message => message.sourceTaskId) }),
       beforeSeal: () => { this.flushOutput(group, agentId); this.finishActivity(group, agentId); },
       assertCurrent: () => {
         const current = agentId === `root_${group.id}` ? group.root?.context : group.children.get(agentId)?.context;
@@ -2593,7 +2719,7 @@ export class DesktopMultiAgentService {
         const operationId = child ? `child_result:${createHash('sha256').update(`${child.id}:${child.context.turnId}`).digest('hex')}` : '';
         if (child && agent.turn > 0 && TERMINAL.has(agent.status) && !this.options.store.getOperation(group.id, operationId)) {
           const full = agent.status === 'completed' ? child.fullResult ?? captured.agent.lastResult ?? '' : captured.agent.error ?? `agent_${agent.status}`;
-          const content = this.options.store.putContent(group.id, child.id, full, true);
+          const content = this.options.store.putContent(group.id, child.id, full, true, child.context.sourceTaskId);
           const preview = truncateMultiAgentText(content.utf8Text, 8 * 1024);
           this.options.store.putAgent(group.id, { ...agent, resultContentId: content.contentId }, true);
           this.options.store.appendEvent(group.id, { kind: 'result', agentId: child.id, turnId: child.context.turnId,
@@ -2601,7 +2727,7 @@ export class DesktopMultiAgentService {
           let parent = this.requireAgent(group.id, child.parentId);
           while (parent.status === 'closed' && parent.parentId) parent = this.requireAgent(group.id, parent.parentId);
           if (parent.status !== 'closed') this.options.store.sendMessage(group.id, {
-            sender: { kind: 'agent', agentId: child.id }, receiverId: parent.id, kind: agent.status === 'completed' ? 'result' : 'error',
+            sender: { kind: 'agent', agentId: child.id }, sourceTaskId: child.context.sourceTaskId, receiverId: parent.id, kind: agent.status === 'completed' ? 'result' : 'error',
             text: preview.text || '(empty result)', contentId: content.contentId, truncated: preview.truncated || content.truncated,
           }, true);
           this.options.store.putOperation({ groupId: group.id, operationId, command: 'child_result',
@@ -2633,6 +2759,7 @@ export class DesktopMultiAgentService {
         toolCounts: undefined, otherToolCount: undefined, toolStatisticsComplete: undefined, resultContentId: undefined } : {}),
       turnId: child?.context.turnId ?? group.root?.context?.turnId,
       sourceTaskId: child ? child.context.sourceTaskId : group.root?.binding.sourceTaskId ?? previous?.sourceTaskId,
+      resultSourceTaskId: core.lastResult || core.error ? child?.context.sourceTaskId ?? group.root?.binding.sourceTaskId : sameTurn ? previous?.resultSourceTaskId : undefined,
       lastResult: core.lastResult ? truncateMultiAgentText(core.lastResult, 1024).text : sameTurn ? previous?.lastResult : undefined,
       resultSummary: core.lastResult ? desktopSubAgentSummary(core.lastResult) : sameTurn ? previous?.resultSummary : undefined,
       error: core.error ? truncateMultiAgentText(core.error, 1024).text : undefined,

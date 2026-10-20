@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "kind": "canonical-batch-v1",
+  "scope": {
+    "rootKeyId": "root",
+    "syncGroupId": "group",
+    "logicalProfileId": "logical",
+    "conversationId": "conversation",
+    "branchId": "branch"
+  },
+  "conversation": {
+    "title": "Original history",
+    "mode": "work",
+    "createdAt": 1000,
+    "updatedAt": 2000,
+    "revision": 3,
+    "coverage": "complete"
+  },
+  "messages": [
+    {
+      "messageId": "message-original",
+      "sequence": 1,
+      "sourceKind": "desktop_task",
+      "sourceId": "source-original",
+      "sourceEpoch": "epoch-original",
+      "sourceMessageId": "event-original",
+      "versions": [
+        {
+          "revision": 1,
+          "sourceRevision": 10,
+          "role": "assistant",
+          "text": "hello",
+          "contentHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          "dependencies": [],
+          "observedAt": 1001,
+          "executionObservation": "settled",
+          "originHash": "d18547b98e37d51520f51ec8fbc9b0e863297d48d67ff875ec5d674f1f5886f6"
+        },
+        {
+          "revision": 2,
+          "sourceRevision": 15,
+          "role": "assistant",
+          "text": "hello again",
+          "contentHash": "3908c567feda72bc0dbdb2dff040fe0d3470dcd51b942374378a476930dbf6b3",
+          "dependencies": [],
+          "observedAt": 1002,
+          "executionObservation": "settled",
+          "originHash": "875cce390b186c6dd3ebfd4b5a92e11d4a736de67a7f9c041f435d311656d0b3"
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "refId": "Ab_-09XYAb_-09XYAb_-09XYAb_-09XY",
+      "snapshotRevision": 2,
+      "entries": [
+        {
+          "messageId": "message-original",
+          "revision": 1,
+          "contentHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        }
+      ],
+      "contentHash": "52327ac70c7dfdac59d429b53b965b32fbe269c7a356f7fd58542a1470f876fc"
+    }
+  ],
+  "grants": [],
+  "coverage": {
+    "firstSequence": 1,
+    "lastSequence": 1,
+    "anchorCount": 1,
+    "versionCount": 2
+  },
+  "inputProjection": {
+    "state": "unavailable"
+  },
+  "checkpointProjection": {
+    "state": "unavailable"
+  },
+  "decisionProjection": {
+    "state": "unavailable"
+  },
+  "manifestHash": "a002f8e67308a9f92296885ab18b3b7d1510029aab4afcd3efdf4f914cfbb95e"
+}

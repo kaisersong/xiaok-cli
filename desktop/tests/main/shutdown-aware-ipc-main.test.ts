@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { registerIpcHandler } from '../../electron/ipc-runtime.js';
 import {
   DesktopShutdownGate,
   ShutdownAwareIpcMain,
@@ -71,6 +73,22 @@ describe('DesktopShutdownGate (design §5.5)', () => {
 });
 
 describe('ShutdownAwareIpcMain (design R17-03, R18-01, R19-01)', () => {
+  it('keeps its token while an invalid asynchronous output fence settles, then rejects the reply',async()=>{
+    const raw=new FakeIpcMain(),gate=new DesktopShutdownGate(),wrapper=new ShutdownAwareIpcMain(raw,gate);
+    let release!:()=>void,done=false;
+    registerIpcHandler({registrar:wrapper,channel:'desktop:testAsyncFence',input:z.void(),output:z.string(),sourceFile:'test',rolloutRound:3,
+      handler:async()=> 'PRIVATE_CANARY',assertOutputCurrent:()=>new Promise<void>(resolve=>{release=resolve;})});
+    const running=raw.invoke('desktop:testAsyncFence').then(()=>{done=true;return null;},error=>{done=true;return error;});
+    await new Promise(resolve=>setTimeout(resolve,0));const early=done;const held=gate.outstanding;release();const error=await running;
+    expect(early).toBe(false);expect(held).toBe(1);expect(error).toBeInstanceOf(Error);expect(error.message).toBe('ipc_output_fence_invalid');expect(gate.outstanding).toBe(0);
+  });
+  it('rejects a concurrent reused event before its null/primitive output can overwrite another invocation',async()=>{
+    const raw=new FakeIpcMain(),gate=new DesktopShutdownGate(),wrapper=new ShutdownAwareIpcMain(raw,gate);
+    let release!:()=>void,calls=0;
+    wrapper.handle('desktop:testConcurrentFence',async()=>{calls++;await new Promise<void>(resolve=>{release=resolve;});return null;},()=>{});
+    const event={},invoke=raw.handlers.get('desktop:testConcurrentFence')!;
+    const first=invoke(event);await expect(invoke(event)).rejects.toThrow('ipc_output_event_reused');expect(calls).toBe(1);release();await expect(first).resolves.toBeNull();expect(gate.outstanding).toBe(0);
+  });
   it('takes and releases a gate token around every invoke, reads included', async () => {
     const raw = new FakeIpcMain();
     const gate = new DesktopShutdownGate();

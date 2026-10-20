@@ -3,10 +3,14 @@ import { type DeliverableGateFunction } from './deliverable-gate.js';
 import type { HostDeliveryRecord, HostDeliveryReport, HostDeliveryRecoveryAuthority, HostDeliveryRecoveryInvocation } from './delivery-types.js';
 import type { MaterialRegistry } from './material-registry.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
-import type { DesktopTaskEvent, TaskEventRecord, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskExecutionScope, TaskRuntimeHost, TaskSnapshot, TaskMultiAgentPreparation, TaskUnderstanding, UserAnswer } from './types.js';
+import type { DesktopTaskEvent, TaskEventRecord, MaterialRecord, TaskContextAudit, TaskContextSkip, TaskCreateContext, TaskCreateInput, TaskExecutionScope, TaskRuntimeHost, TaskSnapshot, TaskMultiAgentPreparation, TaskUnderstanding, UserAnswer } from './types.js';
 export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
+}
+export interface OwnedTaskHistory {
+    history: HistoryMessage[];
+    audit?: TaskContextAudit;
 }
 export interface TaskRunnerInput {
     taskId: string;
@@ -40,6 +44,13 @@ export interface TaskExecutionPolicy {
 export interface TaskIdentityReservation {
     readonly taskId: string;
     readonly reservationId: string;
+    readonly sessionId: string;
+}
+/** Only the fixed main input owner supplies these identity facts. */
+export interface PendingTaskInputIdentity {
+    taskId: string;
+    sessionId: string;
+    revision: string;
 }
 export interface TaskCancellationDecision {
     hostAbortAllowed: boolean;
@@ -53,9 +64,20 @@ export interface InProcessTaskRuntimeHostOptions {
     now?: () => number;
     createTaskId?: () => string;
     createSessionId?: () => string;
+    readPendingInputIdentity?: (inputId: string) => PendingTaskInputIdentity | null;
+    authorizeInputPreparation?: (inputId: string, identity: PendingTaskInputIdentity, input: TaskCreateInput) => void;
+    /** Fixed actual input owner; persisted preparation metadata is only a hint. */
+    authorizeInputAdmission?: (snapshot: TaskSnapshot) => void;
     taskWatchdogMs?: number;
     taskIdleTimeoutMs?: number;
+    beforePrepareTask?: () => Promise<void>;
+    onPreparedSnapshot?: (snapshot: TaskSnapshot) => Promise<void> | void;
     onPersistedEvent?: (input: PersistedTaskEvent) => Promise<void> | void;
+    /** Main-owned observation after runner, buffered writes and cancellation IO exit.
+     * The execution promise stays tracked by drain until this observer exits. */
+    onExecutionSettled?: (snapshot: TaskSnapshot) => Promise<void> | void;
+    /** Notification only, after the original preparation/cancel/execution obligation releases. */
+    onWorkReleased?: (taskId: string) => void;
     aheGuards?: {
         artifactEvidence?: boolean;
         recoveryContinuity?: boolean;
@@ -72,6 +94,9 @@ export interface InProcessTaskRuntimeHostOptions {
     };
     getExecutionPolicy?: (snapshot: TaskSnapshot) => TaskExecutionPolicy;
     authorizePreparation?: (taskId: string, marker: TaskMultiAgentPreparation) => void;
+    assertHistoryRead?: (taskId: string, conversationId: string | undefined) => Promise<void> | void;
+    onHistoryLoaded?: (taskId: string, sources: TaskSnapshot[], conversationId: string | undefined) => Promise<void> | void;
+    resolveOwnedHistory?: (taskId: string, context: TaskCreateContext | undefined) => Promise<OwnedTaskHistory | null> | OwnedTaskHistory | null;
     assertTaskAdmission?: (snapshot: TaskSnapshot) => Promise<void> | void;
     decideCancellation?: (snapshot: TaskSnapshot, reason: string) => Promise<TaskCancellationDecision>;
     /** Fixed main-owned adapter; the exact durable report is the checking ACK. */
@@ -98,6 +123,10 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly subscribers;
     private readonly mutationChains;
     private readonly cancellingTaskIds;
+    private readonly cancellationBodies;
+    private readonly cancellationObservers;
+    private readonly cancellationBodyFailures;
+    private readonly preparationObligations;
     private readonly cancellationPromises;
     private readonly cancellationSettlements;
     private readonly assistantDeltaFlushes;
@@ -114,6 +143,11 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly pendingTerminalPersistedEvents;
     private stoppedAcceptingReason;
     private readonly identityReservations;
+    private readonly inputIdentityOrigins;
+    private readonly inputIdentityRestorations;
+    private readonly preparingTaskIds;
+    private readonly inputPreparationTasks;
+    private readonly inputPreparationAttempts;
     private readonly admissionPromises;
     private readonly deliveryVerifier;
     /** Failure fallback only. Successful delivery always rereads and verifies. */
@@ -124,11 +158,21 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     constructor(options: InProcessTaskRuntimeHostOptions);
     /** Installed once by service.initialize, before its recovery microtask runs. */
     bindMultiAgentRecovery(ready: Promise<void>): void;
+    /** Main wiring check; copying DTOs never establishes an input owner. */
+    assertInputOwnerDependencies(snapshotStore: FileTaskSnapshotStore, materialRegistry: MaterialRegistry): void;
     /** No filesystem/index write and no runnable task until prepareTask commits. */
     reserveTaskIdentity(): TaskIdentityReservation;
+    private readPendingInput;
+    bindPendingInputIdentity(inputId: string, reservation: TaskIdentityReservation): Promise<void>;
+    restorePendingInputIdentity(inputId: string): Promise<TaskIdentityReservation>;
+    private assertInputPreparation;
+    private rejectDeferredInputAuthority;
+    private assertInputAdmission;
+    /** Negative fact from this boot's original exited attempt, never inferred from a DTO/file. */
+    consumeFailedInputPreparation(inputId: string, reservation: TaskIdentityReservation, revision: string, preparedHash: string): void;
     prepareTask(input: TaskCreateInput, preparation?: {
         reservation: TaskIdentityReservation;
-        marker: TaskMultiAgentPreparation;
+        marker?: TaskMultiAgentPreparation;
     }): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;
@@ -147,6 +191,9 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     activeExecutionCount(): number;
     /** Main owner inspection, including admitted work before executeTask starts. */
     inFlightTaskIds(): string[];
+    /** Main-only busy inventory; missing snapshots stay unknown to consumers. */
+    pendingWorkTaskIds(): string[];
+    private notifyWorkReleased;
     /** Main routing fact, including admitted work waiting for its execution lane. */
     ownsLiveExecution(taskId: string): boolean;
     createTask(input: TaskCreateInput): Promise<{
@@ -166,6 +213,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         answer: UserAnswer;
     }): Promise<void>;
     cancelTask(taskId: string, reason?: string): Promise<void>;
+    private observeCancelledWithoutExecution;
     private cancelTaskOwned;
     /** Only original FileStore facts can confirm a save which rejected. Its cache
      * is committed only after append; an append rejection invalidates that cache. */

@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import type { Tool } from '../../src/types.js';
-import { ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
+import { ToolRegistry, isSettledLocalTool, type RegistryOptions } from '../../src/ai/tools/index.js';
+import { createKnownLocalBindingFactory } from './desktop-local-operation-bindings.js';
 import { createReadTool } from '../../src/ai/tools/read.js';
 import { createWriteTool } from '../../src/ai/tools/write.js';
 import { createEditTool } from '../../src/ai/tools/edit.js';
@@ -23,7 +24,7 @@ export class DesktopOwnedToolRegistry extends ToolRegistry {
   private ownership = new Map<string, DesktopToolOwnership>();
   private listeners = new Set<() => void>();
   constructor(options: RegistryOptions, tools: Tool[]) {
-    super(options, tools);
+    super({...options,requireEffectGuard:true}, tools);
     for (const tool of tools) this.ownership.set(tool.definition.name, { ownerId: BUILTINS.has(tool.definition.name) ? 'builtin' : 'desktop-host',
       slotKey: tool.definition.name, binding: BUILTINS.has(tool.definition.name) ? 'builtin' : 'rootOnly',
       verifiedReadOnly: PURE_READ_BUILTINS.has(tool.definition.name) });
@@ -44,8 +45,10 @@ export class DesktopOwnedToolRegistry extends ToolRegistry {
     super.registerTool(tool); this.changed();
   }
   override unregisterTool(name: string, expected?: Tool): void {
-    if (expected && this.getRegisteredTool(name) !== expected) return;
-    super.unregisterTool(name, expected); this.ownership.delete(name); this.changed();
+    const current=this.getRegisteredTool(name);
+    super.unregisterTool(name, expected);
+    if(current&&this.getRegisteredTool(name)===current)return;
+    this.ownership.delete(name); this.changed();
   }
   ownerOf(name: string): DesktopToolOwnership | undefined { return this.ownership.get(name); }
   subscribeToolsChanged(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -95,10 +98,12 @@ export class DesktopToolCatalogBridge {
       const key = JSON.stringify([owner.ownerId, owner.slotKey]); seen.add(key);
       const previous = this.slots.get(key);
       if (previous?.tool === tool && previous.present) continue;
+      const localBinding = owner.binding === 'rootOnly' && isSettledLocalTool(tool)
+        ? createKnownLocalBindingFactory(tool) : undefined;
       const descriptor = this.catalog.publish({ requestSource: 'scheduler', ownerId: owner.ownerId, slotId: previous?.descriptor.slotId,
-        entry: { definition: tool.definition, aliases: [], permission: tool.permission, verifiedReadOnly: owner.verifiedReadOnly === true,
+        entry: { definition: tool.definition, aliases: [], permission: tool.permission, verifiedReadOnly: Boolean(localBinding) || owner.verifiedReadOnly === true,
           scope: { workspaceId: this.options.workspaceId, materialIds: [], permissions: [tool.permission] },
-          bindInvocation: authority => this.bind(tool, owner, authority),
+          bindInvocation: localBinding ?? (authority => this.bind(tool, owner, authority)),
         } });
       this.slots.set(key, { descriptor, tool, present: true });
     }

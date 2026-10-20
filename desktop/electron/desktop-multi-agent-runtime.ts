@@ -1,3 +1,4 @@
+import type {DesktopChildInvocationFactory} from './desktop-model-invocation.js';
 import { randomUUID } from 'node:crypto';
 import type { CustomAgentDef } from '../../src/ai/agents/loader.js';
 import type { Message, ModelAdapter, ToolExecutionContext } from '../../src/types.js';
@@ -15,7 +16,13 @@ import type { DesktopMultiAgentWorktrees, DesktopWorktreeAllocation } from './de
 import type { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approval-transport.js';
 
 export interface DesktopAgentRuntimeBinding {
+  /** Fixed root-task fence inherited by all descendants, never a child-selected identity. */
+  authorizeContext?: () => void;
+  recordUnprovenEffect?:(taskId:string,invocationId:string,toolName:string)=>void;
+  authorizeTaskSource?: (sourceTaskId: string | undefined) => void;
+  inheritContext?: (receiverTaskId: string | undefined) => void;
   adapter: Pick<ModelAdapter, 'stream'>;
+  openChildInvocation?: DesktopChildInvocationFactory;
   systemPrompt: string; catalog: DesktopCapabilityCatalog; policy: DesktopCapabilityPolicy;
   workspaceId: string; materialIds: readonly string[];
   /** @deprecated Compatibility input only; each scope uses its service context. */
@@ -54,6 +61,7 @@ export class DesktopMultiAgentRuntime {
     input.signal.throwIfAborted();
     const seed = input.sessionSeed && this.seeds.get(input.sessionSeed);
     if (!seed || seed.parent !== input.parent.actor) throw new Error('invalid Desktop child seed authority');
+    seed.runtime.authorizeContext?.();
     this.seeds.delete(input.sessionSeed!);
     if (seed.agentDef.model !== undefined || seed.agentDef.modelCapability !== undefined) throw new Error('desktop_multi_agent_model_override_unsupported');
     let allocation: DesktopWorktreeAllocation | undefined;
@@ -64,11 +72,20 @@ export class DesktopMultiAgentRuntime {
       try { input.signal.throwIfAborted(); input.bindWorkingDirectory(allocation.cwd); }
       catch (error) { await allocation.release(); throw error; }
     }
+    const consumedSources = new Set<string | undefined>();
     const runtime: RuntimeState = { ...seed.runtime,
+      authorizeContext: () => { seed.runtime.authorizeContext?.(); for (const source of consumedSources) seed.runtime.authorizeTaskSource?.(source); },
+      inheritContext: source => { seed.runtime.inheritContext?.(source); consumedSources.add(source); },
       systemPrompt: `${seed.runtime.systemPrompt}\n\nAssigned Desktop agent: ${input.identity.canonicalName}\n${seed.agentDef.systemPrompt}`,
       maxIterations: seed.agentDef.maxIterations ?? seed.runtime.maxIterations,
     };
     try { return new DesktopManagedAgentSession({ adapter: runtime.adapter, systemPrompt: runtime.systemPrompt,
+      authorizeContext: runtime.authorizeContext,
+      openInvocation:runtime.openChildInvocation,
+      assertInvocation:context=>this.options.service.assertInvocation(context.actor,context),
+      assertResult:context=>this.options.service.assertResultCurrent(context),
+      inheritContext: runtime.inheritContext,
+      recordUnprovenEffect:runtime.recordUnprovenEffect?(context,id,name)=>{if(!context.sourceTaskId)throw new Error('context_effect_guard_unavailable');runtime.recordUnprovenEffect!(context.sourceTaskId,id,name);}:undefined,
       parentMessages: seed.messages, forkContext: seed.forkContext, getTurnContext: input.getTurnContext,
       createRegistry: (context, signal) => { this.runtimes.set(context.actor, runtime); return this.scope(context, runtime, signal); },
       dataRoot: runtime.dataRoot, materials: runtime.materials, materialRegistry: runtime.materialRegistry,
@@ -87,12 +104,13 @@ export class DesktopMultiAgentRuntime {
     const signal = runSignal ? AbortSignal.any([context.signal, runSignal]) : context.signal;
     signal.throwIfAborted();
     this.options.service.assertInvocation(context.actor, context);
+    runtime.authorizeContext?.();
     const scope = runtime.catalog.createScopedRegistry(runtime.policy, {
       groupId: context.groupId, agentId: context.agentId, turnId: context.turnId, cwd: context.cwd,
       workspaceId: runtime.workspaceId, materialIds: runtime.materialIds, permissionRevision: context.permissionRevision,
       signal, deadlineAt: context.effectiveDeadline,
       getApprovalDeadline: () => this.options.service.getApprovalDeadline(context.actor),
-      assertCurrent: () => this.options.service.assertInvocation(context.actor, context),
+      assertCurrent: () => { this.options.service.assertInvocation(context.actor, context); runtime.authorizeContext?.(); },
       beforeOpaqueInvocation: () => this.options.worktrees?.beforeOpaqueInvocation(context.groupId, context.agentId, context.cwd),
       ...(this.options.approvals ? { requestApproval: invocation => this.options.approvals!.requestApproval({ context, invocation }) } : {}),
     }, runtime.registryOptions);
@@ -104,6 +122,7 @@ export class DesktopMultiAgentRuntime {
       // is a separate restriction, including callers holding a retained Tool.
       scope.authority.signal.throwIfAborted();
       this.options.service.assertInvocation(context.actor, context);
+      runtime.authorizeContext?.();
       toolContext?.onToolInvocationStarted?.();
       return tool.execute(input, toolContext);
     } });
@@ -113,6 +132,7 @@ export class DesktopMultiAgentRuntime {
   private createSeed(context: DesktopAgentExecutionContext, parent: RuntimeState,
     input: { agentDef: CustomAgentDef; forkContext: boolean }, toolContext?: ToolExecutionContext): DesktopAgentSessionSeed {
     this.options.service.assertInvocation(context.actor, context);
+    parent.authorizeContext?.();
     if (input.agentDef.model !== undefined || input.agentDef.modelCapability !== undefined) throw new Error('desktop_multi_agent_model_override_unsupported');
     const agentDef = structuredClone(input.agentDef);
     const fingerprint = JSON.stringify({ agentDef, forkContext: input.forkContext });

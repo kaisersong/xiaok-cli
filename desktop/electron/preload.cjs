@@ -168,6 +168,40 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName),
   uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName),
   createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input),
+  inspectContextConversations: input => ipcRenderer.invoke('desktop:context:inspectConversations', input),
+  getContextGrant: input => ipcRenderer.invoke('desktop:context:getGrant', input),
+  importLegacyThreadMetadata: input => ipcRenderer.invoke('desktop:context:importLegacyMetadata', input),
+  getLegacyThreadMetadata: input => ipcRenderer.invoke('desktop:context:getLegacyMetadata', input),
+  previewLegacyContext: input => ipcRenderer.invoke('desktop:context:previewLegacy', input),
+  claimLegacyContext: input => ipcRenderer.invoke('desktop:context:claimLegacy', input),
+  listCliArchives:input=>ipcRenderer.invoke('desktop:context:listCliArchives',input),
+  previewCliArchive:input=>ipcRenderer.invoke('desktop:context:previewCliArchive',input),
+  claimCliArchive:input=>ipcRenderer.invoke('desktop:context:claimCliArchive',input),
+  createContextConversation: input => ipcRenderer.invoke('desktop:context:createConversation', input),
+  getContextConversation: input => ipcRenderer.invoke('desktop:context:getConversation', input),
+  listContextConversations: input => ipcRenderer.invoke('desktop:context:listConversations', input),
+  updateContextConversation: input => ipcRenderer.invoke('desktop:context:updateConversation', input),
+  createContextReference: input => ipcRenderer.invoke('desktop:context:createReference', input),
+  resolveContextReference: input => ipcRenderer.invoke('desktop:context:resolveReference', input),
+  enqueueConversationInput:input=>ipcRenderer.invoke('desktop:inputs:enqueue',input),
+  listConversationInputs:input=>ipcRenderer.invoke('desktop:inputs:list',input),
+  cancelConversationInput:input=>ipcRenderer.invoke('desktop:inputs:cancel',input),
+  onConversationInputsChanged:handler=>{const listener=(_event,payload)=>{if(typeof payload?.conversationId==='string')handler({conversationId:payload.conversationId});};ipcRenderer.on('desktop:inputs:changed',listener);return ()=>ipcRenderer.off('desktop:inputs:changed',listener);},
+  searchContextHistory: input => ipcRenderer.invoke('desktop:context:searchHistory',input),
+  getHistorySearchConsent: input => ipcRenderer.invoke('desktop:context:getHistorySearchConsent',input),
+  setHistorySearchConsent: input => ipcRenderer.invoke('desktop:context:setHistorySearchConsent',input),
+  getAuthOwnerStatus: () => ipcRenderer.invoke('desktop:context:getAuthOwnerStatus'),
+  startAuthOwnerLogin: () => ipcRenderer.invoke('desktop:context:startAuthOwnerLogin'),
+  cancelAuthOwnerLogin: () => ipcRenderer.invoke('desktop:context:cancelAuthOwnerLogin'),
+  logoutAuthOwner: () => ipcRenderer.invoke('desktop:context:logoutAuthOwner'),
+  getContextMcpStatus: () => ipcRenderer.invoke('desktop:context:getMcpStatus'),
+  setContextMcpEnabled: input => ipcRenderer.invoke('desktop:context:setMcpEnabled', input),
+  resetContextMcpPort: () => ipcRenderer.invoke('desktop:context:resetMcpPort'),
+  issueContextMcpConfig: input => ipcRenderer.invoke('desktop:context:issueMcpConfig', input),
+  listExternalContextReaders: () => ipcRenderer.invoke('desktop:context:listExternalReaders'),
+  revokeExternalContextReader: input => ipcRenderer.invoke('desktop:context:revokeExternalReader', input),
+  attachContextReference: input => ipcRenderer.invoke('desktop:context:attachReference', input),
+  revokeContextGrant: input => ipcRenderer.invoke('desktop:context:revokeGrant', input),
   createTask: (input) => ipcRenderer.invoke('desktop:createTask', input),
   getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }),
   createGoal: (input) => ipcRenderer.invoke('desktop:goal:create', input),
@@ -217,7 +251,10 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
     const subscriptionId = `task-${Date.now()}-${Math.random()}`;
     const channel = `desktop:taskEvent:${taskId}`;
     const listener = (_event, payload) => {
-      handler(payload);
+      if (payload && typeof payload === 'object' && 'event' in payload) {
+        if (payload.taskId !== taskId || !Number.isSafeInteger(payload.eventIndex) || payload.eventIndex < 0 || typeof payload.sourceDataEpoch !== 'string' || !payload.event?.type) return;
+        handler(payload.event, { taskId, eventIndex: payload.eventIndex, sourceDataEpoch: payload.sourceDataEpoch });
+      } else handler(payload);
     };
     ipcRenderer.on(channel, listener);
     const registration = ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex, subscriptionId } : { taskId, subscriptionId }).catch(() => undefined);
@@ -230,6 +267,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   cancelTask: (taskId) => ipcRenderer.invoke('desktop:cancelTask', { taskId }),
   getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask'),
   recoverTask: (taskId, legacyPrompt) => ipcRenderer.invoke('desktop:recoverTask', { taskId, legacyPrompt }),
+  readTaskHistory: taskId => ipcRenderer.invoke('desktop:readTaskHistory', { taskId }),
   openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }),
   // Wire shapes: desktop/shared/file-ipc-contract.ts (validated in main).
   openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }),

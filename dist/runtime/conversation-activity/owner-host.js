@@ -71,6 +71,14 @@ export class ConversationActivityOwnerHost {
         this.unattendedMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_MAX_UNATTENDED_MS, ACTIVITY_OWNER_MAX_UNATTENDED_MS);
         this.address = activityOwnerAddress(options.dataRoot);
         this.store = new ConversationActivityStore(join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.database));
+        try {
+            if (options.migrateFromProfileId)
+                this.store.migrateProfileIdentity(options.migrateFromProfileId, options.profileId);
+        }
+        catch (error) {
+            this.store.close();
+            throw error;
+        }
         this.actor = { requestSource: 'user', actorId: options.actorId };
         this.service = new ConversationActivityService({ ...options, store: this.store });
     }
@@ -139,7 +147,8 @@ export class ConversationActivityOwnerHost {
                                 client.instanceId = message.instanceId;
                                 clearTimeout(handshake);
                                 this.lastActivity = this.unattendedSince = this.now();
-                                this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch });
+                                this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch,
+                                    generation: ACTIVITY_OWNER_GENERATION, profileId: this.options.profileId, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true });
                             }
                             catch {
                                 socket.destroy();
@@ -201,6 +210,7 @@ export class ConversationActivityOwnerHost {
             if (client.role === 'user' && !USER_METHODS.has(method))
                 throw new Error('activity_method_forbidden');
             const result = await this.dispatch(client, method, params);
+            this.service.assertResultCurrent(result);
             if (client.active)
                 this.send(client, { type: 'result', id, result });
         }

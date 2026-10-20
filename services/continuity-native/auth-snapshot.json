@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "scope": "original AuthManager atomic owned snapshot only; NOT an auth-owner or sampling binary qualification",
+  "upstreamCommit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "upstreamArchiveSHA256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
+  "baselineSamplingPatchSHA256": "6e9407a35382f0a15220522c5fd479d3fe56b79e1163990116bd758c38382974",
+  "additionalPatchSHA256": "e5ff64d60e7b7683ebfa93480b42ec9e398137bf7a9dfee4eafdb987c4e89560",
+  "source": [
+    {
+      "path": "codex-rs/login/src/auth/manager.rs",
+      "originalSHA256": "d2081e3e4f2f339a7a1aa52ea62d8485e7785c2b0a12dde1a7f470019d56dc2a",
+      "currentSHA256": "8cd8594c7cd5cdbc8c97bbdf5ef0001a863fdd3a33d6dc1d2e31075a4f374990"
+    },
+    {
+      "path": "codex-rs/login/src/auth/xiaok_snapshot_tests.rs",
+      "originalSHA256": null,
+      "currentSHA256": "fc8395b4681a2a054e06075ed5d622e290940e2f82280735388231588800feac"
+    }
+  ],
+  "sourceRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "reproductionRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/snapshot-patch-reproduction-1ygkiq9w",
+  "exactPatchCheckAndApplyMatched": true,
+  "actualSnapshotTests": {
+    "pass": 12,
+    "fail": 0,
+    "filtered": 201,
+    "log": "/Users/kk/projects/mydocs/xiaok-cli/design/2026-10-17-context-continuity-evidence/native-auth-snapshot-policy-poison-green-v1.log"
+  },
+  "authOwnerRoleAndPrivateRPCQualified": false,
+  "physicalOAuthQualified": false
+}

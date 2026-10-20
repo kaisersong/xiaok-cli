@@ -14,7 +14,9 @@ describe('room runner physical execution and scoped tools', () => {
         const cwd=mkdtempSync(join(tmpdir(),'room-enabled-command-')),p=port();
         const r=createRoomToolRegistry({mode:'workspace',tools:buildToolList(undefined,{cwd}),context:{...context(cwd),localCommandsAllowed:true},port:p});
         expect(r.getToolDefinitions().map(t=>t.name)).toContain('bash');
-        expect(await r.executeTool('bash',{command:'echo local-command-ok',workdir:'/'})).toContain('local-command-ok');
+        const recordUnprovenEffect=vi.fn(),execution={recordUnprovenEffect} as unknown as ToolExecutionContext;
+        expect(await r.executeTool('bash',{command:'echo local-command-ok',workdir:'/'},execution)).toContain('local-command-ok');
+        expect(recordUnprovenEffect).toHaveBeenCalled();
         vi.mocked(p.authorize).mockRejectedValue(new Error('revoked'));
         expect(await r.executeTool('bash',{command:'echo forbidden'})).not.toContain('forbidden');
         await r.drain();r.dispose();

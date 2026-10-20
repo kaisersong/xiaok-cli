@@ -155,6 +155,30 @@ export class ConversationActivityStore {
             this.secureSidecars();
         }
     }
+    /** The constructor's lifetime exclusive lock is held before any domain is changed. */
+    migrateProfileIdentity(legacyProfileId, profileId) {
+        if (!/^[a-f0-9]{64}$/.test(legacyProfileId) || !/^\w{8}-\w{4}-4\w{3}-[89ab]\w{3}-\w{12}$/.test(profileId))
+            throw new Error('profile_identity_unavailable');
+        this.transaction(() => {
+            this.db.exec('CREATE TABLE IF NOT EXISTS profile_identity_migrations(old_profile TEXT PRIMARY KEY,new_profile TEXT NOT NULL,committed_at INTEGER NOT NULL)');
+            const prior = this.db.prepare('SELECT new_profile FROM profile_identity_migrations WHERE old_profile=?').get(legacyProfileId);
+            const tables = ['work_watches', 'conversation_activities', 'conversation_reads', 'activity_presentations', 'thread_tombstones'];
+            const jsonTables = ['association_operations', 'work_watches'];
+            const hasDomain = (id) => tables.some(table => !!this.db.prepare(`SELECT 1 FROM ${table} WHERE profile_id=? LIMIT 1`).get(id)) || jsonTables.some(table => !!this.db.prepare(`SELECT 1 FROM ${table} WHERE json_extract(data_json,'$.origin.profileId')=? LIMIT 1`).get(id));
+            if (prior) {
+                if (prior.new_profile !== profileId || hasDomain(legacyProfileId))
+                    throw new Error('profile_migration_conflict');
+                return;
+            }
+            if (hasDomain(legacyProfileId) && hasDomain(profileId))
+                throw new Error('profile_migration_conflict');
+            for (const table of tables)
+                this.db.prepare(`UPDATE ${table} SET profile_id=? WHERE profile_id=?`).run(profileId, legacyProfileId);
+            for (const table of jsonTables)
+                this.db.prepare(`UPDATE ${table} SET data_json=json_set(data_json,'$.origin.profileId',?) WHERE json_extract(data_json,'$.origin.profileId')=?`).run(profileId, legacyProfileId);
+            this.db.prepare('INSERT INTO profile_identity_migrations VALUES(?,?,?)').run(legacyProfileId, profileId, this.now());
+        });
+    }
     prepareAssociation(input) {
         if (![input.operationId, input.creationIdempotencyKey, ...Object.values(input.origin)].every(id))
             throw new Error('invalid_activity_association');

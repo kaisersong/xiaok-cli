@@ -213,18 +213,13 @@ describe('ChatShell draft prompt navigation state', () => {
   });
 
   it('clears local streaming state after Goal pause succeeds', async () => {
-    const pauseGoal = vi.fn().mockResolvedValue({
-      activation: 'disarmed',
-      state: {
-        goalId: 'goal-pause', sessionId: 'thread-goal-pause', revision: 2, epoch: 1,
-        objective: '等待用户证据', expectedEvidenceKinds: ['answer'], status: 'paused',
-        turnsUsed: 0, tokensUsed: 0, activeWallClockMs: 0,
-        budgetLimits: { turnLimit: 5 }, consecutiveBlockedTurns: 0,
-        terminalReason: 'user_paused', createdAt: 1, updatedAt: 2,
-      },
+    const pauseGoal = vi.fn(async () => {
+      mockRecoverTask.mockResolvedValue({ snapshot: { taskId: 'task-goal-pause', sessionId: 'session-goal-pause', status: 'cancelled',
+        prompt: '等待用户证据', materials: [], events: [], createdAt: 1, updatedAt: 3 } });
+      return { threadId: 'thread-goal-pause', status: 'paused', revision: 2 };
     });
     window.xiaokDesktop = {
-      getGoal: vi.fn().mockResolvedValue({
+      getGoal: vi.fn().mockResolvedValueOnce({
         activation: 'armed',
         state: {
           goalId: 'goal-pause', sessionId: 'thread-goal-pause', revision: 1, epoch: 1,
@@ -233,7 +228,7 @@ describe('ChatShell draft prompt navigation state', () => {
           budgetLimits: { turnLimit: 5 }, consecutiveBlockedTurns: 0,
           createdAt: 1, updatedAt: 1,
         },
-      }),
+      }).mockRejectedValue(new Error('goal_content_unavailable')),
       pauseGoal,
       onGoalChanged: vi.fn(() => () => {}),
       onGoalTaskPrepared: vi.fn(() => () => {}),

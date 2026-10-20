@@ -1,3 +1,6 @@
+import { LegacyContextImport } from './LegacyContextImport';
+import { CopyContextReferenceButton, ContextReferenceCard, contextLinksInText } from './ContextReference';
+import { ContextHistorySearch } from './ContextHistorySearch';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
@@ -187,6 +190,7 @@ export interface ComputerUseActionData {
 }
 
 export interface ChatMessage {
+  contextSource?: { sourceId: string; sourceMessageId: string };
   id: string;
   role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card';
   content: string;
@@ -261,6 +265,7 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
+  contextNavigation?: string;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -277,6 +282,7 @@ interface ChatViewProps {
   onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void | boolean | Promise<void | boolean>;
   onQueue?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   queuedText?: string | null;
+  inputError?: string | null;
   onCancelQueue?: () => void;
   onAnswer: (choiceId: string) => void;
   onCancel: () => void;
@@ -289,10 +295,10 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
+  thread, contextNavigation, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
-  prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
+  prompt, onPromptChange, onSubmit, onQueue, queuedText, inputError, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
   initialFiles,
@@ -433,8 +439,18 @@ export function ChatView({
     return () => window.removeEventListener('keydown', handler);
   }, [onToggleCanvas]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(contextNavigation ?? '');
+    const task = params.get('sourceTask'), message = params.get('sourceMessage');
+    if (!task || !message) return;
+    const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-context-source]') ?? [])
+      .find(node => node.dataset.contextSource === JSON.stringify([task, message]));
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [contextNavigation, messages, thread.id]);
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+      <LegacyContextImport key={`legacy:${thread.id}`} thread={thread} />
+      <div className="flex justify-end px-4"><ContextHistorySearch key={`search:${thread.id}`} conversationId={thread.id}/><CopyContextReferenceButton key={thread.id} conversationId={thread.id} /></div>
       <ConversationIndexRail
         entries={promptIndexEntries}
         activeId={activePromptId}
@@ -465,6 +481,7 @@ export function ChatView({
                     else messageAnchorRefs.current.delete(msg.id);
                   } : undefined}
                   data-message-anchor={msg.role === 'user' ? msg.id : undefined}
+                  data-context-source={msg.contextSource ? JSON.stringify([msg.contextSource.sourceId, msg.contextSource.sourceMessageId]) : undefined}
                   className={`${msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''} ${msg.role === 'user' ? 'scroll-mt-6' : ''}`}
                 >
                 {msg.role === 'user' ? (
@@ -474,6 +491,7 @@ export function ChatView({
                     </div>
                     <div className="mt-0.5 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/usermsg:opacity-100">
                       <CopyButton text={msg.content} />
+                      {msg.contextSource && <CopyContextReferenceButton conversationId={thread.id} sourceMessage={msg.contextSource} />}
                       <SaveToKbButton text={msg.content} />
                     </div>
                   </>
@@ -553,6 +571,7 @@ export function ChatView({
                     {displayResult?.summary?.trim() && (
                       <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/resultmsg:opacity-100">
                         <CopyButton text={displayResult.summary} />
+                        {msg.contextSource && <CopyContextReferenceButton conversationId={thread.id} sourceMessage={msg.contextSource} />}
                         <SaveToKbButton text={displayResult.summary} />
                       </div>
                     )}
@@ -564,10 +583,12 @@ export function ChatView({
                     </div>
                     <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/assistantmsg:opacity-100">
                       <CopyButton text={msg.content} />
+                      {msg.contextSource && <CopyContextReferenceButton conversationId={thread.id} sourceMessage={msg.contextSource} />}
                       <SaveToKbButton text={msg.content} />
                     </div>
                   </>
                 )}
+                  {contextLinksInText(msg.content).map(url => <ContextReferenceCard key={url} url={url} targetConversationId={thread.id} />)}
                 </div>
               );
             })}
@@ -663,7 +684,9 @@ export function ChatView({
         }}
       >
         {activityContent}
-        <ChatInput
+        {contextLinksInText(prompt).length > 0 && <div className="mx-auto w-full max-w-[760px] px-4">{contextLinksInText(prompt).map(url => <ContextReferenceCard key={`draft:${url}:${thread.id}`} url={url} targetConversationId={thread.id} />)}</div>}
+      {inputError ? <p role="alert" className="px-4 py-2 whitespace-pre-wrap text-sm text-[var(--c-danger)]">{inputError}</p> : null}
+      <ChatInput
           value={prompt}
           onChange={onPromptChange}
           onSubmit={onSubmit}

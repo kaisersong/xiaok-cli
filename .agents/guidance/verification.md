@@ -4,6 +4,8 @@
 
 ## Desktop 验证
 
+- 构造 `createDesktopServices` 的测试必须同时显式指定隔离的 `dataRoot` 和 `knowledgeDbPath`；`dataRoot` 不会覆盖知识库默认路径。路径放在该测试自己的临时根目录中，禁止打开已安装 Desktop 的默认知识库。连续性测试由 `context-continuity-test-isolation.test.ts` 检查构造参数，并在真实 SQLite 连接上核对 fixture 路径。
+
 - desktop main / service / scheduler:
   ```bash
   cd desktop

@@ -95,7 +95,7 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
   };
 
   const handleSelect = async (model: DesktopModelEntryView) => {
-    if (!config || saving) return;
+    if (!config || saving || model.unavailableReason) return;
     if (config.defaultModelId === model.id) {
       setOpen(Boolean(model.runtimeConstraints?.reasoningEfforts?.length));
       return;
@@ -184,7 +184,8 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
                 <button
                   key={model.id}
                   type="button"
-                  disabled={saving}
+                  disabled={saving||!!model.unavailableReason}
+                  title={model.unavailableReason?t.nativeContinuityUnavailable:undefined}
                   onClick={() => { void handleSelect(model); }}
                   className="flex w-full items-center justify-between px-3 py-2 text-sm transition-colors bg-[var(--c-bg-menu)] hover:bg-[var(--c-bg-deep)]"
                   style={{

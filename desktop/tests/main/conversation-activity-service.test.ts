@@ -43,7 +43,8 @@ describe('conversation activity authority', () => {
     await bind(); allowed = false;
     await expect(service.acceptEvent('watch', event)).rejects.toThrow('activity_source_forbidden');
     const warning = await service.listActivities('thread', actor);
-    expect(warning).toHaveLength(1); expect(warning[0]).toMatchObject({ kind: 'diagnostic', projection: { summary: undefined, evidenceRefs: [], errorCode: 'activity_source_forbidden', freshness: 'unavailable' } });
+    expect(warning).toHaveLength(1); expect(warning[0]).toMatchObject({ kind: 'diagnostic', projection: { evidenceRefs: [], errorCode: 'activity_source_forbidden', freshness: 'unavailable', sourceSequence: 0, revision: 0, lastProgressAt: null, lastHeartbeatAt: null, lastReportAt: null } });
+    expect(warning[0].projection).not.toHaveProperty('summary');
     allowed = true; deleted = true;
     await expect(service.acceptEvent('watch', event)).rejects.toThrow('activity_thread_deleted');
     expect(store.getProjection('watch')?.executionState).toBe('accepted');

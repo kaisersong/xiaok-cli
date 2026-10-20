@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import {isOwnedNativeModelAdapter} from './context-continuity/native-model-session.js';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 import { recoverModelStream, type ModelRecoveryNotice, type ModelRecoveryPolicy } from '../../src/ai/runtime/model-stream-recovery.js';
@@ -33,7 +34,7 @@ export async function* streamDesktopTaskRecovery(input: Input): AsyncGenerator<S
   let summaryOnly = Boolean(input.summaryOnly);
   try {
     yield* recoverModelStream({ signal, policy: input.policy,
-      shouldRetry: () => prepared,
+      shouldRetry: () => prepared && !isOwnedNativeModelAdapter(input.adapter),
       onRetry: async notice => {
         if (!summaryOnly && !sawTool && prefix.trim() && input.canRecover?.()) summaryOnly = true;
         // These fragments were visible, but no tool from this interrupted request ran.

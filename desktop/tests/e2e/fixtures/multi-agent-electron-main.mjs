@@ -19,6 +19,7 @@ const { buildBrowserWindowOptions, isTrustedDesktopRendererUrl } = await load('s
 const { DesktopApplicationWindowOwner } = await load('desktop-application-window-owner');
 const { registerKSwarmProxy } = await load('kswarm-ipc-proxy');
 const { KSwarmStreamBridge } = await load('kswarm-stream-bridge');
+const { InProcessTaskRuntimeHost } = await import(pathToFileURL(join(desktop, 'dist/main/src/runtime/task-host/task-runtime-host.js')).href);
 const rendererFile = join(desktop, 'dist', 'renderer', 'index.html');
 const showWindows = process.env.XIAOK_E2E_BACKGROUND !== '1';
 const activityWindows = new Set(); let secondary;
@@ -113,6 +114,14 @@ globalThis.multiAgentE2E = {
   holdNextContent: () => { holdContent = true; },
   releaseContent: () => releaseContent(),
   contentReads: () => [...contentReads],
+  failNextHistoryPreparation: () => {
+    const prototype = InProcessTaskRuntimeHost.prototype, read = prototype.resolveContextHistory;
+    prototype.resolveContextHistory = async function () {
+      prototype.resolveContextHistory = read;
+      throw new Error('actual one-shot history preflight fault');
+    };
+    disposers.push(() => { prototype.resolveContextHistory = read; });
+  },
   holdNextCleanup: () => {
     const pending = new Promise(resolve => { releaseCleanup = resolve; });
     const options = services.multiAgent.service.options, create = options.createSession;
