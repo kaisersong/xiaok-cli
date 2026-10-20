@@ -1,4 +1,5 @@
-import test from 'node:test';
+import nodeTest from 'node:test';
+const test=(name,fn)=>nodeTest(name,{skip:process.platform==='win32'},fn);
 import {Coordinator} from '../src/coordinator.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {spawnSync} from 'node:child_process';
