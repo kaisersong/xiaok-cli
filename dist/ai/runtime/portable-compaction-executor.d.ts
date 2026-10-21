@@ -4,6 +4,8 @@ export type NativeCompactionFailureClass = 'http400' | 'http429' | 'http500' | '
 export type PortableCompactionTrigger = {
     kind: 'threshold';
 } | {
+    kind: 'semantic';
+} | {
     kind: 'native_failure';
     failureClass: NativeCompactionFailureClass;
 };
@@ -26,6 +28,8 @@ export type PortableCompactionExecutionOutcome = {
     summaryFailureCode: PortableSummaryFailureCode;
 }));
 export interface PortableCompactionPorts {
+    /** Semantic owner validates anchors and persists CAS before installing live history. */
+    applySemanticPlan?(plan: CompactionPlan, summaryText: string): CompactionApplyOutcome | Promise<CompactionApplyOutcome>;
     summarizePrefix(messages: readonly Message[], signal: AbortSignal): Promise<string>;
     applyPlan(plan: CompactionPlan, summaryText?: string): CompactionApplyOutcome;
 }

@@ -1,3 +1,6 @@
+import {assertCompoundFileEffectCurrent} from '../../runtime/sol-pi/compound-native-phase.js';
+import {writeFileAtomicallySync} from '../../utils/atomic-file.js'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync, renameSync } from 'fs'
 import { dirname, join, basename } from 'path'
 import type { Tool } from '../../types.js'
@@ -80,6 +83,13 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
 
   return {
     permission: 'write',
+    compoundFilePrecondition(input) {
+      const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd);
+      let beforeHash: string | null = null;
+      try { beforeHash = createHash('sha256').update(readFileSync(filePath)).digest('hex'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      return { filePath, beforeHash };
+    },
     definition: {
       name: 'edit',
       description: '在文件中精确替换字符串。old_string 必须在文件中唯一出现。',
@@ -105,21 +115,30 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
       try {
         content = readFileSync(resolvedPath, 'utf-8')
       } catch {
+        await context?.compoundPhase?.rejected?.({ toolName: 'edit', reason: 'file_missing' })
         return `Error: 文件不存在: ${resolvedPath}`
       }
 
       const occurrences = content.split(old_string).length - 1
-      if (occurrences === 0) return 'Error: old_string 在文件中不存在'
-      if (occurrences > 1) return `Error: old_string 在文件中出现了 ${occurrences} 次，必须唯一`
+      if (occurrences === 0) { await context?.compoundPhase?.rejected?.({ toolName: 'edit', reason: 'old_string_missing' }); return 'Error: old_string 在文件中不存在' }
+      if (occurrences > 1) { await context?.compoundPhase?.rejected?.({ toolName: 'edit', reason: 'old_string_ambiguous' }); return `Error: old_string 在文件中出现了 ${occurrences} 次，必须唯一` }
 
       const updated = content.split(old_string).join(new_string)
 
       // Generate unified diff before writing
       const diff = generateUnifiedDiff(content, updated, resolvedPath)
 
-      const tmp = join(dirname(resolvedPath), `.xiaok-tmp-${Date.now()}`)
-      writeFileSync(tmp, updated, 'utf-8')
-      renameSync(tmp, resolvedPath)
+      await context?.compoundPhase?.beforeFileMutation?.({ filePath: resolvedPath, beforeHash: createHash('sha256').update(content, 'utf8').digest('hex'), afterHash:createHash('sha256').update(updated,'utf8').digest('hex') })
+      if (context?.compoundPhase && readFileSync(resolvedPath, 'utf8') !== content) throw Error('compound_file_changed_before_mutation')
+      context?.signal?.throwIfAborted(); context?.assertPermissionApproval?.()
+      assertCompoundFileEffectCurrent(context?.compoundPhase);
+      if(context?.compoundPhase)writeFileAtomicallySync(resolvedPath,updated,{requireDirectorySync:true,tempName:`.xiaok-tmp-${randomUUID()}`})
+      else {
+        const tmp = join(dirname(resolvedPath), `.xiaok-tmp-${Date.now()}`)
+        writeFileSync(tmp, updated, 'utf-8')
+        renameSync(tmp, resolvedPath)
+      }
+      await context?.compoundPhase?.fileMutationCommitted?.({ filePath: resolvedPath, afterHash: createHash('sha256').update(updated, 'utf8').digest('hex') })
 
       if (context?.toolInvocationId) {
         context.runtimeFactSink?.emit({

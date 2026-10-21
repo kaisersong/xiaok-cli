@@ -37,8 +37,8 @@ function artifactFromRoomMessage(message: NonNullable<RoomUiSnapshot['messages']
     projectId: sourceRef.projectId,
     filename: artifact.filename,
     name: artifact.filename,
-    type: artifact.kind,
-    mimeType: artifact.mimeType,
+    type: artifact.kind ?? undefined,
+    mimeType: artifact.mimeType ?? undefined,
   };
 }
 

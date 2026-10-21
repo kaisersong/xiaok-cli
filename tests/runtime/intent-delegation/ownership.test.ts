@@ -144,6 +144,10 @@ function createPlanDraft(input: {
   riskTier?: RiskTier;
 }): IntentPlanDraft {
   const riskTier = input.riskTier ?? 'medium';
+  const steps = [
+    createStep(input.intentId, 0, 'collect', [], riskTier),
+    createStep(input.intentId, 1, 'compose', [`${input.intentId}:step:collect`], riskTier),
+  ];
   return {
     instanceId: input.instanceId,
     intentId: input.intentId,
@@ -152,14 +156,25 @@ function createPlanDraft(input: {
     normalizedIntent: 'write a brief',
     intentType: 'generate',
     deliverable: 'brief',
+    finalDeliverable: 'brief',
     explicitConstraints: [],
     delegationBoundary: [],
     riskTier,
+    intentMode: 'single_stage',
+    segmentationConfidence: 'low',
     templateId: 'tpl_generate',
-    steps: [
-      createStep(input.intentId, 0, 'collect', [], riskTier),
-      createStep(input.intentId, 1, 'compose', [`${input.intentId}:step:collect`], riskTier),
-    ],
+    stages: [{
+      stageId: `${input.intentId}:stage:1`,
+      order: 0,
+      label: '生成brief',
+      intentType: 'generate',
+      deliverable: 'brief',
+      templateId: 'tpl_generate',
+      riskTier,
+      dependsOnStageIds: [],
+      steps,
+    }],
+    steps,
     continuationMode: 'new_intent',
   };
 }

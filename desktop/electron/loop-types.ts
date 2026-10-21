@@ -1,3 +1,5 @@
+import type {LoopRunStatus, LoopStageStatus, LoopStageKind, LoopRunFailureKind} from '../../src/runtime/loop/producer-types.js';
+export type {LoopRunStatus, LoopStageStatus, LoopStageKind, LoopRunFailureKind} from '../../src/runtime/loop/producer-types.js';
 import type { LoopContractV1 } from './loop-contract.js';
 
 export const BUILT_IN_LOOP_IDS = {
@@ -12,19 +14,9 @@ export type BuiltInLoopId = typeof BUILT_IN_LOOP_IDS[keyof typeof BUILT_IN_LOOP_
 export type LoopDefinitionOrigin = 'built_in' | 'user_template';
 export type LoopDefinitionStatus = 'active' | 'paused' | 'deleted';
 
-export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 
-export type LoopStageStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked' | 'skipped';
-export type LoopStageKind = 'scan' | 'execute' | 'verify';
 export type UserLoopTemplateKind = 'markdown_file' | 'task_completion';
 
-export type LoopRunFailureKind =
-  | 'executor_crash'
-  | 'executor_failed'
-  | 'validation_failed'
-  | 'evidence_missing'
-  | 'evidence_kind_mismatch'
-  | 'unknown';
 
 export type LoopRunTrigger = {
   kind: string;

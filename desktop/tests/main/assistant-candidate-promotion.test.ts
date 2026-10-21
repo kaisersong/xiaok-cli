@@ -92,7 +92,7 @@ describe('assistant candidate promotion', () => {
     expect(candidates.current).toMatchObject({ status: 'accepting', targetId: 'assistant-memory:candidate-1' });
 
     candidates.markAccepted = originalMarkAccepted;
-    const recovered = await service.recoverAccepting();
+    const recovered = await service.recoverAccepting({requestSource:'scheduler'});
 
     expect(recovered).toEqual([{ candidateId: 'candidate-1', status: 'accepted' }]);
     expect(candidates.current.status).toBe('accepted');
@@ -150,4 +150,13 @@ describe('assistant candidate promotion', () => {
       .rejects.toThrow('assistant_candidate_project_cwd_required');
     expect(candidates.current.status).toBe('accept_failed');
   });
+});
+
+it('recovery service rejects missing and agent source before any target work',async()=>{
+ const candidates=repository({...memoryCandidate,status:'accepting',targetKind:'memory',targetId:'assistant-memory:candidate-1'}),save=vi.fn();const service=new AssistantCandidatePromotionService({candidates,targets:{ensureMemory:save,ensureKnowledge:save,ensureFollowUp:save}});
+ await expect((service.recoverAccepting as any)()).rejects.toThrow('recovery_source');
+ await expect((service.recoverAccepting as any)({requestSource:'agent'})).rejects.toThrow('recovery_source');expect(save).not.toHaveBeenCalled();
+});
+it('captures original user collection before repository callbacks can change input',async()=>{
+ const candidates=repository({...memoryCandidate,kind:'knowledge'}),ensureKnowledge=vi.fn(async()=>({targetRef:'kb://original'}));const input={candidateId:'candidate-1',requestSource:'user' as const,collectionId:'original'};const original=candidates.get.bind(candidates);candidates.get=id=>{input.collectionId='changed';return original(id);};const service=new AssistantCandidatePromotionService({candidates,targets:{ensureMemory:vi.fn(),ensureKnowledge,ensureFollowUp:vi.fn()}});await service.accept(input);expect(ensureKnowledge).toHaveBeenCalledWith(expect.objectContaining({collectionId:'original'}));
 });

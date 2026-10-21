@@ -1,3 +1,10 @@
+import { emitThreadDeletionPhase, type ThreadDeletionPhase } from './thread-deletion-diagnostics';
+import { AUTOMATION_CONFIG_SCHEMA, AUTOMATION_OVERVIEW_SCHEMA } from '../../../shared/automation-config-ipc-contract';
+import type { MobileRelaySignInResult } from '../../../shared/mobile-signin-ipc-contract';
+import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
+import type { ProxyHttpBody } from './types';
+import type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
+import type {LoopPublicationAction} from '../../../shared/loop-publication-types.js';
 import { createLogger } from '../lib/logger';
 import type {
   AvailableModelView,
@@ -201,11 +208,13 @@ async function createTaskWithRetry(input: {
   materials: Array<{ materialId: string; role?: MaterialRole }>;
   context?: TaskCreateContext;
   retries?: number;
-}): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
+}): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
   return await window.xiaokDesktop.createTask(input);
 }
 
 const log = createLogger('api-bridge');
+const threadDeletionDiagnosticState = { active: false };
+let threadDeletionDiagnosticAttemptOrdinal = 0;
 
 export const api = {
   // ---------------------
@@ -318,42 +327,81 @@ export const api = {
 
   async deleteThread(id: string): Promise<void> {
     if (isDesktop()) {
+      const attemptOrdinal = ++threadDeletionDiagnosticAttemptOrdinal;
+      const reportPhase = (phase: ThreadDeletionPhase, taskOrdinal?: number) => {
+        emitThreadDeletionPhase(threadDeletionDiagnosticState, () => console, () => ({
+          attemptOrdinal, phase, ...(taskOrdinal === undefined ? {} : { taskOrdinal }),
+        }));
+      };
+      reportPhase('delete_enter');
+      try {
       const desktop = getDesktopApi();
       if (!desktop?.getMultiAgentThreadDeletion || !desktop.deleteMultiAgentThread) {
+        reportPhase('desktop_api_unavailable');
         throw new Error('thread_deletion_unavailable');
       }
+      reportPhase('thread_read_start');
       const thread = await api.getThread(id), identity = threadTaskIdentity(thread);
+      reportPhase('thread_read_done');
+      reportPhase('receipt_read_start');
       const snapshot = await desktop.getMultiAgentThreadDeletion({ threadId: id });
+      reportPhase('receipt_read_done');
       if (snapshot.threadId !== id || !Number.isSafeInteger(snapshot.threadRevision) || snapshot.threadRevision < 0) {
+        reportPhase('receipt_invalid');
         throw new Error('thread_deletion_unknown');
       }
-      if (!thread && !(snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed')) throw new Error('thread_deletion_pending');
+      if (!thread && !(snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed')) { reportPhase('thread_absent_pending'); throw new Error('thread_deletion_pending'); }
       const taskIds = [...new Set([...(thread?.taskIds ?? []), ...(thread?.currentTaskId ? [thread.currentTaskId] : [])])];
       const recoveringCompletion = thread?.deletionPending && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed';
-      for (let offset = 0; !recoveringCompletion && offset < taskIds.length; offset += 8) {
+      // A same-thread Main receipt and an existing local reservation route an
+      // explicit retry through Main's original authorization and cleanup path.
+      const resumingDeletion = thread?.deletionPending === true && snapshot.deleteState === 'delete_pending'
+        && (snapshot.operation?.state === 'cleanup_pending' || snapshot.operation?.state === 'unknown');
+      for (let offset = 0; !recoveringCompletion && !resumingDeletion && offset < taskIds.length; offset += 8) {
+        let nextTaskOrdinal = offset;
         await Promise.all(taskIds.slice(offset, offset + 8).map(async taskId => {
-          if (!desktop.recoverTask) throw new Error('thread_deletion_unavailable');
-          const recovered = await desktop.recoverTask(taskId).catch(() => { throw new Error('thread_deletion_unknown'); });
-          if (recovered.snapshot?.context?.threadId !== id) throw new Error('thread_deletion_unavailable');
+          const taskOrdinal = nextTaskOrdinal++;
+          reportPhase('recover_start', taskOrdinal);
+          if (!desktop.recoverTask) { reportPhase('recover_api_unavailable', taskOrdinal); throw new Error('thread_deletion_unavailable'); }
+          const recovered = await desktop.recoverTask(taskId).catch(() => { reportPhase('recover_rejected', taskOrdinal); throw new Error('thread_deletion_unknown'); });
+          reportPhase('recover_resolved', taskOrdinal);
+          if (recovered.snapshot?.context?.threadId !== id) { reportPhase('recover_context_mismatch', taskOrdinal); throw new Error('thread_deletion_unavailable'); }
+          reportPhase('recover_context_match', taskOrdinal);
         }));
       }
-      if (thread) await mutateStoredThread(id, current => {
-        if (!current && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed') return null;
-        if (!current || threadTaskIdentity(current) !== identity) throw new Error('thread_deletion_pending');
+      if (thread) {
+        reportPhase('reservation_start');
+        await mutateStoredThread(id, current => {
+        if (!current && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed') { reportPhase('reservation_completed_tombstone'); return null; }
+        if (!current || threadTaskIdentity(current) !== identity || (resumingDeletion && current.deletionPending !== true)) { reportPhase('reservation_identity_mismatch'); throw new Error('thread_deletion_pending'); }
+        reportPhase('reservation_identity_match');
         return { ...current, deletionPending: true };
-      });
+        });
+        reportPhase('reservation_done');
+      }
+      // This marks the original conditional expression, not IPC dispatch/admission.
+      reportPhase('main_expression_enter');
       const result = snapshot.deleteState === 'deleted' ? snapshot.operation : await desktop.deleteMultiAgentThread({
         threadId: id, expectedThreadRevision: snapshot.threadRevision,
         operationId: `delete:${snapshot.threadRevision}:${crypto.randomUUID()}`, confirmTerminate: true,
       });
+      reportPhase('main_expression_resolved');
       if (result?.state !== 'completed') {
+        reportPhase('main_result_not_completed');
         throw new Error(result?.state === 'cleanup_pending' ? 'thread_deletion_pending' : 'thread_deletion_unknown');
       }
+      reportPhase('completion_cas_start');
       await mutateStoredThread(id, current => {
-        if (current && threadTaskIdentity(current) !== identity) throw new Error('thread_deletion_pending');
+        if (current && threadTaskIdentity(current) !== identity) { reportPhase('completion_identity_mismatch'); throw new Error('thread_deletion_pending'); }
         return null;
       });
+      reportPhase('completion_cas_done');
+      reportPhase('delete_return');
       return;
+      } catch (error) {
+        reportPhase('delete_reject');
+        throw error;
+      }
     }
     await withStore('readwrite', (store) => store.delete(id));
   },
@@ -388,11 +436,16 @@ export const api = {
   // ---------------------
   // Run API (IPC via DesktopApi)
   // ---------------------
+  prepareObservationTask: () => window.xiaokDesktop.prepareObservationTask(),
+  createObservationTask: (input:{draftId:string;prompt:string;threadId?:string}) => window.xiaokDesktop.createObservationTask(input),
+  stopObservationTask: (taskId:string) => window.xiaokDesktop.stopObservationTask(taskId),
+  revokeObservationTask: (taskId:string) => window.xiaokDesktop.revokeObservationTask(taskId),
+  getObservationTaskStatus: (taskId:string) => window.xiaokDesktop.getObservationTaskStatus(taskId),
   async createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     context?: TaskCreateContext;
-  }): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
+  }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     log.info('createTask', JSON.stringify({ prompt: input.prompt, materialsCount: input.materials.length }));
     const result = await createTaskWithRetry(input);
     log.info('createTask ok', JSON.stringify({ taskId: result.taskId }));
@@ -449,6 +502,10 @@ export const api = {
     return r;
   },
 
+  getLoopPublicationConfiguration: (loopId:string) => window.xiaokDesktop.getLoopPublicationConfiguration(loopId),
+  getLoopPublicationState: (runId:string) => window.xiaokDesktop.getLoopPublicationState(runId),
+  performLoopPublicationAction: (input:LoopPublicationAction) => window.xiaokDesktop.performLoopPublicationAction(input),
+
   async getLoopDefinitions(): Promise<LoopDefinitionView[]> {
     return await window.xiaokDesktop.getLoopDefinitions() as LoopDefinitionView[];
   },
@@ -473,7 +530,7 @@ export const api = {
     return await window.xiaokDesktop.createUserLoopTemplate(input) as CreateUserLoopTemplateResultView;
   },
 
-  async updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): Promise<unknown> {
+  async updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): Promise<UserLoopTemplateView | undefined> {
     return await window.xiaokDesktop.updateUserLoopTemplate(loopId, patch);
   },
 
@@ -498,7 +555,9 @@ export const api = {
   },
 
   async getAutomationOverviewSnapshot(): Promise<AutomationOverviewSnapshotView> {
-    return await window.xiaokDesktop.getAutomationOverviewSnapshot() as AutomationOverviewSnapshotView;
+    const result = AUTOMATION_OVERVIEW_SCHEMA.safeParse(await window.xiaokDesktop.getAutomationOverviewSnapshot());
+    if (!result.success) throw Error('automation_config_operation_unknown');
+    return result.data;
   },
 
   async getAutomationRunHistory(): Promise<AutomationRunHistoryItemView[]> {
@@ -506,11 +565,15 @@ export const api = {
   },
 
   async getAutomationsConfig(): Promise<AutomationsConfigView> {
-    return await window.xiaokDesktop.getAutomationsConfig() as AutomationsConfigView;
+    const result = AUTOMATION_CONFIG_SCHEMA.safeParse(await window.xiaokDesktop.getAutomationsConfig());
+    if (!result.success) throw Error('automation_config_operation_unknown');
+    return result.data;
   },
 
   async setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<AutomationsConfigView> {
-    return await window.xiaokDesktop.setGlobalBackgroundAutoRun(input) as AutomationsConfigView;
+    const result = AUTOMATION_CONFIG_SCHEMA.safeParse(await window.xiaokDesktop.setGlobalBackgroundAutoRun(input));
+    if (!result.success) throw Error('automation_config_operation_unknown');
+    return result.data;
   },
 
   async openLoopOutputDirectory(loopId: string): Promise<LoopOutputActionResultView> {
@@ -520,6 +583,8 @@ export const api = {
   async readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView> {
     return await window.xiaokDesktop.readLoopOutputPreview(loopId) as LoopOutputPreviewView;
   },
+
+  async listLoopPublishedArtifacts(loopId:string,page:LoopArtifactPageRequest):Promise<LoopArtifactListView>{return await window.xiaokDesktop.listLoopPublishedArtifacts(loopId,page) as LoopArtifactListView;},
 
   async readLoopTaskResult(loopId: string): Promise<LoopTaskResultView> {
     return await window.xiaokDesktop.readLoopTaskResult(loopId) as LoopTaskResultView;
@@ -581,15 +646,7 @@ export const api = {
     return r;
   },
 
-  async createManagedXiaokAgent(input: {
-    name: string;
-    description?: string;
-    roles?: string[];
-    capabilities?: string[];
-    instructions?: string;
-    maxConcurrentTasks?: number;
-    desktopModelId?: string | null;
-  }): Promise<unknown> {
+  async createManagedXiaokAgent(input: ManagedAgentInput): Promise<ManagedAgentResult> {
     log.info('createManagedXiaokAgent', JSON.stringify({ name: input.name, roles: input.roles }));
     const r = await window.xiaokDesktop.createManagedXiaokAgent(input);
     log.info('createManagedXiaokAgent ok');
@@ -628,7 +685,7 @@ export const api = {
   onMobileRelayStatus(handler: (status: DesktopMobileRelayStatus) => void): () => void {
     return window.xiaokDesktop.onMobileRelayStatus(handler);
   },
-  async openMobileRelaySignIn(): Promise<{ ok: boolean; url?: string; error?: string }> {
+  async openMobileRelaySignIn(): Promise<MobileRelaySignInResult> {
     return await window.xiaokDesktop.openMobileRelaySignIn();
   },
   async getMobilePairingInfo(): Promise<DesktopMobilePairingInfo> {
@@ -743,10 +800,10 @@ export const api = {
   async listChannels() {
     return window.xiaokDesktop.listChannels();
   },
-  async createChannel(input: { type: string; name: string; webhookUrl?: string }) {
+  async createChannel(input: { type: string; name: string; webhookUrl?: string; appId?: string; appSecret?: string; token?: string; botToken?: string; chatId?: string }) {
     return window.xiaokDesktop.createChannel(input as never);
   },
-  async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }) {
+  async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean; appId?: string; appSecret?: string; token?: string; botToken?: string; chatId?: string }) {
     return window.xiaokDesktop.updateChannel(id, input as never);
   },
   async deleteChannel(id: string) {
@@ -754,7 +811,7 @@ export const api = {
   },
   async testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
     if (!window.xiaokDesktop?.testChannel) {
-      return { success: false, error: 'testChannel API not available' };
+      throw Error('channel_mcp_mutation_runtime_unavailable');
     }
     return await window.xiaokDesktop.testChannel(channelId);
   },
@@ -776,7 +833,7 @@ export const api = {
   async updateChannelBinding(_accessToken: string, channelId: string, bindingId: string, patch: Record<string, unknown>): Promise<ChannelBindingResponse | null> {
     const api = getDesktopApi();
     if (!api?.kswarmProxyPatch) return null;
-    return await api.kswarmProxyPatch(`/channels/${channelId}/bindings/${bindingId}`, patch) as ChannelBindingResponse | null;
+    return await api.kswarmProxyPatch(`/channels/${channelId}/bindings/${bindingId}`, patch as ProxyHttpBody) as ChannelBindingResponse | null;
   },
   async createChannelBindCode(_accessToken: string, channelType: string): Promise<{ token: string } | null> {
     const api = getDesktopApi();
@@ -828,7 +885,7 @@ export const api = {
   async createMCPInstall(input: { name: string; source: string; command: string; args?: string[] }) {
     return window.xiaokDesktop.createMCPInstall(input as never);
   },
-  async updateMCPInstall(id: string, input: { name?: string; source?: string; command?: string; enabled?: boolean }) {
+  async updateMCPInstall(id: string, input: { name?: string; source?: string; command?: string; args?: string[]; enabled?: boolean }) {
     return window.xiaokDesktop.updateMCPInstall(id, input as never);
   },
   async deleteMCPInstall(id: string) {
@@ -979,12 +1036,8 @@ export const api = {
   // Skill API (mock)
   // ---------------------
   async listSkills() {
-    if (!window.xiaokDesktop?.listSkills) return [];
-    try {
-      return await window.xiaokDesktop.listSkills();
-    } catch {
-      return [];
-    }
+    if (!window.xiaokDesktop?.listSkills) throw new Error('skill_list_runtime_unavailable');
+    return window.xiaokDesktop.listSkills();
   },
   async installSkill(skillName: string): Promise<{ success: boolean; message: string }> {
     if (!window.xiaokDesktop?.installSkill) {
@@ -1020,11 +1073,7 @@ export const api = {
   async getConnectorsConfig(): Promise<import('./types').ConnectorsConfigSnapshot | null> {
     const desktop = (window as unknown as { xiaokDesktop?: { getConnectorsConfig?: () => Promise<import('./types').ConnectorsConfigSnapshot | null> } }).xiaokDesktop;
     if (desktop?.getConnectorsConfig) {
-      try {
-        return await desktop.getConnectorsConfig();
-      } catch {
-        return null;
-      }
+      return await desktop.getConnectorsConfig();
     }
     return {
       config: {
@@ -1038,33 +1087,21 @@ export const api = {
   async saveConnectorsConfig(input: import('./types').ConnectorsConfig): Promise<import('./types').ConnectorsConfigSnapshot | null> {
     const desktop = (window as unknown as { xiaokDesktop?: { saveConnectorsConfig?: (input: unknown) => Promise<import('./types').ConnectorsConfigSnapshot> } }).xiaokDesktop;
     if (desktop?.saveConnectorsConfig) {
-      try {
-        return await desktop.saveConnectorsConfig(input);
-      } catch {
-        return null;
-      }
+      return await desktop.saveConnectorsConfig(input);
     }
     return null;
   },
   async listConnectorRuntimes(): Promise<import('./types').ConnectorsProviderRuntime[]> {
     const desktop = (window as unknown as { xiaokDesktop?: { listConnectorRuntimes?: () => Promise<import('./types').ConnectorsProviderRuntime[]> } }).xiaokDesktop;
     if (desktop?.listConnectorRuntimes) {
-      try {
-        return await desktop.listConnectorRuntimes();
-      } catch {
-        return [];
-      }
+      return await desktop.listConnectorRuntimes();
     }
     return [];
   },
   async testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult> {
     const desktop = (window as unknown as { xiaokDesktop?: { testConnectorProvider?: (kind: 'search' | 'fetch') => Promise<ConnectorTestResult> } }).xiaokDesktop;
     if (desktop?.testConnectorProvider) {
-      try {
-        return await desktop.testConnectorProvider(kind);
-      } catch (e) {
-        return { success: false, latencyMs: 0, providerName: 'unknown', error: (e as Error).message };
-      }
+      return await desktop.testConnectorProvider(kind);
     }
     return { success: false, latencyMs: 0, providerName: 'none', error: 'not available in browser' };
   },
@@ -1264,11 +1301,8 @@ export const api = {
   },
 
   async getSkillStats() {
-    try {
-      return await window.xiaokDesktop.getSkillStats();
-    } catch {
-      return [];
-    }
+    if (!window.xiaokDesktop?.getSkillStats) throw new Error('diagnostics_runtime_unavailable');
+    return window.xiaokDesktop.getSkillStats();
   },
 
   // ---------------------
@@ -1336,6 +1370,9 @@ export interface MarketSkill {
   registry_slug?: string;
   detail_url?: string;
   repository_url?: string;
+  registry_provider?: string;
+  owner_handle?: string;
+  updated_at?: string;
   installed: boolean;
   enabled_by_default: boolean;
   scan_status?: string;
@@ -1352,6 +1389,7 @@ export interface SkillReference {
 }
 
 export interface SkillImportCandidate {
+  path: string;
   skill_key: string;
   display_name: string;
   description?: string;
@@ -1367,10 +1405,8 @@ export interface PlatformSkillItem {
   platform_status: string;
 }
 
-export async function listInstalledSkills(_accessToken: string): Promise<InstalledSkill[]> {
-  try {
-    const skills = await api.listSkills();
-    return skills.map((s: { name: string; aliases?: string[]; description?: string; source?: string; tier?: string }) => ({
+export function mapInstalledSkillList(skills: import('../../../shared/skill-list-ipc-contract').SkillListDto): InstalledSkill[] {
+  return skills.map((s: { name: string; aliases?: string[]; description?: string; source?: string; tier?: string }) => ({
       skill_key: s.name,
       display_name: s.name,
       description: s.description,
@@ -1379,19 +1415,17 @@ export async function listInstalledSkills(_accessToken: string): Promise<Install
       is_platform: false,
       updated_at: new Date().toISOString(),
     }));
-  } catch {
-    return [];
-  }
+}
+export async function listInstalledSkills(_accessToken: string): Promise<InstalledSkill[]> {
+  return mapInstalledSkillList(await api.listSkills());
 }
 
 export async function listDefaultSkills(_accessToken: string): Promise<InstalledSkill[]> {
   return [];
 }
 
-export async function listPlatformSkills(_accessToken: string): Promise<PlatformSkillItem[]> {
-  try {
-    const skills = await api.listSkills();
-    return skills
+export function mapPlatformSkillList(skills: import('../../../shared/skill-list-ipc-contract').SkillListDto): PlatformSkillItem[] {
+  return skills
       .filter((s: { source?: string }) => s.source === 'builtin' || s.source === 'platform')
       .map((s: { name: string; description?: string }) => ({
         skill_key: s.name,
@@ -1400,9 +1434,9 @@ export async function listPlatformSkills(_accessToken: string): Promise<Platform
         version: '1.0.0',
         platform_status: 'auto',
       }));
-  } catch {
-    return [];
-  }
+}
+export async function listPlatformSkills(_accessToken: string): Promise<PlatformSkillItem[]> {
+  return mapPlatformSkillList(await api.listSkills());
 }
 
 export async function searchMarketSkills(_accessToken: string, _query: string, _officialOnly: boolean): Promise<MarketSkill[]> {
@@ -1410,7 +1444,9 @@ export async function searchMarketSkills(_accessToken: string, _query: string, _
 }
 
 export async function installSkill(_accessToken: string, ref: SkillReference): Promise<{ success: boolean; message: string }> {
-  return api.installSkill(ref.skill_key);
+  const result = await api.installSkill(ref.skill_key);
+  if (!result.success) throw new Error(result.message);
+  return result;
 }
 
 export async function deleteSkill(_accessToken: string, ref: SkillReference): Promise<void> {
@@ -1422,11 +1458,11 @@ export async function importRegistrySkill(_accessToken: string, _input: { slug: 
   throw new Error('Marketplace not available in desktop mode');
 }
 
-export async function importSkillFromGitHub(_accessToken: string, _input: { repositoryUrl: string }): Promise<{ candidates: SkillImportCandidate[] }> {
+export async function importSkillFromGitHub(_accessToken: string, _input: { repository_url: string; ref?: string; candidate_path?: string }): Promise<{ skill: SkillPackageResponse }> {
   throw new Error('GitHub import not available in desktop mode');
 }
 
-export async function importSkillFromUpload(_input: { fileName: string; content: string }): Promise<{ candidates: SkillImportCandidate[] }> {
+export async function importSkillFromUpload(_accessToken: string, _input: { file: File; install_after_import: boolean }): Promise<SkillPackageResponse> {
   throw new Error('Upload import not available in desktop mode');
 }
 
@@ -1454,6 +1490,8 @@ export function setExternalDirs(_accessToken: string, _dirs: string[]): Promise<
 
 export interface ApiErrorLike extends Error {
   status?: number;
+  code?: string;
+  details?: unknown;
 }
 
 export function isApiError(error: unknown): error is ApiErrorLike {

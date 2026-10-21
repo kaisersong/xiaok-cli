@@ -2,6 +2,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -437,6 +438,8 @@ describe('safe transcript gzip archive', () => {
 
     expect(() => sealTranscriptWriter('sess_seal_busy', dir, {
       open: () => { throw busy; },
+      fsync: fsyncSync,
+      close: closeSync,
     })).toThrow(expect.objectContaining({ code: 'transcript_busy' }));
   });
 

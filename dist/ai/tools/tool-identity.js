@@ -42,23 +42,23 @@ export function buildCapabilityToolDefinition(record) {
         inputSchema: record.inputSchema ?? { type: 'object', properties: {} },
     };
 }
-export function dedupeToolSearchEntries(entries) {
+export function dedupeToolSearchEntries(entries) { return dedupeToolSearchCandidates(entries).map(entry => entry.definition); }
+export function selectToolEntries(entries, names) { return selectToolSearchCandidates(entries, names).map(entry => entry.definition); }
+/** Preserve the whole selected registration, including host-only sidecars. */
+export function dedupeToolSearchCandidates(entries) {
     const merged = new Map();
-    for (const entry of entries) {
-        if (!merged.has(entry.canonicalId)) {
-            merged.set(entry.canonicalId, entry.definition);
-        }
-    }
+    for (const entry of entries)
+        if (!merged.has(entry.canonicalId))
+            merged.set(entry.canonicalId, entry);
     return [...merged.values()];
 }
-export function selectToolEntries(entries, names) {
-    const lookup = new Map(entries.map((entry) => [entry.canonicalId, entry.definition]));
-    const selected = [];
+export function selectToolSearchCandidates(entries, names) {
+    const lookup = new Map(entries.map(entry => [entry.canonicalId, entry]));
+    const result = [];
     for (const name of names) {
-        const definition = lookup.get(getCanonicalToolId(name));
-        if (definition) {
-            selected.push(definition);
-        }
+        const entry = lookup.get(getCanonicalToolId(name));
+        if (entry)
+            result.push(entry);
     }
-    return selected;
+    return result;
 }

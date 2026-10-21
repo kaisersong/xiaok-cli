@@ -1,4 +1,4 @@
-import type { ActiveIntentContext, CreateIntentPlanInput } from './planner.js';
+import type { ActiveIntentContext, ActiveIntentPlanningData, CreateIntentPlanInput } from './planner.js';
 import type { IntentPlanDraft, IntentType } from './types.js';
 
 export type AmbiguityType = 'verb_no_output' | 'material_no_directive' | 'implicit_workflow';
@@ -29,15 +29,19 @@ export type RuleBoundaryDecision =
   | { kind: 'definite_intent'; reason: string; plannerHint: PlannerHint }
   | { kind: 'ambiguous'; ambiguityType: AmbiguityType; reason: string; plannerHint?: PlannerHint };
 
-export interface IntentBoundaryInput {
+export interface IntentBoundaryInput<TActive extends ActiveIntentPlanningData = ActiveIntentPlanningData> {
+  newIntentId?: string;
   input: string;
   instanceId: string;
   sessionId: string;
   cwd: string;
   skills: CreateIntentPlanInput['skills'];
-  activeIntent?: ActiveIntentContext;
+  activeIntent?: TActive;
   skillScoreLookup?: CreateIntentPlanInput['skillScoreLookup'];
 }
+
+export type StrongIntentBoundaryInput = IntentBoundaryInput<ActiveIntentContext>;
+export type RawIntentBoundaryInput = IntentBoundaryInput<ActiveIntentPlanningData>;
 
 export type LlmBoundaryDecision =
   | { kind: 'answer_directly'; confidence: number; reason: string }

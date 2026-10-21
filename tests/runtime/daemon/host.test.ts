@@ -1,12 +1,13 @@
 import { createConnection, type Socket } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { XiaokDaemonHost, type XiaokDaemonClientInfo, type XiaokDaemonService } from '../../../src/runtime/daemon/host.js';
+import { XiaokDaemonHost, type XiaokDaemonService } from '../../../src/runtime/daemon/host.js';
 import {
   XIAOK_DAEMON_PROTOCOL_VERSION,
   createXiaokDaemonRpcId,
   resolveXiaokDaemonSocketPath,
   type XiaokDaemonServerMessage,
+  type XiaokDaemonClientInfo,
 } from '../../../src/runtime/daemon/protocol.js';
 import { queryXiaokDaemonStatus } from '../../../src/runtime/daemon/control.js';
 import { waitFor } from '../../support/wait-for.js';

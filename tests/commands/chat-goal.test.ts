@@ -55,3 +55,20 @@ describe('chat Goal command contract', () => {
     expect(buildGoalContinuationInput(state).prompt).not.toContain('用户说');
   });
 });
+
+it('parses explicit publication controls without allowing identity or source arguments', () => {
+  expect(parseGoalSlashCommand('/goal publication recover')).toEqual({ kind: 'publication', action: 'recover' });
+  expect(parseGoalSlashCommand('/goal publication continue')).toEqual({ kind: 'publication', action: 'continue' });
+  for (const text of ['publication', 'publication approve', 'publication recover other', 'publication continue --source agent']) {
+    expect(parseGoalSlashCommand(`/goal ${text}`)).toMatchObject({ kind: 'invalid' });
+  }
+});
+it('refuses constructing another model turn for a pending publication even at active status', () => {
+  const state = createGoalState({ sessionId: 's', objective: 'done', expectedEvidenceKinds: ['answer'], now: 1 });
+  state.pendingCompletionIntentId = 'original';
+  expect(() => buildGoalContinuationInput(state)).toThrow(/publication_pending/);
+});
+it('parses identity-free native lifecycle controls and rejects extra authority arguments',()=>{
+ for(const action of ['status','recover','continue','cancel'])expect(parseGoalSlashCommand(`/goal native ${action}`)).toEqual({kind:'native',action});
+ for(const text of ['native','native approve','native recover owner','native continue --source agent'])expect(parseGoalSlashCommand(`/goal ${text}`)).toMatchObject({kind:'invalid'});
+});

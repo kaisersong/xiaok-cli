@@ -1,9 +1,33 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createEmptySessionSkillEvalState, cloneSessionSkillEvalState, inferDeliverableFamily, } from './skill-eval.js';
 export class SessionSkillEvalStore {
     sessionStore;
-    constructor(sessionStore) {
+    scope = new AsyncLocalStorage();
+    tail = Promise.resolve();
+    mutationPort;
+    constructor(sessionStore, options) {
         this.sessionStore = sessionStore;
+        this.mutationPort = options?.withMutationLease;
     }
+    /** Fixed host composition. No lease or write token is exposed to hook callers. */
+    withMutation(sessionId, work) {
+        const inherited = this.scope.getStore();
+        if (inherited) {
+            this.assertMutationCurrent(sessionId);
+            return Promise.resolve().then(work);
+        }
+        const run = async (lease) => { lease?.assertCurrent(); const context = { sessionId, lease, active: true }; try {
+            return await this.scope.run(context, work);
+        }
+        finally {
+            context.active = false;
+        } };
+        const pending = this.tail.then(() => this.mutationPort ? this.mutationPort(sessionId, lease => run(lease)) : run());
+        this.tail = pending.then(() => { }, () => { });
+        return pending;
+    }
+    assertMutationCurrent(sessionId) { const scope = this.scope.getStore(); if (!scope?.active || scope.sessionId !== sessionId)
+        throw Error('skill_eval_mutation_scope'); scope.lease?.assertCurrent(); }
     async load(sessionId) {
         const snapshot = await this.sessionStore.load(sessionId);
         if (!snapshot) {
@@ -103,15 +127,23 @@ export class SessionSkillEvalStore {
         });
     }
     async mutate(sessionId, apply) {
-        const snapshot = await this.requireSnapshot(sessionId);
-        const current = snapshot.skillEval ? cloneSessionSkillEvalState(snapshot.skillEval) : createEmptySessionSkillEvalState(snapshot.updatedAt);
-        const next = apply(current);
-        await this.sessionStore.save({
-            ...snapshot,
-            updatedAt: next.updatedAt,
-            skillEval: cloneSessionSkillEvalState(next),
+        return this.withMutation(sessionId, async () => {
+            this.assertMutationCurrent(sessionId);
+            const snapshot = await this.requireSnapshot(sessionId);
+            this.assertMutationCurrent(sessionId);
+            const current = snapshot.skillEval ? cloneSessionSkillEvalState(snapshot.skillEval) : createEmptySessionSkillEvalState(snapshot.updatedAt), next = apply(current);
+            const nextSnapshot = { ...snapshot, updatedAt: Math.max(snapshot.updatedAt, next.updatedAt), skillEval: cloneSessionSkillEvalState(next) }, lease = this.scope.getStore().lease;
+            this.assertMutationCurrent(sessionId);
+            if (lease) {
+                if (!this.sessionStore.compareAndSave || snapshot.storeRevision === undefined || snapshot.historyDigest === undefined)
+                    throw Error('skill_eval_cas_required');
+                await this.sessionStore.compareAndSave({ nextSnapshot, expectedStoreRevision: snapshot.storeRevision, expectedHistoryDigest: snapshot.historyDigest, lease });
+            }
+            else
+                await this.sessionStore.save(nextSnapshot);
+            this.assertMutationCurrent(sessionId);
+            return next;
         });
-        return next;
     }
     async requireSnapshot(sessionId) {
         const snapshot = await this.sessionStore.load(sessionId);

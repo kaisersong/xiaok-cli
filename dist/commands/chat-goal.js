@@ -21,6 +21,16 @@ export function parseGoalSlashCommand(input) {
             ? { kind: 'resume', turnLimit }
             : { kind: 'invalid', message: '用法：/goal resume [newTurnLimit]' };
     }
+    if (rest === 'publication recover')
+        return { kind: 'publication', action: 'recover' };
+    if (rest === 'publication continue')
+        return { kind: 'publication', action: 'continue' };
+    if (/^publication(?:\s|$)/u.test(rest))
+        return { kind: 'invalid', message: '用法：/goal publication recover|continue' };
+    if (/^native (status|recover|continue|cancel)$/u.test(rest))
+        return { kind: 'native', action: rest.slice(7) };
+    if (/^native(?:\s|$)/u.test(rest))
+        return { kind: 'invalid', message: '用法：/goal native status|recover|continue|cancel' };
     if (rest === 'cancel')
         return { kind: 'cancel' };
     if (rest === 'replace')
@@ -78,6 +88,8 @@ export function formatGoalSummaryLine(goal) {
     return `Goal · ${goal.status} · ${goal.turnsUsed}/${goal.budgetLimits.turnLimit} turns`;
 }
 export function buildGoalContinuationInput(goal) {
+    if (goal.pendingCompletionIntentId)
+        throw Error('goal_publication_pending');
     return {
         systemTrigger: 'goal_continuation',
         prompt: [
@@ -94,5 +106,8 @@ export const GOAL_COMMAND_HELP = [
     '/goal pause',
     '/goal resume [newTurnLimit]',
     '/goal cancel',
+    '/goal publication recover',
+    '/goal publication continue',
     '/goal replace <objective>',
+    '/goal native status|recover|continue|cancel',
 ].join('\n');

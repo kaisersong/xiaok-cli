@@ -41,7 +41,7 @@ export async function activityFixture(cleanup: Cleanup) {
     pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService });
   cleanup.push(() => services.disposeMultiAgent());
   const boundary = services.multiAgent!; await boundary.ready;
-  await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' });
+  await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
   const service = boundary.service, internals = service as unknown as Internals, store = internals.options.store;
   const db = (store as unknown as { db: NativeDb }).db;
   cleanup.push(() => db.setAuthorizer(null));
@@ -112,8 +112,12 @@ export function serviceSite(method: string, statement: string, occurrence = 0): 
   const lines = readFileSync(new URL('../../electron/desktop-multi-agent-service.ts', import.meta.url), 'utf8').split('\n');
   const start = lines.findIndex(line => line.includes(method));
   if (start < 0) throw new Error(`missing fault site method ${method}`);
+  // A changed statement must fail to locate, rather than silently select a
+  // different method's SQL boundary further down the file.
+  const nextMethod = lines.slice(start + 1).findIndex(line => /^  (?:private |public |protected )?(?:async )?\w+(?:<[^>]+>)?\(/.test(line));
+  const end = nextMethod < 0 ? lines.length : start + nextMethod + 1;
   let seen = 0;
-  const offset = lines.slice(start).findIndex(line => line.includes(statement) && seen++ === occurrence);
+  const offset = lines.slice(start, end).findIndex(line => line.includes(statement) && seen++ === occurrence);
   if (offset < 0) throw new Error(`missing fault statement ${statement}`);
   return `desktop-multi-agent-service.ts:${start + offset + 1}:`;
 }

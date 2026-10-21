@@ -1,3 +1,5 @@
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
@@ -98,35 +100,49 @@ export class ClaudeAdapter {
         return this.clientPromise;
     }
     async *stream(messages, tools, systemPrompt, options) {
-        let attempt = 0;
-        while (true) {
-            options?.signal?.throwIfAborted();
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
-            const signal = options?.signal
-                ? AbortSignal.any([controller.signal, options.signal])
-                : controller.signal;
-            let emittedAny = false;
-            try {
-                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
-                    emittedAny = true;
-                    yield chunk;
+        const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+        if (disclosure !== undefined) {
+            assertProviderDisclosureActive(disclosure);
+            const disclosureSignal = getProviderDisclosureSignal(disclosure);
+            options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
+        }
+        try {
+            let attempt = 0;
+            while (true) {
+                options?.signal?.throwIfAborted();
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+                const signal = options?.signal
+                    ? AbortSignal.any([controller.signal, options.signal])
+                    : controller.signal;
+                let emittedAny = false;
+                try {
+                    for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
+                        emittedAny = true;
+                        yield chunk;
+                    }
+                    return;
                 }
-                return;
-            }
-            catch (error) {
-                clearTimeout(timer);
-                // 一旦本次尝试已产出 chunk（消费端已实时落地/上屏），重试会重复输出，必须放弃重试
-                if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
-                    throw error;
+                catch (error) {
+                    if (disclosure !== undefined)
+                        assertProviderDisclosureActive(disclosure);
+                    clearTimeout(timer);
+                    // 一旦本次尝试已产出 chunk（消费端已实时落地/上屏），重试会重复输出，必须放弃重试
+                    if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
+                        throw error;
+                    }
+                    const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+                    await sleep(delayMs, options?.signal);
+                    attempt += 1;
                 }
-                const delayMs = Math.min(1000 * 2 ** attempt, 16000);
-                await sleep(delayMs, options?.signal);
-                attempt += 1;
+                finally {
+                    clearTimeout(timer);
+                }
             }
-            finally {
-                clearTimeout(timer);
-            }
+        }
+        finally {
+            if (disclosure !== undefined)
+                disposeProviderDisclosureContext(disclosure);
         }
     }
     async *streamOnce(messages, tools, systemPrompt, options, signal) {
@@ -183,7 +199,10 @@ export class ClaudeAdapter {
             input_schema: t.inputSchema,
             cache_control: t.cache_control,
         }));
-        const client = await this.getClient();
+        const sharedClient = await this.getClient();
+        const client = options?.providerDisclosure
+            ? sharedClient.withOptions({ fetch: createProviderDisclosureFetch(options.providerDisclosure, globalThis.fetch.bind(globalThis)) })
+            : sharedClient;
         const stream = client.messages.stream({
             model: this.model,
             max_tokens: options?.maxOutputTokens ?? CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,

@@ -77,6 +77,7 @@ describe('Agent', () => {
   it('returns text response without tool calls', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => mockStream([
         { type: 'text', delta: 'Hello ' },
         { type: 'text', delta: 'world' },
@@ -120,6 +121,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     let callCount = 0;
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => {
         callCount++;
         if (callCount === 1) {
@@ -144,6 +146,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     let callCount = 0;
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => {
         callCount++;
         if (callCount === 1) {
@@ -167,6 +170,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     let streamCalls = 0;
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => {
         streamCalls += 1;
         if (streamCalls > 3) {
@@ -192,6 +196,7 @@ describe('Agent', () => {
   it('aborts when signal is cancelled before execution', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => mockStream([{ type: 'text', delta: 'ignored' }, { type: 'done' }]),
     };
     const registry = createRegistryMock();
@@ -208,6 +213,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const controller = new AbortController();
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: async function* () {
         yield { type: 'text', delta: 'partial answer' };
         controller.abort();
@@ -241,6 +247,7 @@ describe('Agent', () => {
   it('forwards usage chunks while streaming', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => mockStream([
         { type: 'text', delta: 'hello' },
         { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } },
@@ -263,6 +270,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const seenMessages: Message[][] = [];
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: (messages, _tools, systemPrompt) => {
         seenMessages.push(messages.map((message) => ({
           role: message.role,
@@ -299,6 +307,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const events: unknown[] = [];
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]),
     };
     const registry = createRegistryMock();
@@ -328,6 +337,7 @@ describe('Agent', () => {
     let streamCalls = 0;
     const events: string[] = [];
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => {
         streamCalls += 1;
         if (streamCalls === 1) {
@@ -359,6 +369,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const events: unknown[] = [];
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: () => {
         throw new Error('tool_failed');
       },
@@ -389,6 +400,7 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const prompts: string[] = [];
     const adapter: ModelAdapter = {
+      getModelName: () => '',
       stream: (_messages, _tools, systemPrompt) => {
         prompts.push(systemPrompt);
         return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
@@ -454,6 +466,7 @@ describe('declined tool calls are reported as failures', () => {
   ): ModelAdapter {
     let streamCalls = 0;
     return {
+      getModelName: () => '',
       stream: (messages) => {
         seenMessages.push(messages.map((message) => ({
           role: message.role,

@@ -1,9 +1,9 @@
-import type { Config, LegacyConfig } from '../../src/types.js';
+import type { ConfigInput } from '../../src/types.js';
 import type { ModelReasoningEffort } from '../../src/ai/providers/types.js';
 
 interface OldModelConfigCase {
   name: string;
-  config: Config | LegacyConfig;
+  config: ConfigInput;
   wireModel: string;
   effort?: ModelReasoningEffort;
   contextLimit?: number;

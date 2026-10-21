@@ -2,7 +2,17 @@ import type { RuntimeTurnRequest } from '../../ai/runtime/runtime-facade.js';
 import type { MessageBlock, StreamChunk } from '../../types.js';
 import type { RuntimeEvent } from '../events.js';
 import type { RuntimeHooks } from '../hooks.js';
-import type { TaskRunner, TaskRunnerInput } from './task-runtime-host.js';
+import type { TaskRunnerInput } from './task-runtime-host.js';
+
+// This adapter forwards events; it does not consume the host history or usage port.
+export interface LegacyRuntimeFacadeTaskRunnerInput extends Omit<TaskRunnerInput, 'history' | 'emitUsage' | 'emitRuntimeEvent'> {
+  history?: undefined;
+  emitUsage?: undefined;
+  emitRuntimeEvent(event: RuntimeEvent): void | Promise<void>;
+}
+
+export type RuntimeFacadeTaskRunnerInput = TaskRunnerInput | LegacyRuntimeFacadeTaskRunnerInput;
+export type RuntimeFacadeTaskRunner = (input: RuntimeFacadeTaskRunnerInput) => Promise<void>;
 
 interface RuntimeFacadeLike {
   runTurn(
@@ -22,8 +32,8 @@ interface CreateRuntimeFacadeTaskRunnerOptions {
 
 const MAX_QUEUED_ASSISTANT_DELTA_CHARS = 16 * 1024;
 
-export function createRuntimeFacadeTaskRunner(options: CreateRuntimeFacadeTaskRunnerOptions): TaskRunner {
-  return async (input: TaskRunnerInput): Promise<void> => {
+export function createRuntimeFacadeTaskRunner(options: CreateRuntimeFacadeTaskRunnerOptions): RuntimeFacadeTaskRunner {
+  return async (input: RuntimeFacadeTaskRunnerInput): Promise<void> => {
     const queuedEvents: RuntimeEvent[] = [];
     let drainPromise: Promise<void> | null = null;
     let eventWriteError: unknown;
@@ -94,7 +104,7 @@ function canMergeAssistantDeltas(
     && previous.delta.length + next.delta.length <= MAX_QUEUED_ASSISTANT_DELTA_CHARS;
 }
 
-function buildTaskRunnerInput(input: TaskRunnerInput): MessageBlock[] {
+function buildTaskRunnerInput(input: RuntimeFacadeTaskRunnerInput): MessageBlock[] {
   return [{
     type: 'text',
     text: [

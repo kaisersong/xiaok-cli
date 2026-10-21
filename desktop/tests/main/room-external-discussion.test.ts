@@ -24,7 +24,7 @@ describe.skipIf(process.platform === 'win32')('owned external Room discussion ad
   it('runs the real dedicated xiaok CLI with zero tools, no previous context and a durable input gate',async()=>{
     const root=await mkdtemp(join(tmpdir(),'room-external-cli-'));roots.push(root);const configRoot=join(root,'config');await mkdir(configRoot);
     const requests:any[]=[];
-    const server=createServer(async(req,res)=>{let raw='';for await(const data of req)raw+=data;requests.push(JSON.parse(raw));res.writeHead(200,{'content-type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:{content:'external real reply'},finish_reason:null}]})+'\n\ndata: [DONE]\n\n');});
+    const server=createServer(async(req,res)=>{let raw='';for await(const data of req)raw+=data;requests.push(JSON.parse(raw));res.writeHead(200,{'content-type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:{content:'external real reply'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');});
     await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));
     const address=server.address() as {port:number};
     await writeFile(join(configRoot,'config.json'),JSON.stringify({schemaVersion:2,defaultProvider:'fixture',defaultModelId:'fixture',providers:{fixture:{type:'custom',protocol:'openai_legacy',baseUrl:`http://127.0.0.1:${address.port}/v1`,apiKey:'fixture'}},models:{fixture:{provider:'fixture',model:'fixture',label:'fixture'}},defaultMode:'interactive',channels:{}}));

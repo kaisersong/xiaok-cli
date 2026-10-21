@@ -41,7 +41,7 @@ async function fixture(enabled = true) {
 }
 describe('historical launch workspace admission', () => {
   it('continues an owned historical thread in its original cwd and replays its subscription without changing its binding', async () => {
-    const f = await fixture(); await f.services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.5', apiKey: 'fixture-no-network' }); const before = f.store.getThread(f.binding.threadId)!;
+    const f = await fixture(); await f.services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.5', apiKey: 'fixture-no-network' }, undefined, 'user'); const before = f.store.getThread(f.binding.threadId)!;
     const output = join(f.binding.cwd, 'historical-proof.md'); let round = 0;
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       if (++round === 1) { yield { type: 'tool_use', id: 'write-proof', name: 'write', input: { file_path: output, content: 'historical workspace' } }; }

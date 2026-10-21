@@ -35,7 +35,7 @@ describe('FileTaskSnapshotStore', () => {
 
   it('checks terminal thread history without depending on the active index or loading every task into the runtime cache', async () => {
     const store = new FileTaskSnapshotStore(rootDir);
-    await store.save({ ...createSnapshot('task_history', 'completed'), context: { threadId: 'legacy-thread', taskIds: [] } });
+    await store.save({ ...createSnapshot('task_history', 'completed'), context: { threadId: 'legacy-thread', taskIds: [], loadedTaskIds: [], skipped: [] } });
     const reloaded = new FileTaskSnapshotStore(rootDir);
     expect(await reloaded.getActiveTasks()).toEqual([]);
     expect(await reloaded.hasThreadHistory('legacy-thread')).toBe(true);
@@ -344,7 +344,9 @@ describe('FileTaskSnapshotStore', () => {
     expect(checkpoint.events).toHaveLength(512);
     expect(journal).toHaveLength(88);
     await expect(new FileTaskSnapshotStore(rootDir).recoverTask('task_long_running')).resolves.toEqual(snapshot);
-  });
+  // 600 real writes include source registry fsync and fixed OS ACL checks.
+  // This is checkpoint correctness coverage; real timings are retained separately.
+  }, 30_000);
 
   it('upgrades a legacy checkpoint before journaling and fails closed after an old writer removes the seal', async () => {
     const initial = createSnapshot('task_legacy_upgrade', 'running');

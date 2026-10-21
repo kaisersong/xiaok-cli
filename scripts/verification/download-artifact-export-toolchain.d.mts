@@ -1,0 +1,1 @@
+export function downloadArtifactExportToolchain(input:{entry:{filename:string;size:number;sha256:string};destination:string;signal?:AbortSignal;fetchImpl?:typeof fetch;timeoutMs?:number}):Promise<string>;

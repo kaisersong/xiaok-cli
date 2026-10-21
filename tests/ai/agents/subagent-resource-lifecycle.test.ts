@@ -45,7 +45,7 @@ describe('production subagent resource lifecycle', () => {
 
   it('disposes the real one-shot session when the provider run fails', async () => {
     const { options, manager, registry, path } = fixture();
-    options.adapter = () => ({ async *stream() { throw new Error('provider run failed'); } });
+    options.adapter = () => ({ getModelName: () => '', async *stream() { throw new Error('provider run failed'); } });
     await expect(executeNamedSubAgent({ ...options, prompt: 'fail in run' })).rejects.toThrow('provider run failed');
     expect(options.releaseRegistry).toHaveBeenCalledExactlyOnceWith(registry);
     expect(registry.getToolDefinitions()).toEqual([]);
@@ -56,7 +56,7 @@ describe('production subagent resource lifecycle', () => {
     const { options, manager, registry } = fixture();
     const controller = new AbortController();
     let actualSignal: AbortSignal | undefined;
-    options.adapter = () => ({ async *stream(_messages, _tools, _prompt, streamOptions) {
+    options.adapter = () => ({ getModelName: () => '', async *stream(_messages, _tools, _prompt, streamOptions) {
       actualSignal = streamOptions?.signal;
       await new Promise<void>((_resolve, reject) => actualSignal?.addEventListener('abort', () => reject(actualSignal?.reason), { once: true }));
     } });
@@ -129,13 +129,14 @@ describe('production subagent resource lifecycle', () => {
   });
 
   it('isolates a cancelled model reader and never executes its late tool request', async () => {
-    const {options, registry, manager} = fixture();
+    const {options, registry, manager, path} = fixture();
     let finish!: () => void;
     let started = false;
+    let released = false;
     const gate = new Promise<void>(resolve => {finish = resolve;});
     const execute = vi.fn(async () => 'unexpected');
     registry.registerTool({permission:'safe',definition:{name:'late_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},execute});
-    options.adapter = () => ({async *stream() {
+    options.adapter = () => ({getModelName: () => '', async *stream() {
       started = true; await gate;
       yield {type:'tool_use' as const,id:'late',name:'late_tool',input:{}};
       yield {type:'done' as const};
@@ -145,18 +146,23 @@ describe('production subagent resource lifecycle', () => {
     try {
       const child = await coordinator.spawn({...caller,taskName:'late',message:'run',createSession:() => createNamedSubAgentSession(options)});
       await vi.waitFor(() => expect(started).toBe(true));
-      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({resourcesReleased:true});
-      finish();
-      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({closed:true,resourcesReleased:false,cleanupPending:true});
+      expect(manager.release).not.toHaveBeenCalled();
+      const pending = coordinator.listAgents(caller).find(agent => agent.id === child.id);
+      expect(pending).toMatchObject({status:'closed',executionActive:false,resourcesReleased:false,runtimeResident:true});
+      expect(pending?.cleanupError).toBeUndefined();
+      released = true; finish();
+      await vi.waitFor(() => expect(manager.release).toHaveBeenCalledWith(path));
+      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({closed:true,resourcesReleased:true,cleanupPending:false});
       expect(execute).not.toHaveBeenCalled();
       expect(manager.release).toHaveBeenCalledOnce();
-    } finally {finish(); await coordinator.dispose();}
+    } finally {if (!released) {released = true; finish();} await coordinator.dispose();}
   });
 
   it('publishes actual stalled tool health while retaining the SubAgent execution owner',async()=>{
     const {options,registry}=fixture();let finish!:(s:string)=>void;
     registry.registerTool({permission:'safe',definition:{name:'stalled',description:'test',inputSchema:{}},executionPolicy:{idleTimeoutMs:50},execute:async()=>new Promise(resolve=>{finish=resolve;})});
-    options.adapter=()=>({async *stream(){yield {type:'tool_use' as const,id:'held',name:'stalled',input:{}};yield {type:'done' as const};}});
+    options.adapter=()=>({getModelName: () => '', async *stream(){yield {type:'tool_use' as const,id:'held',name:'stalled',input:{}};yield {type:'done' as const};}});
     const caller={requestSource:'agent' as const,callerId:'main'};const coordinator=createMultiAgentCoordinator();
     try {
       const child=await coordinator.spawn({...caller,taskName:'health',message:'work',createSession:()=>createNamedSubAgentSession(options)});

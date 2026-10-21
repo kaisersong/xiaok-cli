@@ -74,7 +74,7 @@ describe('D4: production snapshot read can abandon continuation without clearing
     await entered.promise; controller.abort(reason); await flush();
     try {
       expect.soft(settled).toBe(true); expect.soft(pending.raw).toContain(heldRaw);
-      expect.soft(pending.settled()).toBe(stage === 'checkpoint' ? 0 : 1);
+      expect.soft(pending.settled()).toBe(stage === 'checkpoint' ? 1 : 2);
       for (const args of vi.mocked(fs.readFile).mock.calls) expect(args[1]).toBe('utf8'); // no raw IO AbortSignal
     } finally { held.resolve(); await outcome; await Promise.allSettled(pending.raw); }
     expect(await outcome).toEqual({ error: reason });
@@ -91,7 +91,7 @@ describe('D4: production snapshot read can abandon continuation without clearing
     const outcome = recover(f.reader, pending.options).then(value => ({ value }), error => ({ error }));
     await entered.promise; controller.abort(reason); held.resolve();
     expect(await outcome).toEqual({ error: reason }); await Promise.allSettled(pending.raw);
-    expect(pending.raw).toHaveLength(1); expect(pending.settled()).toBe(1);
+    expect(pending.raw).toHaveLength(2); expect(pending.settled()).toBe(2);
   });
 
   it('waiting for a real in-flight write abandons only this reader, not the writer queue or its late successful bytes', async () => {
@@ -101,8 +101,10 @@ describe('D4: production snapshot read can abandon continuation without clearing
     let writeSettled = false; const write = f.writer.save(next, f.latest).finally(() => { writeSettled = true; }); await entered.promise;
     const controller = new AbortController(); const reason = new Error('stop waiting for write'); const pending = track(controller.signal);
     let readSettled = false; const read = recover(f.writer, pending.options).then(value => ({ value }), error => ({ error })).finally(() => { readSettled = true; });
+    const originalQueue = (f.writer as unknown as { taskWriteQueues: Map<string, Promise<void>> }).taskWriteQueues.get('snapshot-fixture')!;
+    await vi.waitFor(() => expect(pending.raw).toContain(originalQueue));
     controller.abort(reason); await flush();
-    try { expect.soft(readSettled).toBe(true); expect.soft(writeSettled).toBe(false); expect.soft(pending.raw).toHaveLength(1); expect.soft(pending.settled()).toBe(0); }
+    try { expect.soft(readSettled).toBe(true); expect.soft(writeSettled).toBe(false); expect.soft(pending.raw).toHaveLength(2); expect.soft(pending.settled()).toBe(1); }
     finally { held.resolve(); await write; await read; await Promise.allSettled(pending.raw); }
     expect(await read).toEqual({ error: reason }); expect(writeSettled).toBe(true);
     expect(await new FileTaskSnapshotStore(f.root).recoverTask('snapshot-fixture')).toEqual(next);
@@ -112,7 +114,8 @@ describe('D4: production snapshot read can abandon continuation without clearing
     const f = await fixture(); const controller = new AbortController(); const add = vi.spyOn(controller.signal, 'addEventListener');
     const remove = vi.spyOn(controller.signal, 'removeEventListener'); const pending = track(controller.signal);
     expect(await recover(f.reader, pending.options)).toEqual(f.latest); await Promise.all(pending.raw);
-    expect(pending.raw).toHaveLength(2); expect(pending.settled()).toBe(2);
+    expect(pending.raw).toHaveLength(5); expect(pending.settled()).toBe(5);
+    expect(new Set(pending.raw).size).toBe(5);
     expect(add.mock.calls.length).toBeGreaterThan(0); expect(remove.mock.calls.length).toBe(add.mock.calls.length);
     controller.abort(new Error('after completion')); vi.mocked(fs.readFile).mockClear();
     expect(await f.reader.recoverTask('snapshot-fixture')).toEqual(f.latest); expect(fs.readFile).not.toHaveBeenCalled();

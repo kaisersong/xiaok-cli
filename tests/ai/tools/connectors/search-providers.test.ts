@@ -5,7 +5,7 @@ import { SearchProviderError } from '../../../../src/ai/tools/connectors/search/
 
 describe('tavily search provider', () => {
   it('parses tavily JSON results into SearchHit shape', async () => {
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({
       results: [
         { title: 'Hello', url: 'https://example.com/a', content: 'snippet a', score: 0.9 },
         { title: 'World', url: 'https://example.com/b', content: 'snippet b', published_date: '2026-05-01' },
@@ -49,7 +49,7 @@ describe('tavily search provider', () => {
 
 describe('brave search provider', () => {
   it('reads results from web.results', async () => {
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({
       web: {
         results: [
           { title: 'Brave hit', url: 'https://example.com/x', description: 'desc', page_age: '2026-04-01' },
@@ -76,7 +76,7 @@ describe('brave search provider', () => {
   });
 
   it('caps count at 10', async () => {
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ web: { results: [] } }), { status: 200 }));
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ web: { results: [] } }), { status: 200 }));
     const provider = createBraveSearchProvider({ apiKey: 'brave-x', fetchFn });
     await provider.search({ query: 'q', count: 50 });
     const callUrl = String(fetchFn.mock.calls[0][0]);

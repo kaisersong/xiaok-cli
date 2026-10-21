@@ -20,6 +20,7 @@ const desktop = createPreloadApi({
 // Unrelated multi-agent/settings capabilities are absent, not stubbed allowed.
 contextBridge.exposeInMainWorld('xiaokDesktop', {
   getGoal: desktop.getGoal, createGoal: desktop.createGoal,
+  getObservationTaskStatus: desktop.getObservationTaskStatus,
   onGoalChanged: desktop.onGoalChanged, onGoalTaskPrepared: desktop.onGoalTaskPrepared,
   ackGoalTaskAttached: desktop.ackGoalTaskAttached, setGoalUserQueuePending: desktop.setGoalUserQueuePending,
   subscribeTask: desktop.subscribeTask, recoverTask: desktop.recoverTask, cancelTask: desktop.cancelTask,

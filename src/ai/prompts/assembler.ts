@@ -10,6 +10,7 @@ import type { LoadedContext } from '../runtime/context-loader.js';
 import type { MemoryRecord } from '../memory/store.js';
 import type { HarnessMemoryRecord } from '../../runtime/harness-memory/types.js';
 import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
+import { promptAutoContextBudget } from '../runtime/context-budget.js';
 import { formatSkillsContext } from '../skills/loader.js';
 import { getCliDelegationSection, type CliDelegationOptions } from './sections/cli-delegation.js';
 import {
@@ -68,6 +69,15 @@ export interface AssembledPrompt {
   segments: PromptSegment[];
 }
 
+// The observed legacy shape omits all three context fields together.
+export interface LegacyAssemblerInput extends Omit<AssemblerOptions, 'enterpriseId' | 'devApp' | 'budget'> {
+  enterpriseId?: undefined;
+  devApp?: undefined;
+  budget?: undefined;
+}
+
+export type AssemblerInput = AssemblerOptions | LegacyAssemblerInput;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -82,7 +92,7 @@ function truncateToTokens(text: string, maxTokens: number): string {
   return text.slice(0, maxChars) + '\n...(truncated)';
 }
 
-function shouldInjectYzjContext(opts: AssemblerOptions): boolean {
+function shouldInjectYzjContext(opts: AssemblerInput): boolean {
   if (opts.channel === 'yzj') {
     return true;
   }
@@ -109,7 +119,7 @@ function shouldInjectYzjContext(opts: AssemblerOptions): boolean {
  * sections (per-turn). Mirrors Claude Code's 7-layer static prefix +
  * dynamic suffix architecture.
  */
-export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<AssembledPrompt> {
+export async function assembleSystemPrompt(opts: AssemblerInput): Promise<AssembledPrompt> {
   // -----------------------------------------------------------------------
   // STATIC PREFIX — stable across turns, cache-friendly
   // -----------------------------------------------------------------------
@@ -206,13 +216,14 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
   // 9. Auto context (CLAUDE.md, AGENTS.md, git)
   const autoContext = opts.autoContext ?? await loadAutoContext({
     cwd: opts.cwd,
-    maxChars: Math.max(1_200, opts.budget * 2),
+    ...promptAutoContextBudget(() => opts.budget),
   });
   const autoContextSection = formatLoadedContext(autoContext);
 
   // 10. Yunzhijia API overview (budget-managed)
   const base = [...segments.map((segment) => segment.text), ...dynamicSections].join('\n\n');
-  let remaining = opts.budget - estimateTokens(base);
+  const budget = opts.budget;
+  let remaining = budget === undefined ? undefined : budget - estimateTokens(base);
 
   let apiOverview = '';
   if (existsSync(API_OVERVIEW_PATH)) {
@@ -221,7 +232,7 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
 
   const includeYzjContext = shouldInjectYzjContext(opts);
 
-  if (includeYzjContext && apiOverview && remaining > 50) {
+  if (includeYzjContext && apiOverview && remaining !== undefined && remaining > 50) {
     const truncated = truncateToTokens(apiOverview, remaining);
     dynamicSections.push(truncated);
     remaining -= estimateTokens(truncated);

@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
@@ -133,13 +134,11 @@ describe('MaterialRegistry', () => {
     });
     expect(record.extractedTextPath).toBeUndefined();
 
-    const extractedTextPath = join(workspaceRoot, 'task_docx', 'materials', `${record.materialId}.txt`);
-    writeFileSync(extractedTextPath, '这是一份董事会评审报告。');
+    const extractedTextPath = join(record.workspacePath, '..', `${record.materialId}.extracted.txt`);
     const updated = await registry.updateMaterialExtraction(record.materialId, {
-      extractedTextPath,
       parseStatus: 'parsed',
       parseSummary: '已解析 Word 文档，提取 12 字符',
-    });
+    }, '这是一份董事会评审报告。');
     expect(updated).toMatchObject({
       materialId: record.materialId,
       parseStatus: 'parsed',
@@ -308,4 +307,76 @@ function escapeXml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+// New ordinary data-size coverage only; no model, SDK or protected writer qualification.
+describe('MaterialRegistry ordinary actual-byte scale', () => {
+  it('imports and reopens an actual 50MiB material and rejects the next byte without changing its index', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'material-actual-50m-'));
+    const sourcePath = join(root, 'source.md'), workspaceRoot = join(root, 'workspace');
+    const maximum = 50 * 1024 ** 2;
+    const registries: MaterialRegistry[] = [];
+    const errors: unknown[] = [];
+    try {
+      materialScaleWrite(sourcePath, maximum);
+      const expected = await materialScaleDigest(sourcePath);
+      expect(expected.bytes).toBe(maximum);
+      const registry = new MaterialRegistry({ workspaceRoot, maxBytes: maximum });
+      registries.push(registry);
+      const record = await registry.importMaterial({ taskId: 'scale-material', sourcePath, role: 'customer_material', roleSource: 'user' });
+      expect(record.sizeBytes).toBe(maximum);
+      expect(record.sha256).toBe(expected.sha256);
+      expect(await materialScaleDigest(record.workspacePath)).toEqual(expected);
+      await registry.sealAndDrainInstanceMutations();
+      const reloaded = new MaterialRegistry({ workspaceRoot, maxBytes: maximum });
+      registries.push(reloaded);
+      expect(reloaded.get(record.materialId)).toEqual(record);
+      expect(reloaded.list('scale-material')).toEqual([record]);
+      expect(reloaded.toView(record)).toEqual({ materialId: record.materialId, originalName: 'source.md', role: 'customer_material', parseStatus: 'pending', parseSummary: undefined });
+      expect(await materialScaleDigest(record.workspacePath)).toEqual(expected);
+      const indexPath = join(workspaceRoot, 'materials-index.json');
+      const before = readFileSync(indexPath, 'utf8');
+      expect(JSON.parse(before).records).toEqual([record]);
+      const directoryBefore = readdirSync(join(workspaceRoot, 'scale-material', 'materials')).sort();
+      appendFileSync(sourcePath, 'x');
+      expect(statSync(sourcePath).size).toBe(maximum + 1);
+      await expect(reloaded.importMaterial({ taskId: 'scale-material', sourcePath, role: 'customer_material', roleSource: 'user' }))
+        .rejects.toThrow(`oversized material: ${maximum + 1} bytes`);
+      expect(readFileSync(indexPath, 'utf8')).toBe(before);
+      expect(readdirSync(join(workspaceRoot, 'scale-material', 'materials')).sort()).toEqual(directoryBefore);
+      expect(reloaded.list('scale-material')).toEqual([record]);
+    } catch (error) { errors.push(error); }
+    const closeErrors: unknown[] = [];
+    for (const registry of registries) {
+      try { await registry.sealAndDrainInstanceMutations(); } catch (error) { closeErrors.push(error); }
+    }
+    errors.push(...closeErrors);
+    if (closeErrors.length === 0) {
+      try { rmSync(root, { recursive: true }); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, `material_scale_failed; ownedRoot=${root}`, { cause: errors[0] });
+  }, 120_000);
+});
+
+// Write every byte; no truncate/fallocate/sparse stand-in. Test-owned source only.
+function materialScaleWrite(path: string, bytes: number): void {
+  const fd = openSync(path, 'wx'), block = Buffer.alloc(1024 ** 2, 0x61);
+  try {
+    let remaining = bytes;
+    while (remaining > 0) {
+      const count = writeSync(fd, block, 0, Math.min(block.length, remaining));
+      if (count <= 0) throw Error('material_scale_short_write');
+      remaining -= count;
+    }
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+}
+async function materialScaleDigest(path: string): Promise<{ bytes: number; sha256: string }> {
+  const hash = createHash('sha256'); let bytes = 0;
+  for await (const block of createReadStream(path, { highWaterMark: 1024 ** 2 })) {
+    if (!Buffer.isBuffer(block)) throw Error('material_scale_stream_type');
+    bytes += block.length; hash.update(block);
+  }
+  expect(statSync(path).size).toBe(bytes);
+  return { bytes, sha256: hash.digest('hex') };
 }

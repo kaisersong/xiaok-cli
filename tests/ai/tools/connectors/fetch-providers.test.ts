@@ -4,7 +4,7 @@ import { FetchProviderError } from '../../../../src/ai/tools/connectors/fetch/ty
 
 describe('jina fetch provider', () => {
   it('returns markdown content with no api key', async () => {
-    const fetchFn = vi.fn(async () => new Response('# Hello\nworld', {
+    const fetchFn = vi.fn<typeof fetch>(async () => new Response('# Hello\nworld', {
       status: 200,
       headers: { 'content-type': 'text/markdown' },
     }));
@@ -20,7 +20,7 @@ describe('jina fetch provider', () => {
   });
 
   it('attaches Bearer when api key is provided', async () => {
-    const fetchFn = vi.fn(async () => new Response('content', { status: 200 }));
+    const fetchFn = vi.fn<typeof fetch>(async () => new Response('content', { status: 200 }));
     const provider = createJinaFetchProvider({ apiKey: 'jina-key', fetchFn });
     await provider.fetch({ url: 'https://example.com/', maxChars: 1000 });
     const init = fetchFn.mock.calls[0][1] as RequestInit | undefined;

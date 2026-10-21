@@ -1,7 +1,14 @@
+import {hasProtectedIntentProducerHistory} from './intent-commit-boundary.js';
+import {readInstalledCurrentOwner} from '../verification/installed-owner-state.js';
 import type { RuntimeHooks } from '../hooks.js';
 import type { IntentBreadcrumb, IntentLedgerRecord, SessionIntentLedger } from './types.js';
 import { cloneSessionIntentLedger } from './types.js';
 import { SessionIntentDelegationStore } from './store.js';
+import { checkIntentEvent } from './runtime-event-data.js';
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/stored-snapshot-types.js';
+
+type RawIntentLedgerData = NonNullable<StoredSessionSnapshot['intentDelegation']>;
+type RawIntentRecordData = RawIntentLedgerData['intents'][number];
 
 export interface IntentRuntimeSyncOptions {
   hooks: RuntimeHooks;
@@ -13,24 +20,34 @@ interface SyncEntry {
   turnId: string;
   toolName: IntentSyncToolName;
   toolInput: Record<string, unknown>;
-  before: SessionIntentLedger | null | undefined;
+  before: RawIntentLedgerData | null | undefined;
 }
 
 type IntentSyncToolName = 'intent_create' | 'intent_step_update' | 'intent_stage_artifact' | 'intent_salvage';
 
-const TERMINAL_INTENT_STATUSES = new Set<IntentLedgerRecord['overallStatus']>(['completed', 'failed', 'cancelled']);
+const TERMINAL_INTENT_STATUSES = new Set<unknown>(['completed', 'failed', 'cancelled']);
 
-export function wireIntentDelegationToRuntimeSync(options: IntentRuntimeSyncOptions): () => void {
-  let latestLedger: SessionIntentLedger | null | undefined;
-  void options.ledgerStore.load(options.sessionId).then((ledger) => {
-    latestLedger = ledger;
-  });
+export function wireIntentDelegationToRuntimeSync(options: IntentRuntimeSyncOptions): () => Promise<void> {
+  let latestLedger: RawIntentLedgerData | null | undefined;
+  let open = true, stopping: Promise<void> | undefined;
+  const active = new Set<Promise<unknown>>(), errors: unknown[] = [];
+  const track = (work: () => Promise<unknown>): void => {
+    if (!open) return;
+    // Register before invoking a leaf that may synchronously reenter through hooks.
+    const pending = Promise.resolve().then(work);
+    active.add(pending);
+    void pending.then(() => active.delete(pending), error => {
+      errors.push(error);
+      active.delete(pending);
+    });
+  };
+  track(async () => { latestLedger = await options.ledgerStore.load(options.sessionId); });
 
   const syncState = new Map<string, SyncEntry[]>();
 
   const unsubscribers = [
     options.hooks.on('tool_started', (event) => {
-      if (event.sessionId !== options.sessionId) {
+      if (!open || event.sessionId !== options.sessionId) {
         return;
       }
 
@@ -49,56 +66,67 @@ export function wireIntentDelegationToRuntimeSync(options: IntentRuntimeSyncOpti
       syncState.set(key, queue);
     }),
     options.hooks.on('tool_finished', (event) => {
-      if (event.sessionId !== options.sessionId) {
+      if (!open || event.sessionId !== options.sessionId) {
         return;
       }
 
       if (isIntentSyncTool(event.toolName)) {
-        void processIntentToolFinished(options, syncState, event.turnId, event.toolName, event.ok, {
+        const { turnId, toolName, ok } = event;
+        track(() => processIntentToolFinished(options, syncState, turnId, toolName, ok, {
           getLatestLedger: () => latestLedger,
           setLatestLedger: (ledger) => {
             latestLedger = ledger;
           },
-        });
+        }));
         return;
       }
 
       if (!event.ok) {
-        void patchActiveIntent(options, {
-          blockedReason: `tool ${event.toolName} returned an error`,
+        const blockedReason = `tool ${event.toolName} returned an error`;
+        track(() => patchActiveIntent(options, {
+          blockedReason,
         }, (ledger) => {
           latestLedger = ledger;
-        });
+        }));
       }
     }),
     options.hooks.on('turn_failed', (event) => {
-      if (event.sessionId !== options.sessionId) {
+      if (!open || event.sessionId !== options.sessionId) {
         return;
       }
-      void patchActiveIntent(options, {
+      const blockedReason = event.error.message;
+      track(() => patchActiveIntent(options, {
         overallStatus: 'failed',
-        blockedReason: event.error.message,
+        blockedReason,
       }, (ledger) => {
         latestLedger = ledger;
-      });
+      }));
     }),
     options.hooks.on('turn_aborted', (event) => {
-      if (event.sessionId !== options.sessionId) {
+      if (!open || event.sessionId !== options.sessionId) {
         return;
       }
-      void patchActiveIntent(options, {
+      track(() => patchActiveIntent(options, {
         overallStatus: 'cancelled',
       }, (ledger) => {
         latestLedger = ledger;
-      });
+      }));
     }),
   ];
 
   return () => {
-    for (const unsubscribe of unsubscribers) {
-      unsubscribe();
-    }
-    syncState.clear();
+    if (stopping) return stopping;
+    open = false;
+    // Publish before unsubscribe/cleanup so a reentrant stop joins this attempt.
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    stopping = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    void Promise.allSettled([...active]).then(() => {
+      syncState.clear();
+      if (errors.length) reject(new AggregateError(errors, 'intent_runtime_sync_drain_failed'));
+      else resolve();
+    });
+    return stopping;
   };
 }
 
@@ -109,8 +137,8 @@ async function processIntentToolFinished(
   toolName: IntentSyncToolName,
   ok: boolean,
   state: {
-    getLatestLedger(): SessionIntentLedger | null | undefined;
-    setLatestLedger(ledger: SessionIntentLedger | null): void;
+    getLatestLedger(): RawIntentLedgerData | null | undefined;
+    setLatestLedger(ledger: RawIntentLedgerData | null): void;
   },
 ): Promise<void> {
   const key = buildSyncKey(turnId, toolName);
@@ -154,7 +182,7 @@ function emitIntentCreated(
   hooks: RuntimeHooks,
   sessionId: string,
   entry: SyncEntry,
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
 ): void {
   const beforeIntentIds = new Set(entry.before?.intents.map((intent) => intent.intentId) ?? []);
   const created = after.intents.find((intent) => !beforeIntentIds.has(intent.intentId))
@@ -163,7 +191,7 @@ function emitIntentCreated(
     return;
   }
 
-  hooks.emit({
+  hooks.emit(checkIntentEvent({
     type: 'intent_created',
     sessionId,
     turnId: entry.turnId,
@@ -171,11 +199,11 @@ function emitIntentCreated(
     templateId: created.templateId,
     deliverable: created.deliverable,
     riskTier: created.riskTier,
-  });
+  }));
 
-  const initialStage = created.stages.find((stage) => stage.stageId === created.activeStageId) ?? created.stages[0];
+  const initialStage = stageRows(created.stages).find((stage) => stage.stageId === created.activeStageId) ?? stageRows(created.stages)[0];
   if (initialStage) {
-    hooks.emit({
+    hooks.emit(checkIntentEvent({
       type: 'stage_activated',
       sessionId,
       turnId: entry.turnId,
@@ -183,8 +211,8 @@ function emitIntentCreated(
       stageId: initialStage.stageId,
       label: initialStage.label,
       order: initialStage.order,
-      totalStages: created.stages.length,
-    });
+      totalStages: stageRows(created.stages).length,
+    }));
   }
 }
 
@@ -192,7 +220,7 @@ function emitStepUpdateTraces(
   hooks: RuntimeHooks,
   sessionId: string,
   entry: SyncEntry,
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
 ): void {
   const afterIntent = resolveIntentForInput(after, entry.toolInput);
   if (!afterIntent) {
@@ -208,9 +236,9 @@ function emitStepUpdateTraces(
   const requestedReceipt = typeof entry.toolInput.receipt_note === 'string' ? entry.toolInput.receipt_note.trim() : '';
 
   if (beforeIntent?.activeStageId !== afterIntent.activeStageId) {
-    const activeStage = afterIntent.stages.find((stage) => stage.stageId === afterIntent.activeStageId);
+    const activeStage = stageRows(afterIntent.stages).find((stage) => stage.stageId === afterIntent.activeStageId);
     if (activeStage) {
-      hooks.emit({
+      hooks.emit(checkIntentEvent({
         type: 'stage_activated',
         sessionId,
         turnId: entry.turnId,
@@ -218,21 +246,21 @@ function emitStepUpdateTraces(
         stageId: activeStage.stageId,
         label: activeStage.label,
         order: activeStage.order,
-        totalStages: afterIntent.stages.length,
-      });
+        totalStages: stageRows(afterIntent.stages).length,
+      }));
     }
   }
 
   if (requestedStatus === 'running' && isStepRunning(afterIntent, activeStepId)) {
     const beforeStatus = beforeIntent?.steps.find((step) => step.stepId === activeStepId)?.status;
     if (!beforeIntent || beforeStatus !== 'running') {
-      hooks.emit({
+      hooks.emit(checkIntentEvent({
         type: 'step_activated',
         sessionId,
         turnId: entry.turnId,
         intentId: afterIntent.intentId,
         stepId: activeStepId,
-      });
+      }));
     }
   }
 
@@ -241,15 +269,15 @@ function emitStepUpdateTraces(
     : resolveBreadcrumbFromInput(after, afterIntent.intentId, activeStepId, requestedStatus, requestedBreadcrumb);
 
   for (const breadcrumb of breadcrumbs) {
-    hooks.emit({
+    hooks.emit(checkIntentEvent({
       type: 'breadcrumb_emitted',
       sessionId,
       turnId: entry.turnId,
-      intentId: breadcrumb.intentId,
-      stepId: breadcrumb.stepId,
-      status: breadcrumb.status,
-      message: breadcrumb.message,
-    });
+      intentId: readableTraceData(breadcrumb).intentId,
+      stepId: readableTraceData(breadcrumb).stepId,
+      status: readableTraceData(breadcrumb).status,
+      message: readableTraceData(breadcrumb).message,
+    }));
   }
 
   if (!requestedReceipt) {
@@ -257,18 +285,18 @@ function emitStepUpdateTraces(
   }
 
   if (after.receipt
-    && after.receipt.intentId === afterIntent.intentId
-    && after.receipt.stepId === activeStepId
-    && after.receipt.note === requestedReceipt
+    && readableTraceData(after.receipt).intentId === afterIntent.intentId
+    && readableTraceData(after.receipt).stepId === activeStepId
+    && readableTraceData(after.receipt).note === requestedReceipt
     && (!entry.before || hasReceiptChanged(entry.before, after))) {
-    hooks.emit({
+    hooks.emit(checkIntentEvent({
       type: 'receipt_emitted',
       sessionId,
       turnId: entry.turnId,
-      intentId: after.receipt.intentId,
-      stepId: after.receipt.stepId,
-      note: after.receipt.note,
-    });
+      intentId: readableTraceData(after.receipt).intentId,
+      stepId: readableTraceData(after.receipt).stepId,
+      note: readableTraceData(after.receipt).note,
+    }));
   }
 }
 
@@ -276,7 +304,7 @@ function emitSalvageTrace(
   hooks: RuntimeHooks,
   sessionId: string,
   entry: SyncEntry,
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
 ): void {
   const intentId = typeof entry.toolInput.intent_id === 'string' ? entry.toolInput.intent_id : undefined;
   const summary = readSummary(entry.toolInput.summary);
@@ -285,7 +313,7 @@ function emitSalvageTrace(
     return;
   }
 
-  if (after.salvage.intentId !== intentId || !sameSummary(after.salvage.summary, summary) || after.salvage.reason !== reason) {
+  if (readableTraceData(after.salvage).intentId !== intentId || !sameSummary(after.salvage.summary, summary) || readableTraceData(after.salvage).reason !== reason) {
     return;
   }
 
@@ -293,21 +321,21 @@ function emitSalvageTrace(
     return;
   }
 
-  hooks.emit({
+  hooks.emit(checkIntentEvent({
     type: 'salvage_emitted',
     sessionId,
     turnId: entry.turnId,
     intentId,
     summary: [...summary],
     reason,
-  });
+  }));
 }
 
 function emitArtifactTrace(
   hooks: RuntimeHooks,
   sessionId: string,
   entry: SyncEntry,
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
 ): void {
   const intent = resolveIntentForInput(after, entry.toolInput);
   const stageId = typeof entry.toolInput.stage_id === 'string' ? entry.toolInput.stage_id : undefined;
@@ -317,21 +345,21 @@ function emitArtifactTrace(
   }
 
   const artifact = intent.artifacts?.[intent.artifacts.length - 1];
-  if (!artifact || artifact.stageId !== stageId || artifact.label !== label) {
+  if (!artifact || readableTraceData(artifact).stageId !== stageId || readableTraceData(artifact).label !== label) {
     return;
   }
 
-  hooks.emit({
+  hooks.emit(checkIntentEvent({
     type: 'artifact_recorded',
     sessionId,
     turnId: entry.turnId,
     intentId: intent.intentId,
     stageId,
-    artifactId: artifact.artifactId,
-    label: artifact.label,
-    kind: artifact.kind,
-    path: artifact.path,
-  });
+    artifactId: readableTraceData(artifact).artifactId,
+    label: readableTraceData(artifact).label,
+    kind: readableTraceData(artifact).kind,
+    path: readableTraceData(artifact).path,
+  }));
 }
 
 async function patchActiveIntent(
@@ -340,7 +368,7 @@ async function patchActiveIntent(
     overallStatus?: IntentLedgerRecord['overallStatus'];
     blockedReason?: string;
   },
-  onPatched?: (ledger: SessionIntentLedger | null) => void,
+  onPatched?: (ledger: RawIntentLedgerData | null) => void,
 ): Promise<void> {
   const ledger = await options.ledgerStore.load(options.sessionId);
   const intentId = ledger?.activeIntentId;
@@ -348,6 +376,7 @@ async function patchActiveIntent(
     return;
   }
 
+  if(hasProtectedIntentProducerHistory(ledger)||[...ledger.intents,...(ledger.latestPlan?[ledger.latestPlan]:[])].some(row=>readInstalledCurrentOwner({ownerKind:'intent',ownerId:row.intentId}).kind!=='ordinary')){onPatched?.(ledger);return;}
   const activeIntent = ledger.intents.find((intent) => intent.intentId === intentId);
   if (!activeIntent || TERMINAL_INTENT_STATUSES.has(activeIntent.overallStatus)) {
     onPatched?.(ledger);
@@ -372,10 +401,12 @@ function isIntentSyncTool(toolName: string): toolName is IntentSyncToolName {
     || toolName === 'intent_salvage';
 }
 
+function resolveCreatedIntentFromInput(after: SessionIntentLedger, toolInput: Record<string, unknown>): IntentLedgerRecord | undefined;
+function resolveCreatedIntentFromInput(after: RawIntentLedgerData, toolInput: Record<string, unknown>): RawIntentRecordData | undefined;
 function resolveCreatedIntentFromInput(
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
   toolInput: Record<string, unknown>,
-): IntentLedgerRecord | undefined {
+): RawIntentRecordData | undefined {
   const rawIntent = typeof toolInput.raw_intent === 'string' ? toolInput.raw_intent : undefined;
   const deliverable = typeof toolInput.deliverable === 'string' ? toolInput.deliverable : undefined;
   return after.intents.find((intent) => intent.rawIntent === rawIntent && intent.deliverable === deliverable)
@@ -383,10 +414,12 @@ function resolveCreatedIntentFromInput(
     ?? undefined;
 }
 
+function resolveIntentForInput(ledger: SessionIntentLedger, toolInput: Record<string, unknown>): IntentLedgerRecord | undefined;
+function resolveIntentForInput(ledger: RawIntentLedgerData, toolInput: Record<string, unknown>): RawIntentRecordData | undefined;
 function resolveIntentForInput(
-  ledger: SessionIntentLedger,
+  ledger: RawIntentLedgerData,
   toolInput: Record<string, unknown>,
-): IntentLedgerRecord | undefined {
+): RawIntentRecordData | undefined {
   const intentId = typeof toolInput.intent_id === 'string' ? toolInput.intent_id : ledger.activeIntentId;
   if (!intentId) {
     return undefined;
@@ -394,11 +427,11 @@ function resolveIntentForInput(
   return ledger.intents.find((intent) => intent.intentId === intentId);
 }
 
-function isStepRunning(intent: IntentLedgerRecord, stepId: string): boolean {
+function isStepRunning(intent: {readonly steps: readonly {readonly stepId?: unknown; readonly status?: unknown}[]}, stepId: unknown): boolean {
   return intent.steps.some((step) => step.stepId === stepId && step.status === 'running');
 }
 
-function diffBreadcrumbs(before: SessionIntentLedger, after: SessionIntentLedger): IntentBreadcrumb[] {
+function diffBreadcrumbs(before: RawIntentLedgerData, after: RawIntentLedgerData): object[] {
   const previous = before.breadcrumbs;
   if (after.breadcrumbs.length <= previous.length) {
     return [];
@@ -408,12 +441,12 @@ function diffBreadcrumbs(before: SessionIntentLedger, after: SessionIntentLedger
 }
 
 function resolveBreadcrumbFromInput(
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
   intentId: string,
-  stepId: string,
+  stepId: unknown,
   status: IntentBreadcrumb['status'],
   breadcrumb: string,
-): IntentBreadcrumb[] {
+): object[] {
   if (!breadcrumb) {
     return [];
   }
@@ -427,44 +460,61 @@ function resolveBreadcrumbFromInput(
 }
 
 function matchesRequestedBreadcrumb(
-  breadcrumb: IntentBreadcrumb,
+  breadcrumb: object,
   intentId: string,
-  stepId: string,
+  stepId: unknown,
   status: IntentBreadcrumb['status'],
   message: string,
 ): boolean {
-  return breadcrumb.intentId === intentId
-    && breadcrumb.stepId === stepId
-    && breadcrumb.status === status
-    && breadcrumb.message === message;
+  const value = readableTraceData(breadcrumb);
+  return value.intentId === intentId
+    && value.stepId === stepId
+    && value.status === status
+    && value.message === message;
 }
 
-function hasReceiptChanged(before: SessionIntentLedger, after: SessionIntentLedger): boolean {
+function hasReceiptChanged(before: RawIntentLedgerData, after: RawIntentLedgerData): boolean {
   if (!after.receipt) {
     return false;
   }
   const previous = before.receipt;
   return !previous
-    || previous.intentId !== after.receipt.intentId
-    || previous.stepId !== after.receipt.stepId
-    || previous.note !== after.receipt.note
-    || previous.createdAt !== after.receipt.createdAt;
+    || readableTraceData(previous).intentId !== readableTraceData(after.receipt).intentId
+    || readableTraceData(previous).stepId !== readableTraceData(after.receipt).stepId
+    || readableTraceData(previous).note !== readableTraceData(after.receipt).note
+    || readableTraceData(previous).createdAt !== readableTraceData(after.receipt).createdAt;
 }
 
-function hasSalvageChanged(before: SessionIntentLedger, after: SessionIntentLedger): boolean {
+function hasSalvageChanged(before: RawIntentLedgerData, after: RawIntentLedgerData): boolean {
   if (!after.salvage) {
     return false;
   }
   const previous = before.salvage;
   return !previous
-    || previous.intentId !== after.salvage.intentId
-    || previous.reason !== after.salvage.reason
-    || previous.createdAt !== after.salvage.createdAt
+    || readableTraceData(previous).intentId !== readableTraceData(after.salvage).intentId
+    || readableTraceData(previous).reason !== readableTraceData(after.salvage).reason
+    || readableTraceData(previous).createdAt !== readableTraceData(after.salvage).createdAt
     || !sameSummary(previous.summary, after.salvage.summary);
 }
 
 function readStepStatus(value: unknown): IntentBreadcrumb['status'] {
   return value === 'blocked' || value === 'completed' || value === 'failed' ? value : 'running';
+}
+
+function isTraceObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+
+// Property-readable DATA only, not a record/event/producer assertion. No fields are invented.
+function readableTraceData(value: unknown): Readonly<Record<string, unknown>> {
+  if (!isTraceObject(value)) throw Error('intent_runtime_trace_object');
+  return value;
+}
+
+// Identity-preserving container check at each original .stages evaluation point.
+function stageRows(value: RawIntentRecordData['stages']): NonNullable<RawIntentRecordData['stages']> {
+  if (!Array.isArray(value)) throw Error('intent_runtime_stage_array');
+  return value;
 }
 
 function readSummary(value: unknown): string[] {

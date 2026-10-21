@@ -44,7 +44,7 @@ export interface PlannedStep {
     status: StepStatus;
     riskTier: RiskTier;
 }
-export type StageStatus = 'planned' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
+export type StageStatus = 'publication_pending' | 'planned' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
 export type ArtifactKind = 'markdown' | 'report' | 'slides' | 'summary' | 'analysis' | 'document' | 'unknown';
 export type ArtifactStorage = 'inline' | 'file_ref';
 export type ValidationState = 'pending' | 'passed' | 'failed';
@@ -101,6 +101,8 @@ export interface IntentPlanDraft {
     continuationMode: 'new_intent' | 'continue_active' | 'clarify';
 }
 export interface IntentLedgerRecord {
+    producerReports?: import('../../runtime/intent-delegation/producer-facts.js').IntentProducerReport[];
+    executionTerminals?: import('../../runtime/intent-delegation/intent-commit-boundary.js').IntentExecutionTerminal[];
     intentId: string;
     instanceId: string;
     sessionId: string;
@@ -121,7 +123,7 @@ export interface IntentLedgerRecord {
     artifacts?: StageArtifactRecord[];
     steps: PlannedStep[];
     activeStepId: string;
-    overallStatus: 'drafting_plan' | 'executing' | 'waiting_user' | 'recovering' | 'completed' | 'failed' | 'cancelled';
+    overallStatus: 'publication_pending' | 'drafting_plan' | 'executing' | 'waiting_user' | 'recovering' | 'completed' | 'failed' | 'cancelled';
     attemptCount: number;
     latestBreadcrumb?: string;
     latestReceipt?: string;

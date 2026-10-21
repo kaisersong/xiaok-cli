@@ -1,3 +1,4 @@
+import {withReservedTaskFixture} from '../support/loop-reserved-task-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -54,7 +55,7 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const result = await runner.runLoopNow(ARTIFACT_LOOP_ID);
+    const result = await runner.runLoopNow(ARTIFACT_LOOP_ID, undefined, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({ status: 'success' });
     expect(finishSuccess).toHaveBeenCalledWith({
@@ -121,7 +122,7 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const result = await runner.runLoopNow(KSWARM_HEALTH_LOOP_ID);
+    const result = await runner.runLoopNow(KSWARM_HEALTH_LOOP_ID, undefined, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({ status: 'success' });
     expect(artifactScanner.scan).not.toHaveBeenCalled();
@@ -164,11 +165,12 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const result = await runner.runLoopNow('user-loop-1');
+    const result = await runner.runLoopNow('user-loop-1', undefined, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({ status: 'success', run: expect.objectContaining({ summary: 'user loop success' }) });
     expect(artifactScanner.scan).not.toHaveBeenCalled();
     expect(userLoopTemplateRunner.runTemplateLoop).toHaveBeenCalledWith({
+      requestSource:'user',producer:undefined,
       loopId: 'user-loop-1',
       runId: expect.any(String),
       trigger: { kind: 'manual' },
@@ -191,7 +193,7 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const result = await runner.runLoopNow(ARTIFACT_LOOP_ID);
+    const result = await runner.runLoopNow(ARTIFACT_LOOP_ID, undefined, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({ status: 'blocked' });
     const [run] = store.listLoopRuns(ARTIFACT_LOOP_ID, 10);
@@ -230,13 +232,13 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const first = runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'first' });
+    const first = runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'first' }, undefined, {requestSource:'user'});
     await vi.waitFor(() => {
       expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10)).toHaveLength(1);
     });
 
     const activeRunId = store.listLoopRuns(ARTIFACT_LOOP_ID, 10)[0].id;
-    const second = await runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'second' });
+    const second = await runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'second' }, undefined, {requestSource:'user'});
 
     expect(second).toEqual({ status: 'already_running', activeRunId });
     resolveScan?.({
@@ -305,7 +307,7 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const result = await runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'recovery' });
+    const result = await runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'recovery' }, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({ status: 'success' });
     expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10).find(run => run.id === stale.id)).toMatchObject({
@@ -330,7 +332,7 @@ describe('loop executor', () => {
       staleAfterMs: 60_000,
     });
 
-    const pending = runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'late-scan' });
+    const pending = runner.runLoopNow(ARTIFACT_LOOP_ID, { kind: 'manual', source: 'late-scan' }, undefined, {requestSource:'user'});
     await vi.waitFor(() => {
       expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10)).toHaveLength(1);
     });
@@ -405,7 +407,7 @@ describe('loop executor', () => {
       timedActionRunId: 'timed-run-1',
       scheduledDueAt: 1_000,
       claimedAt: 2_000,
-    }), undefined);
+    }), undefined, {requestSource:'scheduler'});
   });
 
   it('loop timed action executor throws when the loop run fails', async () => {
@@ -499,7 +501,7 @@ describe('loop executor abort signal', () => {
     expect(runLoop).toHaveBeenCalledWith(
       ARTIFACT_LOOP_ID,
       expect.objectContaining({ kind: 'scheduled' }),
-      controller.signal
+      controller.signal, {requestSource:'scheduler'}
     );
   });
 
@@ -521,6 +523,7 @@ describe('loop executor abort signal', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: { status: 'completed', events: [] } }),
       cancelTask: vi.fn().mockResolvedValue(undefined),
     };
+    withReservedTaskFixture(taskPort,'task-1');
     const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
     const runner = createUserLoopTemplateRunner({
       loopStore: store,
@@ -538,7 +541,7 @@ describe('loop executor abort signal', () => {
     expect(begin.status).toBe('started');
     if (begin.status !== 'started') throw new Error('expected started');
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-abort-1',
       runId: begin.run.id,
       trigger: { kind: 'manual' },
@@ -564,18 +567,19 @@ describe('loop executor abort signal', () => {
     });
 
     const controller = new AbortController();
-    let pollCount = 0;
+    let pollCount = 0, cancelled = false;
 
     const taskPort = {
       createTask: vi.fn().mockResolvedValue({ taskId: 'task-2' }),
       recoverTask: vi.fn().mockImplementation(() => {
         pollCount++;
         if (pollCount === 2) controller.abort();
-        return Promise.resolve({ snapshot: { status: 'running', events: [] } });
+        return Promise.resolve({ snapshot: { taskId:'task-2',sessionId:'session-2',prompt:'Write something.',materials:[],createdAt:now,updatedAt:now,status:cancelled?'cancelled':'running',events:[] } });
       }),
-      cancelTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn(async()=>{cancelled=true;}),
     };
 
+    withReservedTaskFixture(taskPort,'task-2');
     const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
     const runner = createUserLoopTemplateRunner({
       loopStore: store,
@@ -590,7 +594,7 @@ describe('loop executor abort signal', () => {
     const begin = store.beginLoopRun('user-abort-2', { kind: 'manual' }, now, 60_000);
     if (begin.status !== 'started') throw new Error('expected started');
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-abort-2',
       runId: begin.run.id,
       trigger: { kind: 'manual' },
@@ -616,10 +620,11 @@ describe('loop executor abort signal', () => {
 
     const taskPort = {
       createTask: vi.fn().mockResolvedValue({ taskId: 'task-3' }),
-      recoverTask: vi.fn().mockResolvedValue({ snapshot: { status: 'completed', events: [], result: { summary: 'done' } } }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: {taskId:'task-3',sessionId:'session-3',prompt:'Do something.',materials:[],createdAt:now,updatedAt:now,status:'completed',events:[],result:{summary:'done'}} }),
       cancelTask: vi.fn().mockResolvedValue(undefined),
     };
 
+    withReservedTaskFixture(taskPort,'task-3');
     const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
     const runner = createUserLoopTemplateRunner({
       loopStore: store,
@@ -634,7 +639,7 @@ describe('loop executor abort signal', () => {
     const begin = store.beginLoopRun('user-no-signal', { kind: 'manual' }, now, 60_000);
     if (begin.status !== 'started') throw new Error('expected started');
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-no-signal',
       runId: begin.run.id,
       trigger: { kind: 'manual' },
@@ -683,7 +688,7 @@ describe('loop executor abort signal', () => {
 
     controller.abort();
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-abort-priority',
       runId: begin.run.id,
       trigger: { kind: 'manual' },

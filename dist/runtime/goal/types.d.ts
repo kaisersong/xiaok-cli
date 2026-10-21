@@ -1,4 +1,6 @@
 import type { CompletionEvidenceRecord, CompletionKind } from '../guards/completion-evidence.js';
+import type { GoalCompletionIntent, GoalCompletionIntentUpdate } from './completion-intent.js';
+import type { GoalPublicationAttempt, GoalPublicationAttemptUpdate } from './publication-attempt.js';
 export declare const DEFAULT_GOAL_TURN_LIMIT = 20;
 export declare const MAX_GOAL_TURN_LIMIT = 50;
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete' | 'cancelled';
@@ -16,6 +18,10 @@ export interface GoalInput {
     expectedEvidenceKinds: GoalEvidenceKind[];
     turnLimit?: number;
 }
+/** Original user-supplied criteria; main/CLI parse the complete definition. */
+export interface GoalCreationInput extends GoalInput {
+    verificationDefinition?: unknown;
+}
 export interface GoalState {
     goalId: string;
     revision: number;
@@ -31,6 +37,8 @@ export interface GoalState {
     activeWallClockMs: number;
     budgetLimits: GoalBudgetLimits;
     terminalReason?: string;
+    /** Durable pending publication selector; never proof or approval. */
+    pendingCompletionIntentId?: string;
     blockerFingerprint?: string;
     consecutiveBlockedTurns: number;
     createdAt: number;
@@ -76,6 +84,8 @@ export interface GoalDocument {
     events: GoalEvent[];
     turns: GoalTurnRecord[];
     evidence: GoalEvidenceEnvelope[];
+    completionIntents?: GoalCompletionIntent[];
+    completionAttempts?: GoalPublicationAttempt[];
 }
 export interface GoalCommitInput {
     sessionId: string;
@@ -84,10 +94,24 @@ export interface GoalCommitInput {
     events: GoalEvent[];
     turns: GoalTurnRecord[];
     evidence: GoalEvidenceEnvelope[];
+    completionIntent?: GoalCompletionIntentUpdate;
+    /** Original durable claim selector, never an approval or a persisted write grant. */
+    completionIntentId?: string;
+    /** Private one-attempt cache projection ticket; never persisted. */
+    completionProjection?: object;
+    /** Private one-attempt native application cache projection; never persisted. */
+    nativeProjection?: object;
 }
 export interface GoalStore {
     load(sessionId: string): Promise<GoalDocument | null>;
+    /** Exact historical claim, including a Goal no longer selected by the session. */
+    loadCompletionIntent(sessionId: string, intentId: string): Promise<GoalCompletionIntent | null>;
+    listCompletionAttempts(sessionId: string, intentId: string): Promise<GoalPublicationAttempt[]>;
+    updateCompletionAttempt(sessionId: string, update: GoalPublicationAttemptUpdate): Promise<void>;
+    finalizeCompletionAttempt(sessionId: string, attemptId: string): Promise<GoalCompletionIntent>;
     commit(input: GoalCommitInput): Promise<void>;
+    /** Updates original recovery facts only, without changing any Goal state/pointer. */
+    updateCompletionIntent(sessionId: string, update: GoalCompletionIntentUpdate): Promise<void>;
 }
 export interface GoalOwnershipPort {
     assertOwned(sessionId: string, instanceId: string): void | Promise<void>;

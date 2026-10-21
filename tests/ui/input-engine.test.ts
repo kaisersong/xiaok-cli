@@ -50,7 +50,7 @@ describe('input engine', () => {
       initialSnapshot: { draft: 'run it', cursor: 6 },
       pasteController: createPasteController(),
       policy: {
-        onSubmit: (text) => submitted.push(text),
+        onSubmit: (text) => { submitted.push(text); },
         onCancel: () => {},
         onChange: () => {},
       },

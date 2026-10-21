@@ -923,7 +923,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     await service.start();
 
     expect(findPortOwner).toHaveBeenCalledWith(4400);
-    expect(killStalePortOwner).toHaveBeenCalledWith(4400);
+    expect(killStalePortOwner).toHaveBeenCalledWith(4400, expect.objectContaining({ expectedPid: 43_210, signal: expect.any(AbortSignal) }));
     expect(spawnMock).toHaveBeenCalledTimes(1);
     await service.stop();
     rmSync(serviceRoot, { recursive: true, force: true });
@@ -980,7 +980,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let blockNextHealth = false;
-    let releaseBlockedHealth: (() => void) | null = null;
+    let releaseBlockedHealth = null as (() => void) | null;
     let signalBlockedHealth: (() => void) | null = null;
     const blockedHealth = new Promise<void>((resolve) => { signalBlockedHealth = resolve; });
     const releaseHealth = new Promise<void>((resolve) => { releaseBlockedHealth = resolve; });
@@ -1036,7 +1036,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
-    let releaseBlockedHealth: (() => void) | null = null;
+    let releaseBlockedHealth = null as (() => void) | null;
     let signalBlockedHealth: (() => void) | null = null;
     const blockedHealth = new Promise<void>((resolve) => { signalBlockedHealth = resolve; });
     const releaseHealth = new Promise<void>((resolve) => { releaseBlockedHealth = resolve; });
@@ -1118,7 +1118,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
-    let releaseBlockedHealth: (() => void) | null = null;
+    let releaseBlockedHealth = null as (() => void) | null;
     let signalBlockedHealth: (() => void) | null = null;
     let blockFirstHealth = true;
     const blockedHealth = new Promise<void>((resolve) => { signalBlockedHealth = resolve; });
@@ -1169,7 +1169,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
-    let releaseFirstExit: (() => void) | null = null;
+    let releaseFirstExit = null as (() => void) | null;
     let signalFirstKill: (() => void) | null = null;
     const firstKillStarted = new Promise<void>((resolve) => { signalFirstKill = resolve; });
     const releaseExit = new Promise<void>((resolve) => { releaseFirstExit = resolve; });
@@ -1318,7 +1318,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let blockSeedReconciliation = true;
-    let releaseSeedReconciliation: (() => void) | null = null;
+    let releaseSeedReconciliation = null as (() => void) | null;
     let signalSeedReconciliation: (() => void) | null = null;
     const seedReconciliationStarted = new Promise<void>((resolve) => { signalSeedReconciliation = resolve; });
     const releaseReconciliation = new Promise<void>((resolve) => { releaseSeedReconciliation = resolve; });
@@ -1377,7 +1377,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let brokerHealthChecks = 0;
     let brokerAvailable = false;
-    let releaseBrokerProbe: (() => void) | null = null;
+    let releaseBrokerProbe = null as (() => void) | null;
     let signalBrokerProbe: (() => void) | null = null;
     const brokerProbeStarted = new Promise<void>((resolve) => { signalBrokerProbe = resolve; });
     const releaseProbe = new Promise<void>((resolve) => { releaseBrokerProbe = resolve; });
@@ -1438,7 +1438,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let blockReadyProbe = true;
-    let releaseReadyProbe: (() => void) | null = null;
+    let releaseReadyProbe = null as (() => void) | null;
     let signalReadyProbe: (() => void) | null = null;
     const readyProbeStarted = new Promise<void>((resolve) => { signalReadyProbe = resolve; });
     const releaseProbe = new Promise<void>((resolve) => { releaseReadyProbe = resolve; });
@@ -1582,7 +1582,7 @@ describe('activity-owner delegated manager boundaries', () => {
         ? { ok: true, features: ['dynamic_workflows'], service: { entryPath: entry } }
         : { ok: true, agents: [] }), { status: 200 });
     }));
-    const request = vi.fn(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
+    const request = vi.fn<(method: string, payload?: unknown) => Promise<void>>(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
     const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never,
       findPortOwner: findOwner, killStalePortOwner: killer });
     service.bindActivityOwner!({ ownerEpoch: 'owner', request } as never);
@@ -1599,7 +1599,7 @@ describe('activity-owner delegated manager boundaries', () => {
     vi.stubEnv('XIAOK_CONFIG_DIR', root);
     const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, features: [], service: { entryPath: entry } }), { status: 200 })));
-    const request = vi.fn(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
+    const request = vi.fn<(method: string, payload?: unknown) => Promise<void>>(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
     const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, findPortOwner: findOwner, killStalePortOwner: killer });
     service.bindActivityOwner!({ ownerEpoch: 'owner', request } as never);
     try {

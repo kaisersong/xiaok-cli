@@ -35,13 +35,34 @@ describe('multi-agent tools', () => {
       depth: 1,
       status: 'pending',
       unreadMessages: 0,
+      turn: 0,
+      executionActive: false,
+      resourcesReleased: false,
+      runtimeResident: true,
     });
     vi.mocked(coordinator.sendMessage).mockReturnValue({ messageId: 'msg_1' });
     vi.mocked(coordinator.followupTask).mockReturnValue({ queued: true });
     vi.mocked(coordinator.waitForUpdate).mockResolvedValue({ agents: [], messages: [], timedOut: true });
     vi.mocked(coordinator.listAgents).mockReturnValue([]);
     vi.mocked(coordinator.interruptAgent).mockReturnValue({ interrupted: true });
-    vi.mocked(coordinator.closeAgent).mockResolvedValue({ closed: true });
+    vi.mocked(coordinator.closeAgent).mockResolvedValue({
+      closed: true,
+      resourcesReleased: false,
+      cleanupPending: true,
+      agents: [{
+        id: 'agent_1',
+        taskName: 'review',
+        canonicalName: '/root/review',
+        parentId: 'main',
+        depth: 1,
+        status: 'closed',
+        unreadMessages: 0,
+        turn: 0,
+        executionActive: false,
+        resourcesReleased: false,
+        runtimeResident: true,
+      }],
+    });
   });
 
   it('exposes the Codex-style control-plane surface', () => {
@@ -124,7 +145,15 @@ describe('multi-agent tools', () => {
     expect(byName.get('send_message')!.definition.description).toContain('不触发');
     expect(byName.get('followup_task')!.definition.description).toContain('只能');
     expect(byName.get('followup_task')!.definition.description).toContain('严格后代');
-    expect(byName.get('spawn_agent')!.definition.inputSchema.properties.tools.description).toContain('显式');
+    const properties = byName.get('spawn_agent')!.definition.inputSchema.properties;
+    if (!properties || typeof properties !== 'object' || !('tools' in properties)) {
+      throw new Error('multi_agent_tools_schema_properties_missing');
+    }
+    const toolsSchema = properties.tools;
+    if (!toolsSchema || typeof toolsSchema !== 'object' || !('description' in toolsSchema)) {
+      throw new Error('multi_agent_tools_schema_description_missing');
+    }
+    expect(toolsSchema.description).toContain('显式');
     expect(byName.get('interrupt_agent')!.definition.description).toContain('严禁');
     expect(byName.get('close_agent')!.definition.description).toContain('严禁');
     expect(byName.get('close_agent')!.definition.description).toContain('结算后');

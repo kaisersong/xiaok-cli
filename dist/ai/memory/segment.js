@@ -2,7 +2,7 @@
 // nodejieba is a CJS package; use createRequire for ESM compat.
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 const require = createRequire(import.meta.url);
 let jieba = null;
 let jiebaLoadFailed = false;
@@ -30,8 +30,8 @@ export function rewriteAsarPath(filePath) {
     return filePath.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1');
 }
 /**
- * Resolve every dictionary to a path that is readable from JS, or null when
- * nodejieba is not installed.
+ * Resolve every dictionary to a native-compatible path, or null when
+ * nodejieba is not installed or cannot safely open that Windows path.
  */
 export function resolveJiebaDictPaths() {
     let entry;
@@ -45,6 +45,15 @@ export function resolveJiebaDictPaths() {
     const resolved = {};
     for (const fileName of Object.values(DICT_FILES)) {
         resolved[fileName] = join(dictDir, fileName);
+    }
+    if (process.platform === 'win32') {
+        // cppjieba uses narrow ifstream: JS readability does not establish native
+        // Unicode-path support, and a failed native open aborts the entire process.
+        if (Object.values(resolved).some(filePath => /[^\x00-\x7f]/.test(filePath)))
+            return null;
+        for (const fileName of Object.values(DICT_FILES)) {
+            resolved[fileName] = win32.toNamespacedPath(resolved[fileName]);
+        }
     }
     return resolved;
 }

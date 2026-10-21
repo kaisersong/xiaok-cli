@@ -1,14 +1,27 @@
+import { hasProtectedIntentProducerHistory } from './intent-commit-boundary.js';
+import { readInstalledCurrentOwner } from '../verification/installed-owner-state.js';
 import { cloneSessionIntentLedger } from './types.js';
 const TERMINAL_INTENT_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export function wireIntentDelegationToRuntimeSync(options) {
     let latestLedger;
-    void options.ledgerStore.load(options.sessionId).then((ledger) => {
-        latestLedger = ledger;
-    });
+    let open = true, stopping;
+    const active = new Set(), errors = [];
+    const track = (work) => {
+        if (!open)
+            return;
+        // Register before invoking a leaf that may synchronously reenter through hooks.
+        const pending = Promise.resolve().then(work);
+        active.add(pending);
+        void pending.then(() => active.delete(pending), error => {
+            errors.push(error);
+            active.delete(pending);
+        });
+    };
+    track(async () => { latestLedger = await options.ledgerStore.load(options.sessionId); });
     const syncState = new Map();
     const unsubscribers = [
         options.hooks.on('tool_started', (event) => {
-            if (event.sessionId !== options.sessionId) {
+            if (!open || event.sessionId !== options.sessionId) {
                 return;
             }
             if (!isIntentSyncTool(event.toolName)) {
@@ -25,53 +38,68 @@ export function wireIntentDelegationToRuntimeSync(options) {
             syncState.set(key, queue);
         }),
         options.hooks.on('tool_finished', (event) => {
-            if (event.sessionId !== options.sessionId) {
+            if (!open || event.sessionId !== options.sessionId) {
                 return;
             }
             if (isIntentSyncTool(event.toolName)) {
-                void processIntentToolFinished(options, syncState, event.turnId, event.toolName, event.ok, {
+                const { turnId, toolName, ok } = event;
+                track(() => processIntentToolFinished(options, syncState, turnId, toolName, ok, {
                     getLatestLedger: () => latestLedger,
                     setLatestLedger: (ledger) => {
                         latestLedger = ledger;
                     },
-                });
+                }));
                 return;
             }
             if (!event.ok) {
-                void patchActiveIntent(options, {
-                    blockedReason: `tool ${event.toolName} returned an error`,
+                const blockedReason = `tool ${event.toolName} returned an error`;
+                track(() => patchActiveIntent(options, {
+                    blockedReason,
                 }, (ledger) => {
                     latestLedger = ledger;
-                });
+                }));
             }
         }),
         options.hooks.on('turn_failed', (event) => {
-            if (event.sessionId !== options.sessionId) {
+            if (!open || event.sessionId !== options.sessionId) {
                 return;
             }
-            void patchActiveIntent(options, {
+            const blockedReason = event.error.message;
+            track(() => patchActiveIntent(options, {
                 overallStatus: 'failed',
-                blockedReason: event.error.message,
+                blockedReason,
             }, (ledger) => {
                 latestLedger = ledger;
-            });
+            }));
         }),
         options.hooks.on('turn_aborted', (event) => {
-            if (event.sessionId !== options.sessionId) {
+            if (!open || event.sessionId !== options.sessionId) {
                 return;
             }
-            void patchActiveIntent(options, {
+            track(() => patchActiveIntent(options, {
                 overallStatus: 'cancelled',
             }, (ledger) => {
                 latestLedger = ledger;
-            });
+            }));
         }),
     ];
     return () => {
-        for (const unsubscribe of unsubscribers) {
+        if (stopping)
+            return stopping;
+        open = false;
+        // Publish before unsubscribe/cleanup so a reentrant stop joins this attempt.
+        let resolve, reject;
+        stopping = new Promise((yes, no) => { resolve = yes; reject = no; });
+        for (const unsubscribe of unsubscribers)
             unsubscribe();
-        }
-        syncState.clear();
+        void Promise.allSettled([...active]).then(() => {
+            syncState.clear();
+            if (errors.length)
+                reject(new AggregateError(errors, 'intent_runtime_sync_drain_failed'));
+            else
+                resolve();
+        });
+        return stopping;
     };
 }
 async function processIntentToolFinished(options, syncState, turnId, toolName, ok, state) {
@@ -255,6 +283,10 @@ async function patchActiveIntent(options, patch, onPatched) {
     const ledger = await options.ledgerStore.load(options.sessionId);
     const intentId = ledger?.activeIntentId;
     if (!ledger || !intentId) {
+        return;
+    }
+    if (hasProtectedIntentProducerHistory(ledger) || [...ledger.intents, ...(ledger.latestPlan ? [ledger.latestPlan] : [])].some(row => readInstalledCurrentOwner({ ownerKind: 'intent', ownerId: row.intentId }).kind !== 'ordinary')) {
+        onPatched?.(ledger);
         return;
     }
     const activeIntent = ledger.intents.find((intent) => intent.intentId === intentId);

@@ -1,0 +1,4 @@
+export interface ScheduledErrorLabels {scheduledProjectionUnavailable:string;scheduledOperationUnknown:string;scheduledInputInvalid:string}
+export function scheduledErrorMessage(error:unknown,labels:ScheduledErrorLabels,reading=false):string{const message=error instanceof Error?error.message:typeof error==='string'?error:'';const has=(code:string)=>message===code||message.endsWith(': '+code);if(has('scheduled_input_invalid'))return labels.scheduledInputInvalid;if(has('scheduled_projection_unavailable')||has('scheduled_runtime_unavailable'))return labels.scheduledProjectionUnavailable;if(has('scheduled_operation_unknown'))return labels.scheduledOperationUnknown;return reading?labels.scheduledProjectionUnavailable:labels.scheduledOperationUnknown;}
+export const SCHEDULED_READ_FAILURE_EVENT='xiaok:scheduled-read-failure';
+export function reportScheduledReadFailure():void{window.dispatchEvent(new CustomEvent(SCHEDULED_READ_FAILURE_EVENT));}

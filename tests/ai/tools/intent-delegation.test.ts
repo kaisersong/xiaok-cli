@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { IntentPlanDraft, PlannedStep, RiskTier } from '../../../src/ai/intent-delegation/types.js';
+import type { IntentLedgerRecord, PlannedStep, RiskTier } from '../../../src/ai/intent-delegation/types.js';
 import { FileSessionStore } from '../../../src/ai/runtime/session-store.js';
 import { createIntentDelegationTools } from '../../../src/ai/tools/intent-delegation.js';
 import { markSessionOwned } from '../../../src/runtime/intent-delegation/ownership.js';
@@ -60,7 +60,7 @@ describe('intent delegation tools', () => {
       active_step_id: created.activeStepId,
       step_status: 'running',
       breadcrumb: 'Collecting source materials',
-    })) as { overallStatus: string; latestBreadcrumb: string };
+    })) as IntentLedgerRecord;
 
     expect(running.overallStatus).toBe('executing');
     expect(running.latestBreadcrumb).toBe('Collecting source materials');
@@ -351,7 +351,7 @@ function createPlanDraft(input: {
   normalizedIntent?: string;
   deliverable?: string;
   riskTier?: RiskTier;
-}): IntentPlanDraft {
+}): Parameters<typeof appendIntentToLedger>[1] {
   const riskTier = input.riskTier ?? 'medium';
   return {
     instanceId: input.instanceId,

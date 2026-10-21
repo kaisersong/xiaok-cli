@@ -6,6 +6,7 @@ import { truncateText } from './truncation.js';
 import { extractMaterialText } from '../../runtime/materials/text-extractor.js';
 import { detectImageMediaType } from '../../shared/media/image.js';
 import { validateToolImage } from '../runtime/tool-image-channel.js';
+import { beginToolObservation } from '../../runtime/sol-pi/collector-port.js';
 import {
   MODEL_OUTPUT_CAP,
   SENSITIVE_FILE_REDACTION,
@@ -106,12 +107,18 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         max_chars?: number;
       };
       let resolvedPath: string;
-      try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, options.outsideCwdGuard); }
-      catch (error) {
-        let reference: string | undefined;
-        try { reference = realpathSync(resolve(file_path)); } catch { /* Preserve the original denial. */ }
-        if (!reference || !readOnlyPaths.has(reference)) throw error;
-        resolvedPath = reference;
+      const outsideCwdGuard = options.outsideCwdGuard;
+      if (allowOutsideCwd && outsideCwdGuard) {
+        // An active sandbox guard owns every path; its rejection cannot become a reference exception.
+        resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, outsideCwdGuard);
+      } else {
+        try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd); }
+        catch (error) {
+          let reference: string | undefined;
+          try { reference = realpathSync(resolve(file_path)); } catch { /* Preserve the original denial. */ }
+          if (!reference || !readOnlyPaths.has(reference)) throw error;
+          resolvedPath = reference;
+        }
       }
       if (!existsSync(resolvedPath)) return `Error: 文件不存在: ${resolvedPath}`;
       if (isSensitiveFilePath(resolvedPath)) {
@@ -159,6 +166,12 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         const start = offset - 1;
         const slice = limit ? lines.slice(start, start + limit) : lines.slice(start);
         const numbered = slice.map((line, index) => `${start + index + 1}\t${line}`).join('\n');
+        const observation = beginToolObservation(context?.observationCollector, {
+          toolName: 'read', source: { filePath: resolvedPath, offset, ...(limit === undefined ? {} : { limit }) },
+        });
+        observation.append(numbered);
+        observation.finalize({ executionState: 'terminal', outcome: 'success',
+          ...(kind === 'ooxml' ? { incompleteReason: 'extraction_completeness_unverified' } : {}) });
         return truncateText(redactSecrets(numbered).text, max_chars).text;
       } catch (e) {
         context?.signal?.throwIfAborted();

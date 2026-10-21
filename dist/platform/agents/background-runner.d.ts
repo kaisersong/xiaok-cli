@@ -53,5 +53,7 @@ export interface BackgroundRunner {
         settled: boolean;
         pendingJobs: string[];
     }>;
+    /** Host resource owner only; a bounded dispose response is not physical cleanup. */
+    waitForDisposedResources(): Promise<void>;
 }
 export declare function createBackgroundRunner(options: BackgroundRunnerOptions): BackgroundRunner;

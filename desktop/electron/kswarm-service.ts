@@ -1,3 +1,4 @@
+import {createNativeWorkflowReadPort,closeNativeWorkflowReadPort,assertNativeWorkflowReadPort,type NativeWorkflowReadPort} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
 import { buildSidecarEnv } from './sidecar-env.js';
 import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
@@ -13,6 +14,8 @@ import type { ConversationActivityOwnerClient } from '../../src/runtime/conversa
  * - Graceful shutdown on app quit
  */
 
+import { createLocalSourceWriterLifetime } from '../../src/runtime/verification/local-source-writer-lifetime.js';
+import { createOwnedServiceChildCloseTracker } from './owned-service-child-close.js';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { assertRoomWorkspaceSidecarProtocol, assertRoomWorkspaceStartupProtocol } from './room-workspace-protocol.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -623,28 +626,43 @@ export interface CreateKSwarmServiceOptions {
   killStalePortOwner?: typeof killStaleServiceOnPort;
 }
 
-export async function killStaleServiceOnPort(port: number): Promise<boolean> {
-  const pid = await findPidOnPort(port);
-  if (pid == null || pid === process.pid) return false;
+export type StalePortTermination = 'stopped' | 'aborted' | 'owner_changed' | 'not_found' | 'failed';
+
+export async function terminateStalePortOwner(port: number, expectedPid: number, signal: AbortSignal, io: { findOwner(port: number): Promise<number | null>; signalProcess: typeof process.kill } = { findOwner: findPidOnPort, signalProcess: process.kill.bind(process) }): Promise<StalePortTermination> {
+  if (signal.aborted) return 'aborted';
+  const pid = await io.findOwner(port);
+  if (signal.aborted) return 'aborted';
+  if (pid == null || pid === process.pid) return 'not_found';
+  if (pid !== expectedPid) return 'owner_changed';
   try {
-    process.kill(pid, 'SIGTERM');
-  } catch {
-    return false;
-  }
+    if (signal.aborted) return 'aborted';
+    io.signalProcess(pid, 'SIGTERM');
+  } catch { return 'failed'; }
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 200));
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    if (signal.aborted) return 'aborted';
+    try { io.signalProcess(pid, 0); }
+    catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'stopped' : 'failed';
     }
   }
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch { /* already gone */ }
-  await new Promise(r => setTimeout(r, 200));
-  return true;
+  if (signal.aborted) return 'aborted';
+  const currentPid = await io.findOwner(port);
+  if (signal.aborted) return 'aborted';
+  if (currentPid == null) return 'stopped';
+  if (currentPid !== expectedPid) return 'owner_changed';
+  try { io.signalProcess(pid, 'SIGKILL'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return 'failed'; }
+  // This is the legacy stale-listener recovery operation, not close/custody proof.
+  await new Promise(resolve => setTimeout(resolve, 200));
+  return signal.aborted ? 'aborted' : 'stopped';
+}
+
+export async function killStaleServiceOnPort(port: number, context?: { expectedPid: number; signal: AbortSignal }): Promise<boolean> {
+  const pid = context?.expectedPid ?? await findPidOnPort(port);
+  if (pid == null || pid === process.pid) return false;
+  return await terminateStalePortOwner(port, pid, context?.signal ?? new AbortController().signal) === 'stopped';
 }
 
 export function findPidOnPort(port: number): Promise<number | null> {
@@ -689,15 +707,45 @@ export async function recoverOwnedBrokerAuthentication(options: {
   return 'stopped';
 }
 
+const workflowReadPorts = new WeakMap<KSwarmService,{port:NativeWorkflowReadPort;request:KSwarmService['request']}>();
+function assertWorkflowReadService(service:KSwarmService) {
+ const entry=workflowReadPorts.get(service);if(!entry||!instanceClosers.has(service))throw Error('kswarm_workflow_read_instance_unknown');
+ const descriptor=Object.getOwnPropertyDescriptor(service,'request');if(!descriptor||!Object.hasOwn(descriptor,'value')||descriptor.value!==entry.request)throw Error('kswarm_workflow_read_instance_changed');
+ assertNativeWorkflowReadPort(entry.port);return entry;
+}
+export async function getKSwarmWorkflowReadPort(service:KSwarmService):Promise<NativeWorkflowReadPort> {
+ const entry=assertWorkflowReadService(service);
+ const response=await Reflect.apply(entry.request,service,['/health',{method:'GET'}]);
+ await response.body?.cancel();
+ if(!response.ok)throw Error('kswarm_workflow_read_unavailable');
+ if(assertWorkflowReadService(service)!==entry)throw Error('kswarm_workflow_read_instance_changed');
+ return entry.port;
+}
+
+const instanceClosers = new WeakMap<KSwarmService, () => Promise<void>>();
+
+/** Permanently closes this Main instance and observes its direct children close.
+ * External services, descendants and remote work are not covered by this API. */
+export function sealAndDrainKSwarmServiceInstance(service: KSwarmService): Promise<void> {
+  const close = instanceClosers.get(service);
+  if (!close) throw Error('kswarm_service_instance_unknown');
+  return close();
+}
+
 export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): KSwarmService {
   assertRoomWorkspaceStartupProtocol();
+  const ingress = createLocalSourceWriterLifetime('kswarm_service');
+  const background = createLocalSourceWriterLifetime('kswarm_service_background');
+  const ownedChildren = createOwnedServiceChildCloseTracker();
+  const closeAbort = new AbortController();
+  let permanentlySealed = false;
+  let closing: Promise<void> | undefined;
   const spawnProcess = options.spawnProcess ?? spawn;
   const findPortOwner = options.findPortOwner ?? findPidOnPort;
   let activityOwner: ConversationActivityOwnerClient | undefined;
   let activityDelegated = options.activityOwnerPending === true;
   let activityFallback = false;
-  const killStalePortOwner = async (port: number): Promise<boolean> => {
-    // Without the owner this process cannot tell a stale listener from a live owner's managed source.
+  const killStalePortOwner = async (port: number, context?: { expectedPid: number; signal: AbortSignal }): Promise<boolean> => {
     if (activityFallback) return false;
     if (activityDelegated || activityOwner) {
       // A UI process never kills a managed or unknown listener. If the owner
@@ -706,7 +754,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       if (pid && activityOwner) await activityOwner.request('sourceProtected', { pid });
       return false;
     }
-    return (options.killStalePortOwner ?? killStaleServiceOnPort)(port);
+    return (options.killStalePortOwner ?? killStaleServiceOnPort)(port, context);
   };
   let child: ChildProcess | null = null;
   let brokerChild: ChildProcess | null = null;
@@ -852,26 +900,28 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   async function brokerDesktopTokenAccepted(): Promise<boolean> {
     const baseUrls = uniqueServiceUrls(BROKER_HEALTH_URLS.map(url => url.replace(/\/health$/, '')));
     for (const baseUrl of baseUrls) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
         const res = await fetch(`${baseUrl}/rooms`, {
           signal: controller.signal,
           headers: { 'x-intent-broker-room-token': desktopRoomToken },
         });
-        clearTimeout(timer);
         if (res.status === 401) return false;
         return true;
       } catch {
         // fall through to next base URL; unreachable is handled by the health check
-      }
+      } finally { clearTimeout(timer); }
     }
     return true;
   }
 
   function startHealthCheck() {
     stopHealthCheck();
-    healthTimer = setInterval(async () => {
+    if (permanentlySealed) return;
+    healthTimer = setInterval(() => {
+      if (permanentlySealed) return;
+      void background.runAsync(async () => {
       if (!running || stopping) return;
       const ok = await healthCheck();
       healthFailureCount = nextHealthFailureCount(healthFailureCount, ok);
@@ -891,6 +941,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         } catch (error) { lastError = error instanceof Error ? error.message : 'activity_source_unavailable'; notifyListeners(); }
         if (!stopping) scheduleRestart();
       }
+      }).catch(error => { console.error('[kswarm-service] Health loop failed:', error); });
     }, HEALTH_INTERVAL_MS);
   }
 
@@ -991,6 +1042,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   function scheduleRestart() {
+    if (permanentlySealed) return;
     if (terminalDegraded) {
       console.warn('[kswarm-service] Terminal degraded (unrecoverable durable state); skipping restart');
       return;
@@ -1005,8 +1057,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     if (restartTimer) return;
     const delay = Math.min(RESTART_BASE_DELAY_MS * Math.pow(2, restartCount), MAX_RESTART_DELAY_MS);
     console.log(`[kswarm-service] Scheduling restart in ${delay}ms (attempt ${restartCount + 1})`);
-    restartTimer = setTimeout(async () => {
+    restartTimer = setTimeout(() => {
       restartTimer = null;
+      if (permanentlySealed) return;
+      void background.runAsync(async () => {
       if (!stopping && !running && !child) {
         restartCount++;
         try {
@@ -1021,6 +1075,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
           if (!stopping) scheduleRestart();
         }
       }
+      }).catch(error => { console.error('[kswarm-service] Restart loop failed:', error); });
     }, delay);
   }
 
@@ -1104,6 +1159,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       cwd: brokerLaunch.cwd,
       env: nodeRuntime.env,
     }));
+    ownedChildren.track(spawnedBroker, 3_000);
     brokerChild = spawnedBroker;
     spawnedBroker.stdout?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
@@ -1119,6 +1175,13 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         logKSwarmServiceLine('broker', 'stderr', msg);
       }
     });
+    spawnedBroker.on('error', (error) => {
+      logKSwarmServiceLine('broker', 'lifecycle', `Spawn error: ${error.message}`);
+      if (brokerChild !== spawnedBroker) return;
+      brokerChild = null;
+      lastError = `Broker spawn failed: ${error.message}`;
+      notifyListeners();
+    });
     spawnedBroker.on('exit', (code) => {
       const message = `Broker exited: code=${code}`;
       console.log(`[kswarm-service] ${message}`);
@@ -1133,6 +1196,12 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       if (await brokerHealthCheck()) return true;
     }
     return false;
+  }
+
+  async function replaceStalePortOwner(expectedPid?: number): Promise<boolean> {
+    const pid = expectedPid ?? await findPortOwner(KSWARM_PORT);
+    if (permanentlySealed || pid == null || pid === process.pid) return false;
+    return killStalePortOwner(KSWARM_PORT, { expectedPid: pid, signal: closeAbort.signal });
   }
 
   async function spawnServer(): Promise<void> {
@@ -1178,8 +1247,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
           'lifecycle',
           `replacing unhealthy orphan service pid=${portOwner} port=${KSWARM_PORT}`,
         );
-        const killed = await killStalePortOwner(KSWARM_PORT);
-        if (stopping) return;
+        const killed = await replaceStalePortOwner(portOwner);
+        if (permanentlySealed || stopping) return;
         if (!killed) {
           lastError = `failed to kill unhealthy orphan kswarm service on port ${KSWARM_PORT}`;
           running = false;
@@ -1201,8 +1270,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       const reason = formatServiceIdentityBlock(serviceIdentity);
       console.warn(`[kswarm-service] ${reason}`);
       logKSwarmServiceLine('server', 'lifecycle', `replacing stale service: ${reason}`);
-      const killed = await killStalePortOwner(KSWARM_PORT);
-      if (stopping) return;
+      const killed = await replaceStalePortOwner();
+      if (permanentlySealed || stopping) return;
       if (!killed) {
         lastError = `failed to kill stale kswarm service on port ${KSWARM_PORT}: ${reason}`;
         console.error(`[kswarm-service] ${lastError}`);
@@ -1237,8 +1306,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       const reason = `existing kswarm service on port ${KSWARM_PORT} does not support dynamic workflows`;
       console.warn(`[kswarm-service] ${reason}`);
       logKSwarmServiceLine('server', 'lifecycle', `replacing incompatible service: ${reason}`);
-      const killed = await killStalePortOwner(KSWARM_PORT);
-      if (stopping) return;
+      const killed = await replaceStalePortOwner();
+      if (permanentlySealed || stopping) return;
       if (!killed) {
         lastError = `failed to kill incompatible kswarm service on port ${KSWARM_PORT}`;
         console.error(`[kswarm-service] ${lastError}`);
@@ -1309,6 +1378,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     const serverChild = spawnProcess(nodeRuntime.command, [serverPath], buildBackgroundNodeSpawnOptions({
       env: nodeRuntime.env,
     }));
+    ownedChildren.track(serverChild, 5_000);
     child = serverChild;
 
     serverChild.stdout?.on('data', (data: Buffer) => {
@@ -1489,15 +1559,20 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     const ownedChild = child;
     if (!ownedChild) return;
     suppressedServerExits.add(ownedChild);
+    let onExit!: () => void;
+    let timer!: ReturnType<typeof setTimeout>;
     const exitPromise = new Promise<void>(resolve => {
-      ownedChild.once('exit', () => resolve());
-      setTimeout(resolve, 5_000);
+      onExit = resolve;
+      ownedChild.once('exit', onExit);
+      timer = setTimeout(resolve, 5_000);
     });
-    ownedChild.kill('SIGTERM');
-    await exitPromise;
-    if (child === ownedChild) {
-      ownedChild.kill('SIGKILL');
-      child = null;
+    try {
+      ownedChild.kill('SIGTERM');
+      await exitPromise;
+      if (child === ownedChild) { ownedChild.kill('SIGKILL'); child = null; }
+    } finally {
+      clearTimeout(timer);
+      ownedChild.removeListener('exit', onExit);
     }
   }
 
@@ -1523,15 +1598,20 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     if (activityDelegated || activityOwner) throw new Error('activity_source_stop_delegated');
     if (!brokerChild) return;
     const ownedBroker = brokerChild;
+    let onExit!: () => void;
+    let timer!: ReturnType<typeof setTimeout>;
     const exitPromise = new Promise<void>(resolve => {
-      ownedBroker.on('exit', () => resolve());
-      setTimeout(resolve, 3_000);
+      onExit = resolve;
+      ownedBroker.once('exit', onExit);
+      timer = setTimeout(resolve, 3_000);
     });
-    ownedBroker.kill('SIGTERM');
-    await exitPromise;
-    if (brokerChild === ownedBroker) {
-      brokerChild.kill('SIGKILL');
-      brokerChild = null;
+    try {
+      ownedBroker.kill('SIGTERM');
+      await exitPromise;
+      if (brokerChild === ownedBroker) { ownedBroker.kill('SIGKILL'); brokerChild = null; }
+    } finally {
+      clearTimeout(timer);
+      ownedBroker.removeListener('exit', onExit);
     }
   }
 
@@ -1606,8 +1686,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     notifyListeners();
   }
 
-  return {
-    async activityOwnerConfig() {
+  async function activityOwnerConfig() {
       const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
       const brokerLaunch = resolveBrokerLaunchSpec();
       if (!serverPath || !brokerLaunch) throw new Error('activity_source_entry_unavailable');
@@ -1628,13 +1707,53 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         { name: 'kswarm' as const, executable: ksEnv.command, entryPath: serverPath, cwd: dirname(dirname(dirname(serverPath))),
           env: strings(ksEnv.env), healthUrl: `http://127.0.0.1:${KSWARM_PORT}/health`, expectedHealth: expected(serverPath) },
       ] };
-    },
-    bindActivityOwner(client: ConversationActivityOwnerClient) {
+  }
+  function bindActivityOwner(client: ConversationActivityOwnerClient) {
       if (child || brokerChild || startingPromise) throw new Error('activity_source_handoff_required');
       activityOwner = client; activityDelegated = true;
-    },
-    releaseActivityOwnerDelegation() {
+      }
+  function sealAndDrain(): Promise<void> {
+    if (closing) return closing;
+    let resolveClosing!:()=>void;let rejectClosing!:(reason:unknown)=>void;
+    closing=new Promise<void>((resolve,reject)=>{resolveClosing=resolve;rejectClosing=reject;});
+    permanentlySealed = true;
+    const readPort=workflowReadPorts.get(service);
+    const readDrain=readPort?closeNativeWorkflowReadPort(readPort.port):Promise.resolve();
+    const drains = [readDrain, ingress.close(), background.close()];
+    void Promise.allSettled(drains).then(async outcomes => {
+      const errors = outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : []);
+      stopping = true;
+      try { await ownedChildren.closeAll(); } catch (error) { errors.push(error); }
+      running = false;
+      healthFailureCount = 0;
+      notifyListeners();
+      if (errors.length) throw new AggregateError(errors, 'kswarm_service_close_unconfirmed');
+    }).then(resolveClosing,rejectClosing);
+    // Publish the cached Promise before abort listeners can reenter.
+    closeAbort.abort();
+    stopHealthCheck();
+    clearRestartTimer();
+    return closing;
+  }
+  const service: KSwarmService = {
+    start: async () => ingress.runAsync(start),
+    stop: async () => ingress.runAsync(stop),
+    restart: async () => ingress.runAsync(restart),
+    request: async (path, init) => ingress.runAsync(() => request(path, init)),
+    restartRelatedService: async id => ingress.runAsync(() => restartRelatedService(id)),
+    getServiceStatus: async () => ingress.runAsync(getServiceStatus),
+    getHealthDiagnosticInput: async () => ingress.runAsync(getHealthDiagnosticInput),
+    getDesktopMutationToken: () => ingress.runSync(getDesktopMutationToken),
+    getIntentBrokerRoomToken: () => ingress.runSync(getIntentBrokerRoomToken),
+    activityOwnerConfig: async () => ingress.runAsync(activityOwnerConfig),
+    bindActivityOwner: client => ingress.runSync(() => bindActivityOwner(client)),
+    releaseActivityOwnerDelegation: () => ingress.runSync(() => {
       if (activityOwner) return;
       activityDelegated = false; activityFallback = true;
-    }, start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, getIntentBrokerRoomToken, request };
+    }),
+    getStatus, onStatusChange,
+  };
+  instanceClosers.set(service, sealAndDrain);
+  workflowReadPorts.set(service,{port:createNativeWorkflowReadPort(),request:service.request});
+  return service;
 }

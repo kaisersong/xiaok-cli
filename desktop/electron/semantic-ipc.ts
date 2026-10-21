@@ -1,4 +1,9 @@
-import type { IpcMain } from 'electron';
+import { registerCollaborationRoomTypedIpc } from './collaboration-room-typed-ipc.js';
+import type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../shared/collaboration-room-ipc-contract.js';
+import { registerKSwarmProjectAgentTypedIpc } from './kswarm-project-agent-typed-ipc.js';
+import { registerKSwarmTeamTypedIpc } from './kswarm-team-typed-ipc.js';
+import type { AssistantProfileDto, AssistantOverviewDto, AssistantCandidateDto, AssistantAcceptResultDto } from '../shared/assistant-ipc-contract.js';
+import { registerAssistantTypedIpc } from './assistant-typed-ipc.js';
 import type { KSwarmSemanticService } from './kswarm-semantic-service.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
@@ -8,32 +13,33 @@ import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
  * the stable broker_unavailable degraded code instead of a raw crash.
  */
 export interface CollaborationRoomSemanticController {
-  listRooms(): unknown | Promise<unknown>;
-  getRoom(roomId: string): unknown | Promise<unknown>;
-  createRoom(input: unknown): unknown | Promise<unknown>;
-  archiveRoom(input: unknown): unknown | Promise<unknown>;
-  deleteRoom?(input: unknown, authority: {requestSource: 'user'}): unknown | Promise<unknown>;
-  updateRoomMembers(input: unknown): unknown | Promise<unknown>;
-  sendMessage(input: unknown): unknown | Promise<unknown>;
-  markRoomSeen(input: unknown): unknown | Promise<unknown>;
-  cancelDiscussion(input: unknown): unknown | Promise<unknown>;
-  createProjectFromRoom(input: unknown): unknown | Promise<unknown>;
-  createTaskFromRoomMessage(input: unknown): unknown | Promise<unknown>;
+  listRooms(): RoomListResultDto | Promise<RoomListResultDto>;
+  getRoom(roomId: string): RoomSnapshotDto | Promise<RoomSnapshotDto>;
+  createRoom(input: RoomCreateInput, authority?: { requestSource: 'user'; signal?: AbortSignal }): RoomCreateResultDto | Promise<RoomCreateResultDto>;
+  archiveRoom(input: RoomArchiveInput): RoomArchiveResultDto | Promise<RoomArchiveResultDto>;
+  deleteRoom?(input: RoomDeleteInput, authority: { requestSource: 'user' }): RoomDeleteResultDto | Promise<RoomDeleteResultDto>;
+  updateRoomMembers(input: RoomMembersInput): RoomMembersResultDto | Promise<RoomMembersResultDto>;
+  sendMessage(input: RoomSendInput): RoomSendResultDto | Promise<RoomSendResultDto>;
+  markRoomSeen(input: RoomSeenInput): RoomSeenResultDto | Promise<RoomSeenResultDto>;
+  cancelDiscussion(input: RoomCancelInput): RoomCancelResultDto | Promise<RoomCancelResultDto>;
+  createProjectFromRoom(input: RoomProjectCreateInput): RoomProjectCreateResultDto | Promise<RoomProjectCreateResultDto>;
+  createTaskFromRoomMessage(input: RoomTaskCreateInput): RoomTaskCreateResultDto | Promise<RoomTaskCreateResultDto>;
 }
 
 export interface AssistantSemanticController {
-  getOverview(): unknown | Promise<unknown>;
-  activate(input: { requestSource: 'user' }): unknown | Promise<unknown>;
-  pause(input: { requestSource: 'user' }): unknown | Promise<unknown>;
-  resume(input: { requestSource: 'user' }): unknown | Promise<unknown>;
-  acceptCandidate(input: { candidateId: string; collectionId?: string; requestSource: 'user' }): unknown | Promise<unknown>;
-  rejectCandidate(input: { candidateId: string; requestSource: 'user' }): unknown | Promise<unknown>;
+  getOverview(): AssistantOverviewDto | Promise<AssistantOverviewDto>;
+  activate(input: { requestSource: 'user' }): AssistantProfileDto | Promise<AssistantProfileDto>;
+  pause(input: { requestSource: 'user' }): AssistantProfileDto | Promise<AssistantProfileDto>;
+  resume(input: { requestSource: 'user' }): AssistantProfileDto | Promise<AssistantProfileDto>;
+  acceptCandidate(input: { candidateId: string; collectionId?: string; requestSource: 'user' }): AssistantAcceptResultDto | Promise<AssistantAcceptResultDto>;
+  rejectCandidate(input: { candidateId: string; requestSource: 'user' }): AssistantCandidateDto | Promise<AssistantCandidateDto>;
 }
 
 export function registerSemanticDesktopIpc(
   ipcMain: IpcHandleRegistrar,
   options: {
     assistant: AssistantSemanticController;
+    authorizeAssistant?: (event: unknown) => boolean;
     authorizeRoomDeletion?: (event: unknown) => boolean;
     kswarm: KSwarmSemanticService;
     collaborationRooms?: CollaborationRoomSemanticController | null;
@@ -41,61 +47,13 @@ export function registerSemanticDesktopIpc(
 ): void {
   const { assistant, kswarm } = options;
   const rooms = options.collaborationRooms ?? null;
-  const unavailable = () => ({ ok: false, code: 'broker_unavailable' });
-  const roomHandler = <T,>(fn: (controller: CollaborationRoomSemanticController, input: T) => unknown | Promise<unknown>) =>
-    (input: T) => (rooms ? fn(rooms, input) : unavailable());
-  ipcMain.handle('desktop:assistant:getOverview', () => assistant.getOverview());
-  ipcMain.handle('desktop:assistant:activate', () => assistant.activate({ requestSource: 'user' }));
-  ipcMain.handle('desktop:assistant:pause', () => assistant.pause({ requestSource: 'user' }));
-  ipcMain.handle('desktop:assistant:resume', () => assistant.resume({ requestSource: 'user' }));
-  ipcMain.handle('desktop:assistant:acceptCandidate', (_event, input) => assistant.acceptCandidate({
-    candidateId: readId(input?.candidateId),
-    collectionId: readOptionalId(input?.collectionId),
-    requestSource: 'user',
-  }));
-  ipcMain.handle('desktop:assistant:rejectCandidate', (_event, input) => assistant.rejectCandidate({
-    candidateId: readId(input?.candidateId),
-    requestSource: 'user',
-  }));
+  registerAssistantTypedIpc(ipcMain, assistant, options.authorizeAssistant);
 
-  ipcMain.handle('desktop:kswarm:team:plan', (_event, input) => kswarm.planProjectTeam({ projectId: readId(input?.projectId) }));
+  registerKSwarmTeamTypedIpc(ipcMain, kswarm);
 
-  // CollaborationRoom semantic channels: room mutations are ONLY reachable
-  // here — the kswarmProxy* routes deny every room/link path (design §9.3).
-  ipcMain.handle('desktop:collaborationRoom:listRooms', () => roomHandler((controller) => controller.listRooms())(undefined));
-  ipcMain.handle('desktop:collaborationRoom:getRoom', (_event, roomId: string) => roomHandler((controller) => controller.getRoom(roomId))(roomId));
-  ipcMain.handle('desktop:collaborationRoom:createRoom', (_event, input: unknown) => roomHandler((controller) => controller.createRoom(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:archiveRoom', (_event, input: unknown) => roomHandler((controller) => controller.archiveRoom(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:deleteRoom', (event, input: unknown) => {
-    if (options.authorizeRoomDeletion?.(event) !== true) return {ok: false, code: 'room_actor_forbidden'};
-    return rooms?.deleteRoom ? rooms.deleteRoom(input, {requestSource: 'user'}) : unavailable();
-  });
-  ipcMain.handle('desktop:collaborationRoom:updateMembers', (_event, input: unknown) => roomHandler((controller) => controller.updateRoomMembers(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:sendMessage', (_event, input: unknown) => roomHandler((controller) => controller.sendMessage(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:markSeen', (_event, input: unknown) => roomHandler((controller) => controller.markRoomSeen(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:cancelDiscussion', (_event, input: unknown) => roomHandler((controller) => controller.cancelDiscussion(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:createProjectFromRoom', (_event, input: unknown) => roomHandler((controller) => controller.createProjectFromRoom(input))(input));
-  ipcMain.handle('desktop:collaborationRoom:createTaskFromRoomMessage', (_event, input: unknown) => roomHandler((controller) => controller.createTaskFromRoomMessage(input))(input));
-  ipcMain.handle('desktop:kswarm:team:apply', (_event, input) => kswarm.applyProjectTeamPlan({
-    projectId: readId(input?.projectId),
-    planId: readId(input?.planId),
-    projectRevision: readRevision(input?.projectRevision),
-  }));
-  ipcMain.handle('desktop:kswarm:team:getOperation', (_event, input) => kswarm.getProjectTeamOperation({ projectId: readId(input?.projectId) }));
-  ipcMain.handle('desktop:kswarm:project:create', (_event, input) => kswarm.createKSwarmProject(readRecord(input)));
-  ipcMain.handle('desktop:kswarm:project:updateExecutionMode', (_event, input) => kswarm.updateKSwarmProjectExecutionMode({
-    projectId: readId(input?.projectId),
-    executionMode: readExecutionMode(input?.executionMode),
-  }));
-  ipcMain.handle('desktop:kswarm:project:delete', (_event, input) => kswarm.deleteKSwarmProject({ projectId: readId(input?.projectId) }));
-  ipcMain.handle('desktop:kswarm:agent:create', (_event, input) => kswarm.createKSwarmAgent(readRecord(input), { requestSource: 'user' }));
-  ipcMain.handle('desktop:kswarm:agent:update', (_event, input) => kswarm.updateKSwarmAgent({
-    id: readId(input?.agentId), changes: readRecord(input?.patch),
-  }, { requestSource: 'user' }));
-  ipcMain.handle('desktop:kswarm:agent:archive', (_event, input) => kswarm.archiveKSwarmAgent({ id: readId(input?.agentId) }));
-  ipcMain.handle('desktop:kswarm:agent:start', (_event, input) => kswarm.startKSwarmAgent({ id: readId(input?.agentId) }));
-  ipcMain.handle('desktop:kswarm:agent:stop', (_event, input) => kswarm.stopKSwarmAgent({ id: readId(input?.agentId) }));
-  ipcMain.handle('desktop:kswarm:agent:probe', (_event, input) => kswarm.probeKSwarmAgent({ id: readId(input?.agentId) }));
+  registerCollaborationRoomTypedIpc(ipcMain, rooms, options.authorizeRoomDeletion);
+  registerKSwarmProjectAgentTypedIpc(ipcMain, kswarm);
+
 }
 
 function readId(value: unknown): string {

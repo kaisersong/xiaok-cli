@@ -1,0 +1,8 @@
+// @vitest-environment node
+import {beforeAll,expect,it} from 'vitest';import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';
+let facts:{normalMethods:string[];normal:Array<{method:string;value:unknown}>;coercions:Array<{kind:string}>;currentFailures:{createGetterReads:number;getterRefused:boolean;createAgentAllow:boolean}};
+beforeAll(async()=>{const require=createRequire(import.meta.url);const {stdout}=await promisify(execFile)(process.execPath,['--import',require.resolve('tsx'),fileURLToPath(new URL('../fixtures/knowledge-owned-child/main-normal-controls.mts',import.meta.url))],{timeout:15000});const line=stdout.split('\n').find(x=>x.startsWith('KNOWLEDGE_FACTS:'));expect(line).toBeDefined();facts=JSON.parse(line!.slice('KNOWLEDGE_FACTS:'.length));},18000);
+it.each(['listCollections','createCollection','deleteCollection','listSources','addSource','pickFiles','deleteSource','getCollectionState','getSourceContent','search'])('retains real Main %s with actual SQLite and isolated own data',method=>{expect(facts.normalMethods).toContain(method);});
+it('retains content coercion and finite projection for eight legacy scalar inputs',()=>{expect(facts.coercions.filter(x=>x.kind==='content')).toHaveLength(8);});
+it('retains original search slice behavior for seven legacy scalar limits',()=>{expect(facts.coercions.filter(x=>x.kind==='search')).toHaveLength(7);});
+it('retains actual agent create while refusing wire accessors without reading them',()=>{expect(facts.currentFailures).toEqual({createGetterReads:0,getterRefused:true,createAgentAllow:true});});

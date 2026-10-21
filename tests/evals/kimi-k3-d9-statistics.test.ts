@@ -131,7 +131,7 @@ describe('Kimi K3 D9 statistics', () => {
       clustersByStratum: strata,
       iterations: 10_000,
       seed: 2026072802,
-      valueSelector: value => {
+      valueSelector: (value: number) => {
         selectorCalls += 1;
         return value;
       },

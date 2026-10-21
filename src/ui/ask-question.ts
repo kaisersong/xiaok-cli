@@ -303,20 +303,11 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
 
     function onKey(data: string | Buffer) {
       if (settled) return;
-      const input = typeof data === 'string' ? data : data.toString('utf8');
-      // A stdin data event is a byte batch, not a single key. Keep CSI sequences
-      // and multi-digit numbers intact, then apply the keys in arrival order.
-      const keys = input.match(/\x1b\[[0-?]*[ -/]*[@-~]|\d+|[\r\n \x1b\x03\x7f\x08]/g) ?? [];
-      // Preserve the old behavior for arbitrary pasted text in a choice menu.
-      if (keys.join('') !== input) return;
-      for (const key of keys) {
-        if (settled) break;
-        handleKey(key);
-      }
-    }
-
-    function handleKey(key: string) {
-      if (settled) return;
+      const raw = typeof data === 'string' ? data : data.toString('utf8');
+      // stdin may coalesce numeric choices, arrows and Enter. Keep escape
+      // parameters and CRLF atomic, and preserve buffered-number validation.
+      const keys = raw.match(/\x1b(?:\[[0-?]*[ -/]*(?:[@-~]|$)|O[0-?]*[ -/]*(?:[@-~]|$))|\r\n|\d+|[ \r\n\x1b\x03\x7f\x08]/g) ?? [];
+      if (keys.join('') !== raw) return;
       const UP    = '\x1b[A';
       const DOWN  = '\x1b[B';
       const ENTER = '\r';
@@ -324,48 +315,51 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
       const CTRL_C = '\x03';
       const ESC   = '\x1b';
 
-      if (key === CTRL_C || key === ESC) {
-        finish(null);
-        return;
-      }
-
-      try {
-        if (key === UP) {
-          numberInput = '';
-          selectedIdx = (selectedIdx - 1 + allOptions.length) % allOptions.length;
-          draw();
-        } else if (key === DOWN) {
-          numberInput = '';
-          selectedIdx = (selectedIdx + 1) % allOptions.length;
-          draw();
-        } else if (key === SPACE && params.multiSelect) {
-          chooseIndex(selectedIdx);
-        } else if (allOptions.length > 9 && (key === '\x7f' || key === '\x08')) {
-          numberInput = numberInput.slice(0, -1);
-          draw();
-        } else if (/^\d+$/.test(key)) {
-          if (allOptions.length <= 9) {
-            for (const digit of key) {
-              const number = Number(digit);
-              if (number > 0 && number <= allOptions.length) chooseIndex(number - 1);
-              if (settled) break;
-            }
-          } else {
-            const candidate = numberInput + key;
-            if (!candidate.startsWith('0') && candidate.length <= String(allOptions.length).length) {
-              numberInput = candidate;
-              draw();
-            }
-          }
-        } else if (key === ENTER || key === '\n') {
-          if (numberInput) {
-            const index = Number(numberInput) - 1;
-            if (index >= 0 && index < allOptions.length) chooseIndex(index);
-          } else {
-            confirmSelection();
-          }
+      for (const key of keys) {
+        if (settled) break;
+        if (key === CTRL_C || key === ESC) {
+          finish(null);
+          return;
         }
-      } catch (error) { finish(null, error); }
+
+        try {
+          if (key === UP) {
+            numberInput = '';
+            selectedIdx = (selectedIdx - 1 + allOptions.length) % allOptions.length;
+            draw();
+          } else if (key === DOWN) {
+            numberInput = '';
+            selectedIdx = (selectedIdx + 1) % allOptions.length;
+            draw();
+          } else if (key === SPACE && params.multiSelect) {
+            chooseIndex(selectedIdx);
+          } else if (allOptions.length > 9 && (key === '\x7f' || key === '\x08')) {
+            numberInput = numberInput.slice(0, -1);
+            draw();
+          } else if (/^\d+$/.test(key)) {
+            if (allOptions.length <= 9) {
+              for (const digit of key) {
+                const number = Number(digit);
+                if (number > 0 && number <= allOptions.length) chooseIndex(number - 1);
+                if (settled) break;
+              }
+            } else {
+              const candidate = numberInput + key;
+              if (!candidate.startsWith('0') && candidate.length <= String(allOptions.length).length) {
+                numberInput = candidate;
+                draw();
+              }
+            }
+          } else if (key === ENTER || key === '\n' || key === '\r\n') {
+            if (numberInput) {
+              const index = Number(numberInput) - 1;
+              if (index >= 0 && index < allOptions.length) chooseIndex(index);
+            } else {
+              confirmSelection();
+            }
+          }
+        } catch (error) { finish(null, error); }
+      }
     }
 
     process.stdin.on('data', onKey);

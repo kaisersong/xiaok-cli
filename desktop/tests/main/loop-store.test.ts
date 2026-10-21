@@ -66,10 +66,23 @@ describe('LoopStore', () => {
     db.close();
 
     expect(rows.map(row => row.name)).toEqual([
+      'loop_artifact_exports',
       'loop_definitions',
       'loop_learned_constraints',
+      'loop_native_attempts',
+      'loop_producer_results',
+      'loop_projection_generations',
+      'loop_projection_origins',
+      'loop_publication_attempts',
+      'loop_publication_candidate_members',
+      'loop_publication_candidates',
+      'loop_publication_configs',
+      'loop_run_publication_basis',
       'loop_runs',
+      'loop_stage_execution_results',
       'loop_stages',
+      'loop_verification_executions',
+      'loop_verification_sessions',
       'user_loop_templates',
     ]);
 
@@ -740,7 +753,7 @@ describe('LoopStore — task_completion kind', () => {
     const run = expectStarted(store.beginLoopRun('tc-meta', { kind: 'manual' }, 2_000, 60_000));
     const stage = store.startLoopStage(run.id, 'tc-meta', 'execute', 2_000, { trigger: { kind: 'manual' } });
     store.updateLoopStageMetadata(stage.id, { taskId: 'task_123' });
-    const updated = store.getLoopStage(stage.id);
+    const updated = store.listLoopStages(run.id).find(value => value.id === stage.id);
     expect(updated!.metadata).toMatchObject({ trigger: { kind: 'manual' }, taskId: 'task_123' });
   });
 

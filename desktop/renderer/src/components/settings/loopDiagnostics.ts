@@ -41,10 +41,13 @@ export function getLoopAnomalyLogPaths(anomaly: EvidenceAnomalyView): string[] {
 }
 
 export function buildLoopDiagnosticsSummary({
+  observationLabel, labels,
   loop,
   runs,
   anomalies,
 }: {
+  observationLabel:(run:LoopRunView)=>string
+  labels:{loop:string;status:string;history:string;observation:string;finishedAt:string;openAnomalies:string;owner:string;seen:string;suggestedAction:string;logs:string;none:string}
   loop: LoopDefinitionView
   runs: LoopRunView[]
   anomalies: EvidenceAnomalyView[]
@@ -52,20 +55,22 @@ export function buildLoopDiagnosticsSummary({
   const latestRun = runs[0]
   const openAnomalies = getOpenLoopAnomalies(anomalies)
   const lines = [
-    `Loop: ${loop.title} (${loop.id})`,
-    `Status: ${loop.status}`,
-    `Latest run: ${latestRun ? `${latestRun.status} at ${new Date(latestRun.finishedAt ?? latestRun.updatedAt ?? latestRun.startedAt).toISOString()}` : 'none'}`,
-    `Open anomalies: ${openAnomalies.length}`,
+    `${labels.loop}: ${loop.title} (${loop.id})`,
+    `${labels.status}: ${loop.status}`,
+    `${labels.history}: ${latestRun?.status??labels.none}`,
+    `${labels.observation}: ${latestRun?observationLabel(latestRun):labels.none}`,
+    `${labels.finishedAt}: ${latestRun?new Date(latestRun.finishedAt??latestRun.updatedAt??latestRun.startedAt).toISOString():labels.none}`,
+    `${labels.openAnomalies}: ${openAnomalies.length}`,
   ]
 
   for (const anomaly of openAnomalies) {
     const suggestedAction = getLoopAnomalySuggestedAction(anomaly)
     const logPaths = getLoopAnomalyLogPaths(anomaly)
     lines.push(`- ${anomaly.kind}: ${anomaly.message}`)
-    lines.push(`  owner: ${anomaly.ownerKind}/${anomaly.ownerId}`)
-    lines.push(`  seen: ${anomaly.seenCount}`)
-    if (suggestedAction) lines.push(`  suggested action: ${suggestedAction}`)
-    if (logPaths.length > 0) lines.push(`  logs: ${logPaths.join(', ')}`)
+    lines.push(`  ${labels.owner}: ${anomaly.ownerKind}/${anomaly.ownerId}`)
+    lines.push(`  ${labels.seen}: ${anomaly.seenCount}`)
+    if (suggestedAction) lines.push(`  ${labels.suggestedAction}: ${suggestedAction}`)
+    if (logPaths.length > 0) lines.push(`  ${labels.logs}: ${logPaths.join(', ')}`)
   }
 
   return lines.join('\n')

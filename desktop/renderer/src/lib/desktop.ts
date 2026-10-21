@@ -1,3 +1,4 @@
+import type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../../../shared/collaboration-room-ipc-contract.js';
 /**
  * Renderer-side bridge for collaboration room APIs (design §12, §16.4).
  *
@@ -14,54 +15,8 @@ function requireDesktopApi() {
   return api;
 }
 
-export interface RoomUiSnapshot {
-  executionCapabilities?: Array<{ logicalAgentId: string; mode: 'workspace_worker' | 'discussion_only' | 'discussion_unavailable'; runtime?: string; reason?: string }>;
-  ok: boolean;
-  code?: string;
-  degraded?: boolean;
-  room?: { roomId: string; title?: string; description?: string; status: string; revision?: number };
-  members?: Array<{
-    alias?: string;
-    displayName?: string;
-    subject: { kind: 'user'; userId: string } | { kind: 'agent'; logicalAgentId: string };
-    role: string;
-    status: string;
-  }>;
-  messages?: Array<{
-    messageId: string;
-    text?: string;
-    kind: string;
-    sender?: { kind: string; userId?: string; logicalAgentId?: string; service?: string };
-    roomSequence?: number;
-    replyToMessageId?: string;
-    idempotencyKey?: string;
-    createdAt?: string;
-    sourceRef?: {
-      kind?: string;
-      attachments?: Array<{ filePath: string; name: string }>;
-      projectId?: string;
-      projectRevision?: number;
-      eventType?: string;
-      eventKind?: string;
-      projectionEventId?: string;
-      taskId?: string;
-      artifactId?: string;
-      artifact?: {
-        projectId?: string;
-        filename?: string;
-        kind?: string;
-        mimeType?: string;
-      };
-    };
-  }>;
-  projects?: Array<{ id: string; name?: string; status?: string }>;
-}
-
-export interface RoomListResult {
-  ok: boolean;
-  code?: string;
-  rooms?: Array<{ roomId: string; title: string; description?: string; status: string; revision?: number; lastActivityAt?: string; createdAt?: string; updatedAt?: string }>;
-}
+export type RoomUiSnapshot = RoomSnapshotDto;
+export type RoomListResult = RoomListResultDto;
 
 export type CollaborationRoomEvent =
   | { type: 'workspace_changed'; kind?: 'workspace_changed'; roomId: string }
@@ -88,35 +43,28 @@ export const desktop = {
   async getCollaborationRoom(roomId: string): Promise<RoomUiSnapshot> {
     return requireDesktopApi().getCollaborationRoom(roomId) as Promise<RoomUiSnapshot>;
   },
-  async sendCollaborationRoomMessage(input: {
-    roomId: string;
-    text: string;
-    filePaths: string[];
-    idempotencyKey: string;
-    replyToMessageId?: string;
-    contextScope?: { kind: string; projectId?: string };
-  }): Promise<unknown> {
+  async sendCollaborationRoomMessage(input: RoomSendInput): Promise<RoomSendResultDto> {
     return requireDesktopApi().sendCollaborationRoomMessage(input);
   },
   onCollaborationRoomEvent(listener: (event: CollaborationRoomEvent) => void): () => void {
     return requireDesktopApi().onCollaborationRoomEvent(listener as (event: unknown) => void);
   },
-  async createCollaborationRoom(input: unknown): Promise<unknown> {
+  async createCollaborationRoom(input: RoomCreateInput): Promise<RoomCreateResultDto> {
     return requireDesktopApi().createCollaborationRoom(input);
   },
-  async deleteCollaborationRoom(input: {roomId: string; expectedRoomRevision: number}): Promise<unknown> {
+  async deleteCollaborationRoom(input: RoomDeleteInput): Promise<RoomDeleteResultDto> {
     return requireDesktopApi().deleteCollaborationRoom(input);
   },
-  async archiveCollaborationRoom(input: unknown): Promise<unknown> {
+  async archiveCollaborationRoom(input: RoomArchiveInput): Promise<RoomArchiveResultDto> {
     return requireDesktopApi().archiveCollaborationRoom(input);
   },
-  async updateCollaborationRoomMembers(input: unknown): Promise<unknown> {
+  async updateCollaborationRoomMembers(input: RoomMembersInput): Promise<RoomMembersResultDto> {
     return requireDesktopApi().updateCollaborationRoomMembers(input);
   },
-  async markCollaborationRoomSeen(input: unknown): Promise<unknown> {
+  async markCollaborationRoomSeen(input: RoomSeenInput): Promise<RoomSeenResultDto> {
     return requireDesktopApi().markCollaborationRoomSeen(input);
   },
-  async createProjectFromRoom(input: unknown): Promise<unknown> {
+  async createProjectFromRoom(input: RoomProjectCreateInput): Promise<RoomProjectCreateResultDto> {
     return requireDesktopApi().createProjectFromRoom(input);
   },
 };

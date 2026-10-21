@@ -1,7 +1,31 @@
+import { computeSessionHistoryDigest } from './session-store/store.js';
 import { applyCompactionPlan, estimateTokens, mergeUsage, planCompaction as buildCompactionPlan, } from './usage.js';
 import { AgentSessionGraph } from './session-graph.js';
 let nextCompactionId = 0;
 export class AgentSessionState {
+    observationRestoreGeneration = 0;
+    publishedHistoryBasis;
+    getPublishedHistoryBasis() {
+        return this.publishedHistoryBasis ??= computeSessionHistoryDigest(this.graph.exportSnapshot());
+    }
+    /** Host complete-history publisher only, after the exact snapshot was committed.
+     * Generic metadata receipts never advance this lineage. */
+    notePublishedHistory(snapshot, expectedBasis) {
+        const digest = computeSessionHistoryDigest(snapshot);
+        if (snapshot.sessionId !== this.graph.exportSnapshot().sessionId
+            || (this.getPublishedHistoryBasis() !== expectedBasis && this.getPublishedHistoryBasis() !== digest))
+            throw Error('SESSION_PUBLISHED_HISTORY_STALE');
+        this.publishedHistoryBasis = digest;
+    }
+    observationRestoreListeners = new Set();
+    onObservationRestoreGeneration(listener) {
+        const listeners = this.observationRestoreListeners;
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+    }
+    getObservationRestoreGeneration() {
+        return this.observationRestoreGeneration;
+    }
     graph = new AgentSessionGraph({
         sessionId: 'transient',
         cwd: process.cwd(),
@@ -12,6 +36,12 @@ export class AgentSessionState {
     promptSnapshotId;
     promptMemoryRefs;
     promptCwd;
+    addProtectedObservationReferences(refs) {
+        this.graph.addProtectedObservationReferences(refs);
+    }
+    getProtectedObservationClosure() {
+        return this.graph.getProtectedObservationClosure();
+    }
     getMessages() {
         return this.graph.getMessages();
     }
@@ -157,7 +187,35 @@ export class AgentSessionState {
     exportSnapshot() {
         return this.graph.exportSnapshot();
     }
+    updatePersistenceFacts(snapshot) {
+        const current = this.graph.exportSnapshot();
+        if (snapshot.sessionId !== current.sessionId || snapshot.cwd !== current.cwd
+            || !Number.isSafeInteger(snapshot.storeRevision) || (snapshot.storeRevision ?? -1) < (current.storeRevision ?? 0)
+            || snapshot.historyDigest !== computeSessionHistoryDigest(snapshot))
+            throw Error('SESSION_PERSISTENCE_RECEIPT_INVALID');
+        this.graph.updatePersistenceFacts(snapshot);
+    }
+    /** Same-owner installation after a successful durable CAS. This is not a restore
+     * and must not invalidate the live observation provenance generation. */
+    installCommittedSnapshot(input) {
+        const current = this.graph.exportSnapshot(), next = input.snapshot;
+        if (this.graph.getRevision() !== input.expectedRevision || computeSessionHistoryDigest(current) !== input.expectedHistoryDigest
+            || next.sessionId !== current.sessionId || next.cwd !== current.cwd
+            || !Number.isSafeInteger(next.storeRevision) || (next.storeRevision ?? -1) < (current.storeRevision ?? 0)
+            || next.historyDigest !== computeSessionHistoryDigest(next))
+            throw Error('SEMANTIC_LIVE_COMMIT_STALE');
+        this.graph.restoreSnapshot(next);
+        this.publishedHistoryBasis = computeSessionHistoryDigest(next);
+    }
     restoreSnapshot(snapshot) {
+        this.observationRestoreGeneration += 1;
+        for (const listener of [...this.observationRestoreListeners]) {
+            try {
+                listener();
+            }
+            catch { /* One failed cleanup cannot suppress the remaining revocations. */ }
+        }
         this.graph.restoreSnapshot(snapshot);
+        this.publishedHistoryBasis = computeSessionHistoryDigest(snapshot);
     }
 }

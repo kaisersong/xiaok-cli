@@ -1,3 +1,4 @@
+import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
@@ -5,8 +6,8 @@ import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { GoalBar } from './GoalBar';
-import type { DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared } from '../../../electron/preload-api';
-import type { GoalInput } from '../../../../src/runtime/goal/types';
+import type { DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared, DesktopGoalNativeMutationProjection } from '../../../electron/preload-api';
+import type { GoalCreationInput } from '../../../shared/host-observation-types';
 import { attachPreparedGoalTask } from '../lib/goal-task-attachment';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
@@ -272,6 +273,8 @@ export function ChatShell() {
   const location = useLocation();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
+  const [observationDraft, setObservationDraft] = useState<string|null>(null);
+  useEffect(()=>setObservationDraft(null),[taskId]);
   const [agentHistory, setAgentHistory] = useState<{ threadId: string; groupId?: string } | null>(null);
   const [canvasVisible, setCanvasVisible] = useState(false);
   const sidebarWasCollapsedRef = useRef(false);
@@ -288,6 +291,7 @@ export function ChatShell() {
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
+  const [goalNativeMutation, setGoalNativeMutation] = useState<DesktopGoalNativeMutationProjection | null>(null);
   const [goalLoading, setGoalLoading] = useState(false);
   const [goalError, setGoalError] = useState<string | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -847,18 +851,32 @@ export function ChatShell() {
     if (!desktop) return;
     let live = true;
     const capturedAttempt = goalAttemptRef.current;
+    let goalReadGeneration = 0;
     const initialCurrent = () => live && liveRenderScope.current === renderScope && goalAttemptRef.current === capturedAttempt;
     setGoalLoading(true);
     setGoalError(null);
+    setGoalNativeMutation(null);
+    void desktop.getGoalNativeMutation?.(taskId).then(value => {
+      if (initialCurrent()) setGoalNativeMutation(value);
+    }).catch(() => { /* Existing Goal read reports service availability. */ });
     void desktop.getGoal(taskId).then(value => {
-      if (initialCurrent()) applyGoal(value);
+      if (initialCurrent() && goalReadGeneration === 0) applyGoal(value);
     }).catch(error => {
       if (initialCurrent()) setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
     }).finally(() => {
       if (initialCurrent()) setGoalLoading(false);
     });
     const unsubscribeChanged = desktop.onGoalChanged(event => {
-      if (live && liveRenderScope.current === renderScope && event.threadId === taskId) applyGoal(event.goal);
+      if (!live || liveRenderScope.current !== renderScope || event.threadId !== taskId) return;
+      const generation = ++goalReadGeneration, attempt = goalAttemptRef.current;
+      applyGoal(event.goal);
+      if (event.goal.currentCompletion?.kind === 'unavailable') {
+        // Main owns current verification; this event-driven read never decides continuation.
+        void desktop.getGoal(taskId).then(value => {
+          if (live && liveRenderScope.current === renderScope && generation === goalReadGeneration
+            && goalAttemptRef.current === attempt) applyGoal(value);
+        }).catch(() => { /* Keep the explicit unavailable state. */ });
+      }
     });
     const unsubscribePrepared = desktop.onGoalTaskPrepared(prepared => {
       if (!live || liveRenderScope.current !== renderScope || !validPrepared(prepared)) return;
@@ -1355,6 +1373,15 @@ export function ChatShell() {
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId || admissionPending.current === renderScope) return false;
+    if (observationDraft && files?.length) {
+      // Reuse the ordinary task error message position; no Goal panel is required.
+      setMessages(previous => [...previous, {
+        id: `msg-${Date.now()}-err`,
+        role: 'assistant',
+        content: t.observation.filesUnsupported,
+      }]);
+      return false;
+    }
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {
@@ -1407,7 +1434,10 @@ export function ChatShell() {
     try {
       // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
-      if (files && files.length > 0) {
+      if (observationDraft) {
+        const draftId=observationDraft;setObservationDraft(null);
+        newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
+      } else if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
         const result = await createGoalAwareTaskWithRetry(() => api.createTaskWithFiles({
           prompt: text, filePaths, context: submitContext,
@@ -1531,7 +1561,7 @@ export function ChatShell() {
   };
 
   const runGoalMutation = async (
-    action: () => Promise<DesktopGoalProjection>,
+    action: () => Promise<DesktopGoalProjection | null>,
     clearTaskPresentation = false,
   ) => {
     const attempt = beginGoalAttempt();
@@ -1558,7 +1588,31 @@ export function ChatShell() {
     await attachGoalTask(prepared, attempt);
   };
 
-  const handleGoalCreate = async (input: GoalInput) => {
+  const refreshGoalNative = async (attempt: GoalAttempt) => {
+    const desktop = getDesktopApi();
+    if (!taskId || !desktop?.getGoalNativeMutation) return;
+    try { const next = await desktop.getGoalNativeMutation(taskId); if (currentAttempt(attempt)) setGoalNativeMutation(next); }
+    catch { /* Keep the original operation error; never infer approval. */ }
+  };
+
+  const handleGoalNativeAction = async (action: 'recover' | 'continue' | 'cancel') => {
+    const desktop = getDesktopApi();
+    if (!taskId || !desktop) return;
+    const attempt = beginGoalAttempt(action === 'continue');
+    await runGoalAttempt(attempt, async () => {
+      if (action === 'continue') await acceptGoalReply(attempt, await desktop.continueGoalNativeMutation({ threadId: taskId, requestId: attempt.requestId }));
+      else if (action === 'recover') {
+        const result = await desktop.recoverGoalNativeMutation({ threadId: taskId });
+        if (currentAttempt(attempt)) { setGoalNativeMutation(result.mutation); applyGoal(result.goal); }
+      } else {
+        const result = await desktop.cancelGoalNativeMutation({ threadId: taskId });
+        if (currentAttempt(attempt)) setGoalNativeMutation(result);
+      }
+    });
+    await refreshGoalNative(attempt);
+  };
+
+  const handleGoalCreate = async (input: GoalCreationInput) => {
     if (!taskId) return;
     const desktop = getDesktopApi();
     if (!desktop) return;
@@ -1567,9 +1621,10 @@ export function ChatShell() {
       const reply = await desktop.createGoal({ threadId: taskId, ...input, requestId: attempt.requestId });
       await acceptGoalReply(attempt, reply, input.objective);
     });
+    await refreshGoalNative(attempt);
   };
 
-  const handleGoalReplace = async (input: GoalInput) => {
+  const handleGoalReplace = async (input: GoalCreationInput) => {
     if (!taskId) return;
     const desktop = getDesktopApi();
     if (!desktop) return;
@@ -1578,6 +1633,7 @@ export function ChatShell() {
       const reply = await desktop.replaceGoal({ threadId: taskId, ...input, requestId: attempt.requestId });
       await acceptGoalReply(attempt, reply, input.objective);
     });
+    await refreshGoalNative(attempt);
   };
 
   const handleGoalResume = async (turnLimit?: number) => {
@@ -1713,12 +1769,16 @@ export function ChatShell() {
     return collectGeneratedFilesForTurn(currentTaskEventsRef.current, textsToScan);
   })();
 
-  const showGoalPanel = goal !== null || state?.createGoal === true;
+  const showGoalPanel = goal !== null || (goalNativeMutation !== null && goalNativeMutation.status !== 'applied') || state?.createGoal === true;
   const showTaskPanel = planSteps.length > 0 || showGoalPanel;
   const goalContent = showGoalPanel ? (
     <GoalBar
       key={taskId}
       goal={goal}
+      nativeMutation={goalNativeMutation}
+      onRecoverNative={() => handleGoalNativeAction('recover')}
+      onContinueNative={() => handleGoalNativeAction('continue')}
+      onCancelNative={() => handleGoalNativeAction('cancel')}
       initialEditing={state?.createGoal === true}
       loading={goalLoading}
       error={goalError}
@@ -1729,6 +1789,14 @@ export function ChatShell() {
         if (taskId && desktop) return runGoalMutation(() => desktop.pauseGoal(taskId), true);
       }}
       onResume={handleGoalResume}
+      onRecoverPublication={() => {
+        const desktop = getDesktopApi();
+        if (taskId && desktop) return runGoalMutation(() => desktop.recoverGoalPublication({ threadId: taskId }));
+      }}
+      onContinuePublication={() => {
+        const desktop = getDesktopApi();
+        if (taskId && desktop) return runGoalMutation(() => desktop.continueGoalPublication({ threadId: taskId }));
+      }}
       onCancel={() => {
         const desktop = getDesktopApi();
         if (taskId && desktop) return runGoalMutation(() => desktop.cancelGoal(taskId), true);
@@ -1794,13 +1862,14 @@ export function ChatShell() {
       historicalSelection={multiAgent.summary.historicalSelection} deleted={multiAgent.summary.deleted}
       taskContent={taskContent} canvasContent={canvasContent} canvasOpen={canvasOpen} canvasExpanded={canvasExpanded}
       canvasRequestId={canvasPreviewModeRequest.id} onCanvasVisibilityChange={setCanvasVisible}
+      approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
+      <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
       <ChatView
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
-        approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
         thread={thread}
         messages={messages}
         streamingText={streamingText}

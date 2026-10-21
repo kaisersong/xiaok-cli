@@ -1,3 +1,4 @@
+import { useSkillListReadonly } from '../hooks/useSkillReadonly';
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
@@ -74,7 +75,8 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>(initialFiles ?? []);
   const [focused, setFocused] = useState(false);
-  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const skillFacts = useSkillListReadonly();
+  const skills = skillFacts.data ?? [];
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [mentionTrigger, setMentionTrigger] = useState<MentionTrigger | null>(null);
   const [slashQuery, setSlashQuery] = useState('');
@@ -194,13 +196,6 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     el.addEventListener('paste', handler);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    api.listSkills().then(list => setSkills(list)).catch(() => {});
-    const unsubscribe = api.onSkillsChanged?.(() => {
-      api.listSkills().then(list => setSkills(list)).catch(() => {});
-    });
-    return unsubscribe;
-  }, []);
 
   useEffect(() => {
     if (autoFocus && textareaRef.current) {
@@ -451,6 +446,8 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
   return (
     <div className="w-full relative">
+      {skillFacts.data === null && !skillFacts.failed && <p role="status">{t.skillsReadonlyUnknown}</p>}
+      {skillFacts.failed && <p role="alert">{t.skillsReadonlyListFailed}<button type="button" onClick={() => skillFacts.refresh()}>{t.skillsReadonlyRetry}</button></p>}
       {mentionTrigger && matchedMentions.length > 0 && (
         <div className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg">
           <div className="border-b border-[var(--c-border)] p-2 text-xs text-[var(--c-text-secondary)]">

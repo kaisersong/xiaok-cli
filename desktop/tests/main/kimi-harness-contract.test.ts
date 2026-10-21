@@ -10,7 +10,7 @@ import { createDesktopPromptCacheAffinity } from '../../../src/ai/runtime/prompt
 import { streamDesktopTaskProviderConversation } from '../../../src/ai/runtime/provider-conversation-authorization.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
-import type { Message, StreamChunk, ToolDefinition, UsageStats } from '../../../src/types.js';
+import type { Message, MessageBlock, StreamChunk, ToolDefinition, UsageStats } from '../../../src/types.js';
 import {
   buildDesktopProviderMessages,
   runDesktopToolLoop,
@@ -438,7 +438,7 @@ describe('CLI/Desktop Kimi harness captured-request contract', () => {
       stepId: 'step-1',
       taskId: 'task-1',
       materials: [],
-      emitRuntimeEvent() {},
+      async emitRuntimeEvent() {},
       skillInvocation: null,
       skillCatalog: {} as never,
       dataRoot: rootDir,
@@ -531,7 +531,7 @@ describe('CLI/Desktop Kimi harness captured-request contract', () => {
       stepId: 'step-replay',
       taskId: 'task-replay',
       materials: [],
-      emitRuntimeEvent(event) {
+      async emitRuntimeEvent(event) {
         runtimeEvents.push(event as unknown as Record<string, unknown>);
       },
       skillInvocation: null,
@@ -570,7 +570,14 @@ describe('CLI/Desktop Kimi harness captured-request contract', () => {
       session: { messages: Message[] };
       messages: Message[];
       toolDefinitions: ToolDefinition[];
+      hostProviderInvocationId: string;
+      modelSupportsImageInput: boolean;
+      emitToolImage(image: Extract<MessageBlock, { type: 'image' }>): void;
     };
+    expect(projectedContext.hostProviderInvocationId).toMatch(/^inv_/);
+    expect(projectedContext.modelSupportsImageInput).toBe(adapter.getCapabilities().supportsImageInput === true);
+    expect(typeof projectedContext.emitToolImage).toBe('function');
+    expect(() => projectedContext.emitToolImage({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } })).toThrow('tool_image_invocation_closed');
     expect(Object.isFrozen(projectedContext.session)).toBe(true);
     expect(Object.isFrozen(projectedContext.session.messages)).toBe(true);
     expect(Object.isFrozen(projectedContext.messages)).toBe(true);

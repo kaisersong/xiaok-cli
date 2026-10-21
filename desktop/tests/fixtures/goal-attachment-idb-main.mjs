@@ -33,7 +33,25 @@ ipcMain.handle('desktop:goal:ackTaskAttached', (_event, input) => {
   attached = true;
 });
 ipcMain.handle('desktop:goal:setUserQueuePending', () => {});
-ipcMain.handle('desktop:subscribeTask', (_event, input) => { metrics.subscriptions.push(input.taskId); });
+// Only scripted A/B have a task record; neither has an Observation allocation.
+// Real status absence: desktop-services.observationTaskStatus, not an off/active grant.
+ipcMain.handle('desktop:getObservationTaskStatus', (_event, input) => {
+  if (!input || Object.keys(input).length !== 1 || ![taskA, taskB].includes(input.taskId)) throw new Error('fixture_wrong_task');
+  const value = snapshot(threadId, input.taskId, attached);
+  if (value.protectedObservationClosure || value.executionProtected) throw new Error('fixture_protected_observation_not_modeled');
+  return { mode: 'unavailable' };
+});
+const taskSubscriptions = new Map();
+ipcMain.handle('desktop:subscribeTask', (event, input) => {
+  if (![taskA, taskB].includes(input.taskId) || typeof input.subscriptionId !== 'string' || !input.subscriptionId) throw new Error('fixture_wrong_subscription');
+  taskSubscriptions.set(`${event.sender.id}:${input.taskId}`, input.subscriptionId);
+  metrics.subscriptions.push(input.taskId);
+});
+ipcMain.handle('desktop:unsubscribeTask', (event, input) => {
+  if (![taskA, taskB].includes(input.taskId) || typeof input.subscriptionId !== 'string' || !input.subscriptionId) throw new Error('fixture_wrong_subscription');
+  const key = `${event.sender.id}:${input.taskId}`;
+  if (taskSubscriptions.get(key) === input.subscriptionId) taskSubscriptions.delete(key);
+});
 ipcMain.handle('desktop:recoverTask', (_event, input) => {
   if (![taskA, taskB].includes(input.taskId)) throw new Error('fixture_wrong_task');
   metrics.recoveries.push(input.taskId); return { snapshot: snapshot(threadId, input.taskId, attached) };

@@ -1,5 +1,7 @@
 import { expect, test, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer } from 'node:http';
+import { build } from 'esbuild';
+import type { api as rendererThreadApi } from '../../renderer/src/api/bridge';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -18,8 +20,100 @@ const desktop = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 type Scenario = 'plain' | 'child' | 'root-approval' | 'child-approval' | 'both-approval';
 type RequestFact = { actor: 'root' | 'child'; round: number };
 type Pending = NonNullable<MultiAgentGroupSnapshot['pendingApprovals']>[number];
+type E3ThreadBridge = Pick<typeof rendererThreadApi, 'getThread' | 'updateThreadTaskId'>;
+declare global { interface Window { multiAgentE3ThreadBridge: E3ThreadBridge } }
+
+// Diagnostic-only observation of the existing renderer storage and DOM.
+// No task/approval/authorization mutation, no UI click, no source-id synthesis.
+async function captureApprovalBinding(page: Page, root: string, threadId: string,
+  known: MultiAgentGroupSnapshot, label: string, approval?: MultiAgentApprovalView): Promise<void> {
+  const sourceTaskId = known.root?.sourceTaskId ?? null;
+  try {
+    const observed = await page.evaluate(async ({ threadId, expectedSourceTaskId }) => {
+      const ui = () => {
+        const panel = document.querySelector('[data-testid="chat-right-panel"]');
+        return {
+          at: Date.now(), routeHash: location.hash,
+          panelHidden: panel?.getAttribute('hidden') ?? null,
+          selectedTabs: Array.from(panel?.querySelectorAll('[role="tab"][aria-selected="true"]') ?? [])
+            .map(tab => ({ id: tab.id, controls: tab.getAttribute('aria-controls') })),
+          selectedAgentId: panel?.querySelector('.multi-agent-detail .multi-agent-meta > code')?.textContent ?? null,
+          approvalRegionsInPanel: Array.from(panel?.querySelectorAll('[role="region"][aria-label],section[aria-label]') ?? [])
+            .filter(node => /工具审批/.test(node.getAttribute('aria-label') ?? '')).length,
+          approvalRegionsInDocument: Array.from(document.querySelectorAll('[role="region"][aria-label],section[aria-label]'))
+            .filter(node => /工具审批/.test(node.getAttribute('aria-label') ?? '')).length,
+        };
+      };
+      const uiBefore = ui();
+      const stored = await new Promise<{
+        state: string; id?: string | null; currentTaskId?: string | null;
+        currentTaskIdType?: string; taskCount?: number | null; expectedSourceListed?: boolean | null;
+        readErrorName?: string;
+      }>(resolve => {
+        // No version bump; onupgradeneeded aborts creation if the DB disappeared.
+        const opening = indexedDB.open('xiaok-desktop');
+        let missingDatabase = false, wasBlocked = false;
+        opening.onupgradeneeded = () => { missingDatabase = true; opening.transaction?.abort(); };
+        opening.onerror = () => resolve({ state: missingDatabase ? 'database_absent_aborted' : 'open_failed', readErrorName: opening.error?.name });
+        opening.onblocked = () => { wasBlocked = true; resolve({ state: 'open_blocked' }); };
+        opening.onsuccess = () => {
+          const db = opening.result;
+          if (wasBlocked) { db.close(); return; }
+          if (!db.objectStoreNames.contains('threads')) { db.close(); resolve({ state: 'threads_store_absent' }); return; }
+          let tx: IDBTransaction;
+          try { tx = db.transaction('threads', 'readonly'); }
+          catch { db.close(); resolve({ state: 'readonly_transaction_failed' }); return; }
+          const read = tx.objectStore('threads').get(threadId);
+          tx.oncomplete = () => {
+            try {
+              const raw: unknown = read.result;
+              if (raw === undefined || raw === null) { resolve({ state: 'thread_absent' }); return; }
+              if (typeof raw !== 'object' || Array.isArray(raw)) { resolve({ state: 'thread_shape_invalid' }); return; }
+              const id: unknown = Reflect.get(raw, 'id');
+              const current: unknown = Reflect.get(raw, 'currentTaskId');
+              const tasks: unknown = Reflect.get(raw, 'taskIds');
+              resolve({ state: 'existing_thread_read', id: typeof id === 'string' ? id : null,
+                currentTaskId: typeof current === 'string' || current === null ? current : undefined,
+                currentTaskIdType: current === null ? 'null' : typeof current,
+                taskCount: Array.isArray(tasks) ? tasks.length : null,
+                expectedSourceListed: expectedSourceTaskId === null || !Array.isArray(tasks) ? null : tasks.includes(expectedSourceTaskId),
+              });
+            } finally { db.close(); }
+          };
+          tx.onabort = tx.onerror = () => { db.close(); resolve({ state: 'readonly_read_failed', readErrorName: tx.error?.name }); };
+        };
+      });
+      return { uiBefore, stored, uiAfter: ui(), reactThreadCurrentTaskId: 'NOT_PUBLICLY_CAPTURED' };
+    }, { threadId, expectedSourceTaskId: sourceTaskId });
+    writeFileSync(join(root, `${label}-binding-diagnostic.json`), JSON.stringify({
+      diagnosticOnly: true, threadId, observed,
+      knownSnapshot: { provenance: 'previously_observed_original_test_snapshot_not_a_new_IPC_read',
+        groupId: known.group?.groupId ?? null, lastSeq: known.lastSeq,
+        rootAgentId: known.root?.id ?? null, rootSourceTaskId: sourceTaskId,
+        pendingApprovalCount: known.pendingApprovalCount,
+        pending: known.pendingApprovals?.map(item => ({ approvalId: item.approvalId, agentId: item.agentId, turnId: item.turnId })),
+      },
+      knownApproval: approval ? { status: approval.status, canDecide: approval.canDecide } : null,
+    }, null, 2), { mode: 0o600 });
+  } catch {
+    // Never replace the original region/assertion failure with a diagnostic error.
+    try { writeFileSync(join(root, `${label}-binding-diagnostic.json`), JSON.stringify({ diagnosticOnly: true,
+      threadId, diagnosticFailed: true, code: 'BINDING_OBSERVATION_FAILED' }), { mode: 0o600 }); }
+    catch { console.error('E3_BINDING_DIAGNOSTIC_WRITE_FAILED'); }
+  }
+}
+
 
 async function fixture(scenario: Scenario) {
+  // Existing E2E pattern: bundle the actual renderer bridge, never copy its
+  // IndexedDB association/CAS logic or add a production preload mutation.
+  const threadBridge = await build({ stdin: {
+    contents: "import { api } from './renderer/src/api/bridge'; globalThis.multiAgentE3ThreadBridge = { getThread: api.getThread, updateThreadTaskId: api.updateThreadTaskId };",
+    resolveDir: desktop, loader: 'ts',
+  }, bundle: true, write: false, format: 'iife', platform: 'browser',
+    define: { 'import.meta.env.DEV': 'false', 'process.env.NODE_ENV': '"test"' } });
+  const threadBridgeSource = threadBridge.outputFiles[0]?.text;
+  if (!threadBridgeSource) throw new Error('E3 actual renderer bridge bundle is absent');
   const root = mkdtempSync(join(tmpdir(), 'xiaok-desktop-authorization-electron-'));
   const workspace = join(root, 'workspace'); mkdirSync(workspace);
   const requests: RequestFact[] = [], providerErrors: string[] = [], pageErrors: string[] = [];
@@ -83,6 +177,7 @@ async function fixture(scenario: Scenario) {
     await expect(page.locator('body')).not.toBeEmpty();
     expect(page.url()).toContain('dist/renderer/index.html');
     await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+    await page.evaluate(source => { (0, eval)(source); }, threadBridgeSource);
     // Test-only read observation: retain the actual entry state at native click
     // capture, before React's toggle handler. No state or event is rewritten.
     await page.evaluate(() => {
@@ -172,9 +267,25 @@ async function fixture(scenario: Scenario) {
     await expect(page.getByRole('dialog', { name: 'SubAgent', exact: true })).toHaveCount(0);
     return panel;
   };
-  const startDefault = (threadId: string) => app!.evaluate(async (_electron, id) => {
-    return (globalThis as any).multiAgentE2E.getServices().createTask({ prompt: 'E3 isolated verification task.', materials: [], permissionMode: 'default', context: { threadId: id } });
-  }, threadId) as Promise<{ taskId: string }>;
+  const startDefault = async (threadId: string) => {
+    // The ID is returned by the actual unchanged MAIN default-task producer.
+    const task = await (app!.evaluate(async (_electron, id) => {
+      return (globalThis as any).multiAgentE2E.getServices().createTask({ prompt: 'E3 isolated verification task.', materials: [], permissionMode: 'default', context: { threadId: id } });
+    }, threadId) as Promise<{ taskId: string }>);
+    await page.evaluate(async ({ threadId, taskId }) => {
+      await window.multiAgentE3ThreadBridge.updateThreadTaskId(threadId, taskId);
+      const stored = await window.multiAgentE3ThreadBridge.getThread(threadId);
+      if (stored?.currentTaskId !== taskId || !(stored.taskIds ?? []).includes(taskId)) {
+        throw new Error('E3 normal renderer bridge did not associate the returned task');
+      }
+    }, { threadId, taskId: task.taskId });
+    // Re-enter the ordinary route to load its persisted bridge result; do not
+    // mutate ChatShell state or synthesize a source task inside IndexedDB.
+    await page.evaluate(() => { location.hash = '#/'; });
+    await expect(page.getByTestId('quick-prompts')).toBeVisible();
+    await navigate(threadId);
+    return task;
+  };
   const recover = (taskId: string) => app!.evaluate(async (_electron, id) =>
     (globalThis as any).multiAgentE2E.getServices().recoverTask(id), taskId) as Promise<{ snapshot: { status: string } }>;
   const approval = (threadId: string, groupId: string, pending: Pending, inputOffset?: number) => page.evaluate(input =>
@@ -311,9 +422,24 @@ for (const actor of ['root', 'child'] as const) for (const decision of ['approve
         await expect(f.page.getByTestId('chat-right-panel')).toHaveCount(1);
       }
       if (decision === 'approve') {
+        if (actor === 'child') {
+          // spawn_agent already started this root continuation. Its normal
+          // completed fact must settle before the reconnect request baseline.
+          await expect.poll(async () => (await f.snapshot(threadId)).root?.status).toBe('completed');
+        }
         const requestCount = f.requests.length; await f.reconnect(threadId);
         expect((await f.snapshot(threadId)).pendingApprovals?.map(item => item.approvalId)).toEqual([pending.approvalId]);
-        expect(f.requests).toHaveLength(requestCount); expect(existsSync(f.effect(actor))).toBe(false);
+        try { expect(f.requests).toHaveLength(requestCount); }
+        catch (originalFailure) {
+          // Observe only after the original failure; never delay/change its assertion.
+          try { writeFileSync(join(f.root, `e3-${actor}-${decision}-reconnect-requests.json`), JSON.stringify({
+            diagnosticOnly: true, expectedCount: requestCount, actualCount: f.requests.length,
+            requests: f.requests.map(fact => ({ actor: fact.actor, round: fact.round })), observedAt: Date.now(),
+          }), { mode: 0o600 }); } catch { console.error('E3_RECONNECT_DIAGNOSTIC_WRITE_FAILED'); }
+          await captureApprovalBinding(f.page, f.root, threadId, first, `e3-${actor}-${decision}-reconnect`, metadata);
+          throw originalFailure;
+        }
+        expect(existsSync(f.effect(actor))).toBe(false);
       }
       if (actor === 'root') {
         const entry = f.page.locator('.chat-right-entry');
@@ -321,6 +447,7 @@ for (const actor of ['root', 'child'] as const) for (const decision of ['approve
         await entry.click();
       }
       const panel = await f.surface(); const card = panel.getByRole('region', { name: /工具审批/ });
+      await captureApprovalBinding(f.page, f.root, threadId, first, `e3-${actor}-${decision}`, metadata);
       await expect(card).toHaveCount(1); await expect(card).toContainText(pending.agentId); await expect(card).toContainText(pending.turnId);
       await expect(card).toContainText(f.workspace); await expect(card).toContainText(metadata.inputSha256);
       await card.getByRole('button', { name: '查看本次参数', exact: true }).click();
@@ -340,6 +467,17 @@ for (const actor of ['root', 'child'] as const) for (const decision of ['approve
           resourcesReleased: current.resourcesReleased, resumable: current.resumable,
         }, null, 2));
       }
+      // Exercise the same single surface when the chat main becomes inert.
+      await f.app.evaluate(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        if (windows.length !== 1) throw new Error('E3 expected one actual fixture window');
+        windows[0].setSize(760, 940);
+      });
+      await expect(panel).toHaveAttribute('aria-modal', 'true');
+      await expect(f.page.getByTestId('chat-right-main')).toHaveAttribute('inert');
+      await expect(card).toBeVisible();
+      await expect(f.page.getByRole('region', { name: /工具审批/ })).toHaveCount(1);
+      expect(await card.evaluate(element => element.closest('[inert], [role="tabpanel"]') === null)).toBe(true);
       await f.page.screenshot({ path: join(f.root, 'pending-input.png') });
       await card.getByRole('button', { name: decision === 'approve' ? '仅批准本次' : '拒绝本次', exact: true }).click();
       await expect.poll(async () => (await f.approval(threadId, groupId, pending)).status).toBe(decision === 'approve' ? 'approved' : 'denied');
@@ -368,7 +506,9 @@ test('E3d: killing the isolated process with real root and child pending never r
     const before = await f.snapshot(threadId), groupId = before.group!.groupId, pending = before.pendingApprovals!;
     expect(new Set(pending.map(item => item.agentId)).size).toBe(2);
     expect(f.audit().map(row => row.result.approval.status)).toEqual(['pending', 'pending']);
-    await f.surface(); await expect(f.page.getByRole('region', { name: /工具审批/ })).toHaveCount(2);
+    await f.surface();
+    await captureApprovalBinding(f.page, f.root, threadId, before, 'e3-crash-pending');
+    await expect(f.page.getByRole('region', { name: /工具审批/ })).toHaveCount(2);
     await f.page.screenshot({ path: join(f.root, 'before-crash-two-pending.png') });
     const requestCount = f.requests.length, oldPid = f.app.process().pid, oldBoot = (await f.authorization()).bootId;
     await f.stop('crash'); await f.launch(); expect(f.app.process().pid).not.toBe(oldPid);

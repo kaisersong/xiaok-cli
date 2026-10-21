@@ -1,12 +1,12 @@
+import {assertConnectorsUser,captureConnectorsInput,captureConnectorsKind,captureConnectorsSnapshot} from './connectors-authority.js';
+import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
 import { ConnectorRegistry } from '../../src/ai/tools/connectors/registry.js';
 import {
-  cloneDefaultConnectorsConfig,
   type ConnectorsConfig,
   type ProviderRuntime,
 } from '../../src/ai/tools/connectors/config.js';
 import { createWebSearchTool } from '../../src/ai/tools/web-search.js';
 import { createWebFetchTool } from '../../src/ai/tools/web-fetch.js';
-import type { Tool } from '../../src/types.js';
 import type { ToolRegistry } from '../../src/ai/tools/index.js';
 import { ConnectorsStore, type ConnectorsLoadStatus } from './connectors-store.js';
 
@@ -51,9 +51,13 @@ function withDeepseekConfigKey(config: ConnectorsConfig, apiKey: string | undefi
  * key 只存在于进程内存；snapshot 回传 renderer 前剥离，IPC 不暴露模型密钥。
  */
 function stripDeepseekConfigKey(config: ConnectorsConfig): ConnectorsConfig {
+  const search = { ...config.search };
+  const fetch = { ...config.fetch };
+  delete search.deepseekApiKey;
+  delete fetch.deepseekApiKey;
   return {
-    search: { ...config.search, deepseekApiKey: undefined },
-    fetch: { ...config.fetch, deepseekApiKey: undefined },
+    search,
+    fetch,
   };
 }
 
@@ -108,8 +112,8 @@ export class ConnectorsService {
     // 每次工具执行前无条件 apply 会让三连败保护失效（评审 P2 #5）。
     const signature = JSON.stringify(next);
     if (this.lastAppliedRuntimeSignature === signature) return;
-    this.lastAppliedRuntimeSignature = signature;
     this.registry.apply(next);
+    this.lastAppliedRuntimeSignature = signature;
   }
 
   /** 保持 public 方法返回前 registry 状态已含最新凭证注入。 */
@@ -118,35 +122,40 @@ export class ConnectorsService {
     return await fn();
   }
 
-  async getConfig(): Promise<ConnectorsConfigSnapshot> {
+  getConfig(request?: ConnectorsMutationRequest): Promise<ConnectorsConfigSnapshot> {
+    assertConnectorsUser(request);
     return this.withCredentials(() => Promise.resolve(this.snapshot()));
   }
 
-  async setConfig(input: unknown): Promise<ConnectorsConfigSnapshot> {
-    const persisted = await this.store.save(input);
+  async setConfig(input: unknown, request?: ConnectorsMutationRequest): Promise<ConnectorsConfigSnapshot> {
+    const actor = assertConnectorsUser(request);
+    const snapshot = captureConnectorsInput(input);
+    const persisted = await this.store.save(snapshot, actor);
     this.loadStatus = 'ok';
     // 配置切换与凭证注入合并为同一串行轮次的一次性重建（评审 #9）：不存在
     // 「先应用无凭证 persisted、再排队补 key」的窗口——并发中的工具调用要
     // 么使用旧的完整配置，要么等待「persisted+注入 key」一次到位后才执行，
     // 不会在有效凭证配置切换期间静默降级 fallback。
     await this.refreshCredentials(persisted);
-    return this.snapshot();
+    return this.snapshot('connectors_operation_unknown');
   }
 
   async listProviders(): Promise<ProviderRuntime[]> {
     return this.withCredentials(() => Promise.resolve(this.registry.listProviderRuntimes()));
   }
 
-  async testProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult> {
-    return this.withCredentials(() => this.testProviderNow(kind));
+  async testProvider(kind: 'search' | 'fetch', request?: ConnectorsMutationRequest): Promise<ConnectorTestResult> {
+    assertConnectorsUser(request);
+    const capturedKind = captureConnectorsKind(kind);
+    return this.withCredentials(() => this.testProviderNow(capturedKind));
   }
 
-  private snapshot(): ConnectorsConfigSnapshot {
-    return {
+  private snapshot(errorCode = 'connectors_projection_unavailable'): ConnectorsConfigSnapshot {
+    return captureConnectorsSnapshot({
       config: stripDeepseekConfigKey(this.registry.getConfig()),
       loadStatus: this.loadStatus,
       providers: this.registry.listProviderRuntimes(),
-    };
+    }, errorCode);
   }
 
   private async testProviderNow(kind: 'search' | 'fetch'): Promise<ConnectorTestResult> {

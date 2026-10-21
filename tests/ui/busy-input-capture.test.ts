@@ -158,6 +158,7 @@ describe('InputReader busy capture', () => {
       recordOutput() {},
       beginSuppress() {},
       endSuppress() {},
+      close() {},
     };
     reader.setTranscriptLogger(logger);
 

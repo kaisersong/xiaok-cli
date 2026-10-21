@@ -1,3 +1,4 @@
+import type { MemoryLayerIpcEntry } from '../../../../shared/memory-ipc-types.js'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Brain, Plus, Upload, RefreshCw, Trash2, Search, Pencil, X } from 'lucide-react'
 import { useLocale } from '../../contexts/LocaleContext'
@@ -14,13 +15,7 @@ interface LayerStats {
   dbSizeBytes: number
 }
 
-interface MemoryEntryView {
-  id: string
-  content: string
-  tags?: string[]
-  createdAt?: string
-  meta?: Record<string, unknown>
-}
+type MemoryEntryView = MemoryLayerIpcEntry
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`

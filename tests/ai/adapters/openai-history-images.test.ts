@@ -29,7 +29,7 @@ async function capture(messages: Message[], model = 'GLM-5.3', flags: string[] =
   servers.push(server);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
-  const adapter = new OpenAIAdapter({ apiKey: 'synthetic-test-key', harnessContext: buildOpenAIHarnessContext({
+  const adapter = new OpenAIAdapter({ apiKey: 'synthetic-test-key', kimiCodingHeadersApplied: false, harnessContext: buildOpenAIHarnessContext({
     identity: { providerId: 'test', providerType: 'custom', protocol: 'openai_legacy', canonicalBaseUrl: baseUrl,
       wireModel: model, capabilities: flags },
     flags: resolveKimiHarnessFeatureFlags({}),

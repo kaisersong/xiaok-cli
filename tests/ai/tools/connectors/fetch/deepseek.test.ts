@@ -8,7 +8,7 @@ import { FetchProviderError } from '../../../../../src/ai/tools/connectors/fetch
 
 describe('web_fetch.deepseek', () => {
   it('posts the url with auth header and returns markdown content', async () => {
-    const fetchFn = vi.fn(async () => new Response(
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async () => new Response(
       JSON.stringify({ title: 'Example', content: 'Body **markdown**.' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     ));
@@ -16,11 +16,11 @@ describe('web_fetch.deepseek', () => {
     const result = await provider.fetch({ url: 'https://example.com/article', maxChars: 1000 });
 
     expect(provider.name).toBe('web_fetch.deepseek');
-    const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = fetchFn.mock.calls[0];
     expect(url).toBe('https://api.example/fetch');
-    expect(init.method).toBe('POST');
-    expect((init.headers as Record<string, string>).authorization).toBe('Bearer sk-x');
-    expect(init.body).toBe(JSON.stringify({ url: 'https://example.com/article' }));
+    expect(init!.method).toBe('POST');
+    expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-x');
+    expect(init!.body).toBe(JSON.stringify({ url: 'https://example.com/article' }));
     expect(result).toEqual({
       url: 'https://example.com/article',
       contentType: 'text/markdown',
@@ -63,7 +63,7 @@ describe('web_fetch.deepseek', () => {
     const error = await provider.fetch({ url: 'https://e.com', maxChars: 10 }).catch((e: unknown) => e as FetchProviderError);
     expect(error).toBeInstanceOf(FetchProviderError);
     expect(error).toMatchObject({ kind: 'http', status: 403 });
-    expect(error.message).toContain('security policy');
+    expect((error as FetchProviderError).message).toContain('security policy');
   });
 
   it('rejects malformed keys at construction with a fixed message that never echoes the key', async () => {

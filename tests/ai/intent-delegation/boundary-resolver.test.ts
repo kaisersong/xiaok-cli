@@ -1,3 +1,4 @@
+import type { LlmBoundaryDecision } from '../../../src/ai/intent-delegation/boundary-types.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createIntentBoundaryResolver } from '../../../src/ai/intent-delegation/boundary-resolver.js';
 
@@ -32,7 +33,7 @@ describe('intent boundary resolver', () => {
     const events: unknown[] = [];
     const resolver = createIntentBoundaryResolver({
       config: { ...baseConfig, llmClassifier: 'shadow' },
-      llmClassify: vi.fn(async () => ({
+      llmClassify: vi.fn(async (): Promise<LlmBoundaryDecision> => ({
         kind: 'create_intent',
         confidence: 0.9,
         intentType: 'generate',
@@ -52,7 +53,7 @@ describe('intent boundary resolver', () => {
   it('uses active LLM decision in ambiguous_only mode', async () => {
     const resolver = createIntentBoundaryResolver({
       config: { ...baseConfig, llmClassifier: 'ambiguous_only' },
-      llmClassify: vi.fn(async () => ({
+      llmClassify: vi.fn(async (): Promise<LlmBoundaryDecision> => ({
         kind: 'create_intent',
         confidence: 0.9,
         intentType: 'generate',
@@ -92,7 +93,7 @@ describe('intent boundary resolver', () => {
   it('applies the configured LLM confidence threshold before creating intent', async () => {
     const resolver = createIntentBoundaryResolver({
       config: { ...baseConfig, llmClassifier: 'ambiguous_only', confidenceThreshold: 0.95 },
-      llmClassify: vi.fn(async () => ({
+      llmClassify: vi.fn(async (): Promise<LlmBoundaryDecision> => ({
         kind: 'create_intent',
         confidence: 0.9,
         intentType: 'generate',
@@ -114,7 +115,7 @@ describe('intent boundary resolver', () => {
   it('limits repeated clarification prompts', async () => {
     const resolver = createIntentBoundaryResolver({
       config: { ...baseConfig, llmClassifier: 'ambiguous_only' },
-      llmClassify: vi.fn(async () => ({
+      llmClassify: vi.fn(async (): Promise<LlmBoundaryDecision> => ({
         kind: 'ask_clarification',
         confidence: 0.9,
         question: '要生成什么？',

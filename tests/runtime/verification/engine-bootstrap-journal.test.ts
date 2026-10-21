@@ -1,0 +1,9 @@
+import {it,expect} from 'vitest';import {mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {openPrivateVerificationDatabase} from '../../../src/runtime/verification/private-database.js';
+import {createEngineBootstrapJournal} from '../../../src/runtime/verification/engine-bootstrap-journal.js';
+it('commits a single immutable creation intent and never authorizes replay after a lost create response',()=>{
+ const root=mkdtempSync(join(tmpdir(),'engine-journal-')),db=openPrivateVerificationDatabase(root);
+ try{const j=createEngineBootstrapJournal(db),proposal={deploymentHash:'a'.repeat(64),configHash:'b'.repeat(64),creationNonce:'c'.repeat(64),vmName:'xiaok-engine' as const};j.prepare(proposal);db.exec('BEGIN IMMEDIATE');expect(()=>j.beginCreate(proposal)).toThrow('engine_bootstrap_outer_transaction');db.exec('ROLLBACK');expect(j.read()?.state).toBe('prepared');j.beginCreate(proposal);expect(j.read()?.state).toBe('create_started');
+ const reopened=createEngineBootstrapJournal(db);expect(reopened.read()?.state).toBe('unknown');expect(()=>reopened.beginCreate(proposal)).toThrow();expect(()=>reopened.prepare({...proposal,creationNonce:'d'.repeat(64)})).toThrow();expect(()=>reopened.recordObservation(proposal,{machineId:'vm',bootId:'boot',engineId:'engine',creationNonce:proposal.creationNonce,processUid:499,processStartIdentity:'kernel-start',effectiveConfigHash:'d'.repeat(64)})).toThrow();reopened.recordObservation(proposal,{machineId:'vm',bootId:'boot',engineId:'engine',creationNonce:proposal.creationNonce,processUid:499,processStartIdentity:'kernel-start',effectiveConfigHash:proposal.configHash});expect(reopened.read()?.state).toBe('observed');expect(()=>reopened.beginCreate(proposal)).toThrow();
+ }finally{db.close();rmSync(root,{recursive:true,force:true});}
+});

@@ -11,6 +11,12 @@ export type GoalSlashCommand = {
 } | {
     kind: 'cancel';
 } | {
+    kind: 'native';
+    action: 'status' | 'recover' | 'continue' | 'cancel';
+} | {
+    kind: 'publication';
+    action: 'recover' | 'continue';
+} | {
     kind: 'create';
     objective: string;
 } | {

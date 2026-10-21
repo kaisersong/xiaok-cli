@@ -24,6 +24,60 @@ describe('BDD: durable Desktop multi-agent groups', () => {
     return { root, dbPath, store, group };
   }
 
+  it('retains an immutable published-message fact across reopen without accepting replacement closure',()=>{
+    const {store,dbPath,group}=setup();
+    const row={groupId:group.groupId,operationId:'published_message:actual-row',command:'published_message',requestHash:'a'.repeat(64),applyState:'applied' as const,result:{messageId:'actual-row',messageSeq:1,facts:{version:1,closure:{observations:[]}}}};
+    store.putOperation(row);
+    const reopened=new DesktopMultiAgentStore(dbPath,{bootId:'boot-1'});stores.push(reopened);
+    expect(reopened.getOperation(group.groupId,row.operationId)).toEqual(row);
+    expect(()=>reopened.putOperation({...row,result:{...row.result,messageSeq:2}})).toThrow('published_message_immutable');
+    expect(()=>store.putOperation({...row,result:{...row.result,facts:{version:1,closure:{observations:['different']}}}})).toThrow('published_message_immutable');
+    expect(reopened.getOperation(group.groupId,row.operationId)).toEqual(row);
+  });
+
+  it('reserves an immutable followup turn in the original durable operation across writers and restart',()=>{
+    const {store,dbPath,group}=setup();
+    store.putOperation({groupId:group.groupId,operationId:'follow',requestHash:'exact',command:'followup',applyState:'applied',result:{state:'queued_next_admission',targetAgentId:'child',expectedTurn:2}});
+    const input={groupId:group.groupId,operationId:'follow',requestHash:'exact',agentId:'child',previousTurnId:'old-turn',expectedTurn:2,rootEpoch:1,messageHash:'a'.repeat(64),closureHash:'b'.repeat(64)};
+    const first=store.reserveManagedFollowupTurn(input);
+    expect(first.nextTurnId).toBeTruthy();
+    const other=new DesktopMultiAgentStore(dbPath,{bootId:'boot-1'});stores.push(other);
+    expect(other.reserveManagedFollowupTurn(input)).toEqual(first);
+    expect(()=>other.reserveManagedFollowupTurn({...input,messageHash:'c'.repeat(64)})).toThrow(/reservation/);
+    expect(()=>store.reserveManagedFollowupTurn({...input,expectedTurn:3})).toThrow(/reservation/);
+    store.putOperation({...store.getOperation(group.groupId,'follow')!,applyState:'unknown',result:{state:'unknown'}});
+    expect(other.reserveManagedFollowupTurn(input)).toEqual(first);
+    expect(other.getOperation(group.groupId,'follow')?.managedTurnReservation).toEqual(first);
+    expect(()=>store.putOperation({...store.getOperation(group.groupId,'follow')!,managedTurnReservation:{...first,nextTurnId:'replacement'}})).toThrow(/reservation/);
+    const reopened=new DesktopMultiAgentStore(dbPath,{bootId:'boot-1'});stores.push(reopened);
+    expect(reopened.reserveManagedFollowupTurn(input)).toEqual(first);
+  });
+
+  it('reserves prepared presentation ordinals durably without making actors visible or reusing failed reservations', () => {
+    const {store,dbPath,group}=setup();
+    const reserve=(target:string,operationId:string)=>store.reservePresentationOrdinal({groupId:group.groupId,operationId,requestHash:operationId,agentId:target});
+    for(const id of ['a','b'])store.putOperation({groupId:group.groupId,operationId:id,requestHash:id,command:'spawn',applyState:'prepared',result:{targetAgentId:id}});
+    expect(reserve('a','a')).toBe(1);
+    const other=new DesktopMultiAgentStore(dbPath,{bootId:'boot-1'});stores.push(other);
+    expect(other.reservePresentationOrdinal({groupId:group.groupId,operationId:'b',requestHash:'b',agentId:'b'})).toBe(2);
+    expect(store.getAgent(group.groupId,'a')).toBeNull();
+    store.putOperation({...store.getOperation(group.groupId,'a')!,applyState:'unknown',result:{state:'unknown'}});
+    expect(reserve('a','a')).toBe(1);
+    expect(()=>reserve('different','a')).toThrow(/reservation/);
+    expect(()=>store.reservePresentationOrdinal({groupId:group.groupId,operationId:'a',requestHash:'wrong',agentId:'a'})).toThrow(/conflict/);
+    const input={parentId:`root_${group.groupId}`,taskName:'child',canonicalName:'/root/child',depth:1,status:'pending' as const,turn:1};
+    expect(store.putAgent(group.groupId,{...input,id:'ordinary'}).presentationOrdinal).toBe(3);
+    expect(other.putAgent(group.groupId,{...input,id:'b'}).presentationOrdinal).toBe(2);
+    expect(other.getOperation(group.groupId,'a')?.presentationReservation).toEqual({agentId:'a',ordinal:1});
+    expect(()=>store.putOperation({...store.getOperation(group.groupId,'a')!,presentationReservation:{agentId:'a',ordinal:4}})).toThrow(/reservation/);
+    const reopened=new DesktopMultiAgentStore(dbPath,{bootId:'boot-1'});stores.push(reopened);
+    expect(reopened.reservePresentationOrdinal({groupId:group.groupId,operationId:'a',requestHash:'a',agentId:'a'})).toBe(1);
+    reopened.putOperation({groupId:group.groupId,operationId:'ceiling',requestHash:'ceiling',command:'spawn',applyState:'unknown',result:{},presentationReservation:{agentId:'ceiling',ordinal:Number.MAX_SAFE_INTEGER}});
+    store.putOperation({groupId:group.groupId,operationId:'overflow',requestHash:'overflow',command:'spawn',applyState:'prepared',result:{targetAgentId:'overflow'}});
+    expect(()=>reserve('overflow','overflow')).toThrow(/capacity/);
+    expect(store.getOperation(group.groupId,'overflow')?.presentationReservation).toBeUndefined();
+  });
+
   it('U1 Given only roots or another thread child, Then history comes only from committed local child rows and survives reset/restart until purge', () => {
     const { root, dbPath, store, group } = setup();
     store.registerThread({ threadId: 'foreign', profileId: 'other-profile', workspaceId: 'other-workspace', cwd: root });

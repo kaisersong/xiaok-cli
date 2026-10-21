@@ -27,6 +27,9 @@ export interface IntentSalvage {
     createdAt: number;
 }
 export interface SessionIntentLedger {
+    verificationExecutions?: import('./verification-execution-journal.js').IntentVerificationExecution[];
+    publicationCandidates?: import('./publication-candidate-journal.js').IntentPublicationCandidate[];
+    nativeContracts?: import('./native-contract-journal.js').IntentNativeContractRecord[];
     instanceId?: string;
     sessionId: string;
     activeIntentId?: string;

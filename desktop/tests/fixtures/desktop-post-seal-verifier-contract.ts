@@ -1,8 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 import { expect } from 'vitest';
 import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
@@ -41,16 +40,27 @@ export function snapshotFixture(patch: Partial<TaskSnapshot> = {}): TaskSnapshot
 export async function loadActualLegacyCollectors() {
   const sourcePath = join(taskHostDirectory, 'task-runtime-host.ts');
   const source = readFileSync(sourcePath, 'utf8');
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-legacy-')); const output = join(root, 'actual.cjs');
-  await build({ entryPoints: [sourcePath], outfile: output, bundle: true, platform: 'node', format: 'cjs', plugins: [{
-    name: 'test-export-unmodified-production-functions', setup(context) {
-      context.onLoad({ filter: /task-runtime-host\.ts$/ }, input => input.path === sourcePath ? {
-        contents: source + '\nexport { buildCompletionEvidenceContext, evidenceForExpectation };', loader: 'ts', resolveDir: taskHostDirectory,
-      } : undefined);
-    },
-  }] });
-  return { root, actual: createRequire(import.meta.url)(output) as {
-    buildCompletionEvidenceContext(id: string, snapshot: TaskSnapshot): { expectation?: unknown; evidence: unknown[] };
-    evidenceForExpectation(expectation: unknown, evidence: unknown[]): unknown[];
-  } };
+  const artifactRoot = fileURLToPath(new URL('../../../.artifacts/', import.meta.url));
+  mkdirSync(artifactRoot, { recursive: true });
+  const root = mkdtempSync(join(artifactRoot, 'post-seal-legacy-'));
+  const output = join(root, 'actual.mjs');
+  try {
+    await build({ entryPoints: [sourcePath], outfile: output, bundle: true, platform: 'node', format: 'esm', packages: 'external',
+      banner: { js: `import { createRequire as __legacyCreateRequire } from 'node:module'; const require = __legacyCreateRequire(${JSON.stringify(pathToFileURL(sourcePath).href)});` },
+      plugins: [{
+        name: 'test-export-unmodified-production-functions', setup(context) {
+          context.onLoad({ filter: /task-runtime-host\.ts$/ }, input => input.path === sourcePath ? {
+            contents: source + '\nexport { buildCompletionEvidenceContext, evidenceForExpectation };', loader: 'ts', resolveDir: taskHostDirectory,
+          } : undefined);
+        },
+      }],
+    });
+    return { root, actual: await import(/* @vite-ignore */ pathToFileURL(output).href) as {
+      buildCompletionEvidenceContext(id: string, snapshot: TaskSnapshot): { expectation?: unknown; evidence: unknown[] };
+      evidenceForExpectation(expectation: unknown, evidence: unknown[]): unknown[];
+    } };
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    throw error;
+  }
 }

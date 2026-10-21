@@ -41,7 +41,7 @@ function deepSeekSearchResponse(): Response {
 
 describe('ConnectorRegistry search routing', () => {
   it('routes search to the deepseek provider when its key is configured', async () => {
-    const fetchFn = vi.fn(async () => deepSeekSearchResponse());
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async () => deepSeekSearchResponse());
     const registry = new ConnectorRegistry(
       buildConfig((cfg) => {
         cfg.search.provider = 'deepseek';
@@ -53,13 +53,13 @@ describe('ConnectorRegistry search routing', () => {
     expect(outcome.effective).toBe('web_search.deepseek');
     expect(outcome.fallback).toBeUndefined();
     expect(outcome.hits[0].url).toBe('https://example.com/ds');
-    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit];
-    expect((init.headers as Record<string, string>).authorization).toBe('Bearer sk-ds');
+    const [, init] = fetchFn.mock.calls[0];
+    expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-ds');
   });
 
   it('falls back to duckduckgo when deepseek search is selected without a key', async () => {
     // key 缺失时根本不该请求 DeepSeek 端点；mock 只服务 DDG。
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = url.toString();
       if (u.includes('deepseek')) throw new TypeError('deepseek provider must not be called without a key');
       return ddgResponse();
@@ -98,7 +98,7 @@ describe('ConnectorRegistry search routing', () => {
 
   it('falls back to duckduckgo when primary throws and surfaces fallback metadata', async () => {
     let firstCall = true;
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://api.tavily.com')) {
         if (firstCall) {
@@ -123,7 +123,7 @@ describe('ConnectorRegistry search routing', () => {
   });
 
   it('after 3 consecutive primary failures, marks primary invalid_config', async () => {
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://api.tavily.com')) {
         return new Response('boom', { status: 500 });
@@ -174,7 +174,7 @@ describe('ConnectorRegistry search routing', () => {
 describe('ConnectorRegistry fetch routing', () => {
   it('falls back to basic when jina returns 500', async () => {
     let jinaCalled = false;
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://r.jina.ai/')) {
         jinaCalled = true;

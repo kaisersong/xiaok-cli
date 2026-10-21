@@ -15,6 +15,7 @@ const productionDependencies = {
  * than waiting for terminal input.
  */
 export async function createChatAdapterWithLoginBootstrap(config, options, dependencies = productionDependencies) {
+    options.cancellation?.signal.throwIfAborted();
     try {
         return { config, adapter: dependencies.createAdapter(config) };
     }
@@ -25,11 +26,15 @@ export async function createChatAdapterWithLoginBootstrap(config, options, depen
             throw error;
         }
         dependencies.writeLine('首次使用需要先登录并配置 AI provider。现在进入登录向导；按 Ctrl+C 可退出。');
-        const result = await dependencies.runLogin({ setDefault: true });
+        const result = options.cancellation
+            ? await dependencies.runLogin({ setDefault: true }, options.cancellation)
+            : await dependencies.runLogin({ setDefault: true });
+        options.cancellation?.signal.throwIfAborted();
         if (result.status !== 'saved') {
             throw error;
         }
         const configured = await dependencies.loadConfig();
+        options.cancellation?.signal.throwIfAborted();
         return {
             config: configured,
             adapter: dependencies.createAdapter(configured),

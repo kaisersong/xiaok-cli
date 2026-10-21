@@ -1,0 +1,5 @@
+import {expect,it,vi} from 'vitest';
+import {DesktopShutdownGate} from '../../electron/shutdown-aware-ipc-main.js';
+import {withDesktopBootstrapWriter} from '../../electron/desktop-bootstrap-writer.js';
+it.each([false,true])('holds actual startup until its original Promise settles, including failure=%s',async failed=>{const gate=new DesktopShutdownGate();let release!:()=>void;const held=new Promise<void>(r=>{release=r;});const work=withDesktopBootstrapWriter(gate,async()=>{await held;if(failed)throw Error('startup failed');return 'view';});void work.catch(()=>{});expect(gate.outstanding).toBe(1);gate.close();expect(await gate.drain(1)).toBe(false);release();if(failed)await expect(work).rejects.toThrow('startup failed');else expect(await work).toBe('view');expect(await gate.drain(0)).toBe(true);});
+it('a closed gate refuses bootstrap before its first resource callback',async()=>{const gate=new DesktopShutdownGate(),create=vi.fn(async()=>({}));gate.close();await expect(withDesktopBootstrapWriter(gate,create)).rejects.toThrow('shutting_down');expect(create).not.toHaveBeenCalled();});

@@ -101,6 +101,10 @@ export function loadConfigSync(): Config {
 }
 
 export async function saveConfig(config: Config): Promise<void> {
+  saveConfigSync(config);
+}
+
+function saveConfigSync(config: Config): void {
   mkdirSync(getConfigDir(), { recursive: true });
   const path = getConfigPath();
   // 老文件可能是 644：先收紧再写入，收紧失败就中止，避免新 Key 写进别人可读的文件。
@@ -108,4 +112,13 @@ export async function saveConfig(config: Config): Promise<void> {
   // mode 只在新建文件时生效；写完再确认一次。
   writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
   tightenOrThrow(path);
+}
+
+/** One synchronous semantic edit; does not make unrelated whole-config writers transactional. */
+export function updateGlobalBackgroundAutoRun(enabled: unknown, requestSource?: 'user' | 'agent' | 'scheduler'): void {
+  if (requestSource !== 'user') throw Error('automation_config_request_source_forbidden');
+  if (typeof enabled !== 'boolean') throw Error('automation_config_input_invalid');
+  const config = loadConfigSync();
+  config.automations = { ...(config.automations ?? {}), globalBackgroundAutoRunEnabled: enabled };
+  saveConfigSync(config);
 }

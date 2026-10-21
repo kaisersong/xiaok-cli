@@ -1,6 +1,9 @@
+import {inheritNativeReadonlyExecutionContext} from '../../src/ai/tools/native-readonly-context.js';
+import { captureToolDescriptionMetadata, type ToolDescriptionMetadata, type ToolDiscovery } from '../../src/shared/tool-description-metadata.js';
+import {inheritDesktopNativeReadonlyDescriptor,assertDesktopNativeDescriptorCurrent} from './desktop-native-catalog-provenance.js';
 import { randomUUID } from 'node:crypto';
 import type { PermissionClass, Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../src/types.js';
-import { isToolPermissionGrant, ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
+import { snapshotToolPermissionGrant, ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
 import { getCanonicalToolId } from '../../src/ai/tools/tool-identity.js';
 import { MULTI_AGENT_TOOL_NAMES } from '../../src/ai/tools/multi-agent.js';
 import type { ExecutionAuthorizationSnapshot } from '../shared/multi-agent-types.js';
@@ -56,6 +59,7 @@ const keyOf = (ownerId: string, slotId: string): string => JSON.stringify([owner
 /** Main-only catalog: names address capabilities but never grant their identity. */
 export class DesktopCapabilityCatalog {
   private readonly descriptors = new Map<string, DesktopCapabilityDescriptor>();
+  private readonly descriptions = new Map<string, Readonly<ToolDescriptionMetadata> | undefined>();
   private readonly slotOwners = new Map<string, string>();
   private readonly slotRevisions = new Map<string, number>();
   private readonly names = new Map<string, string>();
@@ -65,7 +69,7 @@ export class DesktopCapabilityCatalog {
   private readonly workspaceRevisions = new Map<string, number>();
   private readonly workspaceAuthorizations = new Map<string, Readonly<ExecutionAuthorizationSnapshot>>();
 
-  publish(input: { requestSource: Source; ownerId: string; slotId?: string; entry: DesktopCapabilityEntry }): DesktopCapabilityDescriptor {
+  publish(input: { requestSource: Source; ownerId: string; slotId?: string; entry: DesktopCapabilityEntry }, metadata?: ToolDescriptionMetadata): DesktopCapabilityDescriptor {
     this.assertSource(input.requestSource, 'scheduler');
     if (!input.ownerId) throw new Error('capability requires owner');
     const slotId = input.slotId ?? randomUUID();
@@ -81,18 +85,39 @@ export class DesktopCapabilityCatalog {
     }
     const scope = copyScope(input.entry.scope);
     if (!scope.permissions.includes(input.entry.permission)) throw new Error('capability permission is outside its scope');
+    const description = captureToolDescriptionMetadata(metadata);
     const revision = (this.slotRevisions.get(slotId) ?? 0) + 1;
     const descriptor: DesktopCapabilityDescriptor = Object.freeze({ ...input.entry,
       definition: structuredClone(input.entry.definition), aliases: Object.freeze([...input.entry.aliases]), scope,
       capabilityId: randomUUID(), ownerId: input.ownerId, slotId, revision, canonicalName: input.entry.definition.name,
     });
     // Validate first, then atomically remove all aliases of the previous revision.
-    if (previous) this.removeNames(key, previous);
+    if (previous) { this.removeNames(key, previous); this.descriptions.delete(previous.capabilityId); }
+    this.descriptions.set(descriptor.capabilityId, description);
     this.descriptors.set(key, descriptor); this.slotOwners.set(slotId, input.ownerId); this.slotRevisions.set(slotId, revision);
     for (const name of names) this.names.set(name, key);
     this.authorized.delete(key);
     this.refreshAll();
     return descriptor;
+  }
+
+  /** Host-only descriptive snapshot; never an invocation or authorization grant. */
+  getDiscovery(capabilityId: string): ToolDiscovery | undefined {
+    const descriptor = [...this.descriptors.values()].find(item => item.capabilityId === capabilityId);
+    if (!descriptor) return undefined;
+    const metadata = this.descriptions.get(capabilityId);
+    return Object.freeze(metadata ? { coreDefinition: descriptor.definition, metadata } : { coreDefinition: descriptor.definition });
+  }
+
+  describe(capabilityId: string): ToolDiscovery | undefined { return this.getDiscovery(capabilityId); }
+
+  refreshDescription(input: { requestSource: Source; ownerId: string; capabilityId: string }, metadata?: ToolDescriptionMetadata): void {
+    this.assertSource(input.requestSource, 'scheduler');
+    const descriptor = [...this.descriptors.values()].find(item => item.capabilityId === input.capabilityId);
+    if (!descriptor || descriptor.ownerId !== input.ownerId) throw new Error('stale capability description or owner mismatch');
+    const description = captureToolDescriptionMetadata(metadata);
+    this.descriptions.set(descriptor.capabilityId, description);
+    this.refreshAll();
   }
 
   authorize(input: { requestSource: Source; capabilityId: string }): void {
@@ -108,7 +133,7 @@ export class DesktopCapabilityCatalog {
     for (const [key, descriptor] of this.descriptors) {
       if (descriptor.ownerId !== input.ownerId || input.slotId && descriptor.slotId !== input.slotId
         || input.expectedCapabilityId && descriptor.capabilityId !== input.expectedCapabilityId) continue;
-      this.removeNames(key, descriptor); this.descriptors.delete(key); this.authorized.delete(key);
+      this.removeNames(key, descriptor); this.descriptors.delete(key); this.authorized.delete(key); this.descriptions.delete(descriptor.capabilityId);
     }
     this.refreshAll();
   }
@@ -234,7 +259,10 @@ export class DesktopCapabilityCatalog {
     }
     for (const [name, tool] of record.tools) {
       const next = desired.get(name);
-      if (next && (tool as Tool & { capabilityId?: string }).capabilityId === next.descriptor.capabilityId) continue;
+      if (next && (tool as Tool & { capabilityId?: string }).capabilityId === next.descriptor.capabilityId) {
+        record.handle.registry.updateToolDescription(tool, this.descriptions.get(next.descriptor.capabilityId));
+        continue;
+      }
       record.handle.registry.unregisterTool(name, tool); record.tools.delete(name);
     }
     for (const [name, { key, descriptor }] of desired) {
@@ -253,16 +281,18 @@ export class DesktopCapabilityCatalog {
           if (Date.now() >= authority.deadlineAt) throw new DOMException('invocation deadline exceeded', 'AbortError');
           authority.assertCurrent?.(); context?.assertPermissionApproval?.();
           if (this.descriptors.get(key) !== descriptor || !this.available(record, key, descriptor)) throw new Error('capability revoked or scope changed');
+          assertDesktopNativeDescriptorCurrent(descriptor);
           const invoke = descriptor.bindInvocation(authority);
           const boundContext: ToolExecutionContext | undefined = context ? { ...context,
             signal: AbortSignal.any([authority.signal, ...(context.signal ? [context.signal] : [])]),
             session: { ...context.session, cwd: authority.cwd },
           } : undefined;
           context?.onToolInvocationStarted?.();
-          return invoke(input, boundContext);
+          return invoke(input, inheritNativeReadonlyExecutionContext(context, boundContext));
         },
       };
-      record.tools.set(name, tool); record.handle.registry.registerTool(tool);
+      inheritDesktopNativeReadonlyDescriptor(descriptor,tool);
+      record.tools.set(name, tool); record.handle.registry.registerTool(tool, this.descriptions.get(descriptor.capabilityId));
     }
   }
 
@@ -296,7 +326,7 @@ export class DesktopCapabilityCatalog {
           const item = { current, listener }; record.invalidations.add(item); return () => { record.invalidations.delete(item); };
         },
       });
-      return isToolPermissionGrant(result) ? result : false;
+      return snapshotToolPermissionGrant(result) ?? false;
     }
     if (remaining <= 0) return false;
     return new Promise<boolean | ToolPermissionGrant>((resolve, reject) => {
@@ -306,13 +336,14 @@ export class DesktopCapabilityCatalog {
         clearTimeout(timer); authority.signal.removeEventListener('abort', abort);
         if (error) { reject(error.reason); return; }
         if (authority.signal.aborted || Date.now() >= minDeadlineAt) { resolve(false); return; }
-        if (!isToolPermissionGrant(approved)) { resolve(approved === true); return; }
+        const grant = snapshotToolPermissionGrant(approved);
+        if (!grant) { resolve(approved === true); return; }
         // Preserve the input-consuming receipt rather than truthiness. This
         // invocation-local adapter also retains the captured short deadline
         // through a later async opaque journal; it never renews that deadline.
         resolve({ approved: true,
-          prepareInput: finalInput => { assertApprovalCurrent(); return approved.prepareInput(finalInput); },
-          assertCurrent: () => { assertApprovalCurrent(); return approved.assertCurrent(); },
+          prepareInput: finalInput => { assertApprovalCurrent(); return grant.prepareInput(finalInput); },
+          assertCurrent: () => { assertApprovalCurrent(); return grant.assertCurrent(); },
         });
       };
       const abort = () => finish(false);

@@ -1,3 +1,4 @@
+import type {LoopTimedCompletionHost} from './loop-timed-completion.js';
 import type { TimedActionStore } from './timed-action-store.js';
 import type {
   ClaimedTimedAction,
@@ -11,6 +12,9 @@ import type {
 } from './timed-action-types.js';
 
 export interface TimedActionSchedulerOptions {
+  loopCompletion?:LoopTimedCompletionHost;
+  /** Fixed Main shutdown-gate port; covers actual writers, not timeout races. */
+  acquireWriter?: (label: string) => { release(): void };
   executors: Partial<Record<TimedActionExecutorKind, TimedActionExecutorHandler>>;
   now?: () => number;
   isGlobalBackgroundAutoRunEnabled?: () => boolean;
@@ -45,7 +49,7 @@ export interface TimedActionSchedulerOptions {
   onRunComplete?: (event: {
     action: TimedActionRecord;
     runId: string;
-    status: 'success' | 'failed' | 'skipped';
+    status: 'success' | 'failed' | 'skipped' | 'publication_pending';
     finishedAt: number;
     runtimeTaskId?: string;
     error?: string;
@@ -54,7 +58,9 @@ export interface TimedActionSchedulerOptions {
 
 export class TimedActionScheduler {
   private timer: NodeJS.Timeout | null = null;
+  private ticking:Promise<void>|undefined;
   private readonly now: () => number;
+  private readonly acquireWriter: TimedActionSchedulerOptions['acquireWriter'];
   private readonly scanIntervalMs: number;
   private readonly resolveExecutorTimeoutMs: (kind: TimedActionExecutorKind) => number;
   private readonly maxClaimPerTick: number;
@@ -62,6 +68,8 @@ export class TimedActionScheduler {
   private readonly maxLoopConcurrent: number;
   private readonly staleAfterMs: number;
   private readonly inFlight = new Map<string, TimedActionExecutorKind>();
+  private accepting = true;
+  private readonly activeControllers = new Set<AbortController>();
   private lastTickAt: number | null = null;
   private lastTickError: string | null = null;
 
@@ -69,6 +77,7 @@ export class TimedActionScheduler {
     private readonly store: TimedActionStore,
     private readonly options: TimedActionSchedulerOptions
   ) {
+    this.acquireWriter = options.acquireWriter?.bind(options);
     this.now = options.now ?? (() => Date.now());
     this.scanIntervalMs = options.scanIntervalMs ?? 10_000;
     this.resolveExecutorTimeoutMs = resolveExecutorTimeoutMsFromOptions(options);
@@ -79,8 +88,9 @@ export class TimedActionScheduler {
   }
 
   start(): void {
-    if (this.timer) return;
+    if (!this.accepting || this.timer) return;
     void this.runOnce('startup_recovery');
+    if (!this.accepting) return;
     this.timer = setInterval(() => {
       void this.runOnce('normal_tick');
     }, this.scanIntervalMs);
@@ -92,6 +102,12 @@ export class TimedActionScheduler {
     this.timer = null;
   }
 
+  stopAccepting(): void { this.accepting = false; this.stop(); }
+
+  abortAllActive(reason: string = 'app_shutdown'): void {
+    for (const controller of this.activeControllers) controller.abort(new Error(reason));
+  }
+
   getStatus(): { lastTickAt: number | null; lastTickError: string | null; activeLocks: number } {
     return {
       lastTickAt: this.lastTickAt,
@@ -100,13 +116,23 @@ export class TimedActionScheduler {
     };
   }
 
-  async runOnce(recoveryReason: TimedActionRecoveryReason = 'normal_tick'): Promise<void> {
-    const now = this.now();
-    this.lastTickAt = now;
+  runOnce(recoveryReason: TimedActionRecoveryReason = 'normal_tick'): Promise<void> {
+    if(this.ticking)return this.ticking;
+    const work=this.tick(recoveryReason);this.ticking=work;const clear=()=>{if(this.ticking===work)this.ticking=undefined;};void work.then(clear,clear);return work;
+  }
+
+  private async tick(recoveryReason:TimedActionRecoveryReason):Promise<void> {
+    if (!this.accepting) return;
+    let writer: { release(): void } | undefined;
+    const recoveryController=new AbortController();this.activeControllers.add(recoveryController);
     try {
-      this.store.releaseStaleLocks(now, this.staleAfterMs, {
-        resolveLinkedLoopRun: this.options.resolveLinkedLoopRun,
-      });
+      writer = this.acquireWriter?.('timed-action:tick');
+      const now = this.now();
+      if (!this.accepting) return;
+      this.lastTickAt = now;
+      await this.options.loopCompletion?.reconcile(recoveryController.signal);
+      if(!this.accepting||recoveryController.signal.aborted)return;
+      this.store.releaseStaleLocks(now, this.staleAfterMs);
       const notify = this.store.claimDueActions(now, this.maxClaimPerTick, {
         executorKinds: ['notify'],
         recoveryReason,
@@ -152,7 +178,7 @@ export class TimedActionScheduler {
     } catch (error) {
       this.lastTickError = (error as Error).message;
       console.error('[timed-action] tick failed:', error);
-    }
+    } finally { this.activeControllers.delete(recoveryController);writer?.release(); }
   }
 
   private skipAutoRunDisabled(claimed: ClaimedTimedAction): void {
@@ -166,57 +192,76 @@ export class TimedActionScheduler {
   }
 
   private dispatch(claimed: ClaimedTimedAction): void {
-    const handler = this.options.executors[claimed.action.executor.kind];
-    if (!handler) {
-      this.store.finishRunFailure(
-        claimed.action.id,
-        claimed.runId,
-        this.now(),
-        `missing executor: ${claimed.action.executor.kind}`
-      );
-      return;
-    }
-
-    const decision = handler.decideRecovery?.(claimed.action, claimed.context) ?? defaultRecoveryDecision(claimed);
-    if (decision.action !== 'execute') {
-      const finishedAt = this.now();
-      this.store.finishRunSkipped(claimed.action.id, claimed.runId, finishedAt, decision);
-      this.notifyRunComplete(claimed, 'skipped', finishedAt, undefined, decision.reason);
-      return;
-    }
-
-    this.inFlight.set(claimed.action.id, claimed.action.executor.kind);
-    this.store.markRunRunning(claimed.action.id, claimed.runId, this.now());
-    void this.executeClaimed(claimed, handler, decision);
+    if (!this.accepting) return;
+    const writer = this.acquireWriter?.('timed-action:executor:' + claimed.runId);
+    let handedOff = false;
+    try {
+      if (!this.accepting) return;
+      const handler = this.options.executors[claimed.action.executor.kind];
+      if (!handler) {
+        this.store.finishRunFailure(claimed.action.id, claimed.runId, this.now(), `missing executor: ${claimed.action.executor.kind}`);
+        return;
+      }
+      const decision = handler.decideRecovery?.(claimed.action, claimed.context) ?? defaultRecoveryDecision(claimed);
+      if (decision.action !== 'execute') {
+        const finishedAt = this.now();
+        this.store.finishRunSkipped(claimed.action.id, claimed.runId, finishedAt, decision);
+        this.notifyRunComplete(claimed, 'skipped', finishedAt, undefined, decision.reason);
+        return;
+      }
+      if (!this.accepting) return;
+      this.store.markRunRunning(claimed.action.id, claimed.runId, this.now());
+      this.inFlight.set(claimed.action.id, claimed.action.executor.kind);
+      const work = this.executeClaimed(claimed, handler, decision, () => writer?.release());
+      handedOff = true;
+      void work.catch(error => console.error('[timed-action] executor finalization failed:', error));
+    } finally { if (!handedOff) writer?.release(); }
   }
 
   private async executeClaimed(
     claimed: ClaimedTimedAction,
     handler: TimedActionExecutorHandler,
-    decision: Extract<ExecutorRecoveryDecision, { action: 'execute' }>
+    decision: Extract<ExecutorRecoveryDecision, { action: 'execute' }>,
+    releaseWriter: () => void
   ): Promise<void> {
     const controller = new AbortController();
-    const timeoutMs = this.resolveExecutorTimeoutMs(claimed.action.executor.kind);
-    const timeoutTimer = setTimeout(() => {
-      controller.abort(new Error('executor_timeout'));
-    }, timeoutMs);
-    timeoutTimer.unref?.();
+    this.activeControllers.add(controller);
+    let actual: Promise<Awaited<ReturnType<TimedActionExecutorHandler['execute']>>> | undefined;
+    let removeAbortListener: (() => void) | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     try {
+      const timeoutMs = this.resolveExecutorTimeoutMs(claimed.action.executor.kind);
+      timeoutTimer = setTimeout(() => controller.abort(new Error('executor_timeout')), timeoutMs);
+      timeoutTimer.unref?.();
       const runtimeContext: TimedActionExecutorRuntimeContext = {
         timedActionRunId: claimed.runId,
         signal: controller.signal,
       };
+      actual = Promise.resolve().then(() => {
+        if (!this.accepting) throw new Error('app_shutdown');
+        return handler.execute(claimed.action, claimed.context, runtimeContext);
+      });
       const result = await Promise.race([
-        Promise.resolve(handler.execute(claimed.action, claimed.context, runtimeContext)),
+        actual,
         new Promise<never>((_, reject) => {
-          controller.signal.addEventListener('abort', () => {
+          const abort = () => {
             reject(controller.signal.reason instanceof Error
               ? controller.signal.reason
               : new Error('executor_timeout'));
-          }, { once: true });
+          };
+          if (controller.signal.aborted) abort();
+          else { controller.signal.addEventListener('abort', abort, { once: true }); removeAbortListener = () => controller.signal.removeEventListener('abort', abort); }
         }),
       ]);
       const finishedAt = this.now();
+      if(claimed.action.executor.kind==='loop'&&(!result.skip||result.decision?.reused===true)){
+        const loopRunId=result.awaitingLoopRunId??parseLoopTimedActionDecision(result.decision).loopRunId;
+        if(!this.options.loopCompletion)throw Error('loop_timed_host_required');
+        const completion=await this.options.loopCompletion.finalize({actionId:claimed.action.id,timedRunId:claimed.runId,loopRunId,mode:result.decision?.reused===true?'reused':'normal',requestSource:'scheduler',signal:controller.signal});
+        if(completion.status==='retry_pending')return;
+        const status=completion.outcome==='success'?(result.skip?'skipped':'success'):completion.outcome==='publication_pending'?'publication_pending':completion.outcome==='blocked'||completion.outcome==='rejected'?'skipped':'failed';
+        this.notifyRunComplete(claimed,status,finishedAt,result.runtimeTaskId,completion.receipt.after.run.error??undefined);return;
+      }
       if (result.skip) {
         this.store.finishRunSkipped(claimed.action.id, claimed.runId, finishedAt, result.skip);
         this.notifyRunComplete(claimed, 'skipped', finishedAt, result.runtimeTaskId, result.skip.reason);
@@ -224,6 +269,7 @@ export class TimedActionScheduler {
       }
       if (claimed.action.executor.kind === 'loop') {
         const loopDecision = parseLoopTimedActionDecision(result.decision);
+        if(loopDecision.loopStatus==='publication_pending'){this.store.finishRunPublicationPending(claimed.action.id,claimed.runId,finishedAt,loopDecision);this.notifyRunComplete(claimed,'publication_pending',finishedAt,result.runtimeTaskId);return;}
         if (loopDecision.loopStatus === 'failed') {
           throw new Error(`loop failed: ${loopDecision.nextActionSummary ?? loopDecision.loopRunId}`);
         }
@@ -247,30 +293,34 @@ export class TimedActionScheduler {
     } catch (error) {
       const finishedAt = this.now();
       const message = (error as Error).message;
+      if(claimed.action.executor.kind==='loop'&&this.options.loopCompletion)return;
       this.store.finishRunFailure(claimed.action.id, claimed.runId, finishedAt, message);
       this.notifyRunComplete(claimed, 'failed', finishedAt, undefined, message);
     } finally {
       clearTimeout(timeoutTimer);
       this.inFlight.delete(claimed.action.id);
+      removeAbortListener?.();
+      const release = () => { this.activeControllers.delete(controller); releaseWriter(); };
+      // A timeout settles this wrapper, not the underlying writer.
+      if (actual) void actual.then(release, release); else release();
     }
   }
 
   private notifyRunComplete(
     claimed: ClaimedTimedAction,
-    status: 'success' | 'failed' | 'skipped',
+    status: 'success' | 'failed' | 'skipped' | 'publication_pending',
     finishedAt: number,
     runtimeTaskId?: string,
     error?: string
   ): void {
-    const action = this.store.getAction(claimed.action.id) ?? claimed.action;
-    this.options.onRunComplete?.({
-      action,
-      runId: claimed.runId,
-      status,
-      finishedAt,
-      runtimeTaskId,
-      error,
-    });
+    // Notification is after the durable outcome. Its failure must not enter
+    // executeClaimed's failure finalizer and overwrite that committed history.
+    const failed=(error:unknown)=>console.warn('[timed-action] completion notification failed:',error);
+    try {
+      const action = this.store.getAction(claimed.action.id) ?? claimed.action;
+      const notification:unknown=this.options.onRunComplete?.({action,runId:claimed.runId,status,finishedAt,runtimeTaskId,error});
+      void Promise.resolve(notification).catch(failed);
+    } catch (notificationError) { failed(notificationError); }
   }
 
   private countInFlight(kind: TimedActionExecutorKind): number {
@@ -286,7 +336,7 @@ function parseLoopTimedActionDecision(decision: Record<string, unknown> | undefi
   if (!decision || typeof decision.loopRunId !== 'string' || decision.loopRunId.length === 0) {
     throw new Error('loop executor decision missing loopRunId');
   }
-  if (decision.loopStatus !== 'success' && decision.loopStatus !== 'failed' && decision.loopStatus !== 'blocked') {
+  if (decision.loopStatus !== 'success' && decision.loopStatus !== 'failed' && decision.loopStatus !== 'blocked' && decision.loopStatus !== 'publication_pending') {
     throw new Error('loop executor decision missing loopStatus');
   }
   return {

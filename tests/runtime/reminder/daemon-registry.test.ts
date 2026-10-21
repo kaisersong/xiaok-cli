@@ -35,6 +35,7 @@ describe('reminder daemon registry', () => {
       reminderId: 'reminder_1',
       content: '发日报',
       createdAt: 3_000,
+      taskType: 'reminder',
     });
 
     expect(firstSink).not.toHaveBeenCalled();
@@ -43,6 +44,7 @@ describe('reminder daemon registry', () => {
       sessionId: 'sess_1',
       reminderId: 'reminder_1',
       content: '发日报',
+      taskType: 'reminder',
     }));
   });
 
@@ -54,6 +56,7 @@ describe('reminder daemon registry', () => {
       reminderId: 'reminder_1',
       content: '发日报',
       createdAt: 3_000,
+      taskType: 'reminder',
     })).rejects.toMatchObject({
       name: ReminderDeliveryError.name,
       message: 'target session offline',

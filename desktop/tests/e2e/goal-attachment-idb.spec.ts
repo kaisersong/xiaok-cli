@@ -52,9 +52,15 @@ async function launch(throwSubscribe: boolean, profile = join(mkdtempSync(join(t
   const page = await app.firstWindow(), errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  await expect(page).toHaveTitle('U11 native Goal attachment');
-  await expect(page.getByTestId('display-source')).toBeVisible();
-  await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+  try {
+    await expect(page).toHaveTitle('U11 native Goal attachment');
+    await expect(page.getByTestId('display-source')).toBeVisible();
+    await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+  } catch (error) {
+    // Reuse the existing pageerror/console collectors; no extra observer or backend.
+    console.error('U11_PAGE_INITIALIZATION_FAILED', JSON.stringify({ profile, url: page.url(), errors }));
+    throw error;
+  }
   return { app, page, errors, profile };
 }
 async function close(instance: Instance) {

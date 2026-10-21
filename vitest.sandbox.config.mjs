@@ -1,6 +1,8 @@
 export default {
   cacheDir: '.test-cache/vitest-sandbox',
   test: {
+    globalSetup: ['./tests/support/profile-account.global.mjs'],
+    setupFiles: ['./tests/support/profile-account.setup.mjs'],
     globals: true,
     environment: 'node',
     include: ['.test-dist/tests/**/*.test.js'],

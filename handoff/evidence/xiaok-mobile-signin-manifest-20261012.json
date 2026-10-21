@@ -1,0 +1,904 @@
+{
+  "historicalOnlyAcrossMachines": true,
+  "noInstalledIdentityCredentialsNativeBinariesDependenciesOrLiveLease": true,
+  "originalAcceptanceUnchanged": true,
+  "parentComplete": false,
+  "masterMerged": false,
+  "entries": [
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/desktop-shutdown-coordinator.ts",
+      "bytes": 10075,
+      "sha256": "40c2badcdc032a76030df6a06764b39865eab39eac42dfe285abd80bda1779a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/ipc-data-snapshot.ts",
+      "bytes": 2324,
+      "sha256": "64ef3e413c324642523bad12070e58b44e7ef04b63f40c60521917ae2eab976c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/ipc-native-promise.ts",
+      "bytes": 1317,
+      "sha256": "69ad5daffa7adaed0ad6109a044c6916226962811e45abde742e29827df3fa31"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/ipc-runtime.ts",
+      "bytes": 7177,
+      "sha256": "b496edb0a13398f8cebc2acad5936d6852e02c25d43fa1c8ba23856d55f88184"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/main.ts",
+      "bytes": 95048,
+      "sha256": "0b98bdb3ccfe1a5cd8bf3109ebce1dd331f124c12a3766dd221eb2a9cffd6343"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/meeting-recorder-window.ts",
+      "bytes": 6521,
+      "sha256": "ab6340d21f47ba05e6ab8e7bd941883470446f4415603589bc50a847a3a17b08"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/mobile-readonly-typed-ipc.ts",
+      "bytes": 3057,
+      "sha256": "4e2a3e879121a75799fe455166a93c6c5b5b295264ba104be882d9dbde3dfbb4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/mobile-relay-signin.ts",
+      "bytes": 2754,
+      "sha256": "ec56033ca4a4ac22796859e7d978a477e597f82540fe8bc89128f6b07701b5c9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/mobile-signin-typed-ipc.ts",
+      "bytes": 2194,
+      "sha256": "dc29073428fd85d7a1a23c641040e4f207cc764f7f2b4e711ad23377151ce39a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/preload-api.ts",
+      "bytes": 121920,
+      "sha256": "7dd3f1bb37bdddd7467d87f2a53ac862885a2b8fb1a654d67f046e7b2724e44b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/preload.cjs",
+      "bytes": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/security.ts",
+      "bytes": 2163,
+      "sha256": "f83f35e56d59b632e0be52ce5f5ec1ffa89641b9dc5a08280e782dfadf627864"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/electron/shutdown-aware-ipc-main.ts",
+      "bytes": 5492,
+      "sha256": "d7c6d9de51611e9dad094045e002c1d1bfeef9348f2cd3659cb7ae5373b56632"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/api/bridge.ts",
+      "bytes": 56624,
+      "sha256": "7a5c05b1b8a66511e2ba0d093fd3b3f0da9475e0bb37c7921fe2f67fc722aadc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/components/DesktopSettings.tsx",
+      "bytes": 234921,
+      "sha256": "eb7014dc9ec367ee9a5a7936f3442b1a412e1fb73fc622f6f69ec2e4b99a9c91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/locales/en.ts",
+      "bytes": 209172,
+      "sha256": "bc4b5ee5dbed73abb4366a0f202f2d6e858dc0f521d0f7414deb1f00fd0d2cea"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/locales/index.ts",
+      "bytes": 131518,
+      "sha256": "7a00baf62a036a4f812becfc0367f3827cbc1ea3326f4aa38305b0609961b07f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/locales/zh.ts",
+      "bytes": 203859,
+      "sha256": "0bfebec942e3e793dc7d8bf1a1abaea6897f3043f67f347244dd58d7052262ce"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/shared/mobile-readonly-ipc-contract.ts",
+      "bytes": 1184,
+      "sha256": "6c2ed5d4d00dda027bc67d0eb059386ac84cfc5970cdcd3e76483c14c459391e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/shared/mobile-signin-ipc-contract.ts",
+      "bytes": 425,
+      "sha256": "43186f857a94dc29333ef385a575bf424903f6dd88242ef8a418ecfdb55f3032"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/tests/main/ipc-schema-coverage.test.ts",
+      "bytes": 4717,
+      "sha256": "99c760ec203bfded744af0b8381aa17ae00364d365ab7b6f3964f8015e063cc8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/tests/main/mobile-signin-contract.test.ts",
+      "bytes": 3045,
+      "sha256": "3fdef2c47204a23169e1dc47e17d9027f28119f814d201d9b6e1ee13be563a04"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/tests/main/mobile-signin-main-controls.test.ts",
+      "bytes": 12253,
+      "sha256": "ecb7292def86f51e9e956eaf5ae16d4343d81043d83992bee2d884a1ad127766"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/tests/main/preload-contract.test.ts",
+      "bytes": 56116,
+      "sha256": "4b0bf2f9abd7aa0f96c9140fe90eb5f781df68239dcc96a4d73a7b55f73770e7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/mobile-readonly-consistency.test.tsx",
+      "bytes": 9209,
+      "sha256": "a71bf87f0800fae0c3e2d39c90de863b6770b613b7d92c36df657600fc4e49c5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/mobile-signin-action.test.tsx",
+      "bytes": 5162,
+      "sha256": "8b11d9a4f59e72397880cb62d856ada114354d88ff69480d3da4920dd4606ecd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/desktop-shutdown-coordinator.ts",
+      "bytes": 10075,
+      "sha256": "40c2badcdc032a76030df6a06764b39865eab39eac42dfe285abd80bda1779a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/ipc-data-snapshot.ts",
+      "bytes": 2324,
+      "sha256": "64ef3e413c324642523bad12070e58b44e7ef04b63f40c60521917ae2eab976c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/ipc-native-promise.ts",
+      "bytes": 1317,
+      "sha256": "69ad5daffa7adaed0ad6109a044c6916226962811e45abde742e29827df3fa31"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/ipc-runtime.ts",
+      "bytes": 7177,
+      "sha256": "b496edb0a13398f8cebc2acad5936d6852e02c25d43fa1c8ba23856d55f88184"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/main.ts",
+      "bytes": 95048,
+      "sha256": "0b98bdb3ccfe1a5cd8bf3109ebce1dd331f124c12a3766dd221eb2a9cffd6343"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/meeting-recorder-window.ts",
+      "bytes": 6521,
+      "sha256": "ab6340d21f47ba05e6ab8e7bd941883470446f4415603589bc50a847a3a17b08"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/mobile-readonly-typed-ipc.ts",
+      "bytes": 3057,
+      "sha256": "4e2a3e879121a75799fe455166a93c6c5b5b295264ba104be882d9dbde3dfbb4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/mobile-relay-signin.ts",
+      "bytes": 2754,
+      "sha256": "ec56033ca4a4ac22796859e7d978a477e597f82540fe8bc89128f6b07701b5c9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/mobile-signin-typed-ipc.ts",
+      "bytes": 2194,
+      "sha256": "dc29073428fd85d7a1a23c641040e4f207cc764f7f2b4e711ad23377151ce39a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/preload-api.ts",
+      "bytes": 121920,
+      "sha256": "7dd3f1bb37bdddd7467d87f2a53ac862885a2b8fb1a654d67f046e7b2724e44b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/preload.cjs",
+      "bytes": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/security.ts",
+      "bytes": 2163,
+      "sha256": "f83f35e56d59b632e0be52ce5f5ec1ffa89641b9dc5a08280e782dfadf627864"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/electron/shutdown-aware-ipc-main.ts",
+      "bytes": 5492,
+      "sha256": "d7c6d9de51611e9dad094045e002c1d1bfeef9348f2cd3659cb7ae5373b56632"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/renderer/src/api/bridge.ts",
+      "bytes": 56624,
+      "sha256": "7a5c05b1b8a66511e2ba0d093fd3b3f0da9475e0bb37c7921fe2f67fc722aadc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/renderer/src/components/DesktopSettings.tsx",
+      "bytes": 234921,
+      "sha256": "eb7014dc9ec367ee9a5a7936f3442b1a412e1fb73fc622f6f69ec2e4b99a9c91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/renderer/src/locales/en.ts",
+      "bytes": 209172,
+      "sha256": "bc4b5ee5dbed73abb4366a0f202f2d6e858dc0f521d0f7414deb1f00fd0d2cea"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/renderer/src/locales/index.ts",
+      "bytes": 131518,
+      "sha256": "7a00baf62a036a4f812becfc0367f3827cbc1ea3326f4aa38305b0609961b07f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/renderer/src/locales/zh.ts",
+      "bytes": 203859,
+      "sha256": "0bfebec942e3e793dc7d8bf1a1abaea6897f3043f67f347244dd58d7052262ce"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/shared/mobile-readonly-ipc-contract.ts",
+      "bytes": 1184,
+      "sha256": "6c2ed5d4d00dda027bc67d0eb059386ac84cfc5970cdcd3e76483c14c459391e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/shared/mobile-signin-ipc-contract.ts",
+      "bytes": 425,
+      "sha256": "43186f857a94dc29333ef385a575bf424903f6dd88242ef8a418ecfdb55f3032"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/tests/main/ipc-schema-coverage.test.ts",
+      "bytes": 4717,
+      "sha256": "99c760ec203bfded744af0b8381aa17ae00364d365ab7b6f3964f8015e063cc8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/tests/main/mobile-signin-contract.test.ts",
+      "bytes": 3045,
+      "sha256": "3fdef2c47204a23169e1dc47e17d9027f28119f814d201d9b6e1ee13be563a04"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/tests/main/mobile-signin-main-controls.test.ts",
+      "bytes": 13175,
+      "sha256": "324f83e047d5d91f514ae9a09285c0d534c3afe32078d99ba49545a36654c35f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/tests/main/preload-contract.test.ts",
+      "bytes": 56116,
+      "sha256": "4b0bf2f9abd7aa0f96c9140fe90eb5f781df68239dcc96a4d73a7b55f73770e7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/tests/renderer/mobile-readonly-consistency.test.tsx",
+      "bytes": 9209,
+      "sha256": "a71bf87f0800fae0c3e2d39c90de863b6770b613b7d92c36df657600fc4e49c5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-freeze-r2/desktop/tests/renderer/mobile-signin-action.test.tsx",
+      "bytes": 5162,
+      "sha256": "8b11d9a4f59e72397880cb62d856ada114354d88ff69480d3da4920dd4606ecd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-request-setup-failure-r1.json",
+      "bytes": 187,
+      "sha256": "dc06b51ef08ca549ae5ec87b2fbb99796bbf633f050b43769a702b317dde6b33"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/code-review-wording-correction-r1.json",
+      "bytes": 658,
+      "sha256": "1deaf446d8897bb502ba91905cadc066381551900f668a73bfb653d50b366ca4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/coordinator-test-contract-correction-r1.json",
+      "bytes": 283,
+      "sha256": "0a37342091414b00e5b3b324cb8671b6b21ce23d80bfb2c42e80c10915fe754c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r1-pid.json",
+      "bytes": 108,
+      "sha256": "4bebbc18a0e5dbf0a211e6dff49bad3c7b04385873bddd768348f25cf56cd6cb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r1-process.json",
+      "bytes": 6231,
+      "sha256": "11604a3904279c6998c59473871336c97187baa9924ef36a68597dc45debd686"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r1-request.json",
+      "bytes": 3213,
+      "sha256": "279120944ab5e71fbd4d52a116c3eeaa22ae130bf3a3b5db919b2f55f55041dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r1.log",
+      "bytes": 5594,
+      "sha256": "8634feaaaeb716410ff23578d158b28879bf3772e2282b1cf44e87302aadd41f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r2-pid.json",
+      "bytes": 108,
+      "sha256": "cb24b16556f78cf8964dafb5a8e0d37a162dd73079c7948b674858938339ab29"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r2-process.json",
+      "bytes": 7435,
+      "sha256": "3f7916bd6ca43f8aa2ac8d5f7db86a7dd9cac789b663bd581bc54f66a9cde010"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r2-request.json",
+      "bytes": 3711,
+      "sha256": "1d37321392e9af0cabd8c2bc9ee0055a81e655ee6e4eecf019da77c5b8b885d6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-independent-r2.log",
+      "bytes": 3231,
+      "sha256": "63ae2a51d55b5c4f9f54588868bd57951ff7e5ba4b3d87f81d92771d129342ed"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-r1.md",
+      "bytes": 5913,
+      "sha256": "a73907d11c9531df1b599c19e3c8af38dbc9ff45b5b726ad33511144eea77266"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/design-r2.md",
+      "bytes": 9187,
+      "sha256": "3244e649ae17f17537c4b1a3f19155dc2c592955446532850b969c7df6d81c61"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/fallback-original-main-b7867b60.ts",
+      "bytes": 94587,
+      "sha256": "a02724fac89a7c58c48cc8aaedf9850eb796b9bc4cd0ecfc334d3d459f963135"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/final-owned-process-audit-r1.json",
+      "bytes": 4854,
+      "sha256": "1108bbe26941a34bf3713eb046add0b63d397d7b8c63408e0e15858d828c1230"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/finalize-component.py",
+      "bytes": 6022,
+      "sha256": "023501276d56df41bdbe9680e878eadb4fc9bf0f1ceb617f60280dbc47868cff"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/hygiene-r1-pid.json",
+      "bytes": 108,
+      "sha256": "86fecebdd58e6a5a11200b30407563f797fa283aecbfe570157c1a496666ba99"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/hygiene-r1-process.json",
+      "bytes": 689,
+      "sha256": "b6d63c18414fef0aba24ee998cecfe86379605d886fbe98e9a612807b9c73abd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/hygiene-r1-request.json",
+      "bytes": 235,
+      "sha256": "84424a9859c2881ade8c9d0433bfee34ee65885048263e67085e3cd13a9a7ad9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/hygiene-r1.log",
+      "bytes": 945,
+      "sha256": "64c9623e8de2e817d4c2b77493c8a264562f3f1ee44b030a39ae5c2e8fe0ddab"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/make-native-signin-probe.mjs",
+      "bytes": 7293,
+      "sha256": "dcd801d50281c96f8d8d41bdb56538ecef4efbfb2d3c7194c9c187b272cd5e4e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/mobile-signin-component-final-r1.json",
+      "bytes": 16741,
+      "sha256": "4c50a9804cfba539c991f3c4a56684f420cf93e73fa67d5a903468055bcf1eb1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-cleanup-r1.json",
+      "bytes": 224,
+      "sha256": "34df8da38ee7d320d126200011448088ecdeccc9873293f0e667d64358adf0b2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-r1-pid.json",
+      "bytes": 108,
+      "sha256": "c790c4e448edc4f652ddf2ef93285596b04a5b4d81c8ec9897007bbc4748dd7a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-r1-process.json",
+      "bytes": 8820,
+      "sha256": "1a1fce5bc484bfb65dcc3b9641a1c1ca7d6e0c3e0cc605bb6b6cf4256dca4839"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-r1-request.json",
+      "bytes": 3104,
+      "sha256": "cef811af8a7e4b848c43cfe2f0d26da2b39bb89981621d6fdfa7104f2889624b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-r1.json",
+      "bytes": 1746,
+      "sha256": "6ff9f082d57060a1fc75716925fa5778de091d522bb4b4a4e3042f31763fd69d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-r1.log",
+      "bytes": 1178,
+      "sha256": "8a18dcc283015d8ac8ca7758b278ce6957d806f9db1accc69a288a74ed667b80"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-script-r1.json",
+      "bytes": 1653,
+      "sha256": "41827c9059094368d2592087410ad80c5e63d7010b43fb80634a7d1479a0b973"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/native-signin-script-r1.mjs",
+      "bytes": 7942,
+      "sha256": "1f5dbb81357d36205485a168f287addacc7f88d6dd9c93708f3a990f00f6e3cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/run.py",
+      "bytes": 2107,
+      "sha256": "367a767227f319b28780b207cae7d61f749997584bf579b29ae49a7868f042de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-architecture-changed-r1-pid.json",
+      "bytes": 108,
+      "sha256": "dae6b38601c6183a12e51725fc1bdc9a80f9fff6c95a18d1fe514989752923b2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-architecture-changed-r1-process.json",
+      "bytes": 7194,
+      "sha256": "12bf157e1a6a6efec2226ce565546ff699117fc447188094114f0e34b262616b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-architecture-changed-r1-request.json",
+      "bytes": 2391,
+      "sha256": "fb269940f7d09ffee4c1a0d26c3634f20e4488e1a9eec4cf50ec0a86f966d549"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-architecture-changed-r1.log",
+      "bytes": 163,
+      "sha256": "22bacd1a4242e323191cc9cc86ab0dcf5b7edf64236eb89f680a148dc18a5280"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-main-r1-pid.json",
+      "bytes": 108,
+      "sha256": "44c72b8a44a0fa5a57b91b05a77bed59e513b856a28a1e55a33c25a83beb2adc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-main-r1-process.json",
+      "bytes": 7155,
+      "sha256": "a5dd3b7264e54248f55934ceceb3c454f9a930c17f5649ca9bc97afb05591f8c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-main-r1-request.json",
+      "bytes": 2354,
+      "sha256": "7b5615edfecd029b82db10ad3dbb048f67cd03fa5ff6a7bf4adfc7afc24e5254"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-main-r1.log",
+      "bytes": 1099,
+      "sha256": "95f579e2d5a35e5154985d0869829d1ba4cbdb51b46dc32defa61f9403df92b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-renderer-r1-pid.json",
+      "bytes": 108,
+      "sha256": "a42054fab7155ecc00285b6706531d5437c4b0ea9133f253bcdb73bfbcdbd5bd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-renderer-r1-process.json",
+      "bytes": 7164,
+      "sha256": "c4a95a2a3e2f57f265fdbd451502ba7fc92d659ffc4720b3a282fa2127f973cd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-renderer-r1-request.json",
+      "bytes": 2362,
+      "sha256": "d5b6e2dec2732c7b63823d27a737d86c04b757de1671fcee47d5dfeb50a868b6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-build-renderer-r1.log",
+      "bytes": 37028,
+      "sha256": "d582644dfbd89ec444e04bd6e50c92f6f8ba6605c8ef883703cd69425db57806"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-freeze-r1.json",
+      "bytes": 13584,
+      "sha256": "b0f6f25bfacb59210f9097475f825dc27328ad3e34c60e1663786c4baae6c738"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-freeze-r2.json",
+      "bytes": 13677,
+      "sha256": "e91bc834541df09868c80b577921e93258cdb9977935d720ce54fb431c8e9054"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r1-pid.json",
+      "bytes": 109,
+      "sha256": "06ec053004ade7b33e4006c5d88899b3eb4440141c349cddf55a06f74d3c9382"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r1-process.json",
+      "bytes": 39093,
+      "sha256": "b024796b22f9b5e1ba6645abaf1f3a89d184982afc446d229635f780f05b8a60"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r1-request.json",
+      "bytes": 16988,
+      "sha256": "3b27367c00dc7d1fb3d8cedfba882886ba110e09036fea254acb13f656cbe93a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r1.log",
+      "bytes": 4782,
+      "sha256": "b311b3c7a42d910ef3e43092c497f96227a58714b974a74469673426aff0e43a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r2-pid.json",
+      "bytes": 108,
+      "sha256": "2a6a510bec1897f9437c212a7348a2f6425dced3a8ec8e1dd899ccced8853cc4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r2-process.json",
+      "bytes": 31930,
+      "sha256": "56049cbffe0737c5a1ec0e4775061839fcc42c21ea0b20739d879e4c89ab14c0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r2-request.json",
+      "bytes": 14069,
+      "sha256": "bd9284b048a6d02918003eddd08a61ee5ac1a314340ad0d4800bb7dca14fea89"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-independent-r2.log",
+      "bytes": 3324,
+      "sha256": "48f69b6a022329c80293b01098133909b442489a2411feb92b347b2f09f16b99"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-code-supplement-r1.patch",
+      "bytes": 3971,
+      "sha256": "b542abf45b697d1feb4d5436b8d72e3bfd4b42fb20a4039e9c4b9b4495f7d42b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-fallback-red-r1-pid.json",
+      "bytes": 108,
+      "sha256": "05aef5c6d31c1400498ade2656f7d9aa2b86ad2a49d7ebcb9ea33e6fc03fae86"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-fallback-red-r1-process.json",
+      "bytes": 4756,
+      "sha256": "08a2bae386119578226e3687a1de1c807864a53c2ad55ec6e63e2e4b3938afcf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-fallback-red-r1-request.json",
+      "bytes": 1961,
+      "sha256": "266b908f13c49dc3ba45f8b797f92383f3567ebf966f20b3aa2bbae7cfe2487c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-fallback-red-r1.json",
+      "bytes": 13005,
+      "sha256": "e2c086ae250677ad34a5b23bea634f7b1eaf92da2a446c2a5a4f9c0df180941d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-fallback-red-r1.log",
+      "bytes": 490,
+      "sha256": "1780341bcacc2952cd172d7a64a4b68ed6b9e7fd1cb9ad0630aa3530ccbb84ef"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-gov-r1-pid.json",
+      "bytes": 109,
+      "sha256": "e1f22798bd471e1bfd592eca0ebf723c19244203cf7cde7f3a2e0b9cb8f58bb1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-gov-r1-process.json",
+      "bytes": 7149,
+      "sha256": "1d7c912aa193a9151affecad702d0ce41e470413e2667389d3b8d8e58a835829"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-gov-r1-request.json",
+      "bytes": 2345,
+      "sha256": "7aea8b3d2e65760eac8eff0f9737da46d37ac567cc39ee0a0be908b4e1fff628"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-gov-r1.log",
+      "bytes": 359,
+      "sha256": "d5e4a6a0de393233d1657b683199e6924312eb72d98cbbae7d9053aee5531a9d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r1-pid.json",
+      "bytes": 108,
+      "sha256": "e5acb224f72a122418e4d55578695ce7bb50e3aaec4cfb7ce52725f7b2a97d36"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r1-process.json",
+      "bytes": 4111,
+      "sha256": "8eee1205932c081689a5054c5d2b0c29292a9ea8c9a419df13f32df13ec8d84d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r1-request.json",
+      "bytes": 1631,
+      "sha256": "10da4f5f6a44161c24135ba65efc481a01722d98827b70b8eb94ef7efbf51dcf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r1.json",
+      "bytes": 16036,
+      "sha256": "8b957243cd634a176bdaa15c9d108de39c02155d2d78623b6344fb97d6c2eed5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r1.log",
+      "bytes": 181,
+      "sha256": "31009762b31f7ed03c178dceef73969ec67ea39278a965b7857e6374df97a075"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r2-pid.json",
+      "bytes": 109,
+      "sha256": "66f1584299515fec38f8a4b5e16f92cf28c56487d02a52d9f6e449e9290a1bda"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r2-process.json",
+      "bytes": 4111,
+      "sha256": "e926eecd6598011fd9fbdc776c79f88a8911ec2fba0160019afb571335724243"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r2-request.json",
+      "bytes": 1631,
+      "sha256": "a69a4957bf0814669812e260048429cffd8cf51e35fb686573476583c8d3010d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r2.json",
+      "bytes": 15217,
+      "sha256": "172069971290cb967fe94ee2f20d11ee4834125b7b94616983461341df2e74f9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-green-r2.log",
+      "bytes": 181,
+      "sha256": "3a0eeb9e30078c948df901f89737178598393e0b35c3241d002020342a6ef7c7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-red-r1-pid.json",
+      "bytes": 109,
+      "sha256": "eeef8a80f320bd52a65aba487108eb148768d77f5db9e0a9435607398d105080"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-red-r1-process.json",
+      "bytes": 2286,
+      "sha256": "0273d8703e4ef4fb435af9ce79d629321623239ed4504e96c12aec263c3e1dd2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-red-r1-request.json",
+      "bytes": 1056,
+      "sha256": "502134c9ee5630a26b0386b83fe0a207b7a0022521d468c1720f050dcdb77d3f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-red-r1.json",
+      "bytes": 116797,
+      "sha256": "e6336fcd4e6bf4571f581856dd8749abb9d66c0803b565cf57d037115fea0506"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-red-r1.log",
+      "bytes": 179,
+      "sha256": "7c0e5d86b0e92f9968b2954faa9ad26f6b3373916478593fe13eed2cdcd67105"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-source-diff-r1.patch",
+      "bytes": 15929,
+      "sha256": "66808b1c019f0b1d1590cf8684d291f06bcb8906fa2bfd787c380d883eb3f163"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r1-pid.json",
+      "bytes": 106,
+      "sha256": "5d1e5b04c516adc9a52f5c6320330a6fadb985d34cac778f01d72fc4b321e4c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r1-process.json",
+      "bytes": 35251,
+      "sha256": "ef1ed9a02a28f96874d9ab8abe1a283e0b7c47bbfa35e26fedbfab00575ca8cd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r1-request.json",
+      "bytes": 11646,
+      "sha256": "0f29144b3f4ec4119a9327ec0439007ed6d28e81a48b9600f8b78c9a31e9cff8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r1.json",
+      "bytes": 954087,
+      "sha256": "879439ab26cc3f3110eb394e1e5a68a0f6cbd9f248b2be2e9e65453d14b7c34d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r1.log",
+      "bytes": 91,
+      "sha256": "6062df9f0c218e272145ae4b69ed19f0cde141601c6551835f9a7ae265b6665f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r2-pid.json",
+      "bytes": 109,
+      "sha256": "46705b7ef90784d517aabd95f98becafa953bd191bff5ed950c451975aff1d77"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r2-process.json",
+      "bytes": 35252,
+      "sha256": "cbba6dbee73e0589ccdd47fde1bc9921d4684d03b1fa47db405af6c516fe4b70"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r2-request.json",
+      "bytes": 11646,
+      "sha256": "6788158f81c4aeccf4f43fede614390f6ddab3db270d0917e583a9d3dd5cc20e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r2.json",
+      "bytes": 954087,
+      "sha256": "400e0967bbb2842cc274f6edf587ae9ac10a3e9783eeb91a8a4256c2bfa2b3e8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r2.log",
+      "bytes": 91,
+      "sha256": "6062df9f0c218e272145ae4b69ed19f0cde141601c6551835f9a7ae265b6665f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r3-pid.json",
+      "bytes": 108,
+      "sha256": "8ee288d78a6747d557f198074b535d75f107e17dbceb9fecf0fd94277749a925"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r3-process.json",
+      "bytes": 35252,
+      "sha256": "c6dbb89bebe95292f9699efb72b947116ffb17d4ab808635f5f3126090ab0026"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r3-request.json",
+      "bytes": 11646,
+      "sha256": "62229846eb8d06891f48f48cd8e828c18a81bb23af35aa0df3d723cbcad1b066"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r3.json",
+      "bytes": 954087,
+      "sha256": "466dab8f04025264fda2a9ce5c70a0fa5ec1cc97adb6843417e392a08b88a422"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-strict-r3.log",
+      "bytes": 91,
+      "sha256": "6062df9f0c218e272145ae4b69ed19f0cde141601c6551835f9a7ae265b6665f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r1-pid.json",
+      "bytes": 108,
+      "sha256": "de0d1da376781d8223faecd2bdaf7505f00f53d9bb73e73c79195aaa3faeed67"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r1-process.json",
+      "bytes": 7448,
+      "sha256": "dcd2a68b7e11abea38d341a37c6f6ad383c6575f958d18c84e3377d225504bbf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r1-request.json",
+      "bytes": 2644,
+      "sha256": "bb30dbd0649d9ab76bffa5f564c75b644b633621a62ea66e656be5bdd2d9ead8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r1.json",
+      "bytes": 825,
+      "sha256": "764b87a376891eb045a4e475af4d3da65dd7fcafb84144955c8a93f701851ece"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r1.log",
+      "bytes": 47,
+      "sha256": "99b78b07c2bad47d7b2a84b36cdbbd5f6a3fa6fb5bbdecc840717d441368f5a6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r2-pid.json",
+      "bytes": 108,
+      "sha256": "d5c078958f5b74bc79d4a4d9c5672a9507c6fa702c5b2546f208d4fd68d83a92"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r2-process.json",
+      "bytes": 7448,
+      "sha256": "d46ebcc867a0923d7834a570edd56133e307708c96c1ae01472236d6fb53485f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r2-request.json",
+      "bytes": 2644,
+      "sha256": "67a9dce0c8a311f6f1547f030a2d347a122030565cc5b008e2740f78892ca9e6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r2.json",
+      "bytes": 825,
+      "sha256": "764b87a376891eb045a4e475af4d3da65dd7fcafb84144955c8a93f701851ece"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r2.log",
+      "bytes": 47,
+      "sha256": "99b78b07c2bad47d7b2a84b36cdbbd5f6a3fa6fb5bbdecc840717d441368f5a6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r3-pid.json",
+      "bytes": 109,
+      "sha256": "405377aa633811216c4afc713f9907033b4c98436334f5de67467370db8ad5d1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r3-process.json",
+      "bytes": 7449,
+      "sha256": "5672da2346fe0f90264f7f2460ab7e03347fe9e65aa305f41d88fad919c08a2c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r3-request.json",
+      "bytes": 2644,
+      "sha256": "d2a1612cd6fe1b63f347b0f82e6351e91c69ff6430acae55d07bd389d91968a5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r3.json",
+      "bytes": 825,
+      "sha256": "764b87a376891eb045a4e475af4d3da65dd7fcafb84144955c8a93f701851ece"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-test-lint-r3.log",
+      "bytes": 47,
+      "sha256": "99b78b07c2bad47d7b2a84b36cdbbd5f6a3fa6fb5bbdecc840717d441368f5a6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r1-pid.json",
+      "bytes": 106,
+      "sha256": "a52a2ed59afff54ccac2de4f36e07aaa9c1d72950792a99cb9cab124062631f8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r1-process.json",
+      "bytes": 38313,
+      "sha256": "cc60e0852815a9229bd7b24664ed330895fc9b8a12fdc26227013f6f28e95b26"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r1-request.json",
+      "bytes": 15000,
+      "sha256": "1c0b7296204c3c7d6ff2fb5f7bb40c82d0c453c6417b7bfed35750da77633cc5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r1.json",
+      "bytes": 279859,
+      "sha256": "b948dc60ea03bf4eec470b0061308a15b54b6c6a379609cc45f4fab4b33e0402"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r1.log",
+      "bytes": 136965,
+      "sha256": "d7682d6973834ee56bda62f1109be4ed0519d6da1c03375acf6580b989cf245f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r2-pid.json",
+      "bytes": 108,
+      "sha256": "374bf67d8b5e4f7cb425a6bdc701f5f2ae8c54db144d2fa6bd03fccad9f2396b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r2-process.json",
+      "bytes": 38314,
+      "sha256": "d175599588a8ec4c1286ca1b665e4f7260dc9e6932ef05a2aac5de3581751e82"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r2-request.json",
+      "bytes": 15000,
+      "sha256": "67f615558422a4a34dd646de3011b218b29e67ab18c2d3f8c4e087e9f487b432"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r2.json",
+      "bytes": 280258,
+      "sha256": "3bbbfdac8edb01981a51d0bfdbd86dcd637115f1a414c36b1fdb86e9a8ecf63a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r2.log",
+      "bytes": 136965,
+      "sha256": "6b6762971cb53843443d0b686ff5f1cdf2495327ba57c731bae12e6e777f9db8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r3-pid.json",
+      "bytes": 108,
+      "sha256": "a0940c37e590602318cee017e20f296a0ec40d653c3af9a31d14f2b14d5b1a64"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r3-process.json",
+      "bytes": 38313,
+      "sha256": "6cab0e7068d0998e1d0b88aeddd04cd8f92ce6fd2dd171e0c01a24f0eed0cbc0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r3-request.json",
+      "bytes": 15000,
+      "sha256": "169e868ffb1cc81d7b799fc4e24a43e3055bbfc90a92651181072dc4fb90c037"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r3.json",
+      "bytes": 280927,
+      "sha256": "aa570548f530401bd3a6eba476f41fa51cd40c3c403f4b5a0673dd8ef21e0e8a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/signin-whole-r3.log",
+      "bytes": 136965,
+      "sha256": "0a3492fccec633fab32ea3765a8e8214cac7df48a8a76cbf769e13d5504c43bb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/strict.mjs",
+      "bytes": 4044,
+      "sha256": "3204ac257d6b1b1bfa6615704048480456469513e104aebc3e8eeff463e5df58"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/mobile-signin1-20261012-kk-r1/test-lint.mjs",
+      "bytes": 706,
+      "sha256": "63907d99df2769f5f26ccdf96414c4097b5b5cb4724df60477096967e90c83ec"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/parent-complete-acceptance-queue-mobile-signin-20261012-kk-r1.json",
+      "bytes": 50382,
+      "sha256": "9bc12a4603c139118668615a42f4b4941d9747808b6074163c55b84d346148cc"
+    }
+  ]
+}

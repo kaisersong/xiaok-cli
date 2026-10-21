@@ -1,0 +1,153 @@
+import { assertProfileSourceNamespace, assertProfileReferenceNamespace } from './profile-source-namespace.js';
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { canonicalVerificationJson as json } from './protocol.js';
+function shape(value, keys) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== [...keys].sort().join(','))
+    throw Error('profile_transfer_schema'); }
+const LIMIT = 128 * 1024 ** 2;
+function count(value, max = LIMIT) { if (!Number.isSafeInteger(value) || value < 0 || value > max)
+    throw Error('profile_transfer_count'); }
+function decimal(value, positive = false) { if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(value) || BigInt(value) > 18446744073709551615n || positive && value === '0')
+    throw Error('profile_transfer_identity'); }
+function digest(value) { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
+    throw Error('profile_transfer_hash'); }
+function freeze(value) { if (value && typeof value === 'object') {
+    Object.values(value).forEach(freeze);
+    Object.freeze(value);
+} return value; }
+const hash = (value) => createHash('sha256').update(json(value)).digest('hex');
+/** Strict transfer decoder only. Passing it plain bytes never creates a capture
+ * brand; only the installed factory can fetch the original broker handle. */
+export function parseProfileCaptureTransfer(bytes, review) {
+    if (bytes.length > LIMIT)
+        throw Error('profile_transfer_limit');
+    const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (!Buffer.from(json(raw)).equals(bytes))
+        throw Error('profile_transfer_canonical');
+    shape(raw, ['facts', 'directories', 'databases']);
+    shape(raw.facts, ['uid', 'capturedBytes', 'physicalFileBytes', 'sources']);
+    const facts = raw.facts;
+    count(facts.capturedBytes);
+    decimal(facts.physicalFileBytes);
+    if (BigInt(facts.physicalFileBytes) > BigInt(LIMIT) || facts.uid !== review.principal.uid || !Array.isArray(facts.sources) || facts.sources.length !== review.sourceSet.sources.length || !Array.isArray(raw.directories) || !Array.isArray(raw.databases))
+        throw Error('profile_transfer_sources');
+    const sources = new Map(), hashes = new Map();
+    for (let index = 0; index < facts.sources.length; index++) {
+        const fact = facts.sources[index];
+        shape(fact, ['source', 'snapshotHash']);
+        const original = review.sourceSet.sources[index], { namespaceId, reviewedSnapshotSha256, ...source } = original;
+        if (json(fact.source) !== json(source) || fact.snapshotHash !== reviewedSnapshotSha256)
+            throw Error('profile_transfer_sources');
+        assertProfileSourceNamespace(source);
+        sources.set(source.sourceId, source);
+        hashes.set(source.sourceId, fact.snapshotHash);
+    }
+    const physical = new Map(), files = new Map(), directories = new Map();
+    let capturedBytes = 0;
+    function charge(device, inode, size) { const key = json([device, inode]), old = physical.get(key); if (old !== undefined && old !== size)
+        throw Error('profile_transfer_physical'); physical.set(key, size); }
+    const seen = new Set();
+    for (const row of raw.databases) {
+        shape(row, ['sourceId', 'capture']);
+        const source = sources.get(row.sourceId);
+        if (!source || source.kind !== 'sqlite-db' || seen.has(row.sourceId))
+            throw Error('profile_transfer_sources');
+        seen.add(row.sourceId);
+        const c = row.capture;
+        shape(c, ['source', 'pageSize', 'pageCount', 'byteLength', 'sha256', 'physicalFiles']);
+        shape(c.source, ['snapshotFormat', 'directory', 'database', 'sidecars']);
+        shape(c.source.sidecars, ['journal', 'wal', 'shm']);
+        if (json(c.source.directory) !== json(source.directory) || json(c.source.database) !== json(source.database) || c.source.snapshotFormat !== source.snapshotFormat)
+            throw Error('profile_transfer_sources');
+        for (const side of Object.values(c.source.sidecars)) {
+            if (side === 'absent')
+                continue;
+            if (typeof side !== 'string' || side.split(':').length !== 2)
+                throw Error('profile_transfer_identity');
+            const [d, i] = side.split(':');
+            decimal(d);
+            decimal(i, true);
+        }
+        count(c.pageSize, 65536);
+        count(c.pageCount);
+        count(c.byteLength);
+        digest(c.sha256);
+        if (c.pageSize < 512 || (c.pageSize & (c.pageSize - 1)) || c.pageCount < 1 || c.pageSize * c.pageCount !== c.byteLength || !Array.isArray(c.physicalFiles) || c.physicalFiles.length < 1 || c.physicalFiles.length > 4)
+            throw Error('profile_transfer_pages');
+        let previous = -1;
+        for (const file of c.physicalFiles) {
+            shape(file, ['suffix', 'device', 'inode', 'byteLength']);
+            const index = ['', '-journal', '-wal', '-shm'].indexOf(file.suffix);
+            decimal(file.device);
+            decimal(file.inode, true);
+            decimal(file.byteLength);
+            if (index < 0 || index <= previous || previous < 0 && index !== 0 || index === 0 && (file.device !== source.database.device || file.inode !== source.database.inode))
+                throw Error('profile_transfer_physical');
+            previous = index;
+            charge(file.device, file.inode, file.byteLength);
+            const path = join(source.directory.canonicalPath, source.database.basename + file.suffix);
+            if (files.has(path))
+                throw Error('profile_transfer_alias');
+            files.set(path, { sourceId: source.sourceId, suffix: file.suffix, device: file.device, inode: file.inode, size: file.byteLength, snapshotHash: hashes.get(source.sourceId), snapshotFormat: source.snapshotFormat });
+        }
+        capturedBytes += c.byteLength;
+        if (hash({ format: source.snapshotFormat, pagerHash: c.sha256, directory: source.directory, database: source.database }) !== hashes.get(source.sourceId))
+            throw Error('profile_transfer_hash');
+    }
+    for (const row of raw.directories) {
+        shape(row, ['sourceId', 'entries']);
+        const source = sources.get(row.sourceId);
+        if (!source || source.kind === 'sqlite-db' || seen.has(row.sourceId) || !Array.isArray(row.entries))
+            throw Error('profile_transfer_sources');
+        seen.add(row.sourceId);
+        directories.set(source.directory.canonicalPath, source);
+        let last = '';
+        for (const e of row.entries) {
+            shape(e, ['sourceIndex', 'path', 'kind', 'byteLength', 'physicalSize', 'device', 'inode', 'mode', ...(e.kind === 'file' ? ['sha256'] : [])]);
+            count(e.sourceIndex, Number.MAX_SAFE_INTEGER);
+            count(e.byteLength);
+            count(e.mode, 0xffffffff);
+            decimal(e.device);
+            decimal(e.inode, true);
+            decimal(e.physicalSize);
+            if (typeof e.path !== 'string' || !e.path || Buffer.compare(Buffer.from(e.path), Buffer.from(last)) <= 0 || e.path.split('/').some((p) => !p || p === '.' || p === '..') || /[\\\x00-\x1f\x7f]/.test(e.path) || !['file', 'directory', 'source-reference'].includes(e.kind))
+                throw Error('profile_transfer_entry');
+            last = e.path;
+            if (e.kind === 'file') {
+                digest(e.sha256);
+                if ((e.mode & 0o170000) !== 0o100000 || String(e.byteLength) !== e.physicalSize)
+                    throw Error('profile_transfer_entry');
+                capturedBytes += e.byteLength;
+            }
+            else if (e.byteLength !== 0)
+                throw Error('profile_transfer_entry');
+            if ((e.mode & 0o170000) === 0o100000)
+                charge(e.device, e.inode, e.physicalSize);
+            else if ((e.mode & 0o170000) !== 0o040000)
+                throw Error('profile_transfer_entry');
+        }
+    }
+    if (seen.size !== sources.size || capturedBytes !== facts.capturedBytes || capturedBytes > LIMIT || String([...physical.values()].reduce((sum, value) => sum + BigInt(value), 0n)) !== facts.physicalFileBytes)
+        throw Error('profile_transfer_total');
+    const normalizedDirectories = new Map();
+    for (const row of raw.directories) {
+        const source = sources.get(row.sourceId);
+        const normalized = row.entries.map((e) => { const { sourceIndex, ...entry } = e; if (e.kind !== 'source-reference')
+            return entry; const path = join(source.directory.canonicalPath, ...e.path.split('/')); if ((e.mode & 0o170000) === 0o040000) {
+            const target = directories.get(path);
+            if (!target || target.directory.device !== e.device || target.directory.inode !== e.inode)
+                throw Error('profile_transfer_reference');
+            assertProfileReferenceNamespace(source, e.path, target);
+            return { kind: e.kind, path: e.path, sourceId: target.sourceId, logicalSnapshotHash: hashes.get(target.sourceId) };
+        } const target = files.get(path); if (!target || target.device !== e.device || target.inode !== e.inode || target.size !== e.physicalSize || source.kind === 'goal-file-root' && /^goals\.sqlite(?:-wal|-shm|-journal)?$/.test(e.path) && target.snapshotFormat !== 'goal-sqlite-v1')
+            throw Error('profile_transfer_reference'); assertProfileReferenceNamespace(source, e.path, sources.get(target.sourceId), target.suffix); return { kind: e.kind, path: e.path, sourceId: target.sourceId, suffix: target.suffix, logicalSnapshotHash: target.snapshotHash }; });
+        normalizedDirectories.set(source.sourceId, normalized);
+    }
+    // Every physical reference has matched before checking the logical DAG hashes.
+    for (const [sourceId, entries] of normalizedDirectories) {
+        const source = sources.get(sourceId);
+        if (hash({ format: source.snapshotFormat, directory: source.directory, entries }) !== hashes.get(sourceId))
+            throw Error('profile_transfer_hash');
+    }
+    return freeze(raw);
+}

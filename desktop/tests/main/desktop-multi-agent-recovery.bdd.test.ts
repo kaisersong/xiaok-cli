@@ -1,9 +1,9 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
@@ -17,7 +17,7 @@ describe('BDD: startup proves physical boot ownership before reconciliation', ()
   const cleanup: Array<() => void | Promise<void>> = [];
   afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); });
   function fixture() {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-ma-recovery-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-ma-recovery-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const dbPath = join(root, 'groups.sqlite');
     const old = new DesktopMultiAgentStore(dbPath, { bootId: 'old-boot' }); cleanup.push(() => old.close());
@@ -45,34 +45,8 @@ describe('BDD: startup proves physical boot ownership before reconciliation', ()
 
   it('A12/A25 Given an actually accepted queued followup before process death, Then reopening keeps its historical source without replay or guessing a new root', async () => {
     const f = fixture(); const projectRoot = fileURLToPath(new URL('../../../', import.meta.url));
-    const script = `
-      import { join } from 'node:path'; import { pathToFileURL } from 'node:url';
-      const load = file => import(pathToFileURL(join(${JSON.stringify(projectRoot)}, file)).href);
-      const { DesktopMultiAgentStore } = await load('desktop/electron/desktop-multi-agent-store.ts');
-      const { DesktopMultiAgentService } = await load('desktop/electron/desktop-multi-agent-service.ts');
-      const { DesktopExecutionCoordinator } = await load('desktop/electron/desktop-execution-coordinator.ts');
-      const { InProcessTaskRuntimeHost } = await load('src/runtime/task-host/task-runtime-host.ts');
-      const { FileTaskSnapshotStore } = await load('src/runtime/task-host/snapshot-store.ts');
-      const { MaterialRegistry } = await load('src/runtime/task-host/material-registry.ts');
-      const root = ${JSON.stringify(f.root)}; const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'), { bootId: 'old-boot' });
-      const coordinator = new DesktopExecutionCoordinator(); let childId;
-      const service = new DesktopMultiAgentService({ store, coordinator, createSession: async () => ({
-        run: async () => new Promise(() => {}), suspend: async () => {}, dispose: async () => {},
-      }) });
-      const host = new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),
-        materialRegistry: new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 }),
-        runner: input => service.runRoot(input, async context => {
-          childId = (await service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'crash-spawn', taskName: 'crash', message: 'first' })).targetAgentId;
-          await service.followup({ actor: context.actor, requestSource: 'agent', operationId: 'crash-followup', target: childId, message: 'not replayed' });
-        }), authorizePreparation: (id, marker) => service.assertHostPreparation(id, marker), assertTaskAdmission: snapshot => service.assertHostAdmission(snapshot),
-        decideCancellation: (snapshot, reason) => service.decideHostCancellation(snapshot, reason), getExecutionPolicy: () => ({ deliveryRepair: 'explicit' }),
-      });
-      await service.initialize(host);
-      const task = await service.prepareRoot(host, 'thread', { prompt: 'source A', materials: [] }); await host.startTask(task.taskId); await host.drain();
-      process.stdout.write(JSON.stringify({ childId, sourceTaskId: task.taskId }) + '\\n');
-      setInterval(() => {}, 1000);
-    `;
-    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    const ownerEntry = fileURLToPath(new URL('../fixtures/desktop-source-recovery-owner.ts', import.meta.url));
+    const child = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', ownerEntry, f.root, 'source', inject('profileTestAccountRoot'), userInfo().homedir], {
       cwd: projectRoot, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     cleanup.push(async () => { if (child.exitCode === null && child.signalCode === null) { const closed = once(child, 'close'); child.kill('SIGKILL'); await closed; } });

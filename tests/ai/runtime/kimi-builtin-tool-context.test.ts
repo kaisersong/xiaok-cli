@@ -24,7 +24,7 @@ describe('K3 with the full builtin registry',()=>{
       yield {type:'done'};
     };
     try{
-      const prompt=await new PromptBuilder({memoryStore:{listRelevant:async()=>[]} as never,harnessMemoryStore:{listActive:()=>[]}}).build({cwd:process.cwd(),channel:'chat'});
+      const prompt=await new PromptBuilder({memoryStore:{listRelevant:async()=>[]} as never,harnessMemoryStore:{listActive:()=>[]}}).build({cwd:process.cwd(),channel:'chat',enterpriseId:null,devApp:null,budget:2000});
       const runtime=new AgentRuntime({adapter,registry,session:new AgentSessionState(),controller:new AgentRunController(),systemPrompt:prompt.rendered,promptSnapshot:prompt});
       const events:string[]=[];
       await runtime.run('生成一张xiaok的图片',event=>events.push(event.type));

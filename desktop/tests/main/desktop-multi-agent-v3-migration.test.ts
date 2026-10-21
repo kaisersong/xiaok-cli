@@ -40,7 +40,7 @@ function operation(db: DatabaseSync, id: string, ordinal: number, agentId: strin
   db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run('g', id, json, Buffer.byteLength(json));
 }
 
-describe('actual v2 to v3 presentation index migration', () => {
+describe('actual legacy v2/v3 to v4 presentation and Activity migration', () => {
   it.each(['missing', 'partial', 'already-present'])('upgrades v2 with %s new indexes, retains every row and reopens idempotently', state => {
     const { file, db } = fixture();
     operation(db, 'old-operation', 1, 'old-agent');
@@ -48,14 +48,14 @@ describe('actual v2 to v3 presentation index migration', () => {
     if (state === 'already-present') db.exec(agentSql);
     const before = rows(db);
     open(file).close();
-    expect(version(db)).toBe(3);
-    expect(rows(db)).toEqual(before);
+    expect(version(db)).toBe(4);
+    expect(rows(db)).toEqual([...before,{name:'activity_members',rows:[]},{name:'activity_runs',rows:[]}].sort((a,b)=>a.name.localeCompare(b.name)));
     const upgraded = schema(db);
     expect(upgraded.filter(row => String(row.name).startsWith('operations_presentation_'))).toHaveLength(2);
     open(file).close();
-    expect(version(db)).toBe(3);
+    expect(version(db)).toBe(4);
     expect(schema(db)).toEqual(upgraded);
-    expect(rows(db)).toEqual(before);
+    expect(rows(db)).toEqual([...before,{name:'activity_members',rows:[]},{name:'activity_runs',rows:[]}].sort((a,b)=>a.name.localeCompare(b.name)));
   });
 
   it.each(['ordinal', 'agentId'])('rolls back both new indexes and the version on a real duplicate %s', key => {
@@ -82,11 +82,11 @@ describe('actual v2 to v3 presentation index migration', () => {
 
   it('refuses a damaged v3 instead of treating it as a pending v2 migration', () => {
     const { file, db } = fixture();
-    open(file).close();
-    db.exec('DROP INDEX operations_presentation_ordinal');
-    const before = schema(db);
+    db.exec(ordinalSql);db.exec(agentSql);db.exec('PRAGMA user_version=3');
+    expect(version(db)).toBe(3);db.exec('DROP INDEX operations_presentation_ordinal');
+    const before = schema(db), beforeRows=rows(db);
     expect(() => open(file)).toThrow(/multi_agent_schema_invalid:operations_presentation_ordinal/);
     expect(version(db)).toBe(3);
-    expect(schema(db)).toEqual(before);
+    expect(schema(db)).toEqual(before);expect(rows(db)).toEqual(beforeRows);
   });
 });

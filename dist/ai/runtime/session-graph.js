@@ -1,9 +1,15 @@
+import { validateSemanticCompactionLedger, mergeSemanticCompactionLedgers } from '../../runtime/sol-pi/semantic-compaction-ledger.js';
+import { validateCompoundOperationLedger, mergeCompoundOperationLedgers } from '../../runtime/sol-pi/compound-operation.js';
+import { mergeProtectedObservationClosures } from './protected-observation-closure.js';
 export class AgentSessionGraph {
     snapshot;
     revision = 0;
     constructor(snapshot) {
         this.snapshot = {
             ...snapshot,
+            compoundOperations: snapshot.compoundOperations === undefined ? undefined : validateCompoundOperationLedger(snapshot.compoundOperations),
+            semanticCompaction: snapshot.semanticCompaction === undefined ? undefined : validateSemanticCompactionLedger(snapshot.semanticCompaction),
+            protectedObservationClosure: mergeProtectedObservationClosures(undefined, snapshot.protectedObservationClosure),
             messages: snapshot.messages ?? [],
             usage: snapshot.usage ?? { inputTokens: 0, outputTokens: 0 },
             compactions: snapshot.compactions ?? [],
@@ -11,6 +17,13 @@ export class AgentSessionGraph {
             approvalRefs: snapshot.approvalRefs ?? [],
             backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
         };
+    }
+    addProtectedObservationReferences(observations) {
+        this.snapshot.protectedObservationClosure = mergeProtectedObservationClosures(this.snapshot.protectedObservationClosure, { version: 1, requiresReauthorization: true, observations });
+        this.touch();
+    }
+    getProtectedObservationClosure() {
+        return mergeProtectedObservationClosures(undefined, this.snapshot.protectedObservationClosure);
     }
     getMessages() {
         return structuredClone(this.snapshot.messages);
@@ -95,9 +108,24 @@ export class AgentSessionGraph {
     exportSnapshot() {
         return structuredClone(this.snapshot);
     }
+    /** Durable writer receipt only; message revision and live queued input remain owned here. */
+    updatePersistenceFacts(snapshot) {
+        const compoundOperations = mergeCompoundOperationLedgers(this.snapshot.compoundOperations, snapshot.compoundOperations);
+        const semanticCompaction = mergeSemanticCompactionLedgers(this.snapshot.semanticCompaction, snapshot.semanticCompaction);
+        this.snapshot.compoundOperations = compoundOperations;
+        this.snapshot.semanticCompaction = semanticCompaction;
+        this.snapshot.storeRevision = snapshot.storeRevision;
+        this.snapshot.historyDigest = snapshot.historyDigest;
+        if (snapshot.executionProtected)
+            this.snapshot.executionProtected = true;
+    }
     restoreSnapshot(snapshot) {
+        const protectedObservationClosure = mergeProtectedObservationClosures(this.snapshot.protectedObservationClosure, snapshot.protectedObservationClosure);
         this.snapshot = {
             ...structuredClone(snapshot),
+            compoundOperations: mergeCompoundOperationLedgers(this.snapshot.compoundOperations, snapshot.compoundOperations),
+            semanticCompaction: mergeSemanticCompactionLedgers(this.snapshot.semanticCompaction, snapshot.semanticCompaction),
+            protectedObservationClosure,
             memoryRefs: snapshot.memoryRefs ?? [],
             approvalRefs: snapshot.approvalRefs ?? [],
             backgroundJobRefs: snapshot.backgroundJobRefs ?? [],

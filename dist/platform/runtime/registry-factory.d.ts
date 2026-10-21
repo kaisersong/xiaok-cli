@@ -37,5 +37,7 @@ export interface PlatformRegistryFactory {
     }): ToolRegistry;
     getReminderApi(): ReminderApi | undefined;
     dispose(): Promise<void>;
+    /** Host-only physical barrier, separate from bounded child shutdown responses. */
+    waitForDisposedResources(): Promise<void>;
 }
 export declare function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory;

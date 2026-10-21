@@ -1,3 +1,32 @@
+import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
+import { createAutomationConfigOwner } from './automation-config-owner.js';
+import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
+import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
+import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
+import { captureIpcData } from './ipc-data-snapshot.js';
+import { createDesktopServiceControl } from './desktop-service-control.js';
+import { registerServiceControlIpc } from './service-control-typed-ipc.js';
+import { registerMobileReadonlyIpc, captureMobileRelayStatus } from './mobile-readonly-typed-ipc.js';
+import { registerUpdaterIpc } from './updater-typed-ipc.js';
+import { registerRecorderWindowIpc } from './recorder-window-typed-ipc.js';
+import {registerConnectorsIpc} from './connectors-typed-ipc.js';
+import {registerScheduledTimedActionIpc} from './scheduled-timed-action-typed-ipc.js';
+import type {IpcHandleRegistrar,IpcHandlerListener} from './shutdown-aware-ipc-main.js';
+import { registerThreadMetadataIpc } from './thread-metadata-typed-ipc.js';
+import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.js';
+import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
+import { createDesktopKSwarmService, startDesktopKSwarmService } from './kswarm-service-lifetime.js';
+import { registerDesktopBeforeQuit, disposeDesktopLifetimeSteps } from './desktop-before-quit.js';
+import { assertStandardIpcPromise } from './ipc-native-promise.js';
+import {deferLoopArtifactPickerWindowDestroy} from './loop-artifact-save-picker.js';
+import {createLoopOutputService,registerLoopOutputIpc} from './loop-output-service.js';
+import {createLoopCurrentViews,registerLoopCurrentViewIpc} from './loop-current-views.js';
+import {createLoopTimedCompletionHost} from './loop-timed-completion.js';
+import {withDesktopBootstrapWriter} from './desktop-bootstrap-writer.js';
+import {createDesktopLoopPublicationService} from './loop-desktop-publication-service.js';
+import {registerLoopPublicationIpc,createLoopPublicationIpcAuthorizer} from './loop-publication-ipc.js';
+import {createLoopPublicationShutdownOwner} from './loop-publication-shutdown.js';
+import {createShutdownAwareTimedActionService} from './timed-action-service-lifetime.js';
 import { scheduledRunPresentation } from './scheduled-run-presentation.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
@@ -11,6 +40,8 @@ import {
   getDesktopMemoryStore,
   resumeOneScriptWorkflow,
 } from './desktop-services.js';
+import { createDesktopRuntimeActionService } from './runtime-action-service.js';
+import { registerRuntimeActionIpc } from './runtime-action-typed-ipc.js';
 import { onSkillCatalogChanged } from './skill-catalog-invalidation.js';
 import { registerDesktopIpc } from './ipc.js';
 import {
@@ -37,15 +68,15 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
-import { createOnceNotice, startKSwarmWithActivityOwner } from './activity-owner-startup.js';
-import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
+import { createOnceNotice } from './activity-owner-startup.js';
+import { resolveKSwarmServiceLogRoot, type KSwarmService } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
   resolveBundledPluginsDir,
   prepareBundledPluginPythonRuntime,
 } from './deploy-bundled-plugins.js';
 import { DesktopShutdownGate, ShutdownAwareIpcMain } from './shutdown-aware-ipc-main.js';
-import { DesktopShutdownCoordinator } from './desktop-shutdown-coordinator.js';
+import { DesktopShutdownCoordinator, type IngressOwner, type DurableStoreOwner } from './desktop-shutdown-coordinator.js';
 import { PluginProviderRuntimeFacade } from './plugin-provider-runtime-facade.js';
 import { TimedActionStore } from './timed-action-store.js';
 import { ThreadMetaStore } from './thread-meta-store.js';
@@ -65,9 +96,8 @@ import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
 import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js';
 import { DesktopApplicationWindowOwner } from './desktop-application-window-owner.js';
 import { AssistantService } from './assistant-service.js';
-import { AssistantController } from './assistant-controller.js';
-import { listLatestMorningSuggestions } from './assistant-morning-suggestions.js';
-import { buildAssistantMorningContext } from './assistant-morning-context.js';
+import { AssistantController, createAssistantCandidatePromotionTargets } from './assistant-controller.js';
+import { createAssistantPublicationContextReader } from './assistant-publication-context.js';
 import { ASSISTANT_EVENING_LOOP_ID, ASSISTANT_MORNING_LOOP_ID } from './assistant-types.js';
 import { createAssistantRuntime } from './assistant-runtime.js';
 import { createAssistantDesktopSnapshotReader } from './assistant-desktop-snapshot.js';
@@ -97,7 +127,7 @@ import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
 import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
 import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
 import { ensureRoomWorkspaceProtocol } from './room-workspace-protocol.js';
-import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
+import { buildAutomationOverviewSnapshot } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
   createKSwarmRuntimeBridge,
@@ -160,7 +190,26 @@ let meetingRecorderController: MeetingRecorderWindowController | null = null;
  * mutation allowlist can miss an entry point.
  */
 const desktopShutdownGate = new DesktopShutdownGate();
-const shutdownAwareIpc = new ShutdownAwareIpcMain(ipcMain, desktopShutdownGate);
+const shutdownAwareIpc = new ShutdownAwareIpcMain(ipcMain, desktopShutdownGate, authorizeDesktopInvoke);
+
+function authorizeDesktopInvoke(event: Electron.IpcMainInvokeEvent): void {
+  try {
+    const sender = event.sender;
+    if (!sender || sender.isDestroyed()) throw new Error('desktop_user_sender_forbidden');
+    const ownedMain = mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents;
+    if (!ownedMain && meetingRecorderController?.ownsWebContents(sender) !== true) {
+      throw new Error('desktop_user_sender_forbidden');
+    }
+    const frame = event.senderFrame;
+    if (!frame || frame !== sender.mainFrame || !isTrustedDesktopRendererUrl(frame.url, {
+      rendererFile: join(__dirname, '../../../renderer/index.html'),
+      devServer: process.env['XIAOK_DESKTOP_DEV_SERVER'],
+    })) throw new Error('desktop_user_sender_forbidden');
+  } catch {
+    // Teardown failures are unavailable caller facts, never an admission grant.
+    throw new Error('desktop_user_sender_forbidden');
+  }
+}
 
 /**
  * Design v58 §4: created synchronously before any service or gateway, never
@@ -169,35 +218,128 @@ const shutdownAwareIpc = new ShutdownAwareIpcMain(ipcMain, desktopShutdownGate);
  */
 const pluginProviderRuntime = new PluginProviderRuntimeFacade();
 
+// Standard bootstrap only; genuine Main async producer, not arbitrary thenables.
+const McpNativePromise = Promise;
+const mcpPromiseGlobal = globalThis;
+const mcpPromiseOwnDescriptor = Object.getOwnPropertyDescriptor;
+const mcpPromisePrototype = McpNativePromise.prototype;
+const mcpPromiseInitialThen = mcpPromiseOwnDescriptor(mcpPromisePrototype, 'then');
+const mcpPreProducerWitness = new McpNativePromise<void>(resolve => resolve());
+function assertMcpRegistrationPromiseAmbient(): void {
+  // Reuse the real descriptor witness FIRST, before any gate/callback/effect.
+  assertStandardIpcPromise(mcpPreProducerWitness, 'mcp_registration_promise_contract');
+  const globalPromise = mcpPromiseOwnDescriptor(mcpPromiseGlobal, 'Promise');
+  const currentThen = mcpPromiseOwnDescriptor(mcpPromisePrototype, 'then');
+  if (!globalPromise || !('value' in globalPromise) || globalPromise.value !== McpNativePromise
+    || !mcpPromiseInitialThen || !currentThen || !('value' in mcpPromiseInitialThen) || !('value' in currentThen)
+    || currentThen.value !== mcpPromiseInitialThen.value || currentThen.writable !== mcpPromiseInitialThen.writable
+    || currentThen.enumerable !== mcpPromiseInitialThen.enumerable || currentThen.configurable !== mcpPromiseInitialThen.configurable) {
+    throw Error('mcp_registration_promise_contract');
+  }
+}
+/** Main-only callback ownership. Native await still reads raw.constructor:
+ * hostile own constructor, foreign raw and mid-producer mutation are unsupported. */
+function startOwnedMcpRegistration(options: {
+  isOpen(): boolean;
+  acquireWriter(): { release(): void };
+  registerFinalLifetime(dispose: () => Promise<void>): void;
+  register(): Promise<{ dispose: () => Promise<void> }>;
+  startBridge(): void;
+  reportRegistrationFailure(error: unknown): void;
+  reportOwnershipFailure(error: unknown): void;
+}): { registered: Promise<boolean>; dispose(): Promise<void> } {
+  assertMcpRegistrationPromiseAmbient();
+  if (!options.isOpen()) throw Error('mcp_registration_shutdown');
+  const writer = options.acquireWriter();
+  let resolveReady!: (dispose: (() => Promise<void>) | undefined) => void;
+  let rejectReady!: (error: unknown) => void;
+  const ready = new McpNativePromise<(() => Promise<void>) | undefined>((resolve, reject) => {
+    resolveReady = resolve; rejectReady = reject;
+  });
+  let resolveRegistered!: (value: boolean) => void, rejectRegistered!: (error: unknown) => void;
+  const registered = new McpNativePromise<boolean>((resolve, reject) => {
+    resolveRegistered = resolve; rejectRegistered = reject;
+  });
+  // Native-await observers, attached before producer; original promises retained.
+  void (async () => { try { await ready; } catch (error) { try { options.reportOwnershipFailure(error); } catch {} } })();
+  void (async () => { try { await registered; } catch (error) { try { options.reportOwnershipFailure(error); } catch {} } })();
+  let disposal: Promise<void> | undefined;
+  const dispose = (): Promise<void> => {
+    if (disposal) return disposal;
+    let complete!: () => void, fail!: (error: unknown) => void;
+    const closing = new McpNativePromise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    disposal = closing; // Memoize before observer body, never self-capture a pending local.
+    void (async () => {
+      try { const returnedDispose = await ready; await returnedDispose?.(); complete(); }
+      catch (error) { fail(error); }
+    })();
+    return closing;
+  };
+  try { options.registerFinalLifetime(dispose); }
+  catch (error) {
+    rejectReady(error); rejectRegistered(error);
+    try { writer.release(); } catch (releaseError) { try { options.reportOwnershipFailure(releaseError); } catch {} }
+    throw error;
+  }
+  void (async () => {
+    let value = false, failure: { reason: unknown } | undefined;
+    try {
+      let outcome: { ok: true; result: { dispose: () => Promise<void> } } | { ok: false; error: unknown };
+      try {
+        if (!options.isOpen()) throw Error('mcp_registration_shutdown');
+        const raw = options.register(); // Exact known-native async output, captured before await.
+        outcome = { ok: true, result: await raw };
+      } catch (error) { outcome = { ok: false, error }; }
+      if (outcome.ok) {
+        resolveReady(outcome.result.dispose);
+        if (options.isOpen()) options.startBridge();
+        value = true;
+      } else {
+        const openAtFailure = options.isOpen();
+        if (openAtFailure) resolveReady(undefined); else rejectReady(outcome.error);
+        options.reportRegistrationFailure(outcome.error);
+        if (openAtFailure && options.isOpen()) options.startBridge();
+      }
+    } catch (error) {
+      failure = { reason: error }; rejectReady(error);
+    }
+    // No downstream lifetime dependency; settle status only after release.
+    try { writer.release(); } catch (error) { failure = { reason: error }; rejectReady(error); }
+    if (failure) rejectRegistered(failure.reason); else resolveRegistered(value);
+  })();
+  return { registered, dispose };
+}
+
 /**
  * Design v58 §5.5: the only Xiaok-owned `before-quit` owner. Registered at module
  * scope so a quit during startup is still ordered; the lifetime disposer is
  * attached once `createWindow()` has built the per-process resources.
  */
 const desktopLifetimeSteps: Array<{ name: string; run: () => Promise<void> }> = [];
+const desktopFinalLifetimeSteps: Array<{ name: string; run: () => Promise<void> }> = [];
 function registerLifetimeDisposerStep(name: string, run: () => Promise<void>): void {
   desktopLifetimeSteps.push({ name, run });
 }
+const desktopIngressOwners: IngressOwner[] = [];
+const desktopDurableStores: DurableStoreOwner[] = [];
 const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
   gate: desktopShutdownGate,
   providerRuntime: pluginProviderRuntime,
-  ingressOwners: [],
-  durableStores: [],
+  ingressOwners: desktopIngressOwners,
+  durableStores: desktopDurableStores,
   destroyWindows: () => {
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.destroy();
+      if (!win.isDestroyed() && !deferLoopArtifactPickerWindowDestroy(win)) win.destroy();
     }
   },
   disposeLifetimeResources: async () => {
     // Each step runs at most once, in registration order; a failing step never
     // skips the rest (design §5.5 phase ⑥ independent cleanup).
-    for (const step of desktopLifetimeSteps.splice(0)) {
-      try {
-        await step.run();
-      } catch (error) {
-        debugMain(`lifetime disposer step failed: ${step.name}`, error instanceof Error ? error.message : String(error));
-      }
-    }
+    await disposeDesktopLifetimeSteps([
+      ...desktopLifetimeSteps.splice(0), ...desktopFinalLifetimeSteps.splice(0),
+    ], (name, error) => {
+      debugMain(`lifetime disposer step failed: ${name}`, error instanceof Error ? error.message : String(error));
+    });
   },
   releaseMainSourcePin: async () => {
     // Stage 3 wiring: the trusted source resolver installs the real release here
@@ -214,15 +356,10 @@ const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
  */
 const updaterHandoff = createUpdaterHandoff();
 
-app.on('before-quit', (event) => {
-  // A real before-quit is the only transition into irreversible cleanup.
-  updaterHandoff.commitHandoffOnBeforeQuit();
-  completeUpdaterHandoff();
-  const { preventDefault } = desktopShutdownCoordinator.onBeforeQuit();
-  if (preventDefault) event.preventDefault();
+registerDesktopBeforeQuit(app, desktopShutdownCoordinator, updaterHandoff, completeUpdaterHandoff, error => {
+  debugMain('updater quit hook failed', error instanceof Error ? error.message : String(error));
 });
 
-let isQuitting = false;
 const MAX_MOBILE_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024;
 
 function debugMain(message: string, extra?: unknown): void {
@@ -329,7 +466,7 @@ function findMobileArtifactPreview(dataRoot: string, artifactId: string): Mobile
 }
 
 async function findKSwarmMobileArtifactPreview(
-  kswarmService: ReturnType<typeof createKSwarmService>,
+  kswarmService: KSwarmService,
   artifactId: string,
 ): Promise<MobileArtifactPreview | null> {
   const projects = await fetchKSwarmProjectsForMobile(kswarmService).catch(() => []);
@@ -413,7 +550,7 @@ function isSystemPreviewFileKind(kind: string, contentType: string): boolean {
     || contentType.includes('officedocument');
 }
 
-async function fetchKSwarmProjectsForMobile(kswarmService: ReturnType<typeof createKSwarmService>): Promise<KSwarmProjectLike[]> {
+async function fetchKSwarmProjectsForMobile(kswarmService: KSwarmService): Promise<KSwarmProjectLike[]> {
   const status = kswarmService.getStatus();
   if (!status.running || !status.port) return [];
   const response = await fetch(`http://127.0.0.1:${status.port}/projects`);
@@ -533,13 +670,17 @@ async function createReplacementWindow(): Promise<BrowserWindow> {
   configureDesktopView(window, devServer);
   setupMenuBar(window);
   if (process.env.NODE_ENV !== 'development' && !devServer) {
-    void setupAutoUpdater(window, (event, diagnostic) => debugMain(`updater:${event}`, diagnostic)).catch(error => debugMain('setupAutoUpdater failed', String(error)));
+    void setupAutoUpdater(window, (event, diagnostic) => debugMain(`updater:${event}`, diagnostic), { requestSource: 'scheduler' }).catch(error => debugMain('setupAutoUpdater failed', String(error)));
   }
   if (devServer) await window.loadURL(devServer); else await window.loadFile(rendererFile);
   return window;
 }
 
-async function createInitialWindow(): Promise<BrowserWindow> {
+function createInitialWindow(): Promise<BrowserWindow> {
+  return withDesktopBootstrapWriter(desktopShutdownGate, createInitialWindowResources);
+}
+
+async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
@@ -568,14 +709,16 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
-  shutdownAwareIpc.handle('desktop:meetingOpenRecorderWindow', (event, input: { collectionId?: unknown }) => {
+  const recorderWindowProducers = new Map<string, IpcHandlerListener>();
+  const recorderWindowIpc: IpcHandleRegistrar = { handle(channel, listener) { recorderWindowProducers.set(channel, listener); } };
+  recorderWindowIpc.handle('desktop:meetingOpenRecorderWindow', (event, input: { collectionId?: unknown }) => {
     if (!isMainWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     if (typeof input?.collectionId !== 'string' || !input.collectionId.trim()) {
       return { ok: false, error: 'collection_id_required' };
     }
     return meetingRecorderController!.open({ collectionId: input.collectionId });
   });
-  shutdownAwareIpc.handle('desktop:meetingSetRecorderWindowMode', (event, input: { mode?: unknown }) => {
+  recorderWindowIpc.handle('desktop:meetingSetRecorderWindowMode', (event, input: { mode?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     const mode = input?.mode;
     if (mode !== 'workbench' && mode !== 'compact' && mode !== 'summary') {
@@ -583,7 +726,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     }
     return meetingRecorderController!.setMode(mode as MeetingRecorderWindowMode);
   });
-  shutdownAwareIpc.handle('desktop:meetingSetRecorderSessionState', (event, input: { state?: unknown }) => {
+  recorderWindowIpc.handle('desktop:meetingSetRecorderSessionState', (event, input: { state?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     const state = input?.state;
     if (state !== 'idle' && state !== 'recording' && state !== 'processing' && state !== 'summary') {
@@ -591,58 +734,54 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     }
     return meetingRecorderController!.setSessionState(state as MeetingRecorderSessionState);
   });
-  shutdownAwareIpc.handle('desktop:meetingNotifyRecorderSummaryReady', (event, input: { title?: unknown }) => {
+  recorderWindowIpc.handle('desktop:meetingNotifyRecorderSummaryReady', (event, input: { title?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     return meetingRecorderController!.notifySummaryReady({
       title: typeof input?.title === 'string' ? input.title : '',
     });
   });
-  shutdownAwareIpc.handle('desktop:meetingNotifyRecordingSaved', (event, input: { collectionId?: unknown }) => {
+  recorderWindowIpc.handle('desktop:meetingNotifyRecordingSaved', (event, input: { collectionId?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     if (typeof input?.collectionId !== 'string' || !input.collectionId.trim()) {
       return { ok: false, error: 'collection_id_required' };
     }
     return meetingRecorderController!.notifySaved({ collectionId: input.collectionId });
   });
-  shutdownAwareIpc.handle('desktop:meetingCloseRecorderWindow', (event) => {
+  recorderWindowIpc.handle('desktop:meetingCloseRecorderWindow', (event) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     return meetingRecorderController!.close();
   });
+  registerRecorderWindowIpc(shutdownAwareIpc, recorderWindowProducers, { isMainWindowSender, isRecorderWindowSender });
   // KSwarm service — manages kswarm server as a child process
-  const kswarmService = createKSwarmService({ activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' });
+  const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, { activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' });
+  if (!kswarmService) return window;
   let kswarmStartPromise: Promise<void>;
-  shutdownAwareIpc.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
-  shutdownAwareIpc.handle('desktop:kswarm:start', () => kswarmService.start());
-  shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop());
-  shutdownAwareIpc.handle('desktop:kswarm:restart', () => kswarmService.restart());
-  shutdownAwareIpc.handle('desktop:kswarm:resumeWorkflowRun', (_event, input) =>
-    resumeOneScriptWorkflow(kswarmService, input?.projectId, input?.workflowRunId));
-  let restartRuntimeBridgeService: () => Promise<void> = async () => {};
-  shutdownAwareIpc.handle('desktop:services:getStatus', async () => {
-    const snapshot = await kswarmService.getServiceStatus();
-    return {
-      ...snapshot,
-      services: [
-        ...snapshot.services,
-        {
-          id: 'runtime-bridge',
-          label: 'Runtime Bridge',
-          running: runtimeBridgeStarted,
-          reachable: runtimeBridgeStarted,
-          port: 0,
-          pid: null,
-          restartCount: 0,
-          lastError: null,
-          detail: runtimeBridgeStarted ? `${runtimeBridgeClients.length} client(s) registered` : 'not started',
-        },
-      ],
-    };
+  registerKswarmStatusReadonlyIpc(shutdownAwareIpc, () => kswarmService.getStatus());
+  const runtimeActions = createDesktopRuntimeActionService({
+    start: () => kswarmService.start(), stop: () => kswarmService.stop(), restart: () => kswarmService.restart(),
+    resumeWorkflowRun: input => resumeOneScriptWorkflow(kswarmService, input.projectId, input.workflowRunId),
   });
-  shutdownAwareIpc.handle('desktop:services:restart', (_event, serviceId) => (
-    serviceId === 'runtime-bridge'
-      ? restartRuntimeBridgeService()
-      : kswarmService.restartRelatedService(serviceId)
-  ));
+  const runtimeActionProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:kswarm:start', () => runtimeActions.start('user')],
+    ['desktop:kswarm:stop', () => runtimeActions.stop('user')],
+    ['desktop:kswarm:restart', () => runtimeActions.restart('user')],
+    ['desktop:kswarm:resumeWorkflowRun', (_event, input) => runtimeActions.resumeWorkflowRun(input, 'user')],
+  ]);
+  registerRuntimeActionIpc(shutdownAwareIpc, runtimeActionProducers);
+  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): Promise<void> }> = [];
+  let runtimeBridgeStarted = false;
+  let restartRuntimeBridgeService: () => Promise<void> = async () => { throw Error('service_runtime_unavailable'); };
+  const serviceControl = createDesktopServiceControl({
+    getSdkSnapshot: () => kswarmService.getServiceStatus(),
+    restartSdk: serviceId => kswarmService.restartRelatedService(serviceId),
+    getRuntimeBridgeFacts: () => ({ started: runtimeBridgeStarted, clients: runtimeBridgeClients.length }),
+    getRuntimeBridgeRestart: () => restartRuntimeBridgeService,
+  });
+  const serviceControlProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:services:getStatus', () => serviceControl.getStatus()],
+    ['desktop:services:restart', (_event, serviceId) => serviceControl.restart(serviceId, 'user')],
+  ]);
+  registerServiceControlIpc(shutdownAwareIpc, serviceControlProducers);
   kswarmService.onStatusChange((status) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:kswarm:statusChange', status);
   });
@@ -660,7 +799,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     },
   });
 
-  const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
+  const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
@@ -697,14 +836,20 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
+  desktopIngressOwners.push(services.goalShutdown.ingress);
+  desktopDurableStores.push(services.goalShutdown.durable);
+  if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
   const activityOwnerNoticeOnce = createOnceNotice(text => {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
   });
-  kswarmStartPromise = startKSwarmWithActivityOwner({
-    kswarmService, activityEnabled: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
-    attachConversationActivityOwner: config => services.attachConversationActivityOwner(config),
-    log: message => console.error(message),
-  }, activityOwnerNoticeOnce).then(() => undefined).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
+  kswarmStartPromise = startDesktopKSwarmService(desktopShutdownGate, kswarmService,
+    process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+    error => {
+      const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
+      console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
+      activityOwnerNoticeOnce(code);
+    },
+  ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
   registerLifetimeDisposerStep('local-memory', async () => { getDesktopMemoryStore(dataRoot).close?.(); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
@@ -834,27 +979,39 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       credentialState: 'missing',
       requiresUserReauth: true,
     };
-  shutdownAwareIpc.handle('desktop:mobile:getRelayStatus', () => latestMobileRelayStatus);
+
   /**
    * Deliberately not a generic "open any URL" bridge: the renderer can only ask
    * for the relay's own sign-in page, and the URL is derived here from the relay
    * config rather than accepted from the caller.
    */
-  shutdownAwareIpc.handle('desktop:mobile:openRelaySignIn', () => {
-    const relayUrl = mobileRelayConfig?.relayUrl ?? latestMobileRelayStatus.relayUrl;
-    if (!relayUrl) return { ok: false as const, error: 'relay_url_unknown' };
-    const signInUrl = `${relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login`;
-    void shell.openExternal(signInUrl);
-    debugMain('mobile-relay:sign-in-opened', { signInUrl });
-    return { ok: true as const, url: signInUrl };
+  const mobileSignInOwner = createMobileRelaySignInOwner({
+    getRelayUrl: () => {
+      try {
+        return mobileRelayConfig
+          ? captureIpcData(mobileRelayConfig, 'mobile_signin_operation_unknown').relayUrl
+          : captureMobileRelayStatus(latestMobileRelayStatus).relayUrl;
+      } catch { throw Error('mobile_signin_operation_unknown'); }
+    },
+    openExternal: url => shell.openExternal(url),
+    onOpened: () => debugMain('mobile-relay:sign-in-opened', { targetKind: 'relay-auth-login' }),
   });
-  shutdownAwareIpc.handle('desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
-    desktopName: 'Xiaok Desktop',
-    identity: mobileIdentity,
-    gatewayStatus: mobileGateway.getStatus(),
-    relayUrl: mobileRelayConfig?.relayUrl,
-    relayJwt: mobileRelayConfig?.relayJwt,
-  }));
+  const mobileSignInProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:mobile:openRelaySignIn', () => mobileSignInOwner.open('user')],
+  ]);
+  registerMobileSignInIpc(shutdownAwareIpc, mobileSignInProducers);
+  const mobileReadonlyProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:mobile:getRelayStatus', () => latestMobileRelayStatus],
+    ['desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
+      desktopName: 'Xiaok Desktop',
+      identity: mobileIdentity,
+      gatewayStatus: mobileGateway.getStatus(),
+      relayUrl: mobileRelayConfig?.relayUrl,
+      relayJwt: mobileRelayConfig?.relayJwt,
+    })],
+  ]);
+  registerMobileReadonlyIpc(shutdownAwareIpc, mobileReadonlyProducers);
+
   const mobileRelayBridge = mobileRelayConfig
     ? createMobileRelayBridge({
       identity: mobileIdentity,
@@ -873,28 +1030,34 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       respondToApproval: respondMobileApproval,
       getArtifactPreview: getMobileArtifactPreview,
       onStatus: (status) => {
+        latestMobileRelayStatus = status;
+        let snapshot: MobileRelayStatus;
+        try { snapshot = captureMobileRelayStatus(status); }
+        catch {
+          debugMain('mobile-relay:projection-unavailable', { code: 'mobile_projection_unavailable' });
+          return;
+        }
         debugMain('mobile-relay:status', {
-          running: status.running,
-          connected: status.connected,
-          relayUrl: status.relayUrl,
-          roomId: status.roomId,
-          credentialState: status.credentialState,
-          ...(status.credentialExpiresAt ? { credentialExpiresAt: status.credentialExpiresAt } : {}),
-          requiresUserReauth: status.requiresUserReauth,
-          lastError: status.lastError,
+          running: snapshot.running,
+          connected: snapshot.connected,
+          relayUrl: snapshot.relayUrl,
+          roomId: snapshot.roomId,
+          credentialState: snapshot.credentialState,
+          ...(snapshot.credentialExpiresAt ? { credentialExpiresAt: snapshot.credentialExpiresAt } : {}),
+          requiresUserReauth: snapshot.requiresUserReauth,
+          lastError: snapshot.lastError,
         });
         // A credential problem is terminal until the user signs in again, so say
         // exactly that once instead of repeating a bare 401 every 30 seconds.
-        if (status.requiresUserReauth) {
+        if (snapshot.requiresUserReauth) {
           debugMain('mobile-relay:reauth-required', {
-            credentialState: status.credentialState,
-            credentialExpiresAt: status.credentialExpiresAt ?? null,
-            action: `open ${status.relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login to sign in again`,
+            credentialState: snapshot.credentialState,
+            credentialExpiresAt: snapshot.credentialExpiresAt ?? null,
+            action: `open ${snapshot.relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login to sign in again`,
           });
         }
-        latestMobileRelayStatus = status;
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('desktop:mobileRelayStatus', status);
+          mainWindow.webContents.send('desktop:mobileRelayStatus', snapshot);
         }
       },
     })
@@ -915,12 +1078,17 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   } else {
     debugMain('mobile-relay:disabled', 'missing relay credentials');
   }
+  const acquireAutomationWriter = (label:string) => desktopShutdownGate.acquire('external',label);
   const loopNotificationPort = createElectronDesktopNotificationPort();
   const loopLlmPort = createDesktopLoopLLMPort(executionCoordinator);
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
+    acquireWriter: acquireAutomationWriter,
     taskPort: {
       createTask: (input) => services.createBackgroundTask(input),
+      reserveTask:(input,context)=>services.reserveBackgroundTask(input,context),
+      createReservedTask:(control,guard)=>services.createReservedBackgroundTask(control,guard),
+      discardReservedTask:control=>services.discardReservedBackgroundTask(control),
       recoverTask: (taskId) => services.recoverTask(taskId),
       cancelTask: (taskId, reason) => services.cancelTask(taskId, reason),
     },
@@ -967,6 +1135,8 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   });
   loopStoreRef = loopRuntime.loopStore;
 
+
+
   try {
     await services.recoverStaleTasks();
   } catch (err) {
@@ -978,22 +1148,23 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
   }
 
-  shutdownAwareIpc.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
-  shutdownAwareIpc.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));
-  shutdownAwareIpc.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
-  shutdownAwareIpc.handle('desktop:testConnectorProvider', (_event, kind) => services.testConnectorProvider(kind));
+  const connectorsProducers = new Map<string, IpcHandlerListener>();
+  const connectorsIpc: IpcHandleRegistrar = {handle(channel, listener) {connectorsProducers.set(channel, listener);}};
+  registerConnectorsIpc(shutdownAwareIpc, connectorsProducers);
+  connectorsIpc.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig({requestSource:'user'}));
+  connectorsIpc.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input, {requestSource:'user'}));
+  connectorsIpc.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
+  connectorsIpc.handle('desktop:testConnectorProvider', (_event, kind) => services.testConnectorProvider(kind, {requestSource:'user'}));
 
   // Register update IPC handlers
-  shutdownAwareIpc.handle('desktop:getUpdateStatus', () => {
-    try {
-      return { ...getUpdateStatus(), currentVersion: app.getVersion() };
-    } catch (e) {
-      return { checking: false, available: false, downloading: false, downloaded: false, progress: 0, error: (e as Error).message, currentVersion: app.getVersion() };
-    }
+  const updaterProducers = new Map<string, IpcHandlerListener>();
+  const updaterIpc: IpcHandleRegistrar = { handle(channel, listener) { updaterProducers.set(channel, listener); } };
+  updaterIpc.handle('desktop:getUpdateStatus', () => {
+    return { ...getUpdateStatus(), currentVersion: app.getVersion() };
   });
-  shutdownAwareIpc.handle('desktop:checkForUpdates', async () => {
+  updaterIpc.handle('desktop:checkForUpdates', async () => {
     try {
-      await checkForUpdates();
+      await checkForUpdates({ requestSource: 'user' });
     } catch (e) {
       // Error already handled in checkForUpdates
     }
@@ -1004,31 +1175,34 @@ async function createInitialWindow(): Promise<BrowserWindow> {
    * return, and during that wait closing the window must still hide rather than
    * quit. Only the coordinator's real `before-quit` phase ① sets the flag.
    */
-  shutdownAwareIpc.handle('desktop:quitAndInstall', () => {
-    const outcome = updaterHandoff.begin();
+  updaterIpc.handle('desktop:quitAndInstall', () => {
+    const outcome = updaterHandoff.begin({ requestSource: 'user' });
     return { ...outcome, projection: updaterHandoff.projection() };
   });
 
+  registerUpdaterIpc(shutdownAwareIpc, updaterProducers, isMainWindowSender);
+
   let globalBackgroundAutoRunEnabled = (await loadConfig()).automations?.globalBackgroundAutoRunEnabled !== false;
-  const automationsConfigSnapshot = () => ({ globalBackgroundAutoRunEnabled });
-  shutdownAwareIpc.handle('desktop:automations:getConfig', () => automationsConfigSnapshot());
-  shutdownAwareIpc.handle('desktop:automations:setGlobalBackgroundAutoRun', async (_event, input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.enabled !== 'boolean') {
-      throw new Error('enabled must be a boolean');
-    }
-    const config = await loadConfig();
-    globalBackgroundAutoRunEnabled = input.enabled;
-    config.automations = {
-      ...(config.automations ?? {}),
-      globalBackgroundAutoRunEnabled,
-    };
-    await saveConfig(config);
-    return automationsConfigSnapshot();
+  const automationConfigOwner = createAutomationConfigOwner({
+    getEnabled: () => globalBackgroundAutoRunEnabled,
+    onCommitted: enabled => { globalBackgroundAutoRunEnabled = enabled; },
+    persist: (enabled, source) => updateGlobalBackgroundAutoRun(enabled, source),
   });
+  const automationConfigProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:automations:getConfig', () => automationConfigOwner.getConfig()],
+    ['desktop:automations:setGlobalBackgroundAutoRun', (_event, input) => automationConfigOwner.setEnabled(input, 'user')],
+  ]);
+  registerAutomationConfigIpc(shutdownAwareIpc, automationConfigProducers);
 
   // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
-  const timedActionService = new TimedActionService(timedActionStore);
+  const timedActionService = createShutdownAwareTimedActionService(new TimedActionService(timedActionStore), desktopShutdownGate);
+  let timedStoreClosed = false;
+  desktopDurableStores.push({name: 'timed-actions', async close() {
+    if (timedStoreClosed) return;
+    if (desktopShutdownGate.isOpen || desktopShutdownGate.outstanding !== 0) throw Error('timed_action_shutdown_not_drained');
+    timedActionStore.close(); timedStoreClosed = true;
+  }});
   const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
   services.registerTimedActionService(timedActionService);
   const assistantService = new AssistantService({
@@ -1045,6 +1219,55 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     }
   }).catch(() => {});
   const knowledgeBaseStore = services.getKnowledgeBaseStore();
+  const loopPublicationService = createDesktopLoopPublicationService({
+    store: loopRuntime.loopStore,
+    assistantTargets: createAssistantCandidatePromotionTargets({memoryStore: getDesktopMemoryStore(dataRoot), memoryBackend: getDesktopMemoryBackend(dataRoot), kbStore: knowledgeBaseStore}),
+    assistantProjectCwd: projectId => projectCwdById.get(projectId),
+    sessionRoot: join(dataRoot, 'loop-verification-sessions'),
+    workspaceRoot: process.cwd(),
+    getWindow: () => mainWindow ?? undefined,
+    taskPort: {recoverTask: async taskId => (await services.recoverTask(taskId)).snapshot ?? undefined},
+    captureAdmission() {
+      const view = mainWindow;
+      const original = services.captureLoopPublicationAdmission();
+      const current = () => {
+        original();
+        if (!desktopShutdownGate.isOpen || !view || view.isDestroyed() || mainWindow !== view
+          || !isTrustedDesktopRendererUrl(view.webContents.mainFrame.url, {rendererFile, devServer})) {
+          throw Error('loop_desktop_publication_view_changed');
+        }
+      };
+      current();
+      return current;
+    },
+  });
+  const authorizeLoopCurrentView=createLoopPublicationIpcAuthorizer({getWindow:()=>mainWindow,isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  const loopCurrentViews=createLoopCurrentViews({loopStore:loopRuntime.loopStore,timedStore:timedActionStore,gate:desktopShutdownGate,
+    taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
+    captureAdmission(){const view=mainWindow,original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen||!view||view.isDestroyed()||mainWindow!==view||!isTrustedDesktopRendererUrl(view.webContents.mainFrame.url,{rendererFile,devServer}))throw Error('loop_view_changed');};},
+  });
+  registerLoopCurrentViewIpc(shutdownAwareIpc,loopCurrentViews,authorizeLoopCurrentView);
+  const loopOutputService=createLoopOutputService({store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,gate:desktopShutdownGate,
+    taskPort:{recoverTask:async id=>(await services.recoverTask(id)).snapshot??undefined},openPath:path=>shell.openPath(path),
+    captureAdmission(){const view=mainWindow,original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen||!view||view.isDestroyed()||mainWindow!==view||!isTrustedDesktopRendererUrl(view.webContents.mainFrame.url,{rendererFile,devServer}))throw Error('loop_output_view_changed');};},
+  });
+  registerLoopOutputIpc(shutdownAwareIpc,loopOutputService,authorizeLoopCurrentView);
+  const closeLoopOutputs=()=>{void loopOutputService.close().catch(()=>{});};
+  desktopIngressOwners.push({name:'loop-output-consumers',stopAccepting:closeLoopOutputs,abortAllActive:closeLoopOutputs,drain:ms=>desktopShutdownGate.drain(ms)});
+  if(desktopShutdownCoordinator.isQuitting)closeLoopOutputs();
+
+  const closeLoopViews=()=>{void loopCurrentViews.close().catch(()=>{});};
+  desktopIngressOwners.push({name:'loop-current-views',stopAccepting:closeLoopViews,abortAllActive:closeLoopViews,drain:ms=>desktopShutdownGate.drain(ms)});
+  if(desktopShutdownCoordinator.isQuitting)closeLoopViews();
+  const loopPublicationShutdown = createLoopPublicationShutdownOwner(loopPublicationService, desktopShutdownGate, () => loopRuntime.close());
+  desktopIngressOwners.push(loopPublicationShutdown.ingress);
+  desktopDurableStores.push(loopPublicationShutdown.durable);
+  if (desktopShutdownCoordinator.isQuitting) loopPublicationShutdown.ingress.stopAccepting();
+  registerLoopPublicationIpc(shutdownAwareIpc, loopPublicationService, createLoopPublicationIpcAuthorizer({
+    getWindow: () => mainWindow,
+    isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer}),
+  }));
+  const assistantContextReader = createAssistantPublicationContextReader({store: loopRuntime.loopStore, evidenceStore: loopRuntime.evidenceStore, publication: loopPublicationService});
   const assistantSnapshotReader = createAssistantDesktopSnapshotReader({
     listTaskSnapshots: ({ from, to }) => readRecentTaskSnapshots(dataRoot, 100)
       .filter(snapshot => snapshot.updatedAt >= from && snapshot.updatedAt <= to)
@@ -1124,13 +1347,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     collect: async input => {
       const snapshot = await assistantSnapshotReader.collect(input);
       if (input.kind === 'evening') return snapshot;
-      return buildAssistantMorningContext({
-        snapshot,
-        eveningRun: loopRuntime.loopStore.listLoopRuns(ASSISTANT_EVENING_LOOP_ID, 10)
-          .find(run => run.status === 'success'),
-        pendingCandidates: loopRuntime.loopStore.listAssistantCandidates({ statuses: ['pending'] }),
-        pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')],
-      });
+      return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
     },
   });
   const assistantAwareRunner = createLoopExecutionAdapter({
@@ -1144,13 +1361,8 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     memoryBackend: getDesktopMemoryBackend(dataRoot),
     kbStore: knowledgeBaseStore,
     resolveProjectCwd: projectId => projectCwdById.get(projectId),
-    listMorningSuggestions: () => listLatestMorningSuggestions({
-      listRuns: () => loopRuntime.loopStore.listLoopRuns(ASSISTANT_MORNING_LOOP_ID, 10),
-      listEvidence: runId => loopRuntime.evidenceStore.listEvidenceForOwner('loop_run', runId),
-    }),
-  });
-  void assistantController.recoverAccepting().catch(error => {
-    console.warn('[main] assistant candidate recovery failed:', (error as Error).message);
+    assistantPublication: loopPublicationService,
+    listMorningSuggestions: () => assistantContextReader.listMorningSuggestions(),
   });
   const kswarmTeamService = createKSwarmTeamService({
     kswarmService,
@@ -1290,6 +1502,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   services.bindConversationRoomCreator((input, context) => context.requestSource==='user' ? collaborationRoomService.createRoom(input,context) : Promise.resolve({ok:false,code:'room_actor_forbidden'}));
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
+    authorizeAssistant: createLoopPublicationIpcAuthorizer({getWindow: () => mainWindow, isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer})}),
     authorizeRoomDeletion: event => {
       const source = event as Electron.IpcMainInvokeEvent;
       return Boolean(mainWindow && !mainWindow.isDestroyed()
@@ -1322,14 +1535,10 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     },
   });
   debugMain('createWindow:ipc-registered');
-  shutdownAwareIpc.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
+  automationConfigProducers.set('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
     loopStore: loopRuntime.loopStore,
     timedActionStore,
     globalBackgroundAutoRunEnabled,
-  }));
-  shutdownAwareIpc.handle('desktop:automations:getRunHistory', () => buildAutomationRunHistory({
-    loopStore: loopRuntime.loopStore,
-    timedActionStore,
   }));
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
@@ -1346,28 +1555,56 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   });
 
   // Register MCP plugin tools (connects to MCP servers declared in the plugins dir)
-  let mcpDispose: (() => Promise<void>) | undefined;
-  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
-  let runtimeBridgeStarted = false;
   let runtimeBridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
-  const stopRuntimeBridge = () => {
+  let runtimeBridgeStartEpoch = 0;
+  let runtimeBridgeStopping: Promise<void> | undefined;
+  const stopRuntimeBridge = (): Promise<void> => {
+    if (runtimeBridgeStopping) return runtimeBridgeStopping;
+    let complete!: () => void, fail!: (error: unknown) => void;
+    const stopping = new Promise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    runtimeBridgeStopping = stopping; // Capture before a synchronous close can reenter.
+    void (async () => { try { await stopping; } catch {} })();
+    runtimeBridgeStartEpoch += 1;
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
-    for (const client of runtimeBridgeClients.splice(0)) client.stop();
+    const owned = [...runtimeBridgeClients];
     runtimeBridgeStarted = false;
+    // Every original synchronous stop is attempted before the first await.
+    const pending: Promise<void>[] = [], failures: unknown[] = [];
+    for (const client of owned) {
+      try { pending.push(client.stop()); } catch (error) { failures.push(error); }
+    }
+    void (async () => {
+      for (const raw of pending) { try { await raw; } catch (error) { failures.push(error); } }
+      if (failures.length) {
+        fail(new AggregateError(failures, 'runtime_bridge_clients_stop_unconfirmed'));
+        return; // Retain memo and client references; never reopen an unconfirmed generation.
+      }
+      for (const client of owned) {
+        const index = runtimeBridgeClients.indexOf(client);
+        if (index >= 0) runtimeBridgeClients.splice(index, 1);
+      }
+      runtimeBridgeStopping = undefined;
+      complete();
+    })();
+    return stopping;
   };
   const startRuntimeBridge = () => {
-    if (runtimeBridgeStarted) return;
+    if (runtimeBridgeStopping || runtimeBridgeStarted || !desktopShutdownGate.isOpen) return;
+    const startEpoch = ++runtimeBridgeStartEpoch;
     runtimeBridgeStarted = true;
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
     void kswarmStartPromise.then(async () => {
+      if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const { loadConfig } = await import('../../src/utils/config.js');
+      if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const cfg = await loadConfig();
+      if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
       const brokerUrl = 'http://127.0.0.1:4318';
@@ -1422,7 +1659,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     });
   };
   restartRuntimeBridgeService = async () => {
-    stopRuntimeBridge();
+    await stopRuntimeBridge();
     startRuntimeBridge();
   };
 
@@ -1452,23 +1689,47 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     const sleptMs = powerSuspendedAtMs ? Date.now() - powerSuspendedAtMs : 0;
     powerSuspendedAtMs = 0;
     debugMain('powerMonitor:resume');
-    void restartRuntimeBridgeService();
+    void restartRuntimeBridgeService().catch(error => { debugMain('runtime-bridge:restart-unconfirmed', error instanceof Error ? error.message : String(error)); });
     void postRuntimePower('/runtime/resume', { sleptMs });
   });
 
+  assertMcpRegistrationPromiseAmbient();
+  if (!desktopShutdownGate.isOpen) return window;
+  // Pre-register before MCP's unshift: final MCP precedes this gateway join.
+  let mobileGatewayStopRetirement: Promise<void> | undefined;
+  let mobileGatewaySuffixFailure: { error: unknown } | undefined;
+  desktopFinalLifetimeSteps.unshift({ name: 'mobile-gateway-stop', run: async () => {
+    const retirement = mobileGatewayStopRetirement;
+    if (!retirement) return; // No stop started; no closed/retired assertion.
+    try { await retirement; }
+    catch (error) {
+      if (mobileGatewaySuffixFailure) throw new AggregateError([error, mobileGatewaySuffixFailure.error], 'mobile_gateway_and_lifetime_cleanup_failed');
+      throw error;
+    }
+  } });
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
-  const mcpRegistrationPromise = services.registerMcpTools().then(({ dispose }) => {
-    mcpDispose = dispose;
-    startRuntimeBridge();
-    return true;
-  }).catch((error) => {
-    debugMain('createWindow:mcp-registration-failed', error instanceof Error ? error.message : String(error));
-    startRuntimeBridge();
-    return false;
+  const mcpRegistrationOwner = startOwnedMcpRegistration({
+    isOpen: () => desktopShutdownGate.isOpen,
+    acquireWriter: () => desktopShutdownGate.acquire('bootstrap_queue', 'mcp-tools-registration'),
+    // Original ordinary bridge cleanup still closes first. This early-owned
+    // final fallback also covers startup abort before that step is installed.
+    registerFinalLifetime: dispose => { desktopFinalLifetimeSteps.unshift({ name: 'mcp-tools-registration', run: dispose }); },
+    register: () => services.registerMcpTools(),
+    startBridge: startRuntimeBridge,
+    reportRegistrationFailure: error => debugMain('createWindow:mcp-registration-failed', error instanceof Error ? error.message : String(error)),
+    reportOwnershipFailure: error => debugMain('createWindow:mcp-registration-ownership-failed', error instanceof Error ? error.message : String(error)),
   });
+  const mcpRegistrationPromise = mcpRegistrationOwner.registered;
   debugMain('createWindow:mcp-registration-started');
 
+  const loopTimedCompletion=createLoopTimedCompletionHost({
+    timedStore:timedActionStore,loopStore:loopRuntime.loopStore,
+    taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
+    captureAdmission(){const original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen)throw Error('loop_timed_shutdown');};},
+  });
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
+    loopCompletion:loopTimedCompletion,
+    acquireWriter: acquireAutomationWriter,
     executors: createDesktopTimedActionExecutors({
       getMainWindow: () => mainWindow,
       loopRuntime,
@@ -1487,7 +1748,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       timedActionRunId,
     }),
     onRunComplete: (event) => {
-      if (event.action.executor.kind !== 'agent_task') return;
+      if (event.action.executor.kind !== 'agent_task' || event.status === 'publication_pending') return;
       const window = mainWindow;
       if (!window || window.isDestroyed()) return;
       const success = event.status === 'success';
@@ -1495,7 +1756,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       window.webContents.send('desktop:scheduledTaskDue', {
         taskId: event.action.id,
         runtimeTaskId: event.runtimeTaskId,
-        ...scheduledRunPresentation(event),
+        ...scheduledRunPresentation({ status: event.status, runtimeTaskId: event.runtimeTaskId }),
         success,
         title,
         lastRunAt: event.action.lastDueAt ?? event.finishedAt,
@@ -1531,19 +1792,30 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       } catch { /* notification is best-effort */ }
     },
   });
-  timedActionScheduler.start();
+  desktopIngressOwners.push({
+    name: 'timed-action-scheduler',
+    stopAccepting: () => {timedActionScheduler.stopAccepting();void loopTimedCompletion.close().catch(()=>{});},
+    abortAllActive: reason => timedActionScheduler.abortAllActive(reason),
+    drain: deadlineMs => desktopShutdownGate.drain(deadlineMs),
+  });
+  if (desktopShutdownCoordinator.isQuitting) timedActionScheduler.stopAccepting();
+  else timedActionScheduler.start();
 
-  shutdownAwareIpc.handle('desktop:syncScheduledTasks', (_event, tasks) => {
+  const scheduledProducers = new Map<string, IpcHandlerListener>();
+  const scheduledIpc: IpcHandleRegistrar = {handle(channel, listener) {scheduledProducers.set(channel, listener);}};
+  registerScheduledTimedActionIpc(shutdownAwareIpc, scheduledProducers);
+
+  scheduledIpc.handle('desktop:syncScheduledTasks', (_event, tasks) => {
     // Deprecated compatibility endpoint. Renderer must not replace main state.
     return timedActionService.listScheduledTasks();
   });
-  shutdownAwareIpc.handle('desktop:getScheduledTasks', () => {
+  scheduledIpc.handle('desktop:getScheduledTasks', () => {
     return timedActionService.listScheduledTasks();
   });
-  shutdownAwareIpc.handle('desktop:createScheduledTask', (_event, input) => {
-    return timedActionService.createScheduledTask(input);
+  scheduledIpc.handle('desktop:createScheduledTask', (_event, input) => {
+    return timedActionService.createScheduledTask(input, {requestSource: 'user'});
   });
-  shutdownAwareIpc.handle('desktop:loops:createSchedule', (_event, input) => {
+  scheduledIpc.handle('desktop:loops:createSchedule', (_event, input) => {
     debugMain('loops:createSchedule', { loopId: (input as any)?.loopId, title: (input as any)?.title });
     try {
       if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -1572,7 +1844,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
         description: typeof record.description === 'string' ? record.description : undefined,
         trigger: record.trigger as never,
         source: 'user',
-      });
+      }, {requestSource: 'user'});
       debugMain('loops:createSchedule ok', { loopId, actionId: (result as any)?.id });
       return result;
     } catch (e) {
@@ -1580,39 +1852,38 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       throw e;
     }
   });
-  shutdownAwareIpc.handle('desktop:loops:getScheduleBindings', () => {
+  scheduledIpc.handle('desktop:loops:getScheduleBindings', () => {
     return timedActionService.listLoopScheduleBindings();
   });
-  shutdownAwareIpc.handle('desktop:updateScheduledTask', (_event, input) => {
-    return timedActionService.updateScheduledTask(input);
+  scheduledIpc.handle('desktop:updateScheduledTask', (_event, input) => {
+    return timedActionService.updateScheduledTask(input, {requestSource: 'user'});
   });
-  shutdownAwareIpc.handle('desktop:setScheduledTaskStatus', (_event, id: string, status: 'active' | 'paused') => {
-    return timedActionService.setScheduledTaskStatus(id, status) ?? null;
+  scheduledIpc.handle('desktop:setScheduledTaskStatus', (_event, id: string, status: 'active' | 'paused') => {
+    return timedActionService.setScheduledTaskStatus(id, status, undefined, {requestSource: 'user'}) ?? null;
   });
-  shutdownAwareIpc.handle('desktop:cancelScheduledTask', (_event, id: string) => {
-    return timedActionService.cancelScheduledTask(id);
+  scheduledIpc.handle('desktop:cancelScheduledTask', (_event, id: string) => {
+    return timedActionService.cancelScheduledTask(id, undefined, {requestSource: 'user'});
   });
-  shutdownAwareIpc.handle('desktop:getTimedActions', () => {
+  scheduledIpc.handle('desktop:getTimedActions', () => {
     return timedActionService.getActions();
   });
-  shutdownAwareIpc.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
+  scheduledIpc.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
   });
-  shutdownAwareIpc.handle('desktop:scheduledTasks:clearRunHistory', (_event, actionId: string, statuses?: unknown) => {
+  scheduledIpc.handle('desktop:scheduledTasks:clearRunHistory', (_event, actionId: string, statuses?: unknown) => {
     if (typeof actionId !== 'string' || actionId.trim().length === 0) {
       throw new Error('actionId must be a non-empty string');
     }
     const validStatuses = Array.isArray(statuses) && statuses.every((s) => typeof s === 'string')
       ? (statuses as string[])
       : undefined;
-    const removed = timedActionStore.clearActionRunHistory(actionId, validStatuses);
-    return { ok: true, removed };
+    return timedActionService.clearScheduledTaskRunHistory(actionId, validStatuses, {requestSource: 'user'});
   });
-  shutdownAwareIpc.handle('desktop:timedAction:approveAuto', (_event, actionId: string) => {
-    return timedActionService.approveAuto(actionId) ?? null;
+  scheduledIpc.handle('desktop:timedAction:approveAuto', (_event, actionId: string) => {
+    return timedActionService.approveAuto(actionId, {requestSource: 'user'}) ?? null;
   });
-  shutdownAwareIpc.handle('desktop:timedAction:revokeAuto', (_event, actionId: string) => {
-    return timedActionService.revokeAuto(actionId) ?? null;
+  scheduledIpc.handle('desktop:timedAction:revokeAuto', (_event, actionId: string) => {
+    return timedActionService.revokeAuto(actionId, {requestSource: 'user'}) ?? null;
   });
 
   // Thread meta (GTD / pinned) — persistent via SQLite in main process
@@ -1620,82 +1891,67 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send('desktop:skillsChanged');
   });
-  const broadcastThreadMeta = () => {
+  const broadcastThreadMeta = (snapshot: ThreadMetadataSnapshotDto) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());
+    mainWindow.webContents.send('desktop:threadMetaChanged', snapshot);
   };
-  shutdownAwareIpc.handle('desktop:getThreadLabels', () => {
-    return threadMetaStore.getAll();
-  });
-  shutdownAwareIpc.handle('desktop:setThreadLabel', (_event, threadId: string, label: string) => {
-    const result = threadMetaStore.addThreadToLabel(threadId, label as any);
-    if (result.ok) broadcastThreadMeta();
-    return result;
-  });
-  shutdownAwareIpc.handle('desktop:unsetThreadLabel', (_event, threadId: string, label: string) => {
-    const result = threadMetaStore.removeThreadFromLabel(threadId, label as any);
-    if (result.ok) broadcastThreadMeta();
-    return result;
-  });
-  shutdownAwareIpc.handle('desktop:moveThreadLabel', (_event, threadId: string, from: string, to: string) => {
-    const result = threadMetaStore.moveThread(threadId, from as any, to as any);
-    if (result.ok) broadcastThreadMeta();
-    return result;
-  });
-  shutdownAwareIpc.handle('desktop:getAppFlag', (_event, key: string) => {
-    return threadMetaStore.getFlag(key as any);
-  });
-  shutdownAwareIpc.handle('desktop:setAppFlag', (_event, key: string, value: string) => {
-    const result = threadMetaStore.setFlag(key as any, value);
-    if (result.ok) broadcastThreadMeta();
-    return result;
-  });
-  shutdownAwareIpc.handle('desktop:migrateLegacyThreadMeta', (_event, data: any) => {
-    const result = threadMetaStore.bulkImport(data);
-    if (result.ok) broadcastThreadMeta();
-    return result;
-  });
+  registerThreadMetadataIpc(shutdownAwareIpc, threadMetaStore, broadcastThreadMeta);
 
   // Design v58 §5.5: both former `before-quit` listeners are now steps of the
   // single coordinator-owned lifetime disposer, so each runs at most once and
   // provider close is actually awaited before the process exits.
   registerLifetimeDisposerStep('provider-runtime', () => pluginProviderRuntime.dispose());
   registerLifetimeDisposerStep('kswarm-and-bridges', async () => {
-    await kswarmService.stop().catch((err) => {
-      debugMain('kswarmService.stop failed', err instanceof Error ? err.message : String(err));
-    });
+    runtimeBridgeStartEpoch += 1;
+    runtimeBridgeStarted = false;
     kswarmStreamBridge.dispose();
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
-    for (const client of runtimeBridgeClients) client.stop();
+    await stopRuntimeBridge();
     timedActionScheduler.stop();
-    loopRuntime.close();
-    timedActionStore.close();
+    // SQLite owners close only in the coordinator durable-store phase.
     mobileBonjourAdvertiser.stop();
-    mobileGateway.stop().catch((err) => {
-      debugMain('mobileGateway.stop failed', err instanceof Error ? err.message : String(err));
-    });
-    mobileRelayBridge?.stop();
-    await mcpDispose?.();
+    // Same known-native async stop/receiver/arguments; own its first exact raw.
+    assertMcpRegistrationPromiseAmbient();
+    let completeGateway!: () => void, failGateway!: (error: unknown) => void;
+    const gatewayRetirement = new McpNativePromise<void>((resolve, reject) => { completeGateway = resolve; failGateway = reject; });
+    mobileGatewayStopRetirement = gatewayRetirement; // Before producer/prefix reentry.
+    void (async () => { try { await gatewayRetirement; } catch {} })();
+    void (async () => {
+      const failures: unknown[] = [];
+      try {
+        const raw = mobileGateway.stop();
+        await raw;
+      } catch (error) {
+        failures.push(error);
+        try { debugMain('mobileGateway.stop failed', error instanceof Error ? error.message : String(error)); }
+        catch (logError) { failures.push(logError); }
+      }
+      if (failures.length === 1) failGateway(failures[0]);
+      else if (failures.length > 1) failGateway(new AggregateError(failures, 'mobile_gateway_stop_failed'));
+      else completeGateway();
+    })();
+    // Keep invocation timing: gateway starts, then relay, then MCP.
+    try { mobileRelayBridge?.stop(); await mcpRegistrationOwner.dispose(); }
+    catch (error) {
+      mobileGatewaySuffixFailure = { error };
+      throw error; // Let existing final MCP run before the gateway fallback join.
+    }
+    await gatewayRetirement; // Normal tail join; error paths join in final fallback.
   });
 
   // Reminder IPC handlers
-  shutdownAwareIpc.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
-    return timedActionService.createReminder(input.content, input.scheduleAt, input.timezone);
+  scheduledIpc.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
+    return timedActionService.createReminder(input.content, input.scheduleAt, input.timezone, {requestSource: 'user', ownerKind: 'user', ownerId: 'desktop-user'});
   });
-  shutdownAwareIpc.handle('desktop:listReminders', () => timedActionService.listReminders());
-  shutdownAwareIpc.handle('desktop:cancelReminder', (_event, id: string) => timedActionService.cancelReminder(id));
-  shutdownAwareIpc.handle('desktop:getReminderStatus', () => timedActionService.getReminderStatus());
+  scheduledIpc.handle('desktop:listReminders', () => timedActionService.listReminders());
+  scheduledIpc.handle('desktop:cancelReminder', (_event, id: string) => timedActionService.cancelReminder(id, {requestSource: 'user'}));
+  scheduledIpc.handle('desktop:getReminderStatus', () => timedActionService.getReminderStatus());
 
   // Skill debug config IPC handlers
-  shutdownAwareIpc.handle('desktop:getSkillDebugConfig', () => services.getSkillDebugConfig());
-  shutdownAwareIpc.handle('desktop:saveSkillDebugConfig', (_event, input: { enabled: boolean }) => services.saveSkillDebugConfig(input));
-
-  // KSwarm config IPC handlers
-  shutdownAwareIpc.handle('desktop:getKswarmConfig', () => services.getKswarmConfig());
-  shutdownAwareIpc.handle('desktop:saveKswarmConfig', (_event, input: { maxConcurrentTasks: number }) => services.saveKswarmConfig(input));
+  registerDesktopSmallConfigIpc(shutdownAwareIpc, services);
 
   // Setup menubar with K icon
   setupMenuBar(window);
@@ -1703,7 +1959,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
 
   // Setup auto-updater (production only)
   if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
-    setupAutoUpdater(window, (event, diagnostic) => debugMain(`updater:${event}`, diagnostic)).catch((err) => {
+    setupAutoUpdater(window, (event, diagnostic) => debugMain(`updater:${event}`, diagnostic), { requestSource: 'scheduler' }).catch((err) => {
       debugMain('setupAutoUpdater failed', err instanceof Error ? err.message : String(err));
     });
   }
@@ -1715,36 +1971,75 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
+  if (desktopShutdownGate.isOpen) {
+    const writer = acquireAutomationWriter('assistant:recover-accepting');
+    void assistantController.recoverAccepting({requestSource: 'scheduler'}).catch(error => {
+      console.warn('[main] assistant candidate recovery failed:', (error as Error).message);
+    }).finally(() => writer.release());
+  }
+
   // Python discovery, venv creation and dependency checks are intentionally
   // post-interactive. Static plugin files are already available, while Python
   // MCP servers remain fail-closed until this main-process-owned command exists.
-  void prepareBundledPluginPythonRuntime(pluginDeployment).then(async (pythonResult) => {
-    managedPythonCommand = pythonResult.pythonCommand;
-    debugMain('createWindow:python-runtime-ready', pythonResult);
-    const mcpRegistered = await mcpRegistrationPromise;
-    if (!mcpRegistered) {
-      services.markDeferredPythonMcpToolsUnavailable();
-      return;
+  if (!desktopShutdownGate.isOpen) return window;
+  // Register ownership before the real producer starts; retirement is not a
+  // physical child/process-tree ACK. Standard native-Promise realm required.
+  const pythonWriter = desktopShutdownGate.acquire('bootstrap_queue', 'plugin-python-runtime');
+  let completePythonRetirement!: () => void;
+  let failPythonRetirement!: (error: unknown) => void;
+  const pythonRetirement = new Promise<void>((resolve, reject) => {
+    completePythonRetirement = resolve; failPythonRetirement = reject;
+  });
+  registerLifetimeDisposerStep('plugin-python-runtime-preparation', () => pythonRetirement);
+  // Observe before producer. The lifecycle receives the exact same reservation
+  // and its original rejected reason, not a swallowed-error replacement.
+  void (async () => {
+    try { await pythonRetirement; }
+    catch (error) {
+      try { debugMain('createWindow:python-retirement-failed', error instanceof Error ? error.message : String(error)); } catch {}
     }
-    if (managedPythonCommand) {
-      await services.registerDeferredPythonMcpTools();
-    } else {
-      services.markDeferredPythonMcpToolsUnavailable();
-    }
-    const started = await services.startPluginProviderRuntime().catch((error) => {
-      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
-      return { started: false as const };
-    });
-    debugMain('provider-runtime:start', started);
-  }).catch((error) => {
-    debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
-    void mcpRegistrationPromise.then(async (mcpRegistered) => {
+  })();
+  const runPythonPreparation = async (): Promise<void> => {
+    try {
+      const pythonResult = await prepareBundledPluginPythonRuntime(pluginDeployment);
+      if (!desktopShutdownGate.isOpen) return;
+      managedPythonCommand = pythonResult.pythonCommand;
+      debugMain('createWindow:python-runtime-ready', pythonResult);
+      const mcpRegistered = await mcpRegistrationPromise;
+      if (!desktopShutdownGate.isOpen) return;
+      if (!mcpRegistered) {
+        services.markDeferredPythonMcpToolsUnavailable();
+        return;
+      }
+      if (managedPythonCommand) {
+        await services.registerDeferredPythonMcpTools();
+      } else {
+        services.markDeferredPythonMcpToolsUnavailable();
+      }
+      if (!desktopShutdownGate.isOpen) return;
+      const started = await services.startPluginProviderRuntime().catch((error) => {
+        debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
+        return { started: false as const };
+      });
+      debugMain('provider-runtime:start', started);
+    } catch (error) {
+      debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
+      if (!desktopShutdownGate.isOpen) throw error;
+      const mcpRegistered = await mcpRegistrationPromise;
+      if (!desktopShutdownGate.isOpen) throw error;
       services.markDeferredPythonMcpToolsUnavailable();
       if (!mcpRegistered) return;
       const started = await services.startPluginProviderRuntime().catch(() => ({ started: false as const }));
       debugMain('provider-runtime:start-after-python-failure', started);
-    });
-  });
+    }
+  };
+  void (async () => {
+    try {
+      try { await runPythonPreparation(); }
+      finally { pythonWriter.release(); }
+      completePythonRetirement();
+    } catch (error) { failPythonRetirement(error); }
+  })();
   return window;
 }
 
@@ -1755,7 +2050,7 @@ function configureDesktopView(window: BrowserWindow, devServer?: string): void {
       mainWindow = null;
     }
   });
-  attachCloseToMinimize(window, process.platform, () => !isQuitting);
+  attachCloseToMinimize(window, process.platform, () => !desktopShutdownCoordinator.isQuitting);
   attachWindowRepaintHandlers(window);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -1863,8 +2158,7 @@ if (packagedKimiSmokeResultPath) {
     debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
     restoreOrCreateWindow();
   });
-  // `isQuitting` is now set by the coordinator's synchronous phase ① rather than
-  // as a listener side effect.
+  // Quitting state belongs to the coordinator's synchronous phase ①.
   registerLifetimeDisposerStep('window-scoped', async () => {
     meetingRecorderController?.dispose();
     destroyMenuBar();

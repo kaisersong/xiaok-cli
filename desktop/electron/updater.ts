@@ -1,3 +1,6 @@
+import { types } from 'node:util';
+import { assertUpdaterSource, captureUpdateStatus } from './updater-authority.js';
+import type { UpdaterRequestContext } from '../shared/updater-ipc-contract.js';
 import type { BrowserWindow } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,6 +29,7 @@ let mainWindow: BrowserWindow | null = null;
 let isDevMode = false;
 let autoUpdater: any = null;
 let autoUpdaterEventsRegistered = false;
+let updaterSetup: Promise<boolean> | undefined;
 const STARTUP_UPDATE_RETRY_DELAY_MS = 60_000;
 let handoff: UpdaterHandoffStateMachine | null = null;
 let observationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -44,7 +48,7 @@ function clearObservation(): void {
 
 function reportUpdaterError(error: unknown): void {
   const message = toError(error).message;
-  logUpdater('error', message.replace(/https?:\/\/[^\s]+/gi, '[URL omitted]'));
+  try { logUpdater('error', message.replace(/https?:\/\/[^\s]+/gi, '[URL omitted]')); } catch { /* diagnostic sink */ }
   if (handoff?.snapshot().kind === 'handed_off') return;
   if (wrapperInProgress) syncWrapperError = toError(error);
   else handoff?.observeAsyncUpdaterError(error);
@@ -57,6 +61,7 @@ export function createUpdaterHandoff(platform: NodeJS.Platform = process.platfor
   if (handoff) return handoff;
   handoff = new UpdaterHandoffStateMachine({
     platformClass: platform === 'darwin' ? 'mac' : 'base',
+    authorizeBegin: context => assertUpdaterSource(context, 'user'),
     preflight: () => {
       if (updateStatus.error) throw new Error(updateStatus.error);
       if (!updateStatus.downloaded || !autoUpdater || typeof autoUpdater.quitAndInstall !== 'function') {
@@ -117,10 +122,25 @@ export function resolveAutoUpdaterExport(module: unknown): any | null {
   return candidate;
 }
 
+function recordProjectionFailure(): void {
+  // Preserve the last known flags/version/progress; this diagnostic grants no lifecycle transition.
+  updateStatus = { ...updateStatus, error: 'updater_projection_unavailable' };
+  sendUpdateStatus();
+}
 function setUpdateStatus(patch: Partial<UpdateStatus>, installTransition = false): void {
   if (!installTransition && attemptLocked()) return;
-  updateStatus = { ...updateStatus, ...patch };
+  try { updateStatus = captureUpdateStatus({ ...updateStatus, ...patch }); }
+  catch { recordProjectionFailure(); return; }
   sendUpdateStatus();
+}
+function sdkScalar(raw: unknown, key: string): unknown {
+  if (!raw || typeof raw !== 'object' || types.isProxy(raw)) throw Error('updater_projection_unavailable');
+  const descriptor = Object.getOwnPropertyDescriptor(raw, key);
+  if (!descriptor || !('value' in descriptor)) throw Error('updater_projection_unavailable');
+  return descriptor.value;
+}
+function sdkEvent(handler: (raw: unknown) => void): (raw: unknown) => void {
+  return raw => { try { handler(raw); } catch { recordProjectionFailure(); } };
 }
 
 function isDevelopmentMode(): boolean {
@@ -139,7 +159,12 @@ function isDevelopmentMode(): boolean {
 }
 
 function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
+  if (typeof error === 'string') return new Error(error);
+  if (error && typeof error === 'object' && !types.isProxy(error)) {
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'message');
+    if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string') return new Error(descriptor.value);
+  }
+  return new Error('updater_operation_unknown');
 }
 
 export async function runStartupUpdateCheck(
@@ -176,7 +201,7 @@ async function loadAutoUpdater(): Promise<boolean> {
     }
     return true;
   } catch (e) {
-    setUpdateStatus({ error: `无法加载更新器: ${(e as Error).message}` });
+    setUpdateStatus({ error: `无法加载更新器: ${toError(e).message}` });
     return false;
   }
 }
@@ -189,14 +214,16 @@ function registerAutoUpdaterEvents(): void {
     setUpdateStatus({ checking: true, installing: false, error: undefined });
   });
 
-  autoUpdater.on('update-available', (info: { version: string }) => {
+  autoUpdater.on('update-available', sdkEvent(info => {
+    const version = sdkScalar(info, 'version');
+    if (typeof version !== 'string') throw Error('updater_projection_unavailable');
     setUpdateStatus({
       checking: false,
       available: true,
       installing: false,
-      version: info.version,
+      version,
     });
-  });
+  }));
 
   autoUpdater.on('update-not-available', () => {
     setUpdateStatus({
@@ -206,43 +233,50 @@ function registerAutoUpdaterEvents(): void {
     });
   });
 
-  autoUpdater.on('download-progress', (progress: { percent: number }) => {
+  autoUpdater.on('download-progress', sdkEvent(progress => {
+    const percent = sdkScalar(progress, 'percent');
+    if (typeof percent !== 'number' || !Number.isFinite(percent)) throw Error('updater_projection_unavailable');
     setUpdateStatus({
       downloading: true,
       installing: false,
-      progress: Math.round(progress.percent),
+      progress: Math.round(percent),
     });
-  });
+  }));
 
-  autoUpdater.on('update-downloaded', (info: { version: string }) => {
+  autoUpdater.on('update-downloaded', sdkEvent(info => {
+    const version = sdkScalar(info, 'version');
+    if (typeof version !== 'string') throw Error('updater_projection_unavailable');
     logUpdater('update-downloaded');
     setUpdateStatus({
       downloading: false,
       downloaded: true,
       installing: false,
-      version: info.version,
+      version,
       progress: 100,
     });
-  });
+  }));
 
-  autoUpdater.on('error', (error: Error) => {
-    reportUpdaterError(error);
-  });
+  autoUpdater.on('error', sdkEvent(error => {
+    reportUpdaterError(toError(error));
+  }));
 }
 
-export async function setupAutoUpdater(window: BrowserWindow, logger?: typeof logUpdater): Promise<void> {
+export async function setupAutoUpdater(window: BrowserWindow, logger: typeof logUpdater | undefined, context: UpdaterRequestContext): Promise<void> {
+  assertUpdaterSource(context, 'scheduler');
   mainWindow = window;
   if (logger) logUpdater = logger;
+  if (updaterSetup) { await updaterSetup; return; }
+  const attempt = Promise.resolve().then(async () => {
   isDevMode = isDevelopmentMode();
 
   // Skip in development mode
   if (isDevMode) {
     updateStatus.error = '开发模式下无法检查更新';
-    return;
+    return true;
   }
 
   // Load autoUpdater dynamically
-  if (!(await loadAutoUpdater())) return;
+  if (!(await loadAutoUpdater())) return false;
 
   // Configure autoUpdater
   autoUpdater.autoDownload = true;
@@ -266,16 +300,23 @@ export async function setupAutoUpdater(window: BrowserWindow, logger?: typeof lo
         setUpdateStatus({
           checking: false,
           downloading: false,
-          error: error.message,
+          error: toError(error).message,
         });
       });
     }
   }, 4 * 60 * 60 * 1000);
+  return true;
+  });
+  updaterSetup = attempt;
+  try { if (!await attempt && updaterSetup === attempt) updaterSetup = undefined; }
+  catch (error) { if (updaterSetup === attempt) updaterSetup = undefined; throw error; }
 }
 
 function sendUpdateStatus(): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('desktop:updateStatus', updateStatus);
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:updateStatus', captureUpdateStatus(updateStatus));
+  } catch {
+    // A closing renderer cannot throw back into the SDK event dispatcher.
   }
 }
 
@@ -292,10 +333,11 @@ export function getUpdateStatus(): UpdateStatus {
       error: '开发模式下无法检查更新',
     };
   }
-  return updateStatus;
+  return captureUpdateStatus(updateStatus);
 }
 
-export async function checkForUpdates(): Promise<void> {
+export async function checkForUpdates(context: UpdaterRequestContext): Promise<void> {
+  assertUpdaterSource(context, 'user');
   if (attemptLocked()) return;
   // Skip in development mode - app-update.yml doesn't exist
   if (isDevMode || isDevelopmentMode()) {
@@ -325,13 +367,13 @@ export async function checkForUpdates(): Promise<void> {
     setUpdateStatus({
       checking: false,
       downloading: false,
-      error: (e as Error).message,
+      error: toError(e).message,
     });
   }
 }
 
-export function quitAndInstall(): void {
-  createUpdaterHandoff().begin();
+export function quitAndInstall(context: UpdaterRequestContext): void {
+  createUpdaterHandoff().begin(context);
 }
 
 export function callAutoUpdaterQuitAndInstall(updater: unknown): boolean {

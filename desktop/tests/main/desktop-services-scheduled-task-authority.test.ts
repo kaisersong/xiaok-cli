@@ -1,3 +1,6 @@
+import type {ToolExecutionContext} from '../../../src/types.js';
+import {AgentSessionState} from '../../../src/ai/runtime/session.js';
+import {ToolRegistry} from '../../../src/ai/tools/index.js';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,13 +45,16 @@ describe('desktop scheduled task agent authority', () => {
 
   it('removes mandatory cancellation guidance from tool output and the desktop system prompt', async () => {
     const tools = createTimedActionTools(service, 'Asia/Shanghai');
-    const createTool = tools.find(tool => tool.definition.name === 'scheduled_task_create');
-    const result = await createTool!.execute({
+    const session = new AgentSessionState();session.appendUserText('Create this own temporary scheduled task for the authority fixture.');
+    const registry = new ToolRegistry({autoMode:true}, tools);
+    const context: ToolExecutionContext = {taskId:'legacy-agent-task', session:session.exportSnapshot(), messages:session.getMessages(), systemPrompt:'Only run this own fixture scheduled tool; no external task execution.', toolDefinitions:registry.getToolDefinitions()};
+    const result = await registry.executeTool('scheduled_task_create', {
       name: '检查项目',
       prompt: '检查项目是否完成',
       frequency: 'interval',
       interval_minutes: 5,
-    });
+    }, context);
+    registry.dispose();
     const source = readFileSync(join(__dirname, '../../electron/desktop-services.ts'), 'utf8');
 
     expect(result).toContain('cancellation is limited to the current agent-owned interval temporary task');
@@ -67,7 +73,7 @@ describe('desktop scheduled task agent authority', () => {
       prompt: '生成日报',
       trigger: { kind: 'daily', hour: 22, minute: 0 },
       source: 'user',
-    });
+    }, {requestSource:'user'});
     store.createAction({
       id: 'assistant-daily',
       title: '助理晚间复盘',

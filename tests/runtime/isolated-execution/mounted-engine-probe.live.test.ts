@@ -1,0 +1,10 @@
+import {it,expect} from 'vitest';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import type { BlobReservationProposal } from '../../../src/runtime/verification/blob-budget.js';
+import {openPrivateVerificationDatabase} from '../../../src/runtime/verification/private-database.js';import {createVerificationBlobBudget} from '../../../src/runtime/verification/blob-budget.js';import {DockerEngineTransport} from '../../../src/runtime/isolated-execution/docker-engine-transport.js';import {createMountedEngineProbe} from '../../../src/runtime/isolated-execution/mounted-engine-probe.js';
+const socket=process.env.SOL_PI_DOCKER_PROBE_SOCKET,image=process.env.SOL_PI_DOCKER_PROBE_IMAGE;
+it.skipIf(!socket||!image)('runs actual mounted-holder policy probes with durable expected and exact resource cleanup (dev evidence only)',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'mounted-probe-')),db=openPrivateVerificationDatabase(root);let probe:ReturnType<typeof createMountedEngineProbe>;
+ const budget=createVerificationBlobBudget({database:db,profileId:'dev-only',assertCurrent(){},deletion:{assertDeleted(proof:object,p:Readonly<BlobReservationProposal>){probe.deletionAuthority.assertDeleted(proof,p);}}});
+ try{probe=createMountedEngineProbe({database:db,budget,engine:new DockerEngineTransport({socketPath:socket!}),engineBinding:{engineId:'dev-docker-not-qualified',incarnation:'dev-epoch',epoch:1},imageId:image!,assertCurrent(){}});const report=await probe.run();expect(report.evidenceHash).toMatch(/^[a-f0-9]{64}$/);expect(report.qualified).toBe(false);const resource=JSON.parse((db.prepare('SELECT resources_json FROM docker_runner_resources').get() as {resources_json:string}).resources_json);expect(resource.stdin).toMatchObject({sha256:expect.stringMatching(/^[a-f0-9]{64}$/),bytes:36});expect(db.prepare("SELECT COUNT(*) n FROM verification_blob_reservations WHERE state='reserved'").get()).toEqual({n:0});expect(db.prepare('SELECT COUNT(*) n FROM docker_runner_resources').get()).toEqual({n:1});}
+ finally{probe!?.close();budget.close();db.close();rmSync(root,{recursive:true,force:true});}
+},30000);

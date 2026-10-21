@@ -23,5 +23,11 @@ export declare class OpenAIAdapter implements ModelAdapter {
     dispose(): void;
     cloneWithModel(newWireModel: string): OpenAIAdapter;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
+    /** Host request planning only. Strict signed transcripts have no preview path. */
+    getObservationRequestPreview(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): {
+        serializedBody: string;
+        destination: string;
+    } | undefined;
+    private buildChatRequest;
     private streamOnce;
 }

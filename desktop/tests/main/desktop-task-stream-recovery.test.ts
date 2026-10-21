@@ -15,7 +15,7 @@ describe('Desktop model request recovery', () => {
       yield { type: 'text', delta: 'continued' }; yield { type: 'done' };
     } };
     const out = await collect(request(adapter, { prepareRequest: prepare, onInvocation: (id: string) => ids.push(id) }));
-    expect(out.some(x => x.delta === 'continued')).toBe(true); expect(calls).toBe(3);
+    expect(out.some(x => x.type === 'text' && x.delta === 'continued')).toBe(true); expect(calls).toBe(3);
     expect(prepare).toHaveBeenCalledTimes(3); expect(new Set(ids).size).toBe(3);
     expect(signals[0].aborted).toBe(true); expect(signals[1].aborted).toBe(true);
     expect(signals[2].aborted).toBe(false);
@@ -68,7 +68,7 @@ it('recovers idle model reads and ignores abandoned output', async () => {
     signals.push(o.signal); if (++calls === 1) await new Promise(() => {});
     yield { type: 'text', delta: 'healthy' }; yield { type: 'done' };
   } }));
-  expect(calls).toBe(2); expect(signals[0].aborted).toBe(true); expect(out.some(x => x.delta === 'healthy')).toBe(true);
+  expect(calls).toBe(2); expect(signals[0].aborted).toBe(true); expect(out.some(x => x.type === 'text' && x.delta === 'healthy')).toBe(true);
 });
 it('keeps tools disabled when recovering an eligible child summary', async () => {
   const tools: any[] = []; let calls = 0;

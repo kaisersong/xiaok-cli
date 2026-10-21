@@ -133,7 +133,7 @@ function createController(input: {
 }
 
 describe('AssistantController', () => {
-  it('returns pending candidates separately from at most three morning suggestions', () => {
+  it('returns pending candidates separately from at most three morning suggestions', async () => {
     const records = Array.from({ length: 5 }, (_, index) => candidate({
       id: `candidate-${index + 1}`,
       title: `建议 ${index + 1}`,
@@ -149,7 +149,7 @@ describe('AssistantController', () => {
       })),
     });
 
-    expect(controller.getOverview()).toMatchObject({
+    expect(await controller.getOverview()).toMatchObject({
       profile: { status: 'needs_consent' },
       pendingCandidateCount: 5,
       suggestions: [
@@ -160,10 +160,10 @@ describe('AssistantController', () => {
     });
   });
 
-  it('does not project evening candidates as morning suggestions', () => {
+  it('does not project evening candidates as morning suggestions', async () => {
     const { controller } = createController({ candidates: [candidate()] });
 
-    expect(controller.getOverview()).toMatchObject({
+    expect(await controller.getOverview()).toMatchObject({
       pendingCandidateCount: 1,
       suggestions: [],
     });
@@ -250,6 +250,7 @@ describe('AssistantController', () => {
       getCollection: vi.fn(() => ({ id: 'collection-1' })),
       getSource: vi.fn(),
       addSource,
+      ensureAssistantSource: addSource,
     } as unknown as KbStore;
     const { controller } = createController({ candidates: [knowledge], kbStore });
 
@@ -314,7 +315,7 @@ describe('AssistantController', () => {
     });
     const { controller, candidates } = createController({ candidates: [accepting], memory });
 
-    await expect(controller.recoverAccepting()).resolves.toEqual([
+    await expect(controller.recoverAccepting({requestSource:'scheduler'})).resolves.toEqual([
       { candidateId: 'candidate-1', status: 'accepted' },
     ]);
     expect(candidates.records.get('candidate-1')?.status).toBe('accepted');
@@ -344,9 +345,10 @@ describe('AssistantController', () => {
       })),
       addSource,
     } as unknown as KbStore;
+    kbStore.ensureAssistantSource = vi.fn(() => kbStore.getSource('assistant-source:candidate-1')!);
     const { controller, candidates } = createController({ candidates: [accepting], kbStore });
 
-    await expect(controller.recoverAccepting()).resolves.toEqual([
+    await expect(controller.recoverAccepting({requestSource:'scheduler'})).resolves.toEqual([
       { candidateId: 'candidate-1', status: 'accepted' },
     ]);
     expect(candidates.records.get('candidate-1')).toMatchObject({

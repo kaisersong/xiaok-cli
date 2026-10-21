@@ -1,9 +1,18 @@
+import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 import type { SessionStore } from '../../ai/runtime/session-store/store.js';
 import type { IntentLedgerRecord } from './types.js';
 import { type SessionSkillEvalState, type SkillFeedbackRecord, type SkillRoutingObservation } from './skill-eval.js';
 export declare class SessionSkillEvalStore {
     private readonly sessionStore;
-    constructor(sessionStore: SessionStore);
+    private readonly scope;
+    private tail;
+    private readonly mutationPort?;
+    constructor(sessionStore: SessionStore, options?: {
+        withMutationLease: <T>(sessionId: string, work: (lease?: SessionExecutionLease) => Promise<T>) => Promise<T>;
+    });
+    /** Fixed host composition. No lease or write token is exposed to hook callers. */
+    withMutation<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
+    assertMutationCurrent(sessionId: string): void;
     load(sessionId: string): Promise<SessionSkillEvalState | null>;
     ensureObservationsForIntent(sessionId: string, intent: IntentLedgerRecord): Promise<SessionSkillEvalState>;
     recordSkillInvocation(sessionId: string, input: {

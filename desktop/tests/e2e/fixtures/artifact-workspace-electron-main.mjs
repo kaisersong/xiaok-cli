@@ -7,6 +7,8 @@ const fixtureDir = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(fixtureDir, '..', '..', '..');
 const compiledElectronRoot = join(desktopRoot, 'dist', 'main', 'desktop', 'electron');
 const userData = process.env.XIAOK_E2E_USER_DATA;
+if (!userData || !process.env.XIAOK_CONFIG_DIR) throw new Error('isolated workspace E2E paths are required');
+await import('./ordinary-ui-account-binding.cjs');
 if (userData) app.setPath('userData', userData);
 
 console.log('[artifact-workspace-e2e-main] importing compiled services');
@@ -41,6 +43,7 @@ app.whenReady().then(async () => {
   const dataRoot = join(app.getPath('userData'), 'artifact-workspace-e2e-data');
   const services = createDesktopServices({
     dataRoot,
+    knowledgeDbPath: join(userData, 'knowledge.sqlite'),
     kswarmService: createKSwarmStub(),
     artifactWorkspaceFeatureFlags: {
       artifactWorkspaceRevisionUi: true,

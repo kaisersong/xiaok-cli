@@ -9,7 +9,7 @@ describe('statusbar config', () => {
     const bar = new StatusBar();
     bar.init('claude-opus-4-6', 'sess_1', '/Users/song/projects/xiaok-cli', 'plan');
     bar.updateBranch('feature/wave2');
-    bar.update({ inputTokens: 1000, outputTokens: 1000, budget: 4000 });
+    bar.update({ inputTokens: 1000, outputTokens: 1000 });
     bar.setFields(['model', 'mode']);
 
     const line = bar.getStatusLine();
@@ -40,7 +40,7 @@ describe('statusbar config', () => {
       const bar = new StatusBar();
       bar.init('claude-opus-4-6', 'sess_1', cwd, 'plan');
       bar.updateBranch('feature/wave2');
-      bar.update({ inputTokens: 1000, outputTokens: 1000, budget: 4000 });
+      bar.update({ inputTokens: 1000, outputTokens: 1000 });
 
       const line = bar.getStatusLine();
 

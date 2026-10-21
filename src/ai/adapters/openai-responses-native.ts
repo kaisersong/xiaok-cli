@@ -1,3 +1,6 @@
+import { hasObservationExecutionOwner } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { createTransportAuthorizationError } from '../../runtime/sol-pi/transport-lease.js';
+import type { ProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 const PUBLIC_OPENAI_V1_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
@@ -21,6 +24,7 @@ export interface OpenAINativeResponseResult {
 }
 
 interface OpenAINativeRequestParams {
+  providerDisclosure?: ProviderDisclosureContext;
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -90,6 +94,7 @@ interface ValidatedRequest {
 }
 
 function validateRequestParams(params: OpenAINativeRequestParams): ValidatedRequest {
+  if (params.providerDisclosure !== undefined || hasObservationExecutionOwner()) throw createTransportAuthorizationError();
   const apiKey = requireNonEmptyString(params.apiKey, 'apiKey');
   const model = requireNonEmptyString(params.model, 'model');
   if (!Array.isArray(params.input) || params.input.length === 0) {
