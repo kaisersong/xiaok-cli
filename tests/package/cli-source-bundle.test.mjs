@@ -117,7 +117,8 @@ for (const present of [[], ['x64'], ['arm64']]) {
 test('merged manifest preserves native source lifecycle and all original helper build gates', async () => {
   const manifest = JSON.parse(await readFile(process.env.XIAOK_TEST_CLI_MANIFEST || join(packageRoot, 'package.json'), 'utf8'));
   const lock = JSON.parse(await readFile(join(packageRoot, 'package-lock.json'), 'utf8'));
-  assert.equal(manifest.version, '1.5.9');
+  const desktopManifest = JSON.parse(await readFile(join(packageRoot, 'desktop', 'package.json'), 'utf8'));
+  assert.equal(manifest.version, desktopManifest.version);
   assert.equal(manifest.scripts.postinstall, 'node scripts/prepare-cli-native.mjs');
   assert.equal(manifest.scripts.prepack, 'node scripts/pack-cli.mjs --prepack-check');
   assert.equal(manifest.scripts['pack:cli'], 'node scripts/pack-cli.mjs');
