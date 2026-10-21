@@ -27,33 +27,82 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
 
 
-def inventory(root):
-    if git(root, 'rev-parse', 'HEAD') != PINS['pluginHead']:
-        raise RuntimeError('plugin_head_mismatch')
-    actual_paths = set(subprocess.check_output(
-        ['git', '-C', str(root), 'ls-files', '-z']).decode().rstrip('\0').split('\0'))
-    if actual_paths != {r['path'] for r in PINS['files']}:
-        raise RuntimeError('tracked_population_mismatch')
-    rows = []
-    for row in PINS['files']:
-        rel = Path(row['path'])
-        if rel.is_absolute() or '..' in rel.parts:
-            raise RuntimeError('invalid_frozen_path')
-        path = root / rel
-        info = path.lstat()
-        # A tracked symlink may be a Git materialized text leaf on Windows.
-        # Its Git blob is the link target; never follow the link for this hash.
-        if stat.S_ISLNK(info.st_mode) and row['mode'] == '120000':
-            body = os.readlink(path).encode('utf-8')
-        elif stat.S_ISREG(info.st_mode):
-            body = path.read_bytes()
-        else:
-            raise RuntimeError('tracked_leaf_not_regular_or_expected_link')
-        if len(body) != row['size'] or hashlib.sha256(body).hexdigest() != row['sha256']:
-            raise RuntimeError('tracked_input_hash_mismatch')
-        rows.append(row)
-    return rows
+def mismatch_metadata(root, row, body, info):
+    # row comes only from the tracked, frozen PINS.files allowlist, never Git output.
+    if row not in PINS['files']:
+        raise RuntimeError('invalid_frozen_path')
+    observation = {
+        'path': row['path'], 'expectedSha256': row['sha256'],
+        'actualSha256': hashlib.sha256(body).hexdigest(),
+        'expectedSize': row['size'], 'actualSize': len(body),
+        'expectedGitMode': row['mode'], 'actualMode': info.st_mode,
+        'gitBlobObservation': 'unavailable', 'gitBlobMatchesExpected': None,
+        'workingBytesEqualGitBlob': None, 'workingBytesEqualGitBlobCRLFExpanded': None,
+        'workingBytesEqualGitBlobLFNormalized': None,
+    }
+    try:
+        blob = subprocess.check_output(
+            ['git', '-C', str(root), 'cat-file', 'blob',
+             PINS['pluginHead'] + ':' + row['path']], stderr=subprocess.DEVNULL)
+        observation.update({
+            'gitBlobObservation': 'available',
+            'gitBlobMatchesExpected': len(blob) == row['size'] and
+                                     hashlib.sha256(blob).hexdigest() == row['sha256'],
+            'workingBytesEqualGitBlob': body == blob,
+            'workingBytesEqualGitBlobCRLFExpanded':
+                body == blob.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'),
+            'workingBytesEqualGitBlobLFNormalized': body == blob.replace(b'\r\n', b'\n'),
+        })
+    except Exception:
+        # Fixed unknown enum only; no exception message, bytes, or additional paths.
+        pass
+    return observation
 
+
+def inventory(root, diagnostics=None):
+    report = {'schema': 1, 'status': 'REJECTED',
+              'reason': 'inventory_observation_unavailable', 'checkedCount': 0,
+              'mismatchLimit': 8, 'scanStoppedAtLimit': False, 'mismatches': []}
+    try:
+        if git(root, 'rev-parse', 'HEAD') != PINS['pluginHead']:
+            raise RuntimeError('plugin_head_mismatch')
+        actual_paths = set(subprocess.check_output(
+            ['git', '-C', str(root), 'ls-files', '-z']).decode().rstrip('\0').split('\0'))
+        if actual_paths != {r['path'] for r in PINS['files']}:
+            raise RuntimeError('tracked_population_mismatch')
+        rows = []
+        for row in PINS['files']:
+            rel = Path(row['path'])
+            if rel.is_absolute() or '..' in rel.parts:
+                raise RuntimeError('invalid_frozen_path')
+            report['checkedCount'] += 1
+            path = root / rel
+            info = path.lstat()
+            # A tracked symlink may be a Git materialized text leaf on Windows.
+            # Its Git blob is the link target; never follow the link for this hash.
+            if stat.S_ISLNK(info.st_mode) and row['mode'] == '120000':
+                body = os.readlink(path).encode('utf-8')
+            elif stat.S_ISREG(info.st_mode):
+                body = path.read_bytes()
+            else:
+                raise RuntimeError('tracked_leaf_not_regular_or_expected_link')
+            if len(body) != row['size'] or hashlib.sha256(body).hexdigest() != row['sha256']:
+                report['mismatches'].append(mismatch_metadata(root, row, body, info))
+                if len(report['mismatches']) == report['mismatchLimit']:
+                    report['scanStoppedAtLimit'] = True
+                    raise RuntimeError('tracked_input_hash_mismatch')
+            rows.append(row)
+        if report['mismatches']:
+            raise RuntimeError('tracked_input_hash_mismatch')
+        report.update({'status': 'MATCH', 'reason': 'none'})
+        return rows
+    except Exception as exc:
+        if type(exc) is RuntimeError and str(exc) in FAILURE_REASONS:
+            report['reason'] = str(exc)
+        raise
+    finally:
+        if diagnostics is not None:
+            save(diagnostics, report)
 
 def main():
     args = argparse.ArgumentParser()
@@ -125,7 +174,7 @@ def main():
         if subprocess.call(['git', '-C', str(cli), 'diff', '--quiet', PINS['productBase'],
                             'HEAD', '--', 'src', 'desktop/src', 'desktop/electron']) != 0:
             raise RuntimeError('product_sources_changed_from_base')
-        before = inventory(root)
+        before = inventory(root, evidence / 'source-before-diagnostics.json')
         save(evidence / 'source-before.json', before)
         save(evidence / 'wheel-sha256.json', [r for r in before if r['path'].endswith('.whl')])
         result['sourceBeforeVerified'] = True
@@ -185,7 +234,7 @@ def main():
         print('plugin_offline_candidate_failed', type(exc).__name__, file=sys.stderr)
     finally:
         try:
-            after = inventory(root)
+            after = inventory(root, evidence / 'source-after-diagnostics.json')
             save(evidence / 'source-after.json', after)
             result['sourceAfterVerified'] = True
         except Exception:
