@@ -1,0 +1,12 @@
+
+> xiaokcode@1.5.14 hygiene:check
+> node scripts/check-repo-hygiene.mjs
+
+[repo-hygiene] xiaok-cli: $WORKTREE (feat/pi-durable-optimization-20261021) fetch=true
+  WARN: feat/pi-durable-optimization-20261021 has active worktree changes
+[repo-hygiene] kswarm: $PROJECTS/kswarm (master) fetch=true
+[repo-hygiene] intent-broker: $PROJECTS/intent-broker (master) fetch=true
+  ERROR: branch is behind its upstream by 1 commit(s)
+  ERROR: master is behind origin/master by 1 commit(s)
+  ERROR: master has tracked working tree changes
+[repo-hygiene] kai-xiaok-plugins: $PROJECTS/kai-xiaok-plugins (main) fetch=true

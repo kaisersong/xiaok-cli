@@ -3,17 +3,23 @@ on:
   push:
     branches: [master]
     paths:
-      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/adapters/*.ts'
+      - 'desktop/electron/context-manager.ts'
+      - 'desktop/tests/main/*compaction*.test.ts'
+      - 'desktop/tests/main/context-manager.test.ts'
       - 'src/ai/runtime/**'
-      - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/adapters/*.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
   pull_request:
     paths:
-      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/adapters/*.ts'
+      - 'desktop/electron/context-manager.ts'
+      - 'desktop/tests/main/*compaction*.test.ts'
+      - 'desktop/tests/main/context-manager.test.ts'
       - 'src/ai/runtime/**'
-      - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/adapters/*.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
@@ -41,7 +47,16 @@ jobs:
         run: >
           npm run test:sandbox:run --
           .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ai/adapters/claude.test.js
+          .test-dist/tests/ai/adapters/openai-responses.test.js
+          .test-dist/tests/ai/runtime/compaction-completion.test.js
+          .test-dist/tests/ai/runtime/compact-runner.test.js
+          .test-dist/tests/ai/runtime/portable-compaction-executor.test.js
           .test-dist/tests/ai/runtime/model-stream-recovery.test.js
           .test-dist/tests/ai/runtime/abort-error-discrimination.test.js
           .test-dist/tests/ai/runtime/agent-runtime.test.js
           .test-dist/tests/ai/runtime/provider-request-error.test.js
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Test Desktop compaction history and completion boundary
+        working-directory: desktop
+        run: npm test -- tests/main/context-manager.test.ts tests/main/compaction-completion.test.ts

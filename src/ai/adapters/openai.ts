@@ -11,6 +11,7 @@ import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
+import { CompactionResponseError } from '../runtime/compaction-response.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import {
@@ -933,6 +934,7 @@ export class OpenAIAdapter implements ModelAdapter {
       buffer: '',
     };
     let emittedDone = false;
+    let incompleteSummary = false;
     let outputChars = 0;
     let streamTextChars = 0;
     let usageReceived = false;
@@ -972,7 +974,9 @@ export class OpenAIAdapter implements ModelAdapter {
         throwIfCallerAborted(options?.signal);
       }
 
-      if (attemptState && emittedDone) {
+      if ((attemptState || options?.requireCompleteResponse) && emittedDone) {
+        if (options?.requireCompleteResponse && chunk.choices.some(choice => choice.finish_reason != null
+          || Object.values(choice.delta ?? {}).some(value => value != null && value !== '' && !(Array.isArray(value) && value.length === 0)))) incompleteSummary = true;
         continue;
       }
 
@@ -1059,7 +1063,7 @@ export class OpenAIAdapter implements ModelAdapter {
       }
 
       if (choice?.finish_reason) {
-        if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
+        if (!options?.requireCompleteResponse && options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
           await streamIterator.return?.();
           throw new Error('memory_output_incomplete');
         }
@@ -1094,6 +1098,11 @@ export class OpenAIAdapter implements ModelAdapter {
           yield toolCall;
         }
 
+        if (options?.requireCompleteResponse) {
+          incompleteSummary = choice.finish_reason !== 'stop';
+          emittedDone = true;
+          continue;
+        }
         if (attemptState) {
           emittedDone = true;
           continue;
@@ -1114,6 +1123,15 @@ export class OpenAIAdapter implements ModelAdapter {
       }
     }
 
+    if (options?.requireCompleteResponse) {
+      if (!emittedDone || incompleteSummary) throw new CompactionResponseError('provider_incomplete');
+      if (!attemptState) {
+        if (!usageReceived) yield { type: 'usage', usage: estimateStreamUsage(messages, systemPrompt, outputChars) };
+        throwIfCallerAborted(options.signal);
+        yield { type: 'done' };
+      }
+      return;
+    }
     if (!emittedDone) {
       if (strictKimiK3) {
         if (toolBuffers.size === 0) {

@@ -1,0 +1,248 @@
+
+ RUN  v3.2.6 $WORKTREE
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts (20 tests | 18 failed) 10ms
+   × actual adapter to CompactRunner completion boundary > rejects Claude max_tokens with the default output reservation 4ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Claude model_context_window_exceeded with the default output reservation 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Claude refusal with the default output reservation 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Claude tool_use with the default output reservation 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Claude EOF without message_stop 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   ✓ actual adapter to CompactRunner completion boundary > keeps a complete Claude summary 0ms
+   × actual adapter to CompactRunner completion boundary > rejects Responses status incomplete without an explicit output limit 1ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Responses status failed without an explicit output limit 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Responses status cancelled without an explicit output limit 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects Responses status undefined without an explicit output limit 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects actual OpenAI length and drains the usage trailer 2ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects actual OpenAI content_filter and drains the usage trailer 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > rejects actual OpenAI tool_calls and drains the usage trailer 0ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"partial"} 0ms
+     → promise resolved "'partial'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"   "} 0ms
+     → promise resolved "''" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"thinking","delta":"only thinking"} 0ms
+     → promise resolved "''" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"tool_use","id":"tool","name":"write","input":{}} 0ms
+     → promise resolved "'text'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"first"} 0ms
+     → promise resolved "'firstlate'" instead of rejecting
+   ✓ actual adapter to CompactRunner completion boundary > drains late usage and preserves a late original error 0ms
+   × actual adapter to CompactRunner completion boundary > does not commit text after cancellation won at the terminal boundary 0ms
+     → promise resolved "'summary'" instead of rejecting
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Claude max_tokens with the default output reservation
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Claude model_context_window_exceeded with the default output reservation
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Claude refusal with the default output reservation
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Claude tool_use with the default output reservation
+AssertionError: promise resolved "'partial summary'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"partial summary"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:24:103
+     22|
+     23|   it.each(['max_tokens', 'model_context_window_exceeded', 'refusal', '…
+     24|     await expect(new CompactRunner(claude([text, end(reason), { type: …
+       |                                                                                                       ^
+     25|   });
+     26|   it('rejects Claude EOF without message_stop', async () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Claude EOF without message_stop
+AssertionError: promise resolved "'partial summary'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"partial summary"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:27:81
+     25|   });
+     26|   it('rejects Claude EOF without message_stop', async () => {
+     27|     await expect(new CompactRunner(claude([text, end('end_turn')])).ru…
+       |                                                                                 ^
+     28|   });
+     29|   it('keeps a complete Claude summary', async () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Responses status incomplete without an explicit output limit
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Responses status failed without an explicit output limit
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Responses status cancelled without an explicit output limit
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects Responses status undefined without an explicit output limit
+AssertionError: promise resolved "'partial summary'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"partial summary"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:38:57
+     36|     }), { status: 200 })));
+     37|     const adapter = new OpenAIResponsesAdapter('fixture', 'gpt-4o', 'h…
+     38|     await expect(new CompactRunner(adapter).run(history)).rejects.toTh…
+       |                                                         ^
+     39|   });
+     40|   it.each(['length', 'content_filter', 'tool_calls'])('rejects actual …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects actual OpenAI length and drains the usage trailer
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects actual OpenAI content_filter and drains the usage trailer
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects actual OpenAI tool_calls and drains the usage trailer
+AssertionError: promise resolved "'partial summary'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"partial summary"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:52:57
+     50|       },
+     51|     } as never);
+     52|     await expect(new CompactRunner(adapter).run(history)).rejects.toTh…
+       |                                                         ^
+     53|     expect(drained).toBe(true); expect(create).toHaveBeenCalledTimes(1…
+     54|     expect(create.mock.calls[0]?.[0]).not.toHaveProperty('requireCompl…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"partial"}
+AssertionError: promise resolved "'partial'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"partial"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:65:57
+     63|   ] as StreamChunk[][])('does not accept an invalid normalized summary…
+     64|     const adapter: ModelAdapter = { getModelName: () => 'fixture', str…
+     65|     await expect(new CompactRunner(adapter).run(history)).rejects.toTh…
+       |                                                         ^
+     66|   });
+     67|   it('drains late usage and preserves a late original error', async ()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"   "}
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"thinking","delta":"only thinking"}
+AssertionError: promise resolved "''" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+""
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:65:57
+     63|   ] as StreamChunk[][])('does not accept an invalid normalized summary…
+     64|     const adapter: ModelAdapter = { getModelName: () => 'fixture', str…
+     65|     await expect(new CompactRunner(adapter).run(history)).rejects.toTh…
+       |                                                         ^
+     66|   });
+     67|   it('drains late usage and preserves a late original error', async ()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"tool_use","id":"tool","name":"write","input":{}}
+AssertionError: promise resolved "'text'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"text"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:65:57
+     63|   ] as StreamChunk[][])('does not accept an invalid normalized summary…
+     64|     const adapter: ModelAdapter = { getModelName: () => 'fixture', str…
+     65|     await expect(new CompactRunner(adapter).run(history)).rejects.toTh…
+       |                                                         ^
+     66|   });
+     67|   it('drains late usage and preserves a late original error', async ()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"first"}
+AssertionError: promise resolved "'firstlate'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"firstlate"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:65:57
+     63|   ] as StreamChunk[][])('does not accept an invalid normalized summary…
+     64|     const adapter: ModelAdapter = { getModelName: () => 'fixture', str…
+     65|     await expect(new CompactRunner(adapter).run(history)).rejects.toTh…
+       |                                                         ^
+     66|   });
+     67|   it('drains late usage and preserves a late original error', async ()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/18]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not commit text after cancellation won at the terminal boundary
+AssertionError: promise resolved "'summary'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"summary"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:81:88
+     79|       yield { type: 'text', delta: 'summary' }; yield { type: 'done' }…
+     80|     } };
+     81|     await expect(new CompactRunner(adapter).run(history, { signal: con…
+       |                                                                                        ^
+     82|   });
+     83| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/18]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  18 failed | 2 passed (20)
+   Start at  17:36:45
+   Duration  250ms (transform 70ms, setup 9ms, collect 100ms, tests 10ms, environment 0ms, prepare 26ms)

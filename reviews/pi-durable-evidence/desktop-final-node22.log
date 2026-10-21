@@ -1,0 +1,10 @@
+
+ RUN  v3.2.4 $WORKTREE/desktop
+
+ ✓ tests/main/compaction-completion.test.ts (10 tests) 6ms
+ ✓ tests/main/context-manager.test.ts (41 tests) 18ms
+
+ Test Files  2 passed (2)
+      Tests  51 passed (51)
+   Start at  17:47:53
+   Duration  1.08s (transform 236ms, setup 232ms, collect 500ms, tests 24ms, environment 951ms, prepare 146ms)

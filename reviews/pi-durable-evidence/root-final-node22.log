@@ -1,0 +1,23 @@
+
+ RUN  v3.2.6 $WORKTREE
+
+ ✓ tests/ai/runtime/portable-compaction-executor.test.ts (21 tests) 8ms
+ ✓ tests/ai/adapters/openai-responses.test.ts (8 tests) 380ms
+   ✓ OpenAIResponsesAdapter > emits text and usage from a non-streaming responses payload  376ms
+ ✓ tests/ai/adapters/claude.test.ts (14 tests) 395ms
+   ✓ ClaudeAdapter > exposes the same existing output reservation sent in the real adapter request  338ms
+ ✓ tests/ai/runtime/model-stream-recovery.test.ts (10 tests) 158ms
+ ✓ tests/ai/runtime/abort-error-discrimination.test.ts (11 tests) 4ms
+ ✓ tests/ai/runtime/provider-request-error.test.ts (12 tests) 7ms
+ ✓ tests/ai/runtime/compact-runner.test.ts (12 tests) 5ms
+ ✓ tests/runtime/task-host/snapshot-store.test.ts (18 tests) 1000ms
+   ✓ FileTaskSnapshotStore > uses geometrically spaced interim checkpoints to bound long running-task replay  818ms
+ ✓ tests/ai/runtime/compaction-completion.test.ts (32 tests) 18ms
+ ✓ tests/ai/adapters/openai.test.ts (187 tests) 415ms
+ ✓ tests/ai/runtime/agent-runtime.test.ts (77 tests) 2142ms
+   ✓ AgentRuntime > resumes a strict Kimi model failure without replaying a completed tool  2009ms
+
+ Test Files  11 passed (11)
+      Tests  402 passed (402)
+   Start at  17:47:51
+   Duration  3.74s (transform 3.12s, setup 236ms, collect 5.22s, tests 4.53s, environment 1ms, prepare 802ms)

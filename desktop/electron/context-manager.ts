@@ -14,6 +14,8 @@ import { join, dirname } from 'node:path';
 import type { Message, ModelAdapter } from '../../src/types.js';
 import { randomUUID } from 'node:crypto';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
+import { collectCompactionResponse, CompactionResponseError } from '../../src/ai/runtime/compaction-response.js';
+import { isAbortError } from '../../src/ai/runtime/abort-utils.js';
 
 // ---- Constants ----
 
@@ -124,17 +126,18 @@ export async function compactConversation(
   // Use simplified system prompt to reduce token cost
   const compactSystemPrompt = 'You are a conversation summarizer. Compress the conversation history as requested.';
   let summary = '';
+  let receivedChunk = false;
   try {
-    for await (const chunk of streamDesktopTaskProviderConversation({
+    summary = await collectCompactionResponse(streamDesktopTaskProviderConversation({
       adapter,
       messages: summaryMessages,
       tools: [],
       systemPrompt: compactSystemPrompt,
+      options: { requireCompleteResponse: true },
       invocationId: `inv_${randomUUID()}`,
-    })) {
-      if (chunk.type === 'text') summary += chunk.delta;
-    }
-  } catch {
+    }), { allowEmpty: true, onProgress: () => { receivedChunk = true; } });
+  } catch (error) {
+    if (receivedChunk || error instanceof CompactionResponseError || isAbortError(error)) throw error;
     // Fallback: if summary request fails (e.g. prompt_too_long), do history snip
     historySnip(messages, 6);
     return;

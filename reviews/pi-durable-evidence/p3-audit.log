@@ -1,0 +1,1 @@
+{"probe":"malformed_active_index","result":[],"conclusion":"gap: corrupt active index becomes empty; no store protocol change authorized in this batch"}

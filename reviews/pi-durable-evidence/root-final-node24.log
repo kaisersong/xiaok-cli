@@ -1,0 +1,21 @@
+
+ RUN  v3.2.6 $WORKTREE
+
+ ✓ tests/ai/runtime/portable-compaction-executor.test.ts (21 tests) 9ms
+ ✓ tests/ai/adapters/openai-responses.test.ts (8 tests) 242ms
+ ✓ tests/ai/runtime/model-stream-recovery.test.ts (10 tests) 161ms
+ ✓ tests/ai/adapters/claude.test.ts (14 tests) 310ms
+ ✓ tests/ai/runtime/abort-error-discrimination.test.ts (11 tests) 2ms
+ ✓ tests/ai/runtime/provider-request-error.test.ts (12 tests) 5ms
+ ✓ tests/ai/runtime/compact-runner.test.ts (12 tests) 6ms
+ ✓ tests/runtime/task-host/snapshot-store.test.ts (18 tests) 542ms
+   ✓ FileTaskSnapshotStore > uses geometrically spaced interim checkpoints to bound long running-task replay  345ms
+ ✓ tests/ai/runtime/compaction-completion.test.ts (32 tests) 20ms
+ ✓ tests/ai/adapters/openai.test.ts (187 tests) 472ms
+ ✓ tests/ai/runtime/agent-runtime.test.ts (77 tests) 2204ms
+   ✓ AgentRuntime > resumes a strict Kimi model failure without replaying a completed tool  2013ms
+
+ Test Files  11 passed (11)
+      Tests  402 passed (402)
+   Start at  17:47:49
+   Duration  3.66s (transform 1.69s, setup 221ms, collect 4.14s, tests 3.97s, environment 1ms, prepare 673ms)

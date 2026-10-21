@@ -1,0 +1,48 @@
+
+ RUN  v3.2.4 $WORKTREE/desktop
+
+ ❯ tests/main/compaction-completion.test.ts (10 tests | 3 failed) 7ms
+   ✓ legacy Desktop compaction completion > rejects incomplete content without modifying history {"type":"text","delta":"partial"} 1ms
+   ✓ legacy Desktop compaction completion > rejects incomplete content without modifying history {"type":"tool_use","id":"t","name":"write","input":{}} 0ms
+   ✓ legacy Desktop compaction completion > rejects incomplete content without modifying history {"type":"text","delta":"summary"} 0ms
+   ✓ legacy Desktop compaction completion > preserves the original late error after text without snipping 0ms
+   ✓ legacy Desktop compaction completion > preserves the original late error after usage without snipping 0ms
+   ✓ legacy Desktop compaction completion > preserves cancellation before the first chunk 0ms
+   ✓ legacy Desktop compaction completion > requires provider completion while preserving complete blank no-op 0ms
+   × legacy Desktop compaction completion > preserves all history for malformed real Responses payload {"status":"completed","output":[{"type":"function_call","name":"write","arguments":"{}"}]} 4ms
+     → promise resolved "undefined" instead of rejecting
+   × legacy Desktop compaction completion > preserves all history for malformed real Responses payload {malformed JSON 1ms
+     → promise resolved "undefined" instead of rejecting
+   × legacy Desktop compaction completion > preserves all history for malformed real Responses payload {"status":"completed","output":{}} 0ms
+     → promise resolved "undefined" instead of rejecting
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/compaction-completion.test.ts > legacy Desktop compaction completion > preserves all history for malformed real Responses payload {"status":"completed","output":[{"type":"function_call","name":"write","arguments":"{}"}]}
+ FAIL  tests/main/compaction-completion.test.ts > legacy Desktop compaction completion > preserves all history for malformed real Responses payload {malformed JSON
+ FAIL  tests/main/compaction-completion.test.ts > legacy Desktop compaction completion > preserves all history for malformed real Responses payload {"status":"completed","output":{}}
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/main/compaction-completion.test.ts:54:128
+     52|     }));
+     53|     const before = JSON.stringify(source);
+     54|     await expect(compactConversation(source, new OpenAIResponsesAdapte…
+       |                                                                                                                                ^
+     55|     expect(JSON.stringify(source)).toBe(before);
+     56|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 7 passed (10)
+   Start at  17:46:55
+   Duration  497ms (transform 75ms, setup 41ms, collect 91ms, tests 7ms, environment 209ms, prepare 23ms)

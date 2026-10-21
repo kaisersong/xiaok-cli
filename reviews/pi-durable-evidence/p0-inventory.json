@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-10-21T09:34:18.965771+00:00",
+  "baseline": "dc221f9bac84d939b8fb543d4795396693fdc9b8",
+  "source": "local desktop task checkpoint metadata only",
+  "files": 50,
+  "bytes": 10936366,
+  "statusCounts": {
+    "completed": 50
+  },
+  "distinctSessionOrThreadCount": 48,
+  "browsingOrSubscriptionAccessTraceAvailable": false,
+  "cacheAdmission": "unknown_missing_representative_access_workload",
+  "rawUserPayloadCopied": false
+}

@@ -1,0 +1,144 @@
+
+ RUN  v3.2.6 $WORKTREE
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts (32 tests | 4 failed) 14ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude max_tokens with the default output reservation 1ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude model_context_window_exceeded with the default output reservation 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude refusal with the default output reservation 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude tool_use with the default output reservation 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude EOF without message_stop 0ms
+   ✓ actual adapter to CompactRunner completion boundary > keeps a complete Claude summary 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Responses status incomplete without an explicit output limit 1ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Responses status failed without an explicit output limit 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Responses status cancelled without an explicit output limit 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Responses status undefined without an explicit output limit 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects actual OpenAI length and drains the usage trailer 2ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects actual OpenAI content_filter and drains the usage trailer 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects actual OpenAI tool_calls and drains the usage trailer 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects actual OpenAI post-terminal content or repeated finish {"choices":[{"delta":{"content":"late"},"finish_reason":null}]} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects actual OpenAI post-terminal content or repeated finish {"choices":[{"delta":{},"finish_reason":"stop"}]} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects actual OpenAI post-terminal content or repeated finish {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"late","function":{"name":"write","arguments":"{}"}}]},"finish_reason":null}]} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > accepts actual OpenAI stop followed only by usage 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude content after its terminal {"type":"message_stop"} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > rejects Claude content after its terminal {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial summary"}} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > keeps Claude usage-only trailers 0ms
+   ✓ actual adapter to CompactRunner completion boundary > accepts a completed Responses body without sending the internal policy 0ms
+   × actual adapter to CompactRunner completion boundary > routes a real Claude truncation through AgentRuntime fallback and honest failure events 4ms
+     → expected [ 'compact_triggered' ] to deeply equal [ 'compact_failed', …(1) ]
+   × actual adapter to CompactRunner completion boundary > rejects a Claude tool block even when its closing event is missing 1ms
+     → promise resolved "'partial summary'" instead of rejecting
+   × actual adapter to CompactRunner completion boundary > preserves cancellation over a simultaneous iterator failure 0ms
+     → expected Error: late failure to be Error: caller cancelled // Object.is equality
+   × actual adapter to CompactRunner completion boundary > does not invent Responses usage when the completed response omits it 1ms
+     → expected [ …(3) ] to deeply equal [ …(2) ]
+   ✓ actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"partial"} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"   "} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"thinking","delta":"only thinking"} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"tool_use","id":"tool","name":"write","input":{}} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > does not accept an invalid normalized summary {"type":"text","delta":"first"} 0ms
+   ✓ actual adapter to CompactRunner completion boundary > drains late usage and preserves a late original error 0ms
+   ✓ actual adapter to CompactRunner completion boundary > does not commit text after cancellation won at the terminal boundary 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > routes a real Claude truncation through AgentRuntime fallback and honest failure events
+AssertionError: expected [ 'compact_triggered' ] to deeply equal [ 'compact_failed', …(1) ]
+
+- Expected
++ Received
+
+  [
+-   "compact_failed",
+    "compact_triggered",
+  ]
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:125:97
+    123|     await runtime.run('current', event => events.push(event.type));
+    124|     expect(create).toHaveBeenCalledTimes(2);
+    125|     expect(events.filter(event => event === 'compact_failed' || event …
+       |                                                                                                 ^
+    126|     expect(session.getCompactions()).toHaveLength(1);
+    127|     expect(session.getCompactions()[0]!.summary).toContain('[context c…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > rejects a Claude tool block even when its closing event is missing
+AssertionError: promise resolved "'partial summary'" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+"partial summary"
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:136:21
+    134|       { type: 'content_block_delta', index: 1, delta: { type: 'input_j…
+    135|       end('end_turn'), { type: 'message_stop' },
+    136|     ])).run(history)).rejects.toThrow();
+       |                     ^
+    137|   });
+    138|   it('preserves cancellation over a simultaneous iterator failure', as…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > preserves cancellation over a simultaneous iterator failure
+AssertionError: expected Error: late failure to be Error: caller cancelled // Object.is equality
+
+- Expected
++ Received
+
+  Error {
+-   "message": "caller cancelled",
++   "message": "late failure",
+  }
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:143:5
+    141|       yield { type: 'text', delta: 'summary' }; yield { type: 'done' }…
+    142|     } };
+    143|     await expect(new CompactRunner(adapter).run(history, { signal: con…
+       |     ^
+    144|   });
+    145|   it('does not invent Responses usage when the completed response omit…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  tests/ai/runtime/compaction-completion.test.ts > actual adapter to CompactRunner completion boundary > does not invent Responses usage when the completed response omits it
+AssertionError: expected [ …(3) ] to deeply equal [ …(2) ]
+
+- Expected
++ Received
+
+@@ -2,8 +2,15 @@
+    {
+      "delta": "summary",
+      "type": "text",
+    },
+    {
++     "type": "usage",
++     "usage": {
++       "inputTokens": 0,
++       "outputTokens": 0,
++     },
++   },
++   {
+      "type": "done",
+    },
+  ]
+
+ ❯ tests/ai/runtime/compaction-completion.test.ts:152:20
+    150|     const adapter = new OpenAIResponsesAdapter('fixture', 'gpt-4o', 'h…
+    151|     for await (const chunk of adapter.stream(history, [], 'summary', {…
+    152|     expect(chunks).toEqual([{ type: 'text', delta: 'summary' }, { type…
+       |                    ^
+    153|   });
+    154|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 28 passed (32)
+   Start at  17:43:22
+   Duration  406ms (transform 177ms, setup 9ms, collect 255ms, tests 14ms, environment 0ms, prepare 27ms)
