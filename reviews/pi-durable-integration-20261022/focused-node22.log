@@ -1,0 +1,30 @@
+
+ RUN  v3.2.6 <worktree>
+
+ ✓ tests/runtime/sol-pi/semantic-summary-attempt.test.ts (5 tests) 1987ms
+   ✓ persists a charged dispatched reservation before returning any sending capability  533ms
+   ✓ does not refund unknown attempts or allow stale source history to reserve  416ms
+   ✓ rechecks the host boundary inside the actual reservation commit and keeps admitted costs after boundary changes  338ms
+   ✓ retains the full durable charge after real SIGKILL without reconstructing a sending capability  572ms
+ ✓ tests/ai/runtime/agent-runtime.test.ts (77 tests) 2156ms
+   ✓ AgentRuntime > resumes a strict Kimi model failure without replaying a completed tool  2011ms
+ ✓ tests/ai/adapters/claude.test.ts (15 tests) 185ms
+ ✓ tests/ai/adapters/openai-responses.test.ts (9 tests) 167ms
+ ✓ tests/ai/adapters/openai.test.ts (188 tests) 162ms
+ ✓ tests/ai/runtime/compaction-completion.test.ts (33 tests) 15ms
+ ✓ tests/runtime/sol-pi/provider-disclosure.test.ts (32 tests) 1353ms
+   ✓ provider disclosure actual transport binding > real SDK cannot replay a send after async confirmation fails, and cancels its unread response  408ms
+   ✓ provider disclosure actual transport binding > real openai SDK automatic retry re-enters guard and rejects revocation  473ms
+   ✓ provider disclosure actual transport binding > real claude SDK automatic retry re-enters guard and rejects revocation  437ms
+ ✓ tests/ai/runtime/portable-compaction-executor.test.ts (25 tests) 7ms
+ ✓ tests/ai/runtime/compact-runner.test.ts (13 tests) 5ms
+ ✓ tests/runtime/sol-pi/compaction-policy.test.ts (58 tests) 6ms
+ ✓ tests/runtime/sol-pi/semantic-compaction-ledger.test.ts (11 tests) 6ms
+ ✓ tests/runtime/sol-pi/capacity-admission.test.ts (5 tests) 3ms
+ ✓ tests/runtime/sol-pi/deepseek-capacity-profile.test.ts (3 tests | 1 skipped) 3ms
+ ✓ tests/runtime/sol-pi/semantic-compaction-owner.test.ts (2 tests) 2ms
+
+ Test Files  14 passed (14)
+      Tests  475 passed | 1 skipped (476)
+   Start at  03:40:29
+   Duration  5.80s (transform 1.01s, setup 103ms, collect 3.84s, tests 6.06s, environment 1ms, prepare 404ms)

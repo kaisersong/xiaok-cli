@@ -1,0 +1,1192 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+ ❯ tests/main/desktop-compound-ancestor-followup.test.ts (8 tests | 8 failed) 152353ms
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: success 2104ms
+     → expected 0 to be greater than or equal to 2
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: unpublished-ack 149ms
+     → expected 0 to be greater than or equal to 2
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: unknown-resource 116ms
+     → expected 0 to be greater than or equal to 2
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: own-effect 139ms
+     → expected 0 to be greater than or equal to 2
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: active-window 173ms
+     → expected 0 to be greater than or equal to 2
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: final-history-failure 271ms
+     → expected 0 to be greater than or equal to 2
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: final-history-failure-shutdown 20132ms
+     → expected undefined to match object { executionActive: false, …(1) }
+     → expected [ Array(1) ] to deeply equal []
+   × P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: root-tail 120035ms
+     → Test timed out in 120000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+     → expected [ Array(1) ] to deeply equal []
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D7 actual native pathological classifier cannot block owner heartbeat beyond its 100ms delivery budget
+[post-seal-native-cpu] {
+  actualHelper: true,
+  heartbeatElapsedMs: 50.38933300000008,
+  watchdogMs: 100
+}
+
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at before-marker uses committed marker truth and never replays
+[post-seal-crash] {
+  mode: 'before-marker',
+  ownerPid: 2243,
+  signal: 'SIGKILL',
+  committedMarker: false,
+  terminalCount: 1
+}
+
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at marker-committed uses committed marker truth and never replays
+[post-seal-crash] {
+  mode: 'marker-committed',
+  ownerPid: 2752,
+  signal: 'SIGKILL',
+  committedMarker: true,
+  terminalCount: 1
+}
+
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at snapshot uses committed marker truth and never replays
+[post-seal-crash] {
+  mode: 'snapshot',
+  ownerPid: 3090,
+  signal: 'SIGKILL',
+  committedMarker: true,
+  terminalCount: 1
+}
+
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts (114 tests | 18 failed) 171101ms
+   ✓ BDD: durable service uses the real shared coordinator > commits only a real delegated publication before activating its prepared child identity (message port=false)  596ms
+   ✓ BDD: durable service uses the real shared coordinator > commits only a real delegated publication before activating its prepared child identity (message port=true)  425ms
+   ✓ BDD: durable service uses the real shared coordinator > commits only a real delegated publication before activating its prepared child identity (message port=activation-failure)  449ms
+   ✓ BDD: durable service uses the real shared coordinator > commits only a real delegated publication before activating its prepared child identity (message port=aggregate-revoke)  694ms
+   ✓ BDD: durable service uses the real shared coordinator > holds protected child text outside the visible journal and drains preparation before shutdown (false)  392ms
+   ✓ BDD: durable service uses the real shared coordinator > holds protected child text outside the visible journal and drains preparation before shutdown (true) 179ms
+   ✓ BDD: durable service uses the real shared coordinator > holds protected child text outside the visible journal and drains preparation before shutdown (reserve-failure) 211ms
+   ✓ BDD: durable service uses the real shared coordinator > stopping an observation-owned root turn retains its child while closing the real group aborts and drains it 295ms
+   ✓ BDD: durable service uses the real shared coordinator > closes only its actual group while another group preparation remains pending  801ms
+   ✓ BDD: durable service uses the real shared coordinator > validates message metadata only against the original actual service operation and exact native result 269ms
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=false) 316ms
+     → expected [ Array(1) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=true) 212ms
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=publication-persist-failure) 88ms
+     → expected [ Array(1) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=semantic-next-turn) 192ms
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=closed-result-read) 89ms
+     → expected [ Array(1) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-group) 388ms
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed) 188ms
+     → expected undefined to be defined
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=group-close-drain) 120008ms
+     → Test timed out in 120000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-close) 286ms
+     → expected undefined to be defined
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-parallel) 373ms
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup) 394ms
+     → Cannot read properties of undefined (reading 'id')
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-agent-followup) 255ms
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-agent-followup-busy) 299ms
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-cancel) 304ms
+     → Cannot read properties of undefined (reading 'id')
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-ack-loss) 346ms
+     → Cannot read properties of undefined (reading 'id')
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-close-preparing) 522ms
+     → Cannot read properties of undefined (reading 'id')
+     → expected [ …(2) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-root-orphan) 174ms
+     → expected [ Array(1) ] to deeply equal []
+   × BDD: durable service uses the real shared coordinator > retains an actual product group owner and native history across two real root tasks with durable alias publication 0ms
+     → actual product capacity environment required
+   ✓ BDD: durable service uses the real shared coordinator > publishes a real archived root closure through the actual group journal and rejects copied tickets  2298ms
+   ✓ BDD: durable service uses the real shared coordinator > activity completion requires native host proof and physical child settlement, without waiting for warm-session TTL  457ms
+   ✓ BDD: durable service uses the real shared coordinator > namespaces user followup run identity by its native group across a confirmed group reset  1048ms
+   ✓ BDD: durable service uses the real shared coordinator > isolates a malformed host proof so other committed runs reconcile successfully  712ms
+   ✓ BDD: durable service uses the real shared coordinator > settles an abandoned preparation without inventing a host terminal when no host snapshot was created 31ms
+   ✓ BDD: durable service uses the real shared coordinator > U1 Given a root-only thread and a foreign child, Then the real snapshot and first-root notification deny history while explicit audit reads remain available  432ms
+   ✓ BDD: durable service uses the real shared coordinator > summary recovery requires a current root with fully settled current-turn children 248ms
+   ✓ BDD: durable service uses the real shared coordinator > U1 Given a real settled child, Then reset creates an empty current group without losing thread history or authorizing the historical child  782ms
+   ✓ BDD: durable service uses the real shared coordinator > U1 Given an inactive historical child group, Then a null-expected reset publishes its history fact without creating a session 20ms
+   ✓ BDD: durable service uses the real shared coordinator > A1/A31 Given capacity=1, When the real root spawns two children and waits, Then both run under its lease and root receives durable results 299ms
+   ✓ BDD: durable service uses the real shared coordinator > A17/A37/A40 Given a suspended child, When a confirmed user reset awaits real dispose, Then no root/followup is admitted and settlement alone creates exactly one new group  446ms
+   ✓ BDD: durable service uses the real shared coordinator > A17/A40 Given no active group, When a new user resets with null expected ID, Then a group is created idempotently and stale expected IDs cannot replace it 5ms
+   ✓ BDD: durable service uses the real shared coordinator > A15/A40 Given reset intent committed but unused root projection write fails, Then the operation is unknown and a fresh confirmed operation can recover after storage recovers 8ms
+   ✓ BDD: durable service uses the real shared coordinator > A40 Given host cancel acknowledgement fails (rejected) but its root physically settles, Then reset completes from real settlement without a second user reset 121ms
+   ✓ BDD: durable service uses the real shared coordinator > A40 Given host cancel acknowledgement fails (synchronous) but its root physically settles, Then reset completes from real settlement without a second user reset 121ms
+   ✓ BDD: durable service uses the real shared coordinator > A40 Given host cancel acknowledgement fails (late) but its root physically settles, Then reset completes from real settlement without a second user reset 164ms
+   ✓ BDD: durable service uses the real shared coordinator > A40 Given two concurrent null-expected resets, Then the real command and transaction owners grant only one group 5ms
+   ✓ BDD: durable service uses the real shared coordinator > A25/A40 Given a reset waiting for a never-settled child, Then it never creates a replacement or clears audit rows and the original execution remains blocked  426ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given the applied transaction fails, When spawn is attempted, Then factory is never entered, the group freezes and its unused lease is released 113ms
+   ✓ BDD: durable service uses the real shared coordinator > A12 Given many public deltas and repeated usage IDs, When the real turn seals, Then output is coalesced and flushed before terminal status with usage counted once 255ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/U5 Given rapid phase changes, When activity is projected, Then it emits at most once per second, checkpoints after five seconds and never allocates durable sequence for activity 270ms
+   ✓ BDD: durable service uses the real shared coordinator > A12 Given public output persistence fails at seal, When a turn ends, Then it cannot publish success after losing its output 74ms
+   ✓ BDD: durable service uses the real shared coordinator > A11 Given an existing canonical task name, When another spawn is rejected, Then it does not freeze or abort the healthy group 269ms
+   ✓ BDD: durable service uses the real shared coordinator > A34 Given queued followups behind a live child, When interrupted, Then old future work is cancelled and its operation is durably terminal 102ms
+   ✓ BDD: durable service uses the real shared coordinator > A14 Given an old interrupt operation was applied, When replayed during a newer child turn, Then the cached acknowledgement cannot interrupt that new execution  393ms
+   ✓ BDD: durable service uses the real shared coordinator > A15/A34 Given queued followup audit writes fail, When agent interrupt is authorized, Then physical abort still happens and acknowledgement is unknown 98ms
+   ✓ BDD: durable service uses the real shared coordinator > A15/A34 Given queued followup audit writes fail, When agent close is authorized, Then physical abort still happens and acknowledgement is unknown 124ms
+   ✓ BDD: durable service uses the real shared coordinator > LIFE-D1 Given root and child execution explicitly waiting for approval, When 31 minutes elapse, Then total duration does not expire lease or approval actors 289ms
+   ✓ BDD: durable service uses the real shared coordinator > A6/A33 Given an explicitly configured core watchdog wins before the child exception seals, When the late interruption is sealed, Then the durable failed outcome is not overwritten 92ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 Given a sealed root with a live child, When its lease deadline expires, Then the child stops without cancelling the completed host or releasing unsettled work 284ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 preserves the original host cancellation cause after the stalled-root grace blocks its group 118ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 Given an active root, When a stale or early lease expiry is followed by a real expiry, Then only the real deadline wins and cancels its host execution 108ms
+   ✓ BDD: durable service uses the real shared coordinator > A18/A42 Given host preparation persisted but queued journal write fails, When root admission aborts, Then the host checkpoint is compensated immediately without waiting for restart 89ms
+   ✓ BDD: durable service uses the real shared coordinator > A29 Given a live peer sends a message, When wait observes it, Then it returns notification IDs without consuming the mailbox 271ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A43 Given a child with a live execution, When closed through the service, Then descendants stop, resources stay pending, and root controls are denied 98ms
+   ✓ BDD: durable service uses the real shared coordinator > A37/A43 Given a child authority, When it sends to main but tries to control main or forge its actor, Then only the message succeeds 81ms
+   ✓ BDD: durable service uses the real shared coordinator > A34 Given a child ignores abort, When interrupted and waited on, Then stopping is reported without claiming settlement or freeing its lease 85ms
+   ✓ BDD: durable service uses the real shared coordinator > A6/A16 Given an explicitly idle-limited child never settles, When its real core watchdog and cleanup grace expire, Then the whole runtime blocks rather than running forever behind a failed status 85ms
+   ✓ BDD: durable service uses the real shared coordinator > A16/A33 Given the root provider ignores user cancellation, When the cleanup grace expires, Then root execution retains its ticket and blocks all future work 85ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 Given cancel and pure-text seal enter the same sequencer in that order, When both settle, Then seal cannot overwrite the cancelled root with completed 81ms
+   ✓ BDD: durable service uses the real shared coordinator > A18/A33 Given a root waits in global FIFO without starting, When preparation is cancelled, Then pending identity is visible and the next root does not inherit a busy preparation 113ms
+   ✓ BDD: durable service uses the real shared coordinator > A16 Given a settled root with a running child, When ordinary work queues, Then it waits until the last real execution member settles 254ms
+   ✓ BDD: durable service uses the real shared coordinator > A2 Given eight suspended child sessions, When another spawn requests capacity, Then reclamation starts without awaiting dispose and the slot stays reserved until actual release  977ms
+   ✓ BDD: durable service uses the real shared coordinator > A20 Given many fully settled groups, When runtime objects become dormant, Then only bounded metadata remains and returning to a group rebuilds its core without changing historical results  3295ms
+   ✓ BDD: durable service uses the real shared coordinator > A8/A28 Given an idle child and no active root, When the authenticated user follows up behind ordinary X, Then it uses FIFO and a new epoch without requiring a live root actor  333ms
+   ✓ BDD: durable service uses the real shared coordinator > A8/A17/A37 Given main-issued user access, When source or expected turn is forged or root is targeted by lifecycle controls, Then no physical control is allowed and user messages keep their actual sender 274ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated stale userSend, Then main records a known refusal with no control effect and the same ID never replays it  304ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated stale userFollowup, Then main records a known refusal with no control effect and the same ID never replays it 290ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated stale userInterrupt, Then main records a known refusal with no control effect and the same ID never replays it  330ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated stale userClose, Then main records a known refusal with no control effect and the same ID never replays it 250ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated unknown target for userSend, Then rejection is durable without a synthetic agent and foreign or purged groups stay denied  310ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated unknown target for userFollowup, Then rejection is durable without a synthetic agent and foreign or purged groups stay denied  343ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated unknown target for userInterrupt, Then rejection is durable without a synthetic agent and foreign or purged groups stay denied  370ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given an authenticated unknown target for userClose, Then rejection is durable without a synthetic agent and foreign or purged groups stay denied 270ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given model and user followups race for the same child, Then the shared queue admits only four and the excess user command gets a durable refusal  407ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given a child cannot yet resume, Then its rejected operation stays rejected after real settlement and only a new explicit ID may follow up  384ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given rejection receipt persistence fails, Then main freezes the group without sending the message or pretending the refusal was durably acknowledged 241ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given four queued user followups or a closed child, Then excess queue/send requests have durable refusals without hidden work  362ms
+   ✓ BDD: durable service uses the real shared coordinator > A31 Given one child never settles after abort, When its grace expires, Then all global waiters fail and the live slot is not released 105ms
+   ✓ BDD: durable service uses the real shared coordinator > A18 Given a child handoff before-close, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once  430ms
+   ✓ BDD: durable service uses the real shared coordinator > A18 Given a child handoff consuming, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once  466ms
+   ✓ BDD: durable service uses the real shared coordinator > A18 Given a child handoff after-close, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once  387ms
+   ✓ BDD: durable service uses the real shared coordinator > A18 Given a child handoff applied, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once  513ms
+   ✓ BDD: durable service uses the real shared coordinator > A18 Given a child handoff multiple-ancestors, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once  606ms
+   ✓ BDD: durable service uses the real shared coordinator > A17 Given a real granted followup with cancelFirst=true, Then cancellation and activation have only one winner without freezing the group  455ms
+   ✓ BDD: durable service uses the real shared coordinator > A17 Given a real granted followup with cancelFirst=false, Then cancellation and activation have only one winner without freezing the group  521ms
+   ✓ BDD: durable service uses the real shared coordinator > A37 Given interrupt has revoked a child turn, When it tries another side effect, Then its stale scoped actor is rejected immediately 223ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A32 Given agent followup from A waits behind X, Then a later prepared B cannot change its accepted provenance  673ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A32 Given user-busy followup from A waits behind X, Then a later prepared B cannot change its accepted provenance  646ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A32 Given user-idle followup from A waits behind X, Then a later prepared B cannot change its accepted provenance  595ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A32 Given unknown-source followup from A waits behind X, Then a later prepared B cannot change its accepted provenance  710ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A32 Given root B follows up A child with earlier A followup=false, Then each queued operation preserves its own caller source after both roots end  600ms
+   ✓ BDD: durable service uses the real shared coordinator > A12/A32 Given root B follows up A child with earlier A followup=true, Then each queued operation preserves its own caller source after both roots end  734ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given agent followup receipt persistence fails, Then no new source-bearing turn is queued or executed 157ms
+   ✓ BDD: durable service uses the real shared coordinator > A15 Given user followup receipt persistence fails, Then no new source-bearing turn is queued or executed 141ms
+   ✓ BDD: durable service uses the real shared coordinator > LIFE-F1 Given B is busy and X waits, When root waits for its followup, Then B2 settles in the current epoch before root exits and X runs  406ms
+   ✓ BDD: durable service uses the real shared coordinator > LIFE-F2 Given a future user turn, Then agent followup is durably refused and impossible waits cannot spin 210ms
+   ✓ BDD: durable service uses the real shared coordinator > LIFE-F3 Given child session initialization is pending, Then followup remains queueable and interrupt removes that capability 143ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 Given root seal committed before host terminal, When user cancellation arrives, Then host and root complete while its child keeps running  328ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 Given cancellation wins before root seal, When the actual host cancellation runs, Then both root and child signals are aborted 156ms
+   ✓ BDD: durable service uses the real shared coordinator > A33 Given an authorized cancellation cannot persist its intent, When SQLite fails, Then physical abort still happens but the host call returns unknown 141ms
+   ✓ BDD: durable service uses the real shared coordinator > A42 Given queued host checkpoints from the previous boot, When startup reconciles both stores, Then roots fail without replay and ordinary preparations remain untouched  732ms
+   ✓ BDD: durable service uses the real shared coordinator > retains a real protected initialization failure across two root task identities without an ordinary SDK fallback (reset)  933ms
+   ✓ BDD: durable service uses the real shared coordinator > retains a real protected initialization failure across two root task identities without an ordinary SDK fallback (dispose)  645ms
+   ✓ BDD: durable service uses the real shared coordinator > retains a real protected initialization failure across two root task identities without an ordinary SDK fallback (renew)  1269ms
+   ✓ BDD: durable service uses the real shared coordinator > retains actual Core unknown cleanup when its physical-close factual SQLite publication fails 223ms
+ ❯ tests/main/desktop-post-seal-facts.bdd.test.ts (38 tests | 38 failed) 2562ms
+   × R4 raw facts preserve actual production collector and gate semantics > D14 multiple-result-indices matches unmodified ordinary production helpers, not a test classifier 90ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-JqjojM/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 repeated-plan-last-wins matches unmodified ordinary production helpers, not a test classifier 90ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Xl5B7y/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 same-invocation-last-wins matches unmodified ordinary production helpers, not a test classifier 64ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-sY3ZS8/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 file-uri matches unmodified ordinary production helpers, not a test classifier 61ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ry2JgV/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 result-artifacts matches unmodified ordinary production helpers, not a test classifier 56ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Ge59n5/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 project matches unmodified ordinary production helpers, not a test classifier 63ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-n0pxf0/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 no-result matches unmodified ordinary production helpers, not a test classifier 85ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-UgkZKv/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D14 null-result matches unmodified ordinary production helpers, not a test classifier 105ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-QIdoT2/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 builder refuses cumulative events bytes before touching the next source item 77ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-crgrgu/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 builder refuses cumulative artifacts bytes before touching the next source item 63ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Lv2f2c/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (result) refuses before reading its payload 69ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-FYWCKG/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (progress_plan_reported) refuses before reading its payload 70ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-pGROjB/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (artifact_recorded) refuses before reading its payload 62ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-q7hXyf/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (canvas_file_changed) refuses before reading its payload 68ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-7U73Ya/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (goal_tool_fact) refuses before reading its payload 64ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Rmu589/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (goal_tool_finished) refuses before reading its payload 70ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-FiSvLN/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (canvas_tool_result) refuses before reading its payload 64ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Q9JrQw/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (canvas_tool_call) refuses before reading its payload 57ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-VD5nhr/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (assistant_delta) refuses before reading its payload 60ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-N8STSP/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained goal_tool_fact exactly fills slot 256 without an off-by-one refusal 73ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-qVtALt/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained canvas_tool_call exactly fills slot 256 without an off-by-one refusal 57ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ekL4YP/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained canvas_tool_result exactly fills slot 256 without an off-by-one refusal 72ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-CRHnPr/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained assistant_delta exactly fills slot 256 without an off-by-one refusal 60ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-qV8uXW/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 non-retained goal_tool_fact after slot 256 is ignored without payload access or a false limit failure 62ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-hZRlSr/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 non-retained canvas_tool_call after slot 256 is ignored without payload access or a false limit failure 58ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-wj9EW1/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 non-retained canvas_tool_result after slot 256 is ignored without payload access or a false limit failure 71ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-LS9koh/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 non-retained assistant_delta after slot 256 is ignored without payload access or a false limit failure 67ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-8hRddr/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 non-retained progress after slot 256 is ignored without payload access or a false limit failure 60ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-BLHGRd/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at artifact-id before reading the next field/item 57ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-9dr89n/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at artifact-label before reading the next field/item 71ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-KdNiKF/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at goal-invocation before reading the next field/item 61ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-EhuPWM/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at plan-step before reading the next field/item 65ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-TRTS60/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at file-path before reading the next field/item 63ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-hf9lpj/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at result-summary before reading the next field/item 62ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-g12sDk/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at result-artifact-id before reading the next field/item 66ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Xo0AAH/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 mixed fixed-schema JSON accepts exactly the wire limit plus -1 bytes, without omitting fields 83ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-grSHen/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 mixed fixed-schema JSON accepts exactly the wire limit plus 0 bytes, without omitting fields 61ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-uWoDpl/delivery-verifier.mjs
+   × R4 raw facts preserve actual production collector and gate semantics > D13 mixed fixed-schema JSON accepts exactly the wire limit plus 1 bytes, without omitting fields 54ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-zpgdHt/delivery-verifier.mjs
+stderr | tests/main/desktop-runner-finalization.test.ts > desktop runner finalization > runs a no-tool finalization turn at an explicit limit but does not report the exhausted task as completed
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-runner-finalization.test.ts > desktop runner finalization > runs a no-tool finalization turn at an explicit limit but does not report the exhausted task as completed
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-runner-finalization.test.ts > desktop runner finalization > runs a no-tool finalization turn when the model returns an empty turn after tool results
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-runner-finalization.test.ts > desktop runner finalization > runs a no-tool finalization turn when the model returns an empty turn after tool results
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+ ❯ tests/main/desktop-runner-finalization.test.ts (2 tests | 2 failed) 448ms
+   × desktop runner finalization > runs a no-tool finalization turn at an explicit limit but does not report the exhausted task as completed 202ms
+     → expected [Function] to throw error including 'desktop_task_failed' but got 'KSwarm service unavailable: failed to…'
+   × desktop runner finalization > runs a no-tool finalization turn when the model returns an empty turn after tool results 246ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10 OS crash at before-host-write preserves actual host journal commit and never appends duplicate terminal
+[d10-before-host-write-passive-trace] {"parent":{"entries":[{"stage":"test-enter","sequence":1,"monotonicMs":36136.0555},{"stage":"spawn-before","sequence":2,"monotonicMs":36139.817},{"stage":"spawn-after","sequence":3,"monotonicMs":36140.338583},{"stage":"stdout-received:sealed","sequence":4,"monotonicMs":37195.208833},{"stage":"sealed-received","sequence":5,"monotonicMs":37195.244458},{"stage":"start-resolved","sequence":6,"monotonicMs":37195.4495},{"stage":"stdout-received:native-worker-start","sequence":7,"monotonicMs":37901.740167},{"stage":"stdout-received:native-worker-exit","sequence":8,"monotonicMs":37939.845083},{"stage":"stdout-received:before-host-write","sequence":9,"monotonicMs":37943.518208},{"stage":"boundary-received","sequence":10,"monotonicMs":37943.592458},{"stage":"observer-inspect-before","sequence":11,"monotonicMs":37944.986625},{"stage":"observer-inspect-after","sequence":12,"monotonicMs":37948.320917},{"stage":"kill-before","sequence":13,"monotonicMs":37948.667792},{"stage":"kill-after","sequence":14,"monotonicMs":37956.25125},{"stage":"initialize-before","sequence":15,"monotonicMs":37957.355667},{"token":1,"stage":"parent-protection-worker-constructor-before","sequence":16,"monotonicMs":37958.368917},{"token":1,"threadId":213,"stage":"parent-protection-worker-constructor-after","sequence":17,"monotonicMs":37958.536},{"token":1,"stage":"parent-protection-worker-online","sequence":18,"monotonicMs":37969.468},{"token":1,"stage":"parent-protection-worker-message","sequence":19,"monotonicMs":38131.325292},{"token":1,"stage":"parent-protection-worker-exit","sequence":20,"monotonicMs":38133.408917},{"token":2,"stage":"parent-protection-worker-constructor-before","sequence":21,"monotonicMs":38134.200417},{"token":2,"threadId":215,"stage":"parent-protection-worker-constructor-after","sequence":22,"monotonicMs":38134.31525},{"token":2,"stage":"parent-protection-worker-online","sequence":23,"monotonicMs":38146.582792},{"token":2,"stage":"parent-protection-worker-message","sequence":24,"monotonicMs":38293.852083},{"token":2,"stage":"parent-protection-worker-exit","sequence":25,"monotonicMs":38295.920875},{"token":3,"stage":"parent-protection-worker-constructor-before","sequence":26,"monotonicMs":38300.967958},{"token":3,"threadId":217,"stage":"parent-protection-worker-constructor-after","sequence":27,"monotonicMs":38301.104542},{"token":3,"stage":"parent-protection-worker-online","sequence":28,"monotonicMs":38312.042958},{"token":3,"stage":"parent-protection-worker-message","sequence":29,"monotonicMs":38452.223708},{"token":3,"stage":"parent-protection-worker-exit","sequence":30,"monotonicMs":38454.687083},{"token":4,"stage":"parent-protection-worker-constructor-before","sequence":31,"monotonicMs":38454.762042},{"token":4,"threadId":219,"stage":"parent-protection-worker-constructor-after","sequence":32,"monotonicMs":38454.88875},{"token":4,"stage":"parent-protection-worker-online","sequence":33,"monotonicMs":38467.266583},{"token":4,"stage":"parent-protection-worker-message","sequence":34,"monotonicMs":38649.752417},{"token":4,"stage":"parent-protection-worker-exit","sequence":35,"monotonicMs":38651.877},{"token":5,"stage":"parent-protection-worker-constructor-before","sequence":36,"monotonicMs":38655.445375},{"token":5,"threadId":221,"stage":"parent-protection-worker-constructor-after","sequence":37,"monotonicMs":38655.65225},{"token":5,"stage":"parent-protection-worker-online","sequence":38,"monotonicMs":38671.21675},{"token":5,"stage":"parent-protection-worker-message","sequence":39,"monotonicMs":38810.206042},{"token":5,"stage":"parent-protection-worker-exit","sequence":40,"monotonicMs":38812.473625},{"token":6,"stage":"parent-protection-worker-constructor-before","sequence":41,"monotonicMs":38812.538667},{"token":6,"threadId":223,"stage":"parent-protection-worker-constructor-after","sequence":42,"monotonicMs":38812.647458},{"token":6,"stage":"parent-protection-worker-online","sequence":43,"monotonicMs":38823.102583},{"token":6,"stage":"parent-protection-worker-message","sequence":44,"monotonicMs":38953.444042},{"token":6,"stage":"parent-protection-worker-exit","sequence":45,"monotonicMs":38955.406417},{"token":7,"stage":"parent-protection-worker-constructor-before","sequence":46,"monotonicMs":38957.842375},{"token":7,"threadId":225,"stage":"parent-protection-worker-constructor-after","sequence":47,"monotonicMs":38957.950833},{"token":7,"stage":"parent-protection-worker-online","sequence":48,"monotonicMs":38969.05725},{"token":7,"stage":"parent-protection-worker-message","sequence":49,"monotonicMs":39111.564125},{"token":7,"stage":"parent-protection-worker-exit","sequence":50,"monotonicMs":39114.309333},{"token":8,"stage":"parent-protection-worker-constructor-before","sequence":51,"monotonicMs":39114.438125},{"token":8,"threadId":227,"stage":"parent-protection-worker-constructor-after","sequence":52,"monotonicMs":39114.633208},{"token":8,"stage":"parent-protection-worker-online","sequence":53,"monotonicMs":39126.019542},{"token":8,"stage":"parent-protection-worker-message","sequence":54,"monotonicMs":39310.538583},{"token":8,"stage":"parent-protection-worker-exit","sequence":55,"monotonicMs":39314.234208},{"token":9,"stage":"parent-protection-worker-constructor-before","sequence":56,"monotonicMs":39319.191083},{"token":9,"threadId":229,"stage":"parent-protection-worker-constructor-after","sequence":57,"monotonicMs":39319.395042},{"token":9,"stage":"parent-protection-worker-online","sequence":58,"monotonicMs":39331.467167},{"token":9,"stage":"parent-protection-worker-message","sequence":59,"monotonicMs":39488.805333},{"token":9,"stage":"parent-protection-worker-exit","sequence":60,"monotonicMs":39491.1475},{"token":10,"stage":"parent-protection-worker-constructor-before","sequence":61,"monotonicMs":39491.23075},{"token":10,"threadId":231,"stage":"parent-protection-worker-constructor-after","sequence":62,"monotonicMs":39491.361708},{"token":10,"stage":"parent-protection-worker-online","sequence":63,"monotonicMs":39502.769542},{"token":10,"stage":"parent-protection-worker-message","sequence":64,"monotonicMs":39652.423583},{"token":10,"stage":"parent-protection-worker-exit","sequence":65,"monotonicMs":39656.260958},{"token":11,"stage":"parent-protection-worker-constructor-before","sequence":66,"monotonicMs":39701.627125},{"token":11,"threadId":233,"stage":"parent-protection-worker-constructor-after","sequence":67,"monotonicMs":39701.856083},{"token":11,"stage":"parent-protection-worker-online","sequence":68,"monotonicMs":39712.830917},{"token":11,"stage":"parent-protection-worker-message","sequence":69,"monotonicMs":39838.977083},{"token":11,"stage":"parent-protection-worker-exit","sequence":70,"monotonicMs":39841.239292},{"token":12,"stage":"parent-protection-worker-constructor-before","sequence":71,"monotonicMs":39841.356},{"token":12,"threadId":235,"stage":"parent-protection-worker-constructor-after","sequence":72,"monotonicMs":39841.533875},{"token":12,"stage":"parent-protection-worker-online","sequence":73,"monotonicMs":39852.781},{"token":12,"stage":"parent-protection-worker-message","sequence":74,"monotonicMs":39994.929292},{"token":12,"stage":"parent-protection-worker-exit","sequence":75,"monotonicMs":39997.240583},{"stage":"initialize-after","sequence":76,"monotonicMs":40008.8485},{"stage":"recovered-inspect-before","sequence":77,"monotonicMs":40008.851417},{"stage":"recovered-inspect-after","sequence":78,"monotonicMs":40012.007292}],"overflow":0,"observerErrors":0},"boundary":{"entries":[{"stage":"owner-entry","sequence":1,"monotonicMs":426.955084},{"stage":"worker-build-before","sequence":2,"monotonicMs":426.97575},{"stage":"worker-build-after","sequence":3,"monotonicMs":435.464834},{"stage":"harness-before","sequence":4,"monotonicMs":459.489084},{"stage":"harness-after","sequence":5,"monotonicMs":589.302959},{"stage":"prepareRoot-before","sequence":6,"monotonicMs":589.538625},{"stage":"prepareRoot-after","sequence":7,"monotonicMs":895.606125},{"stage":"startTask-before","sequence":8,"monotonicMs":895.608125},{"stage":"startTask-after","sequence":9,"monotonicMs":905.544},{"stage":"post-seal-observed","sequence":10,"monotonicMs":1043.411792},{"token":1,"stage":"child-protection-worker-constructor-before","sequence":11,"monotonicMs":1055.108},{"token":1,"threadId":2,"stage":"child-protection-worker-constructor-after","sequence":12,"monotonicMs":1055.31075},{"token":1,"stage":"child-protection-worker-online","sequence":13,"monotonicMs":1067.572959},{"token":1,"stage":"child-protection-worker-message","sequence":14,"monotonicMs":1226.469334},{"token":1,"stage":"child-protection-worker-exit","sequence":15,"monotonicMs":1229.093667},{"token":2,"stage":"child-protection-worker-constructor-before","sequence":16,"monotonicMs":1229.216959},{"token":2,"threadId":4,"stage":"child-protection-worker-constructor-after","sequence":17,"monotonicMs":1229.343792},{"token":2,"stage":"child-protection-worker-online","sequence":18,"monotonicMs":1240.765459},{"token":2,"stage":"child-protection-worker-message","sequence":19,"monotonicMs":1406.508125},{"token":2,"stage":"child-protection-worker-exit","sequence":20,"monotonicMs":1408.913834},{"token":3,"stage":"child-protection-worker-constructor-before","sequence":21,"monotonicMs":1412.19375},{"token":3,"threadId":6,"stage":"child-protection-worker-constructor-after","sequence":22,"monotonicMs":1412.354292},{"token":3,"stage":"child-protection-worker-online","sequence":23,"monotonicMs":1424.834542},{"token":3,"stage":"child-protection-worker-message","sequence":24,"monotonicMs":1592.468792},{"token":3,"stage":"child-protection-worker-exit","sequence":25,"monotonicMs":1595.120125},{"token":4,"stage":"child-protection-worker-constructor-before","sequence":26,"monotonicMs":1595.238667},{"token":4,"threadId":8,"stage":"child-protection-worker-constructor-after","sequence":27,"monotonicMs":1595.473125},{"token":4,"stage":"child-protection-worker-online","sequence":28,"monotonicMs":1607.781959},{"token":4,"stage":"child-protection-worker-message","sequence":29,"monotonicMs":1743.88475},{"token":4,"stage":"child-protection-worker-exit","sequence":30,"monotonicMs":1746.288042},{"stage":"before-host-write-boundary","sequence":31,"monotonicMs":1791.745417}],"overflow":0,"observerErrors":0}}
+
+ ❯ tests/main/desktop-post-seal-process.bdd.test.ts (17 tests | 2 failed) 52064ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D7 actual native pathological classifier cannot block owner heartbeat beyond its 100ms delivery budget  1703ms
+   × R4 actual post-seal owner CPU/IO and crash boundary > D6 actual file:// PDF FIFO cannot block host heartbeat; raw IO keeps in-flight ownership after deadline 3027ms
+     → post-seal fixture boundary was not reached
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at before-marker uses committed marker truth and never replays  2560ms
+   × R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at marker-transaction uses committed marker truth and never replays 1178ms
+     → production host drained without required marker-transaction boundary
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at marker-committed uses committed marker truth and never replays  3222ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at snapshot uses committed marker truth and never replays  3342ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 Goal active after owner death consumes only durable recovery and remains disarmed  3418ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 Goal budget after owner death consumes only durable recovery and remains disarmed  3786ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 Goal paused after owner death consumes only durable recovery and remains disarmed  3208ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 Goal cancelled after owner death consumes only durable recovery and remains disarmed  3039ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 Goal consumer-failure after owner death consumes only durable recovery and remains disarmed  3234ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 Goal invalid-factory-order after owner death consumes only durable recovery and remains disarmed  3881ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10 OS crash at before-host-write preserves actual host journal commit and never appends duplicate terminal  3900ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10 OS crash at host-committed preserves actual host journal commit and never appends duplicate terminal  3453ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10 OS crash at projection-committed preserves actual host journal commit and never appends duplicate terminal  2564ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D18 concurrent recoverTask/getActiveTask cannot race startup into ordinary stale-running recovery  3056ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D18 only service-issued recovery handle can settle a disarmed Goal; copied/JSON/wrong source are zero writes and the used handle is revoked  3492ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 68 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: success
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: unpublished-ack
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: unknown-resource
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: own-effect
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: active-window
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: final-history-failure
+AssertionError: expected 0 to be greater than or equal to 2
+ ❯ tests/main/desktop-compound-ancestor-followup.test.ts:244:46
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/83]⎯
+
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: success
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: unpublished-ack
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: unknown-resource
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: own-effect
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: active-window
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: final-history-failure
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: final-history-failure-shutdown
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: root-tail
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Error: ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-W1IkBv/account-cllr9A/.cache'
++     at realpathSync (node:fs:2787:29)
++     at trustedEnvironment (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:110:39)
++     at createProductObservationOwner (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:193:20)
++     at createDesktopProductObservationBinding (<master-baseline>/desktop/electron/desktop-observation-owner.ts:139:21)
++     at createDesktopProductObservationGroup (<master-baseline>/desktop/electron/desktop-observation-group.ts:38:16)
++     at run (<master-baseline>/desktop/electron/desktop-services.ts:8195:21)
++     at <master-baseline>/desktop/electron/desktop-services.ts:8377:11
++     at setup.expectedDisposeError (<master-baseline>/desktop/tests/main/desktop-compound-ancestor-followup.test.ts:136:11)
++     at <master-baseline>/desktop/tests/main/desktop-compound-ancestor-followup.test.ts:86:22
++     at DesktopMultiAgentService.runRoot (<master-baseline>/desktop/electron/desktop-multi-agent-service.ts:2347:22)",
++ ]
+
+ ❯ tests/main/desktop-compound-ancestor-followup.test.ts:62:141
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/83]⎯
+
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: final-history-failure-shutdown
+AssertionError: expected undefined to match object { executionActive: false, …(1) }
+
+- Expected:
+{
+  "executionActive": false,
+  "status": StringMatching /^(failed|interrupted|closed)$/,
+}
+
++ Received:
+undefined
+
+ ❯ vi.waitFor.timeout tests/main/desktop-compound-ancestor-followup.test.ts:237:140
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/83]⎯
+
+ FAIL  tests/main/desktop-compound-ancestor-followup.test.ts > P2 actual managed ancestor followup > uses exact drained descendant resources for a fresh user turn: root-tail
+Error: Test timed out in 120000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/main/desktop-compound-ancestor-followup.test.ts:112:166
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=false)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=publication-persist-failure)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=closed-result-read)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-root-orphan)
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Error: ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-W1IkBv/account-bmL6if/.cache/xiaok/sol-pi/deepseek-recipe-0.1.1/environment.json'
++     at lstatSync (node:fs:1710:25)
++     at trustedEnvironment (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:112:18)
++     at createProductObservationOwner (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:193:20)
++     at createDesktopProductObservationBinding (<master-baseline>/desktop/electron/desktop-observation-owner.ts:139:21)
++     at createDesktopProductObservationGroup (<master-baseline>/desktop/electron/desktop-observation-group.ts:38:16)
++     at setup.expectedDisposeError (<master-baseline>/desktop/tests/main/desktop-multi-agent-service.bdd.test.ts:429:19)
++     at <master-baseline>/desktop/tests/main/desktop-multi-agent-service.bdd.test.ts:148:22
++     at DesktopMultiAgentService.runRoot (<master-baseline>/desktop/electron/desktop-multi-agent-service.ts:2347:22)
++     at InProcessTaskRuntimeHost.executeTask (<master-baseline>/src/runtime/task-host/task-runtime-host.ts:1270:7)
++     at async Promise.allSettled (index 0)",
++ ]
+
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:124:141
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=true)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=semantic-next-turn)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-group)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=group-close-drain)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-close)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-parallel)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-agent-followup)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-agent-followup-busy)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-cancel)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-ack-loss)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-close-preparing)
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Error: ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-W1IkBv/account-bmL6if/.cache/xiaok/sol-pi/deepseek-recipe-0.1.1/environment.json'
++     at lstatSync (node:fs:1710:25)
++     at trustedEnvironment (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:112:18)
++     at createProductObservationOwner (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:193:20)
++     at createDesktopProductObservationBinding (<master-baseline>/desktop/electron/desktop-observation-owner.ts:139:21)
++     at createDesktopProductObservationGroup (<master-baseline>/desktop/electron/desktop-observation-group.ts:38:16)
++     at run (<master-baseline>/desktop/electron/desktop-services.ts:8195:21)
++     at <master-baseline>/desktop/electron/desktop-services.ts:8377:11
++     at setup.expectedDisposeError (<master-baseline>/desktop/tests/main/desktop-multi-agent-service.bdd.test.ts:413:13)
++     at <master-baseline>/desktop/tests/main/desktop-multi-agent-service.bdd.test.ts:148:22
++     at DesktopMultiAgentService.runRoot (<master-baseline>/desktop/electron/desktop-multi-agent-service.ts:2347:22)",
++   "Error: ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-W1IkBv/account-bmL6if/.cache/xiaok/sol-pi/deepseek-recipe-0.1.1/environment.json'
++     at lstatSync (node:fs:1710:25)
++     at trustedEnvironment (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:112:18)
++     at createProductObservationOwner (<master-baseline>/src/runtime/sol-pi/product-bootstrap.ts:193:20)
++     at createDesktopProductObservationBinding (<master-baseline>/desktop/electron/desktop-observation-owner.ts:139:21)
++     at createDesktopProductObservationGroup (<master-baseline>/desktop/electron/desktop-observation-group.ts:38:16)
++     at run (<master-baseline>/desktop/electron/desktop-services.ts:8195:21)
++     at <master-baseline>/desktop/electron/desktop-services.ts:8377:11
++     at setup.expectedDisposeError (<master-baseline>/desktop/tests/main/desktop-multi-agent-service.bdd.test.ts:413:13)
++     at <master-baseline>/desktop/tests/main/desktop-multi-agent-service.bdd.test.ts:148:22
++     at DesktopMultiAgentService.runRoot (<master-baseline>/desktop/electron/desktop-multi-agent-service.ts:2347:22)",
++ ]
+
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:124:141
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed)
+AssertionError: expected undefined to be defined
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:533:33
+    531|     }
+    532|     if(mode==='compound-managed'){
+    533|       expect(resourceAdmission).toBeDefined();
+       |                                 ^
+    534|       expect(()=>f.service.assertManagedResourceCurrent(resourceAdmiss…
+    535|       expect(()=>f.service.assertObservationChildPersistence(resourceP…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=group-close-drain)
+Error: Test timed out in 120000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:328:453
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-close)
+AssertionError: expected undefined to be defined
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:543:89
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-cancel)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-ack-loss)
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > uses the actual prepared Runtime and managed session before its first SDK send (product runner=compound-managed-followup-close-preparing)
+TypeError: Cannot read properties of undefined (reading 'id')
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:497:81
+    495|       const groupId=f.store.getThread('t1')!.activeGroupId!,child=f.st…
+    496|       const access=f.service.createUserAccess({requestSource:'user',ac…
+    497|       const request={access,requestSource:'user' as const,groupId,agen…
+       |                                                                                 ^
+    498|       const followupResult=await f.service.userFollowup(request);expec…
+    499|       if(followupClosePreparing){
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/83]⎯
+
+ FAIL  tests/main/desktop-multi-agent-service.bdd.test.ts > BDD: durable service uses the real shared coordinator > retains an actual product group owner and native history across two real root tasks with durable alias publication
+Error: actual product capacity environment required
+ ❯ tests/main/desktop-multi-agent-service.bdd.test.ts:550:118
+    548|     const {homedir}=await import('node:os');const {existsSync,writeFil…
+    549|     const environmentRoot=join(homedir(),'.cache/xiaok/sol-pi/deepseek…
+    550|     if(process.platform!=='darwin'||process.arch!=='arm64'||!existsSyn…
+       |                                                                                                                      ^
+    551|     const {createDesktopProductObservationGroup}=await import('../../e…
+    552|     const {ToolRegistry,buildToolList}=await import('../../../src/ai/t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 multiple-result-indices matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-JqjojM/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-JqjojM/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 repeated-plan-last-wins matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Xl5B7y/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Xl5B7y/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 same-invocation-last-wins matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-sY3ZS8/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-sY3ZS8/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 file-uri matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ry2JgV/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ry2JgV/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 result-artifacts matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Ge59n5/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Ge59n5/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 project matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-n0pxf0/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-n0pxf0/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 no-result matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-UgkZKv/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-UgkZKv/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D14 null-result matches unmodified ordinary production helpers, not a test classifier
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-QIdoT2/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-QIdoT2/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 builder refuses cumulative events bytes before touching the next source item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-crgrgu/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-crgrgu/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 builder refuses cumulative artifacts bytes before touching the next source item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Lv2f2c/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Lv2f2c/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (result) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-FYWCKG/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-FYWCKG/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (progress_plan_reported) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-pGROjB/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-pGROjB/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (artifact_recorded) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-q7hXyf/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-q7hXyf/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (canvas_file_changed) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-7U73Ya/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-7U73Ya/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (goal_tool_fact) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Rmu589/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Rmu589/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (goal_tool_finished) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-FiSvLN/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-FiSvLN/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (canvas_tool_result) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Q9JrQw/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Q9JrQw/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (canvas_tool_call) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-VD5nhr/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-VD5nhr/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 retained fact 257 (assistant_delta) refuses before reading its payload
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-N8STSP/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-N8STSP/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained goal_tool_fact exactly fills slot 256 without an off-by-one refusal
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-qVtALt/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-qVtALt/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained canvas_tool_call exactly fills slot 256 without an off-by-one refusal
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ekL4YP/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ekL4YP/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained canvas_tool_result exactly fills slot 256 without an off-by-one refusal
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-CRHnPr/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-CRHnPr/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 conditional retained assistant_delta exactly fills slot 256 without an off-by-one refusal
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-qV8uXW/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-qV8uXW/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 non-retained goal_tool_fact after slot 256 is ignored without payload access or a false limit failure
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-hZRlSr/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-hZRlSr/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 non-retained canvas_tool_call after slot 256 is ignored without payload access or a false limit failure
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-wj9EW1/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-wj9EW1/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 non-retained canvas_tool_result after slot 256 is ignored without payload access or a false limit failure
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-LS9koh/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-LS9koh/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 non-retained assistant_delta after slot 256 is ignored without payload access or a false limit failure
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-8hRddr/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-8hRddr/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 non-retained progress after slot 256 is ignored without payload access or a false limit failure
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-BLHGRd/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-BLHGRd/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at artifact-id before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-9dr89n/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-9dr89n/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at artifact-label before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-KdNiKF/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-KdNiKF/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at goal-invocation before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-EhuPWM/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-EhuPWM/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at plan-step before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-TRTS60/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-TRTS60/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at file-path before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-hf9lpj/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-hf9lpj/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at result-summary before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-g12sDk/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-g12sDk/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 exact structural budget stops at result-artifact-id before reading the next field/item
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Xo0AAH/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-Xo0AAH/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 mixed fixed-schema JSON accepts exactly the wire limit plus -1 bytes, without omitting fields
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-grSHen/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-grSHen/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 mixed fixed-schema JSON accepts exactly the wire limit plus 0 bytes, without omitting fields
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-uWoDpl/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-uWoDpl/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-facts.bdd.test.ts > R4 raw facts preserve actual production collector and gate semantics > D13 mixed fixed-schema JSON accepts exactly the wire limit plus 1 bytes, without omitting fields
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-zpgdHt/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-zpgdHt/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D6 actual file:// PDF FIFO cannot block host heartbeat; raw IO keeps in-flight ownership after deadline
+Error: post-seal fixture boundary was not reached
+ ❯ Timeout.<anonymous> tests/fixtures/desktop-post-seal-harness.ts:23:38
+     21|   let timer!: ReturnType<typeof realTimeout>;
+     22|   try { return await Promise.race([promise, new Promise<never>((_, rej…
+     23|     timer = realTimeout(() => reject(new Error('post-seal fixture boun…
+       |                                      ^
+     24|   })]); } finally { realClearTimeout(timer); }
+     25| }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[50/83]⎯
+
+ FAIL  tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at marker-transaction uses committed marker truth and never replays
+Error: production host drained without required marker-transaction boundary
+ ❯ check tests/main/desktop-post-seal-process.bdd.test.ts:130:43
+    128|         if (found) { listeners.delete(check); resolve(found); }
+    129|         else if (stage !== 'sealed' && events.some(event => event.stag…
+    130|           listeners.delete(check); reject(new Error(`production host d…
+       |                                           ^
+    131|         }
+    132|       };
+ ❯ Socket.<anonymous> tests/main/desktop-post-seal-process.bdd.test.ts:122:162
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[51/83]⎯
+
+ FAIL  tests/main/desktop-runner-finalization.test.ts > desktop runner finalization > runs a no-tool finalization turn at an explicit limit but does not report the exhausted task as completed
+AssertionError: expected [Function] to throw error including 'desktop_task_failed' but got 'KSwarm service unavailable: failed to…'
+
+Expected: "desktop_task_failed"
+Received: "KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189"
+
+ ❯ tests/main/desktop-runner-finalization.test.ts:101:5
+     99|     });
+    100|
+    101|     await expect(execution).rejects.toThrow('desktop_task_failed');
+       |     ^
+    102|     expect(adapterState.streamCalls).toBe(3);
+    103|     expect(adapterState.toolCounts.slice(0, 2).every((count) => count …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[52/83]⎯
+
+ FAIL  tests/main/desktop-runner-finalization.test.ts > desktop runner finalization > runs a no-tool finalization turn when the model returns an empty turn after tool results
+KSwarmUnavailableError: KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+ ❯ request electron/kswarm-service.ts:1493:13
+    1491|
+    1492|     if (!running) {
+    1493|       throw new KSwarmUnavailableError(lastError || 'KSwarm service fa…
+       |             ^
+    1494|     }
+    1495|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[53/83]⎯
+
+
+ Test Files  5 failed (5)
+      Tests  68 failed | 111 passed (179)
+   Start at  03:46:13
+   Duration  207.71s (transform 3.70s, setup 292ms, collect 6.69s, tests 378.53s, environment 0ms, prepare 142ms)

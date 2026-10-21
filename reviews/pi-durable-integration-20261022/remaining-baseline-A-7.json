@@ -1,0 +1,23 @@
+{
+  "label": "remaining-baseline-A-7",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/ai/runtime/kimi-builtin-tool-context.test.ts",
+    "tests/runtime/verification/application-own-data-adversarial.test.ts",
+    "tests/runtime/verification/installed-blackbox-command.test.ts",
+    "tests/runtime/sol-pi/desktop-owner-boundary.test.ts",
+    "--maxWorkers=2",
+    "--testNamePattern",
+    "(?:exports\\ a\\ data\\ description\\ for\\ win32|exports\\ a\\ data\\ description\\ for\\ darwin|descriptor::get::readApplicationOwnDataField|descriptor::get::captureApplicationData|descriptor::get::createPublishedArtifactIndex|descriptor::set::readApplicationOwnDataField|descriptor::set::captureApplicationData|descriptor::set::createPublishedArtifactIndex|descriptor\\-sibling::get::createIntentApplicationBinding::default|descriptor\\-sibling::set::createIntentApplicationBinding::default|descriptor\\-sibling::get::createIntentApplicationBinding::parent|descriptor\\-sibling::set::createIntentApplicationBinding::parent|descriptor\\-sibling::get::readPublishedArtifacts::default|descriptor\\-sibling::set::readPublishedArtifacts::default|descriptor\\-sibling::get::readPublishedArtifacts::intent\\-stage|descriptor\\-sibling::set::readPublishedArtifacts::intent\\-stage|descriptor\\-producer\\-array::get|descriptor\\-producer\\-array::set|admits\\ every\\ actual\\ approved\\ blackbox\\ member\\ through\\ the\\ fixed\\ original\\ run\\ command|cannot\\ silently\\ clear\\ protected\\ inherited\\ owner\\ at\\ a\\ legacy\\ Desktop\\ entry)$"
+  ],
+  "startedAt": "2026-10-21T20:12:44.941118+00:00",
+  "runnerPid": 4147,
+  "pid": 4148,
+  "pgid": 4148,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:12:58.597058+00:00",
+  "reaped": true
+}

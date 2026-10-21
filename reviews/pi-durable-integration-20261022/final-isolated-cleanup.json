@@ -1,0 +1,15 @@
+{
+  "temporaryRoot": "<final-validation>",
+  "resolvedTemporaryRoot": "<final-validation>",
+  "sourceCommit": "d7f9a5a07b8695fc05b1a406c0863eafaac4a421",
+  "allRunsReaped": true,
+  "ownedProcessGroupsRemaining": [],
+  "checksPassedBeforeDeletion": true,
+  "method": "shutil.rmtree only own mkdtemp root; directory symlinks are unlinked, not traversed",
+  "startedAt": "2026-10-21T20:10:39.950941+00:00",
+  "manualKill": false,
+  "sharedServicesTouched": false,
+  "finishedAt": "2026-10-21T20:10:41.341848+00:00",
+  "rootExistsAfter": false,
+  "rootSymlinkAfter": false
+}

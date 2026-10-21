@@ -1,0 +1,151 @@
+
+> xiaokcode@1.5.15 test:sandbox:run
+> node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.sandbox.config.mjs --configLoader runner .test-dist/tests/runtime/conversation-activity/owner-process.test.js .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js --maxWorkers=1
+
+
+ RUN  v3.2.6 <master-baseline>
+
+stderr | .test-dist/tests/runtime/conversation-activity/owner-process.test.js > handles a real legacy owner with empty tasks
+
+
+stderr | .test-dist/tests/runtime/conversation-activity/owner-process.test.js > handles a real legacy owner with completed tasks
+
+
+stderr | .test-dist/tests/runtime/conversation-activity/owner-process.test.js > retires or reuses an owner built by the previous generation (empty tasks) without a config mismatch
+
+
+stderr | .test-dist/tests/runtime/conversation-activity/owner-process.test.js > retires or reuses an owner built by the previous generation (pending tasks) without a config mismatch
+
+
+ ❯ .test-dist/tests/runtime/conversation-activity/owner-process.test.js (6 tests | 4 failed) 3621ms
+   ✓ independent activity process lifecycle > keeps collecting native durable facts after the producer client exits, with one owner across concurrent attachment  1707ms
+   × handles a real legacy owner with empty tasks 399ms
+     → expected undefined to be 3 // Object.is equality
+   ✓ handles a real legacy owner with pending tasks  366ms
+   × handles a real legacy owner with completed tasks 342ms
+     → expected undefined to be 3 // Object.is equality
+   × retires or reuses an owner built by the previous generation (empty tasks) without a config mismatch 341ms
+     → expected [] to deeply equal [ 'replaced' ]
+   × retires or reuses an owner built by the previous generation (pending tasks) without a config mismatch 465ms
+     → expected [] to deeply equal [ 'reused_pending' ]
+ ❯ .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js (12 tests | 4 failed) 995ms
+   ✓ private storage > tightens legacy directories and files and rejects symlinks and chmod failure 8ms
+   ✓ private storage > accepts a linked ancestor above the activity tree (for example macOS /var -> /private/var) 1ms
+   × private storage > creates writable private storage under umask 0 in a child 51ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   × private storage > creates writable private storage under umask 18 in a child 55ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   × private storage > creates writable private storage under umask 63 in a child 43ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   × private storage > creates writable private storage under umask 191 in a child 53ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   ✓ private storage > preserves unrelated shared entries in desktop 6ms
+   ✓ private storage > preserves unrelated shared entries in .xiaok 6ms
+   ✓ private storage > preserves unrelated shared entries in custom-config 7ms
+   ✓ private storage > queues the exact permission failure notice once without throwing 1ms
+   ✓ Windows permission guard is a no-op 0ms
+   ✓ real owner creates private files under inherited strict umask  762ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .test-dist/tests/runtime/conversation-activity/owner-process.test.js > handles a real legacy owner with empty tasks
+ FAIL  .test-dist/tests/runtime/conversation-activity/owner-process.test.js > handles a real legacy owner with completed tasks
+AssertionError: expected undefined to be 3 // Object.is equality
+
+- Expected:
+3
+
++ Received:
+undefined
+
+ ❯ .test-dist/tests/runtime/conversation-activity/owner-process.test.js:126:35
+    124|             return;
+    125|         }
+    126|         expect(status.generation).toBe(ACTIVITY_OWNER_GENERATION);
+       |                                   ^
+    127|         expect(nextPid).not.toBe(child.pid);
+    128|         await exited;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  .test-dist/tests/runtime/conversation-activity/owner-process.test.js > retires or reuses an owner built by the previous generation (empty tasks) without a config mismatch
+AssertionError: expected [] to deeply equal [ 'replaced' ]
+
+- Expected
++ Received
+
+- [
+-   "replaced",
+- ]
++ []
+
+ ❯ .test-dist/tests/runtime/conversation-activity/owner-process.test.js:195:23
+    193|             return;
+    194|         }
+    195|         expect(hints).toEqual(['replaced']);
+       |                       ^
+    196|         expect(status.generation).toBe(ACTIVITY_OWNER_GENERATION);
+    197|         expect(nextPid).not.toBe(child.pid);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  .test-dist/tests/runtime/conversation-activity/owner-process.test.js > retires or reuses an owner built by the previous generation (pending tasks) without a config mismatch
+AssertionError: expected [] to deeply equal [ 'reused_pending' ]
+
+- Expected
++ Received
+
+- [
+-   "reused_pending",
+- ]
++ []
+
+ ❯ .test-dist/tests/runtime/conversation-activity/owner-process.test.js:189:27
+    187|         nextPid = status.pid;
+    188|         if (kind === 'pending') {
+    189|             expect(hints).toEqual(['reused_pending']);
+       |                           ^
+    190|             expect(nextPid).toBe(child.pid);
+    191|             process.kill(child.pid, 0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js > private storage > creates writable private storage under umask 0 in a child
+ FAIL  .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js > private storage > creates writable private storage under umask 18 in a child
+ FAIL  .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js > private storage > creates writable private storage under umask 63 in a child
+ FAIL  .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js > private storage > creates writable private storage under umask 191 in a child
+AssertionError: expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+
+- Expected
++ Received
+
+- Error
++ file://<master-baseline>/[eval1]:15
++         const notices = createActivityStartupNotices({ configDir: root }); notices.queueStarted(); notices.take().markShown();
++                                                                                    ^
++
++ TypeError: notices.queueStarted is not a function
++     at file://<master-baseline>/[eval1]:15:84
++     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
++     at async node:internal/modules/esm/loader:230:26
++     at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:227:20)
++     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
++
++ Node.js v24.16.0
++
+
+ ❯ .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js:77:62
+     75|         }
+     76|       `], { encoding: 'utf8' });
+     77|             expect(result.stderr, result.error?.message).not.toContain…
+       |                                                              ^
+     78|             expect(result.status, result.stderr).toBe(0);
+     79|         }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  8 failed | 10 passed (18)
+   Start at  03:47:49
+   Duration  5.50s (transform 411ms, setup 9ms, collect 696ms, tests 4.62s, environment 0ms, prepare 48ms)

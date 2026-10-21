@@ -1,0 +1,20 @@
+{
+  "label": "desktop-cancellation-baseline",
+  "cwd": "<master-baseline>/desktop",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts",
+    "tests/main/desktop-host-cancellation-write-failures.bdd.test.ts",
+    "tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:40:28.050074+00:00",
+  "runnerPid": 39417,
+  "pid": 39442,
+  "pgid": 39442,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:40:53.339186+00:00",
+  "reaped": true
+}

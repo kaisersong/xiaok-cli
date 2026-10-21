@@ -1,0 +1,145 @@
+{
+  "createdAt": "2026-10-21T20:09:41.074459+00:00",
+  "temporaryRoot": "<final-validation>",
+  "sourceCommit": "d7f9a5a07b8695fc05b1a406c0863eafaac4a421",
+  "dependencySource": "<worktree>/node_modules",
+  "dependencyCopyArgv": [
+    "cp",
+    "-cR",
+    "<worktree>/node_modules",
+    "<final-validation>/node_modules"
+  ],
+  "archiveExitCode": 0,
+  "tarExitCode": 0,
+  "tarStderr": "",
+  "copyExitCode": 0,
+  "copyStdout": "",
+  "copyStderr": "",
+  "dependencyDirectoryIsSymlink": false,
+  "dependencyDirectoryIsSeparateInode": true,
+  "nodeVersion": "v24.16.0",
+  "sourceBefore": [
+    {
+      "file": ".github/workflows/model-recovery.yml",
+      "expected": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "frozen": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "temporary": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "main": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "allMatch": true
+    },
+    {
+      "file": "desktop/electron/context-manager.ts",
+      "expected": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "frozen": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "temporary": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "main": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "allMatch": true
+    },
+    {
+      "file": "desktop/tests/main/compaction-completion.test.ts",
+      "expected": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "frozen": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "temporary": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "main": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "allMatch": true
+    },
+    {
+      "file": "desktop/tests/main/context-manager.test.ts",
+      "expected": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "frozen": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "temporary": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "main": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/adapters/claude.ts",
+      "expected": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "frozen": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "temporary": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "main": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/adapters/openai-responses.ts",
+      "expected": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "frozen": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "temporary": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "main": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/adapters/openai.ts",
+      "expected": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "frozen": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "temporary": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "main": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/runtime/compact-runner.ts",
+      "expected": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "frozen": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "temporary": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "main": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/runtime/compaction-response.ts",
+      "expected": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "frozen": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "temporary": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "main": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/runtime/model-capabilities.ts",
+      "expected": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "frozen": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "temporary": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "main": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "allMatch": true
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-owner.ts",
+      "expected": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "frozen": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "temporary": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "main": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/adapters/openai.test.ts",
+      "expected": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "frozen": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "temporary": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "main": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/compact-runner.test.ts",
+      "expected": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "frozen": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "temporary": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "main": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/compaction-completion.test.ts",
+      "expected": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "frozen": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "temporary": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "main": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "allMatch": true
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "expected": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "frozen": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "temporary": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "main": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "allMatch": true
+    }
+  ],
+  "all15MatchBefore": true,
+  "sourceTypesBefore": "8413bb67e4f57a5a9b41af969d018982db63e245f5cedd87f18394c6db6bad69"
+}

@@ -1,0 +1,16 @@
+{
+  "label": "baseline-testcompile-cloned",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "npm",
+    "run",
+    "test:sandbox:build"
+  ],
+  "startedAt": "2026-10-21T19:46:59.575916+00:00",
+  "runnerPid": 90989,
+  "pid": 91000,
+  "pgid": 91000,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:47:21.384999+00:00",
+  "reaped": true
+}

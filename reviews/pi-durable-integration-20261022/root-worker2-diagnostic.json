@@ -1,0 +1,8 @@
+{
+  "pid": 6497,
+  "pgid": 24448,
+  "scope": "read-only Vitest current-file diagnostic; own worker, inspector closed afterwards",
+  "returncode": 0,
+  "stdout": "{\"id\":2,\"result\":{\"result\":{\"type\":\"string\",\"value\":\"{\\\"file\\\":\\\"<worktree>/tests/runtime/intent-delegation/verification-host-controller.test.ts\\\",\\\"test\\\":\\\"Intent signed controller actual material and independent recipe: receiver-self\\\",\\\"type\\\":\\\"test\\\",\\\"testFile\\\":\\\"<worktree>/tests/runtime/intent-delegation/verification-host-controller.test.ts\\\"}\"}}}\n",
+  "stderr": ""
+}

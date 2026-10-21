@@ -1,0 +1,9 @@
+{
+  "pid": 69475,
+  "pgid": 69441,
+  "scope": "read-only own worker diagnostic",
+  "returncode": 0,
+  "stdout": "{\"id\":2,\"result\":{\"result\":{\"type\":\"string\",\"value\":\"{\\\"file\\\":\\\"<worktree>/tests/runtime/verification/intent-publication-dependencies.test.ts\\\",\\\"test\\\":\\\"foreign subject and caller-selected inventory cannot redefine original native dependencies\\\",\\\"type\\\":\\\"test\\\",\\\"testFile\\\":\\\"<worktree>/tests/runtime/verification/intent-publication-dependencies.test.ts\\\",\\\"now\\\":1792613049574,\\\"result\\\":{\\\"state\\\":\\\"run\\\",\\\"startTime\\\":1792613010588,\\\"retryCount\\\":0,\\\"repeatCount\\\":0},\\\"timeout\\\":40000}\"}}}\n",
+  "stderr": "",
+  "remainingInspectorListeners": ""
+}

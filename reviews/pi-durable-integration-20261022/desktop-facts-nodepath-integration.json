@@ -1,0 +1,20 @@
+{
+  "label": "desktop-facts-nodepath-integration",
+  "cwd": "<worktree>/desktop",
+  "argv": [
+    "env",
+    "NODE_PATH=<worktree>/node_modules",
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/desktop-post-seal-facts.bdd.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:54:35.832511+00:00",
+  "runnerPid": 28964,
+  "pid": 28972,
+  "pgid": 28972,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:54:42.417904+00:00",
+  "reaped": true
+}

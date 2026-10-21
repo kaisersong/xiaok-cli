@@ -1,0 +1,37 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/workflow-read-port-close-reentry.test.ts [ tests/main/workflow-read-port-close-reentry.test.ts ]
+TypeError: The URL must be of scheme file
+ ❯ tests/support/owned-workflow-network-fixture.mjs:3:65
+      1| import {fileURLToPath} from 'node:url';
+      2| import {resolve} from 'node:path';
+      3| const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileUR…
+       |                                                                 ^
+      4| const siblingRoot=resolve(repositoryRoot,'..');
+      5| import assert from 'node:assert/strict';
+ ❯ tests/main/workflow-read-port-close-reentry.test.ts:6:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/main/workflow-read-port-provenance.test.ts [ tests/main/workflow-read-port-provenance.test.ts ]
+TypeError: The URL must be of scheme file
+ ❯ tests/support/owned-workflow-network-fixture.mjs:3:65
+      1| import {fileURLToPath} from 'node:url';
+      2| import {resolve} from 'node:path';
+      3| const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileUR…
+       |                                                                 ^
+      4| const siblingRoot=resolve(repositoryRoot,'..');
+      5| import assert from 'node:assert/strict';
+ ❯ tests/main/workflow-read-port-provenance.test.ts:6:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  no tests
+   Start at  03:57:22
+   Duration  541ms (transform 73ms, setup 159ms, collect 0ms, tests 0ms, environment 563ms, prepare 50ms)

@@ -1,0 +1,3594 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+ ❯ tests/main/loop-assistant-consumption.test.ts (35 tests | 4 failed) 8879ms
+   ✓ raw protected beginAccept cannot use a cached projection as current authority 223ms
+   ✓ raw protected finalize cannot turn a historical accepting row into accepted 158ms
+   ✓ fixed host performs fresh checks before and after target write  304ms
+   ✓ existing target still requires second fresh read before finalization  322ms
+   ✓ persisted knowledge target survives a genuine DB close/reopen and never changes collection  451ms
+   ✓ offline recovery retains accepting without rewriting the original target  367ms
+   ✓ fresh acceptance rejects agent before target effects  304ms
+   ✓ fresh acceptance rejects scheduler before target effects 293ms
+   ✓ scheduler cannot invent an acceptance intent from projected pending 218ms
+   ✓ real SQL ignore rolls back promotion and original intent 198ms
+   ✓ real SQL tail-member rolls back promotion and original intent 191ms
+   ✓ real SQL tail-config rolls back promotion and original intent 166ms
+   ✓ genuine promotion ticket burns on the wrong store before original retry 227ms
+   ✓ close waits for actual held target save and never finalizes its late result 265ms
+   ✓ readAssistantOutput returns frozen full verified body and rejects remote failure 251ms
+   ✓ forged accepted decision without original promotion intent cannot enter fresh reads 158ms
+   ✓ raw markFailed cannot strand a protected durable accepting intent 220ms
+   ✓ project memory with no actual cwd fails before persisting an unrecoverable intent 243ms
+   × actual KB source written before lost finalize is reconciled through two fresh reads after both DBs reopen 290ms
+     → A valid request source is required to mutate Knowledge
+   ✓ project recovery uses the captured original cwd even when Main project mapping changes  329ms
+   ✓ reject needs explicit user source and cannot retire an in-flight protected intent 159ms
+   ✓ already accepted idempotent read still requires current publication and cannot run target twice  316ms
+   ✓ final SQLite UPDATE cancellation rolls back accepted state and preserves real target intent 254ms
+   ✓ post-target admission cannot mutate original member or durable intent then finalize it 275ms
+   ✓ getters are rejected without execution or a persisted intent 229ms
+   ✓ actual Main service keeps the original target writer held through shutdown and resumes the same intent  2270ms
+   × actual ordinary target save followed by profile protection retains the original durable intent 46ms
+     → A valid request source is required to mutate Knowledge
+   × ordinary fixed host preserves original knowledge selection through actual DB reopen 8ms
+     → A valid request source is required to mutate Knowledge
+   ✓ actual ordinary Store rejects raw beginAccept so no caller can create a new unjournaled accepting row 40ms
+   × actual ordinary Controller without fixed Main host rejects before the target write 8ms
+     → A valid request source is required to mutate Knowledge
+   ✓ ordinary raw accepted cannot bypass the same original intent boundary 16ms
+   ✓ ordinary raw accept_failed cannot bypass the same original intent boundary 7ms
+   ✓ ordinary interrupted target effect recovers the exact durable intent after actual DB reopen 45ms
+   ✓ ordinary first intent rolls back when SQL tail mutates the original run 14ms
+   ✓ ordinary original run cannot be replaced during a target effect before the second write 10ms
+ ❯ tests/main/e2e-dynamic-workflow-script.test.ts (1 test | 1 failed) 4133ms
+   × e2e: dynamic workflow script through KSwarm, broker, and desktop runtime bridge > creates dynamic agent nodes and completes the script-generated workflow run 4132ms
+     → AssertionError: expected [ …(2) ] to deeply equal [ …(2) ]
+    at <master-baseline>/desktop/tests/main/e2e-dynamic-workflow-script.test.ts:434:81
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file://<worktree>/desktop/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+--- desktop bridge seen prompts ---
+[
+  "读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。",
+  "基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。",
+  "从引用、来源、日期和可追溯性角度复核证据链。",
+  "从结构、格式、目标文件类型和交付合同角度复核最终产物。",
+  "综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过。输出是否可交付、必须修复项、证据引用和下一步动作。"
+]
+--- intent-broker replay ---
+{
+  "items": [
+    {
+      "eventId": 1,
+      "intentId": "kswarm-hub-readiness_probe-1792612581330-4and",
+      "kind": "readiness_probe",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "agentId": "xiaok-po",
+        "role": "project_owner",
+        "targetAgentId": "xiaok-po",
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 2,
+      "intentId": "xiaok-desktop-readiness_probe_result-1792612581334-gou40f",
+      "kind": "readiness_probe_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+        "agentId": "xiaok-po",
+        "ok": true,
+        "runtimeSource": "desktop-agent-runtime",
+        "capabilities": [
+          "project_diagnosis",
+          "writing"
+        ],
+        "outputCapabilities": [],
+        "checkedAt": 1792612581334,
+        "participantId": "xiaok-po",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 3,
+      "intentId": "kswarm-hub-readiness_probe-1792612581338-70gj",
+      "kind": "readiness_probe",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "agentId": "xiaok-worker",
+        "role": "worker",
+        "targetAgentId": "xiaok-worker",
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 4,
+      "intentId": "xiaok-desktop-readiness_probe_result-1792612581342-vuucw9",
+      "kind": "readiness_probe_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+        "agentId": "xiaok-worker",
+        "ok": true,
+        "runtimeSource": "desktop-agent-runtime",
+        "capabilities": [
+          "project_diagnosis",
+          "writing"
+        ],
+        "outputCapabilities": [],
+        "checkedAt": 1792612581342,
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 5,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612581373-pfip",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-1",
+        "nodeTitle": "交付物盘点",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-1-1",
+        "input": {
+          "prompt": "读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。",
+          "label": "交付物盘点",
+          "options": {
+            "label": "交付物盘点",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-1",
+            "phaseTitle": "读取交付物",
+            "nodeId": "script-agent-1"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 6,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612581376-agcgw1",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-1",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-1-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 7,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612581378-8autd0",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-1",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-1-1",
+        "output": {
+          "summary": "报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。",
+          "prompt": "读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。",
+          "evidenceRefs": [
+            "requirements.md: 用户要求交付正式报告"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612581378
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 8,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612582392-ycp9",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-2",
+        "nodeTitle": "事实复核",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-2-1",
+        "input": {
+          "prompt": "基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。",
+          "label": "事实复核",
+          "options": {
+            "label": "事实复核",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-2",
+            "phaseTitle": "并行复核",
+            "nodeId": "script-agent-2"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 9,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612582401-4x61",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-3",
+        "nodeTitle": "证据复核",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-3-1",
+        "input": {
+          "prompt": "从引用、来源、日期和可追溯性角度复核证据链。",
+          "label": "证据复核",
+          "options": {
+            "label": "证据复核",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-2",
+            "phaseTitle": "并行复核",
+            "nodeId": "script-agent-3"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 10,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612582405-25td8s",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-2",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-2-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 11,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612582412-ivbliv",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-3",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-3-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 12,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612582405-t23w",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-4",
+        "nodeTitle": "格式与合同复核",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-4-1",
+        "input": {
+          "prompt": "从结构、格式、目标文件类型和交付合同角度复核最终产物。",
+          "label": "格式与合同复核",
+          "options": {
+            "label": "格式与合同复核",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-2",
+            "phaseTitle": "并行复核",
+            "nodeId": "script-agent-4"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 13,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612582435-6h6w1i",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-3",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-3-1",
+        "output": {
+          "summary": "证据复核通过",
+          "prompt": "从引用、来源、日期和可追溯性角度复核证据链。",
+          "evidenceRefs": [
+            "sources.md: 引用日期可追溯"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612582435
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 14,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612582446-a157q2",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-4",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-4-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 15,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612582425-ay84lr",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-2",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-2-1",
+        "output": {
+          "summary": "事实复核通过",
+          "prompt": "基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。",
+          "evidenceRefs": [
+            "sources.md: 事实来源已核对"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612582425
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 16,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612582448-zocuwb",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-4",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-4-1",
+        "output": {
+          "summary": "格式合同复核通过",
+          "prompt": "从结构、格式、目标文件类型和交付合同角度复核最终产物。",
+          "evidenceRefs": [
+            "contract.md: HTML/PDF 交付合同满足"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612582448
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 17,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612583466-s3k3",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-5",
+        "nodeTitle": "最终 gate 建议",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-5-1",
+        "input": {
+          "prompt": "综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过。输出是否可交付、必须修复项、证据引用和下一步动作。",
+          "label": "最终 gate 建议",
+          "options": {
+            "label": "最终 gate 建议",
+            "schema": {
+              "type": "object"
+            },
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-3",
+            "phaseTitle": "归约结论",
+            "nodeId": "script-agent-5"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:23",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 18,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612583483-0ka3e6",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-5",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-5-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:23",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 19,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612583495-0ktb80",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-5",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-5-1",
+        "output": {
+          "summary": "报告通过 final gate，HTML/PDF 产物已生成。",
+          "prompt": "综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过。输出是否可交付、必须修复项、证据引用和下一步动作。",
+          "artifacts": [
+            {
+              "path": "artifacts/workflow-report.html",
+              "label": "HTML 报告",
+              "type": "report_html",
+              "mimeType": "text/html"
+            },
+            {
+              "path": "artifacts/workflow-report.pdf",
+              "label": "PDF 报告",
+              "type": "pdf",
+              "mimeType": "application/pdf"
+            }
+          ],
+          "evidenceRefs": [
+            "artifacts/workflow-report.html: E2E HTML 交付物",
+            "artifacts/workflow-report.pdf: E2E PDF 交付物"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612583495
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:23",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    }
+  ]
+}
+--- intent-broker logs ---
+intent-broker bridge sync: codex=updated, claude-code=ok, xiaok-code=ok, qodercli=updated
+intent-broker persisted session refresh: 0 session(s)
+intent-broker listening on http://127.0.0.1:57135
+intent-broker WebSocket: ws://127.0.0.1:57135/ws
+intent-broker db: /var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/intent-broker.db
+intent-broker config: /var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/intent-broker.config.json
+intent-broker local config: /var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/intent-broker.local.json
+--- kswarm logs ---
+[AgentStore] Seed: ensured desktop xiaok PO+Worker agents
+[KSwarm] KSwarm API server started on port 57145 {}
+[kswarm] registered as kswarm
+[kswarm] WebSocket connected
+[KSwarm] Connected to intent-broker {"url":"http://127.0.0.1:57135"}
+[KSwarm] Failed to ensure project PO runtime {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","poAgent":"xiaok-po","error":"not_pooled_agent"}
+[KSwarm] Readiness probe result received {"fromParticipantId":"xiaok-desktop","probeId":"probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330","ok":true,"reason":null}
+[KSwarm] Readiness probe result received {"fromParticipantId":"xiaok-desktop","probeId":"probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338","ok":true,"reason":null}
+[KSwarm] Project created: E2E 动态脚本工作流 {"id":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","po":"xiaok-po","requestedPo":"xiaok-po","poReassigned":false,"workspace":"/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspa
+[KSwarm] Human added 1 tasks to project proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41 {}
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-1"}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-1","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node progress: script-agent-1 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-1 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-2"}
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-3"}
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-4"}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-2","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-3","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node progress: script-agent-2 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node progress: script-agent-3 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-4","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node result accepted: script-agent-3 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node progress: script-agent-4 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-2 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-4 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-5"}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-5","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node progress: script-agent-5 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-5 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+19:56:21 📁 project.created E2E 动态脚本工作流
+  19:56:21 • tasks.added_by_human
+  19:56:21 • workflow.proposal.created
+  19:56:21 • workflow.run.started
+  19:56:21 • workflow.script.node.created
+  19:56:21 • workflow.node.dispatched
+  19:56:21 • workflow.node.output_received
+  19:56:22 • workflow.script.parallel_group.created
+  19:56:22 • workflow.script.node.created
+  19:56:22 • workflow.node.dispatched
+  19:56:22 • workflow.script.node.created
+  19:56:22 • workflow.node.dispatched
+  19:56:22 • workflow.script.node.created
+  19:56:22 • workflow.node.dispatched
+  19:56:22 • workflow.node.output_received
+  19:56:22 • workflow.node.output_received
+  19:56:22 • workflow.node.output_received
+  19:56:23 • workflow.script.node.created
+  19:56:23 • workflow.node.dispatched
+  19:56:23 • workflow.node.output_received
+  19:56:24 ✓ task.done
+  19:56:24 • final_deliverable.candidate_registered
+  19:56:24 • workflow.run.completed
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > removes live progress on task_terminal completed
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=health
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > removes live progress on task_terminal completed
+[ChatShell] Replaying task=health prompt="work" status=running events=0
+[ChatShell] Replayed task=health → 1 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > removes live progress on task_terminal failed
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=health
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > removes live progress on task_terminal failed
+[ChatShell] Replaying task=health prompt="work" status=running events=0
+[ChatShell] Replayed task=health → 1 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > removes live progress on task_terminal cancelled
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=health
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > removes live progress on task_terminal cancelled
+[ChatShell] Replaying task=health prompt="work" status=running events=0
+[ChatShell] Replayed task=health → 1 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > does not replay stale running progress from a completed snapshot
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=done
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > does not replay stale running progress from a completed snapshot
+[ChatShell] Replaying task=done prompt="work" status=completed events=4
+[ChatShell] Replayed task=done → 3 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > renders main-owned cleanup state through the real task subscription
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=health
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > renders main-owned cleanup state through the real task subscription
+[ChatShell] Replaying task=health prompt="work" status=running events=0
+[ChatShell] Replayed task=health → 1 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > the real parent reopens a retained Canvas after the surface close button through its existing request id even when canvasOpen is already true
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > an explicitly collapsed surface at 899 px stays collapsed after the next real Canvas open/close instead of restoring an older Task selection
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > an explicitly collapsed surface at 900 px stays collapsed after the next real Canvas open/close instead of restoring an older Task selection
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > closes the canvas when switching to another session and reopens it when returning
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > closes the canvas when switching to another session and reopens it when returning
+[ChatShell] Loading thread=thread-B title="thread-B" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > closes the canvas when switching to another session and reopens it when returning
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > keeps the canvas closed for a session that never opened it
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > keeps the canvas closed for a session that never opened it
+[ChatShell] Loading thread=thread-B title="thread-B" currentTaskId=none
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > passes artifact edit shortcut requests through to CanvasPanel
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=desktop-task-7
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > passes artifact edit shortcut requests through to CanvasPanel
+[ChatShell] Replaying task=desktop-task-7 prompt="work" status=running events=0
+[ChatShell] Replayed task=desktop-task-7 → 1 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > keeps each historical artifact bound to the task that produced it
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=task-B
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > keeps each historical artifact bound to the task that produced it
+[ChatShell] Replaying task=task-A prompt="prompt-task-A" status=completed events=4
+[ChatShell] Replayed task=task-A → 4 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > keeps each historical artifact bound to the task that produced it
+[ChatShell] Replaying task=task-B prompt="prompt-task-B" status=completed events=4
+[ChatShell] Replayed task=task-B → 4 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell narration formatting through production handlers > keeps chunks contiguous and separates tool rounds for live
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=narration
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell narration formatting through production handlers > keeps chunks contiguous and separates tool rounds for live
+[ChatShell] Replaying task=narration prompt="work" status=running events=0
+[ChatShell] Replayed task=narration → 1 msgs, addPrompt=true
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell narration formatting through production handlers > keeps chunks contiguous and separates tool rounds for replay
+[ChatShell] Loading thread=thread-A title="thread-A" currentTaskId=narration
+
+stdout | tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell narration formatting through production handlers > keeps chunks contiguous and separates tool rounds for replay
+[ChatShell] Replaying task=narration prompt="work" status=running events=5
+[ChatShell] Replayed task=narration → 2 msgs, addPrompt=true
+
+ ❯ tests/renderer/chat-shell-canvas-session.test.tsx (14 tests | 1 failed) 1347ms
+   ✓ ChatShell canvas is scoped per session > removes live progress on task_terminal completed 33ms
+   ✓ ChatShell canvas is scoped per session > removes live progress on task_terminal failed 10ms
+   ✓ ChatShell canvas is scoped per session > removes live progress on task_terminal cancelled 8ms
+   × ChatShell canvas is scoped per session > does not replay stale running progress from a completed snapshot 1013ms
+     → expected "spy" to be called with arguments: [ 'done' ]
+
+Received:
+
+  1st spy call:
+
+  [
+    "done",
++   "thread-A",
+  ]
+
+
+Number of calls: 1
+
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <div
+        class="chat-right-layout"
+        data-thread-id="thread-A"
+      >
+        <div
+          class="chat-right-main"
+          data-testid="chat-right-main"
+          tabindex="-1"
+        >
+          <div
+            aria-live="polite"
+            class="px-4 py-2 text-xs text-muted-foreground"
+          >
+            <button
+              class="underline"
+              type="button"
+            >
+              为本次任务启用观测记忆
+            </button>
+            <span>
+              此任务未启用观测记忆
+            </span>
+          </div>
+          <div>
+            <div
+              data-testid="narration-output"
+            >
+              preserved response
+            </div>
+            <div
+              data-testid="health-progress"
+            />
+            <div
+              data-testid="canvas-open"
+            >
+              closed
+            </div>
+            <button
+              type="button"
+            >
+              toggle-canvas
+            </button>
+            <button
+              type="button"
+            >
+              edit-artifact
+            </button>
+          </div>
+        </div>
+        <section
+          aria-label="SubAgent"
+          class="chat-right-panel"
+          data-testid="chat-right-panel"
+          hidden=""
+          role="complementary"
+          style="width: 360px;"
+        >
+          <div
+            class="chat-right-tabs"
+            role="tablist"
+          >
+            <button
+              aria-controls="right-thread-A-task"
+              aria-selected="false"
+              disabled=""
+              id="right-thread-A-task-tab"
+              role="tab"
+              tabindex="-1"
+              type="button"
+            >
+              任务
+            </button>
+            <button
+              aria-controls="right-thread-A-canvas"
+              aria-selected="false"
+              disabled=""
+              id="right-thread-A-canvas-tab"
+              role="tab"
+              tabindex="-1"
+              type="button"
+            >
+              画布
+            </button>
+            <button
+              aria-label="收起侧栏"
+              class="chat-right-close"
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            aria-labelledby="right-thread-A-task-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-task"
+            inert=""
+            role="tabpanel"
+          />
+          <div
+            aria-labelledby="right-thread-A-agents-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-agents"
+            inert=""
+            role="tabpanel"
+          >
+            <p
+              class="p-4 text-sm"
+            >
+              SubAgent 状态连接不可用
+            </p>
+          </div>
+          <div
+            aria-labelledby="right-thread-A-files-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-files"
+            inert=""
+            role="tabpanel"
+          />
+          <div
+            aria-labelledby="right-thread-A-instructions-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-instructions"
+            inert=""
+            role="tabpanel"
+          />
+          <div
+            aria-labelledby="right-thread-A-canvas-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-canvas"
+            inert=""
+            role="tabpanel"
+          />
+        </section>
+      </div>
+    </div>
+  </body>
+</html>
+   ✓ ChatShell canvas is scoped per session > renders main-owned cleanup state through the real task subscription 6ms
+   ✓ ChatShell canvas is scoped per session > the real parent reopens a retained Canvas after the surface close button through its existing request id even when canvasOpen is already true 74ms
+   ✓ ChatShell canvas is scoped per session > an explicitly collapsed surface at 899 px stays collapsed after the next real Canvas open/close instead of restoring an older Task selection 59ms
+   ✓ ChatShell canvas is scoped per session > an explicitly collapsed surface at 900 px stays collapsed after the next real Canvas open/close instead of restoring an older Task selection 29ms
+   ✓ ChatShell canvas is scoped per session > closes the canvas when switching to another session and reopens it when returning 32ms
+   ✓ ChatShell canvas is scoped per session > keeps the canvas closed for a session that never opened it 16ms
+   ✓ ChatShell canvas is scoped per session > passes artifact edit shortcut requests through to CanvasPanel 10ms
+   ✓ ChatShell canvas is scoped per session > keeps each historical artifact bound to the task that produced it 22ms
+   ✓ ChatShell narration formatting through production handlers > keeps chunks contiguous and separates tool rounds for live 26ms
+   ✓ ChatShell narration formatting through production handlers > keeps chunks contiguous and separates tool rounds for replay 8ms
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > main denial preserves actual input and attachment=false, with no automatic resubmit
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stderr | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > main denial preserves actual input and attachment=false, with no automatic resubmit
+[2026-10-21T19:56:28.360Z] [error] [ChatShell] handleSubmit error {"message":"multi_agent_permission_revoked","raw":"multi_agent_permission_revoked"}
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > main denial preserves actual input and attachment=true, with no automatic resubmit
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stderr | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > main denial preserves actual input and attachment=true, with no automatic resubmit
+[2026-10-21T19:56:28.387Z] [error] [ChatShell] handleSubmit error {"message":"multi_agent_permission_revoked","raw":"multi_agent_permission_revoked"}
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > a late denial preserves a newer draft typed during the actual pending submit
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stderr | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > a late denial preserves a newer draft typed during the actual pending submit
+[2026-10-21T19:56:28.446Z] [error] [ChatShell] handleSubmit error {"message":"multi_agent_permission_revoked","raw":"multi_agent_permission_revoked"}
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > A late failure after navigation cannot append an error or clear B draft
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > A late failure after navigation cannot append an error or clear B draft
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > ordinary successful admission still clears the submitted draft once
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > a success from unmounted A cannot clear the replacement B input
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual ChatShell and ChatInput retain rejected drafts > a success from unmounted A cannot clear the replacement B input
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > the real parent swallowing a denied create keeps objective and criterion editable and visible
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > late Goal create reject cannot populate or disable a new thread form
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > late Goal create reject cannot populate or disable a new thread form
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > late Goal create resolve cannot populate or disable a new thread form
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > late Goal create resolve cannot populate or disable a new thread form
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > late Goal create unmount cannot populate or disable a new thread form
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > same-thread ACK success keeps its one real subscription and binds the accepted task
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > A late ACK resolve cannot replace B task, error, draft or subscription
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > A late ACK resolve cannot replace B task, error, draft or subscription
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > A late ACK reject cannot replace B task, error, draft or subscription
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > A late ACK reject cannot replace B task, error, draft or subscription
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > scope navigate releases its subscribed observer while ACK never settles, without cancelling execution
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > scope navigate releases its subscribed observer while ACK never settles, without cancelling execution
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > scope unmount releases its subscribed observer while ACK never settles, without cancelling execution
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > a current A unknown ACK recovery read that resolves after navigation cannot populate B Goal or task state
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > a current A unknown ACK recovery read that resolves after navigation cannot populate B Goal or task state
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > same-thread delayed update still subscribes before sending its only attachment ACK
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > a late A thread update resolve cannot ACK an attachment after navigation to B
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > a late A thread update resolve cannot ACK an attachment after navigation to B
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > a late A thread update reject cannot ACK an attachment after navigation to B
+[ChatShell] Loading thread=A title="A" currentTaskId=none
+
+stdout | tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 real attachment helper ACK keeps the original presentation scope > a late A thread update reject cannot ACK an attachment after navigation to B
+[ChatShell] Loading thread=B title="B" currentTaskId=none
+
+ ❯ tests/renderer/workspace-execution-drafts.bdd.test.tsx (20 tests | 1 failed) 726ms
+   ✓ W12 actual ChatShell and ChatInput retain rejected drafts > main denial preserves actual input and attachment=false, with no automatic resubmit 53ms
+   ✓ W12 actual ChatShell and ChatInput retain rejected drafts > main denial preserves actual input and attachment=true, with no automatic resubmit 67ms
+   ✓ W12 actual ChatShell and ChatInput retain rejected drafts > a late denial preserves a newer draft typed during the actual pending submit 16ms
+   ✓ W12 actual ChatShell and ChatInput retain rejected drafts > A late failure after navigation cannot append an error or clear B draft 48ms
+   ✓ W12 actual ChatShell and ChatInput retain rejected drafts > ordinary successful admission still clears the submitted draft once 12ms
+   ✓ W12 actual ChatShell and ChatInput retain rejected drafts > a success from unmounted A cannot clear the replacement B input 26ms
+   × W12 actual Goal form awaits authoritative acceptance > the real parent swallowing a denied create keeps objective and criterion editable and visible 40ms
+     → Found multiple elements with the role "alert"
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+<span
+  class="text-xs text-[var(--c-status-error-text)]"
+  role="alert"
+>
+  模型设置暂时不可用，请稍后重试。
+</span>
+
+Ignored nodes: comments, script, style
+<p
+  class="mt-2 text-[var(--c-danger)]"
+  role="alert"
+>
+  multi_agent_permission_revoked
+</p>
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <button>
+      thread B
+    </button>
+    <div
+      class="chat-right-layout"
+      data-thread-id="A"
+    >
+      <div
+        class="chat-right-main"
+        data-testid="chat-right-main"
+        tabindex="-1"
+      >
+        <div
+          aria-live="polite"
+          class="px-4 py-2 text-xs text-muted-foreground"
+        >
+          <button
+            class="underline"
+            type="button"
+          >
+            为本次任务启用观测记忆
+          </button>
+        </div>
+        <div
+          class="w-full relative"
+        >
+          <div
+            class=""
+            role="presentation"
+            style="border-width: 0.5px; border-style: solid; border-color: var(--c-input-border-color); border-radius: 20px; box-shadow: var(--c-input-shadow); transition: border-color 0.2s ease, box-shadow 0.2s ease; background: var(--c-bg-card); cursor: default;"
+          >
+            <form
+              style="padding: 10px 12px 8px;"
+            >
+              <div
+                style="position: relative; margin-bottom: 8px;"
+              >
+                <textarea
+                  aria-label="draft"
+                  class="w-full resize-none bg-transparent outline-none"
+                  placeholder="draft"
+                  rows="1"
+                  style="font-family: inherit; font-size: 16px; font-weight: 310; line-height: 1.45; color: var(--c-text-primary); letter-spacing: -0.16px; max-height: 220px; overflow-y: auto; height: 0px;"
+                >
+                  original draft
+                </textarea>
+              </div>
+              <div
+                class="flex items-center"
+                style="gap: 8px; min-height: 32px; width: 100%; min-width: 0px;"
+              >
+                <button
+                  aria-label="添加附件"
+                  class="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
+                  type="button"
+                >
+                  <svg
+                    aria-hidden="true"
+                    class="lucide lucide-plus"
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M5 12h14"
+                    />
+                    <path
+                      d="M12 5v14"
+                    />
+                  </svg>
+                </button>
+                <button
+                  aria-label="切换默认模型"
+                  class="flex h-[26px] max-w-[180px] items-center gap-1 rounded-md px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  style="border: 0.5px solid var(--c-border-subtle); background: transparent; color: var(--c-text-secondary); transition: border-color 0.15s, background-color 0.15s;"
+                  title="切换默认模型"
+                  type="button"
+                >
+                  <svg
+                    aria-hidden="true"
+                    class="lucide lucide-cpu shrink-0 opacity-70"
+                    fill="none"
+                    height="12"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="12"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M12 20v2"
+                    />
+                    <path
+                      d="M12 2v2"
+                    />
+                    <path
+                      d="M17 20v2"
+                    />
+                    <path
+                      d="M17 2v2"
+                    />
+                    <path
+                      d="M2 12h2"
+                    />
+                    <path
+                      d="M2 17h2"
+                    />
+                    <path
+                      d="M2 7h2"
+                    />
+                    <path
+                      d="M20 12h2"
+                    />
+                    <path
+                      d="M20 17h2"
+                    />
+                    <path
+                      d="M20 7h2"
+                    />
+                    <path
+                      d="M7 20v2"
+                    />
+                    <path
+                      d="M7 2v2"
+                    />
+                    <rect
+                      height="16"
+                      rx="2"
+                      width="16"
+                  ...
+   ✓ W12 actual Goal form awaits authoritative acceptance > pending double click submits once; a returned void is not an accepted Goal; only real new Goal closes the form 14ms
+   ✓ W12 actual Goal form awaits authoritative acceptance > late Goal create reject cannot populate or disable a new thread form 48ms
+   ✓ W12 actual Goal form awaits authoritative acceptance > late Goal create resolve cannot populate or disable a new thread form 51ms
+   ✓ W12 actual Goal form awaits authoritative acceptance > late Goal create unmount cannot populate or disable a new thread form 13ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > same-thread ACK success keeps its one real subscription and binds the accepted task 19ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > A late ACK resolve cannot replace B task, error, draft or subscription 49ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > A late ACK reject cannot replace B task, error, draft or subscription 51ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > scope navigate releases its subscribed observer while ACK never settles, without cancelling execution 32ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > scope unmount releases its subscribed observer while ACK never settles, without cancelling execution 16ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > a current A unknown ACK recovery read that resolves after navigation cannot populate B Goal or task state 50ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > same-thread delayed update still subscribes before sending its only attachment ACK 28ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > a late A thread update resolve cannot ACK an attachment after navigation to B 44ms
+   ✓ W12 real attachment helper ACK keeps the original presentation scope > a late A thread update reject cannot ACK an attachment after navigation to B 47ms
+stdout | tests/main/memory-ipc-registry.test.ts > complete16 Memory domain through real registration and preload
+MEMORY_IPC_ACTUAL_BACKEND layered
+
+stderr | tests/main/memory-ipc-registry.test.ts > complete16 Memory domain through real registration and preload > rejects malformed update before the existing delete-then-save sequence
+[memory] ONNX 向量引擎不可用且未配置 memory.embedding.provider=api，向量检索已禁用（关键词检索兜底）
+
+ ❯ tests/main/memory-ipc-registry.test.ts (42 tests | 1 failed) 595ms
+   × complete16 Memory domain through real registration and preload > registers exactly complete16 at round4 and preserves old28 single metadata 6ms
+     → expected [ { …(8) }, { …(8) }, { …(8) }, …(27) ] to have a length of 18 but got 30
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for listMemories 1ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for createMemory 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for updateMemory 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for deleteMemory 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for importMemories 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryStats 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryCompact 1ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryPersonaTraits 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryListLayer 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryDeleteEntry 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryClearAll 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memoryGetModelId 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for memorySetModelId 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for getEmbeddingModels 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for downloadEmbeddingModel 0ms
+   ✓ complete16 Memory domain through real registration and preload > has a complete typed output schema for setEmbeddingModel 0ms
+   ✓ complete16 Memory domain through real registration and preload > passes all consumed triple values and retains nullish defaults, omissions and unused extras 1ms
+   ✓ complete16 Memory domain through real registration and preload > passes id and layer independently including the original omitted-layer behavior 1ms
+   ✓ complete16 Memory domain through real registration and preload > rejects malformed update before the existing delete-then-save sequence  341ms
+   ✓ complete16 Memory domain through real registration and preload > never forwards spoofed source/authority into records and preserves fixed user/global ownership 1ms
+   ✓ complete16 Memory domain through real registration and preload > rejects malformed consumed dual/triple values before store mutation/read 1ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of listMemories 1ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of memoryStats 0ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of memoryCompact 0ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of memoryPersonaTraits 0ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of memoryClearAll 14ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of memoryGetModelId 0ms
+   ✓ complete16 Memory domain through real registration and preload > preserves the old ignored-payload ABI of getEmbeddingModels 1ms
+   ✓ complete16 Memory domain through real registration and preload > covers all four real producer metadata shapes, nullable SQLite type and optional createdAt 0ms
+   ✓ complete16 Memory domain through real registration and preload > rejects unknown/malformed layer DTO/meta in development 0ms
+   ✓ complete16 Memory domain through real registration and preload > rejects malformed real model DTO/config dependencies in development 0ms
+   ✓ complete16 Memory domain through real registration and preload > rejects malformed stats/persona/delete receiver outputs in development 0ms
+   ✓ complete16 Memory domain through real registration and preload > rejects unknown/malformed layer DTO/meta in production 1ms
+   ✓ complete16 Memory domain through real registration and preload > rejects malformed real model DTO/config dependencies in production 1ms
+   ✓ complete16 Memory domain through real registration and preload > rejects malformed stats/persona/delete receiver outputs in production 1ms
+   ✓ complete16 Memory domain through real registration and preload > retains model null/default toggles and direct config producer state 2ms
+   ✓ complete16 Memory domain through real registration and preload > drives the real owner create/list/update/delete/import persistence producer through listeners 10ms
+   ✓ complete16 Memory domain through real registration and preload > connects all16 typed/CJS consumer methods to their actual listeners without model downloads 87ms
+   ✓ complete16 Memory domain through real registration and preload > keeps shutdown ahead of tuple parsing and releases every token 0ms
+   ✓ actual generic registrar tuple opt-in and unchanged default single > passes real2 and3 tuple values with event identity and exact parsed order 0ms
+   ✓ actual generic registrar tuple opt-in and unchanged default single > does not let a payload choose tuple mode or change the previous ignored-extra ABI 0ms
+ ❯ tests/renderer/desktop-settings-voice-pane.test.tsx (2 tests | 1 failed) 206ms
+   ✓ DesktopSettings voice pane > renders voice settings and saves online ASR providers 162ms
+   × DesktopSettings voice pane > shows speech model download status in voice settings 43ms
+     → Unable to find an element with the text: 语音识别模型. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--c-bg-page)]"
+    >
+      <div
+        class="flex w-[200px] shrink-0 flex-col overflow-y-auto"
+        style="border-right: 0.5px solid var(--c-border); padding-top: 12px;"
+      >
+        <div
+          class="p-3"
+        >
+          <button
+            class="flex h-[36px] w-full items-center gap-2 rounded-lg px-3 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              class="lucide lucide-chevron-left"
+              fill="none"
+              height="16"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="m15 18-6-6 6-6"
+              />
+            </svg>
+            <span>
+              返回
+            </span>
+          </button>
+        </div>
+        <div
+          class="px-3"
+        >
+          <div
+            class="flex flex-col gap-[2px]"
+          >
+            <button
+              class="flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-all text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-sliders-horizontal"
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M10 5H3"
+                />
+                <path
+                  d="M12 19H3"
+                />
+                <path
+                  d="M14 3v4"
+                />
+                <path
+                  d="M16 17v4"
+                />
+                <path
+                  d="M21 12h-9"
+                />
+                <path
+                  d="M21 19h-5"
+                />
+                <path
+                  d="M21 5h-7"
+                />
+                <path
+                  d="M8 10v4"
+                />
+                <path
+                  d="M8 12H3"
+                />
+              </svg>
+              <span>
+                通用设置
+              </span>
+            </button>
+            <button
+              class="flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-all text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-smartphone"
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  height="20"
+                  rx="2"
+                  ry="2"
+                  width="14"
+                  x="5"
+                  y="2"
+                />
+                <path
+                  d="M12 18h.01"
+                />
+              </svg>
+              <span>
+                移动端
+              </span>
+            </button>
+            <button
+              class="flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-all bg-[var(--c-accent)]/10 text-[var(--c-accent)]"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-mic"
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 19v3"
+                />
+                <path
+                  d="M19 10v2a7 7 0 0 1-14 0v-2"
+                />
+                <rect
+                  height="13"
+                  rx="3"
+         ...
+ ❯ tests/main/inherited-native-readonly.test.ts (14 tests | 1 failed) 166ms
+   ✓ actual catalog inherited grep cannot recover ordinary harmless -i config inside readonly execution 44ms
+   ✓ actual inherited sandbox rejection never invokes an external denial callback in readonly execution 8ms
+   ✓ actual readonly Owned registry rejects same-name-unknown without publishing owner or catalog state 6ms
+   ✓ actual readonly Owned registry rejects unsafe-companion without publishing owner or catalog state 9ms
+   ✓ genuine callback-free sandbox still allows in-policy native read and denies outside paths 11ms
+   ✓ late sandbox callback function after actual prepare cannot execute or grant readonly eligibility 7ms
+   ✓ late sandbox callback accessor after actual prepare cannot execute or grant readonly eligibility 7ms
+   ✓ late sandbox callback prototype after actual prepare cannot execute or grant readonly eligibility 9ms
+   ✓ unknown structural enforcer methods cannot acquire readonly authority from method names 7ms
+   ✓ late actual sandbox enforcer replacement after prepare cannot run a foreign function 8ms
+   ✓ late actual sandbox policy replacement after prepare cannot run a foreign function 5ms
+   ✓ late actual sandbox rule-data replacement after prepare cannot run a foreign function 4ms
+   × genuine native read grep glob observation forks retain all three permitted paths 17ms
+     → expected 'Error: The URL must be of scheme file…' to contain '/var/folders/qk/0759gskn77v_x22b9xqbk…'
+   ✓ ordinary catalog and sandbox preserve user config and executable denial callback behavior 22ms
+ ❯ tests/main/kb-integration.test.ts (13 tests | 13 failed) 174ms
+   × KB Integration — addSource pipeline > paste source ends up as parsed with chunks after inline processing 19ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — addSource pipeline > file source with extractable content ends up parsed 29ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — addSource pipeline > source without chunks stays pending (not falsely marked parsed) 3ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — Chinese search with jieba > finds Chinese content using jieba-segmented terms 23ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — Chinese search with jieba > matches partial Chinese terms 26ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — Chinese search with jieba > returns the explicit empty message when nothing matches 3ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — Chinese search with jieba > rejects weak single-term matches below the relevance floor 2ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — Chinese search with jieba > keeps a one-in-three match, which is above the floor 6ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — default collection and startup fix > creates default collection on first access 7ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — default collection and startup fix > startup fix updates pending sources that already have chunks 2ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — kb_search tool returns actual results > kb_search tool finds content in the same DB instance 3ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — kb_search tool returns actual results > kb_search returns "未找到" when no match 22ms
+     → A valid request source is required to mutate Knowledge
+   × KB Integration — kb_search tool returns actual results > kb_list_collections returns created collections 29ms
+     → A valid request source is required to mutate Knowledge
+ ❯ tests/renderer/capability-migration-snapshot.test.ts (7 tests | 1 failed) 10ms
+   ✓ preload API surface snapshot (Stage 5.5) > has a known set of flat preload API keys 0ms
+   ✓ preload API surface snapshot (Stage 5.5) > includes showSaveDialog and saveFile (pre-migration state) 1ms
+   ✓ preload API surface snapshot (Stage 5.5) > includes readFileContent (pre-migration state, currently takes filePath) 0ms
+   × preload API surface snapshot (Stage 5.5) > tracks the current legacy flat key count for regression 7ms
+     → expected [ 'acceptAssistantCandidate', …(320) ] to deeply equal [ 'acceptAssistantCandidate', …(309) ]
+   ✓ preload API surface snapshot (Stage 5.5) > showSaveDialog currently passes input directly (pre-capabilityToken) 0ms
+   ✓ preload API surface snapshot (Stage 5.5) > saveFile currently passes input directly (pre-capabilityToken) 0ms
+   ✓ preload API surface snapshot (Stage 5.5) > readFileContent wraps filePath in object (already adapted) 0ms
+ ❯ tests/main/bundled-mcp-v2-contract.test.ts (4 tests | 1 failed) 7ms
+   ✓ Desktop bundled MCP v2 contract > declares the official MCP client as a packaged Desktop runtime dependency 1ms
+   ✓ Desktop bundled MCP v2 contract > does not use the legacy stdio client factories in Desktop services 1ms
+   ✓ Desktop bundled MCP v2 contract > pins bundled renderers to modern MCP and CUA to explicit legacy mode 1ms
+   × Desktop bundled MCP v2 contract > bumps bundled plugin versions so deployed copies are replaced 3ms
+     → expected '2.5.1' to be '2.4.0' // Object.is equality
+ ❯ tests/main/react-doctor-low-risk-optimization.test.ts (9 tests | 1 failed) 41978ms
+   ✓ React Doctor low-risk optimization batch > does not scan generated or packaged desktop output 1ms
+   ✓ React Doctor low-risk optimization batch > clears mechanical accessibility control semantics diagnostics 1ms
+   ✓ React Doctor low-risk optimization batch > clears mechanical Tailwind shorthand diagnostics 0ms
+   ✓ React Doctor low-risk optimization batch > clears lazy state initializer diagnostics 0ms
+   × React Doctor low-risk optimization batch > clears repeated Intl formatter construction diagnostics 4ms
+     → expected [ { …(9) }, { …(9) } ] to deeply equal []
+   ✓ React Doctor low-risk optimization batch > clears mechanical map/filter compaction diagnostics 0ms
+   ✓ React Doctor low-risk optimization batch > keeps repeated collection lookup diagnostics limited to reviewed low-risk leftovers 0ms
+   ✓ React Doctor low-risk optimization batch > has a global reduced-motion fallback for desktop animations 0ms
+   ✓ React Doctor low-risk optimization batch > reduces barrel imports to the remaining ambiguous cases 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 26 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/renderer/capability-migration-snapshot.test.ts > preload API surface snapshot (Stage 5.5) > tracks the current legacy flat key count for regression
+AssertionError: expected [ 'acceptAssistantCandidate', …(320) ] to deeply equal [ 'acceptAssistantCandidate', …(309) ]
+
+- Expected
++ Received
+
+@@ -1,18 +1,20 @@
+  [
+    "acceptAssistantCandidate",
+    "ackGoalTaskAttached",
+    "activateAssistant",
++   "answerMcpTaskInput",
+    "answerQuestion",
+    "applyProjectTeamPlan",
+    "approveTimedActionAuto",
+    "archiveCollaborationRoom",
+    "archiveKSwarmAgent",
+    "cancelArtifactGeneration",
+    "cancelCollaborationRoomWorkspaceChange",
+    "cancelGoal",
+    "cancelGoalNativeMutation",
++   "cancelMcpWork",
+    "cancelPluginDependencyTask",
+    "cancelReminder",
+    "cancelRoomDiscussion",
+    "cancelScheduledTask",
+    "cancelTask",
+@@ -78,10 +80,12 @@
+    "getAutomationsConfig",
+    "getCollaborationRoom",
+    "getCollaborationRoomWorkspace",
+    "getComputerUseCapabilityStatus",
+    "getConnectorsConfig",
++   "getConversationActivities",
++   "getConversationActivityUnread",
+    "getEmbeddingModels",
+    "getEvidenceAnomalies",
+    "getGoal",
+    "getGoalNativeMutation",
+    "getKswarmConfig",
+@@ -91,10 +95,11 @@
+    "getLoopDefinitions",
+    "getLoopPublicationConfiguration",
+    "getLoopPublicationState",
+    "getLoopRuns",
+    "getLoopScheduleBindings",
++   "getMcpTaskInputs",
+    "getMobilePairingInfo",
+    "getMobileRelayStatus",
+    "getModelConfig",
+    "getMultiAgentApproval",
+    "getMultiAgentEvents",
+@@ -112,10 +117,11 @@
+    "getSystemOneConfig",
+    "getThreadLabels",
+    "getTimedActionRuns",
+    "getTimedActions",
+    "getUpdateStatus",
++   "getWorkActivity",
+    "importMaterial",
+    "importMemories",
+    "installPlugin",
+    "installPluginDependency",
+    "installSkill",
+@@ -164,10 +170,11 @@
+    "listReminders",
+    "listSkills",
+    "listUserLoopTemplates",
+    "mapCollaborationRoomWorkspaceProject",
+    "markCollaborationRoomSeen",
++   "markConversationActivitiesRead",
+    "meetingCancelLiveTranscription",
+    "meetingCloseRecorderWindow",
+    "meetingDownloadModel",
+    "meetingDraftRecording",
+    "meetingFinishLiveTranscription",
+@@ -282,11 +289,14 @@
+    "setThreadLabel",
+    "showSaveDialog",
+    "startKSwarmAgent",
+    "stopKSwarmAgent",
+    "stopObservationTask",
++   "stopWorkWatch",
+    "submitArtifactGeneration",
++   "subscribeConversationActivities",
++   "subscribeConversationActivityOverview",
+    "subscribeLocalExecutionAuthorization",
+    "subscribeMultiAgents",
+    "subscribeTask",
+    "syncScheduledTasks",
+    "systemUsername",
+@@ -307,6 +317,7 @@
+    "updateMemory",
+    "updateModelRuntimeOptions",
+    "updatePluginDependency",
+    "updateScheduledTask",
+    "updateUserLoopTemplate",
++   "updateWorkReporting",
+  ]
+
+ ❯ tests/renderer/capability-migration-snapshot.test.ts:58:18
+     56|     expect(frozenKeys.closure).toHaveLength(307);
+     57|     const union = [...new Set([...frozenKeys.main, ...frozenKeys.closu…
+     58|     expect(keys).toEqual(union);
+       |                  ^
+     59|     expect([...FULL_PRELOAD_KEYS].sort()).toEqual(union);
+     60|     expect(new Set(FULL_PRELOAD_KEYS).size).toBe(FULL_PRELOAD_KEYS.len…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/26]⎯
+
+ FAIL  tests/renderer/chat-shell-canvas-session.test.tsx > ChatShell canvas is scoped per session > does not replay stale running progress from a completed snapshot
+AssertionError: expected "spy" to be called with arguments: [ 'done' ]
+
+Received:
+
+  1st spy call:
+
+  [
+    "done",
++   "thread-A",
+  ]
+
+
+Number of calls: 1
+
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div>
+      <div
+        class="chat-right-layout"
+        data-thread-id="thread-A"
+      >
+        <div
+          class="chat-right-main"
+          data-testid="chat-right-main"
+          tabindex="-1"
+        >
+          <div
+            aria-live="polite"
+            class="px-4 py-2 text-xs text-muted-foreground"
+          >
+            <button
+              class="underline"
+              type="button"
+            >
+              为本次任务启用观测记忆
+            </button>
+            <span>
+              此任务未启用观测记忆
+            </span>
+          </div>
+          <div>
+            <div
+              data-testid="narration-output"
+            >
+              preserved response
+            </div>
+            <div
+              data-testid="health-progress"
+            />
+            <div
+              data-testid="canvas-open"
+            >
+              closed
+            </div>
+            <button
+              type="button"
+            >
+              toggle-canvas
+            </button>
+            <button
+              type="button"
+            >
+              edit-artifact
+            </button>
+          </div>
+        </div>
+        <section
+          aria-label="SubAgent"
+          class="chat-right-panel"
+          data-testid="chat-right-panel"
+          hidden=""
+          role="complementary"
+          style="width: 360px;"
+        >
+          <div
+            class="chat-right-tabs"
+            role="tablist"
+          >
+            <button
+              aria-controls="right-thread-A-task"
+              aria-selected="false"
+              disabled=""
+              id="right-thread-A-task-tab"
+              role="tab"
+              tabindex="-1"
+              type="button"
+            >
+              任务
+            </button>
+            <button
+              aria-controls="right-thread-A-canvas"
+              aria-selected="false"
+              disabled=""
+              id="right-thread-A-canvas-tab"
+              role="tab"
+              tabindex="-1"
+              type="button"
+            >
+              画布
+            </button>
+            <button
+              aria-label="收起侧栏"
+              class="chat-right-close"
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            aria-labelledby="right-thread-A-task-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-task"
+            inert=""
+            role="tabpanel"
+          />
+          <div
+            aria-labelledby="right-thread-A-agents-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-agents"
+            inert=""
+            role="tabpanel"
+          >
+            <p
+              class="p-4 text-sm"
+            >
+              SubAgent 状态连接不可用
+            </p>
+          </div>
+          <div
+            aria-labelledby="right-thread-A-files-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-files"
+            inert=""
+            role="tabpanel"
+          />
+          <div
+            aria-labelledby="right-thread-A-instructions-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-instructions"
+            inert=""
+            role="tabpanel"
+          />
+          <div
+            aria-labelledby="right-thread-A-canvas-tab"
+            class="chat-right-body"
+            hidden=""
+            id="right-thread-A-canvas"
+            inert=""
+            role="tabpanel"
+          />
+        </section>
+      </div>
+    </div>
+  </body>
+</html>
+ ❯ tests/renderer/chat-shell-canvas-session.test.tsx:183:47
+    181|     ],prompt:'work',materials:[]}});
+    182|     render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvi…
+    183|     await waitFor(()=>expect(mockRecoverTask).toHaveBeenCalledWith('do…
+       |                                               ^
+    184|     await act(async()=>{});
+    185|     expect(screen.getByTestId('health-progress')).toBeEmptyDOMElement(…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/26]⎯
+
+ FAIL  tests/renderer/desktop-settings-voice-pane.test.tsx > DesktopSettings voice pane > shows speech model download status in voice settings
+TestingLibraryElementError: Unable to find an element with the text: 语音识别模型. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <div
+      class="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--c-bg-page)]"
+    >
+      <div
+        class="flex w-[200px] shrink-0 flex-col overflow-y-auto"
+        style="border-right: 0.5px solid var(--c-border); padding-top: 12px;"
+      >
+        <div
+          class="p-3"
+        >
+          <button
+            class="flex h-[36px] w-full items-center gap-2 rounded-lg px-3 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              class="lucide lucide-chevron-left"
+              fill="none"
+              height="16"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="m15 18-6-6 6-6"
+              />
+            </svg>
+            <span>
+              返回
+            </span>
+          </button>
+        </div>
+        <div
+          class="px-3"
+        >
+          <div
+            class="flex flex-col gap-[2px]"
+          >
+            <button
+              class="flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-all text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-sliders-horizontal"
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M10 5H3"
+                />
+                <path
+                  d="M12 19H3"
+                />
+                <path
+                  d="M14 3v4"
+                />
+                <path
+                  d="M16 17v4"
+                />
+                <path
+                  d="M21 12h-9"
+                />
+                <path
+                  d="M21 19h-5"
+                />
+                <path
+                  d="M21 5h-7"
+                />
+                <path
+                  d="M8 10v4"
+                />
+                <path
+                  d="M8 12H3"
+                />
+              </svg>
+              <span>
+                通用设置
+              </span>
+            </button>
+            <button
+              class="flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-all text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-smartphone"
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  height="20"
+                  rx="2"
+                  ry="2"
+                  width="14"
+                  x="5"
+                  y="2"
+                />
+                <path
+                  d="M12 18h.01"
+                />
+              </svg>
+              <span>
+                移动端
+              </span>
+            </button>
+            <button
+              class="flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-all bg-[var(--c-accent)]/10 text-[var(--c-accent)]"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-mic"
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 19v3"
+                />
+                <path
+                  d="M19 10v2a7 7 0 0 1-14 0v-2"
+                />
+                <rect
+                  height="13"
+                  rx="3"
+         ...
+ ❯ Object.getElementError ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ tests/renderer/desktop-settings-voice-pane.test.tsx:187:19
+    185|     });
+    186|
+    187|     expect(screen.getByText('语音识别模型')).toBeInTheDocument();
+       |                   ^
+    188|     expect(screen.getByText('标点模型')).toBeInTheDocument();
+    189|     expect(screen.getByText('base.pt')).toBeInTheDocument();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/26]⎯
+
+ FAIL  tests/renderer/workspace-execution-drafts.bdd.test.tsx > W12 actual Goal form awaits authoritative acceptance > the real parent swallowing a denied create keeps objective and criterion editable and visible
+TestingLibraryElementError: Found multiple elements with the role "alert"
+
+Here are the matching elements:
+
+Ignored nodes: comments, script, style
+<span
+  class="text-xs text-[var(--c-status-error-text)]"
+  role="alert"
+>
+  模型设置暂时不可用，请稍后重试。
+</span>
+
+Ignored nodes: comments, script, style
+<p
+  class="mt-2 text-[var(--c-danger)]"
+  role="alert"
+>
+  multi_agent_permission_revoked
+</p>
+
+(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <button>
+      thread B
+    </button>
+    <div
+      class="chat-right-layout"
+      data-thread-id="A"
+    >
+      <div
+        class="chat-right-main"
+        data-testid="chat-right-main"
+        tabindex="-1"
+      >
+        <div
+          aria-live="polite"
+          class="px-4 py-2 text-xs text-muted-foreground"
+        >
+          <button
+            class="underline"
+            type="button"
+          >
+            为本次任务启用观测记忆
+          </button>
+        </div>
+        <div
+          class="w-full relative"
+        >
+          <div
+            class=""
+            role="presentation"
+            style="border-width: 0.5px; border-style: solid; border-color: var(--c-input-border-color); border-radius: 20px; box-shadow: var(--c-input-shadow); transition: border-color 0.2s ease, box-shadow 0.2s ease; background: var(--c-bg-card); cursor: default;"
+          >
+            <form
+              style="padding: 10px 12px 8px;"
+            >
+              <div
+                style="position: relative; margin-bottom: 8px;"
+              >
+                <textarea
+                  aria-label="draft"
+                  class="w-full resize-none bg-transparent outline-none"
+                  placeholder="draft"
+                  rows="1"
+                  style="font-family: inherit; font-size: 16px; font-weight: 310; line-height: 1.45; color: var(--c-text-primary); letter-spacing: -0.16px; max-height: 220px; overflow-y: auto; height: 0px;"
+                >
+                  original draft
+                </textarea>
+              </div>
+              <div
+                class="flex items-center"
+                style="gap: 8px; min-height: 32px; width: 100%; min-width: 0px;"
+              >
+                <button
+                  aria-label="添加附件"
+                  class="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
+                  type="button"
+                >
+                  <svg
+                    aria-hidden="true"
+                    class="lucide lucide-plus"
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M5 12h14"
+                    />
+                    <path
+                      d="M12 5v14"
+                    />
+                  </svg>
+                </button>
+                <button
+                  aria-label="切换默认模型"
+                  class="flex h-[26px] max-w-[180px] items-center gap-1 rounded-md px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  style="border: 0.5px solid var(--c-border-subtle); background: transparent; color: var(--c-text-secondary); transition: border-color 0.15s, background-color 0.15s;"
+                  title="切换默认模型"
+                  type="button"
+                >
+                  <svg
+                    aria-hidden="true"
+                    class="lucide lucide-cpu shrink-0 opacity-70"
+                    fill="none"
+                    height="12"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="12"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M12 20v2"
+                    />
+                    <path
+                      d="M12 2v2"
+                    />
+                    <path
+                      d="M17 20v2"
+                    />
+                    <path
+                      d="M17 2v2"
+                    />
+                    <path
+                      d="M2 12h2"
+                    />
+                    <path
+                      d="M2 17h2"
+                    />
+                    <path
+                      d="M2 7h2"
+                    />
+                    <path
+                      d="M20 12h2"
+                    />
+                    <path
+                      d="M20 17h2"
+                    />
+                    <path
+                      d="M20 7h2"
+                    />
+                    <path
+                      d="M7 20v2"
+                    />
+                    <path
+                      d="M7 2v2"
+                    />
+                    <rect
+                      height="16"
+                      rx="2"
+                      width="16"
+                  ...
+ ❯ Object.getElementError ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ getElementError ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:20:35
+ ❯ getMultipleElementsFoundError ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:23:10
+ ❯ ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:55:13
+ ❯ ../../xiaok-cli/desktop/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ tests/renderer/workspace-execution-drafts.bdd.test.tsx:105:19
+    103|     fireEvent.click(screen.getByRole('button', { name: '确认创建' })); awa…
+    104|     expect(screen.getByLabelText('目标')).toHaveValue('goal draft'); exp…
+    105|     expect(screen.getByRole('alert')).toHaveTextContent('multi_agent_p…
+       |                   ^
+    106|   });
+    107|   it('pending double click submits once; a returned void is not an acc…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/26]⎯
+
+ FAIL  tests/main/bundled-mcp-v2-contract.test.ts > Desktop bundled MCP v2 contract > bumps bundled plugin versions so deployed copies are replaced
+AssertionError: expected '2.5.1' to be '2.4.0' // Object.is equality
+
+Expected: "2.4.0"
+Received: "2.5.1"
+
+ ❯ tests/main/bundled-mcp-v2-contract.test.ts:63:62
+     61|     // protects is that the deployed copies are replaced, i.e. the man…
+     62|     // version at least as new as the last one Desktop pinned.
+     63|     expect(readPluginManifest('kai-report-creator').version).toBe('2.4…
+       |                                                              ^
+     64|     expect(readPluginManifest('kai-slide-creator').version).toBe('3.4.…
+     65|     expect(readPluginManifest('cua-computer-use').version).toBe('0.3.1…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/26]⎯
+
+ FAIL  tests/main/e2e-dynamic-workflow-script.test.ts > e2e: dynamic workflow script through KSwarm, broker, and desktop runtime bridge > creates dynamic agent nodes and completes the script-generated workflow run
+Error: AssertionError: expected [ …(2) ] to deeply equal [ …(2) ]
+    at <master-baseline>/desktop/tests/main/e2e-dynamic-workflow-script.test.ts:434:81
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at file://<worktree>/desktop/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+--- desktop bridge seen prompts ---
+[
+  "读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。",
+  "基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。",
+  "从引用、来源、日期和可追溯性角度复核证据链。",
+  "从结构、格式、目标文件类型和交付合同角度复核最终产物。",
+  "综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过。输出是否可交付、必须修复项、证据引用和下一步动作。"
+]
+--- intent-broker replay ---
+{
+  "items": [
+    {
+      "eventId": 1,
+      "intentId": "kswarm-hub-readiness_probe-1792612581330-4and",
+      "kind": "readiness_probe",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "agentId": "xiaok-po",
+        "role": "project_owner",
+        "targetAgentId": "xiaok-po",
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 2,
+      "intentId": "xiaok-desktop-readiness_probe_result-1792612581334-gou40f",
+      "kind": "readiness_probe_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330",
+        "agentId": "xiaok-po",
+        "ok": true,
+        "runtimeSource": "desktop-agent-runtime",
+        "capabilities": [
+          "project_diagnosis",
+          "writing"
+        ],
+        "outputCapabilities": [],
+        "checkedAt": 1792612581334,
+        "participantId": "xiaok-po",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 3,
+      "intentId": "kswarm-hub-readiness_probe-1792612581338-70gj",
+      "kind": "readiness_probe",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "agentId": "xiaok-worker",
+        "role": "worker",
+        "targetAgentId": "xiaok-worker",
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 4,
+      "intentId": "xiaok-desktop-readiness_probe_result-1792612581342-vuucw9",
+      "kind": "readiness_probe_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+      "threadId": "thread-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+      "payload": {
+        "probeId": "probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338",
+        "agentId": "xiaok-worker",
+        "ok": true,
+        "runtimeSource": "desktop-agent-runtime",
+        "capabilities": [
+          "project_diagnosis",
+          "writing"
+        ],
+        "outputCapabilities": [],
+        "checkedAt": 1792612581342,
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 5,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612581373-pfip",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-1",
+        "nodeTitle": "交付物盘点",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-1-1",
+        "input": {
+          "prompt": "读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。",
+          "label": "交付物盘点",
+          "options": {
+            "label": "交付物盘点",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-1",
+            "phaseTitle": "读取交付物",
+            "nodeId": "script-agent-1"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 6,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612581376-agcgw1",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-1",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-1-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 7,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612581378-8autd0",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-1",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-1-1",
+        "output": {
+          "summary": "报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。",
+          "prompt": "读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。",
+          "evidenceRefs": [
+            "requirements.md: 用户要求交付正式报告"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612581378
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:21",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 8,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612582392-ycp9",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-2",
+        "nodeTitle": "事实复核",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-2-1",
+        "input": {
+          "prompt": "基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。",
+          "label": "事实复核",
+          "options": {
+            "label": "事实复核",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-2",
+            "phaseTitle": "并行复核",
+            "nodeId": "script-agent-2"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 9,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612582401-4x61",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-3",
+        "nodeTitle": "证据复核",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-3-1",
+        "input": {
+          "prompt": "从引用、来源、日期和可追溯性角度复核证据链。",
+          "label": "证据复核",
+          "options": {
+            "label": "证据复核",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-2",
+            "phaseTitle": "并行复核",
+            "nodeId": "script-agent-3"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 10,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612582405-25td8s",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-2",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-2-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 11,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612582412-ivbliv",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-3",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-3-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 12,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612582405-t23w",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-4",
+        "nodeTitle": "格式与合同复核",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-4-1",
+        "input": {
+          "prompt": "从结构、格式、目标文件类型和交付合同角度复核最终产物。",
+          "label": "格式与合同复核",
+          "options": {
+            "label": "格式与合同复核",
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-2",
+            "phaseTitle": "并行复核",
+            "nodeId": "script-agent-4"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 13,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612582435-6h6w1i",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-3",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-3-1",
+        "output": {
+          "summary": "证据复核通过",
+          "prompt": "从引用、来源、日期和可追溯性角度复核证据链。",
+          "evidenceRefs": [
+            "sources.md: 引用日期可追溯"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612582435
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 14,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612582446-a157q2",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-4",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-4-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 15,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612582425-ay84lr",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-2",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-2-1",
+        "output": {
+          "summary": "事实复核通过",
+          "prompt": "基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。",
+          "evidenceRefs": [
+            "sources.md: 事实来源已核对"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612582425
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 16,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612582448-zocuwb",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-4",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-4-1",
+        "output": {
+          "summary": "格式合同复核通过",
+          "prompt": "从结构、格式、目标文件类型和交付合同角度复核最终产物。",
+          "evidenceRefs": [
+            "contract.md: HTML/PDF 交付合同满足"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612582448
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:22",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 17,
+      "intentId": "kswarm-hub-workflow_node_handoff-1792612583466-s3k3",
+      "kind": "workflow_node_handoff",
+      "fromParticipantId": "kswarm-hub",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "nodeId": "script-agent-5",
+        "nodeTitle": "最终 gate 建议",
+        "nodeKind": "agent_task",
+        "targetParticipantId": "xiaok-worker",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-5-1",
+        "input": {
+          "prompt": "综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过。输出是否可交付、必须修复项、证据引用和下一步动作。",
+          "label": "最终 gate 建议",
+          "options": {
+            "label": "最终 gate 建议",
+            "schema": {
+              "type": "object"
+            },
+            "evidenceRequired": true
+          },
+          "permissions": null,
+          "script": {
+            "workflowId": "report_final_review",
+            "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "scriptHash": "c56b78dd8b33bc6fb59a69635c7a98754c5681bd2a99bcd1f2978e84eba32aab",
+            "phaseId": "phase-3",
+            "phaseTitle": "归约结论",
+            "nodeId": "script-agent-5"
+          },
+          "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+          "workflowRun": {
+            "id": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+            "workflowId": "report_final_review",
+            "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+            "taskId": null
+          },
+          "sourceTask": null
+        },
+        "targetAgentId": "xiaok-worker",
+        "project": {
+          "id": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+          "name": "E2E 动态脚本工作流",
+          "goal": "验证动态 workflow script 可以通过真实 KSwarm 和 broker 跑完",
+          "status": "planning",
+          "workFolder": "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspace"
+        },
+        "participantId": "kswarm-hub",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "xiaok-desktop"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:23",
+      "fromAlias": "kswarm",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 18,
+      "intentId": "xiaok-desktop-workflow_node_progress-1792612583483-0ka3e6",
+      "kind": "workflow_node_progress",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": null,
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "nodeId": "script-agent-5",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-5-1",
+        "stage": "started",
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:23",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    },
+    {
+      "eventId": 19,
+      "intentId": "xiaok-desktop-workflow_node_result-1792612583495-0ktb80",
+      "kind": "workflow_node_result",
+      "fromParticipantId": "xiaok-desktop",
+      "taskId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "threadId": "thread-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+      "payload": {
+        "projectId": "proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41",
+        "workflowRunId": "wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361",
+        "workflowId": "report_final_review",
+        "nodeId": "script-agent-5",
+        "attempt": 1,
+        "handoffId": "wfhd-wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361-script-agent-5-1",
+        "output": {
+          "summary": "报告通过 final gate，HTML/PDF 产物已生成。",
+          "prompt": "综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过。输出是否可交付、必须修复项、证据引用和下一步动作。",
+          "artifacts": [
+            {
+              "path": "artifacts/workflow-report.html",
+              "label": "HTML 报告",
+              "type": "report_html",
+              "mimeType": "text/html"
+            },
+            {
+              "path": "artifacts/workflow-report.pdf",
+              "label": "PDF 报告",
+              "type": "pdf",
+              "mimeType": "application/pdf"
+            }
+          ],
+          "evidenceRefs": [
+            "artifacts/workflow-report.html: E2E HTML 交付物",
+            "artifacts/workflow-report.pdf: E2E PDF 交付物"
+          ]
+        },
+        "participantId": "xiaok-worker",
+        "hostParticipantId": "xiaok-desktop",
+        "provenance": {
+          "runtimeSource": "desktop-agent-runtime",
+          "participantId": "xiaok-worker",
+          "hostParticipantId": "xiaok-desktop",
+          "producedAt": 1792612583495
+        },
+        "delivery": {
+          "semantic": "informational",
+          "source": "default",
+          "targetParticipantIds": [
+            "kswarm-hub"
+          ]
+        }
+      },
+      "createdAt": "2026-10-21 19:56:23",
+      "fromAlias": "Xiaok-Desktop",
+      "fromProjectName": null
+    }
+  ]
+}
+--- intent-broker logs ---
+intent-broker bridge sync: codex=updated, claude-code=ok, xiaok-code=ok, qodercli=updated
+intent-broker persisted session refresh: 0 session(s)
+intent-broker listening on http://127.0.0.1:57135
+intent-broker WebSocket: ws://127.0.0.1:57135/ws
+intent-broker db: /var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/intent-broker.db
+intent-broker config: /var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/intent-broker.config.json
+intent-broker local config: /var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/intent-broker.local.json
+--- kswarm logs ---
+[AgentStore] Seed: ensured desktop xiaok PO+Worker agents
+[KSwarm] KSwarm API server started on port 57145 {}
+[kswarm] registered as kswarm
+[kswarm] WebSocket connected
+[KSwarm] Connected to intent-broker {"url":"http://127.0.0.1:57135"}
+[KSwarm] Failed to ensure project PO runtime {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","poAgent":"xiaok-po","error":"not_pooled_agent"}
+[KSwarm] Readiness probe result received {"fromParticipantId":"xiaok-desktop","probeId":"probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-po-1792612581330","ok":true,"reason":null}
+[KSwarm] Readiness probe result received {"fromParticipantId":"xiaok-desktop","probeId":"probe-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-xiaok-worker-1792612581338","ok":true,"reason":null}
+[KSwarm] Project created: E2E 动态脚本工作流 {"id":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","po":"xiaok-po","requestedPo":"xiaok-po","poReassigned":false,"workspace":"/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xwk-e2e/run-p8QAwh/workspa
+[KSwarm] Human added 1 tasks to project proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41 {}
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-1"}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-1","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node progress: script-agent-1 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-1 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-2"}
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-3"}
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-4"}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-2","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-3","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node progress: script-agent-2 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node progress: script-agent-3 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-4","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node result accepted: script-agent-3 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node progress: script-agent-4 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-2 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-4 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Sending workflow node handoff {"brokerTarget":"xiaok-desktop","logicalTarget":"xiaok-worker","executionMode":"hosted","projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-5"}
+[KSwarm] Workflow node handoff delivery result {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","nodeId":"script-agent-5","brokerTarget":"xiaok-desktop","deliveredCount":1,"onlineRecipients":["xiaok-desktop"],"offlineRecipients":[]}
+[KSwarm] Workflow node progress: script-agent-5 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+[KSwarm] Workflow node result accepted: script-agent-5 {"projectId":"proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41","workflowRunId":"wf-proj-fe359080-dc2d-4ed3-9d56-f8965cd4bb41-report_final_review-1792612581361","fromParticipantId":"xiaok-desktop","agent":"x
+19:56:21 📁 project.created E2E 动态脚本工作流
+  19:56:21 • tasks.added_by_human
+  19:56:21 • workflow.proposal.created
+  19:56:21 • workflow.run.started
+  19:56:21 • workflow.script.node.created
+  19:56:21 • workflow.node.dispatched
+  19:56:21 • workflow.node.output_received
+  19:56:22 • workflow.script.parallel_group.created
+  19:56:22 • workflow.script.node.created
+  19:56:22 • workflow.node.dispatched
+  19:56:22 • workflow.script.node.created
+  19:56:22 • workflow.node.dispatched
+  19:56:22 • workflow.script.node.created
+  19:56:22 • workflow.node.dispatched
+  19:56:22 • workflow.node.output_received
+  19:56:22 • workflow.node.output_received
+  19:56:22 • workflow.node.output_received
+  19:56:23 • workflow.script.node.created
+  19:56:23 • workflow.node.dispatched
+  19:56:23 • workflow.node.output_received
+  19:56:24 ✓ task.done
+  19:56:24 • final_deliverable.candidate_registered
+  19:56:24 • workflow.run.completed
+ ❯ tests/main/e2e-dynamic-workflow-script.test.ts:434:81
+    432|       expect(detail.project.deliverable ?? null).toBeNull();
+    433|       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
+    434|       expect(detail.tasks[0].result?.artifacts?.map(artifact => artifa…
+       |                                                                                 ^
+    435|         'artifacts/workflow-report.html',
+    436|         'artifacts/workflow-report.pdf',
+ ❯ tests/main/e2e-dynamic-workflow-script.test.ts:445:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/26]⎯
+
+ FAIL  tests/main/inherited-native-readonly.test.ts > genuine native read grep glob observation forks retain all three permitted paths
+AssertionError: expected 'Error: The URL must be of scheme file…' to contain '/var/folders/qk/0759gskn77v_x22b9xqbk…'
+
+Expected: "/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/native-inherited-readonly-03qMh6/evidence.txt"
+Received: "Error: The URL must be of scheme file; narrow the search path or pattern."
+
+ ❯ tests/main/inherited-native-readonly.test.ts:46:579
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — addSource pipeline > paste source ends up as parsed with chunks after inline processing
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:38:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — addSource pipeline > file source with extractable content ends up parsed
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:58:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — addSource pipeline > source without chunks stays pending (not falsely marked parsed)
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:80:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — Chinese search with jieba > finds Chinese content using jieba-segmented terms
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:116:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — Chinese search with jieba > matches partial Chinese terms
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:131:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — Chinese search with jieba > returns the explicit empty message when nothing matches
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:144:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — Chinese search with jieba > rejects weak single-term matches below the relevance floor
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:158:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — Chinese search with jieba > keeps a one-in-three match, which is above the floor
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:169:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — default collection and startup fix > creates default collection on first access
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:196:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — default collection and startup fix > startup fix updates pending sources that already have chunks
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:209:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — kb_search tool returns actual results > kb_search tool finds content in the same DB instance
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:240:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — kb_search tool returns actual results > kb_search returns "未找到" when no match
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:265:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/26]⎯
+
+ FAIL  tests/main/kb-integration.test.ts > KB Integration — kb_search tool returns actual results > kb_list_collections returns created collections
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/kb-integration.test.ts:281:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/26]⎯
+
+ FAIL  tests/main/loop-assistant-consumption.test.ts > actual KB source written before lost finalize is reconciled through two fresh reads after both DBs reopen
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/loop-assistant-consumption.test.ts:70:305
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/26]⎯
+
+ FAIL  tests/main/loop-assistant-consumption.test.ts > actual ordinary target save followed by profile protection retains the original durable intent
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/loop-assistant-consumption.test.ts:104:151
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/26]⎯
+
+ FAIL  tests/main/loop-assistant-consumption.test.ts > ordinary fixed host preserves original knowledge selection through actual DB reopen
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/loop-assistant-consumption.test.ts:112:292
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/26]⎯
+
+ FAIL  tests/main/loop-assistant-consumption.test.ts > actual ordinary Controller without fixed Main host rejects before the target write
+Error: A valid request source is required to mutate Knowledge
+ ❯ requireKbRequestSource electron/kb-mutation-authority.ts:6:80
+      4|
+      5| export function requireKbRequestSource(source: RequestSource | undefin…
+      6|   if (source !== 'user' && source !== 'agent' && source !== 'scheduler…
+       |                                                                                ^
+      7|   if (!allowed.includes(source)) throw Error(`Request source ${source}…
+      8|   return source;
+ ❯ Object.createCollection electron/kb-store-sqlite.ts:155:5
+ ❯ tests/main/loop-assistant-consumption.test.ts:118:344
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/26]⎯
+
+ FAIL  tests/main/memory-ipc-registry.test.ts > complete16 Memory domain through real registration and preload > registers exactly complete16 at round4 and preserves old28 single metadata
+AssertionError: expected [ { …(8) }, { …(8) }, { …(8) }, …(27) ] to have a length of 18 but got 30
+
+- Expected
++ Received
+
+- 18
++ 30
+
+ ❯ tests/main/memory-ipc-registry.test.ts:87:153
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/26]⎯
+
+ FAIL  tests/main/react-doctor-low-risk-optimization.test.ts > React Doctor low-risk optimization batch > clears repeated Intl formatter construction diagnostics
+AssertionError: expected [ { …(9) }, { …(9) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "category": "Performance",
++     "column": 17,
++     "filePath": "renderer/src/components/ConversationActivityPanel.tsx",
++     "help": "Hoist `new Intl.NumberFormat(...)` to module scope or wrap in `useMemo` — Intl constructors allocate dozens of objects per locale lookup",
++     "line": 107,
++     "message": "new Intl.RelativeTimeFormat() inside a function — hoist to module scope or wrap in useMemo so it isn't recreated each call",
++     "plugin": "react-doctor",
++     "rule": "js-hoist-intl",
++     "severity": "warning",
++   },
++   {
++     "category": "Performance",
++     "column": 22,
++     "filePath": "renderer/src/components/collaboration/CollaborationRoomsPage.tsx",
++     "help": "Hoist `new Intl.NumberFormat(...)` to module scope or wrap in `useMemo` — Intl constructors allocate dozens of objects per locale lookup",
++     "line": 105,
++     "message": "new Intl.DateTimeFormat() inside a function — hoist to module scope or wrap in useMemo so it isn't recreated each call",
++     "plugin": "react-doctor",
++     "rule": "js-hoist-intl",
++     "severity": "warning",
++   },
++ ]
+
+ ❯ tests/main/react-doctor-low-risk-optimization.test.ts:45:49
+     43|
+     44|   it('clears repeated Intl formatter construction diagnostics', () => {
+     45|     expect(diagnosticsForRule('js-hoist-intl')).toEqual([]);
+       |                                                 ^
+     46|   });
+     47|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/26]⎯
+
+
+ Test Files  11 failed (11)
+      Tests  26 failed | 135 passed (161)
+   Start at  03:56:09
+   Duration  42.63s (transform 3.28s, setup 583ms, collect 6.58s, tests 58.22s, environment 3.56s, prepare 339ms)

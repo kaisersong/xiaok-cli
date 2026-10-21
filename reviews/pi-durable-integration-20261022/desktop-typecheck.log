@@ -1,0 +1,5 @@
+
+> xiaok-desktop@1.5.15 typecheck
+> node scripts/typecheck-baseline.mjs
+
+Electron typecheck clean. Renderer baseline gate clean: 0 current diagnostics, 0 resolved since baseline.

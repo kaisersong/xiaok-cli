@@ -1,0 +1,33 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/platform/runtime/mcp-owner-fencing.test.ts (4 tests | 1 failed) 38ms
+   ✓ MCP registration instance fencing > preserves both built-in and workflow merge winners when colliding MCP tools are updated or withdrawn 32ms
+   ✓ MCP registration instance fencing > does not replace or remove an external owner that took over the same registry name 1ms
+   × MCP registration instance fencing > rejects late permission results for the old MCP instance after same-name replacement 4ms
+     → expected 'next' to contain 'tool authorization changed'
+   ✓ MCP registration instance fencing > tracks companion ownership and does not let implicit registration bypass restricted catalogs 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/platform/runtime/mcp-owner-fencing.test.ts > MCP registration instance fencing > rejects late permission results for the old MCP instance after same-name replacement
+AssertionError: expected 'next' to contain 'tool authorization changed'
+
+Expected: "tool authorization changed"
+Received: "next"
+
+ ❯ tests/platform/runtime/mcp-owner-fencing.test.ts:71:29
+     69|       f.update([next]);
+     70|       approve();
+     71|       expect(await pending).toContain('tool authorization changed');
+       |                             ^
+     72|       expect(old.execute).not.toHaveBeenCalled();
+     73|       expect(await registry.executeTool(next.definition.name, {})).toB…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  04:05:58
+   Duration  2.69s (transform 1.26s, setup 29ms, collect 2.43s, tests 38ms, environment 0ms, prepare 41ms)

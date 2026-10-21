@@ -1,0 +1,16 @@
+{
+  "label": "governance",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "governance:check"
+  ],
+  "startedAt": "2026-10-21T19:43:19.057183+00:00",
+  "runnerPid": 70779,
+  "pid": 70820,
+  "pgid": 70820,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:43:23.005299+00:00",
+  "reaped": true
+}

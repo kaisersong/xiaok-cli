@@ -1,0 +1,20 @@
+{
+  "label": "blocked-publication-integration",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/verification/intent-publication-dependencies.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "actual signed controller routes full original payload pages and last complete dependency observation through fixed reader$"
+  ],
+  "startedAt": "2026-10-21T20:00:07.180161+00:00",
+  "runnerPid": 61956,
+  "pid": 61963,
+  "pgid": 61963,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:01:27.319026+00:00",
+  "reaped": true
+}

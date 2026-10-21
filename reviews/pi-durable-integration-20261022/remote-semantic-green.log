@@ -1,0 +1,26 @@
+
+ RUN  v3.2.6 <remote-validation>
+
+ ✓ tests/runtime/sol-pi/semantic-product-runtime.test.ts (17 tests) 88950ms
+   ✓ actual Runtime semantic lifecycle: success  5914ms
+   ✓ actual Runtime semantic lifecycle: compound  6177ms
+   ✓ actual Runtime semantic lifecycle: compound-intent  6606ms
+   ✓ actual Runtime semantic lifecycle: archived  10024ms
+   ✓ actual Runtime semantic lifecycle: tool-boundary  5238ms
+   ✓ actual Runtime semantic lifecycle: named-child  7714ms
+   ✓ actual Runtime semantic lifecycle: pricing-unavailable  3929ms
+   ✓ actual Runtime semantic lifecycle: automatic  3594ms
+   ✓ actual Runtime semantic lifecycle: empty  4480ms
+   ✓ actual Runtime semantic lifecycle: truncated  4444ms
+   ✓ actual Runtime semantic lifecycle: missing-terminal  4453ms
+   ✓ actual Runtime semantic lifecycle: late-error  4467ms
+   ✓ actual Runtime semantic lifecycle: tool-response  4491ms
+   ✓ actual Runtime semantic lifecycle: stale  4119ms
+   ✓ actual Runtime semantic lifecycle: revoke  4050ms
+   ✓ actual Runtime semantic lifecycle: settlement-failure  4046ms
+   ✓ actual Runtime semantic lifecycle: commit-failure  5203ms
+
+ Test Files  1 passed (1)
+      Tests  17 passed (17)
+   Start at  03:46:56
+   Duration  89.96s (transform 616ms, setup 16ms, collect 869ms, tests 88.95s, environment 0ms, prepare 27ms)

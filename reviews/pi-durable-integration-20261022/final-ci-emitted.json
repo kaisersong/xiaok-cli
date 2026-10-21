@@ -1,0 +1,28 @@
+{
+  "label": "final-ci-emitted",
+  "cwd": "<final-validation>",
+  "argv": [
+    "npm",
+    "run",
+    "test:sandbox:run",
+    "--",
+    ".test-dist/tests/ai/adapters/openai.test.js",
+    ".test-dist/tests/ai/adapters/claude.test.js",
+    ".test-dist/tests/ai/adapters/openai-responses.test.js",
+    ".test-dist/tests/ai/runtime/compaction-completion.test.js",
+    ".test-dist/tests/ai/runtime/compact-runner.test.js",
+    ".test-dist/tests/ai/runtime/portable-compaction-executor.test.js",
+    ".test-dist/tests/ai/runtime/model-stream-recovery.test.js",
+    ".test-dist/tests/ai/runtime/abort-error-discrimination.test.js",
+    ".test-dist/tests/ai/runtime/agent-runtime.test.js",
+    ".test-dist/tests/ai/runtime/provider-request-error.test.js",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:10:19.379290+00:00",
+  "runnerPid": 98852,
+  "pid": 98853,
+  "pgid": 98853,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:10:26.115033+00:00",
+  "reaped": true
+}

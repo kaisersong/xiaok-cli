@@ -1,0 +1,17 @@
+{
+  "label": "desktop-full-node24",
+  "cwd": "<worktree>/desktop",
+  "argv": [
+    "npm",
+    "test",
+    "--",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:39:13.107605+00:00",
+  "runnerPid": 24420,
+  "pid": 24447,
+  "pgid": 24447,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:55:57.017465+00:00",
+  "reaped": true
+}

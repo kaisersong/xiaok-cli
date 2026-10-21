@@ -1,0 +1,9 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+ ✓ tests/main/desktop-post-seal-facts.bdd.test.ts (38 tests) 3230ms
+
+ Test Files  1 passed (1)
+      Tests  38 passed (38)
+   Start at  03:54:19
+   Duration  4.85s (transform 2.38s, setup 52ms, collect 1.44s, tests 3.23s, environment 0ms, prepare 22ms)

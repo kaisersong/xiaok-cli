@@ -1,0 +1,123 @@
+{
+  "time": "2026-10-21T20:26:54.399554+00:00",
+  "removedOwnUntrackedGeneratedFiles": [
+    {
+      "file": "dist/ai/permissions/prompt-authorization-scope.d.ts",
+      "sha256": "906e7aa38b6b35316c8f4ea704ca761db2700935562523d42fa0516b7731592f"
+    },
+    {
+      "file": "dist/ai/permissions/prompt-authorization-scope.js",
+      "sha256": "b49bc9d4c9160850456f2270221fa8ffe2c40a08ddb1974fac309a39ecfea6f5"
+    },
+    {
+      "file": "dist/ai/runtime/compaction-response.d.ts",
+      "sha256": "1caf86c73704663623df7779d0867c9f4e6de45028528d9171d438fe8bd1e8e0"
+    },
+    {
+      "file": "dist/ai/runtime/compaction-response.js",
+      "sha256": "811f685ced310f27b3609fba8a457942414fe88bcd5e4ff1f6b766f9bcd6bca0"
+    },
+    {
+      "file": "dist/ai/runtime/context-budget.d.ts",
+      "sha256": "c98887937fcd64450235197397f65213611ef52b02cb9d6e0bac6445207ceca4"
+    },
+    {
+      "file": "dist/ai/runtime/context-budget.js",
+      "sha256": "09f6f18dab2dbda7061e723cff189c03b696eba3a40c5b6a76ae39ef28174a51"
+    },
+    {
+      "file": "dist/ai/runtime/session-store/stored-snapshot-types.js",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "file": "dist/runtime/conversation-activity/observer-promise-contract.d.ts",
+      "sha256": "d5c8d337c0172479bc8d0e4a4201bb5a6033d86e3ccca49ba9cda30caccdbb4f"
+    },
+    {
+      "file": "dist/runtime/conversation-activity/observer-promise-contract.js",
+      "sha256": "878376c28775bce472458bdf23a9e558cd47d14313006f9be5afc42e126c823a"
+    },
+    {
+      "file": "dist/runtime/conversation-activity/pending-close-owner.d.ts",
+      "sha256": "f66a7c9fdef526b0fdf535f7fa240f55a0fb6a3e9823fc5d6d32e71c1a89d07e"
+    },
+    {
+      "file": "dist/runtime/conversation-activity/pending-close-owner.js",
+      "sha256": "e6527cb1a744e9129a9762b2a2cb552bbf093b82d4c267ba72b3602530088b10"
+    },
+    {
+      "file": "dist/runtime/intent-delegation/protected-history-data.d.ts",
+      "sha256": "b045732c9335d8f8ff587db571a9e9f8771861da81ee94f3d428337428e7b448"
+    },
+    {
+      "file": "dist/runtime/intent-delegation/protected-history-data.js",
+      "sha256": "9c5ad110d03601edb7428c93f2e7a39d3ef0076b978117c89b6baf492082647e"
+    },
+    {
+      "file": "dist/runtime/intent-delegation/runtime-event-data.d.ts",
+      "sha256": "6d0bd147a0096783c8fca65c4b91ce059917a8928463ae7be9bf007c20a69251"
+    },
+    {
+      "file": "dist/runtime/intent-delegation/runtime-event-data.js",
+      "sha256": "712112b575b082c3cf381ca41d8f89d0372fa51b8a79fd5efdbff77a8aff8e31"
+    },
+    {
+      "file": "dist/runtime/intent-delegation/stored-intent-clone.js",
+      "sha256": "e7da133223e40cec3f624aee7a608cc719a8f5b7fab78f8fe7ccd18bddaffb73"
+    },
+    {
+      "file": "dist/runtime/task-host/protected-observation-reader.d.ts",
+      "sha256": "c9e920ccf0cf4a36d78216370fe523af5082c10dd2c1ae6b0f1ca85040596aac"
+    },
+    {
+      "file": "dist/runtime/task-host/protected-observation-reader.js",
+      "sha256": "00840e1a8e7f582b60cbf707094922dfeaff230b79fdffd27bec6d32ee208642"
+    },
+    {
+      "file": "dist/runtime/task-host/protection-read-worker-body.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "file": "dist/runtime/task-host/protection-read-worker-body.js",
+      "sha256": "b7249270fd71469d1a947bf735ff0c1534b53303f713f0a1e3fb1105f23375d5"
+    },
+    {
+      "file": "dist/runtime/verification/installed-maintenance-handoff.d.ts",
+      "sha256": "92292ee117caa21ced589a9de0142ea031fefe94445472e16f6addd4afd4b086"
+    },
+    {
+      "file": "dist/runtime/verification/installed-maintenance-handoff.js",
+      "sha256": "5fd63fe4c56a3c423a447c62796bef63ae1939281ad854a33338737e8226ca6f"
+    },
+    {
+      "file": "dist/runtime/verification/installed-metadata-target-prepare.d.ts",
+      "sha256": "3781cd955c1d8c018d2931fd7e46a57e101e37ed0a8d03929ebfe0a804fd9a35"
+    },
+    {
+      "file": "dist/runtime/verification/installed-metadata-target-prepare.js",
+      "sha256": "3c5f8d9bce0941eef802d3733301bdd20cada675d5ff6ac4ca5cc176b677e8a1"
+    },
+    {
+      "file": "dist/runtime/verification/maintenance-execution-construction.d.ts",
+      "sha256": "bc91a5a8e2317b7313583fd5aa14a3f7d935f796f1d93a0f50aac44364237218"
+    },
+    {
+      "file": "dist/runtime/verification/maintenance-execution-construction.js",
+      "sha256": "837ff0f1a521c9b79334a556066b301dba6d99f9ac91339d093c8f00ea9bccf3"
+    },
+    {
+      "file": "dist/ui/permission-screen.d.ts",
+      "sha256": "024ed2f9937ab0678a154ac33e2af91801d9436a37675f0c468e9901ead8cf43"
+    },
+    {
+      "file": "dist/ui/permission-screen.js",
+      "sha256": "a2bf2138426a2ab0c47cf44c34b527f232ad3bf0a31dc86db0191ec2102f86df"
+    }
+  ],
+  "restoredTrackedFrom": "current merged index, not pre-merge HEAD",
+  "paths": [
+    "dist",
+    "src/build-info.ts"
+  ],
+  "remainingTrackedDiff": []
+}

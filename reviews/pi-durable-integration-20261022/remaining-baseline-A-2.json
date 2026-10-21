@@ -1,0 +1,20 @@
+{
+  "label": "remaining-baseline-A-2",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/verification/artifact-export-helper.test.ts",
+    "tests/platform/runtime/registry-lifecycle.test.ts",
+    "tests/runtime/verification/loop-application-receiver-fence.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:01:44.273852+00:00",
+  "runnerPid": 68975,
+  "pid": 68983,
+  "pgid": 68983,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:02:04.192887+00:00",
+  "reaped": true
+}

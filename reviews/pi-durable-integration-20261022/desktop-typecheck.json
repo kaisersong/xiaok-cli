@@ -1,0 +1,16 @@
+{
+  "label": "desktop-typecheck",
+  "cwd": "<worktree>/desktop",
+  "argv": [
+    "npm",
+    "run",
+    "typecheck"
+  ],
+  "startedAt": "2026-10-21T19:43:19.067452+00:00",
+  "runnerPid": 70788,
+  "pid": 70822,
+  "pgid": 70822,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:43:35.716497+00:00",
+  "reaped": true
+}

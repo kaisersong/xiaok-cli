@@ -1,0 +1,20 @@
+{
+  "label": "desktop-facts-nodepath-baseline",
+  "cwd": "<master-baseline>/desktop",
+  "argv": [
+    "env",
+    "NODE_PATH=<worktree>/node_modules",
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/desktop-post-seal-facts.bdd.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:54:19.001995+00:00",
+  "runnerPid": 28505,
+  "pid": 28513,
+  "pgid": 28513,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:54:24.126404+00:00",
+  "reaped": true
+}

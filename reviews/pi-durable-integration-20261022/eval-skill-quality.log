@@ -1,0 +1,9 @@
+
+> xiaokcode@1.5.15 eval:skill-quality
+> node --import tsx scripts/evals/skill-quality.ts
+
+Skill Quality Eval
+
+PASS skill-quality: 3/3
+
+All structured skill-quality checks passed (3/3).

@@ -1,0 +1,15 @@
+
+ RUN  v3.2.6 <worktree>
+
+ ✓ tests/commands/chat-finalization-process.test.ts (52 tests | 46 skipped) 10088ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1863ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1564ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1776ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1522ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1647ms
+   ✓ actual configured hook-async remains owned until the original hook process drains  1715ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed | 46 skipped (52)
+   Start at  03:58:11
+   Duration  10.34s (transform 87ms, setup 36ms, collect 59ms, tests 10.09s, environment 0ms, prepare 26ms)

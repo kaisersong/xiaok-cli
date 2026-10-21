@@ -1,0 +1,18 @@
+{
+  "label": "mcp-cancellation-baseline",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:43:19.049693+00:00",
+  "runnerPid": 70774,
+  "pid": 70817,
+  "pgid": 70817,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:43:22.007994+00:00",
+  "reaped": true
+}

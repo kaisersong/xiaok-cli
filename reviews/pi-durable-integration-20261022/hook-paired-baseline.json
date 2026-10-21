@@ -1,0 +1,20 @@
+{
+  "label": "hook-paired-baseline",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/commands/chat-finalization-process.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "actual configured hook-(sync|async) remains owned until the original hook process drains"
+  ],
+  "startedAt": "2026-10-21T19:58:11.157691+00:00",
+  "runnerPid": 51478,
+  "pid": 51501,
+  "pgid": 51501,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:58:21.822280+00:00",
+  "reaped": true
+}

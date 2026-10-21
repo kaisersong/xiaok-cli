@@ -1,0 +1,68 @@
+{
+  "sourceCommit": "d7f9a5a07b8695fc05b1a406c0863eafaac4a421",
+  "mergedMaster": "6770092945a42fb0e45ef0d68d0971bfc01b51a8",
+  "originalBaseline": "3b4061489a612337fdb2fc1eb92e96c1d4fbe9a1",
+  "files": [
+    {
+      "file": ".github/workflows/model-recovery.yml",
+      "sha256": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28"
+    },
+    {
+      "file": "desktop/electron/context-manager.ts",
+      "sha256": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7"
+    },
+    {
+      "file": "desktop/tests/main/compaction-completion.test.ts",
+      "sha256": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f"
+    },
+    {
+      "file": "desktop/tests/main/context-manager.test.ts",
+      "sha256": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4"
+    },
+    {
+      "file": "src/ai/adapters/claude.ts",
+      "sha256": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c"
+    },
+    {
+      "file": "src/ai/adapters/openai-responses.ts",
+      "sha256": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770"
+    },
+    {
+      "file": "src/ai/adapters/openai.ts",
+      "sha256": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b"
+    },
+    {
+      "file": "src/ai/runtime/compact-runner.ts",
+      "sha256": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e"
+    },
+    {
+      "file": "src/ai/runtime/compaction-response.ts",
+      "sha256": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b"
+    },
+    {
+      "file": "src/ai/runtime/model-capabilities.ts",
+      "sha256": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-owner.ts",
+      "sha256": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea"
+    },
+    {
+      "file": "tests/ai/adapters/openai.test.ts",
+      "sha256": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade"
+    },
+    {
+      "file": "tests/ai/runtime/compact-runner.test.ts",
+      "sha256": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070"
+    },
+    {
+      "file": "tests/ai/runtime/compaction-completion.test.ts",
+      "sha256": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0"
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "sha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587"
+    }
+  ],
+  "remoteSourceHashesStillMatch": true
+}

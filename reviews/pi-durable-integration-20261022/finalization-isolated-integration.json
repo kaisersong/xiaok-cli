@@ -1,0 +1,18 @@
+{
+  "label": "finalization-isolated-integration",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/commands/chat-finalization-process.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:52:02.711229+00:00",
+  "runnerPid": 19234,
+  "pid": 19310,
+  "pgid": 19310,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:53:44.001885+00:00",
+  "reaped": true
+}

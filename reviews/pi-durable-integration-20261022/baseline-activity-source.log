@@ -1,0 +1,147 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+stderr | tests/runtime/conversation-activity/owner-process.test.ts > handles a real legacy owner with empty tasks
+
+
+stderr | tests/runtime/conversation-activity/owner-process.test.ts > handles a real legacy owner with completed tasks
+
+
+stderr | tests/runtime/conversation-activity/owner-process.test.ts > retires or reuses an owner built by the previous generation (empty tasks) without a config mismatch
+
+
+stderr | tests/runtime/conversation-activity/owner-process.test.ts > retires or reuses an owner built by the previous generation (pending tasks) without a config mismatch
+
+
+ ❯ tests/runtime/conversation-activity/owner-process.test.ts (6 tests | 4 failed) 3259ms
+   ✓ independent activity process lifecycle > keeps collecting native durable facts after the producer client exits, with one owner across concurrent attachment  1776ms
+   × handles a real legacy owner with empty tasks 546ms
+     → expected undefined to be 3 // Object.is equality
+   ✓ handles a real legacy owner with pending tasks 221ms
+   × handles a real legacy owner with completed tasks 247ms
+     → expected undefined to be 3 // Object.is equality
+   × retires or reuses an owner built by the previous generation (empty tasks) without a config mismatch 224ms
+     → expected [] to deeply equal [ 'replaced' ]
+   × retires or reuses an owner built by the previous generation (pending tasks) without a config mismatch 244ms
+     → expected [] to deeply equal [ 'reused_pending' ]
+ ❯ tests/runtime/conversation-activity/storage-permissions.test.ts (12 tests | 4 failed) 824ms
+   ✓ private storage > tightens legacy directories and files and rejects symlinks and chmod failure 35ms
+   ✓ private storage > accepts a linked ancestor above the activity tree (for example macOS /var -> /private/var) 1ms
+   × private storage > creates writable private storage under umask 0 in a child 42ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   × private storage > creates writable private storage under umask 18 in a child 36ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   × private storage > creates writable private storage under umask 63 in a child 53ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   × private storage > creates writable private storage under umask 191 in a child 40ms
+     → expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+   ✓ private storage > preserves unrelated shared entries in desktop 11ms
+   ✓ private storage > preserves unrelated shared entries in .xiaok 11ms
+   ✓ private storage > preserves unrelated shared entries in custom-config 5ms
+   ✓ private storage > queues the exact permission failure notice once without throwing 1ms
+   ✓ Windows permission guard is a no-op 0ms
+   ✓ real owner creates private files under inherited strict umask  588ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-process.test.ts > handles a real legacy owner with empty tasks
+ FAIL  tests/runtime/conversation-activity/owner-process.test.ts > handles a real legacy owner with completed tasks
+AssertionError: expected undefined to be 3 // Object.is equality
+
+- Expected:
+3
+
++ Received:
+undefined
+
+ ❯ tests/runtime/conversation-activity/owner-process.test.ts:94:31
+     92|       nextPid = undefined; return;
+     93|     }
+     94|     expect(status.generation).toBe(ACTIVITY_OWNER_GENERATION); expect(…
+       |                               ^
+     95|     await exited; expect(child.exitCode).toBe(0);
+     96|   } catch (error) { console.error(stderr); throw error; }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-process.test.ts > retires or reuses an owner built by the previous generation (empty tasks) without a config mismatch
+AssertionError: expected [] to deeply equal [ 'replaced' ]
+
+- Expected
++ Received
+
+- [
+-   "replaced",
+- ]
++ []
+
+ ❯ tests/runtime/conversation-activity/owner-process.test.ts:140:19
+    138|       expect(hints).toEqual(['reused_pending']); expect(nextPid).toBe(…
+    139|     }
+    140|     expect(hints).toEqual(['replaced']);
+       |                   ^
+    141|     expect(status.generation).toBe(ACTIVITY_OWNER_GENERATION); expect(…
+    142|     await exited; expect(child.exitCode).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-process.test.ts > retires or reuses an owner built by the previous generation (pending tasks) without a config mismatch
+AssertionError: expected [] to deeply equal [ 'reused_pending' ]
+
+- Expected
++ Received
+
+- [
+-   "reused_pending",
+- ]
++ []
+
+ ❯ tests/runtime/conversation-activity/owner-process.test.ts:138:21
+    136|     const status = await client.request<any>('status'); nextPid = stat…
+    137|     if (kind === 'pending') {
+    138|       expect(hints).toEqual(['reused_pending']); expect(nextPid).toBe(…
+       |                     ^
+    139|     }
+    140|     expect(hints).toEqual(['replaced']);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  tests/runtime/conversation-activity/storage-permissions.test.ts > private storage > creates writable private storage under umask 0 in a child
+ FAIL  tests/runtime/conversation-activity/storage-permissions.test.ts > private storage > creates writable private storage under umask 18 in a child
+ FAIL  tests/runtime/conversation-activity/storage-permissions.test.ts > private storage > creates writable private storage under umask 63 in a child
+ FAIL  tests/runtime/conversation-activity/storage-permissions.test.ts > private storage > creates writable private storage under umask 191 in a child
+AssertionError: expected 'file://<local-user>/projects/.worktrees/…' not to contain 'Error'
+
+- Expected
++ Received
+
+- Error
++ file://<master-baseline>/[eval1]:15
++         const notices = createActivityStartupNotices({ configDir: root }); notices.queueStarted(); notices.take().markShown();
++                                                                                    ^
++
++ TypeError: notices.queueStarted is not a function
++     at file://<master-baseline>/[eval1]:15:84
++     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
++     at async node:internal/modules/esm/loader:230:26
++     at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:227:20)
++     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
++
++ Node.js v24.16.0
++
+
+ ❯ tests/runtime/conversation-activity/storage-permissions.test.ts:70:56
+     68|         }
+     69|       `], { encoding: 'utf8' });
+     70|       expect(result.stderr, result.error?.message).not.toContain('Erro…
+       |                                                        ^
+     71|       expect(result.status, result.stderr).toBe(0);
+     72|     } finally { rmSync(base, { recursive: true, force: true }); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  8 failed | 10 passed (18)
+   Start at  03:47:37
+   Duration  6.10s (transform 883ms, setup 28ms, collect 1.69s, tests 4.08s, environment 0ms, prepare 117ms)

@@ -1,0 +1,8 @@
+{
+  "pid": 13188,
+  "pgid": 24448,
+  "scope": "read-only own Vitest worker diagnostic; inspector closed",
+  "returncode": 0,
+  "stdout": "{\"id\":2,\"result\":{\"result\":{\"type\":\"string\",\"value\":\"{\\\"file\\\":\\\"<worktree>/tests/runtime/verification/intent-publication-dependencies.test.ts\\\",\\\"test\\\":\\\"actual signed controller routes full original payload pages and last complete dependency observation through fixed reader\\\",\\\"type\\\":\\\"test\\\",\\\"testFile\\\":\\\"<worktree>/tests/runtime/verification/intent-publication-dependencies.test.ts\\\"}\"}}}\n",
+  "stderr": ""
+}

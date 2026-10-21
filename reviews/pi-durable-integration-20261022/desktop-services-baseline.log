@@ -1,0 +1,289 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+stderr | tests/main/desktop-services.test.ts > desktop services > runs a task workflow node without reporting system plan artifacts as deliverables
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > runs a task workflow node without reporting system plan artifacts as deliverables
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > runs a project workflow node as a whole-project deliverable producer
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > runs a project workflow node as a whole-project deliverable producer
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > runs a script-generated workflow agent node from the node prompt instead of project diagnosis
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > runs a script-generated workflow agent node from the node prompt instead of project diagnosis
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > falls back to raw markdown summary when a script node returns non-JSON output
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > falls back to raw markdown summary when a script node returns non-JSON output
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > retries a script-generated workflow node once after a transient stream close
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > retries a script-generated workflow node once after a transient stream close
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > fails a workflow node when the desktop runner fails instead of leaving it running
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > fails a workflow node when the desktop runner fails instead of leaving it running
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/desktop-services.test.ts > desktop services > stores the Jev (System One) key in the top-level systemOne block
+[conversation-activity] unavailable: conversation_activity_owner_held
+
+stderr | tests/main/desktop-services.test.ts > A1 actual Main prepared-user admission entry > commits an actual Host task/session source before the ordinary user runner starts
+[goal] task event settlement failed: goal_coordinator_closed
+
+stderr | tests/main/desktop-services.test.ts > A1 actual Main prepared-user admission entry > preserves actual atomic-write failure through Main and never invokes the prepared runner
+[goal] task event settlement failed: goal_coordinator_closed
+
+ ❯ tests/main/desktop-services.test.ts (191 tests | 6 failed) 80791ms
+   ✓ CUA mutation sources and reconnect intent > dispatches macOS legacy indices as native tokens through the actual Desktop service  3227ms
+   ✓ CUA mutation sources and reconnect intent > refuses incompatible macOS catalogs before observation or mutation  3069ms
+   ✓ CUA mutation sources and reconnect intent > does not treat a third-party same-named server as official CUA or disable it  3059ms
+   ✓ CUA mutation sources and reconnect intent > blocks an invalid official CUA server identity before launching raw MCP 23ms
+   ✓ CUA mutation sources and reconnect intent > does not let reconnect grant a disabled capability or agent install a dependency 24ms
+   ✓ desktop services > hashes the physical app.asar and restores Electron ASAR handling 1ms
+   ✓ desktop services > uses successful tool input output_path as artifact evidence when result omits it 0ms
+   ✓ desktop services > does not use tool input output_path as artifact evidence when result reports failure 1ms
+   ✓ desktop services > uses lowercase write file_path as artifact evidence 0ms
+   ✓ desktop services > detects a fresh artifact path from successful bash output 1ms
+   ✓ desktop services > does not treat an old bash-mentioned file as new artifact evidence 1ms
+   ✓ desktop services > renders report HTML through a semantic desktop tool without exposing plugin internals to the agent 135ms
+   ✓ desktop services > imports material, creates a task, runs without confirmation, and recovers result 196ms
+   ✓ desktop services > creates a real desktop task with one RFC 4122 UUID session id 195ms
+   ✓ desktop services > derives one provider-neutral cache affinity for a real default desktop task runner session  633ms
+   ✓ desktop services > completes operational tasks without artifact evidence 257ms
+   ✓ desktop services > runs a kswarm handoff through desktop runtime and returns artifact provenance  656ms
+   ✓ desktop services > cancels a kswarm handoff task when its runtime signal is aborted  561ms
+   × desktop services > runs a task workflow node without reporting system plan artifacts as deliverables 243ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × desktop services > runs a project workflow node as a whole-project deliverable producer 185ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × desktop services > runs a script-generated workflow agent node from the node prompt instead of project diagnosis 204ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × desktop services > falls back to raw markdown summary when a script node returns non-JSON output 181ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × desktop services > retries a script-generated workflow node once after a transient stream close 158ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × desktop services > fails a workflow node when the desktop runner fails instead of leaving it running 151ms
+     → expected [Function] to throw error matching /desktop_task_failed/ but got 'KSwarm service unavailable: failed to…'
+   ✓ desktop services > probes the current model without running a user task 16ms
+   ✓ desktop services > lists plugin dependency health with resolved binary and rejects unconfirmed installs 22ms
+   ✓ desktop services > updates CUA driver dependency via official_installer by re-running install script 23ms
+   ✓ desktop services > rejects unsafe plugin install names before invoking the xiaok installer 21ms
+   ✓ desktop services > registers the Xiaok computer-use wrapper instead of raw CUA MCP tools  3057ms
+   ✓ desktop services > defers Python MCP servers until the injected managed runtime is ready  3103ms
+   ✓ desktop services > marks deferred Python MCP servers unavailable when background preparation finishes without a runtime 55ms
+   ✓ desktop services > lets the official cua-driver mcp proxy own daemon relaunch, with no second Xiaok launch owner 2ms
+   ✓ desktop services > does not expose CUA doctor diagnostics that would request Screen Recording from Xiaok 68ms
+   ✓ desktop services > keeps the computer-use wrapper registered with a permission error when CUA driver dependency is not ready 29ms
+   ✓ desktop services > does not let a component retry activate a CUA the user never enabled  3054ms
+   ✓ desktop services > does not auto-start user-activated plugin MCP servers on desktop startup 22ms
+   ✓ desktop services > reconnects only the CUA MCP server when enabling Computer Use  3063ms
+   ✓ desktop services > auto-recovers Computer Use only for a previously enabled packaged Applications app  3065ms
+   ✓ desktop services > auto-recovers Computer Use for the same explicitly enabled unsigned Applications build  3091ms
+   ✓ desktop services > marks Computer Use failed when a previously ready CUA daemon becomes unreachable  6196ms
+   ✓ desktop services > revives an ended implicit CUA session inside the manager and keeps Desktop ready  3238ms
+   ✓ desktop services > replaces an exited CUA proxy once and safely replays an observation  6316ms
+   ✓ desktop services > does not let a late CUA readiness commit resurrect Computer Use after disable  3219ms
+   ✓ desktop services > singleflights concurrent user reconnects into one CUA candidate and one committed server  3149ms
+   ✓ desktop services > does not auto-recover Computer Use in development even when a prior success exists 30ms
+   ✓ desktop services > reports model_config_missing when kswarm readiness cannot find the configured model 16ms
+   ✓ desktop services > runs project workers concurrently with separate same-name artifact files  631ms
+   ✓ desktop services > discovers kswarm artifacts written directly to the handoff output directory  581ms
+   ✓ desktop services > rejects required kswarm handoff artifacts when neither events nor directory files provide evidence  595ms
+   ✓ desktop services > handles kswarm assign_po by producing a plan and creating board tasks  601ms
+   ✓ desktop services > inspecting active project work does not falsely recover it as stale  634ms
+   ✓ desktop services > runs project planning even while a foreground conversation is waiting  586ms
+   ✓ desktop services > honors persisted plan_only after broker planning completes  598ms
+   ✓ desktop services > honors persisted auto_activate_after_plan after broker planning completes  591ms
+   ✓ desktop services > honors persisted activate_and_dispatch_after_plan after broker planning completes  587ms
+   ✓ desktop services > softens generated hard item counts for current-period research when user did not request a count  579ms
+   ✓ desktop services > handles kswarm review_submission and synthesizes when all tasks are done  1145ms
+   ✓ desktop services > reviews once on the control lane while user and worker leases are occupied  1202ms
+   ✓ desktop services > does not time out a queued PO review after ten minutes  1624ms
+   ✓ desktop services > cancels the actual PO runner before returning execution timeout  634ms
+   ✓ desktop services > delegates scoped queued idle detection to the bounded KSwarm owner  575ms
+   ✓ desktop services > handles kswarm plan approval by requesting dispatch as the PO 16ms
+   ✓ desktop services > reads and writes the same provider/model config catalog as xiaok cli 26ms
+   ✓ desktop services > exposes auth-free Kimi K3 defaults and constraints without persisting view-only constraints 28ms
+   ✓ desktop services > copies runtime metadata only for an exact Kimi K3 catalog wire model 33ms
+   ✓ desktop services > does not expose stale K3 runtime options on a Kimi K2.7 snapshot 31ms
+   ✓ desktop services > carries the official GLM context window from Desktop save through to adapter capabilities 25ms
+   ✓ desktop services > filters custom-endpoint Kimi K3 options without suppressing another provider named K3 24ms
+   ✓ desktop services > does not half-migrate an existing kimi-default binding from K2.7 when updating credentials 25ms
+   ✓ desktop services > updates only an existing Kimi K3 runtime policy and preserves it across reload 48ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'kimi/k3: no runtime options, omitted …' 27ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'kimi/k3: context-only, omitted baseUrl' 23ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'kimi/k3-256k: no runtime options, omi…' 31ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'kimi/k3-256k: context-only, omitted b…' 26ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'glm/GLM-5.3: no runtime options, omit…' 29ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'glm/GLM-5.3: context-only, omitted ba…' 37ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'glm/glm-5.3-flash: no runtime options…' 32ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'glm/glm-5.3-flash: context-only, omit…' 31ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'openai/gpt-5: no runtime options, omi…' 35ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'openai/gpt-5: context-only, omitted b…' 35ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'openai/gpt-5.5: no runtime options, o…' 75ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'openai/gpt-5.5: context-only, omitted…' 94ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'schema v1 kimi/k3' 133ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'schema v1 glm/GLM-5.3' 168ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'schema v1 acme/old-custom-model' 155ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'schema v1 OpenAI GPT-5.5' 85ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'unsupported openai/gpt-4o/openai_lega…' 149ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'unsupported glm/GLM-5.2/openai_legacy' 25ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'unsupported openai/gpt-5.5/openai_res…' 23ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'unsupported acme/old-custom-model/ope…' 24ms
+   ✓ desktop services > keeps old strength-free config compatible with CLI and reload: 'unsupported openai/gpt-5.5/openai_leg…' 32ms
+   ✓ desktop services > adds effort to a context-only old model without overwriting the pinned context limit 57ms
+   ✓ desktop services > selects and persists the middle GLM default, preserving an explicit choice on reselection 40ms
+   ✓ desktop services > hides effort for unsupported protocols and unknown endpoints without losing the context window 29ms
+   ✓ desktop services > updates the declared GLM effort while preserving its context limit 24ms
+   ✓ desktop services > keeps GPT-5.5 effort choices distinct from GPT-5 and rejects an unsupported tier 25ms
+   ✓ desktop services > rejects invalid or out-of-scope runtime policy updates without mutating config 38ms
+   ✓ desktop services > rejects runtimeOptions with an array without mutating config 78ms
+   ✓ desktop services > rejects runtimeOptions with a non-plain object without mutating config 34ms
+   ✓ desktop services > rejects runtimeOptions with a primitive without mutating config 66ms
+   ✓ desktop services > rejects runtimeOptions with unknown keys without mutating config 33ms
+   ✓ desktop services > tests the requested model binding instead of the current default model 25ms
+   ✓ desktop services > tests a provider-owned configured model when modelId is omitted without changing the global default 35ms
+   ✓ desktop services > prefers the configured provider catalog default when modelId is omitted 71ms
+   ✓ desktop services > drains provider connection protocol: 'usage then pending error' 23ms
+   ✓ desktop services > drains provider connection protocol: 'text then pending error' 25ms
+   ✓ desktop services > drains provider connection protocol: 'empty clean exhaustion' 23ms
+   ✓ desktop services > drains provider connection protocol: 'usage-only clean exhaustion' 74ms
+   ✓ desktop services > drains provider connection protocol: 'usage then done clean exhaustion' 60ms
+   ✓ desktop services > drains provider connection protocol: 'text and done clean exhaustion' 40ms
+   ✓ desktop services > reports provider connection latency at clean completion rather than first chunk 27ms
+   ✓ desktop services > uses one real OpenAI outer stream attempt and no retry after the independent 30 second timeout 29ms
+   ✓ desktop services > creates managed xiaok agents from desktop config without asking renderer for provider details 30ms
+   ✓ desktop services > lists available models for a first-party provider 27ms
+   ✓ desktop services > returns empty array for unknown provider 23ms
+   ✓ desktop services > deletes built-in providers, repairs defaults, and keeps an empty configuration deleted 28ms
+   ✓ desktop services > clears the default after deleting the last configured model without recreating it 24ms
+   ✓ desktop services > rejects non-user provider and model deletion 22ms
+   ✓ desktop services > deletes a provider and its associated models 22ms
+   ✓ desktop services > deletes a specific model but keeps the provider 25ms
+   ✓ desktop services > testProviderConnection returns error when API key not configured 23ms
+   ✓ desktop services > testProviderConnection attempts connection when API key is configured 60ms
+   ✓ desktop services > resets defaultProvider when deleted provider was default 26ms
+   ✓ desktop services > provider profiles include availableModels for all first-party providers 34ms
+   ✓ desktop services > stores the Jev (System One) key in the top-level systemOne block 37ms
+   ✓ desktop services > falls back to the env var only while no systemOne key is saved 29ms
+   ✓ desktop services > keeps Jev out of the desktop model catalog, model list and default model 23ms
+   ✓ desktop services > projects GLM-5.3-Flash into the Desktop provider profile 22ms
+   ✓ desktop services > projects DeepSeek V4 Flash Vision Exp into the Desktop provider profile 23ms
+   ✓ desktop services > provider profiles include baseUrl for all first-party providers 24ms
+   ✓ desktop services > adding a first-party provider sets default baseUrl from registry 23ms
+   ✓ desktop services > lists available models for all first-party providers with models 26ms
+   ✓ desktop services > returns empty channels when config has no channels 23ms
+   ✓ desktop services > reads channels from config.json 24ms
+   ✓ desktop services > creates a channel and persists to config.json 22ms
+   ✓ desktop services > updates an existing channel 25ms
+   ✓ desktop services > throws on updating non-existent channel 24ms
+   ✓ desktop services > deletes a channel from config.json 28ms
+   ✓ desktop services > returns empty MCP installs initially 22ms
+   ✓ desktop services > creates an MCP install and persists to file 23ms
+   ✓ desktop services > updates an MCP install 25ms
+   ✓ desktop services > throws on updating non-existent MCP install 26ms
+   ✓ desktop services > deletes an MCP install 27ms
+   ✓ desktop services > supports multiple MCP installs with distinct IDs 33ms
+   ✓ desktop services > enqueues a durable initial plan bootstrap job and returns before planning finishes  585ms
+   ✓ desktop services > records initial plan bootstrap failure for retry without failing the create_project card  595ms
+   ✓ desktop services > recovers pending initial plan bootstrap jobs on desktop service startup  611ms
+   ✓ desktop services > keeps the bootstrap job pending when the dispatch phase fails  578ms
+   ✓ desktop services > treats plan_already_exists as non-fatal and still runs tasks and dispatch  576ms
+   ✓ desktop services > forwards workFolder from the chat create_project tool to kswarm 1ms
+   ✓ desktop services > maps explicit workflow execution mode from chat create_project tool to kswarm workflow_preferred mode 1ms
+   ✓ desktop services > infers workflow_preferred mode from real workflow wording when create_project omits executionMode 1ms
+   ✓ desktop services > uses a stable scoped clientRequestKey so repeated create_project tool calls reuse the same project 1ms
+   ✓ desktop services > injects the runtime session id as create_project request scope 0ms
+   ✓ desktop services > preserves user goal and requirements while forwarding renderer planning guidance 0ms
+   ✓ desktop services > adds visual PDF export guidance for PDF report projects 1ms
+   ✓ desktop services > adds report renderer guidance for high-level analysis projects without mutating user fields 1ms
+   ✓ desktop services > keeps explicit output format details in planningGuidance without rewriting create_project tool fields 2ms
+   ✓ desktop services > prefers the dedicated xiaok PO and worker seeds when chat creates a project 3ms
+   ✓ desktop services > marks user-named project members as explicit agent selection 3ms
+   ✓ desktop services > forwards chat continue_project tool requests to kswarm 1ms
+   ✓ desktop services > does not call kswarm when continue_project is missing projectId 1ms
+   ✓ desktop services > repair_project_task refuses inline deliverable content 1ms
+   ✓ desktop services > repair_project_task_from_file submits repaired artifact paths without inline content 1ms
+   ✓ desktop services > inspect_project finds a kswarm project by name and returns the blocking context with readable artifacts 2ms
+   ✓ desktop services > inspect_project prioritizes artifacts from the current intervention task 1ms
+   ✓ desktop services > inspect_project asks for clarification when a project name matches multiple projects 1ms
+   ✓ desktop services > system prompt separates notification reminders from automatic scheduled tasks 1ms
+   ✓ desktop services > system prompt preserves visual PDF export format instead of Markdown repagination 3ms
+   ✓ desktop services > timed action tools create notification reminders and agent scheduled tasks 8ms
+   ✓ desktop services > system prompt routes stuck Swarm project recovery through file-first repair 0ms
+   ✓ desktop services > system prompt documents resuming interrupted dynamic workflows without re-pasting the script 0ms
+   ✓ desktop services > recoverInterruptedScriptWorkflows > uses the v1 global replay cap of 3 resumable script workflow jobs 2ms
+   ✓ desktop services > recoverInterruptedScriptWorkflows > restores a resumable script run that has a persisted script source 5ms
+   ✓ desktop services > recoverInterruptedScriptWorkflows > skips non-script runs and runs without a persisted script source 1ms
+   ✓ desktop services > recoverInterruptedScriptWorkflows > returns silently when kswarm is unavailable 0ms
+   ✓ desktop services > recoverInterruptedScriptWorkflows > continues scanning when one project workflow listing fails 1ms
+   ✓ desktop services > resumeOneScriptWorkflow > rejects empty input without hitting kswarm 3ms
+   ✓ desktop services > resumeOneScriptWorkflow > returns kswarm_unavailable when the run snapshot request fails 8ms
+   ✓ desktop services > resumeOneScriptWorkflow > returns not_script_workflow for a po_generated run 3ms
+   ✓ desktop services > resumeOneScriptWorkflow > returns not_resumable for a completed script run 25ms
+   ✓ desktop services > resumeOneScriptWorkflow > returns no_script_source when the run has no persisted script source 1ms
+   ✓ desktop services > resumeOneScriptWorkflow > restores a resumable script run and is idempotent on a second call 6ms
+   ✓ desktop services > preserves history for cancelled context tasks so subsequent tasks see prior context  537ms
+   ✓ desktop services > passes createTaskWithFiles thread context through to the runtime host  560ms
+   ✓ desktop services > wires Goal lifecycle through the desktop service and keeps continuation tasks internal  487ms
+   ✓ desktop services > passes discussion cancellation through the real service runner boundary 16ms
+   ✓ desktop services > imports persisted Room attachments as materials and does not advertise a tool-less runtime 29ms
+   ✓ desktop services > binds a Room task capability during execution, makes getRoomMessagesPage resolve it via context.taskId, and releases it after completion 25ms
+   ✓ A1 actual Main prepared-user admission entry > commits an actual Host task/session source before the ordinary user runner starts 198ms
+   ✓ A1 actual Main prepared-user admission entry > preserves actual atomic-write failure through Main and never invokes the prepared runner 226ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/desktop-services.test.ts > desktop services > runs a task workflow node without reporting system plan artifacts as deliverables
+ FAIL  tests/main/desktop-services.test.ts > desktop services > runs a project workflow node as a whole-project deliverable producer
+ FAIL  tests/main/desktop-services.test.ts > desktop services > runs a script-generated workflow agent node from the node prompt instead of project diagnosis
+ FAIL  tests/main/desktop-services.test.ts > desktop services > falls back to raw markdown summary when a script node returns non-JSON output
+ FAIL  tests/main/desktop-services.test.ts > desktop services > retries a script-generated workflow node once after a transient stream close
+KSwarmUnavailableError: KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+ ❯ request electron/kswarm-service.ts:1493:13
+    1491|
+    1492|     if (!running) {
+    1493|       throw new KSwarmUnavailableError(lastError || 'KSwarm service fa…
+       |             ^
+    1494|     }
+    1495|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  tests/main/desktop-services.test.ts > desktop services > fails a workflow node when the desktop runner fails instead of leaving it running
+AssertionError: expected [Function] to throw error matching /desktop_task_failed/ but got 'KSwarm service unavailable: failed to…'
+
+- Expected:
+/desktop_task_failed/
+
++ Received:
+"KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189"
+
+ ❯ tests/main/desktop-services.test.ts:954:5
+    952|     });
+    953|
+    954|     await expect(services.runKSwarmWorkflowNode({
+       |     ^
+    955|       handoff: owned.handoff,
+    956|       targetParticipantId: 'xiaok-worker',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 185 passed (191)
+   Start at  03:43:19
+   Duration  88.82s (transform 4.20s, setup 107ms, collect 7.37s, tests 80.79s, environment 0ms, prepare 38ms)

@@ -1,0 +1,10 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ✓ tests/runtime/verification/intent-publication-dependencies.test.ts (23 tests | 22 skipped) 70712ms
+   ✓ actual signed controller routes full original payload pages and last complete dependency observation through fixed reader  70711ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 22 skipped (23)
+   Start at  03:55:22
+   Duration  75.25s (transform 2.17s, setup 42ms, collect 4.30s, tests 70.71s, environment 0ms, prepare 37ms)

@@ -1,0 +1,16 @@
+{
+  "label": "final-cli-build",
+  "cwd": "<final-validation>",
+  "argv": [
+    "npm",
+    "run",
+    "build"
+  ],
+  "startedAt": "2026-10-21T20:09:46.093440+00:00",
+  "runnerPid": 97898,
+  "pid": 97906,
+  "pgid": 97906,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:09:54.097568+00:00",
+  "reaped": true
+}

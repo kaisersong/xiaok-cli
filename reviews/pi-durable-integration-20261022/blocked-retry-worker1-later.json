@@ -1,0 +1,10 @@
+{
+  "time": "2026-10-21T20:11:26.256957+00:00",
+  "pid": 69474,
+  "pgid": 69441,
+  "scope": "own worker current case query; temporary inspector instrumentation",
+  "returncode": 0,
+  "stdout": "{\"id\":2,\"result\":{\"result\":{\"type\":\"string\",\"value\":\"{\\\"file\\\":\\\"<worktree>/tests/runtime/intent-delegation/verification-host-controller.test.ts\\\",\\\"test\\\":\\\"Intent signed controller actual material and independent recipe: receiver-project-parent\\\",\\\"type\\\":\\\"test\\\",\\\"testFile\\\":\\\"<worktree>/tests/runtime/intent-delegation/verification-host-controller.test.ts\\\",\\\"now\\\":100000,\\\"result\\\":{\\\"state\\\":\\\"run\\\",\\\"startTime\\\":1792613424496,\\\"retryCount\\\":0,\\\"repeatCount\\\":0},\\\"timeout\\\":380000}\"}}}\n",
+  "stderr": "",
+  "remainingInspectorListeners": ""
+}

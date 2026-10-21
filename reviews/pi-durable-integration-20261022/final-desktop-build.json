@@ -1,0 +1,16 @@
+{
+  "label": "final-desktop-build",
+  "cwd": "<worktree>/desktop",
+  "argv": [
+    "npm",
+    "run",
+    "build"
+  ],
+  "startedAt": "2026-10-21T20:00:48.402667+00:00",
+  "runnerPid": 65275,
+  "pid": 65292,
+  "pgid": 65292,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:01:02.592661+00:00",
+  "reaped": true
+}

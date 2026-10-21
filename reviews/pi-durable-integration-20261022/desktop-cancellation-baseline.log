@@ -1,0 +1,419 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+stderr | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-terminal wins without inventing a cancellation writer for signal-only abort
+[conversation-activity] run reconciliation failed: host_delivery_store_closed
+
+stderr | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-terminal wins without inventing a cancellation writer for signal-only abort
+[goal] task event settlement failed: goal_coordinator_closed
+
+stderr | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-terminal wins without inventing a cancellation writer for signal-only abort
+CANCELLATION_WATCHDOG_FAILED_STAGE { first: 'watchdog-terminal', stage: 'watchdog abort authorization' }
+
+stderr | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-signal wins without inventing a cancellation writer for signal-only abort
+[conversation-activity] run reconciliation failed: host_delivery_store_closed
+
+stderr | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-signal wins without inventing a cancellation writer for signal-only abort
+[goal] task event settlement failed: goal_coordinator_closed
+
+stderr | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-signal wins without inventing a cancellation writer for signal-only abort
+CANCELLATION_WATCHDOG_FAILED_STAGE { first: 'watchdog-signal', stage: 'watchdog abort authorization' }
+
+stdout | tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 lease wins without inventing a cancellation writer for signal-only abort
+CANCELLATION_REAL_WATCHDOG_LEASE_ORDER {
+  first: 'lease',
+  status: 'cancelled',
+  events: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'execution_health',
+    'salvage',
+    'task_terminal'
+  ],
+  decisions: [
+    { hostAbortAllowed: true, ack: 'applied' },
+    { hostAbortAllowed: false }
+  ],
+  aborts: 1,
+  models: 1,
+  released: true
+}
+
+ ❯ tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts (3 tests | 2 failed) 10246ms
+   × BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-terminal wins without inventing a cancellation writer for signal-only abort 5055ms
+     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-signal wins without inventing a cancellation writer for signal-only abort 5025ms
+     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 lease wins without inventing a cancellation writer for signal-only abort 165ms
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual checkpoint-write rejection after journal append keeps one original event pair and completes its publication
+CANCELLATION_POST_APPEND_FAILURE {
+  stage: 'checkpoint-write',
+  faults: 1,
+  frameEvents: [ [ 'salvage', 'task_terminal' ] ],
+  callbackEvents: [
+    [ 2, 'salvage', 'cancelled' ],
+    [ 3, 'task_terminal', 'cancelled' ]
+  ],
+  live: [ 'salvage', 'task_terminal' ],
+  coldStatus: 'cancelled',
+  closed: true
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual checkpoint-rename rejection after journal append keeps one original event pair and completes its publication
+CANCELLATION_POST_APPEND_FAILURE {
+  stage: 'checkpoint-rename',
+  faults: 1,
+  frameEvents: [ [ 'salvage', 'task_terminal' ] ],
+  callbackEvents: [
+    [ 2, 'salvage', 'cancelled' ],
+    [ 3, 'task_terminal', 'cancelled' ]
+  ],
+  live: [ 'salvage', 'task_terminal' ],
+  coldStatus: 'cancelled',
+  closed: true
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual journal-unlink rejection after journal append keeps one original event pair and completes its publication
+CANCELLATION_POST_APPEND_FAILURE {
+  stage: 'journal-unlink',
+  faults: 1,
+  frameEvents: [ [ 'salvage', 'task_terminal' ] ],
+  callbackEvents: [
+    [ 2, 'salvage', 'cancelled' ],
+    [ 3, 'task_terminal', 'cancelled' ]
+  ],
+  live: [ 'salvage', 'task_terminal' ],
+  coldStatus: 'cancelled',
+  closed: true
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual index-write rejection after journal append keeps one original event pair and completes its publication
+CANCELLATION_POST_APPEND_FAILURE {
+  stage: 'index-write',
+  faults: 1,
+  frameEvents: [ [ 'salvage', 'task_terminal' ] ],
+  callbackEvents: [
+    [ 2, 'salvage', 'cancelled' ],
+    [ 3, 'task_terminal', 'cancelled' ]
+  ],
+  live: [ 'salvage', 'task_terminal' ],
+  coldStatus: 'cancelled',
+  closed: true
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual index-rename rejection after journal append keeps one original event pair and completes its publication
+CANCELLATION_POST_APPEND_FAILURE {
+  stage: 'index-rename',
+  faults: 1,
+  frameEvents: [ [ 'salvage', 'task_terminal' ] ],
+  callbackEvents: [
+    [ 2, 'salvage', 'cancelled' ],
+    [ 3, 'task_terminal', 'cancelled' ]
+  ],
+  live: [ 'salvage', 'task_terminal' ],
+  coldStatus: 'cancelled',
+  closed: true
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C6 actual complete-frame-then-reject is distinguished by the original Store replay before a second explicit stop
+CANCELLATION_JOURNAL_RECEIPT {
+  stage: 'complete-frame-then-reject',
+  completeFrames: [ [ 'salvage', 'task_terminal' ] ],
+  coldEvents: [ 'salvage', 'task_terminal' ],
+  published: [ 2, 3 ]
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C6 actual partial-frame-then-reject is distinguished by the original Store replay before a second explicit stop
+CANCELLATION_JOURNAL_RECEIPT {
+  stage: 'partial-frame-then-reject',
+  completeFrames: [ [ 'salvage', 'task_terminal' ] ],
+  coldEvents: [ 'salvage', 'task_terminal' ],
+  published: [ 2, 3 ]
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C11 preserves real late ordinary usage and hands the original terminal receipt its final committed cost
+CANCELLATION_LATE_FORMAL_USAGE {
+  modelCalls: 1,
+  before: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'execution_health',
+    'salvage',
+    'task_terminal'
+  ],
+  after: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'execution_health',
+    'salvage',
+    'task_terminal'
+  ],
+  usage: { inputTokens: 0, outputTokens: 0, known: false },
+  persisted: [
+    [ 2, 'task_execution_started' ],
+    [ 3, 'execution_health' ],
+    [ 4, 'salvage' ],
+    [ 5, 'task_terminal' ]
+  ]
+}
+
+stdout | tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C12 actual cancellation flush rejection cannot release its runner leaving a running snapshot orphan
+CANCELLATION_FLUSH_FAILURE_OWNERSHIP {
+  status: 'failed',
+  inFlight: [],
+  active: [],
+  events: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'error',
+    'task_terminal'
+  ]
+}
+
+ ❯ tests/main/desktop-host-cancellation-write-failures.bdd.test.ts (26 tests | 1 failed) 4213ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual checkpoint-write rejection after journal append keeps one original event pair and completes its publication 165ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual checkpoint-rename rejection after journal append keeps one original event pair and completes its publication 179ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual journal-unlink rejection after journal append keeps one original event pair and completes its publication 140ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual index-write rejection after journal append keeps one original event pair and completes its publication 146ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C5 actual index-rename rejection after journal append keeps one original event pair and completes its publication 135ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C6 actual complete-frame-then-reject is distinguished by the original Store replay before a second explicit stop 175ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C6 actual partial-frame-then-reject is distinguished by the original Store replay before a second explicit stop 258ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C7 a no-live prepared task cancellation keeps host drain pending for its actual original append IO 281ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C7 a live root which physically exits while cancellation append is pending cannot dispatch terminal or finish host drain early 220ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 the actual authorized cancellation cannot write after awaited decision changes original marker groupId 187ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 the actual authorized cancellation cannot write after awaited decision changes original marker rootEpoch 130ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 the actual authorized cancellation cannot write after awaited decision changes original marker rootTurnId 221ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 the actual authorized cancellation cannot write after awaited decision changes original marker preparationId 153ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 the actual authorized cancellation cannot write after awaited decision changes original marker bootId 65ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C9 persistent index failure still publishes the confirmed original pair once and a later explicit stop repairs only cleanup 176ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C7 append receipt failure followed by a pending original Store read keeps cancellation and no-live drain pending 211ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C7 all failed reads physically settle as unknown without automatic rewrites, and restored Store replay prevents a duplicate complete frame 127ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 an already committed completed terminal remains unchanged and never asks for new cancellation authority 121ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 an already committed failed terminal remains unchanged and never asks for new cancellation authority 141ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C8 a preparation marker without its real MA binding remains default-denied with no cancellation effects 126ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C9 a rejecting existing terminal consumer is isolated without replaying the original cancellation effects 126ms
+   × BDD: one host cancellation frame preserves original publication after actual filesystem failures > C11 preserves real late ordinary usage and hands the original terminal receipt its final committed cost 152ms
+     → expected [] to deeply equal [ { type: 'usage_recorded', …(2) } ]
+     → expected { inputTokens: +0, …(2) } to deeply equal { inputTokens: 17, …(2) }
+     → expected [] to have a length of 1 but got +0
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C12 actual cancellation flush rejection cannot release its runner leaving a running snapshot orphan 145ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C7 each original cancellation Promise stays tracked at initial-read even when another same-task call finishes first 137ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C7 each original cancellation Promise stays tracked at actual-decision even when another same-task call finishes first 146ms
+   ✓ BDD: one host cancellation frame preserves original publication after actual filesystem failures > C12 a second real failed-terminal write failure stays tracked and never upgrades the original flush failure to a successful memory terminal 150ms
+stdout | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C13 actual completed terminal committed during an awaited cancellation decision must not be aborted or overwritten
+CANCELLATION_TERMINAL_BEFORE_CLAIM {
+  terminal: 'completed',
+  aborted: false,
+  result: { ok: true },
+  cold: 'completed',
+  events: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'assistant_delta',
+    'result',
+    'task_terminal'
+  ]
+}
+
+stdout | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C13 actual failed terminal committed during an awaited cancellation decision must not be aborted or overwritten
+CANCELLATION_TERMINAL_BEFORE_CLAIM {
+  terminal: 'failed',
+  aborted: false,
+  result: { ok: true },
+  cold: 'failed',
+  events: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'error',
+    'task_terminal'
+  ]
+}
+
+stdout | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C14 a concurrent follower cannot replace the original failed buffered-flush outcome with cancelled
+CANCELLATION_CONCURRENT_FLUSH_OWNER {
+  outcomes: [ { ok: false, error: [Error] }, { ok: false, error: [Error] } ],
+  flushes: 1,
+  faults: 1,
+  status: 'failed',
+  events: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'error',
+    'task_terminal'
+  ]
+}
+
+stderr | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint write rejection
+[conversation-activity] run reconciliation failed: host_delivery_store_closed
+
+stderr | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint write rejection
+[goal] task event settlement failed: goal_coordinator_closed
+
+stderr | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint rename rejection
+[conversation-activity] run reconciliation failed: host_delivery_store_closed
+
+stderr | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint rename rejection
+[goal] task event settlement failed: goal_coordinator_closed
+
+stdout | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C16 an actual ordinary factory Goal consumes the original committed late usage once, without replacing terminal index
+CANCELLATION_ORDINARY_GOAL_LATE_USAGE {
+  usage: { inputTokens: 17, outputTokens: 19, known: true },
+  goalTokens: 36,
+  turns: [ 36 ],
+  terminalIndex: 5,
+  callbacks: [
+    [ 0, 'task_started', [Object] ],
+    [ 1, 'understanding_updated', [Object] ],
+    [ 2, 'task_execution_started', [Object] ],
+    [ 3, 'execution_health', [Object] ],
+    [ 4, 'salvage', [Object] ],
+    [ 6, 'usage_recorded', [Object] ],
+    [ 5, 'task_terminal', [Object] ]
+  ]
+}
+
+stdout | tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C17 a runner past its outer cancelling check must yield terminal settlement when cancellation wins during its original async Store read
+CANCELLATION_CLAIM_BEFORE_RUNNER_TERMINAL {
+  status: 'cancelled',
+  events: [
+    'task_started',
+    'understanding_updated',
+    'task_execution_started',
+    'assistant_delta',
+    'result',
+    'execution_health',
+    'salvage',
+    'task_terminal'
+  ]
+}
+
+ ❯ tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts (7 tests | 2 failed) 6263ms
+   ✓ BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C13 actual completed terminal committed during an awaited cancellation decision must not be aborted or overwritten 158ms
+   ✓ BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C13 actual failed terminal committed during an awaited cancellation decision must not be aborted or overwritten 121ms
+   ✓ BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C14 a concurrent follower cannot replace the original failed buffered-flush outcome with cancelled 128ms
+   × BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint write rejection 2730ms
+     → expected [ …(256) ] to have a length of 255 but got 256
+   × BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint rename rejection 2728ms
+     → expected [ …(256) ] to have a length of 255 but got 256
+   ✓ BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C16 an actual ordinary factory Goal consumes the original committed late usage once, without replacing terminal index 206ms
+   ✓ BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C17 a runner past its outer cancelling check must yield terminal settlement when cancellation wins during its original async Store read 191ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint write rejection
+ FAIL  tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts > BDD: real cancellation creator boundaries, without replacing an immutable preparation marker > C15 original runtime event/index is published once when its full append precedes an interim checkpoint rename rejection
+AssertionError: expected [ …(256) ] to have a length of 255 but got 256
+
+- Expected
++ Received
+
+- 255
++ 256
+
+ ❯ tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts:153:29
+    151|       await flushDispatch(f.internals);
+    152|       const before = (await f.cold())!;
+    153|       expect(before.events).toHaveLength(255); expect(before.usage).to…
+       |                             ^
+    154|       f.callback.mockClear();
+    155|       const live: DesktopTaskEvent[] = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-terminal wins without inventing a cancellation writer for signal-only abort
+ FAIL  tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts > BDD: real main watchdog and lease expiry keep whichever legal terminal wins first > C20 watchdog-signal wins without inventing a cancellation writer for signal-only abort
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts:30:69
+     28|     vi.restoreAllMocks(); vi.unstubAllEnvs();
+     29|   });
+     30|   it.each(['watchdog-terminal', 'watchdog-signal', 'lease'] as const)(…
+       |                                                                     ^
+     31|     let stage = 'factory initialization';
+     32|     onTestFailed(() => console.error('CANCELLATION_WATCHDOG_FAILED_STA…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C11 preserves real late ordinary usage and hands the original terminal receipt its final committed cost
+AssertionError: expected [] to deeply equal [ { type: 'usage_recorded', …(2) } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "inputTokens": 17,
+-     "outputTokens": 19,
+-     "type": "usage_recorded",
+-   },
+- ]
++ []
+
+ ❯ tests/main/desktop-host-cancellation-write-failures.bdd.test.ts:401:61
+    399|       persisted: f.callback.mock.calls.filter(([input]) => input.taskI…
+    400|     expect.soft(cold.events.slice(0, cancelled.events.length)).toEqual…
+    401|     expect.soft(cold.events.slice(cancelled.events.length)).toEqual([{…
+       |                                                             ^
+    402|     expect.soft(cold.usage).toEqual({ inputTokens: 17, outputTokens: 1…
+    403|     const terminal = f.callback.mock.calls.filter(([input]) => input.t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C11 preserves real late ordinary usage and hands the original terminal receipt its final committed cost
+AssertionError: expected { inputTokens: +0, …(2) } to deeply equal { inputTokens: 17, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "inputTokens": 17,
+-   "known": true,
+-   "outputTokens": 19,
++   "inputTokens": 0,
++   "known": false,
++   "outputTokens": 0,
+  }
+
+ ❯ tests/main/desktop-host-cancellation-write-failures.bdd.test.ts:402:29
+    400|     expect.soft(cold.events.slice(0, cancelled.events.length)).toEqual…
+    401|     expect.soft(cold.events.slice(cancelled.events.length)).toEqual([{…
+    402|     expect.soft(cold.usage).toEqual({ inputTokens: 17, outputTokens: 1…
+       |                             ^
+    403|     const terminal = f.callback.mock.calls.filter(([input]) => input.t…
+    404|     expect.soft(terminal).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  tests/main/desktop-host-cancellation-write-failures.bdd.test.ts > BDD: one host cancellation frame preserves original publication after actual filesystem failures > C11 preserves real late ordinary usage and hands the original terminal receipt its final committed cost
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/main/desktop-host-cancellation-write-failures.bdd.test.ts:407:128
+    405|     expect.soft(terminal[0]?.[0].eventIndex).toBe(cancelled.events.len…
+    406|     expect.soft(terminal[0]?.[0].snapshot.usage).toEqual(cold.usage);
+    407|     expect.soft(f.callback.mock.calls.filter(([input]) => input.taskId…
+       |                                                                                                                                ^
+    408|     expect(modelCalls).toBe(1);
+    409|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 31 passed (36)
+   Start at  03:40:28
+   Duration  24.98s (transform 1.55s, setup 98ms, collect 3.82s, tests 20.72s, environment 0ms, prepare 64ms)

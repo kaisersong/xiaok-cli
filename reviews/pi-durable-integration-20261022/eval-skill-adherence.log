@@ -1,0 +1,7 @@
+
+> xiaokcode@1.5.15 eval:skill-adherence
+> node --import tsx scripts/evals/skill-adherence.ts
+
+Skill Adherence Eval
+
+PASS skill-adherence: 3/3

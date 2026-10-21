@@ -1,0 +1,22 @@
+{
+  "label": "desktop-extra-baseline",
+  "cwd": "<master-baseline>/desktop",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/desktop-multi-agent-service.bdd.test.ts",
+    "tests/main/desktop-compound-ancestor-followup.test.ts",
+    "tests/main/desktop-post-seal-process.bdd.test.ts",
+    "tests/main/desktop-post-seal-facts.bdd.test.ts",
+    "tests/main/desktop-runner-finalization.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:46:13.593505+00:00",
+  "runnerPid": 87446,
+  "pid": 87457,
+  "pgid": 87457,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:49:41.685148+00:00",
+  "reaped": true
+}

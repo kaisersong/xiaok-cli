@@ -1,0 +1,9 @@
+
+> xiaokcode@1.5.15 test:sandbox:build
+> npm run prepare:types && tsc -p tsconfig.tests.json && node scripts/copy-glob-worker.mjs .test-dist/src/ai/tools && node scripts/copy-test-assets.mjs && node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));"
+
+
+> xiaokcode@1.5.15 prepare:types
+> node scripts/repair-better-sqlite3-types.cjs --apply
+
+sqlite-types: symlink-component

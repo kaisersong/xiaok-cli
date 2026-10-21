@@ -1,0 +1,381 @@
+{
+  "label": "final-glm-scope-inline",
+  "transport": "stdin text containing entire packet",
+  "inputBytes": 443274,
+  "inputSha256": "40cff97b3e828fbae788c737ce4afbe3b9ff1dc7bd93da20ef9274bb3ed54356",
+  "packetSha256": "9a0fced68fa6cfb717b1aa997ad116d444bdd14eea0af786bfed3adf17c86931",
+  "systemInit": {
+    "type": "system",
+    "subtype": "init",
+    "apiKeySource": "none",
+    "qodercli_version": "1.1.73",
+    "protocol_version": "1.5.0",
+    "cwd": "<worktree>",
+    "tools": [],
+    "mcp_servers": [],
+    "model": "GLM-5.3",
+    "permissionMode": "default",
+    "slash_commands": [
+      "about",
+      "agents",
+      "btw",
+      "login",
+      "logout",
+      "branch",
+      "subtask",
+      "clear",
+      "new",
+      "commands",
+      "compact",
+      "copy",
+      "corgi",
+      "docs",
+      "editor",
+      "effort",
+      "fast",
+      "export",
+      "help",
+      "shortcuts",
+      "hooks",
+      "diff",
+      "review",
+      "insights",
+      "kanban",
+      "init",
+      "mcp",
+      "memory",
+      "marketplace",
+      "plugins",
+      "plan",
+      "goal",
+      "permissions",
+      "crontab",
+      "profile",
+      "quit",
+      "rewind",
+      "continue",
+      "rename",
+      "resume",
+      "usage",
+      "status",
+      "add-dir",
+      "context",
+      "context-window",
+      "theme",
+      "tools",
+      "output-style",
+      "skills",
+      "remote-env",
+      "settings",
+      "statusline",
+      "tasks",
+      "workflows",
+      "vim",
+      "voice",
+      "upgrade",
+      "feedback",
+      "privacy",
+      "release-notes",
+      "model",
+      "remote-control",
+      "simplify",
+      "debug",
+      "quest",
+      "batch",
+      "mcp-config",
+      "loop",
+      "run",
+      "verify",
+      "run-skill-generator",
+      "workflow-authoring",
+      "agent-creator",
+      "hook-config",
+      "sdk",
+      "skill-creator",
+      "security-scan",
+      "sites:sites-build-agent-app",
+      "sites:sites-building",
+      "sites:sites-hosting",
+      "sites:sites-management",
+      "deep-research"
+    ],
+    "output_style": "default",
+    "agents": [
+      "general-purpose",
+      "statusline-setup",
+      "Explore",
+      "Plan",
+      "qoder-guide"
+    ],
+    "skills": [
+      "simplify",
+      "debug",
+      "quest",
+      "batch",
+      "mcp-config",
+      "loop",
+      "run",
+      "verify",
+      "run-skill-generator",
+      "workflow-authoring",
+      "agent-creator",
+      "hook-config",
+      "sdk",
+      "skill-creator",
+      "security-scan",
+      "sites:sites-build-agent-app",
+      "sites:sites-building",
+      "sites:sites-hosting",
+      "sites:sites-management",
+      "deep-research"
+    ],
+    "plugins": [
+      {
+        "name": "qoder-update",
+        "path": "<local-user>/.qoder/plugins/cache/qoder-enterprise-019c8d88-ce04-7989-8f4e-93f4b3c1b9b9/qoder-update/1.0.17"
+      }
+    ],
+    "capabilities": [
+      "interrupt_receipt_v1",
+      "interrupt_cancel_queued_v1",
+      "msg_lifecycle_v1",
+      "session_rewind_v1",
+      "background_tasks_v1",
+      "side_question_v1",
+      "custom_context_v1",
+      "goal_v1",
+      "goal_max_turns_v1",
+      "goal_resume_v1",
+      "skill_evolution_v1",
+      "plan_mode_v1",
+      "session_store_fork_barrier_v1",
+      "host_action",
+      "byok_config_management_v1",
+      "commands_changed_v1",
+      "reload_skills_v1",
+      "selected_skills_v1"
+    ],
+    "fast_mode_state": "off",
+    "uuid": "90a88724-f7c7-4d53-8d1e-a039fdc4b825",
+    "session_id": "bfb3f56d-9ec5-458c-adba-96c8c400b283"
+  },
+  "actualSystemInitModel": "GLM-5.3",
+  "actualTools": [],
+  "actualMcpServers": [],
+  "actualToolUseBlocks": 0,
+  "result": {
+    "type": "result",
+    "subtype": "success",
+    "duration_ms": 59699,
+    "duration_api_ms": 59681,
+    "is_error": false,
+    "num_turns": 1,
+    "result": "## 审查范围与材料充分性\n\n本附件实际包含八个变更生产文件的全文/diff：`desktop/electron/context-manager.ts`、`src/ai/adapters/claude.ts`、`src/ai/adapters/openai.ts`、`src/ai/adapters/openai-responses.ts`、`src/ai/runtime/compact-runner.ts`、`src/ai/runtime/compaction-response.ts`（新增）、`src/ai/runtime/model-capabilities.ts`、`src/runtime/sol-pi/semantic-compaction-owner.ts`；另附 semantic 结算/CAS/physical drain/ledger/deletion census/store 全链关键文件全文（`semantic-summary-attempt.ts`、`semantic-compaction-ledger.ts`、`compound-deletion-census.ts`、`store.ts`、`file-store.ts`、`sqlite-store.ts`、`execution-authority.ts`、`single-request-https.ts`、`portable-compaction-executor.ts`、`session.ts`、`semantic-snapshot.ts`、`provider-conversation-authorization.ts`）、AgentRuntime L240–355 真实调用片段及测试 diff 与 17 场景全文。材料对声明范围（摘要入口完成性 + semantic complete-empty 结算修订）充分。局限：`usage.js`（planCompaction/applyCompactionPlan）、`session-graph.ts`、`agent-runtime.ts` 其余部分、`abort-utils.ts`、`semantic-policy.ts` 等未附全文，凡涉及其内部行为之处我按调用方契约推断，不宣称完整审查。\n\n## 核心链分析\n\n**typed empty 的必要条件（compaction-response.ts:20-42）**：`empty` 只在以下全部成立后抛出：流完整 drain（循环正常退出）、无 `failure`（无 tool_use、无 terminal 后内容）、`terminal` 已见 `done`、循环内每个非 usage chunk 前后均 `throwIfAborted`（25/37 行）、且 trim 后为空。因此 `CompactionResponseError(reason==='empty')` 必然蕴含\"完整 drain + 合法终态 + 无 tool/refusal/malformed + 未取消\"。任何 tool、截断、缺终态、late 内容、取消都落入其他 reason 或原样重抛。该判定与规约一致。\n\n**semantic owner 结算（semantic-compaction-owner.ts:148-159）**：catch 中仅 `error instanceof CompactionResponseError && reason==='empty'` 才 `settle('settled')`；取消路径由 `!input.signal.aborted` 守卫跳过 settle（reservation 停留 dispatched，census 在 compound-deletion-census.ts:25 会以 `session_delete_semantic_unsettled` 拒绝删除，保守正确）；其余失败 settle('unknown')，ledger 转移表（ledger.ts:30-34）dispatched→settled/unknown 均合法且单向。settled 后仍抛错 → executePortableCompaction（portable-compaction-executor.ts:119-131）走 summaryModelFailed 分支，semantic trigger 下**不会**调 applyPlan（applySemanticPlan 未被调用），即不安装、不 commit、不退款（reservation 已 dispatched 计费，merge 语义 ledger.ts:72-76 保证不复活预算）。持久化失败：settle 内 `finishSemanticSummaryAttempt` 抛错 → persistenceFailed 记录，owner.ts:175 在 finally 之前 rethrow persistenceError，传播链闭合。CAS 陈旧：`commitSemanticSummarySnapshot`（semantic-summary-attempt.ts:128-141）用 sourceHistoryDigest + storeRevision CAS，`installCommittedSnapshot`（session.ts:252-260）再校验 revision/digest，未见陈旧覆盖窗口。\n\n**单次物理发送**：`resolveSemanticSummaryAttempt` resolved 一次性置位（attempt.ts:90-91），guarded fetch `claimed` 同步置位拒绝二次调用（96-97），底层 `createSingleRequestHttpsFetch` 另有独立 `claimed`（single-request-https.ts:31-33）。双层防重发，且 `requireCompleteResponse` 不会进入请求体（model-capabilities.ts:37-38 声明为内部契约，测试亦断言 body 无该字段）。\n\n**适配器层**：Claude（claude.ts:248-322）在 requireCompleteResponse 下延迟 done、校验 terminal/stopReason∈{end_turn,stop_sequence}/无残留 toolBuffers，message_stop 后仅容忍 message_delta；旧 memory_output_incomplete 语义对非 compaction 路径保留（313 行）。OpenAI（openai.ts:1026-1182）finish_reason 后继续 drain usage，二次 finish 或非空 delta 置 incompleteSummary，EOF 无 finish_reason 抛 provider_incomplete（不再走旧 ERR_STREAM_PREMATURE_CLOSE 分支路径下的误装）；`length` 截断在 compaction 模式改为 provider_incomplete 而非 memory_output_incomplete——对 semantic 而言两者均落 unknown，语义等价。Responses（openai-responses.ts:174-190）对 malformed JSON、非 completed、refusal、function_call、非字符串 text 全部拒绝且先 yield usage 再抛，late usage 被消费。\n\n**Desktop fallback**（context-manager.ts:129-144）：仅\"零 chunk 且非 CompactionResponseError 且非 abort\"才 historySnip；`receivedChunk` 经 onProgress 对包括 usage 在内的任何 chunk 置位。这意味着\"仅收到 usage 后网络错误\"会从旧的 snip 路径转为 rethrow。旧代码任何错误都 snip，严格说这是行为收窄，但与 CLI 侧\"已产出 chunk 不得重试/得 fallback\"的既有原则一致（防止半安装摘要），且规约只要求\"未收到 chunk 的旧网络 fallback 保持\"——usage chunk 算已收到可辩护。列为观察项而非必改。\n\n**取消优先级**：collectCompactionResponse catch 内 `throwIfAborted`（34 行）保证 abort 原因胜过迭代器原发错误；Desktop 端 isAbortError 优先 rethrow 不 snip。测试中 \"preserves cancellation before the first chunk\" 与 \"does not commit text after cancellation won at terminal\" 覆盖了这两个时点。\n\n## 可执行反例搜寻结果\n\n我尝试构造以下反例均未成功：\n1. \"drain 中途取消但被误判为 empty→settled\"：25/34/37 行三重 throwIfAborted 阻断，且 owner 侧 `!input.signal.aborted` 再守卫一次。\n2. \"thinking-only 完整响应被误判\"：thinking chunk 非空、有 done、无 tool → 归入 typed empty。若模型只回 reasoning 无正文，semantic 会 settled+failed 且不安装——与规约\"完成传输事实≠已安装\"一致，不构成绕过。\n3. \"Claude message_stop 后 message_delta 携带新 stop_reason 逃逸\"：claude.ts:298-301 terminal 时置 incompleteSummary，被拒。\n4. \"openai usage-only 尾块被误判 content_after_terminal\"：collect 侧 usage 直接 continue（27 行）；适配器侧空 choices 数组 `some` 为 false（openai.ts:1027-1028）。\n5. \"settled 后再 commit 空摘要\"：empty 抛错使 applySemanticPlan 不可达；commitSemanticCompaction 虽允许 settled reservation 配 commit，但无 commit 写入方。\n6. \"double settle\"：finishSemanticSummaryAttempt `ALREADY_FINISHED` 拒绝；catch 与成功路径互斥（catch 必 rethrow）。\n\n## 结论\n\n**APPROVE**。无必改项。次要观察（不阻塞）：Desktop 端 `receivedChunk` 把仅 usage 的错误流从 snip fallback 改为 rethrow，属行为收窄而非回归引入的绕过；openai.ts compaction 模式下 `length` 的错误类型从 `memory_output_incomplete` 变为 CompactionResponseError，对 AgentRuntime 普通阈值压缩路径经由 CompactRunner 同样生效——原 CLI 确定性 fallback（agent-runtime 对 portable_summary_failed 仅发 compact_failed 事件，历史不动）仍保留，与\"原普通CLI确定性fallback保持\"的规约相符。测试通过不作为本结论依据，结论基于上述静态链分析。",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0,
+    "total_credits": 9.535143399999999,
+    "usage": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "",
+      "iterations": [],
+      "speed": "standard",
+      "request_id": "8dc59e31-b973-4512-b092-836df9f94e82",
+      "context_usage_ratio": 0.6154944444444445
+    },
+    "modelUsage": {
+      "gmodel": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0,
+        "contextWindow": 0,
+        "maxOutputTokens": 0,
+        "credits": 9.535143399999999
+      }
+    },
+    "permission_denials": [],
+    "fast_mode_state": "off",
+    "uuid": "86b1bd2e-15e4-43c3-8dce-1a4272d1e0cf",
+    "session_id": "bfb3f56d-9ec5-458c-adba-96c8c400b283"
+  },
+  "reviewCompletedForDeclaredScope": true,
+  "modelVote": "APPROVE",
+  "coverageLimitations": [
+    "usage.js and session-graph.ts not full text",
+    "AgentRuntime only L240-355",
+    "abort-utils.ts and semantic-policy.ts not full text"
+  ],
+  "modelWordingCorrection": "Ordinary CLI failure calls ports.applyPlan(plan,undefined) at portable-compaction-executor.ts:123-126; do not reuse model final statement history unchanged as factual. Semantic failure returns no_gain without install.",
+  "sourceChecksAfter": [
+    {
+      "file": "desktop/electron/context-manager.ts",
+      "frozenSha256": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "mainSha256": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7"
+    },
+    {
+      "file": "src/ai/adapters/claude.ts",
+      "frozenSha256": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "mainSha256": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c"
+    },
+    {
+      "file": "src/ai/adapters/openai-responses.ts",
+      "frozenSha256": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "mainSha256": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770"
+    },
+    {
+      "file": "src/ai/adapters/openai.ts",
+      "frozenSha256": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "mainSha256": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b"
+    },
+    {
+      "file": "src/ai/runtime/compact-runner.ts",
+      "frozenSha256": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "mainSha256": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e"
+    },
+    {
+      "file": "src/ai/runtime/compaction-response.ts",
+      "frozenSha256": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "mainSha256": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b"
+    },
+    {
+      "file": "src/ai/runtime/model-capabilities.ts",
+      "frozenSha256": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "mainSha256": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-owner.ts",
+      "frozenSha256": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "mainSha256": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-summary-attempt.ts",
+      "frozenSha256": "e388ce894adf966a509725fb137667c6c5cf5a4602cee14a1a116491e0bba244",
+      "mainSha256": "e388ce894adf966a509725fb137667c6c5cf5a4602cee14a1a116491e0bba244"
+    },
+    {
+      "file": "src/ai/runtime/provider-conversation-authorization.ts",
+      "frozenSha256": "6e16f01d6c28f732a271cf7f863a4edcff19cf95fd9de7f3003b2ee8392f4e86",
+      "mainSha256": "6e16f01d6c28f732a271cf7f863a4edcff19cf95fd9de7f3003b2ee8392f4e86"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-ledger.ts",
+      "frozenSha256": "ad6dfd9b3d4c9236a36226ae72ef0c61936982572cee254b14ab6ea35f6745de",
+      "mainSha256": "ad6dfd9b3d4c9236a36226ae72ef0c61936982572cee254b14ab6ea35f6745de"
+    },
+    {
+      "file": "src/ai/runtime/session-store/compound-deletion-census.ts",
+      "frozenSha256": "ebecf259c08658621393baeeb77208d589fe6394670f7a64042b6c0f9656b02f",
+      "mainSha256": "ebecf259c08658621393baeeb77208d589fe6394670f7a64042b6c0f9656b02f"
+    },
+    {
+      "file": "src/ai/runtime/session-store/store.ts",
+      "frozenSha256": "ee9ccb023ff75239627c3acce3a058589c972ab396e764fcade5b93132efc780",
+      "mainSha256": "ee9ccb023ff75239627c3acce3a058589c972ab396e764fcade5b93132efc780"
+    },
+    {
+      "file": "src/ai/runtime/session-store/execution-authority.ts",
+      "frozenSha256": "b9ebb369d8a71d19afd72e014dc8746e359c6c1d3e83d1c99141c9032358fa7c",
+      "mainSha256": "b9ebb369d8a71d19afd72e014dc8746e359c6c1d3e83d1c99141c9032358fa7c"
+    },
+    {
+      "file": "src/ai/runtime/session-store/file-store.ts",
+      "frozenSha256": "ce9799a0b9e9b2db9d15fdb42045b357b44b3e550a230b550df56fbb3965e1f2",
+      "mainSha256": "ce9799a0b9e9b2db9d15fdb42045b357b44b3e550a230b550df56fbb3965e1f2"
+    },
+    {
+      "file": "src/ai/runtime/session-store/sqlite-store.ts",
+      "frozenSha256": "4fae6a618865adea1d510b2c02b1ab298b0a41d27cbd936de4ebb044e6636a45",
+      "mainSha256": "4fae6a618865adea1d510b2c02b1ab298b0a41d27cbd936de4ebb044e6636a45"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-snapshot.ts",
+      "frozenSha256": "5ab22e585ccd93c2f856e295b47ab014810e8d380e32c97f32ba347c2f832bd4",
+      "mainSha256": "5ab22e585ccd93c2f856e295b47ab014810e8d380e32c97f32ba347c2f832bd4"
+    },
+    {
+      "file": "src/runtime/sol-pi/single-request-https.ts",
+      "frozenSha256": "886e4443805e3ee4e95554c3bfd9af77eed9c0260798457181c6e71087c4eb17",
+      "mainSha256": "886e4443805e3ee4e95554c3bfd9af77eed9c0260798457181c6e71087c4eb17"
+    },
+    {
+      "file": "src/ai/runtime/portable-compaction-executor.ts",
+      "frozenSha256": "209bc96a8a89cb6d88bf2c16f823579acd82cfb69ffa1a26d6de796c89c56d50",
+      "mainSha256": "209bc96a8a89cb6d88bf2c16f823579acd82cfb69ffa1a26d6de796c89c56d50"
+    },
+    {
+      "file": "src/ai/runtime/session.ts",
+      "frozenSha256": "cda523d0ee62bb0a8490d6efc51ab09652a6630b6773612bdfeaa2fc2add7c00",
+      "mainSha256": "cda523d0ee62bb0a8490d6efc51ab09652a6630b6773612bdfeaa2fc2add7c00"
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "frozenSha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "mainSha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587"
+    },
+    {
+      "file": "src/ai/runtime/agent-runtime.ts",
+      "frozenSha256": "4a8318908e0c03ea30ac80225900b504e10952aa8f1fa789dc692a38339a935f",
+      "mainSha256": "4a8318908e0c03ea30ac80225900b504e10952aa8f1fa789dc692a38339a935f"
+    },
+    {
+      "file": "desktop/tests/main/compaction-completion.test.ts",
+      "frozenSha256": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "mainSha256": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f"
+    },
+    {
+      "file": "desktop/tests/main/context-manager.test.ts",
+      "frozenSha256": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "mainSha256": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4"
+    },
+    {
+      "file": "tests/ai/adapters/openai.test.ts",
+      "frozenSha256": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "mainSha256": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade"
+    },
+    {
+      "file": "tests/ai/runtime/compact-runner.test.ts",
+      "frozenSha256": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "mainSha256": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070"
+    },
+    {
+      "file": "tests/ai/runtime/compaction-completion.test.ts",
+      "frozenSha256": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "mainSha256": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0"
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "frozenSha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "mainSha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587"
+    }
+  ],
+  "allManifestSourcesStillMatchFrozen": true,
+  "rawLogSha256": "a61e67b2056d19899aac3dab079a592c4a303d26aa5c22979fa97fad7b4977aa",
+  "runnerJsonSha256": "26cdf3aed1ca154a002757c2941cc22ef1e80dd4a855fcfa60ffd2271f264f81",
+  "maxOutputTokensFlag": 3500,
+  "outputTokenCountVerified": false,
+  "usageTelemetryNote": "Provider emitted zero input/output token fields; record input bytes and configured cap, do not infer precise token counts.",
+  "observedQuotaOrRateLimitError": false,
+  "requestAttemptsForThisTransport": 1,
+  "runnerReaped": true,
+  "ownedProcessGroupsRemaining": [],
+  "suggestionsExecuted": false,
+  "sourceCommit": "d7f9a5a07b8695fc05b1a406c0863eafaac4a421",
+  "comparisonBase": "6770092945a42fb0e45ef0d68d0971bfc01b51a8",
+  "sourceManifestSha256": "32386ca2d7f8f6826af3af0b48ccebaa134bc09097ffd08030b80df5ab220014",
+  "originalPacketBytes": 442594,
+  "inputMetadataSha256": "26eb7fdb18a4a3075c4924e3408a7db01a65411b8b5cce8b387f0acbcdd0df28"
+}

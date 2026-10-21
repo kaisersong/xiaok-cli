@@ -1,0 +1,9 @@
+{
+  "pid": 13188,
+  "pgid": 24448,
+  "before": "13188     1 24448 04:33 node (vitest 1)",
+  "time": "2026-10-21T19:54:58.802405+00:00",
+  "signal": "SIGTERM",
+  "case": "tests/runtime/verification/intent-publication-dependencies.test.ts :: actual signed controller routes full original payload pages and last complete dependency observation through fixed reader",
+  "reason": "parent already exited after worker2 failure; remaining busy-loop worker must be reaped; case retained blocked"
+}

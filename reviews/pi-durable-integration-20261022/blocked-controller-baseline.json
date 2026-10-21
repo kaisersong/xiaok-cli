@@ -1,0 +1,20 @@
+{
+  "label": "blocked-controller-baseline",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/intent-delegation/verification-host-controller.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "Intent signed controller actual material and independent recipe: receiver-self$"
+  ],
+  "startedAt": "2026-10-21T19:55:22.415107+00:00",
+  "runnerPid": 32636,
+  "pid": 32671,
+  "pgid": 32671,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:56:16.963018+00:00",
+  "reaped": true
+}

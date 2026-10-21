@@ -1,0 +1,5 @@
+
+> xiaokcode@1.5.15 architecture:check
+> node scripts/governance/check.mjs architecture --changed
+
+[architecture] scanned 1246 files; 124 current, 0 new violations

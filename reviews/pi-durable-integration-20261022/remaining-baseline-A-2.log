@@ -1,0 +1,124 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/runtime/verification/artifact-export-helper.test.ts (40 tests | 40 skipped) 49ms
+   ↓ requires an explicit create command and never writes on startup or EOF
+   ↓ exports exactly 0 original bytes only after commit and removes its temporary link
+   ↓ exports exactly 16777216 original bytes only after commit and removes its temporary link
+   ↓ does not overwrite an existing user destination
+   ↓ rejects and cleans the actual created file for wrong-hash
+   ↓ rejects and cleans the actual created file for short-input
+   ↓ rejects and cleans the actual created file for no-write
+   ↓ cleans through the held directory after the directory is renamed
+   ↓ detects a changed temp at the staged checkpoint and does not remove the foreign replacement
+   ↓ SIGKILL leaves observable uncommitted bytes without inventing a cleanup or success receipt
+   ↓ graceful cancellation drains actual cleanup before the child closes
+   ↓ rejects additional commit commands before publishing a destination
+   ↓ rehashes the held file at commit and rejects in-place changes after staging
+   ↓ rejects a mismatched captured directory identity before creating any file
+   ↓ preserves the actual POSIX basename report:final.md
+   ↓ preserves the actual POSIX basename CON
+   ↓ preserves the actual POSIX basename result.
+   ↓ preserves the actual POSIX basename back\slash
+   ↓ rejects an initial symlink directory before any create
+   ↓ exports on an actual separately mounted APFS volume without requiring ancestor devices to match
+   ↓ rejects a directory junction even though it shares the mounted-volume reparse tag
+   ↓ rejects Windows device basename COM¹.txt before create
+   ↓ rejects Windows device basename LPT².log before create
+   ↓ rejects Windows device basename COM³ before create
+   ↓ rejects Windows device basename CONIN$ before create
+   ↓ rejects Windows device basename CONOUT$ before create
+   ↓ rejects Windows device basename con .txt before create
+   ↓ recovery cannot remove a live helper temporary object at created
+   ↓ recovery cannot remove a live helper temporary object at staged
+   ↓ recovers actual killed staged helper with exact 0 byte payload
+   ↓ recovers actual killed staged helper with exact 16777216 byte payload
+   ↓ recovers known created file without inventing fully written payload progress
+   ↓ retains unknown after a parent move and cleans only after the original directory returns
+   ↓ refuses a wrong durable token and a stable foreign replacement without deleting either
+   ↓ does not infer cleanup when the known temporary entry is missing
+   ↓ refuses to truncate a staged temporary inode that is already hardlinked to an existing target
+   ↓ recovery removes only its temporary link while preserving a previously existing hardlink target
+   ↓ checks staged payload content even when the original ownership trailer remains intact
+   ↓ retains an unknown object after its ownership trailer is removed
+   ↓ refuses a stable symlink replacement and leaves its foreign referent untouched
+ ❯ tests/platform/runtime/registry-lifecycle.test.ts (7 tests | 2 failed) 42ms
+   ✓ registry lifecycle ownership > restores surviving owners without reviving released owners across repeated refreshes 1ms
+   ✓ registry lifecycle ownership > disposes active, deferred and companion registrations without deleting another registry 3ms
+   × registry lifecycle ownership > does not start a tool whose permission check settled after registry disposal 5ms
+     → expected 'Error: tool registry is disposed' to contain 'tool authorization changed'
+   ✓ registry lifecycle ownership > restores main capabilities after repeated production factory children and destroys main on exit 29ms
+   ✓ registry lifecycle ownership > unregisters removed tools across factory registries without widening restricted catalogs 1ms
+   × registry lifecycle ownership > does not invoke an MCP tool removed during its asynchronous permission check 1ms
+     → expected 'Error: 未知工具: mcp__one__removed' to contain 'tool authorization changed'
+   ✓ registry lifecycle ownership > preserves builtins and newer registrations when an MCP catalog collides or is withdrawn 2ms
+ ✓ tests/runtime/verification/loop-application-receiver-fence.test.ts (2 tests) 17500ms
+   ✓ native Loop candidate replacement waits for the original receiver ACK (competing publication: false)  7835ms
+   ✓ native Loop candidate replacement waits for the original receiver ACK (competing publication: true)  9665ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/verification/artifact-export-helper.test.ts [ tests/runtime/verification/artifact-export-helper.test.ts ]
+Error: Command failed: /usr/local/bin/node <master-baseline>/scripts/verification/build-artifact-export-helper.mjs --target darwin-arm64 --toolchain-archive <master-baseline>/.artifacts/solpi-build-tools/go1.27.1.darwin-arm64.tar.gz
+node:fs:561
+  return binding.open(
+                 ^
+
+Error: ENOENT: no such file or directory, open '<master-baseline>/.artifacts/solpi-build-tools/go1.27.1.darwin-arm64.tar.gz'
+    at openSync (node:fs:561:18)
+    at file://<master-baseline>/scripts/verification/build-artifact-export-helper.mjs:19:10
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:633:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '<master-baseline>/.artifacts/solpi-build-tools/go1.27.1.darwin-arm64.tar.gz'
+}
+
+Node.js v24.16.0
+
+ ❯ scripts/verification/build-artifact-export-helper.mjs:19:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/platform/runtime/registry-lifecycle.test.ts > registry lifecycle ownership > does not start a tool whose permission check settled after registry disposal
+AssertionError: expected 'Error: tool registry is disposed' to contain 'tool authorization changed'
+
+Expected: "tool authorization changed"
+Received: "Error: tool registry is disposed"
+
+ ❯ tests/platform/runtime/registry-lifecycle.test.ts:68:26
+     66|     registry.dispose();
+     67|     allow();
+     68|     expect(await result).toContain('tool authorization changed');
+       |                          ^
+     69|     expect(execute.execute).not.toHaveBeenCalled();
+     70|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  tests/platform/runtime/registry-lifecycle.test.ts > registry lifecycle ownership > does not invoke an MCP tool removed during its asynchronous permission check
+AssertionError: expected 'Error: 未知工具: mcp__one__removed' to contain 'tool authorization changed'
+
+Expected: "tool authorization changed"
+Received: "Error: 未知工具: mcp__one__removed"
+
+ ❯ tests/platform/runtime/registry-lifecycle.test.ts:144:26
+    142|     registry.unregisterTool(removed.definition.name);
+    143|     allow();
+    144|     expect(await result).toContain('tool authorization changed');
+       |                          ^
+    145|     expect(removed.execute).not.toHaveBeenCalled();
+    146|     registry.dispose();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  2 failed | 7 passed | 40 skipped (49)
+   Start at  04:01:44
+   Duration  19.61s (transform 1.74s, setup 53ms, collect 3.33s, tests 17.59s, environment 0ms, prepare 87ms)
