@@ -1,6 +1,8 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { dirname, join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -10,17 +12,22 @@ const describeE2E = process.env.XIAOK_E2E ? test.describe : test.describe.skip;
 describeE2E('independent meeting recorder window', () => {
   let app: ElectronApplication;
   let mainPage: Page;
+  let runtimeRoot: string;
 
   test.beforeAll(async () => {
+    runtimeRoot = mkdtempSync(join(tmpdir(), 'xiaok-recorder-runtime-e2e-'));
     app = await electron.launch({
       args: [
+        '-r', join(DESKTOP_ROOT, 'tests', 'e2e', 'fixtures', 'ordinary-ui-account-binding.cjs'), 
         join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js'),
+        `--user-data-dir=${join(runtimeRoot, 'profile')}`,
         '--use-fake-device-for-media-stream',
         '--use-fake-ui-for-media-stream',
       ],
       env: {
         ...process.env,
         NODE_ENV: 'test',
+        XIAOK_CONFIG_DIR: join(runtimeRoot, 'config'),
         XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1',
       },
     });
@@ -30,6 +37,7 @@ describeE2E('independent meeting recorder window', () => {
 
   test.afterAll(async () => {
     await app?.close();
+    if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
   });
 
   test('opens one recorder, keeps its audio session while compact, and restores workbench geometry', async () => {

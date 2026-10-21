@@ -1,3 +1,5 @@
+import {assertConnectorsUser,captureConnectorsInput} from './connectors-authority.js';
+import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -73,8 +75,10 @@ export class ConnectorsStore {
     return { config, status: 'ok' };
   }
 
-  save(input: unknown): Promise<ConnectorsConfig> {
-    return this.enqueue(() => this.doSave(input));
+  save(input: unknown, request?: ConnectorsMutationRequest): Promise<ConnectorsConfig> {
+    assertConnectorsUser(request);
+    const snapshot = captureConnectorsInput(input);
+    return this.enqueue(() => this.doSave(snapshot));
   }
 
   private doSave(input: unknown): ConnectorsConfig {

@@ -8,7 +8,7 @@ export function evaluateArtifactEvidenceGuard(input) {
     if (!terminal) {
         return pass(input.taskId);
     }
-    if (input.expectation !== undefined || input.evidence !== undefined) {
+    {
         const validation = validateCompletionEvidence({
             ownerKind: 'task',
             ownerId: input.taskId,
@@ -18,12 +18,10 @@ export function evaluateArtifactEvidenceGuard(input) {
         });
         return decideValidation(input, validation);
     }
-    return pass(input.taskId);
 }
 export async function evaluateArtifactEvidenceGuardAsync(input, options) {
     assertEvidenceActive(options);
-    if (!['success', 'done', 'submitted', 'completed'].includes(input.status)
-        || (input.expectation === undefined && input.evidence === undefined))
+    if (!['success', 'done', 'submitted', 'completed'].includes(input.status))
         return pass(input.taskId);
     const validation = await validateCompletionEvidenceAsync({ ownerKind: 'task', ownerId: input.taskId,
         targetStatus: input.status, expectation: input.expectation, evidence: input.evidence }, options);
@@ -31,7 +29,9 @@ export async function evaluateArtifactEvidenceGuardAsync(input, options) {
     return decideValidation(input, validation);
 }
 function decideValidation(input, validation) {
-    if (validation.ok)
+    if (validation.failureKind === 'verification_unavailable' || validation.failureKind === 'verification_required')
+        return { ...block(input.taskId, validation.message ?? 'Protected verification required.'), allowOverride: false, action: 'Complete protected verification and publication through the controller.' };
+    if (validation.ok || (input.expectation === undefined && input.evidence === undefined))
         return pass(input.taskId);
     // A text answer is always sufficient evidence — even when the prompt classifier
     // guessed file_artifact / project_update / log_diagnostic etc. Users iterate via

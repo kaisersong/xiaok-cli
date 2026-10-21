@@ -26,10 +26,12 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setSelected(new Set());
+    setError('');
     setSearch('');
     loadMemories();
   }, [open]);
@@ -65,9 +67,12 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
     const entries = memories.filter(m => selected.has(m.id));
     if (entries.length === 0) return;
     setImporting(true);
+    setError('');
     try {
       await onImport(entries);
       onClose();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : t.projectsKnowledgeSaveFailed);
     } finally {
       setImporting(false);
     }
@@ -140,6 +145,8 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
             </div>
           )}
         </div>
+
+        {error && <p role="alert" className="px-5 py-2 text-xs text-[var(--c-status-error-text)]">{error}</p>}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-[var(--c-border-subtle)] px-5 py-3">

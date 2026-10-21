@@ -1,13 +1,14 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
+import { normalizeConfig } from '../../src/ai/providers/normalize.js';
 
 const watchdogEvents = vi.hoisted(() => [] as string[]);
 vi.mock('../../src/commands/chat-runtime-config.js', async importOriginal => {
@@ -86,7 +87,7 @@ function extractLastUserText(messages: Message[]): string {
   }
 
   return lastUserWithText.content
-    .filter((block) => block.type === 'text' && !block.text.startsWith('<system-reminder>'))
+    .filter((block): block is Extract<MessageBlock, { type: 'text' }> => block.type === 'text' && !block.text.startsWith('<system-reminder>'))
     .map((block) => block.text)
     .join('\n');
 }
@@ -1103,7 +1104,7 @@ function writeCompletedFeedbackResumeSessionFixture(
     updatedAt: now,
   });
 
-  const skillEval = createEmptySessionSkillEvalState(sessionId, now);
+  const skillEval = createEmptySessionSkillEvalState(now);
   skillEval.observations.push({
     observationId: `${stepId}:skill_eval`,
     sessionId,
@@ -1163,6 +1164,56 @@ describe('chat interactive runtime', () => {
   let originalDisableGlobalPlugins: string | undefined;
   let cwdSpy: ReturnType<typeof vi.spyOn> | undefined;
 
+  // Diagnostic-only: keep the real fatal/report/exit path and original assertions.
+  // The producer report is already allowlist-only; never dump env or raw errors.
+  const diagnosticWrite = process.stderr.write.bind(process.stderr);
+  const diagnosticRoots = new Set<string>();
+  const diagnosticReports = new Set<string>();
+  const diagnosticReadFailures: unknown[] = [];
+  let diagnosticCase = 0;
+  const reportWorkerResources = (stage: string): void => {
+    const resourceTypes: Record<string, number> = {};
+    for (const type of process.getActiveResourcesInfo()) resourceTypes[type] = (resourceTypes[type] ?? 0) + 1;
+    diagnosticWrite(`[fixture-worker-resources] ${JSON.stringify({ stage, caseOrdinal: diagnosticCase,
+      knownFixtureRoots: diagnosticRoots.size, workerActiveResourcesOnly: resourceTypes,
+      liveDetachedProcessCount: 'UNKNOWN_NOT_MEASURED' })}\n`);
+  };
+  const retainOwnCrashReports = (): void => {
+    for (const root of tempDirs) diagnosticRoots.add(root);
+    // Retain previous roots too: a late pending command can recreate its old
+    // crash directory after that case's cleanup, under the next case's label.
+    for (const root of diagnosticRoots) {
+      const dir = join(root, 'config', 'crashes');
+      let entries: string[];
+      try { entries = readdirSync(dir); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const name of entries) {
+        if (!/^crash-[0-9TZ-]+\.json$/.test(name)) continue;
+        const path = join(dir, name);
+        if (diagnosticReports.has(path)) continue;
+        const stat = lstatSync(path);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) {
+          throw new Error('fixture_crash_report_not_bounded_regular_file');
+        }
+        const report = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+        diagnosticWrite(`[fixture-original-fatal] ${JSON.stringify({ fixture: basename(root), file: name,
+          time: report.time, node: report.node, platform: report.platform, arch: report.arch,
+          context: report.context, error: report.error })}\n`);
+        diagnosticReports.add(path);
+        reportWorkerResources('original-fatal-retained');
+      }
+    }
+  };
+
+
+  const observeOwnCrashReports = (): void => {
+    try { retainOwnCrashReports(); }
+    catch (error) { diagnosticReadFailures.push(error); }
+  };
+
   beforeEach(() => {
     resetAdapterState();
     watchdogEvents.length=0;
@@ -1175,9 +1226,19 @@ describe('chat interactive runtime', () => {
     tempDirs.push(isolatedHome);
     process.env.HOME = isolatedHome;
     process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = '1';
+    diagnosticCase += 1;
+    reportWorkerResources('before-case');
+  });
+
+  afterAll(() => {
+    observeOwnCrashReports();
+    if (diagnosticReadFailures.length) {
+      throw new AggregateError(diagnosticReadFailures, 'fixture_fatal_diagnostic_read_failed');
+    }
   });
 
   afterEach(async () => {
+    observeOwnCrashReports();
     cwdSpy?.mockRestore();
     cwdSpy = undefined;
     if (originalConfigDir === undefined) {
@@ -1242,7 +1303,10 @@ describe('chat interactive runtime', () => {
           await pending;
         } finally {
           for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
-          for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+          for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) {
+            if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
+            process.stdout.removeListener('resize', listener);
+          }
           harness.restore();
         }
       }
@@ -1308,7 +1372,7 @@ describe('chat interactive runtime', () => {
       for (const [key, value] of Object.entries(originalEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
       vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
       for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
-      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
       harness.restore();
     }
   }, 15000);
@@ -1350,7 +1414,7 @@ describe('chat interactive runtime', () => {
       expect(crashSpy).not.toHaveBeenCalled();
     } finally {
       for(const listener of process.listeners('SIGINT'))if(!sigint.includes(listener))process.removeListener('SIGINT',listener);
-      for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
     }
   },15000);
@@ -1402,7 +1466,7 @@ describe('chat interactive runtime', () => {
       harness.send('/exit');harness.send('\r'); await pending;
     } finally {
       for(const listener of process.listeners('SIGINT')) if(!sigintListeners.includes(listener))process.removeListener('SIGINT',listener);
-      for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       harness.restore();
       crashSpy.mockRestore();
     }
@@ -1466,7 +1530,7 @@ describe('chat interactive runtime', () => {
           expect(readdirSync(sessionsDir).filter(entry => entry.endsWith('.json'))).toHaveLength(1);
         } finally {
           for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
-          for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener);
+          for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
           harness.restore();
         }
       }
@@ -1534,7 +1598,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1617,7 +1681,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1657,7 +1721,7 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
-    let pending: Promise<void> | undefined;
+    let pending: ReturnType<Command['parseAsync']> | undefined;
 
     try {
       const program = new Command();
@@ -1696,7 +1760,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1733,7 +1797,7 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
-    let pending: Promise<void> | undefined;
+    let pending: ReturnType<Command['parseAsync']> | undefined;
 
     try {
       const program = new Command();
@@ -1790,7 +1854,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1827,7 +1891,7 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
-    let pending: Promise<void> | undefined;
+    let pending: ReturnType<Command['parseAsync']> | undefined;
 
     try {
       const program = new Command();
@@ -1851,7 +1915,9 @@ describe('chat interactive runtime', () => {
       const lines = harness.screen.lines();
       const noticeIndex = findLineIndex(lines, '正在执行工具...');
       const toolIndex = findLineIndex(lines, 'Read silent.txt');
-      expect(noticeIndex).toBeGreaterThanOrEqual(0);
+      expect(noticeIndex).toBeGreaterThanOrEqual(1);
+      expect(lines[noticeIndex - 1].trim()).toBe('');
+      expect(lines[noticeIndex - 2].trim()).toBe('');
       expect(toolIndex).toBeGreaterThan(noticeIndex);
 
       await waitForInputTurnReady(harness);
@@ -1867,7 +1933,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1928,7 +1994,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2005,7 +2071,10 @@ describe('chat interactive runtime', () => {
       releaseTool(); releaseAnswer();
       vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
       for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
-      for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) {
+            if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
+            process.stdout.removeListener('resize', listener);
+          }
       harness.restore();
     }
   }, 10_000);
@@ -2096,7 +2165,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2170,7 +2239,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2278,7 +2347,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2364,7 +2433,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2427,7 +2496,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2524,7 +2593,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2607,7 +2676,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2722,7 +2791,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2829,7 +2898,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2895,7 +2964,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2987,7 +3056,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3071,7 +3140,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3112,7 +3181,10 @@ describe('chat interactive runtime', () => {
       h.send('/exit\r'); await pending;
     } finally {
       for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
-      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) {
+            if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
+            process.stdout.removeListener('resize', listener);
+          }
       h.restore();
     }
   }, 20_000);
@@ -3193,7 +3265,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3254,7 +3326,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3317,7 +3389,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3407,7 +3479,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3504,7 +3576,7 @@ describe('chat interactive runtime', () => {
         }
         for (const listener of process.stdout.listeners('resize')) {
           if (!stdoutResizeListeners.includes(listener)) {
-            process.stdout.removeListener('resize', listener);
+            process.stdout.removeListener('resize', listener as () => void);
           }
         }
         harness.restore();
@@ -3538,7 +3610,7 @@ describe('chat interactive runtime', () => {
         }
         for (const listener of process.stdout.listeners('resize')) {
           if (!stdoutResizeListeners.includes(listener)) {
-            process.stdout.removeListener('resize', listener);
+            process.stdout.removeListener('resize', listener as () => void);
           }
         }
         secondHarness.restore();
@@ -3587,7 +3659,8 @@ describe('chat interactive runtime', () => {
     });
     const { createAdapter } = await import('../../src/ai/models.js');
     vi.mocked(createAdapter).mockImplementation((nextConfig) => {
-      const entry = nextConfig.models[nextConfig.defaultModelId]!;
+      const normalizedConfig = normalizeConfig(nextConfig);
+      const entry = normalizedConfig.models[normalizedConfig.defaultModelId]!;
       return createFakeAdapter(
         entry.model,
         entry.runtimeOptions?.contextLimit ?? 200_000,
@@ -3640,7 +3713,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3688,7 +3761,6 @@ describe('chat interactive runtime', () => {
           label: 'Kimi K3 1M',
           runtimeOptions: {
             contextLimit: 1_048_576,
-            reasoningEffort: 'max',
           },
         },
       },
@@ -3713,6 +3785,7 @@ describe('chat interactive runtime', () => {
         provider: 'kimi',
         model: 'k3',
         label: 'Kimi K3 1M',
+        reasoningEffort: 'low',
       })
       .mockResolvedValueOnce({
         modelId: 'kimi-k2.7',
@@ -3728,7 +3801,8 @@ describe('chat interactive runtime', () => {
         failNextAdapter = false;
         throw new Error('adapter failed');
       }
-      const entry = nextConfig.models[nextConfig.defaultModelId]!;
+      const normalizedConfig = normalizeConfig(nextConfig);
+      const entry = normalizedConfig.models[normalizedConfig.defaultModelId]!;
       return createFakeAdapter(
         entry.model,
         entry.runtimeOptions?.contextLimit ?? 200_000,
@@ -3812,6 +3886,10 @@ describe('chat interactive runtime', () => {
         expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K3 1M (k3)');
       }, { timeoutMs: 3_000 });
       expect.soft(statusBarUpdateSpy.mock.calls.at(-1)).toEqual(['k3', 1_048_576]);
+      expect.soft(readPersistedConfig().models['kimi-k3-one-million']?.runtimeOptions).toEqual({
+        contextLimit: 1_048_576,
+        reasoningEffort: 'low',
+      });
       await runProbe('k3', 1_048_576);
 
       // The generic fake adapter keeps this test focused on atomic policy refresh; the
@@ -3837,7 +3915,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3899,7 +3977,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3969,7 +4047,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4067,7 +4145,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4164,7 +4242,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       handlerSpy.mockRestore();
@@ -4282,7 +4360,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4373,7 +4451,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4448,7 +4526,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4541,7 +4619,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4662,7 +4740,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4780,7 +4858,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4904,7 +4982,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5004,7 +5082,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5082,7 +5160,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5337,7 +5415,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5584,7 +5662,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5856,7 +5934,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5932,7 +6010,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5998,7 +6076,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6055,7 +6133,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6141,7 +6219,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6225,7 +6303,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6297,7 +6375,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6375,10 +6453,15 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
     }
   }, 15_000);
 });
+
+// EventEmitter returns real functions; guard the public callback shape without wrapping identity.
+function isResizeListener(value: unknown): value is (...args: unknown[]) => void {
+  return typeof value === 'function';
+}

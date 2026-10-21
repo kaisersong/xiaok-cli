@@ -1,3 +1,4 @@
+import { captureToolDescriptionMetadata, type ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
 import { isAbsolute, resolve, relative } from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -94,6 +95,7 @@ class RoomToolRegistry extends ToolRegistry {
     constructor(private readonly roomOptions: {
         mode: 'discussion' | 'workspace';
         tools: Tool[];
+        metadata?: ReadonlyMap<Tool, ToolDescriptionMetadata>;
         context?: RoomWorkspaceExecutionContext;
         port?: WorkspaceExecutionPort;
         allowedTools?: string[];
@@ -106,18 +108,19 @@ class RoomToolRegistry extends ToolRegistry {
             this.allowed = new Set([...this.allowed].filter(name => ceiling.has(name)));
         }
         for (const tool of roomOptions.tools)
-            this.registerTool(tool);
+            this.registerTool(tool, roomOptions.metadata?.get(tool));
         if(this.allowed.has('bash'))this.registerTool(createRoomLocalCommandTool({cwd:roomOptions.context!.effectiveCwd,onCleanupPending:()=>{this.cleanupPending=true;}}));
     }
-    override registerTool(tool: Tool): void {
+    override registerTool(tool: Tool, metadata?: ToolDescriptionMetadata): void {
         // ToolRegistry registers its local search tool inside super().
         if (!this.allowed) {
             if (tool.definition.name === 'tool_search')
-                super.registerTool(tool);
+                super.registerTool(tool, metadata);
             return;
         }
         if (!this.allowed.has(tool.definition.name))
             return;
+        const description = captureToolDescriptionMetadata(metadata);
         if(tool.definition.name==='bash')tool=createRoomLocalCommandTool({cwd:this.roomOptions.context!.effectiveCwd,onCleanupPending:()=>{this.cleanupPending=true;}});
         const definition = ['write','edit'].includes(tool.definition.name) ? { ...tool.definition, inputSchema: { ...tool.definition.inputSchema, properties: { ...(tool.definition.inputSchema.properties as Record<string,unknown>), expectedHash: { type: ['string','null'], description: 'Expected SHA256 of the last observed file; null permits creation only. Omit to use this runner\'s last successful read.' } } } } : tool.definition;
         super.registerTool({ ...tool, definition, execute: (input, context) => {
@@ -183,7 +186,7 @@ class RoomToolRegistry extends ToolRegistry {
                 this.pending.add(operation);
                 void operation.finally(() => this.pending.delete(operation)).catch(() => { });
                 return operation;
-            } });
+            } }, description);
     }
     override executeTool(name: string, input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string> {
         const operation = super.executeTool(name, input, context);
@@ -243,7 +246,9 @@ export async function runRoomWorkspaceExecutor(options: RoomWorkspaceRunOptions 
     signal.addEventListener('abort', onAbort, { once: true });
     async function turn(context: RoomWorkspaceExecutionContext, agentId: string, prompt: string, turnSignal: AbortSignal, history: HistoryMessage[], runContext?: ManagedAgentRunContext, allowedTools?: string[]): Promise<string> {
         const combined = AbortSignal.any([signal, turnSignal]);
-        const registry = createRoomToolRegistry({ mode: 'workspace', tools: buildToolList(undefined, { cwd: context.effectiveCwd }), context, port: options.port, allowedTools });
+        const metadata = new Map<Tool, ToolDescriptionMetadata>();
+        const toolsForRegistry = buildToolList(undefined, { cwd: context.effectiveCwd }, [], metadata);
+        const registry = createRoomToolRegistry({ mode: 'workspace', tools: toolsForRegistry, metadata, context, port: options.port, allowedTools });
         const tools = createMultiAgentTools({ coordinator, callerId: agentId, agents: [], createSession: async ({ identity, agentDef }) => {
                 if (agentDef.model || agentDef.modelCapability || agentDef.isolation === 'worktree')
                     throw new Error('workspace_child_override_unsupported');

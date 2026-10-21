@@ -1,3 +1,5 @@
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
@@ -89,6 +91,13 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+    if (disclosure !== undefined) {
+      assertProviderDisclosureActive(disclosure);
+      const disclosureSignal = getProviderDisclosureSignal(disclosure);
+      options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
+    }
+    try {
     let attempt = 0;
     while (true) {
       options?.signal?.throwIfAborted();
@@ -100,6 +109,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
         }
         return;
       } catch (error) {
+        if (disclosure !== undefined) assertProviderDisclosureActive(disclosure);
         // 已产出 chunk 后重试会重复输出，必须放弃重试
         if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
         const delayMs = Math.min(2000 * 2 ** attempt, 10000);
@@ -107,6 +117,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
         attempt++;
       }
     }
+    } finally { if (disclosure !== undefined) disposeProviderDisclosureContext(disclosure); }
   }
 
   private async *streamOnce(
@@ -124,7 +135,9 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     const endpoint = new URL('responses', ensureTrailingSlash(this.baseUrl)).toString();
     let response: Response;
     try {
-      response = await fetch(endpoint, {
+      const fetchImpl = options?.providerDisclosure
+        ? createProviderDisclosureFetch(options.providerDisclosure, globalThis.fetch.bind(globalThis)) : fetch;
+      response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,

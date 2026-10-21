@@ -154,6 +154,27 @@ describe('actual adapter to CompactRunner completion boundary', () => {
     expect(chunks).toEqual([{ type: 'text', delta: 'summary' }, { type: 'done' }]);
   });
 
+  it('sends the exact OpenAI body preview with the complete-response policy kept internal', async () => {
+    const adapter = new OpenAIAdapter({ apiKey: 'fixture', kimiCodingHeadersApplied: false,
+      harnessContext: buildOpenAIHarnessContext({ identity: { providerId: 'fixture', providerType: 'custom',
+        protocol: 'openai_legacy', canonicalBaseUrl: 'https://fixture.invalid/v1', wireModel: 'fixture', capabilities: [] },
+      flags: resolveKimiHarnessFeatureFlags({}) }) });
+    const runner = new CompactRunner(adapter), original = structuredClone(history);
+    const prepared = runner.prepareRequest(history), options = { maxOutputTokens: 64 };
+    const preview = adapter.getObservationRequestPreview(prepared.messages, [], prepared.systemPrompt, options)!;
+    const create = vi.spyOn(adapter.client.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { content: 'summary' }, finish_reason: 'stop' }] };
+        yield { choices: [], usage: { prompt_tokens: 3, completion_tokens: 7 } };
+      },
+    } as never);
+    await expect(runner.run(history, options)).resolves.toBe('summary');
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]![0]).toEqual(JSON.parse(preview.serializedBody));
+    expect(history).toEqual(original);
+    expect(options).toEqual({ maxOutputTokens: 64 });
+  });
+
   it.each([
     [{ type: 'text', delta: 'partial' }],
     [{ type: 'text', delta: '   ' }, { type: 'done' }],

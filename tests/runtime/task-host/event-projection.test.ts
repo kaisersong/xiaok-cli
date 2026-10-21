@@ -43,6 +43,7 @@ describe('DesktopTaskEvent projection', () => {
         type: 'tool_finished',
         sessionId: 'sess_1',
         turnId: 'turn_1',
+        invocationId: 'read-invocation-1',
         toolName: 'read',
         ok: true,
       },
@@ -101,6 +102,7 @@ describe('DesktopTaskEvent projection', () => {
       { type: 'progress', eventId: 'turn_1:step_1:activated', message: '正在执行步骤 step_1', stage: 'step' },
       { type: 'progress', eventId: expect.stringContaining('turn_1:tool:read:'), message: '🔧 read', stage: 'tool' },
       { type: 'progress', eventId: expect.stringContaining('turn_1:tool-done:read:'), message: '✓ read 完成', stage: 'completed' },
+      { type: 'goal_tool_finished', invocationId: 'read-invocation-1', toolName: 'read', ok: true },
       { type: 'progress', eventId: 'turn_1:step_1:breadcrumb', message: '正在归并客户诉求', stage: 'running' },
       {
         type: 'needs_user',

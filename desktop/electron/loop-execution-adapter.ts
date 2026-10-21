@@ -16,11 +16,11 @@ export function createLoopExecutionAdapter(options: {
   assistantRuntime: AssistantRuntime;
 }): LoopRunner {
   return {
-    runLoopNow(loopId, trigger, signal) {
+    runLoopNow(loopId, trigger, signal, context) {
       if (isAssistantLoopId(loopId)) {
-        return options.assistantRuntime.runLoopNow(loopId, trigger, signal);
+        return options.assistantRuntime.runLoopNow(loopId, trigger, signal, context);
       }
-      return options.genericRunner.runLoopNow(loopId, trigger, signal);
+      return options.genericRunner.runLoopNow(loopId, trigger, signal, context);
     },
   };
 }
@@ -30,7 +30,7 @@ export function createAssistantAwareLoopTimedActionExecutor(options: {
   assistantRuntime: AssistantRuntime;
 }): TimedActionExecutorHandler {
   const assistantExecutor = createLoopExecutor({
-    runLoop: (loopId, trigger, signal) => options.assistantRuntime.runLoopNow(loopId, trigger, signal),
+    runLoop: (loopId, trigger, signal, context) => options.assistantRuntime.runLoopNow(loopId, trigger, signal, context),
   });
   return {
     kind: 'loop',

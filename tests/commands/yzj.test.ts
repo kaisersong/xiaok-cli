@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shouldStartYZJWebSocket } from '../../src/commands/yzj.js';
+import type { YZJChannelConfig } from '../../src/types.js';
 
 describe('yzj command helpers', () => {
   it('does not start websocket client during dry-run verification', () => {
@@ -10,7 +11,7 @@ describe('yzj command helpers', () => {
           inboundMode: 'websocket',
           webhookPath: '/yzj/webhook',
           webhookPort: 3001,
-        },
+        } satisfies YZJChannelConfig as YZJChannelConfig,
         { dryRun: true },
       ),
     ).toBe(false);
@@ -24,7 +25,7 @@ describe('yzj command helpers', () => {
           inboundMode: 'websocket',
           webhookPath: '/yzj/webhook',
           webhookPort: 3001,
-        },
+        } satisfies YZJChannelConfig as YZJChannelConfig,
         {},
       ),
     ).toBe(true);

@@ -1,21 +1,48 @@
 /** Renderer receives projections only; main authenticates every operation. */
 export interface RoomWorkspaceRequest { roomId: string }
 export interface RoomWorkspaceScope { kind: 'room_only' | 'project'; projectId?: string }
+export type RoomWorkspaceActor = { kind: 'user'; userId: string }
+  | { kind: 'agent'; logicalAgentId: string } | { kind: 'system'; service: string };
+export interface RoomWorkspaceTerminationEvidence {
+  executorInstanceId: string; kind: 'process-exit' | 'session-disposed' | 'resources-disposed'; verified: boolean;
+}
+/** Complete existing broker facts, never an execution or authorization grant. */
+export interface RoomWorkspaceClaim {
+  claimId: string; runId: string; executionState: string; authorizationState: string;
+  instructionsRevision: number; agentName?: string; executorInstanceId?: string; projectId?: string;
+  roomId?: string; logicalAgentId?: string; contextScope?: RoomWorkspaceScope;
+  parentClaimId?: string | null; projectMappingRevision?: number | null; taskId?: string | null;
+  protocolVersion?: number; workspaceId?: string; originHostId?: string; hostPrincipal?: string;
+  hostIncarnation?: number; bindingId?: string; generation?: number; workspaceRevision?: number;
+  instructionsDigest?: string | null; membershipRevision?: number; createdAt?: string;
+  acquireDigest?: string; taskName?: string; mappingRevision?: number; roomSequence?: number;
+  updatedAt?: string; lastHeartbeatAt?: string; terminationEvidence?: RoomWorkspaceTerminationEvidence;
+}
+export interface RoomWorkspaceArtifactHandoff {
+  reportedSummary: string; completionStatus: string; unfinished: null; blockers: null; sourceMessageIds: string[];
+}
+export interface RoomWorkspaceInstructions {
+  revision: number; publishedText: string; sourceRelativePath?: string | null; sourceHash?: string | null;
+  sourceChanged?: boolean; candidateText?: string; candidateHash?: string; roomId?: string;
+  description?: string; directoryNotes?: string | string[]; snapshotDigest?: string;
+  publishedBy?: RoomWorkspaceActor; publishedAt?: string;
+}
 export interface RoomWorkspaceArtifact {
   artifactId: string; versionId: string; relativePath: string; state: string;
   bindingId: string; generation: number; contentHash?: string; size?: number;
   producerAgentId?: string; producerRunId?: string; producerDisplayName?: string; producerType?: 'user' | 'unknown' | 'agent';
   projectId?: string; synchronization?: 'pending' | 'synced';
+  roomId?: string; workspaceId?: string; originHostId?: string; workspaceRevision?: number;
+  contextScope?: RoomWorkspaceScope; producerClaimId?: string; handoff?: RoomWorkspaceArtifactHandoff;
+  observedAt?: string; commitTicketId?: string; confirmationTicketId?: string; sourceSequence?: number;
 }
 export interface RoomWorkspaceSnapshot {
   localCommandsAllowed?: boolean;
   ok: boolean; code?: string; phase: string; revision: number;
   permissions: { canManage: boolean; canRead: boolean; canReadArtifacts?: boolean; canRegister?: boolean };
-  workspaceId?: string; bindingId?: string; generation?: number; rootDisplayPath?: string; operationId?: string;
-  instructions?: { revision: number; publishedText: string; sourceRelativePath?: string; sourceHash?: string;
-    sourceChanged?: boolean; candidateText?: string; candidateHash?: string };
-  claims: Array<{ claimId: string; runId: string; executionState: string; authorizationState: string;
-    instructionsRevision: number; agentName?: string; executorInstanceId?: string; projectId?: string }>;
+  workspaceId?: string | null; bindingId?: string | null; generation?: number; rootDisplayPath?: string; operationId?: string | null;
+  instructions?: RoomWorkspaceInstructions | null;
+  claims: RoomWorkspaceClaim[];
   artifacts: RoomWorkspaceArtifact[];
   projectMappings?: Array<{ projectId: string; name?: string; state: string; mappingRevision?: number; projectRevision?: number; workFolderRelativePath?: string; artifactsRelativePath?: string }>;
 }

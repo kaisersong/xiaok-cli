@@ -33,6 +33,9 @@ export const REGISTERED = [
   { config: 'vitest.sandbox.config.mjs', runDir: '.', canary: SANDBOX_CANARY, sandbox: true },                            // npm run test:sandbox:run
   { config: 'vitest.skill-release.config.mjs', runDir: '.', canary: SANDBOX_CANARY, sandbox: true },                      // npm run test:skill:release:run
   { config: 'desktop/vitest.config.ts', runDir: 'desktop', canary: 'tests/host-env-isolation.test.ts', desktop: true },     // cd desktop && npm run test
+  { config: 'desktop/vitest.diagnostics-ipc.config.ts', runDir: 'desktop', canary: 'tests/host-env-isolation.test.ts', desktop: true },
+  { config: 'desktop/vitest.registered-recipe-controls.config.mjs', runDir: 'desktop', canary: 'tests/host-env-isolation.test.ts', desktop: true },
+  { config: 'desktop/vitest.registered-recipe.config.mjs', runDir: 'desktop', canary: 'tests/host-env-isolation.test.ts', desktop: true },
   { config: 'vitest.yolo.config.mjs', runDir: '.', canary: SANDBOX_CANARY, sandbox: true },                                // permission-hooks.yml: registry-factory 归属校验
 ];
 

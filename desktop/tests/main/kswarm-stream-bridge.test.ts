@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { KSwarmStreamBridge } from '../../electron/kswarm-stream-bridge';
+import { KSwarmStreamBridge } from '../../electron/kswarm-stream-bridge.js';
 
 function createMockWebContents(id: number) {
   const listeners: Record<string, Function[]> = {};

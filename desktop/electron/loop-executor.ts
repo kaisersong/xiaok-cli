@@ -1,3 +1,6 @@
+import {createLoopDatabaseOwnerGroup} from './loop-database-owner.js';
+import {readLoopCompletedRun} from './loop-completion-consumer.js';
+import {captureLoopRunContext,assertOrdinaryLoopOwner,type LoopRunContext} from './loop-run-context.js';
 import { join } from 'node:path';
 import {
   ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID,
@@ -50,6 +53,8 @@ export interface LoopScanResult {
 }
 
 export type RunLoopNowResult =
+  | { status: 'publication_pending'; run: LoopRun }
+  | { status: 'executing'; run: LoopRun }
   | { status: 'success'; run: LoopRun }
   | { status: 'blocked'; run: LoopRun }
   | { status: 'failed'; run: LoopRun }
@@ -58,13 +63,14 @@ export type RunLoopNowResult =
   | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export interface LoopRunner {
-  runLoopNow(loopId: string, trigger?: LoopRunTrigger, signal?: AbortSignal): Promise<RunLoopNowResult>;
+  runLoopNow(loopId: string, trigger: LoopRunTrigger|undefined, signal: AbortSignal|undefined, context:LoopRunContext): Promise<RunLoopNowResult>;
 }
 
 export interface CreateLoopRunnerOptions {
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   scanner: LoopScanner;
+  taskPort?: {recoverTask(taskId:string):Promise<import('../../src/runtime/task-host/types.js').TaskSnapshot|undefined>};
   scanners?: Record<string, LoopScanner>;
   userLoopTemplateRunner?: UserLoopTemplateRunner;
   finalizer?: LoopFinalizer;
@@ -78,16 +84,21 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
   const finalizer = options.finalizer ?? createLoopFinalizer(options.loopStore);
 
   return {
-    async runLoopNow(loopId, trigger, signal) {
+    async runLoopNow(loopId, trigger, signal, rawContext) {
+      const context=captureLoopRunContext(rawContext);
       const startedAt = now();
       assertRecoveredStaleRuns(options.loopStore.recoverStaleRuns(startedAt, staleAfterMs));
       const effectiveTrigger = trigger ?? { kind: 'manual' };
-      const begin = options.loopStore.beginLoopRun(loopId, effectiveTrigger, startedAt, staleAfterMs);
+      const begin = options.loopStore.beginLoopRun(loopId, effectiveTrigger, startedAt, staleAfterMs,context);
       if (begin.status !== 'started') {
+        if(begin.status==='already_running'){const run=options.loopStore.getLoopRun(begin.activeRunId);if(run&&options.loopStore.getLoopRunLifecycle(run.id)?.businessState==='publication_pending'){options.loopStore.recoverLoopPublicationCandidates({runId:run.id,requestSource:context.requestSource});return {status:'publication_pending',run};}if(run&&options.loopStore.getLoopRunPublicationBasis(run.id)?.contract.kind==='user-template'&&options.userLoopTemplateRunner?.recoverTemplateLoop)return options.userLoopTemplateRunner.recoverTemplateLoop({loopId:run.loopId,runId:run.id,requestSource:context.requestSource,signal});}
+        if(begin.status==='already_completed'){const run=options.loopStore.getLoopRun(begin.completedRunId);if(!run)throw Error('loop_completion_missing');if(!await readLoopCompletedRun(options.loopStore,{runId:run.id,loopId,logicalRunKey:String(effectiveTrigger.logicalRunKey??'').trim(),requestSource:context.requestSource,...(signal?{signal}:{})},options.taskPort))return {status:'publication_pending',run};}
         return begin;
       }
 
       const run = begin.run;
+      const producer=options.loopStore.getLoopRunPublicationBasis(run.id)?options.loopStore.openLoopPublicationProducer(run):undefined;
+      if(!producer)assertOrdinaryLoopOwner('loop_run',run.id);
       const definition = options.loopStore.getLoopDefinition(loopId);
       if (definition?.origin === 'user_template') {
         if (!options.userLoopTemplateRunner) {
@@ -105,6 +116,8 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
           runId: run.id,
           trigger: effectiveTrigger,
           signal,
+          requestSource:context.requestSource,
+          producer,
         });
       }
 
@@ -123,6 +136,8 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
         if (!liveRun || liveRun.status !== 'running') {
           return resultFromPersistedRun(liveRun ?? run);
         }
+
+        if(producer){producer.recordScan(stage.id,scan as Parameters<typeof producer.recordScan>[1],finishedAt);options.loopStore.recoverLoopPublicationCandidates({runId:run.id,requestSource:context.requestSource});return {status:'publication_pending',run:options.loopStore.getLoopRun(run.id)!};}
 
         if (scan.nextActionKind && scan.nextActionKind !== 'none') {
           const nextActionSummary = scan.nextActionSummary ?? summary;
@@ -189,7 +204,7 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
 }
 
 export interface CreateLoopExecutorOptions {
-  runLoop: (loopId: string, trigger: LoopRunTrigger, signal?: AbortSignal) => Promise<RunLoopNowResult> | RunLoopNowResult;
+  runLoop: (loopId: string, trigger: LoopRunTrigger, signal: AbortSignal|undefined, context:LoopRunContext) => Promise<RunLoopNowResult> | RunLoopNowResult;
 }
 
 export function createLoopExecutor(options: CreateLoopExecutorOptions): TimedActionExecutorHandler {
@@ -199,7 +214,9 @@ export function createLoopExecutor(options: CreateLoopExecutorOptions): TimedAct
       if (action.executor.kind !== 'loop') {
         return { skip: { action: 'skip', reason: `not a loop executor: ${action.executor.kind}` } };
       }
-      const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context, runtimeContext), runtimeContext?.signal);
+      const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context, runtimeContext), runtimeContext?.signal,{requestSource:'scheduler'});
+      if(result.status==='publication_pending')return {decision:{loopRunId:result.run.id,loopStatus:'publication_pending'}};
+      if(result.status==='executing')return {awaitingLoopRunId:result.run.id};
       if (result.status === 'already_running') {
         return { skip: { action: 'skip', reason: `loop already running: ${result.activeRunId}` } };
       }
@@ -255,7 +272,7 @@ function resultFromPersistedRun(run: LoopRun): Extract<RunLoopNowResult, { run: 
     case 'failed':
       return { status: 'failed', run };
     case 'running':
-      return { status: 'failed', run: { ...run, status: 'failed', failureKind: 'unknown', message: 'Loop run remained running after executor completion.' } };
+      return {status:'executing',run};
   }
 }
 
@@ -272,6 +289,7 @@ export interface DesktopLoopRuntime {
 }
 
 export interface CreateDesktopLoopRuntimeOptions {
+  acquireWriter?: (label: string) => { release(): void };
   dataRoot: string;
   now?: () => number;
   staleAfterMs?: number;
@@ -289,12 +307,14 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
   const staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
   const dbPath = options.loopDbPath ?? options.completionEvidenceDbPath ?? join(options.dataRoot, 'loop-evidence.sqlite');
   const completionEvidenceDbPath = options.completionEvidenceDbPath ?? dbPath;
-  const loopStore = new LoopStore(dbPath);
-  const evidenceStore = new CompletionEvidenceStore(completionEvidenceDbPath);
+  const databases=createLoopDatabaseOwnerGroup([dbPath,completionEvidenceDbPath]);
+  try{
+  const loopStore = new LoopStore(databases.sources[0]);
+  const evidenceStore = new CompletionEvidenceStore(databases.sources[1]);
   loopStore.ensureBuiltInLoops(now());
   assertRecoveredStaleRuns(loopStore.recoverStaleRuns(now(), staleAfterMs));
-  const scanner = new ArtifactEvidenceRegressionScanner(completionEvidenceDbPath);
-  const kswarmHealthScanner = new KSwarmServiceHealthScanner(completionEvidenceDbPath, {
+  const scanner = new ArtifactEvidenceRegressionScanner(databases.sources[1]);
+  const kswarmHealthScanner = new KSwarmServiceHealthScanner(databases.sources[1], {
     probe: options.kswarmHealthProbe ?? defaultHealthyKSwarmHealthProbe,
     logPaths: options.kswarmHealthLogPaths,
   });
@@ -303,12 +323,13 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
       loopStore,
       evidenceStore,
       taskPort: options.taskPort,
+      acquireWriter: options.acquireWriter,
       llmPort: options.llmPort,
       onConstraintAdded: options.onConstraintAdded,
       now,
     })
     : undefined;
-  const runner = createLoopRunner({
+  const baseRunner = createLoopRunner({
     loopStore,
     evidenceStore,
     scanner,
@@ -316,9 +337,12 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
       [KSWARM_SERVICE_HEALTH_LOOP_ID]: kswarmHealthScanner,
     },
     userLoopTemplateRunner,
+    taskPort: options.taskPort ? {recoverTask: async taskId => (await options.taskPort!.recoverTask(taskId)).snapshot ?? undefined} : undefined,
     now,
     staleAfterMs,
   });
+  let accepting=true,pending=0,closed=false;
+  const runner:LoopRunner={async runLoopNow(...args){if(!accepting)throw Error('loop_runtime_closed');pending++;try{return await baseRunner.runLoopNow(...args);}finally{pending--;}}};
   return {
     loopStore,
     evidenceStore,
@@ -326,7 +350,7 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     kswarmHealthScanner,
     runner,
     executor: createLoopExecutor({
-      runLoop: (loopId, trigger, signal) => runner.runLoopNow(loopId, trigger, signal),
+      runLoop: (loopId, trigger, signal, context) => runner.runLoopNow(loopId, trigger, signal, context),
     }),
     listAnomalies(loopId) {
       if (loopId === KSWARM_SERVICE_HEALTH_LOOP_ID) {
@@ -340,21 +364,26 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     resolveTimedActionLoopRun(input) {
       if (input.action.executor.kind !== 'loop') return undefined;
       const run = loopStore.findLoopRunByTimedActionRunId(input.timedActionRunId);
-      if (!run || run.loopId !== input.action.executor.loopId || run.status === 'running') return undefined;
+      if (!run || run.loopId !== input.action.executor.loopId) return undefined;
+      const lifecycle=loopStore.getLoopRunLifecycle(run.id);
+      if(run.status==='running'&&lifecycle?.businessState!=='publication_pending')return undefined;
       return {
         loopRunId: run.id,
-        loopStatus: run.status,
+        loopStatus: lifecycle?.businessState==='publication_pending'?'publication_pending':run.status as 'success'|'blocked'|'failed',
         nextActionKind: run.nextActionKind,
         nextActionSummary: run.nextActionSummary ?? run.message ?? run.summary,
       };
     },
     close() {
+      if(closed)return;accepting=false;kswarmHealthScanner.stopAccepting();
+      if(pending||kswarmHealthScanner.pendingScans)throw Error('loop_runtime_not_drained');
       kswarmHealthScanner.close();
       scanner.close();
       evidenceStore.close();
-      loopStore.close();
+      loopStore.close();databases.close();closed=true;
     },
   };
+  }catch(error){try{databases.close();}catch{/* Preserve the original construction failure. */}throw error;}
 }
 
 function assertRecoveredStaleRuns(result: ReturnType<LoopStore['recoverStaleRuns']>): void {

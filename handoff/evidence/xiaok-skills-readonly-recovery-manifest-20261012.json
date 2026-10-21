@@ -1,0 +1,2001 @@
+{
+  "at": "2026-10-12T02:32:00.231281+00:00",
+  "archive": "xiaok-skills-readonly-recovery-evidence-20261012.tar.gz",
+  "sha256": "67aaa7d505f40521c2fd04feb47ccae02e9e875832d44a9f2a2a9a7aec1b0796",
+  "bytes": 2537995,
+  "sourceCheckpoint": "56547ff286ad4a13b92567db17007b50337d2f66",
+  "docsCheckpoint": "697cca635d249bb713465158c7cd31ca5c785c7d",
+  "accepted": 219,
+  "remaining": 79,
+  "parentComplete": false,
+  "masterMerged": false,
+  "contains": "source snapshots, original/red/green validation logs and JSON, actual process receipts, independent reviews including manual interrupted R1, continuation queue and next preflight only",
+  "omits": "node_modules, installs, native credentials, global CPU locks, live processes, unrelated foreign WIP",
+  "members": [
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/active-task-state-r1.json",
+      "bytes": 1876,
+      "sha256": "e4592e3d411438213b6785ee15629a240ef4b2f8f3e3589345b34de9c5be29fd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/bridge-gap-recovery-r1.json",
+      "bytes": 378,
+      "sha256": "869f549873c5117871e8c9c7fdbe469203b435c3091f7f6f2b40afdbca98f6c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/checkpoint-commits-recovery-r1.json",
+      "bytes": 348,
+      "sha256": "7aa637ad655e5a67dd12dea8e8507a28c0f7f6c33d6eca52b62e07eb44cd0a52"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/desktop-services.ts",
+      "bytes": 430441,
+      "sha256": "42666ed87c5315712872c08ae66f6895a57f9dbec9905a546aa38528d87d7394"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/diagnostics-typed-ipc.ts",
+      "bytes": 5195,
+      "sha256": "231defa2ec430967efb1c9cd73dd340e81c01c86ff1c5428809c09673c8ca8fb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/ipc-runtime.ts",
+      "bytes": 7197,
+      "sha256": "0ecda424d77559df556312b59f65cb59d882622997afe501d53984bf2203f8c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/ipc.ts",
+      "bytes": 107098,
+      "sha256": "349a81045e86928ed51b2aa5a711b4918241fff5c4c02a5de6900aac1474b0c9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/preload-api.ts",
+      "bytes": 121956,
+      "sha256": "d704cda0e40da5553e226c6b5ea41715a63b82a2519b40e5cea0255dee5c67a2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/skill-list-typed-ipc.ts",
+      "bytes": 2307,
+      "sha256": "e5350c3b5d2e20803b28f1a54d7d6d018e00e19b4c21daa33a936b6540b91a7e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/electron/skill-readonly-data.ts",
+      "bytes": 1514,
+      "sha256": "3f30bbac25929d758e9f7f4aea674c7d5c28017ed5212d4f07056fdb8901df91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/api/bridge.ts",
+      "bytes": 57509,
+      "sha256": "79bebd5a66496db80b2b6d9fccf753b14edf6c8e862672e34bb7ea00a95e2811"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/api/index.ts",
+      "bytes": 656,
+      "sha256": "df853b0db98167dd18edafea2bd5205fd674a48cbfcf3c57e026869e7c5db7a5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/ChatInput.tsx",
+      "bytes": 27831,
+      "sha256": "496c96425d3f59fe955b6601b544d9bcd65d699e957e2f0fadffd0719fa773dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/DesktopSettings.tsx",
+      "bytes": 234879,
+      "sha256": "f20747e0011677d68866547b5a95a20327bbe138f07297f688303de066b3cffb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/SkillsSettingsContent.tsx",
+      "bytes": 27806,
+      "sha256": "f919378db4ec2fda1cfbfd097185a2621bfa74ba370144c7063fcb4ca6cf5af0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/skills/BuiltinSkillsView.tsx",
+      "bytes": 8094,
+      "sha256": "f441c2f84c6fce42a76199e14dcac1987a391513f47cfe50e5f8a07ab02647b0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/skills/InstalledSkillsView.tsx",
+      "bytes": 14479,
+      "sha256": "41ea346947822140d3e132e224e569dde7b226f0e4d7e485f0d9dd1365f42f09"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/skills/SkillDetailModal.tsx",
+      "bytes": 12096,
+      "sha256": "5c1babfd52cc2b3ad27f718682eb2dc28f09b6f26a36ef3ab2692fc2c9f573f3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/skills/SkillList.tsx",
+      "bytes": 11870,
+      "sha256": "85327774f6eed28a023f45f6647bb1d5d38ac6fc199ef1a27cdcdfdbc3f24548"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/skills/types.ts",
+      "bytes": 6090,
+      "sha256": "499cc666617427c6839ddd857f85b9d9b496c0f4bb65ca5e68e6c2c0b4998985"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/components/ui/BooleanSwitch.tsx",
+      "bytes": 834,
+      "sha256": "c73e7a7e3b5322a9de5f51d0cbd95f866933fe4de15411a89d9329108d90f8b7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/hooks/useSkillReadonly.ts",
+      "bytes": 3368,
+      "sha256": "e9dfcb39e21943f766383fe93aa45eef18832afaf4ababc46e4e202ecbb16944"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/locales/en.ts",
+      "bytes": 209754,
+      "sha256": "10e5993803125f476581e813f74556cb4017b6985eb9ff445d5280d4b68efd21"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/locales/index.ts",
+      "bytes": 131832,
+      "sha256": "2342e93c60b01fe9df023e08b94425262c5617e4aa1e783c6114d9d45a7e122e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/locales/zh.ts",
+      "bytes": 204419,
+      "sha256": "513fcf8ae83e897d6c8a24906d8f05336b4642f0d73563b43a6bea71e2966f0c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/renderer/src/openExternal.ts",
+      "bytes": 870,
+      "sha256": "acf7717f8bdd4c6030e423184aaaffc8ec0cbffdc8dbb1724411432df7ad63c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/shared/desktop-diagnostics-ipc-contract.ts",
+      "bytes": 3214,
+      "sha256": "1d8ad08c87735725d7a20973cb42d0c11029d3e07ff544309a3fa8937297424e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/shared/skill-list-ipc-contract.ts",
+      "bytes": 337,
+      "sha256": "d569ec11cc6ba4ebe90c326d6d6ded51e9bbee3cfcb48f8bff8513da42ff5287"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/diagnostics-ipc-business.test.ts",
+      "bytes": 8849,
+      "sha256": "2987901fdd66df8cf612da5874effe909a41d999488abb24f7a2bf1f49f2beab"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/diagnostics-ipc-contract.test.ts",
+      "bytes": 8917,
+      "sha256": "4b41b80c5403b1b33b43b697dc0f5d400c3b1228b771bc7b6573a72e4315befb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/ipc-native-promise-sibling.test.ts",
+      "bytes": 7527,
+      "sha256": "aa99ba34153e39e99cbc48735f82e33742bbb77a980177c2bf141dd2a0c7c617"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/ipc-schema-coverage.test.ts",
+      "bytes": 5052,
+      "sha256": "23495a3d6593abf6293170c632f9bd68191f621e33445f74fd0eedd66671ea95"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/preload-contract.test.ts",
+      "bytes": 56445,
+      "sha256": "e1a4458882197cc8ba80d5a6a5fc15beeeecc12463f4256b93c53afdd9523785"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/skill-discovery-observation.test.ts",
+      "bytes": 1902,
+      "sha256": "3983a9bd9975e064c8985bdcfa4b83ecc62842e404af6579d75a969a43e5c8a4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/skills-readonly-controls.test.ts",
+      "bytes": 10543,
+      "sha256": "13e4c2f04fa40b00c9622640cb20d6fea0427bbb7dcd38bb8d50bb88d3b1de57"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/main/skills-readonly-preload.test.ts",
+      "bytes": 2134,
+      "sha256": "1d29cf6b93c4b931e340076dc59477316fa6a54881bdbc0af4926fe9d75d65d9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/renderer/skill-prerequisite-controls.test.tsx",
+      "bytes": 4817,
+      "sha256": "0aca48eb99eab95a2fbb56d8b84743252759ef7a799b0e8f9611e7e27d4e5b5e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/renderer/skills-readonly-bridge.test.ts",
+      "bytes": 1530,
+      "sha256": "a36a850c8770d36946a832f6c70ea92f1357f4206291b1424f60a518b112006a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/desktop/tests/renderer/skills-readonly-consumers.test.tsx",
+      "bytes": 8694,
+      "sha256": "afb1c44b14b17f701c5ac43d144ebdf7cadd2743046f51105642ba4c69e38199"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1/src/ai/skills/loader.ts",
+      "bytes": 20585,
+      "sha256": "3bb38e55c659287dd05a81c5771feb456c66b11b3ab6d2c119d2c357d295f5e9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r1.json",
+      "bytes": 17087,
+      "sha256": "caacd7782331a9bbcef24f11b69883b6cd97440dd4f77d5172747f08001f9012"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/desktop-services.ts",
+      "bytes": 430441,
+      "sha256": "42666ed87c5315712872c08ae66f6895a57f9dbec9905a546aa38528d87d7394"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/diagnostics-typed-ipc.ts",
+      "bytes": 5195,
+      "sha256": "231defa2ec430967efb1c9cd73dd340e81c01c86ff1c5428809c09673c8ca8fb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/ipc-runtime.ts",
+      "bytes": 7197,
+      "sha256": "0ecda424d77559df556312b59f65cb59d882622997afe501d53984bf2203f8c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/ipc.ts",
+      "bytes": 107098,
+      "sha256": "349a81045e86928ed51b2aa5a711b4918241fff5c4c02a5de6900aac1474b0c9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/preload-api.ts",
+      "bytes": 121956,
+      "sha256": "d704cda0e40da5553e226c6b5ea41715a63b82a2519b40e5cea0255dee5c67a2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/skill-list-typed-ipc.ts",
+      "bytes": 2307,
+      "sha256": "e5350c3b5d2e20803b28f1a54d7d6d018e00e19b4c21daa33a936b6540b91a7e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/electron/skill-readonly-data.ts",
+      "bytes": 1514,
+      "sha256": "3f30bbac25929d758e9f7f4aea674c7d5c28017ed5212d4f07056fdb8901df91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/api/bridge.ts",
+      "bytes": 57509,
+      "sha256": "79bebd5a66496db80b2b6d9fccf753b14edf6c8e862672e34bb7ea00a95e2811"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/api/index.ts",
+      "bytes": 656,
+      "sha256": "df853b0db98167dd18edafea2bd5205fd674a48cbfcf3c57e026869e7c5db7a5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/ChatInput.tsx",
+      "bytes": 27936,
+      "sha256": "668ecbd21909703c6f3378341a367603738cc40868ed43e6636ef25aa27ec22c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/DesktopSettings.tsx",
+      "bytes": 234879,
+      "sha256": "f20747e0011677d68866547b5a95a20327bbe138f07297f688303de066b3cffb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/SkillsSettingsContent.tsx",
+      "bytes": 27806,
+      "sha256": "f919378db4ec2fda1cfbfd097185a2621bfa74ba370144c7063fcb4ca6cf5af0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/skills/BuiltinSkillsView.tsx",
+      "bytes": 8094,
+      "sha256": "f441c2f84c6fce42a76199e14dcac1987a391513f47cfe50e5f8a07ab02647b0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/skills/InstalledSkillsView.tsx",
+      "bytes": 14479,
+      "sha256": "41ea346947822140d3e132e224e569dde7b226f0e4d7e485f0d9dd1365f42f09"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/skills/SkillDetailModal.tsx",
+      "bytes": 12096,
+      "sha256": "5c1babfd52cc2b3ad27f718682eb2dc28f09b6f26a36ef3ab2692fc2c9f573f3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/skills/SkillList.tsx",
+      "bytes": 11870,
+      "sha256": "85327774f6eed28a023f45f6647bb1d5d38ac6fc199ef1a27cdcdfdbc3f24548"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/skills/types.ts",
+      "bytes": 6090,
+      "sha256": "499cc666617427c6839ddd857f85b9d9b496c0f4bb65ca5e68e6c2c0b4998985"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/components/ui/BooleanSwitch.tsx",
+      "bytes": 834,
+      "sha256": "c73e7a7e3b5322a9de5f51d0cbd95f866933fe4de15411a89d9329108d90f8b7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/hooks/useSkillReadonly.ts",
+      "bytes": 3368,
+      "sha256": "e9dfcb39e21943f766383fe93aa45eef18832afaf4ababc46e4e202ecbb16944"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/locales/en.ts",
+      "bytes": 209754,
+      "sha256": "10e5993803125f476581e813f74556cb4017b6985eb9ff445d5280d4b68efd21"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/locales/index.ts",
+      "bytes": 131832,
+      "sha256": "2342e93c60b01fe9df023e08b94425262c5617e4aa1e783c6114d9d45a7e122e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/locales/zh.ts",
+      "bytes": 204419,
+      "sha256": "513fcf8ae83e897d6c8a24906d8f05336b4642f0d73563b43a6bea71e2966f0c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/renderer/src/openExternal.ts",
+      "bytes": 870,
+      "sha256": "acf7717f8bdd4c6030e423184aaaffc8ec0cbffdc8dbb1724411432df7ad63c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/shared/desktop-diagnostics-ipc-contract.ts",
+      "bytes": 3214,
+      "sha256": "1d8ad08c87735725d7a20973cb42d0c11029d3e07ff544309a3fa8937297424e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/shared/skill-list-ipc-contract.ts",
+      "bytes": 337,
+      "sha256": "d569ec11cc6ba4ebe90c326d6d6ded51e9bbee3cfcb48f8bff8513da42ff5287"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/diagnostics-ipc-business.test.ts",
+      "bytes": 8849,
+      "sha256": "2987901fdd66df8cf612da5874effe909a41d999488abb24f7a2bf1f49f2beab"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/diagnostics-ipc-contract.test.ts",
+      "bytes": 8917,
+      "sha256": "4b41b80c5403b1b33b43b697dc0f5d400c3b1228b771bc7b6573a72e4315befb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/ipc-native-promise-sibling.test.ts",
+      "bytes": 7527,
+      "sha256": "aa99ba34153e39e99cbc48735f82e33742bbb77a980177c2bf141dd2a0c7c617"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/ipc-schema-coverage.test.ts",
+      "bytes": 5052,
+      "sha256": "23495a3d6593abf6293170c632f9bd68191f621e33445f74fd0eedd66671ea95"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/preload-contract.test.ts",
+      "bytes": 56445,
+      "sha256": "e1a4458882197cc8ba80d5a6a5fc15beeeecc12463f4256b93c53afdd9523785"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/skill-discovery-observation.test.ts",
+      "bytes": 2947,
+      "sha256": "a1ca94122f05d3c7c925e57a1854b7a965ce58f5d5b5c03a6715b7f9aaac98ce"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/skills-readonly-controls.test.ts",
+      "bytes": 10543,
+      "sha256": "13e4c2f04fa40b00c9622640cb20d6fea0427bbb7dcd38bb8d50bb88d3b1de57"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/skills-readonly-edge-controls.test.ts",
+      "bytes": 6805,
+      "sha256": "cfba99fb893cdeff3c442d367f978a838cfdc538cb5a88459e2dd726a179bcd5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/main/skills-readonly-preload.test.ts",
+      "bytes": 2134,
+      "sha256": "1d29cf6b93c4b931e340076dc59477316fa6a54881bdbc0af4926fe9d75d65d9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/renderer/skill-prerequisite-controls.test.tsx",
+      "bytes": 4817,
+      "sha256": "0aca48eb99eab95a2fbb56d8b84743252759ef7a799b0e8f9611e7e27d4e5b5e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/renderer/skills-readonly-bridge.test.ts",
+      "bytes": 1530,
+      "sha256": "a36a850c8770d36946a832f6c70ea92f1357f4206291b1424f60a518b112006a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/desktop/tests/renderer/skills-readonly-consumers.test.tsx",
+      "bytes": 13557,
+      "sha256": "42682162991fb24b8c79cfb81806921b909df6f9bde650881b1bffe99c581607"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2/src/ai/skills/loader.ts",
+      "bytes": 20585,
+      "sha256": "3bb38e55c659287dd05a81c5771feb456c66b11b3ab6d2c119d2c357d295f5e9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-freeze-recovery-r2.json",
+      "bytes": 17568,
+      "sha256": "b9795eca7b812aac99e46ba5459f62272492cca2f248ef91ce4f23587d29a979"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-validation-recovery-r1.json",
+      "bytes": 1856,
+      "sha256": "10e0dd532c36a096a468a6bddc8e3d652112fac67d138ea0eba2005a09e30fbc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/code-validation-recovery-r2.json",
+      "bytes": 9553,
+      "sha256": "8c679e0fd4ebeef420e17bb434d22a4a9edd2eb38cb7ba4e337269ddfc66348d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/consumer-controls-candidate-recovery-r1.tsx",
+      "bytes": 12998,
+      "sha256": "7c641d680e6b134f46c615f6618da643b4687ee13b1d4288756f9bb9b269f0df"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/design-r1.md",
+      "bytes": 7062,
+      "sha256": "adbe910580e4942c7c0881bfae57b2b5590bc5be742b783de64a39a662f4c488"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/design-r2.md",
+      "bytes": 11480,
+      "sha256": "52c5aa974c6bb01478da5b8d40a8459722eb7be58a156d5117f54014d1b44090"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/discovery-controls-candidate-recovery-r1.ts",
+      "bytes": 2947,
+      "sha256": "a1ca94122f05d3c7c925e57a1854b7a965ce58f5d5b5c03a6715b7f9aaac98ce"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/edge-controls-candidate-recovery-r1.ts",
+      "bytes": 6805,
+      "sha256": "cfba99fb893cdeff3c442d367f978a838cfdc538cb5a88459e2dd726a179bcd5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-cleanup-recovery-r1.json",
+      "bytes": 232,
+      "sha256": "23e0b79160fa6170cfedde4848fbaada1b134451ab66f51000395926b8857725"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "2a7bdefbb753fc3dcace4ccfde3324a513483faf33f252f5f68ec359fb173837"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-recovery-r1-process.json",
+      "bytes": 18523,
+      "sha256": "8c78e65003c21db8bafeabc3cb9fa419e872368a801dc6dcce3cb378229f27dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-recovery-r1-request.json",
+      "bytes": 6396,
+      "sha256": "b13265fd80f443a49dbc7bb6a3905e38a70712b5f80145ed43dce7a64a6348e3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-recovery-r1.json",
+      "bytes": 4207,
+      "sha256": "ba36bcfe58d8c1bf2f9516f6e089dcd1c6a3bc6e8fb903550cfbf5e5787b477f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-recovery-r1.log",
+      "bytes": 2894,
+      "sha256": "61705520b47717c8e51c1a7b8036a1bea9008919f2493854ee7280e6afdcbafc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-script-recovery-r1.json",
+      "bytes": 4822,
+      "sha256": "2d7ef317388b0dc7e9032c4672740ea3fc2de28c6bd23b81430dc1b620590530"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/electron-readonly-probe-script-recovery-r1.mjs",
+      "bytes": 10190,
+      "sha256": "78fd1079f545948ddf18a080bff284ddc0ab1038d43428bad2885aeab3160ee8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/import-prerequisite-candidates-r1/BuiltinSkillsView.tsx",
+      "bytes": 7951,
+      "sha256": "e63a3c244b89ca727c0d61d26bcca61f65abe86142ce41a64543a82e031edbc0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/import-prerequisite-candidates-r1/SkillDetailModal.tsx",
+      "bytes": 11634,
+      "sha256": "11815dbdbe2cd3e91305ba6e797128afa1902b14b36cc291b47db2b45e1eee01"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/import-prerequisite-candidates-r1/SkillList.tsx",
+      "bytes": 11395,
+      "sha256": "5ae857d26413a8e9b0cb7327f377426841ab17322c7bdec9305e53bc993b9cd4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/import-prerequisite-candidates-r1/types.ts",
+      "bytes": 6107,
+      "sha256": "c0080b41b2dbf45e07319fdadc1e21de20032772529431dab43d8d2d098cdced"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/import-prerequisite-candidates-r1.json",
+      "bytes": 2294,
+      "sha256": "5a99c26a2ff4daf58ed1dc227e7ee78d003b6da5ce81bcb29b3d4e085ffc2107"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/import-prerequisite-design-r1.md",
+      "bytes": 857,
+      "sha256": "ef70f1bf0c7f1553d297c14b407bc14ad6e4743c36bbc7cd60463065d7b0301f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/make-electron-readonly-probe-recovery.mjs",
+      "bytes": 8083,
+      "sha256": "3f45869e845111bbc046119c854cf0cb4705cb9cb01bfcc27cd0bee0c14fd2b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/mapper-syntax-correction-r1.json",
+      "bytes": 279,
+      "sha256": "2bc928225fd39a72a360c545ca982d986bbec8b201920b910c1752fda317bb5e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/new-ui-fixture-correction-r1.json",
+      "bytes": 426,
+      "sha256": "14037d8b8e0f794cab80717bc072c7a48d4e381197cae909ef49ed7239f69304"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/old-error-cases-before-r1/desktop/tests/main/diagnostics-ipc-business.test.ts",
+      "bytes": 8646,
+      "sha256": "21f763a22f3dbcc42fed646fba79d189e757cfce3279ad4160898bd607112b68"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/old-error-cases-before-r1/desktop/tests/main/diagnostics-ipc-contract.test.ts",
+      "bytes": 8904,
+      "sha256": "cb629404c7589268cef61b4e70bca8a3d8dc239ff5194005ef265ba914db1041"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/old-error-cases-before-r1/desktop/tests/main/ipc-native-promise-sibling.test.ts",
+      "bytes": 7341,
+      "sha256": "01efce3839270528862950c48b2938fca1d2f64a6ec17dd3256732deed647c9a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/pane-test-navigation-correction-r1.json",
+      "bytes": 299,
+      "sha256": "8c7d8be4fd31099e341b2c7d37de68f7c6d49b48d149267200c9c9fbcad272e6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preapproved-old-error-assertions-actual-r1.json",
+      "bytes": 1994,
+      "sha256": "03e2a9a52e0c10c938159e8c375b41374d9e093391c13832c5bbf8486f679f13"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preapproved-old-error-assertions-r1.json",
+      "bytes": 1623,
+      "sha256": "ab29c91c6a1e53886a7bee7578e9bdc65cb03865e5c4662a1d86921f0a0a45dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/electron/desktop-services.ts",
+      "bytes": 429815,
+      "sha256": "d144a714bedcc49eec83b43c15f19b64ce4ef5e1fbfc4609e7bea7b35d26f24c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/electron/diagnostics-typed-ipc.ts",
+      "bytes": 4620,
+      "sha256": "b3c8121ca9bf9b312644b4fb19b0c00caec9105111b26bd1119022d08dbb4a4a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/electron/ipc.ts",
+      "bytes": 106808,
+      "sha256": "c1c2c38f96304691e0df3c3458fa321ff443a60fa492d5ab06bed55469f9286b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/electron/preload-api.ts",
+      "bytes": 121963,
+      "sha256": "823484c5ad6b16b9341c4c9b4b80a718d4372b57a8aaa28a2ee7903f2a2313d9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/electron/preload.cjs",
+      "bytes": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/renderer/src/api/bridge.ts",
+      "bytes": 57096,
+      "sha256": "e1a0564f0c98b49da48c0f25e614d4f976e4d26973464292c0649f61be0f22ac"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/renderer/src/components/DesktopSettings.tsx",
+      "bytes": 234921,
+      "sha256": "eb7014dc9ec367ee9a5a7936f3442b1a412e1fb73fc622f6f69ec2e4b99a9c91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/shared/desktop-diagnostics-ipc-contract.ts",
+      "bytes": 3218,
+      "sha256": "f057447850e79f0c7e90715d6608bb6f2c929fb35aed1c22404b03a32ed51fcb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/tests/main/diagnostics-ipc-business.test.ts",
+      "bytes": 8646,
+      "sha256": "21f763a22f3dbcc42fed646fba79d189e757cfce3279ad4160898bd607112b68"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/tests/main/diagnostics-ipc-contract.test.ts",
+      "bytes": 8904,
+      "sha256": "cb629404c7589268cef61b4e70bca8a3d8dc239ff5194005ef265ba914db1041"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/tests/main/skill-catalog-invalidation.test.ts",
+      "bytes": 1274,
+      "sha256": "a5db9cd274c88fbc59da58d3307544c4c7d13c7cc13eb578a9d0afe64c406873"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/desktop/tests/main/skill-reload-on-install.test.ts",
+      "bytes": 1982,
+      "sha256": "504978c47f6d88bd3f43fc0a97533c5f37129ed3d1a3f1e8d397855d66d9f16e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/src/ai/skills/loader.ts",
+      "bytes": 18697,
+      "sha256": "d3779f4fbf6203f9d19db6d5d68196b1c003dbff6fd8c47a8a179b996f39a8ed"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/src/ai/tools/bash.ts",
+      "bytes": 11812,
+      "sha256": "6da4f08605b7c8dc8446e3a9b120fb16edcbe7d079b6980593e86d6c80371654"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/src/ai/tools/install-skill.ts",
+      "bytes": 11147,
+      "sha256": "54a8dc12ca9b7431a6e02d64a08913bf97de38f795218b0825b109fc029a3f02"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/src/ai/tools/uninstall-skill.ts",
+      "bytes": 4119,
+      "sha256": "300c2353267d14ac801ff4381901fff72fea38fed44587625dd003293a95bb79"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r1/src/ai/tools/write.ts",
+      "bytes": 3629,
+      "sha256": "475333681e66cf5370e08d8277e4e1941225c56d25090909bea06961f4ce7545"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r2/desktop/electron/ipc-runtime.ts",
+      "bytes": 7187,
+      "sha256": "40eb10773ec61b34d9440253d692572de8e201bd6241e95e0fc267f0cfa23992"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r2/desktop/renderer/src/components/ChatInput.tsx",
+      "bytes": 27822,
+      "sha256": "3dff05b946aa99a698d4e8feacd70259090edac053d9db16dae481ecee0b52c7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r2/desktop/renderer/src/components/SkillsSettingsContent.tsx",
+      "bytes": 26624,
+      "sha256": "cefd57939ae1bf6a6732d5ff60b06ca4889b831073cf3c778c123e29acd4903a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r2/desktop/renderer/src/components/skills/InstalledSkillsView.tsx",
+      "bytes": 14128,
+      "sha256": "78133f60f30bcca0f31b7708783808218c355089c91bf3b7c3b8fe659e228a62"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/preflight-r2/desktop/tests/main/ipc-native-promise-sibling.test.ts",
+      "bytes": 7341,
+      "sha256": "01efce3839270528862950c48b2938fca1d2f64a6ec17dd3256732deed647c9a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/prerequisite-causal-source-restoration-r3.json",
+      "bytes": 619,
+      "sha256": "263e58daf73f667cba0ec243a198b1c132715603005fabcd52f3c6bb80d8bd93"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/prerequisite-path-check-correction-r1.json",
+      "bytes": 334,
+      "sha256": "1a1ef75655c6790ea9bbb5efb3a2dfbe8361ff78a6861f98118e7e211248c2b0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/prerequisite-test-loader-correction-r1.json",
+      "bytes": 291,
+      "sha256": "6fea155dbf54eeb10dd1b4000f329c12c8967c764269f6b126e370a6221f8089"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/recovery-20261012-progress.json",
+      "bytes": 2364,
+      "sha256": "33efd96958d909dceebb55d470016f271fef0af2e6cf3166f1bfd10b9ae48024"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/remaining81-recovery-groups-r1.json",
+      "bytes": 3823,
+      "sha256": "a949c039ad5cb9638d144a3cf6ebb6b04ef8ca643ac923921bfd4045099e69e4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/render-prerequisite-design-r2.md",
+      "bytes": 3048,
+      "sha256": "a267e49f41835c41f4cfc23dd2694f83d023b65fcdb587aacc4450129ccfdbe5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/render-prerequisite-design-r3.md",
+      "bytes": 5872,
+      "sha256": "1c9f04caf3c4cdfd78f6e8b7b34473167fa28f331bcf45da371015437cafc9bc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/run.py",
+      "bytes": 2107,
+      "sha256": "367a767227f319b28780b207cae7d61f749997584bf579b29ae49a7868f042de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "a16cadfd3d55ade22617cfb8e625d76d599922e842a9b622c40d9d7264e51f04"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r1-process.json",
+      "bytes": 14417,
+      "sha256": "a223f8a66d13d5f16f6056348def06a4f932c413f4212e360372dd98c0d2d064"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r1-request.json",
+      "bytes": 4711,
+      "sha256": "68b7ad6b47cb6fc1e0cbdc875e6af38965288a96756d3fbb3fc9d7de007fc607"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r1.log",
+      "bytes": 163,
+      "sha256": "cf2ff1d834492d8bf4072c5fe18834b2a91f1f57f0a34304f9793349843cd235"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r2-pid.json",
+      "bytes": 109,
+      "sha256": "b04d9257cf4de0a93351a01967433af7ef92bf9117294ce8da71b45f0be5ed84"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r2-process.json",
+      "bytes": 14818,
+      "sha256": "a9351a8ca5369e386a518d68e66a2d436a2ec7c72fd2817cea4e725d9f2d3ec9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r2-request.json",
+      "bytes": 4843,
+      "sha256": "391aca000933af2ec0502246de17d86b94ed7ca2a4e202300af889fa5799bd41"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-arch-changed-recovery-r2.log",
+      "bytes": 163,
+      "sha256": "cf2ff1d834492d8bf4072c5fe18834b2a91f1f57f0a34304f9793349843cd235"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "a440ed0822051f9a53d3f24f02e5b083fc9d2c0869cfb39e6e16770181bd3f92"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r1-process.json",
+      "bytes": 14387,
+      "sha256": "7a91ce0cc1ec194b85d764728b4c99a1a530be62f2d52efee186a60f02906cee"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r1-request.json",
+      "bytes": 4682,
+      "sha256": "3bcf61fc8b7782bc8c025b49ebde44d224ae7131fe20cd4f3957aafd6c100c1a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r1.log",
+      "bytes": 1099,
+      "sha256": "95f579e2d5a35e5154985d0869829d1ba4cbdb51b46dc32defa61f9403df92b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r2-pid.json",
+      "bytes": 108,
+      "sha256": "344bcb15b9c16b32574e892efbd39304a0a8d46ff4789576020bc7d4a6320a3f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r2-process.json",
+      "bytes": 14788,
+      "sha256": "a02923b49ab937da788ef002687914925218ed3e5a77bc6c3f144d72708eeaf6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r2-request.json",
+      "bytes": 4814,
+      "sha256": "64f581c4cf3f74076a176258ca666324c21a5f38fcb509053affede43e5a07f3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-main-recovery-r2.log",
+      "bytes": 1099,
+      "sha256": "95f579e2d5a35e5154985d0869829d1ba4cbdb51b46dc32defa61f9403df92b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "7d35c31c5cc206143a4c75d9feb33912189f56f665bc8faff2eb619424886d7f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r1-process.json",
+      "bytes": 14395,
+      "sha256": "fd84422e69d0c966e1d1df0b0159d902facec5ed568663e0907b50cbddb65788"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r1-request.json",
+      "bytes": 4690,
+      "sha256": "5e8e56dcb174f8a58b5c57212d1d8e99b24198b0211209b26e5be995122b7b95"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r1.log",
+      "bytes": 37028,
+      "sha256": "7f05ad796e74778564334bfbb85c823d78912ccbdd0a1d6d5d04ad319cadd454"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r2-pid.json",
+      "bytes": 108,
+      "sha256": "cee74e10c28c231d93f800035dfc6b7f782829b3ca6ecc392a691b3f1ae359c7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r2-process.json",
+      "bytes": 14795,
+      "sha256": "40f06bd253fc16e7b00e8ca1c8ce0dc448a493a6bcd740212deb66962e81701c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r2-request.json",
+      "bytes": 4822,
+      "sha256": "e64d1e72c7554bece06b02e3ad37a4d8c37d1ac9b6985e237f31432eae747a90"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-build-renderer-recovery-r2.log",
+      "bytes": 37028,
+      "sha256": "c06be45382fa826721ebca0a4e54c7963f17d94979dea7a047dd7fdf468b7e6e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-r1-pid.json",
+      "bytes": 108,
+      "sha256": "d836195671e633f79194e7596d1f9d791c1037bd106efc9ba4efc758db0c7015"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-r1-process.json",
+      "bytes": 13921,
+      "sha256": "6299c4b3ac322c759b470eef65986e09b766aed30ab7cfc5779788ecba15456c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-r1-request.json",
+      "bytes": 4512,
+      "sha256": "5c254eb34ad371a503855e4cd95fb2a9d912885e21870b74e5f4276bea09e605"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-r1.log",
+      "bytes": 423,
+      "sha256": "7a5def70f5e6d2364acab207011f8b79cceb11085860faa16b8a13c9acb944dc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-recovery-r2-pid.json",
+      "bytes": 108,
+      "sha256": "fa32f539991a8fc253f8669efb6ecc526e707452fa6510f00863b6a3fa451221"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-recovery-r2-process.json",
+      "bytes": 14387,
+      "sha256": "89b8c1ee1bffe99a2db6e457fc006c97d0f06da93c5f60f6910ae9e3e3497903"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-recovery-r2-request.json",
+      "bytes": 4681,
+      "sha256": "778169956108d4c9e142cb085d9bec5a44031998d6765183c2e5222c74f31e2a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-build-recovery-r2.log",
+      "bytes": 423,
+      "sha256": "7a5def70f5e6d2364acab207011f8b79cceb11085860faa16b8a13c9acb944dc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-related-recovery-r1-pid.json",
+      "bytes": 107,
+      "sha256": "03754ca6e2dd5edf47717c817db230752bd6a320c5b101415e65d61a75ddd18e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-related-recovery-r1-process.json",
+      "bytes": 5810,
+      "sha256": "d8bd371ea5838da6480e74b450f7e5c2d55da160ff471780e54a20fdc58ed0f5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-related-recovery-r1-request.json",
+      "bytes": 2456,
+      "sha256": "8c70d13380f61c798747caf3cbb023fd49987b0543341d59c6da83f082cd4f16"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-related-recovery-r1.json",
+      "bytes": 57322,
+      "sha256": "87bf543e66bc4d2fe3e9a49f5550d22236eee8206fd1c6750fccfcf7ff50dd96"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-cli-related-recovery-r1.log",
+      "bytes": 1144,
+      "sha256": "e8e9622b768eff3a23738b538b6d28e520890285e0515e6131116dedb5ba846f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r1-manual-stop.json",
+      "bytes": 369,
+      "sha256": "34d97ec3c7f8abf6a48dac20ba85c1858844395942b69f2dc2e41879d02adead"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "5022fcc040fbc74917342148f3c1e0fba85f7f0626457c88cf03c1596547e3ed"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r1-process.json",
+      "bytes": 56549,
+      "sha256": "3316e39e269ffdafd4256c5bcc2f5ef47bd1ebdc1126cf0a3aec461fb2735bb6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r1-request.json",
+      "bytes": 24047,
+      "sha256": "00900c0432de9fe95a7b3cbb96baf08991f95f984e4627a5a255fc185a557e4c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r1.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r2-pid.json",
+      "bytes": 108,
+      "sha256": "d38773f2a0ed12f62b92d0329bec39f6aaecb1a0bf0a838eefb14aee5534d2eb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r2-process.json",
+      "bytes": 44907,
+      "sha256": "d5b466877a353dec6ee0e61e049c66263cf9129128480c5b512ab8cb13f07cdc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r2-request.json",
+      "bytes": 21664,
+      "sha256": "76677ad3f8c0c31f7dfbf4d703b20517b3ee1ad60455ccdb8417b11e5acf3e03"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-code-independent-recovery-r2.log",
+      "bytes": 2658,
+      "sha256": "57d1ec6e5e894fb5bf567f89b51969f336314374b6f8e0d5f770d38216b1831e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-component-final-recovery-r1.json",
+      "bytes": 2054,
+      "sha256": "1b852645ef93eb6a48a6feaadf8b1c7d00b63b02a056cfcaaf1cf66a6e5a2b3c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r1-pid.json",
+      "bytes": 108,
+      "sha256": "24719e6cde98760a2a71df5bfe23aa8da86d1dfb3ea511afff19cdba51ec03d0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r1-process.json",
+      "bytes": 17085,
+      "sha256": "4dc8aeb38438dc91bde8a08a07f94bf4d1ee6304b0beb88622838aa37d6b7146"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r1-request.json",
+      "bytes": 9430,
+      "sha256": "85d46f5ba5915d6900cf2439c52e301136ed0be5c04916b6186bfa39290cda11"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r1.log",
+      "bytes": 5908,
+      "sha256": "ea874b6b7202977e8d9a8224b442b43a3ee53ce3fa8a48d541056b3b6016a086"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r2-pid.json",
+      "bytes": 107,
+      "sha256": "cd4adcf3c10d64c512c2531df67a262bd415cabf690508321f59e0634811bacd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r2-process.json",
+      "bytes": 23309,
+      "sha256": "5f697e9e424964bfa7c46ce5a243b8874691a0af50b03a7a668205f4ac12178f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r2-request.json",
+      "bytes": 10727,
+      "sha256": "99025ee888456f1b4ef508fa496056789c2c06b88e086f8bd37680f22c5f9383"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-design-independent-r2.log",
+      "bytes": 5504,
+      "sha256": "8169ba9cb1d897860f0ecfa62756a784edf07af2dfa293d8f58c0ef4914052f5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "3437683eb75cdbebae179142e5f61f0daa95655789f1c606f68bc4d292b6f109"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r1-process.json",
+      "bytes": 14379,
+      "sha256": "69ece92be3745bfc7c029498dddc6c4405b663cfcb53e71fb28ce7bc819193a7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r1-request.json",
+      "bytes": 4673,
+      "sha256": "44d27dce54a8435fe7617c2a5380eda4a59615e7e386c91a5deaafa65c8a1dae"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r1.log",
+      "bytes": 359,
+      "sha256": "df224fd090845feaf401dd5605c2a747bca1389537025a31096c683d008d1c7c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r2-pid.json",
+      "bytes": 108,
+      "sha256": "2fa14b5f4b905cbeca5ae7252414a376d560550dc3d051f6f1caed643fa68422"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r2-process.json",
+      "bytes": 14777,
+      "sha256": "7a6b2e99a0b508d0da580b8fba4fc22070afeb7e3686285797f277f0efcc9f59"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r2-request.json",
+      "bytes": 4805,
+      "sha256": "187a0be087938352caa160071b86d5c3932178db273a7de52579ff7d4a000296"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-gov-recovery-r2.log",
+      "bytes": 359,
+      "sha256": "df224fd090845feaf401dd5605c2a747bca1389537025a31096c683d008d1c7c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r1-pid.json",
+      "bytes": 108,
+      "sha256": "622f4158eedf07b536cfaa48e937ffd2df384322928bb327f31460a8377ae735"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r1-process.json",
+      "bytes": 16100,
+      "sha256": "b0a0d607c697d09c091b51efe99b624198a9f7d1a61d0f91ab44dcf516fba4f0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r1-request.json",
+      "bytes": 5450,
+      "sha256": "6d64321cfad04c53d98a8e821aea93959da4f7c99c7a45056c5d224558b8d9f6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r1.json",
+      "bytes": 6296,
+      "sha256": "451b0e58065ca0764413870edab2d10e30d19204be0a9885256927781ef55045"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r1.log",
+      "bytes": 562,
+      "sha256": "fbd92f31872a5a14659608163b2f8cb5d55df2df7944bf6dd2928c1e00399d04"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r2-pid.json",
+      "bytes": 107,
+      "sha256": "04175db1f06e2dce65ceb847e33b7b7045acc59d760f926d5c5df315ad4ee264"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r2-process.json",
+      "bytes": 16099,
+      "sha256": "74e92d42eb134e5d998f4c9992efe236892524fdd7d7a0cb6e8b4573a2dd93ed"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r2-request.json",
+      "bytes": 5450,
+      "sha256": "8edf885e1c01bafba29a3f4dd05b71cf5a7b01f41afad007283d4bb014fceba5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r2.json",
+      "bytes": 23733,
+      "sha256": "728ecb52ad1367a923b5d71c8163b83465da77a2e752eb2bb2e17734c8e6f406"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r2.log",
+      "bytes": 562,
+      "sha256": "68258e258be70a6847caab78d5d30e1fda9179e9fac8368c3e6e269467c69916"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r3-pid.json",
+      "bytes": 108,
+      "sha256": "01132e8c325396c64d9b85d6dd3e354707cfc6536ffb50974592cf25a456c29a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r3-process.json",
+      "bytes": 16453,
+      "sha256": "11320d48bb28415987145f11865462ab5c52656d2a846cea44c391dfe528c32e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r3-request.json",
+      "bytes": 5559,
+      "sha256": "5c3417d37ce267476f8bbbd542cd1c991d7e9ea9ede8e70159d110a2918fadb9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r3.json",
+      "bytes": 51693,
+      "sha256": "bd0f9cdd29c59109028fc8216ffd0b54e6a968dd2f5b4fc359569b424cdddc0f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r3.log",
+      "bytes": 562,
+      "sha256": "f590492372ca2cdc7ef9d5076479fc56ac6bf9adef8352dab6706e6b7250055b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r4-pid.json",
+      "bytes": 108,
+      "sha256": "f9750adf5cca2dd8ad0727cea1fec825efdb5e7dee347063161fcfcdeb275381"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r4-process.json",
+      "bytes": 16453,
+      "sha256": "c5d3ea5004f32805dcbba67f60aba00b7f936b4aa02d15d307fea958dfd5c802"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r4-request.json",
+      "bytes": 5559,
+      "sha256": "66c087c80ac1741b59e26b9d327f5c0c71f2e715f403d85399545160276857ca"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r4.json",
+      "bytes": 8985,
+      "sha256": "4c8529d7307c497377c0003b54ed34dda7ff66565febabcc943ba91307339f77"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-green-r4.log",
+      "bytes": 562,
+      "sha256": "2fcb9d9c3d8fd20dff7905968bcfcb29bd77e84f4dd6c72e4348140a17bb2d38"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-import-prerequisite-independent-r1-pid.json",
+      "bytes": 109,
+      "sha256": "93f99c1841b624c9855d9d6c0b845c21f6bb1bf07eb20ec81c2c559e0e4930c4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-import-prerequisite-independent-r1-process.json",
+      "bytes": 6171,
+      "sha256": "2edff543012d13f451df00fdf669d7923789a21e8b83b4feb54283c4ae1c7ea7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-import-prerequisite-independent-r1-request.json",
+      "bytes": 3410,
+      "sha256": "0c92c0d87b6b472860f53dddba33225f7583462012508c4a095d881187b904b9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-import-prerequisite-independent-r1.log",
+      "bytes": 2040,
+      "sha256": "5aeede6416fc8193ed52504c5c1c69ae207a85e07dbccc6d033fc2a0843c77b9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-causal-red-r3-pid.json",
+      "bytes": 109,
+      "sha256": "2fc6db6fc0c2f112d3e9de9bdb7d4b8b858289134bc2ff65fd9d1eb7dd3d577d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-causal-red-r3-process.json",
+      "bytes": 1906,
+      "sha256": "c77672d57ca9ce194564b38c12e2ed05b9935283e323f5bfc219e215d1853880"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-causal-red-r3-request.json",
+      "bytes": 903,
+      "sha256": "cebf75384eaf94ef4669775dd0758840ca2434feb597a598be0a82a46a2d2dda"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-causal-red-r3.json",
+      "bytes": 26398,
+      "sha256": "fb72884b75ac25e7c86963fe906c7275e6bfdbeab824db1efdfde21ec7bea21d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-causal-red-r3.log",
+      "bytes": 509,
+      "sha256": "8ef798de65435a9c1075453c02756a98dad4cf900bff66e1cc28eba8d23553c5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r1-pid.json",
+      "bytes": 109,
+      "sha256": "5edd352e0bb0d3a8acf9107e57565ab13c9fb81063e89fd40aa0262b12625801"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r1-process.json",
+      "bytes": 5826,
+      "sha256": "a38b360307b849272600bdff03ede13211b49b64ce0e8517b0c5ae9effab1dee"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r1-request.json",
+      "bytes": 2178,
+      "sha256": "7914cd2feb102db29c7dd720432cf918b9a32c49a573ce363cbd351b021452be"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r1.json",
+      "bytes": 26411,
+      "sha256": "89e78a738b50f8d22fcb0e640d82908ad40a3e928e0e0cf310d05a4126337be6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r1.log",
+      "bytes": 499,
+      "sha256": "096c13c792bb3dc000ed667398a5d5d389979a7dcdcabf65cd32d10ec78aae07"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r2-pid.json",
+      "bytes": 108,
+      "sha256": "2b4a376323c76b072acea5d2dbab3ae3d808890b49961b6564b2bb0d89fb56b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r2-process.json",
+      "bytes": 5825,
+      "sha256": "d914053fcbd2f78671f7e8a766701dd090c66976cae50b6893f1bf04139f5dd0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r2-request.json",
+      "bytes": 2178,
+      "sha256": "770fe443f3355de82451e57c9b8fde870f1091d05e3f0d7038dd573311b3dc26"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r2.json",
+      "bytes": 5699,
+      "sha256": "f839f4572cbc63b3beb01101c73992c37deafa658b35d386aff0db074816dc91"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-green-r2.log",
+      "bytes": 499,
+      "sha256": "d5a1b9f610e8abc4704860e118bab3279b4a906dabbe5d4f9c619eaed518a2dc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r1-pid.json",
+      "bytes": 108,
+      "sha256": "d9e749b7fa55d77109e8f6ee187f994190db0ef23571f6354cee1b015fbc186c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r1-process.json",
+      "bytes": 1890,
+      "sha256": "504a7d07f5e5eb96585b83d83ff1d951f9c6b9db3fc78d92df7c2378ab705016"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r1-request.json",
+      "bytes": 889,
+      "sha256": "867e66fec7bf3bab92b8e12a61e4b0c612e8f481ed6435778250dca17a7a0af8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r1.json",
+      "bytes": 882,
+      "sha256": "765aa934bf6cfecea6c0365a06c9ddbff1fe0e302d07f205c04f43a9c6d410d1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r1.log",
+      "bytes": 495,
+      "sha256": "6982fd590197641a579e210c2709f964c7cedb954070082f98f249b5b2e32295"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r2-pid.json",
+      "bytes": 108,
+      "sha256": "22a5e1298c67ea31d33bb1919ca018377023d6c59dd65bb397bf7565dbd9c3a5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r2-process.json",
+      "bytes": 1891,
+      "sha256": "1045dfdafccb02f85ca303f87c07e533a64f0e48c235d73280195a151edbda57"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r2-request.json",
+      "bytes": 889,
+      "sha256": "af8e6e8080e6f60b20eed6e6109c352d8ef0315a3e196cf9ba1b471011f6cb3c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r2.json",
+      "bytes": 26411,
+      "sha256": "011bdacc40158e43a60e6bf5a8478006d4263060cfad5eea61f49ea702587f79"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-prerequisite-red-r2.log",
+      "bytes": 495,
+      "sha256": "37795e8e7a6f068fb3b967fa22cc71d0700f051220401c899f9a7086b01c004f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-causal-red-r1-pid.json",
+      "bytes": 107,
+      "sha256": "b8592d53152d4f3551c2de92400ed162334b893f3274b03900a584695c03f762"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-causal-red-r1-process.json",
+      "bytes": 4152,
+      "sha256": "1755a3d88d57cbe74e266aa61be05a4bcb0f24d6cf44435f67baf3ec4eb1bd8e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-causal-red-r1-request.json",
+      "bytes": 1839,
+      "sha256": "6b6b77c3e4aa50da38deeba175c2bcbf2382aab9a874d9ac4a1dff67af8820e9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-causal-red-r1.json",
+      "bytes": 53142,
+      "sha256": "c58f2e7c00d25331323f96e7782285d42e86fb10b598bbf96d7bcc2c8e17fd48"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-causal-red-r1.log",
+      "bytes": 22934,
+      "sha256": "8a5768f25e99c6b7d09743af11c37b3166bc55b4326584fe466f380527bec996"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-green-r1-pid.json",
+      "bytes": 108,
+      "sha256": "feeadec79879c5c6d4ff7537d494b531b50e15ac26f71387e16bfd3e145f381d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-green-r1-process.json",
+      "bytes": 4143,
+      "sha256": "92080964fbebe94a762b41355f6630615ba444937d37185d3184fafe87393338"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-green-r1-request.json",
+      "bytes": 1829,
+      "sha256": "3a1272566416ab7bead3a81b112fc07ed36514a92c93e668109b638886c66151"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-green-r1.json",
+      "bytes": 34120,
+      "sha256": "c8e54d13f69f5917e0d9510b0271b869cbc50a8ea5ccb9479c1bfc3d0e2b4603"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-recovery-green-r1.log",
+      "bytes": 1171,
+      "sha256": "2cffc55d885306035ed0a9fa8dea57b535314b60f5ac89f691e01051cbc0c8a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r1-pid.json",
+      "bytes": 109,
+      "sha256": "9d269e5a02e21ee019362c122c9e6312bef622b7d302b920fb29d34fcbd0ebcd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r1-process.json",
+      "bytes": 10039,
+      "sha256": "71fa43d22fbff7289efa09e1186c7a1447784f00da1261b68e576d195a833e16"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r1-request.json",
+      "bytes": 3505,
+      "sha256": "0de82364560e723371195127790488aebd11aea41a51a0fb1f344214a5c2fb84"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r1.json",
+      "bytes": 15659,
+      "sha256": "a8dafa9fbbb7c8de5dcba4a57c0d35f5916e430b3885d92dd7baf5cbbe9ef9c1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r1.log",
+      "bytes": 558,
+      "sha256": "ce59f9af90d40e20bccf953790efda4dffdd3e6f0f6537d6e595e222020fccfe"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r2-pid.json",
+      "bytes": 108,
+      "sha256": "60b67adc5ebd90c1857a1e7c2fd71eadd6693ccb1496a51651fc39e1ff770b77"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r2-process.json",
+      "bytes": 12782,
+      "sha256": "93f709e48952728318639e386b958171008aebc841c4df70fff24fc0a0ff252c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r2-request.json",
+      "bytes": 4402,
+      "sha256": "c5da177fb0bdefba4d1d9cc853ecd4f5b33258ecc00e02bc3c1988a7ed141426"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r2.json",
+      "bytes": 132481,
+      "sha256": "e483deca33f74d17ace9a9d8fcff4a11223bae482bba4ff7d7860c4f46f4d61a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r2.log",
+      "bytes": 558,
+      "sha256": "d13816a903e55ce6e8c63b43cd3a7473357f5aaa7aba49122758543c1088d114"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r3-pid.json",
+      "bytes": 109,
+      "sha256": "2b89dced35fd8c4cf5aea8fecd65fc712d37c092f6038e950ee2c4c3a4fa2fb6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r3-process.json",
+      "bytes": 12784,
+      "sha256": "3b6111f74889ae0e7fce852a0ea5999a314ede80b9dc835732ebea39a357091e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r3-request.json",
+      "bytes": 4402,
+      "sha256": "33b66d4e3129296882a3a86b19fa584210830507c2ae0d7db6bf46ee00b069e6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r3.json",
+      "bytes": 121950,
+      "sha256": "2f546d8a2de23fbd91ec2a068859afcd8c516129ac27eefa76cfe5dc7d85da85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-red-r3.log",
+      "bytes": 558,
+      "sha256": "a9752c896c85e1fbea81e7c078ccd0395d854f5ded6e1541e505f09a805b1f70"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r2-pid.json",
+      "bytes": 108,
+      "sha256": "792f02c5a45f4a32fdb751a8a7825b8a29d1e58c97afdf1eeef1f195cd297e92"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r2-process.json",
+      "bytes": 6419,
+      "sha256": "3fdff95b79b2ef11f8081373638c2e91da56a08e0a533190f93b35b204ef159d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r2-request.json",
+      "bytes": 3293,
+      "sha256": "5a10af8cf5e4ffc4a7e726a368f204249f325e3b36abbd81d5f82a6a1c300bd7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r2.log",
+      "bytes": 6468,
+      "sha256": "9af41e0300ecc3bf6918bf60782f8a910e3757f772cacdf59f3095cd469f0e19"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r3-pid.json",
+      "bytes": 107,
+      "sha256": "9b3fad22d6d1308eb834be7d2e81507e21fd5df78f7cf071fc1b80ae76a4a76c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r3-process.json",
+      "bytes": 7456,
+      "sha256": "22c22a1022fda8d7b4c2e4bf4a47a0f641b7f0a60616dd2c53fc5feefd6a2d69"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r3-request.json",
+      "bytes": 3840,
+      "sha256": "15bc9a36865003d3ff5f4584c189479247769f90f39f9beacc3563e49d1482dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-render-prerequisite-design-r3.log",
+      "bytes": 3004,
+      "sha256": "7885914ef65c0f59e6759a2fa9f3a9b3421fddb9d67d39da8fbcb97574f0b9dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-r1-pid.json",
+      "bytes": 108,
+      "sha256": "cc632f24f20e9f1bea734b185a5f94fb421595130d2c4e233fa24792e82ae369"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-r1-process.json",
+      "bytes": 14332,
+      "sha256": "68ce28d2c4137043fb887e2fb9622289ccbc7b6b0d45be6db604fd658c857596"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-r1-request.json",
+      "bytes": 4860,
+      "sha256": "e41c63916ed81f0296f8b8f38f60e1ac74e3f62ca67ad13a1662a81eeaf35240"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-r1.json",
+      "bytes": 974768,
+      "sha256": "3e51746850c755874e47215763026ff19306eda8383876b0ab36b45c86ca243a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-r1.log",
+      "bytes": 15122,
+      "sha256": "6265537d76a4348621bd023f26b7a892f4539e5c4749f746cda9d89d5c2cf837"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r2-pid.json",
+      "bytes": 107,
+      "sha256": "a8d569c8a59048c49c20ee49f45dc28c091e0d41d6c1cf6a74c2516a02c2adb4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r2-process.json",
+      "bytes": 15130,
+      "sha256": "6c0f57dbc042ecc60f84e83969b2d7d7e6cbe8a8bf2d4e11c6da945941418d5a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r2-request.json",
+      "bytes": 5133,
+      "sha256": "6260578ea316e57204895210e49202a8524a4731d419539b25137c06c47a5364"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r2.json",
+      "bytes": 970454,
+      "sha256": "fa4ad81bd70870659a1753a3dc2991c6b5288c2be5cecc665b2ce9afff84db40"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r2.log",
+      "bytes": 343,
+      "sha256": "b4c7dac6ceb34ae1208a9fc01e68d805f3cf7339d498b4e1120d8ec04bdaa26c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r3-pid.json",
+      "bytes": 109,
+      "sha256": "4e19f419c2688c8c3dd709d5f76a65443205fa7332c3d88714a34129a3f596c1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r3-process.json",
+      "bytes": 15133,
+      "sha256": "d989229584a01381828dfafc1bfb9743ce027e38ebe3ce6bf91908626c725490"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r3-request.json",
+      "bytes": 5133,
+      "sha256": "8e10f71ea8e15c49c7fe544f83a8c4e717263cb213719cd9b6fabeb6460cdb5c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r3.json",
+      "bytes": 970533,
+      "sha256": "c4b875e45a890629b2f564c9081606400b4e0ef2c55035b90a6730b480ecc255"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r3.log",
+      "bytes": 91,
+      "sha256": "50fce341bf8ddf3176552d6739586d1f07b37ad402d71a100fd6767332bf1d65"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r4-pid.json",
+      "bytes": 109,
+      "sha256": "eda447b6cc3c371a9b1b10de0d579cab1c1b0feb90619e7d217743cb69590c18"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r4-process.json",
+      "bytes": 15532,
+      "sha256": "5eba46a7552a0da74d03784979242c0282f9bf2102844921e995165bc08806ba"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r4-request.json",
+      "bytes": 5265,
+      "sha256": "bc9dde2715e91947eeab551d0a6928f36d8538b2a8d4be4a20ac3039c986a11c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r4.json",
+      "bytes": 970990,
+      "sha256": "01b2bdf1ac5165b4735ede64c2810b981ddd06c79453477ae419c1227775cf7a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-strict-recovery-r4.log",
+      "bytes": 91,
+      "sha256": "66d7fd50cea9c77955ac21e3e62a72572516f73d12208c09bb2b6386c8e720d3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-causal-red-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "d705cfb7097ab7acebd2dd0fd86e879ad08ae711d75132f2df28e3e0a35fc1ef"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-causal-red-recovery-r1-process.json",
+      "bytes": 15317,
+      "sha256": "0cfa8f6bc3b042bd4bb89f0c5c77f518f27da7a3a8dcf932ddd38102d58fc43a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-causal-red-recovery-r1-request.json",
+      "bytes": 5343,
+      "sha256": "56c23876bda37c5e40e028e2d9524b33b6d6eef633358a4afce33d6503dd8d01"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-causal-red-recovery-r1.json",
+      "bytes": 19237,
+      "sha256": "7b7fe2135976a96b19506149ad73fb660085f51167d0c9cd07177b4b2b9ede83"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-causal-red-recovery-r1.log",
+      "bytes": 14651,
+      "sha256": "10b66c8aec9788adee6cbb745affdb27897b561e3138a63b35b4d3828f318115"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-green-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "20752efc8c80ec8f8af9647bba46be00c687c06b531443b8b9466d1b211eb710"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-green-recovery-r1-process.json",
+      "bytes": 15306,
+      "sha256": "0b2266571a6424e77df639c72a9ea7a71117bf9e887d3b7d7dbc373c23ea3f8c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-green-recovery-r1-request.json",
+      "bytes": 5333,
+      "sha256": "9efc69311f6e8313990c61775c53e35801ac70fdd8f9488dcdb1c02707062434"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-green-recovery-r1.json",
+      "bytes": 11080,
+      "sha256": "613185d38636f701104be33280b50452cf669b6b4071dbc50bde9c02222435ef"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-supplement-green-recovery-r1.log",
+      "bytes": 1255,
+      "sha256": "5c5105bba6909ea1053b8866db5bc1f73eb4e046bc14957d3224fb35a3ddbedc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "a24cf499ac7b2aa83a1a2b7c35c19de3d6a5ea6a6ab83ef604e930b3c6d138d7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r1-process.json",
+      "bytes": 15175,
+      "sha256": "838e797e7dde50a5d09354350fdd2924765fc804228f76d393457fa74358631e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r1-request.json",
+      "bytes": 5163,
+      "sha256": "f9f0b5dca60fedd4036a4b27ea5f59f1efe019fd4e765574eb9ea5cd7861ed5a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r1.json",
+      "bytes": 1141,
+      "sha256": "49212886574d9aa6710a31c228648d251c5d48163a7e6420b2d8414406ecda58"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r1.log",
+      "bytes": 48,
+      "sha256": "3cef26c67334fc60bcb6949aa5349134db45b6eeade700e14246d6468bb34271"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r2-pid.json",
+      "bytes": 108,
+      "sha256": "9c7e2099947680bfe511b815beea39024b7d56462b3b7ec4a7dcbdedc14af727"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r2-process.json",
+      "bytes": 15102,
+      "sha256": "2200a7c71a3a182a7866e8c4b248ea4908cf250b45eb2677bade0648c7d814c7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r2-request.json",
+      "bytes": 5126,
+      "sha256": "2a56bce6b6b96e9dd59075a69346eb430ba94731a6eda675c0b11ce535265824"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r2.json",
+      "bytes": 1207,
+      "sha256": "662f0d53939968f8cec64f4b43e75f220c8db92e6f9d583e83049719e1b89efa"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-test-lint-recovery-r2.log",
+      "bytes": 48,
+      "sha256": "28c6c7859c6e9ab792ece3e6c4bc4b75d8a35f12fa56b4a21ad6d0c058225df4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-typing-independent-recovery-r1-pid.json",
+      "bytes": 108,
+      "sha256": "6cfd5e757d668552c3a73746798f3848f5211f8b96c8a114af8e396e6a29b72a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-typing-independent-recovery-r1-process.json",
+      "bytes": 4257,
+      "sha256": "f9473b9228bfef263f06739a9f1e7c0e42b87799bb2de65084eaf370ae302f5d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-typing-independent-recovery-r1-request.json",
+      "bytes": 2571,
+      "sha256": "1b1091c2f87a524310eda03471797bedc8a1b14ad04fadaa8f89ca1311f8a70c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-typing-independent-recovery-r1.log",
+      "bytes": 3071,
+      "sha256": "6e9de55ebf42b86e9b0324e18ce648c169725a8462c3070702152ccc3b9e000b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-ui-loader-diagnostic-r1-pid.json",
+      "bytes": 108,
+      "sha256": "0b07c96109eac0e3ec8e701cc40f85b1670e4c4b8019e7a60fbf3fe5d69ef376"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-ui-loader-diagnostic-r1-process.json",
+      "bytes": 15833,
+      "sha256": "3d855161e9c8170e1980d2f7e421a7fdf6f093f2949c7ee00389cfeb57eb9f15"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-ui-loader-diagnostic-r1-request.json",
+      "bytes": 5183,
+      "sha256": "2275751f72b17fe86f88f8c7db27375ebb882945eeac3add2738639ddaf0d1cd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-ui-loader-diagnostic-r1.log",
+      "bytes": 1923,
+      "sha256": "4e557c92d1d33b8d5a0deca750de1986b2e5b33e4ffea70edfd2ff8490efe3eb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r1-pid.json",
+      "bytes": 108,
+      "sha256": "3c9fb9a9cf8baff169066983915cb18059353583f3a9db2c7922f2e49fdb9444"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r1-process.json",
+      "bytes": 20262,
+      "sha256": "cba2f307a5f7a50ba5c01e5e3db43c089086d28c3b9f9520992714b7eafcf962"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r1-request.json",
+      "bytes": 10040,
+      "sha256": "d239b48049253b383af8cd1dcbc41c1eac1b80ba04a9e3349c2d0a89f5e9931e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r1.json",
+      "bytes": 375029,
+      "sha256": "b58e9f63a0406dc5c1cf1803269690390ba6b3cc5a1cd22ac9bc8f9f10a1d8a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r1.log",
+      "bytes": 158714,
+      "sha256": "61ca6dd127b9ca87b8f16865421c5e8daa3f1253f76db17bfcd4fbcafc7a45f0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r2-pid.json",
+      "bytes": 109,
+      "sha256": "e444c94964388ab70ee29ad172d0d4dc799b73c3681a4fd7680e3554245b57df"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r2-process.json",
+      "bytes": 20263,
+      "sha256": "9398c98764ebae6aa4fff79757d3df8639d3733193eb119afbaf76e2df81ac3d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r2-request.json",
+      "bytes": 10040,
+      "sha256": "a76804728fc08ed78deeaac4ab21fa05b68ec369d2df4fd19a882d4088145cab"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r2.json",
+      "bytes": 371514,
+      "sha256": "f4c158b7a168f5126cd803b494fb5879bc782a4f368c4a45f0677a7f842eec4f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-r2.log",
+      "bytes": 152360,
+      "sha256": "80913d968a6347ec96a86c3560b837f7a39da3c65d4562c69141cd1ea0b074de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r3-pid.json",
+      "bytes": 107,
+      "sha256": "33fc50aec3f96baed5ae53e239b249c6dd16e538cbeacf6bd9c0b94066551833"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r3-process.json",
+      "bytes": 19622,
+      "sha256": "79af26c979b21e575df3121d261ab1cadec01ff04ce0758a9714d2fcc505b116"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r3-request.json",
+      "bytes": 9917,
+      "sha256": "a3b116599b5f78add6f9de0254073f6d3ebac935524b15ebcc3ee2ddae4784e3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r3.json",
+      "bytes": 377748,
+      "sha256": "81f6c8ed29663b43d1f1475d1fe149937cece261b8af81d91aebdfbcb9a671f8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r3.log",
+      "bytes": 152122,
+      "sha256": "f8a44f91ced562f45bebfebbec311855498066182116257f0abcc68440c1a14e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r4-pid.json",
+      "bytes": 108,
+      "sha256": "7657e3c2234b3f8c625fbd7af99e6eacfa8ab7179fa7949bf7418683715aa18f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r4-process.json",
+      "bytes": 20079,
+      "sha256": "acaacc2896b2a37a21f3d9484d089b254d8b0e48a38c81b6dcc43d8152dc6a62"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r4-request.json",
+      "bytes": 10105,
+      "sha256": "9a04dedf43f3359fd92502c0a845a0c203edad15234d7f53b42f302213792a54"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r4.json",
+      "bytes": 383558,
+      "sha256": "bafe469624d4a2eecb31b5f8e2bcb2a3d2d22709f39fb07b49ed5f0991922dcd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/skills-whole-recovery-r4.log",
+      "bytes": 152363,
+      "sha256": "a27920d353859e06e81c5b2bc3cc32262031558ef6c488ddbc1fab234d0a3720"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/source-census-r1.json",
+      "bytes": 8503,
+      "sha256": "c61b7dde48ce6069a31c02241d3efc1636d80bcb5a0b63130419f3e4a198f4ab"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/source-census-r2.json",
+      "bytes": 11158,
+      "sha256": "8a9494ffdf4e7f6348747b2be2b7959a70499548763d441fdaa584938b5dd77e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/source-diff-recovery-r1.patch",
+      "bytes": 82377,
+      "sha256": "f33e8301c9ea534b78a7ec28ef23734bee28f72c1fa45c4d722c77229eaaaa5c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/source-diff-recovery-r2.patch",
+      "bytes": 82483,
+      "sha256": "91adb30079df5ddd58540c4b02787f0ee816fa2ea2075667176297314704c74e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/strict-harness-extension-correction-r1.json",
+      "bytes": 263,
+      "sha256": "220fadbd01d6435644eb82fde6537ccef62a6df25ccefc7f8513837f76848cc6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/strict.mjs",
+      "bytes": 5281,
+      "sha256": "1773b6c290ca507925e9cf846a3e69a44e1f42362e56a46cc31d2835f575270e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/test-lint-recovery.mjs",
+      "bytes": 1050,
+      "sha256": "8eb960f5a2683b820e162f7b3d96e740735ebb7abd987324959800372d95e3a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/typing-approved-apply-recovery-r1.json",
+      "bytes": 1210,
+      "sha256": "974f42d6c8ae3ff73e29498ca43a8603fcf325592cdf67ce5ac10e73b10a4df3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/typing-candidates-r1/desktop/renderer/src/api/bridge.ts",
+      "bytes": 57482,
+      "sha256": "5fb36ef6ccebec6104f89f00ab19b044fcf725e533541efd3e4f880fea973edd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/typing-candidates-r1/desktop/renderer/src/components/skills/types.ts",
+      "bytes": 6090,
+      "sha256": "499cc666617427c6839ddd857f85b9d9b496c0f4bb65ca5e68e6c2c0b4998985"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/typing-candidates-r1.json",
+      "bytes": 1247,
+      "sha256": "1e35215afbae07a42fcd2d1acdd65becc29a91e6277fad927b5078c03a64a396"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/typing-design-recovery-r1.md",
+      "bytes": 1292,
+      "sha256": "dcc9808c41a520c45763a20ba4777b6f944b3be3e3b210ee8f72ee865df07425"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/ui-adapter-binding-correction-r1.json",
+      "bytes": 459,
+      "sha256": "a7130283da54b1b83021cbb4e8f0b054bf3cbbbe2ab6a424470d317cd0017826"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/upstream-discovery-observation-r1.json",
+      "bytes": 468,
+      "sha256": "1a4413099a79573265f9e9c4210605e367ba6efc9354561eea6fc68db070a941"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/verification-recovery-progress-r1.json",
+      "bytes": 1774,
+      "sha256": "712a09ecfa742ba96f533aa01e7c91fac79d4dfaa2dc17efaeb5bcb78a43978d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/verification-recovery-queue-r1.json",
+      "bytes": 1486,
+      "sha256": "c40621da9df0b9c74bc1a145261862d260bdf3c3be8986a4c824fa94f74956df"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/skills-readonly2-20261012-kk-r1/verification-recovery-queue-r2.json",
+      "bytes": 1300,
+      "sha256": "ee1f342a09a3813ab2bf78cba4488ac4f61fb68418f3d4f2efbbafddf2400b33"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/parent-complete-acceptance-queue-skills-readonly-20261012-recovery-r1.json",
+      "bytes": 59928,
+      "sha256": "85c3fc2a1572e37462f2959f6e4fee53c38d397583630396eb70fe0cc4df1d12"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/recovery-parent-population-availability-20261012-r1.json",
+      "bytes": 188492,
+      "sha256": "44726ceb477c5294b7824c88088bf8a98a4dffe31e762049169789a5709c28bb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/active-consumer-census-r1.json",
+      "bytes": 2627,
+      "sha256": "4947f121a09da06433cbea292171293cc4fac10591dde33600bbfbfa31f04fc8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/channel-mcp-readonly-design-r1-request.json",
+      "bytes": 9917,
+      "sha256": "8351e4d528a003d86f533ae209a9322501a292a370738cc043bd44968ea64976"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/characterization-current-cleanup-r1.json",
+      "bytes": 124,
+      "sha256": "94c8ba4f440baac199a92c30f04fcd597ff059c88aa8d54ac01e24a7033b54c8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/characterization-current-r1-process.json",
+      "bytes": 1852,
+      "sha256": "d4b09bb076024e8b203c530a0113ce1bd755a154b09ccd17b24fb39427ee674f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/characterization-current-r1.json",
+      "bytes": 2519,
+      "sha256": "867c3fc4e2d958fb06cb54930465c739e6039d9b3cda82616615eb07c39db086"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/characterization-current-r1.log",
+      "bytes": 38,
+      "sha256": "ba81c272d60ac2d6be1ceecf0840c097064becb5c3c0dfbf98cf39ee204b58f5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/characterize-current-readers.mjs",
+      "bytes": 3365,
+      "sha256": "004747945c94d46692d7b91402bb23ae9cbe9f5d3a6381c347dceefd9a2c256f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/design-draft-r1.md",
+      "bytes": 5915,
+      "sha256": "25b9f2e89d0b51cbb8cd9f6df5fb147620b7adb2f3f4702f928cd85e191ca093"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/electron/desktop-services.ts",
+      "bytes": 430441,
+      "sha256": "42666ed87c5315712872c08ae66f6895a57f9dbec9905a546aa38528d87d7394"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/electron/ipc.ts",
+      "bytes": 107098,
+      "sha256": "349a81045e86928ed51b2aa5a711b4918241fff5c4c02a5de6900aac1474b0c9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/electron/preload-api.ts",
+      "bytes": 121956,
+      "sha256": "d704cda0e40da5553e226c6b5ea41715a63b82a2519b40e5cea0255dee5c67a2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/electron/preload.cjs",
+      "bytes": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/App.tsx",
+      "bytes": 1920,
+      "sha256": "b2625e8cf3190d31ceb4adb953787079a79c93eb0679d9fc7ce6dbcf4f8f69fd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/api/bridge.ts",
+      "bytes": 57509,
+      "sha256": "79bebd5a66496db80b2b6d9fccf753b14edf6c8e862672e34bb7ea00a95e2811"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/components/ChannelsSettingsContent.tsx",
+      "bytes": 33744,
+      "sha256": "f39a74230ce5841b0f348905e2315b3f45d96e316d9c6cef41851c796a44c2b3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/components/DesktopSettings.tsx",
+      "bytes": 234879,
+      "sha256": "f20747e0011677d68866547b5a95a20327bbe138f07297f688303de066b3cffb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/components/MCPSettingsContent.tsx",
+      "bytes": 9622,
+      "sha256": "fd614622723c65257545944bacbe655d40ab977edb7de26e975d82b6edfb2eb7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/components/SettingsModal.tsx",
+      "bytes": 8621,
+      "sha256": "7f3b068342dc1640543bacd14124b6c4e2d3567b2f8d1016c32376a6a2963306"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/components/settings/DesktopChannelsSettings.tsx",
+      "bytes": 10902,
+      "sha256": "a3c054d922eda288f5a56876f21cca6f1788d60a0fbc35c8fe241e325d4fece4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/layouts/AppLayout.tsx",
+      "bytes": 6424,
+      "sha256": "63e5bda23fbf8cc23f1a2b6cd0d8439a9b20d343ab845ac75b771fc7a031a7c4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/desktop/renderer/src/main.tsx",
+      "bytes": 1385,
+      "sha256": "d35c1fe601f88a369a073e7cca860711ec70c7832836353accfc681bfdf0ed07"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/src/ai/providers/normalize.ts",
+      "bytes": 7444,
+      "sha256": "d71788416f6c6ddbd11863c6a24b57a241d73c39205cee7a1aaee25a71bc4f85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/src/types.ts",
+      "bytes": 10781,
+      "sha256": "85bb74a829c9c62f4dccc3ec0e56c8cf60a34c708ace54ec633fe88ad6479acb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight/src/utils/config.ts",
+      "bytes": 4760,
+      "sha256": "d19a76cdffb8f66927db38efd871c8ed03b56c858d889cec4f9643a6632b5417"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/channel-mcp-readonly2-20261012-recovery-r1/preflight-r1.json",
+      "bytes": 6555,
+      "sha256": "a17a878b7936912bf6f3f0587302187e4d251dfd852897b97631e6876abfe90e"
+    }
+  ]
+}

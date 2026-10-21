@@ -1,4 +1,6 @@
+import type {DatabaseSync} from 'node:sqlite';
 // @vitest-environment node
+import {declaredMainGroupsRows} from '../fixtures/captured-groups-declarations.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -100,7 +102,10 @@ describe('BDD: real service/core/SQLite/registry/session/root loop integration',
       }),
     });
     await service.initialize(host);
-    const prepared = await service.prepareRoot(host, 'thread', { prompt: 'run', materials: [] });
+    const originalReservation=host.reserveTaskIdentity();
+    const prepared = await service.prepareRoot(host, 'thread', { prompt: 'run', materials: [] },originalReservation);
+    expect(prepared.taskId).toBe(originalReservation.taskId);
+    await expect(service.prepareRoot(host,'thread',{prompt:'forged',materials:[]},{...originalReservation})).rejects.toThrow(/reservation/);
     await host.startTask(prepared.taskId); await host.drain();
     expect(errors).toEqual([]);
     await vi.waitFor(() => expect(coordinator.snapshot().active).toBe(0));
@@ -139,14 +144,22 @@ describe('BDD: real service/core/SQLite/registry/session/root loop integration',
       try { expect(await service.resolveResource(cleanupRequest)).toMatchObject({ state: 'unknown' }); } finally { journalFault.mockRestore(); }
       expect(await service.resolveResource(cleanupRequest)).toMatchObject({ state: 'unknown' });
       const request = { access, requestSource: 'user' as const, groupId, resourceId: resource.resourceId, action: 'keep' as const, operationId: 'keep-ack-fails' };
-      const original = store.putOperation.bind(store);
-      const fault = vi.spyOn(store, 'putOperation').mockImplementation((operation, control) => {
-        if (operation.operationId === request.operationId && operation.result.state === 'completed') throw new Error('SQLITE_FULL');
-        return original(operation, control);
-      });
-      try { expect(await service.resolveResource(request)).toMatchObject({ state: 'unknown' }); } finally { fault.mockRestore(); }
+      const db=(store as unknown as {db:DatabaseSync}).db;
+      db.exec(`CREATE TEMP TRIGGER deny_keep_ack_insert BEFORE INSERT ON operations
+        WHEN NEW.operation_id='keep-ack-fails' AND json_extract(NEW.data_json,'$.result.state')='completed'
+        BEGIN SELECT RAISE(ABORT,'SQLITE_FULL'); END;
+        CREATE TEMP TRIGGER deny_keep_ack_update BEFORE UPDATE ON operations
+        WHEN NEW.operation_id='keep-ack-fails' AND json_extract(NEW.data_json,'$.result.state')='completed'
+        BEGIN SELECT RAISE(ABORT,'SQLITE_FULL'); END`);
+      try { expect(await service.resolveResource(request)).toMatchObject({ state: 'unknown' }); }
+      finally { db.exec('DROP TRIGGER IF EXISTS temp.deny_keep_ack_insert; DROP TRIGGER IF EXISTS temp.deny_keep_ack_update'); }
       expect(await service.resolveResource(request)).toMatchObject({ state: 'unknown' });
-      const resolved = await service.resolveResource({ access, requestSource: 'user', groupId, resourceId: resource.resourceId, action: 'keep', operationId: 'keep-dirty' });
+      const resolved=await service.resolveResource({ access, requestSource: 'user', groupId, resourceId: resource.resourceId, action: 'keep', operationId: 'keep-dirty' });
+      const rows=declaredMainGroupsRows(store,'operations').filter(row=>row.body.operationId==='keep-dirty');
+      expect(rows).toHaveLength(1);expect(rows[0].unmapped).toEqual([]);
+      const persistedResult=rows[0].body.result;expect(persistedResult).toMatchObject({action:'keep'});
+      const capturedResolution=typeof persistedResult==='object'&&persistedResult!==null&&'action' in persistedResult&&persistedResult.action==='keep';
+      expect(capturedResolution).toBe(true);
       expect(resolved.state).toBe('completed');
       expect(readFileSync(join(resource.canonicalPath, 'user-result.txt'), 'utf8')).toBe('PRESERVE_USER_BYTES');
       expect(store.getAgent(groupId, childId)).toMatchObject({ resourcesReleased: true, cleanupPending: false, resumable: false });

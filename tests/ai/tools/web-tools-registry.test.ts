@@ -7,7 +7,7 @@ import { cloneDefaultConnectorsConfig } from '../../../src/ai/tools/connectors/c
 describe('web_search tool with registry', () => {
   it('appends fallback tag when registry fell back', async () => {
     let tavilyCalled = 0;
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://api.tavily.com')) {
         tavilyCalled++;
@@ -32,7 +32,7 @@ describe('web_search tool with registry', () => {
 
 describe('web_fetch tool with registry', () => {
   it('appends fallback tag when registry fell back', async () => {
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://r.jina.ai/')) {
         return new Response('boom', { status: 500 });

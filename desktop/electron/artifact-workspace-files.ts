@@ -1,3 +1,4 @@
+import { createLocalSourceWriterLifetime } from '../../src/runtime/verification/local-source-writer-lifetime.js';
 import {
   chmodSync,
   copyFileSync,
@@ -89,6 +90,9 @@ export function validatePackageRelativePath(input: string): string {
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
     throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'package path contains traversal');
   }
+  if (process.platform === 'win32' && segments.some(segment => /[:\0]/.test(segment) || /[. ]$/.test(segment) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment))) {
+    throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'unsafe Windows package path');
+  }
   const canonical = posix.normalize(normalized);
   if (canonical === '..' || canonical.startsWith('../')) {
     throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'package path escapes root');
@@ -115,17 +119,52 @@ export function assertPackageLimits(totalBytes: number, fileCount: number): void
   }
 }
 
+const stagedArtifacts = new WeakMap<object, { owner: object; metadata: IngestedWorkspaceArtifact; dev: bigint; ino: bigint }>();
+const sourceWriters = new WeakMap<object, ReturnType<typeof createLocalSourceWriterLifetime>>();
+function sourceWriter(owner: object) {
+  const writer = sourceWriters.get(owner);
+  if (!writer) throw Error('artifact_workspace_source_owner');
+  return writer;
+}
+
 export class ArtifactWorkspaceFileManager {
   private readonly managedRoot: string;
   private readonly stagingRoot: string;
   private readonly versionsRoot: string;
+  private readonly rootIdentity: { dev: bigint; ino: bigint };
 
   constructor(options: { managedRoot: string }) {
-    this.managedRoot = resolve(options.managedRoot);
+    const configured = resolve(options.managedRoot);
+    mkdirSync(configured, { recursive: true });
+    this.managedRoot = realpathSync.native(configured);
+    const identity = lstatSync(this.managedRoot, { bigint: true });
+    this.rootIdentity = { dev: identity.dev, ino: identity.ino };
     this.stagingRoot = join(this.managedRoot, 'staging');
     this.versionsRoot = join(this.managedRoot, 'versions');
-    mkdirSync(this.stagingRoot, { recursive: true });
-    mkdirSync(this.versionsRoot, { recursive: true });
+    for (const directory of [this.stagingRoot, this.versionsRoot]) {
+      try { mkdirSync(directory); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    }
+    this.assertNamespaces();
+    sourceWriters.set(this, createLocalSourceWriterLifetime('artifact_workspace_source'));
+  }
+
+  sealAndDrainInstanceMutations(): Promise<void> { return sourceWriter(this).close(); }
+
+  private assertNamespaces(): void {
+    const root = lstatSync(this.managedRoot, { bigint: true });
+    if (!root.isDirectory() || root.isSymbolicLink() || root.dev !== this.rootIdentity.dev || root.ino !== this.rootIdentity.ino) {
+      throw new ArtifactWorkspaceFileError('invalid_target', 'managed root identity changed');
+    }
+    for (const directory of [this.stagingRoot, this.versionsRoot]) {
+      const info = lstatSync(directory);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new ArtifactWorkspaceFileError('invalid_target', 'managed namespace is not a real directory');
+    }
+  }
+
+  private registerStaged(metadata: IngestedWorkspaceArtifact): IngestedWorkspaceArtifact {
+    const directory = lstatSync(join(this.stagingRoot, metadata.stagingId), { bigint: true });
+    stagedArtifacts.set(metadata, { owner: this, metadata: structuredClone(metadata), dev: directory.dev, ino: directory.ino });
+    return metadata;
   }
 
   resolveSourceIdentity(input: { sourcePath: string; allowedRoot: string }): {
@@ -241,34 +280,38 @@ export class ArtifactWorkspaceFileManager {
     kind: string;
     mimeType?: string;
   }): IngestedWorkspaceArtifact {
-    const stagingId = validatePackageRelativePath(input.stagingId);
-    if (stagingId.includes('/')) {
-      throw new ArtifactWorkspaceFileError('invalid_target', 'staging id must be opaque');
-    }
-    const source = this.resolveSourceIdentity(input).realPath;
-    const sourceStat = statSync(source);
-    if (!sourceStat.isFile()) {
-      throw new ArtifactWorkspaceFileError('invalid_target', 'single-file source is not a regular file');
-    }
-    assertSingleFileLimit(sourceStat.size);
+    return sourceWriter(this).runSync(() => {
+      this.assertNamespaces();
+      const stagingId = validatePackageRelativePath(input.stagingId);
+      if (stagingId.includes('/')) {
+        throw new ArtifactWorkspaceFileError('invalid_target', 'staging id must be opaque');
+      }
+      const source = this.resolveSourceIdentity(input).realPath;
+      const sourceStat = statSync(source);
+      if (!sourceStat.isFile()) {
+        throw new ArtifactWorkspaceFileError('invalid_target', 'single-file source is not a regular file');
+      }
+      assertSingleFileLimit(sourceStat.size);
 
-    const fileName = basename(source);
-    const stagingDirectory = join(this.stagingRoot, stagingId);
-    mkdirSync(stagingDirectory);
-    const stagedPath = join(stagingDirectory, fileName);
-    copyFileSync(source, stagedPath);
-    chmodSync(stagedPath, 0o444);
+      const fileName = validatePackageRelativePath(basename(source));
+      if (fileName.includes('/')) throw new ArtifactWorkspaceFileError('invalid_target', 'invalid source filename');
+      const stagingDirectory = join(this.stagingRoot, stagingId);
+      mkdirSync(stagingDirectory);
+      const stagedPath = join(stagingDirectory, fileName);
+      copyFileSync(source, stagedPath);
+      chmodSync(stagedPath, 0o444);
 
-    return {
-      storageKind: 'single_file',
-      stagingId,
-      stagingRef: posix.join('staging', stagingId, fileName),
-      finalRef: posix.join('versions', stagingId, fileName),
-      checksum: sha256Bytes(readFileSync(stagedPath)),
-      byteSize: sourceStat.size,
-      kind: input.kind,
-      mimeType: input.mimeType,
-    };
+      return this.registerStaged({
+        storageKind: 'single_file',
+        stagingId,
+        stagingRef: posix.join('staging', stagingId, fileName),
+        finalRef: posix.join('versions', stagingId, fileName),
+        checksum: sha256Bytes(readFileSync(stagedPath)),
+        byteSize: sourceStat.size,
+        kind: input.kind,
+        mimeType: input.mimeType,
+      });
+    });
   }
 
   ingestSealedPackage(input: {
@@ -279,98 +322,133 @@ export class ArtifactWorkspaceFileManager {
     kind: string;
     mimeType?: string;
   }): IngestedWorkspaceArtifact {
-    const stagingId = validatePackageRelativePath(input.stagingId);
-    if (stagingId.includes('/')) {
-      throw new ArtifactWorkspaceFileError('invalid_target', 'staging id must be opaque');
-    }
-    const entryRef = validatePackageRelativePath(input.entryRef);
-    const sourceRoot = this.resolveSourceIdentity({
-      sourcePath: input.sourceDirectory,
-      allowedRoot: input.allowedRoot,
-    }).realPath;
-    if (!statSync(sourceRoot).isDirectory()) {
-      throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package source is not a directory');
-    }
-
-    const entries: Array<{ sourcePath: string; relativePath: string; size: number }> = [];
-    const caseFolded = new Set<string>();
-    const walk = (directory: string): void => {
-      for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-        const absolutePath = join(directory, dirent.name);
-        const relativePath = validatePackageRelativePath(relative(sourceRoot, absolutePath).replace(/\\/g, '/'));
-        const stat = lstatSync(absolutePath);
-        if (stat.isSymbolicLink()) {
-          throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package cannot contain symlinks');
-        }
-        if (stat.isDirectory()) {
-          walk(absolutePath);
-          continue;
-        }
-        if (!stat.isFile()) {
-          throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package contains a non-file entry');
-        }
-        if (relativePath === '.xiaok-manifest.json') {
-          throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package uses a reserved manifest path');
-        }
-        const folded = relativePath.toLocaleLowerCase('en-US');
-        if (caseFolded.has(folded)) {
-          throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package contains a case-fold collision');
-        }
-        caseFolded.add(folded);
-        entries.push({ sourcePath: absolutePath, relativePath, size: stat.size });
+    return sourceWriter(this).runSync(() => {
+      this.assertNamespaces();
+      const stagingId = validatePackageRelativePath(input.stagingId);
+      if (stagingId.includes('/')) {
+        throw new ArtifactWorkspaceFileError('invalid_target', 'staging id must be opaque');
       }
-    };
-    walk(sourceRoot);
-    entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+      const entryRef = validatePackageRelativePath(input.entryRef);
+      const sourceRoot = this.resolveSourceIdentity({
+        sourcePath: input.sourceDirectory,
+        allowedRoot: input.allowedRoot,
+      }).realPath;
+      if (!statSync(sourceRoot).isDirectory()) {
+        throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package source is not a directory');
+      }
 
-    const totalBytes = entries.reduce((sum, entry) => sum + entry.size, 0);
-    assertPackageLimits(totalBytes, entries.length);
-    if (!entries.some((entry) => entry.relativePath === entryRef)) {
-      throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package entry file is missing');
-    }
+      const entries: Array<{ sourcePath: string; relativePath: string; size: number }> = [];
+      const caseFolded = new Set<string>();
+      const walk = (directory: string): void => {
+        for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+          const absolutePath = join(directory, dirent.name);
+          const relativePath = validatePackageRelativePath(relative(sourceRoot, absolutePath).replace(/\\/g, '/'));
+          const stat = lstatSync(absolutePath);
+          if (stat.isSymbolicLink()) {
+            throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package cannot contain symlinks');
+          }
+          if (stat.isDirectory()) {
+            walk(absolutePath);
+            continue;
+          }
+          if (!stat.isFile()) {
+            throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package contains a non-file entry');
+          }
+          if (relativePath === '.xiaok-manifest.json') {
+            throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package uses a reserved manifest path');
+          }
+          const folded = relativePath.toLocaleLowerCase('en-US');
+          if (caseFolded.has(folded)) {
+            throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package contains a case-fold collision');
+          }
+          caseFolded.add(folded);
+          entries.push({ sourcePath: absolutePath, relativePath, size: stat.size });
+        }
+      };
+      walk(sourceRoot);
+      entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 
-    const stagingDirectory = join(this.stagingRoot, stagingId);
-    mkdirSync(stagingDirectory);
-    const manifestEntries: PackageManifestEntry[] = [];
-    for (const entry of entries) {
-      const destination = join(stagingDirectory, ...entry.relativePath.split(/[\\/]+/));
-      mkdirSync(resolve(destination, '..'), { recursive: true });
-      copyFileSync(entry.sourcePath, destination);
-      chmodSync(destination, 0o444);
-      manifestEntries.push({
-        path: entry.relativePath,
-        size: entry.size,
-        sha256: sha256Bytes(readFileSync(destination)),
+      const totalBytes = entries.reduce((sum, entry) => sum + entry.size, 0);
+      assertPackageLimits(totalBytes, entries.length);
+      if (!entries.some((entry) => entry.relativePath === entryRef)) {
+        throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package entry file is missing');
+      }
+
+      const stagingDirectory = join(this.stagingRoot, stagingId);
+      mkdirSync(stagingDirectory);
+      const manifestEntries: PackageManifestEntry[] = [];
+      for (const entry of entries) {
+        const destination = join(stagingDirectory, ...entry.relativePath.split(/[\\/]+/));
+        mkdirSync(resolve(destination, '..'), { recursive: true });
+        copyFileSync(entry.sourcePath, destination);
+        chmodSync(destination, 0o444);
+        manifestEntries.push({
+          path: entry.relativePath,
+          size: entry.size,
+          sha256: sha256Bytes(readFileSync(destination)),
+        });
+      }
+      const manifestBytes = JSON.stringify({ schemaVersion: 1, files: manifestEntries });
+      const manifestRef = '.xiaok-manifest.json';
+      writeFileSync(join(stagingDirectory, manifestRef), manifestBytes, { mode: 0o444 });
+
+      return this.registerStaged({
+        storageKind: 'sealed_package',
+        stagingId,
+        stagingRef: posix.join('staging', stagingId),
+        finalRef: posix.join('versions', stagingId),
+        entryRef,
+        packageManifestRef: manifestRef,
+        checksum: sha256Bytes(manifestBytes),
+        byteSize: totalBytes,
+        kind: input.kind,
+        mimeType: input.mimeType,
       });
-    }
-    const manifestBytes = JSON.stringify({ schemaVersion: 1, files: manifestEntries });
-    const manifestRef = '.xiaok-manifest.json';
-    writeFileSync(join(stagingDirectory, manifestRef), manifestBytes, { mode: 0o444 });
-
-    return {
-      storageKind: 'sealed_package',
-      stagingId,
-      stagingRef: posix.join('staging', stagingId),
-      finalRef: posix.join('versions', stagingId),
-      entryRef,
-      packageManifestRef: manifestRef,
-      checksum: sha256Bytes(manifestBytes),
-      byteSize: totalBytes,
-      kind: input.kind,
-      mimeType: input.mimeType,
-    };
+    });
   }
 
   finalize(staged: IngestedWorkspaceArtifact): FinalizedWorkspaceArtifact {
-    const stagingContainer = join(this.stagingRoot, staged.stagingId);
-    const finalContainer = join(this.versionsRoot, staged.stagingId);
-    renameSync(stagingContainer, finalContainer);
-    const { stagingRef: _stagingRef, finalRef, ...metadata } = staged;
-    return { ...metadata, fileRef: finalRef };
+    return sourceWriter(this).runSync(() => {
+      this.assertNamespaces();
+      const entry = stagedArtifacts.get(staged);
+      if (!entry || entry.owner !== this) throw new ArtifactWorkspaceFileError('invalid_target', 'staging object is not owned by this instance');
+      const original = entry.metadata;
+      const descriptors = Object.getOwnPropertyDescriptors(staged), keys = Reflect.ownKeys(staged);
+      if (keys.length !== Object.keys(original).length || keys.some(key => typeof key !== 'string'
+        || !Object.hasOwn(original, key) || !Object.hasOwn(descriptors[key]!, 'value')
+        || descriptors[key]!.value !== original[key as keyof IngestedWorkspaceArtifact])) {
+        throw new ArtifactWorkspaceFileError('invalid_target', 'staging metadata changed');
+      }
+      const stagingId = validatePackageRelativePath(original.stagingId);
+      if (stagingId.includes('/') || original.finalRef !== this.finalRefForStagingRef(original.stagingRef)) throw new ArtifactWorkspaceFileError('invalid_target', 'invalid staging relationship');
+      const segments = original.stagingRef.split('/');
+      if (segments[1] !== stagingId || segments.length !== (original.storageKind === 'single_file' ? 3 : 2)) throw new ArtifactWorkspaceFileError('invalid_target', 'invalid staging namespace');
+      const stagingContainer = join(this.stagingRoot, stagingId);
+      const finalContainer = join(this.versionsRoot, stagingId);
+      const info = lstatSync(stagingContainer, { bigint: true });
+      if (!info.isDirectory() || info.isSymbolicLink() || info.dev !== entry.dev || info.ino !== entry.ino) throw new ArtifactWorkspaceFileError('invalid_target', 'staging directory changed');
+      try { lstatSync(finalContainer); throw new ArtifactWorkspaceFileError('invalid_target', 'final artifact already exists'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      renameSync(stagingContainer, finalContainer);
+      stagedArtifacts.delete(staged);
+      const { stagingRef: _stagingRef, finalRef, ...metadata } = original;
+      return { ...metadata, fileRef: finalRef };
+    });
   }
 
   removeManagedRef(fileRef: string): void {
-    const resolved = this.resolveManagedRef(fileRef);
-    rmSync(resolved, { recursive: true, force: true, maxRetries: 3 });
+    return sourceWriter(this).runSync(() => {
+      this.assertNamespaces();
+      const canonical = validatePackageRelativePath(fileRef), segments = canonical.split('/');
+      if (!['staging', 'versions'].includes(segments[0]!) || segments.length < 2) throw new ArtifactWorkspaceFileError('invalid_target', 'cannot remove a managed namespace');
+      let resolved = this.managedRoot;
+      for (let index = 0; index < segments.length; index += 1) {
+        resolved = join(resolved, segments[index]!);
+        let info;
+        try { info = lstatSync(resolved); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+        if (info.isSymbolicLink() || (index < segments.length - 1 && !info.isDirectory())) throw new ArtifactWorkspaceFileError('invalid_target', 'managed removal crosses an unsafe directory');
+      }
+      rmSync(resolved, { recursive: true, force: true, maxRetries: 3 });
+    });
   }
 }

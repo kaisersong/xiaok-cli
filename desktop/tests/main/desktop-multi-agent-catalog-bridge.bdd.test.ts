@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildToolList } from '../../../src/ai/tools/index.js';
+import {getBuiltinToolIdentity} from '../../../src/ai/tools/native-tool-identity.js';
 import type { Tool } from '../../../src/types.js';
 import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from '../../electron/desktop-multi-agent-catalog-bridge.js';
 
@@ -24,6 +25,31 @@ describe('BDD: the actual Desktop registry supplies identity-bound capabilities'
     return { root, child, registry, bridge, scope };
   }
   const tool = (name: string, result: string): Tool => ({ permission: 'safe', definition: { name, description: 'fixture', inputSchema: { type: 'object', properties: {} } }, execute: async () => result });
+
+  it('preserves only actual native readonly provenance in the final scoped catalog wrapper',()=>{
+    const fixture=setup(),registry=fixture.scope();
+    for(const name of ['read','grep','glob'])expect(getBuiltinToolIdentity(registry.getRegisteredTool(name)!)).toBe('readonly');
+    for(const name of ['write','edit','bash'])expect(getBuiltinToolIdentity(registry.getRegisteredTool(name)!)).toBeUndefined();
+  });
+  it('does not grant native identity to same-name replacement or custom binding',()=>{
+    const fixture=setup();
+    fixture.registry.registerTool(tool('read','FORGED'));
+    expect(getBuiltinToolIdentity(fixture.scope().getRegisteredTool('read')!)).toBeUndefined();
+    const native=buildToolList().find(t=>t.definition.name==='read')!;
+    fixture.registry.registerOwnedTool(native,{ownerId:'builtin',slotKey:'read',binding:'custom',verifiedReadOnly:true,bindInvocation:()=>async()=> 'CUSTOM'});
+    expect(getBuiltinToolIdentity(fixture.scope().getRegisteredTool('read')!)).toBeUndefined();
+  });
+
+  it('rejects a changed original source and does not transfer a descriptor copy provenance',async()=>{
+    const fixture=setup(),registry=fixture.scope(),source=fixture.registry.getRegisteredTool('read')!;
+    const descriptor=fixture.bridge.catalog.snapshotDescriptors().find(d=>d.canonicalName==='read')!;
+    const {inheritDesktopNativeReadonlyDescriptor}=await import('../../electron/desktop-native-catalog-provenance.js');
+    const copied=tool('read','COPY');inheritDesktopNativeReadonlyDescriptor({...descriptor},copied);
+    expect(getBuiltinToolIdentity(copied)).toBeUndefined();
+    const replacement=vi.fn(async()=> 'MUST NOT EXECUTE');source.execute=replacement;
+    expect(await registry.executeTool('read',{file_path:join(fixture.child,'x')})).toMatch(/compound_builtin_tool_changed/);
+    expect(replacement).not.toHaveBeenCalled();
+  });
 
   it('A3/A24 Given child-scoped builtins, When real read/write/bash/grep/glob execute, Then all resolve against the child directory and never inherit root cwd', async () => {
     const fixture = setup(); writeFileSync(join(fixture.root, 'root-only.txt'), 'ROOT'); writeFileSync(join(fixture.child, 'child.txt'), 'CHILD');

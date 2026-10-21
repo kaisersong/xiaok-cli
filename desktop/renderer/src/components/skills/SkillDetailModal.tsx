@@ -1,5 +1,5 @@
 import { Download, Github, MessageSquare, Trash2, X } from 'lucide-react'
-import { PillToggle } from '../shared'
+import { BooleanSwitch } from '../ui/BooleanSwitch'
 import type { ViewSkill } from './types'
 import { formatDate } from './types'
 import { openExternal } from '../../openExternal'
@@ -46,6 +46,7 @@ type Props = {
   platformAvailabilityLabel: (status?: ViewSkill['platform_status']) => string
   platformAvailabilityStyle: (status?: ViewSkill['platform_status']) => React.CSSProperties | null
   scanStatusBadge: (item: ViewSkill) => { label: string; style: React.CSSProperties } | null
+  metricUnknownLabel?: string
   stats?: { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number } | undefined
 }
 
@@ -63,6 +64,7 @@ export function SkillDetailModal({
   platformAvailabilityStyle,
   scanStatusBadge,
   stats,
+  metricUnknownLabel = '--',
 }: Props) {
   const enabled = active(item)
   const platformBadgeLabel = item.is_platform ? platformAvailabilityLabel(item.platform_status) : ''
@@ -160,19 +162,19 @@ export function SkillDetailModal({
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
                   <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailCalls}</span>
-                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailCallsValue?.(stats.totalCalls) ?? stats.totalCalls}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{Number.isFinite(stats.totalCalls) ? skillText.statsDetailCallsValue?.(stats.totalCalls) ?? stats.totalCalls : metricUnknownLabel}</span>
                 </div>
                 <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
                   <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailAvgDuration}</span>
-                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailDurationValue?.(stats.avgDurationMs) ?? `${stats.avgDurationMs}ms`}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{Number.isFinite(stats.avgDurationMs) ? skillText.statsDetailDurationValue?.(stats.avgDurationMs) ?? `${stats.avgDurationMs}ms` : metricUnknownLabel}</span>
                 </div>
                 <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
                   <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailSuccessRate}</span>
-                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailSuccessValue?.(stats.successCount, stats.totalCalls) ?? '--'}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{Number.isFinite(stats.successCount) && Number.isFinite(stats.totalCalls) ? skillText.statsDetailSuccessValue?.(stats.successCount, stats.totalCalls) ?? '--' : metricUnknownLabel}</span>
                 </div>
                 <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
                   <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailTokens}</span>
-                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailTokensValue?.(stats.totalInputTokens + stats.totalOutputTokens) ?? '--'}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{Number.isFinite(stats.totalInputTokens + stats.totalOutputTokens) ? skillText.statsDetailTokensValue?.(stats.totalInputTokens + stats.totalOutputTokens) ?? '--' : metricUnknownLabel}</span>
                 </div>
               </div>
             )}
@@ -234,7 +236,8 @@ export function SkillDetailModal({
             <span className="text-xs text-[var(--c-text-tertiary)]">
               {platformAvailabilityLabel(item.platform_status) || (enabled ? skillText.enabledByDefault : skillText.disable)}
             </span>
-            <PillToggle
+            <BooleanSwitch
+                      ariaLabel={`${skillText.enabledByDefault}: ${item.display_name}`}
               checked={enabled}
               onChange={() => {
                 if (enabled) onDisable(item)

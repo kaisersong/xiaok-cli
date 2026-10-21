@@ -17,6 +17,49 @@ const digest = (value: unknown): string => createHash('sha256').update(encode(va
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)])) : value;
 
+// Host-private diagnostics only. Never serialize raw errors through IPC/preload.
+interface ActivityStoreCleanupDiagnostic {
+  readonly sequence: number;
+  readonly phase: 'begin' | 'commit' | 'rollback' | 'secure-sidecars' | 'readonly-close' | 'data-close' | 'owner-close';
+  readonly stage: 'constructor-cleanup' | 'begin-threw' | 'body-failed' | 'commit-threw' | 'commit-returned';
+  readonly relation: 'secondary' | 'primary-after-commit' | 'primary-state-unknown';
+}
+const activityStoreCleanupDiagnostics: Readonly<ActivityStoreCleanupDiagnostic>[] = [];
+const retainedActivityStoreConstructions = new Set<Readonly<{ data?: DatabaseSync; owner?: DatabaseSync }>>();
+let cleanupSequence = 0, cleanupDiagnosticsDropped = 0, cleanupDiagnosticLogFailures = 0;
+function recordActivityStoreCleanupFailure(
+  phase: ActivityStoreCleanupDiagnostic['phase'], stage: ActivityStoreCleanupDiagnostic['stage'],
+  relation: ActivityStoreCleanupDiagnostic['relation'] = 'secondary',
+): void {
+  const sequence = ++cleanupSequence;
+  try {
+    if (activityStoreCleanupDiagnostics.length === 32) { activityStoreCleanupDiagnostics.shift(); cleanupDiagnosticsDropped += 1; }
+    activityStoreCleanupDiagnostics.push(Object.freeze({ sequence, phase, stage, relation }));
+  } catch { cleanupDiagnosticsDropped += 1; }
+  // Stable metadata only; original SQL/error/cause objects remain host-private.
+  try { console.error('[conversation-activity] activity_store_cleanup_failed', { sequence, phase, stage, relation, dropped: cleanupDiagnosticsDropped, logFailures: cleanupDiagnosticLogFailures, retainedConstructions: retainedActivityStoreConstructions.size }); }
+  catch { cleanupDiagnosticLogFailures += 1; }
+}
+function closeFailedActivityStoreConstruction(
+  data: DatabaseSync | undefined, owner: DatabaseSync | undefined,
+  dataPhase: 'readonly-close' | 'data-close' = 'data-close',
+): void {
+  const retained = Object.freeze({ data, owner });
+  retainedActivityStoreConstructions.add(retained); // Keep actual handles, never PID-derived replacements.
+  let dataClosed = data === undefined, ownerClosed = owner === undefined;
+  if (data) {
+    try { data.close(); dataClosed = true; }
+    catch { recordActivityStoreCleanupFailure(dataPhase, 'constructor-cleanup'); }
+  }
+  // The owner lock is dependent on actual writer close, not an independent disposer.
+  if (dataClosed && owner) {
+    try { owner.close(); ownerClosed = true; }
+    catch { recordActivityStoreCleanupFailure('owner-close', 'constructor-cleanup'); }
+  }
+  if (dataClosed && ownerClosed) retainedActivityStoreConstructions.delete(retained);
+  // No retry, forced release, public handle, or false physical-close ACK.
+}
+
 /** Single host owner. IPC and source admission belong to the service above this store. */
 export class ConversationActivityStore {
   private readonly db: DatabaseSync;
@@ -25,6 +68,8 @@ export class ConversationActivityStore {
   private readonly now: () => number;
   private readonly maxSourceEvents: number;
   private closed = false;
+  // Failure-derived latch; no reset/force/grant API. Reads remain available.
+  private writeState: 'writable' | 'unconfirmed' | 'committed-unverified' = 'writable';
   private file!: string;
 
   private secureSidecars(): void {
@@ -55,7 +100,7 @@ export class ConversationActivityStore {
       try {
         const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
         if (version !== 4) throw new Error('conversation_activity_schema_unsupported');
-      } catch (error) { this.db.close(); throw error; }
+      } catch (error) { closeFailedActivityStoreConstruction(this.db, undefined, 'readonly-close'); throw error; }
       return;
     }
     try {
@@ -70,9 +115,11 @@ export class ConversationActivityStore {
       // It is held for this owner's lifetime and released by process exit, never mtime.
       this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
       this.secureSidecars();
-    } catch {
-      this.owner.close();
-      throw new Error('conversation_activity_owner_held');
+    } catch (error) {
+      // Preserve the existing public owner-held mapping and retain its real cause.
+      const primary = new Error('conversation_activity_owner_held', { cause: error });
+      closeFailedActivityStoreConstruction(undefined, this.owner);
+      throw primary;
     }
     let opened: DatabaseSync | undefined;
     try {
@@ -111,8 +158,7 @@ export class ConversationActivityStore {
       this.db.prepare(`INSERT OR IGNORE INTO source_event_retention SELECT event_key,COALESCE(json_extract(content_json,'$.occurredAt'),?),json_extract(content_json,'$.kind') FROM source_events`).run(this.now());
       this.secureSidecars();
     } catch (error) {
-      opened?.close();
-      this.owner.close();
+      closeFailedActivityStoreConstruction(opened, this.owner);
       throw error;
     }
   }
@@ -120,10 +166,46 @@ export class ConversationActivityStore {
   private transaction<T>(fn: () => T): T {
     if (this.readOnly) throw new Error('conversation_activity_readonly');
     if (this.closed) throw new Error('conversation_activity_store_closed');
-    this.db.exec('BEGIN IMMEDIATE');
-    try { const result = fn(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    finally { this.secureSidecars(); }
+    if (this.writeState !== 'writable') throw new Error('conversation_activity_write_unconfirmed');
+    try { this.db.exec('BEGIN IMMEDIATE'); }
+    catch (primary) {
+      // Only the thrown call is known. Do not infer BEGIN opened a transaction,
+      // or issue ROLLBACK against a transaction whose ownership is unconfirmed.
+      this.writeState = 'unconfirmed';
+      recordActivityStoreCleanupFailure('begin', 'begin-threw', 'primary-state-unknown');
+      throw primary;
+    }
+    let result!: T;
+    let stage: ActivityStoreCleanupDiagnostic['stage'] = 'body-failed';
+    try {
+      result = fn();
+      stage = 'commit-threw'; // COMMIT may throw; do not infer whether it committed.
+      this.db.exec('COMMIT');
+    } catch (primary) {
+      if (stage === 'commit-threw') {
+        this.writeState = 'unconfirmed';
+        recordActivityStoreCleanupFailure('commit', stage, 'primary-state-unknown');
+      }
+      try { this.db.exec('ROLLBACK'); }
+      catch {
+        this.writeState = 'unconfirmed'; // Before logging/reentrant diagnostics.
+        recordActivityStoreCleanupFailure('rollback', stage);
+      }
+      try { this.secureSidecars(); }
+      catch {
+        this.writeState = 'unconfirmed';
+        recordActivityStoreCleanupFailure('secure-sidecars', stage);
+      }
+      throw primary; // Exact original identity, including a non-Error thrown value.
+    }
+    // COMMIT returned. Cleanup failures must not enter the rollback catch above.
+    try { this.secureSidecars(); }
+    catch (primary) {
+      this.writeState = 'committed-unverified';
+      recordActivityStoreCleanupFailure('secure-sidecars', 'commit-returned', 'primary-after-commit');
+      throw primary;
+    }
+    return result;
   }
 
   prepareAssociation(input: { operationId: string; creationIdempotencyKey: string; origin: ActivityOrigin }): void {

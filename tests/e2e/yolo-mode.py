@@ -83,7 +83,7 @@ def run(entry, activation):
         wait_for(lambda s: 'YOLO_FORCE_DONE' in s and helpers.has_ready_input_prompt(s), 'force-executed')
         assert git('rev-parse', 'refs/tags/v1.2.3', cwd=remote) == head
         send('Run the inert blocked-pattern probe')
-        wait_for(lambda s: 'YOLO_BLOCK_PATTERN_DONE' in s and helpers.has_ready_input_prompt(s), 'executor-bypass')
+        wait_for(lambda s: 'YOLO_BLOCK_PATTERN_DONE' in s and helpers.has_ready_input_prompt(s), 'hard-block-denied')
         assert prompts() == 0
         session_id = exit_session(); tty.extra_args = ['--yolo', '--resume', session_id]
         start(); send('Repeat the local tag probe after resume')
@@ -101,10 +101,10 @@ def run(entry, activation):
         assert prompts() == 1
         replies = {m.get('tool_call_id'): m.get('content', '') for m in server.requests[-1]['messages'] if m.get('role') == 'tool'}
         for name in ['force', 'resume']: assert 'YOLO_FORCE_EXECUTED' in replies[name], replies
-        assert replies['block'].strip() == 'mkfs'; assert '已取消' in replies['revoked']
+        assert replies['block'].strip() == 'Error: 权限不足: bash'; assert '已取消' in replies['revoked']
         exit_session()
         (root / 'result.json').write_text(json.dumps({'passed': True, 'activation': activation, 'entry': str(entry),
-            'realLocalRemoteTagUpdated': True, 'noPromptsInYolo': True, 'executorBypass': True,
+            'realLocalRemoteTagUpdated': True, 'noPromptsInYolo': True, 'hardBlockDenied': True,
             'explicitResume': True, 'implicitResumeRememberedYolo': True, 'autoStillConfirms': True}, indent=2))
         print(f'PASS: {activation}; force push actually executed; no approval; resume and revocation verified')
     finally:

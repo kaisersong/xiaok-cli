@@ -50,7 +50,7 @@ describe('StatusBar', () => {
 
     it('should format status line with Codex style', () => {
       statusBar.init('claude-sonnet-4', 'test123', '/Users/song/projects/xiaok-cli');
-      statusBar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
+      statusBar.update({ inputTokens: 1000, outputTokens: 500 });
 
       const line = statusBar.getStatusLine();
 
@@ -64,7 +64,7 @@ describe('StatusBar', () => {
     it('should replace HOME directory with ~', () => {
       const homeDir = process.env.HOME || '/Users/song';
       statusBar.init('gpt-4o', 'test123', `${homeDir}/projects/test`);
-      statusBar.update({ inputTokens: 100, outputTokens: 100, budget: 200000 });
+      statusBar.update({ inputTokens: 100, outputTokens: 100 });
 
       const line = statusBar.getStatusLine();
       expect(line).toContain('test'); // project name
@@ -73,7 +73,7 @@ describe('StatusBar', () => {
 
     it('extracts the project name from a Windows cwd instead of showing the full path', () => {
       statusBar.init('kimi-for-coding', 'test123', 'C:\\Users\\song\\AppData\\Local\\Temp\\xiaok-terminal-e2e-vn9vdd5o\\project');
-      statusBar.update({ inputTokens: 100, outputTokens: 100, budget: 200000 });
+      statusBar.update({ inputTokens: 100, outputTokens: 100 });
 
       const line = statusBar.getStatusLine();
       expect(line).toContain('project');
@@ -88,7 +88,7 @@ describe('StatusBar', () => {
     });
 
     it('should write status line to stdout with Codex format', () => {
-      statusBar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
+      statusBar.update({ inputTokens: 1000, outputTokens: 500 });
       statusBar.render();
 
       expect(stdoutOutput).toContain('xiaok-cli');
@@ -97,7 +97,7 @@ describe('StatusBar', () => {
     });
 
     it('should display high token usage correctly', () => {
-      statusBar.update({ inputTokens: 50000, outputTokens: 50000, budget: 200000 });
+      statusBar.update({ inputTokens: 50000, outputTokens: 50000 });
       stdoutOutput = '';
 
       statusBar.render();
@@ -117,7 +117,7 @@ describe('StatusBar', () => {
     });
 
     it('should display near-full token usage', () => {
-      statusBar.update({ inputTokens: 190000, outputTokens: 9000, budget: 200000 });
+      statusBar.update({ inputTokens: 190000, outputTokens: 9000 });
       stdoutOutput = '';
 
       statusBar.render();
@@ -190,7 +190,7 @@ describe('StatusBar', () => {
       process.stdout.isTTY = false;
       const bar = new StatusBar();
       bar.init('claude-sonnet-4', 'test123', '/Users/song/projects/xiaok-cli');
-      bar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
+      bar.update({ inputTokens: 1000, outputTokens: 500 });
 
       const line = bar.getStatusLine();
       expect(line).toContain('xiaok-cli');
@@ -236,7 +236,7 @@ describe('StatusBar', () => {
   describe('live activity', () => {
     beforeEach(() => {
       statusBar.init('claude-opus-4-6', 'test123', '/Users/song/projects/xiaok-cli');
-      statusBar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
+      statusBar.update({ inputTokens: 1000, outputTokens: 500 });
     });
 
     it('renders animated live activity with elapsed time while a run is active', () => {

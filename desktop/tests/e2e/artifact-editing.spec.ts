@@ -1,7 +1,7 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { dirname, join } from 'node:path';
-import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -38,11 +38,13 @@ const describeE2E = process.env.XIAOK_E2E ? test.describe : test.describe.skip;
 describeE2E('Artifact Live Editing E2E', () => {
   let app: ElectronApplication;
   let page: Page;
+  let runtimeRoot: string;
 
   test.beforeAll(async () => {
+    runtimeRoot = mkdtempSync(join(tmpdir(), 'xiaok-artifact-runtime-e2e-'));
     app = await electron.launch({
-      args: [join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js')],
-      env: { ...process.env, NODE_ENV: 'test' },
+      args: ['-r', join(DESKTOP_ROOT, 'tests', 'e2e', 'fixtures', 'ordinary-ui-account-binding.cjs'), join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js'), `--user-data-dir=${join(runtimeRoot, 'profile')}`],
+      env: { ...process.env, NODE_ENV: 'test', XIAOK_CONFIG_DIR: join(runtimeRoot, 'config') },
     });
     page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
@@ -50,6 +52,7 @@ describeE2E('Artifact Live Editing E2E', () => {
 
   test.afterAll(async () => {
     await app?.close();
+    if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
   });
 
   // A. Core feedback loop

@@ -39,7 +39,7 @@ describe('transcript logger', () => {
   it('writes jsonl transcript events for output and input actions', async () => {
     const logger = await FileTranscriptLogger.open('sess_test', dir);
 
-    logger.record({ type: 'input_key', key: '/k' });
+    logger.record({ type: 'input_key', key: '/k', timestamp: Date.now() });
     logger.recordOutput('stdout', '\r\x1b[2K> /kai\n');
 
     const filePath = join(dir, 'sess_test.jsonl');

@@ -125,6 +125,9 @@ export function createBackgroundRunner(options) {
     const active = new Map();
     let disposed = false;
     let shutdown;
+    let shutdownExecutions = [];
+    const shutdownExecutionErrors = [];
+    let physicalShutdown;
     return {
         async start(input) {
             if (disposed)
@@ -157,8 +160,10 @@ export function createBackgroundRunner(options) {
                     }) ?? current;
                 }
                 catch (error) {
-                    if (disposed)
+                    if (disposed) {
+                        shutdownExecutionErrors.push(error);
                         return;
+                    }
                     current = store.update(job.jobId, {
                         status: 'failed',
                         finishedAt: Date.now(),
@@ -170,7 +175,9 @@ export function createBackgroundRunner(options) {
                 try {
                     await options.notify(current);
                 }
-                catch {
+                catch (error) {
+                    if (disposed)
+                        shutdownExecutionErrors.push(error);
                     // Notification failures should not destabilize the background job lifecycle.
                 }
             }).finally(() => { active.delete(job.jobId); });
@@ -192,28 +199,31 @@ export function createBackgroundRunner(options) {
         async dispose() {
             if (!shutdown) {
                 disposed = true;
-                const errors = [];
-                for (const [jobId, task] of active) {
-                    try {
-                        const job = store.get(jobId);
-                        if (job?.status === 'queued' || job?.status === 'running') {
-                            store.update(jobId, { status: 'failed', finishedAt: Date.now(),
-                                errorMessage: 'BACKGROUND_RUNNER_DISPOSED: host requested shutdown; execution may still be settling',
-                            });
+                const tasks = [...active.entries()];
+                shutdownExecutions = tasks.map(([, task]) => task.execution);
+                // Publish before any abort listener can reenter dispose.
+                shutdown = Promise.resolve().then(async () => {
+                    const errors = [];
+                    for (const [jobId, task] of tasks) {
+                        try {
+                            const job = store.get(jobId);
+                            if (job?.status === 'queued' || job?.status === 'running') {
+                                store.update(jobId, { status: 'failed', finishedAt: Date.now(),
+                                    errorMessage: 'BACKGROUND_RUNNER_DISPOSED: host requested shutdown; execution may still be settling',
+                                });
+                            }
+                        }
+                        catch (error) {
+                            errors.push(error);
+                        }
+                        finally {
+                            task.controller.abort();
                         }
                     }
-                    catch (error) {
-                        errors.push(error);
-                    }
-                    finally {
-                        task.controller.abort();
-                    }
-                }
-                shutdown = (async () => {
                     let timer;
                     try {
                         await Promise.race([
-                            Promise.allSettled([...active.values()].map((task) => task.execution)),
+                            Promise.allSettled(shutdownExecutions),
                             new Promise((resolve) => { timer = setTimeout(resolve, Math.max(1, options.shutdownTimeoutMs ?? 500)); }),
                         ]);
                     }
@@ -223,11 +233,26 @@ export function createBackgroundRunner(options) {
                     }
                     if (errors.length)
                         throw new AggregateError(errors, 'background shutdown state persistence failed');
-                })();
+                });
             }
             await shutdown;
             const pendingJobs = [...active.keys()];
             return { settled: pendingJobs.length === 0, pendingJobs };
+        },
+        waitForDisposedResources() {
+            if (!shutdown)
+                return Promise.reject(new Error('background_cleanup_not_started'));
+            const originalShutdown = shutdown;
+            physicalShutdown ??= Promise.resolve().then(async () => {
+                const results = await Promise.allSettled([originalShutdown, ...shutdownExecutions]);
+                const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+                errors.push(...shutdownExecutionErrors);
+                if (active.size)
+                    errors.push(new Error('background_cleanup_unconfirmed'));
+                if (errors.length)
+                    throw new AggregateError(errors, 'background physical cleanup failed');
+            });
+            return physicalShutdown;
         },
     };
 }

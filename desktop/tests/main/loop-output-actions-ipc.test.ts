@@ -1,3 +1,5 @@
+import {createLoopOutputService,registerLoopOutputIpc,type LoopOutputService} from '../../electron/loop-output-service.js';
+import {DesktopShutdownGate} from '../../electron/shutdown-aware-ipc-main.js';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +32,7 @@ import { LoopStore } from '../../electron/loop-store.js';
 import { recoverTaskSnapshotSync } from '../../../src/runtime/task-host/snapshot-store.js';
 
 describe('desktop loop output action IPC', () => {
+  let outputService:LoopOutputService;
   let rootDir: string;
   let loopStore: LoopStore;
   let evidenceStore: CompletionEvidenceStore;
@@ -70,9 +73,12 @@ describe('desktop loop output action IPC', () => {
     };
 
     await registerDesktopIpc(ipcMain as never, window as never, services as never, { loopRuntime } as never);
+    outputService=createLoopOutputService({store:loopStore,evidenceStore,gate:new DesktopShutdownGate(),captureAdmission:()=>()=>{},taskPort:{recoverTask:async id=>(await services.recoverTask(id)).snapshot??undefined},openPath:electronMocks.openPath});
+    registerLoopOutputIpc(ipcMain as never,outputService,()=>true);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await outputService.close();
     try {
       evidenceStore.close();
     } catch {
@@ -114,6 +120,7 @@ describe('desktop loop output action IPC', () => {
       ok: true,
       loopId: 'user-loop-1',
       pathLabel: template.outputDirectory,
+      origin:'workspace_navigation',
     });
     expect(electronMocks.openPath).toHaveBeenCalledWith(template.outputDirectory);
   });

@@ -1,6 +1,9 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { EventEmitter } from 'node:events';
+import { KSwarmStreamBridge } from '../../electron/kswarm-stream-bridge';
+
 import { useKSwarmClient } from '../../renderer/src/hooks/useKSwarmClient';
 
 describe('useKSwarmClient initial load', () => {
@@ -160,4 +163,35 @@ describe('useKSwarmClient initial load', () => {
     expect(result.current.projects).toHaveLength(1);
     expect(result.current.projects[0]).toMatchObject({ id: 'proj-live' });
   });
+  it('keeps subscription outcome unavailable without retry when the bridge returns unknown', async () => {
+    const api = (globalThis as any).window.xiaokDesktop;
+    api.kswarmStreamSubscribe.mockResolvedValue({ ok: false, code: 'proxy_operation_unknown' });
+    const { result } = renderHook(() => useKSwarmClient());
+    await waitFor(() => expect(result.current.projectsLoaded).toBe(true));
+    await waitFor(() => expect(result.current.connected).toBe(false));
+    act(() => connectionHandler?.({ status: 'connected' }));
+    expect(result.current.connected).toBe(false);
+    expect(result.current.projects[0].id).toBe('proj-live');
+    expect(api.kswarmStreamSubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles the actual partial bridge subscription rejection without unhandled failure or retry', async () => {
+    const api = (globalThis as any).window.xiaokDesktop;
+    const bridge = new KSwarmStreamBridge('ws://127.0.0.1:1');
+    const marker = Error('actual sender transport failure');
+    const sender = Object.assign(new EventEmitter(), { id: 97, isDestroyed: () => false, send: () => { throw marker; } });
+    api.kswarmStreamSubscribe.mockImplementation(async () => {
+      bridge.subscribe({ sender } as never);
+      return { ok: true };
+    });
+    const { result } = renderHook(() => useKSwarmClient());
+    try {
+      await waitFor(() => expect(result.current.projectsLoaded).toBe(true));
+      await waitFor(() => expect(result.current.connected).toBe(false));
+      expect(sender.listenerCount('destroyed')).toBe(1);
+      expect(api.kswarmStreamSubscribe).toHaveBeenCalledTimes(1);
+      expect(result.current.projects[0].id).toBe('proj-live');
+    } finally { bridge.dispose(); }
+  });
+
 });

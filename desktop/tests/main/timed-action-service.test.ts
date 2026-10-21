@@ -23,7 +23,7 @@ describe('TimedActionService', () => {
   });
 
   it('creates reminder business records as notify timed actions', () => {
-    const reminder = service.createReminder('喝水', 60_000, 'Asia/Shanghai');
+    const reminder = service.createReminder('喝水', 60_000, 'Asia/Shanghai', {requestSource:'user',ownerKind:'user',ownerId:'desktop-user'});
     const action = store.getAction(reminder.reminderId);
 
     expect(action?.executor.kind).toBe('notify');
@@ -40,7 +40,7 @@ describe('TimedActionService', () => {
       prompt: '检查项目',
       trigger: { kind: 'interval', intervalMinutes: 5 },
       source: 'agent',
-    });
+    }, {requestSource:'agent',ownerId:'legacy-agent-task'});
 
     const action = store.getAction(created.id);
     expect(created.frequency).toBe('interval');
@@ -63,7 +63,7 @@ describe('TimedActionService', () => {
       description: 'Runs a markdown loop every day.',
       trigger: { kind: 'daily', hour: 9, minute: 30 },
       now: 1_000,
-    });
+    }, {requestSource:'user'});
 
     const action = store.getAction(created.id);
     expect(created).toMatchObject({
@@ -98,7 +98,7 @@ describe('TimedActionService', () => {
       description: 'Runs a markdown loop every day.',
       trigger: { kind: 'daily', hour: 9, minute: 30 },
       now: 1_000,
-    });
+    }, {requestSource:'user'});
 
     expect(service.listScheduledTasks()).toEqual([
       expect.objectContaining({
@@ -122,7 +122,7 @@ describe('TimedActionService', () => {
       prompt: '旧 prompt',
       trigger: { kind: 'daily', hour: 9, minute: 0 },
       source: 'user',
-    });
+    }, {requestSource:'user'});
     const [claimed] = store.claimDueActions(task.nextRunAt!, 1);
     store.markRunRunning(task.id, claimed.runId, task.nextRunAt!);
     store.finishRunSuccess(task.id, claimed.runId, task.nextRunAt! + 1_000, { runtimeTaskId: 'task_runtime_1' });
@@ -134,7 +134,7 @@ describe('TimedActionService', () => {
       prompt: '新 prompt',
       trigger: { kind: 'weekly', dayOfWeek: 5, hour: 18, minute: 30 },
       now: task.nextRunAt! + 2_000,
-    });
+    }, {requestSource:'user'});
 
     expect(updated).toMatchObject({
       id: task.id,
@@ -161,7 +161,7 @@ describe('TimedActionService', () => {
       description: 'Runs a markdown loop every day.',
       trigger: { kind: 'daily', hour: 9, minute: 30 },
       now: 1_000,
-    });
+    }, {requestSource:'user'});
 
     const updated = service.updateScheduledTask({
       id: 'loop-schedule-1',
@@ -170,7 +170,7 @@ describe('TimedActionService', () => {
       prompt: 'renderer stale prompt should be ignored',
       trigger: { kind: 'weekdays', hour: 10, minute: 15 },
       now: 2_000,
-    });
+    }, {requestSource:'user'});
 
     expect(updated).toMatchObject({
       id: 'loop-schedule-1',
@@ -195,9 +195,9 @@ describe('TimedActionService', () => {
       title: 'Weekly Loop',
       trigger: { kind: 'daily', hour: 9, minute: 30 },
       now: 1_000,
-    });
+    }, {requestSource:'user'});
 
-    expect(service.cancelScheduledTask('loop-schedule-1', 'user deleted schedule')).toBe(true);
+    expect(service.cancelScheduledTask('loop-schedule-1', 'user deleted schedule', {requestSource:'user'})).toBe(true);
     expect(store.getAction('loop-schedule-1')).toMatchObject({
       status: 'cancelled',
       lastError: 'user deleted schedule',
@@ -211,9 +211,9 @@ describe('TimedActionService', () => {
       title: 'Weekly Loop',
       trigger: { kind: 'daily', hour: 9, minute: 30 },
       now: 1_000,
-    });
+    }, {requestSource:'user'});
 
-    const paused = service.setScheduledTaskStatus('loop-schedule-1', 'paused', 2_000);
+    const paused = service.setScheduledTaskStatus('loop-schedule-1', 'paused', 2_000, {requestSource:'user'});
     expect(paused).toMatchObject({
       id: 'loop-schedule-1',
       status: 'paused',
@@ -226,7 +226,7 @@ describe('TimedActionService', () => {
       lastError: 'paused_by_user',
     });
 
-    const resumed = service.setScheduledTaskStatus('loop-schedule-1', 'active', 3_000);
+    const resumed = service.setScheduledTaskStatus('loop-schedule-1', 'active', 3_000, {requestSource:'user'});
     expect(resumed).toMatchObject({
       id: 'loop-schedule-1',
       status: 'active',
@@ -247,15 +247,15 @@ describe('TimedActionService', () => {
       title: 'Morning Loop',
       trigger: { kind: 'daily', hour: 9, minute: 0 },
       now: 1_000,
-    });
+    }, {requestSource:'user'});
     service.createLoopSchedule({
       id: 'loop-schedule-b',
       loopId: 'user-loop-1',
       title: 'Evening Loop',
       trigger: { kind: 'daily', hour: 18, minute: 0 },
       now: 2_000,
-    });
-    service.setScheduledTaskStatus('loop-schedule-b', 'paused', 3_000);
+    }, {requestSource:'user'});
+    service.setScheduledTaskStatus('loop-schedule-b', 'paused', 3_000, {requestSource:'user'});
 
     expect(service.listLoopScheduleBindings()).toEqual([
       {
@@ -287,7 +287,7 @@ describe('TimedActionService', () => {
       prompt: '旧 prompt',
       trigger: { kind: 'daily', hour: 9, minute: 0 },
       source: 'user',
-    });
+    }, {requestSource:'user'});
     const openedFromView = task as typeof task & {
       updatedAt: number;
       automationStoreVersion?: number;
@@ -301,7 +301,7 @@ describe('TimedActionService', () => {
       prompt: '外部 prompt',
       trigger: { kind: 'daily', hour: 10, minute: 0 },
       now: 2_000,
-    });
+    }, {requestSource:'user'});
     expect(externalUpdate).toMatchObject({
       id: task.id,
       name: '已经被别处修改',
@@ -318,7 +318,7 @@ describe('TimedActionService', () => {
       expectedUpdatedAt: openedFromView.updatedAt,
       expectedAutomationStoreVersion: openedVersion,
       now: 3_000,
-    } as never);
+    } as never, {requestSource:'user'});
 
     expect(staleUpdate).toEqual({
       ok: false,
@@ -345,7 +345,7 @@ describe('TimedActionService', () => {
       prompt: '检查项目',
       trigger: { kind: 'interval', intervalMinutes: 0.25 },
       source: 'agent',
-    })).toThrow('intervalMinutes must be at least 0.5');
+    }, {requestSource:'agent',ownerId:'legacy-agent-task'})).toThrow('intervalMinutes must be at least 0.5');
   });
 
   it('keeps user-cancelled agent interval tasks as audit records after running', () => {
@@ -354,7 +354,7 @@ describe('TimedActionService', () => {
       prompt: '检查项目，完成时取消自动任务',
       trigger: { kind: 'interval', intervalMinutes: 5 },
       source: 'agent',
-    });
+    }, {requestSource:'agent',ownerId:'legacy-agent-task'});
     const [claimed] = store.claimDueActions(301_000, 1);
     expect(claimed?.action.id).toBe(task.id);
     store.markRunRunning(task.id, claimed.runId, 301_000);
@@ -365,7 +365,7 @@ describe('TimedActionService', () => {
     });
     expect((service.listScheduledTasks()[0] as { threadId?: string }).threadId).toBeUndefined();
 
-    expect(service.cancelScheduledTask(task.id, 'project completed')).toBe(true);
+    expect(service.cancelScheduledTask(task.id, 'project completed', {requestSource:'user'})).toBe(true);
 
     expect(store.getAction(task.id)).toMatchObject({
       id: task.id,
@@ -381,9 +381,9 @@ describe('TimedActionService', () => {
       prompt: '检查',
       trigger: { kind: 'interval', intervalMinutes: 60 },
       source: 'user',
-    });
+    }, {requestSource:'user'});
 
-    expect(service.cancelScheduledTask(task.id, 'user cancelled')).toBe(true);
+    expect(service.cancelScheduledTask(task.id, 'user cancelled', {requestSource:'user'})).toBe(true);
 
     expect(store.getAction(task.id)).toEqual(expect.objectContaining({
       id: task.id,
@@ -392,13 +392,13 @@ describe('TimedActionService', () => {
   });
 
   it('lists only scheduled task business records for agent actions', () => {
-    service.createReminder('提醒', 60_000, 'Asia/Shanghai');
+    service.createReminder('提醒', 60_000, 'Asia/Shanghai', {requestSource:'user',ownerKind:'user',ownerId:'desktop-user'});
     const task = service.createScheduledTask({
       name: '10 分钟后检查',
       prompt: '检查',
       trigger: { kind: 'once', at: 601_000 },
       source: 'agent',
-    });
+    }, {requestSource:'agent',ownerId:'legacy-agent-task'});
 
     expect(service.listScheduledTasks()).toEqual([
       expect.objectContaining({ id: task.id, name: '10 分钟后检查', frequency: 'manual' }),

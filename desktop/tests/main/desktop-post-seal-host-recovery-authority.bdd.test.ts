@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopMultiAgentService } from '../../electron/desktop-multi-agent-service.js';
@@ -24,8 +24,8 @@ let seed: Seed;
 // OS owner has exited. No fake PID, quiesced flag, private WeakMap or permissive
 // authorizer is used to manufacture authority.
 async function crashSeed(): Promise<Seed> {
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-host-authority-seed-'));
-  const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, 'marker-committed'], {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-host-authority-seed-')));
+  const child = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, 'marker-committed', inject('profileTestAccountRoot'), userInfo().homedir], {
     cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -62,7 +62,7 @@ function cloneInput(input: DeliveryInput): DeliveryInput {
 }
 
 function open() {
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-host-authority-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-host-authority-')));
   cpSync(seed.root, root, { recursive: true });
   cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
   const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite')); cleanup.push(() => store.close());
@@ -129,7 +129,7 @@ describe('R4/D18 host recovery uses actual main-issued capability at both queue 
     expect(input.expectedMarker).toEqual(foreign.expectedMarker);
     const forged = cloneInput(input); forged.delivery.authority = foreign.delivery.authority;
     await assertNoMutation(f, () => f.original(forged), /invalid_delivery_recovery_owner/);
-    await finish(f); await finish(other);
+    await Promise.all([finish(f), finish(other)]);
   });
 
   it.each(['user', 'agent'] as const)('rejects requestSource=%s despite a real valid main recovery handle', async requestSource => {

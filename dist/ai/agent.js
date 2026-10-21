@@ -1,3 +1,4 @@
+import { ModelStreamPhysicalOwner } from './runtime/model-stream-physical-owner.js';
 import { AgentRunController } from './runtime/controller.js';
 import { toLegacyStreamChunk } from './runtime/events.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
@@ -8,7 +9,12 @@ export class Agent {
     registry;
     systemPrompt;
     options;
-    session = new AgentSessionState();
+    session;
+    observationOwner;
+    disposed = false;
+    modelPhysicalOwner = new ModelStreamPhysicalOwner();
+    disposalScheduled = false;
+    disposalWork;
     controller = new AgentRunController();
     sessionId = `sess_${(nextSessionOrdinal += 1)}`;
     turnCount = 0;
@@ -18,12 +24,16 @@ export class Agent {
         this.registry = registry;
         this.systemPrompt = systemPrompt;
         this.options = options;
+        this.observationOwner = options.observationOwner;
+        if (this.observationOwner && !options.initialSession)
+            throw new Error('SOL_PI_AGENT_INITIAL_SESSION_REQUIRED');
+        this.session = options.initialSession ?? new AgentSessionState();
+        this.observationOwner?.assertSession(this.session);
         this.runtime = this.createRuntime();
     }
     async runTurn(userInput, onChunk, signal, invocationContext, onRuntimeEvent) {
-        if (signal?.aborted) {
-            throw new DOMException('agent aborted', 'AbortError');
-        }
+        signal?.throwIfAborted();
+        this.assertLive();
         const turnId = `turn_${(this.turnCount += 1)}`;
         await this.runtime.run(userInput, (event) => {
             this.emitLegacyHook(event, turnId);
@@ -35,10 +45,12 @@ export class Agent {
         }, signal, invocationContext);
     }
     clearHistory() {
+        this.assertHistoryMutationAllowed();
         this.session = new AgentSessionState();
         this.runtime = this.createRuntime();
     }
     forceCompact() {
+        this.assertHistoryMutationAllowed();
         return this.session.forceCompact();
     }
     getUsage() {
@@ -48,27 +60,92 @@ export class Agent {
         return this.session.exportSnapshot();
     }
     restoreSession(snapshot) {
+        this.assertHistoryMutationAllowed();
         this.session.restoreSnapshot(snapshot);
     }
     getSessionState() {
         return this.session;
     }
     setAdapter(adapter) {
+        this.assertLive();
+        if (adapter !== this.adapter && (this.modelPhysicalOwner.hasPending() || this.modelPhysicalOwner.hasFailure()))
+            throw Error('agent_model_resources_pending');
+        if (this.observationOwner) {
+            if (adapter !== this.adapter)
+                throw new Error('SOL_PI_AGENT_FRESH_TASK_REQUIRED');
+            return;
+        }
         this.runtime.setAdapter(adapter);
         this.adapter = adapter;
     }
     setSystemPrompt(systemPrompt) {
+        this.assertLive();
         this.systemPrompt = systemPrompt;
         this.runtime.setSystemPrompt(systemPrompt);
     }
+    notifySubtaskBoundary() {
+        this.assertLive();
+        this.runtime.notifySubtaskBoundary();
+    }
     setPromptSnapshot(promptSnapshot) {
+        this.assertLive();
         this.runtime.setPromptSnapshot(promptSnapshot);
+    }
+    /** Host stop closes ingress without revoking an owner still used by writers. */
+    stopNewRuns(reason) {
+        if (this.disposed)
+            return;
+        this.disposed = true;
+        this.modelPhysicalOwner.stop(reason);
+        this.controller.abortActiveRun(this.modelPhysicalOwner.signal.reason);
+    }
+    waitForStoppedResources() { return this.modelPhysicalOwner.waitForStopped(); }
+    waitForIdleResources() { return this.modelPhysicalOwner.waitForIdle(); }
+    dispose() {
+        this.stopNewRuns();
+        if (this.disposalScheduled)
+            return;
+        this.disposalScheduled = true;
+        if (!this.modelPhysicalOwner.hasPending() && !this.modelPhysicalOwner.hasFailure()) {
+            try {
+                this.observationOwner?.dispose();
+                this.disposalWork = Promise.resolve();
+            }
+            catch (error) {
+                this.disposalWork = Promise.reject(error);
+                void this.disposalWork.catch(() => { });
+                throw error;
+            }
+            return;
+        }
+        this.disposalWork = this.waitForStoppedResources().then(() => this.observationOwner?.dispose());
+        // Observe both outcomes while retaining the exact rejected cleanup Promise
+        // for a host. Never turn an unknown owner failure into successful release.
+        void this.disposalWork.catch(() => { });
+    }
+    waitForDisposedResources() {
+        return this.disposalScheduled ? this.disposalWork : Promise.reject(Error('agent_disposal_not_started'));
+    }
+    assertLive() {
+        if (this.disposed)
+            throw new Error('agent_disposed');
+    }
+    assertHistoryMutationAllowed() {
+        this.assertLive();
+        if (this.modelPhysicalOwner.hasPending() || this.modelPhysicalOwner.hasFailure())
+            throw Error('agent_model_resources_pending');
+        if (this.observationOwner)
+            throw new Error('SOL_PI_AGENT_FRESH_TASK_REQUIRED');
     }
     createRuntime() {
         return new AgentRuntime({
+            modelPhysicalOwner: this.modelPhysicalOwner,
             adapter: this.adapter,
             registry: this.registry,
             session: this.session,
+            observationOwner: this.observationOwner,
+            semanticCompactionOwner: this.options.semanticCompactionOwner,
+            onSemanticCompactionOutcome: this.options.onSemanticCompactionOutcome,
             controller: this.controller,
             systemPrompt: this.systemPrompt,
             maxIterations: this.options.maxIterations,
@@ -79,6 +156,7 @@ export class Agent {
             providerSurfaceKind: this.options.providerSurfaceKind,
             onActivity: this.options.onActivity,
             takePendingInput: this.options.takePendingInput,
+            onSemanticCompactionDecision: this.options.onSemanticCompactionDecision,
         });
     }
     emitLegacyHook(event, turnId) {

@@ -61,13 +61,13 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 3889856041a08a2a282f4d92f0870ba0cc3c09ee
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 63f2f1e78a7adf5d75ee3a19e5c1c48c88113ed4
+          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 419ea454b958101e9750b28c052e43f316e667fb
+          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
@@ -118,6 +118,14 @@ jobs:
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64 --verify
+
+      - name: Prepare verified artifact export helper
+        env:
+          XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
+        run: |
+          node scripts/verification/prepare-artifact-export-toolchain.mjs
+          node scripts/verification/build-artifact-export-helper.mjs --target darwin-arm64
+          cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
       - name: Build desktop
         run: cd desktop && npm run build
@@ -254,6 +262,13 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Compile Windows verification namespace helper
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" x64
+          node scripts/verification/build-windows-absence.mjs --target x64
+          node scripts/verification/test-windows-absence.mjs
+
       - name: Install root dependencies
         run: npm ci
 
@@ -276,13 +291,13 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 3889856041a08a2a282f4d92f0870ba0cc3c09ee
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 63f2f1e78a7adf5d75ee3a19e5c1c48c88113ed4
+          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 419ea454b958101e9750b28c052e43f316e667fb
+          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
@@ -326,6 +341,14 @@ jobs:
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
+
+      - name: Prepare verified artifact export helper
+        env:
+          XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
+        run: |
+          node scripts/verification/prepare-artifact-export-toolchain.mjs
+          node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
+          cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
       - name: Build desktop
         run: cd desktop && npm run build

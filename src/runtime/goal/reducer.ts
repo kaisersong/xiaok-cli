@@ -9,6 +9,7 @@ import {
 
 export type GoalAction =
   | { type: 'pause'; reason: string; now: number }
+  | { type: 'resume_publication'; now: number }
   | { type: 'resume'; turnLimit?: number; now: number }
   | { type: 'cancel'; reason: string; now: number }
   | { type: 'complete'; reason: string; now: number }
@@ -30,6 +31,7 @@ export type GoalAction =
       terminalDecision:
         | { kind: 'none' }
         | { kind: 'complete'; reason: string }
+        | { kind: 'publication_pending'; intentId: string }
         | { kind: 'blocked'; reason: string; fingerprint?: string }
         | { kind: 'blocker'; reason: string; fingerprint: string; threshold?: number }
         | { kind: 'paused'; reason: string };
@@ -68,7 +70,12 @@ export function reduceGoal(state: GoalState, action: GoalAction): GoalState {
     case 'pause':
       assertStatus(state, ['active'], 'pause');
       return mutate(state, action.now, { status: 'paused', terminalReason: action.reason });
+    case 'resume_publication':
+      assertStatus(state, ['active', 'paused', 'blocked'], 'resume publication');
+      if (!state.pendingCompletionIntentId) throw Error('goal_publication_not_pending');
+      return mutate(state, action.now, { status: 'active', terminalReason: 'completion_publication_pending' });
     case 'resume':
+      if (state.pendingCompletionIntentId) throw Error('goal_publication_pending');
       assertStatus(state, ['paused', 'blocked'], 'resume');
       if (state.status === 'blocked' && state.terminalReason === 'turn_budget_exhausted') {
         if (action.turnLimit === undefined) {
@@ -96,7 +103,7 @@ export function reduceGoal(state: GoalState, action: GoalAction): GoalState {
       return mutate(state, action.now, { status: 'cancelled', terminalReason: action.reason });
     case 'complete':
       assertStatus(state, ['active'], 'complete');
-      return mutate(state, action.now, { status: 'complete', terminalReason: action.reason });
+      return mutate(state, action.now, { status: 'complete', terminalReason: action.reason, pendingCompletionIntentId: undefined });
     case 'block': {
       assertStatus(state, ['active'], 'block');
       const consecutive = action.fingerprint && action.fingerprint === state.blockerFingerprint
@@ -137,12 +144,14 @@ export function reduceGoal(state: GoalState, action: GoalAction): GoalState {
         tokensUsed: 0,
         activeWallClockMs: 0,
         terminalReason: undefined,
+        pendingCompletionIntentId: undefined,
         blockerFingerprint: undefined,
         consecutiveBlockedTurns: 0,
         updatedAt: action.now,
       };
     }
     case 'record_turn': {
+      if (state.pendingCompletionIntentId) throw Error('goal_publication_pending');
       assertStatus(state, ['active'], 'record turn');
       const turnsUsed = state.turnsUsed + 1;
       const budgetReached = turnsUsed >= state.budgetLimits.turnLimit;
@@ -156,6 +165,7 @@ export function reduceGoal(state: GoalState, action: GoalAction): GoalState {
       });
     }
     case 'settle_turn': {
+      if (state.pendingCompletionIntentId) throw Error('goal_publication_pending');
       assertStatus(state, ['active'], 'settle turn');
       const turnsUsed = state.turnsUsed + 1;
       const tokensUsed = state.tokensUsed + nonNegative(action.tokensUsed, 'tokensUsed');
@@ -164,7 +174,14 @@ export function reduceGoal(state: GoalState, action: GoalAction): GoalState {
       if (action.terminalDecision.kind === 'complete') {
         return mutate(state, action.now, {
           turnsUsed, tokensUsed, activeWallClockMs,
-          status: 'complete', terminalReason: action.terminalDecision.reason,
+          status: 'complete', terminalReason: action.terminalDecision.reason, pendingCompletionIntentId: undefined,
+        });
+      }
+      if (action.terminalDecision.kind === 'publication_pending') {
+        if (!action.terminalDecision.intentId) throw Error('goal_publication_intent_missing');
+        return mutate(state, action.now, {
+          turnsUsed, tokensUsed, activeWallClockMs, status: 'active',
+          pendingCompletionIntentId: action.terminalDecision.intentId, terminalReason: 'completion_publication_pending',
         });
       }
       if (action.terminalDecision.kind === 'blocked') {

@@ -1,6 +1,18 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { isAbortError } from '../../src/ai/runtime/abort-utils.js';
+import { assertStandardIpcPromise } from './ipc-native-promise.js';
+
+const BridgePromise = Promise;
+const bridgePromiseWitness = new BridgePromise<void>(resolve => resolve());
+const bridgeOwnDescriptor = Object.getOwnPropertyDescriptor;
+const bridgeGlobalPromiseDescriptor = bridgeOwnDescriptor(globalThis, 'Promise');
+const bridgeThenDescriptor = bridgeOwnDescriptor(BridgePromise.prototype, 'then');
+function sameBridgeDataDescriptor(current: PropertyDescriptor | undefined, expected: PropertyDescriptor | undefined): boolean {
+  return Boolean(current && expected && 'value' in current && 'value' in expected
+    && current.value === expected.value && current.writable === expected.writable
+    && current.enumerable === expected.enumerable && current.configurable === expected.configurable);
+}
 
 export interface KSwarmTaskHandoff {
   kind: 'kswarm_task_handoff_v1';
@@ -360,52 +372,136 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
   let activeTaskCount = 0;
   const activeTaskControllers = new Map<string, AbortController>();
   const activeTaskRequests=new Map<string,{identity:string;promise:Promise<void>}>();
-
-  async function start(): Promise<void> {
-    if (socket) return;
-    stopped = false;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    if (!WebSocketImpl) throw new Error('websocket_unavailable');
-    try {
-      socket = new WebSocketImpl(`${brokerUrl.replace(/^http/, 'ws')}/ws?participantId=${encodeURIComponent(options.participantId)}`);
-      socket.onmessage = (event) => {
-        handleSocketMessage(event.data).catch(() => {});
-      };
-      socket.onerror = () => {};
-      socket.onclose = () => {
-        socket = null;
-        if (!stopped) scheduleReconnect();
-      };
-      await waitForSocketOpen(socket);
-      await postJson('/participants/register', {
-        participantId: options.participantId,
-        kind: options.participantKind ?? 'agent',
-        alias: options.alias ?? options.participantId,
-        roles: options.roles ?? [],
-        capabilities: options.capabilities ?? [],
-        inboxMode: 'realtime',
-        context: { runtimeSource: 'desktop-agent-runtime' },
-      });
-    } catch (error) {
-      const current = socket;
-      socket = null;
-      current?.close();
-      if (!stopped) scheduleReconnect();
-      throw error;
+  const activeWork = new Set<Promise<void>>();
+  type SocketOwner = { socket?: WebSocketLike; closed: Promise<void>; resolveClosed(): void; rejectClosed(error: unknown): void; requested: boolean; issued: boolean };
+  const sockets = new Set<SocketOwner>();
+  type Closing = { promise: Promise<void>; state: 'pending' | 'fulfilled' | 'rejected'; failures: unknown[]; error?: unknown };
+  let closing: Closing | undefined;
+  function assertPromiseRealm(): void {
+    // FIRST: the existing native witness rejects species/constructor mutation without invoking it.
+    assertStandardIpcPromise(bridgePromiseWitness, 'runtime_bridge_promise_unavailable');
+    // Descriptor-only checks never read an ambient Promise/then accessor.
+    if (!sameBridgeDataDescriptor(bridgeOwnDescriptor(globalThis, 'Promise'), bridgeGlobalPromiseDescriptor)
+      || !sameBridgeDataDescriptor(bridgeOwnDescriptor(BridgePromise.prototype, 'then'), bridgeThenDescriptor)) {
+      throw Error('runtime_bridge_promise_unavailable');
     }
   }
+  // All begin sites are this module's private native async bodies. Arbitrary
+  // foreign thenables/hostile raw.constructor mutations are not this contract.
+  function ownWork<T>(begin: () => Promise<T>): Promise<T> {
+    assertPromiseRealm();
+    let complete!: () => void, fail!: (reason: unknown) => void;
+    const reservation = new BridgePromise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    activeWork.add(reservation);
+    void (async () => { try { await reservation; } catch {} })();
+    const failed = (error: unknown) => { activeWork.delete(reservation); if (closing?.state === 'pending') closing.failures.push(error); fail(error); };
+    try {
+      const raw = begin();
+      void (async () => { try { await raw; activeWork.delete(reservation); complete(); } catch (error) { failed(error); } })();
+      return raw;
+    } catch (error) { failed(error); return BridgePromise.reject(error); }
+  }
+  function newSocketOwner(): SocketOwner {
+    let complete!: () => void, fail!: (error: unknown) => void;
+    const closed = new BridgePromise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    const owner: SocketOwner = { closed, resolveClosed: complete, rejectClosed: fail, requested: false, issued: false };
+    sockets.add(owner);
+    void (async () => { try { await closed; } catch {} })();
+    return owner;
+  }
+  function requestSocketClose(owner: SocketOwner): void {
+    owner.requested = true;
+    if (!owner.socket || owner.issued) return;
+    owner.issued = true;
+    owner.socket.close(); // Same original receiver and zero arguments, synchronously.
+  }
+  function start(): Promise<void> {
+    assertPromiseRealm();
+    if (closing?.state === 'pending') return BridgePromise.reject(new Error('runtime_bridge_stop_in_progress'));
+    if (closing?.state === 'rejected') return BridgePromise.reject(closing.error);
+    if (closing?.state === 'fulfilled') closing = undefined; // explicit new generation only after actual retirement
+    if (socket) return BridgePromise.resolve();
+    return ownWork(async () => {
+      stopped = false;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (!WebSocketImpl) throw new Error('websocket_unavailable');
+      // Reserve before constructor invocation; a reentrant stop can mark the
+      // still-arriving socket for immediate close after its genuine publication.
+      const owner = newSocketOwner();
+      let opened: WebSocketLike | undefined;
+      try {
+        opened = new WebSocketImpl(`${brokerUrl.replace(/^http/, 'ws')}/ws?participantId=${encodeURIComponent(options.participantId)}`);
+        owner.socket = opened; socket = opened;
+        const actual = opened;
+        actual.onmessage = event => { void (async () => { try { await handleSocketMessage(event.data); } catch {} })(); };
+        actual.onerror = () => {};
+        actual.onclose = () => {
+          if (socket === actual) socket = null;
+          owner.resolveClosed(); sockets.delete(owner);
+          if (!stopped) scheduleReconnect();
+        };
+        if (stopped || owner.requested) { requestSocketClose(owner); return; }
+        await waitForSocketOpen(actual);
+        if (stopped) return; // stop must not create a new registration after open
+        await postJson('/participants/register', {
+          participantId: options.participantId,
+          kind: options.participantKind ?? 'agent',
+          alias: options.alias ?? options.participantId,
+          roles: options.roles ?? [],
+          capabilities: options.capabilities ?? [],
+          inboxMode: 'realtime',
+          context: { runtimeSource: 'desktop-agent-runtime' },
+        });
+      } catch (error) {
+        if (!opened) {
+          // A native constructor that returns no handle owns its pre-return
+          // failure. Not a claim about arbitrary injected constructor resources.
+          owner.rejectClosed(error); sockets.delete(owner);
+        } else {
+          if (socket === opened) socket = null;
+          try { requestSocketClose(owner); }
+          catch (closeError) { throw new AggregateError([error, closeError], 'runtime_bridge_start_and_close_failed'); }
+        }
+        if (!stopped) scheduleReconnect();
+        throw error;
+      }
+    });
+  }
 
-  function stop(): void {
+  function stop(): Promise<void> {
+    if (closing) return closing.promise;
+    assertPromiseRealm();
+    let complete!: () => void, fail!: (error: unknown) => void;
+    const promise = new BridgePromise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    const state: Closing = { promise, state: 'pending', failures: [] };
+    closing = state; // Memoize before close callbacks can synchronously reenter.
+    void (async () => { try { await promise; } catch {} })();
     stopped = true;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    socket?.close();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    const admitted = [...activeWork];
+    const ownedSockets = [...sockets];
+    for (const owner of ownedSockets) { try { requestSocketClose(owner); } catch (error) { state.failures.push(error); } }
     socket = null;
+    void (async () => {
+      const seen = new Set<Promise<void>>();
+      let batch = [...admitted, ...ownedSockets.map(owner => owner.closed)];
+      for (;;) {
+        // A sealed handler may naturally start another required HTTP completion.
+        // Wait real settlement, never a tick, timeout, synthetic ACK or cancel.
+        for (const raw of batch) {
+          if (seen.has(raw)) continue;
+          seen.add(raw);
+          try { await raw; } catch (error) { state.failures.push(error); }
+        }
+        batch = [...activeWork, ...[...sockets].map(owner => owner.closed)].filter(raw => !seen.has(raw));
+        if (!batch.length) break;
+      }
+      if (state.failures.length) {
+        state.error = new AggregateError([...new Set(state.failures)], 'runtime_bridge_stop_unconfirmed');
+        state.state = 'rejected'; fail(state.error);
+      } else { state.state = 'fulfilled'; complete(); }
+    })();
+    return promise;
   }
 
   function scheduleReconnect(): void {
@@ -416,7 +512,11 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     }, 2_000);
   }
 
-  async function handleSocketMessage(data: unknown): Promise<void> {
+  function handleSocketMessage(data: unknown): Promise<void> {
+    if (stopped) return BridgePromise.resolve();
+    return ownWork(() => dispatchSocketMessage(data));
+  }
+  async function dispatchSocketMessage(data: unknown): Promise<void> {
     if (stopped) return;
     const message = parseBrokerMessage(data);
     if (message?.type !== 'new_intent') return;
@@ -762,14 +862,27 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     };
   }
 
-  async function postJson(path: string, body: Record<string, unknown>): Promise<Response> {
-    const response = await fetchImpl(`${brokerUrl}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+  function postJson(path: string, body: Record<string, unknown>): Promise<Response> {
+    return ownWork(async () => {
+      const response = await fetchImpl(`${brokerUrl}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      // Preserve the original headers/status ACK while separately owning the
+      // actual HTTP body EOF. Internal callers never expose or read this body.
+      const bodyDrain = ownWork(async () => {
+        const body = response.body;
+        if (body) {
+          const reader = body.getReader();
+          try { for (;;) { if ((await reader.read()).done) break; } }
+          finally { reader.releaseLock(); }
+        }
+      });
+      void (async () => { try { await bodyDrain; } catch {} })();
+      if (!response.ok) throw new Error(`broker_http_${response.status}`);
+      return response;
     });
-    if (!response.ok) throw new Error(`broker_http_${response.status}`);
-    return response;
   }
 
   return { start, stop, handleSocketMessage };
@@ -892,7 +1005,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function waitForSocketOpen(socket: WebSocketLike): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return new BridgePromise<void>((resolve, reject) => {
     const previousError = socket.onerror;
     const previousClose = socket.onclose;
     const timer = setTimeout(() => {

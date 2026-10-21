@@ -1,5 +1,5 @@
 import { FileMemoryStore, type MemoryStore } from '../memory/store.js';
-import { assembleSystemPrompt, type AssemblerOptions } from './assembler.js';
+import { assembleSystemPrompt, type AssemblerOptions, type AssemblerInput, type LegacyAssemblerInput } from './assembler.js';
 import type { PromptSnapshot } from './types.js';
 import { join } from 'node:path';
 import { getConfigDir } from '../../utils/config.js';
@@ -10,15 +10,22 @@ export interface PromptBuilderInput extends AssemblerOptions {
   channel: 'chat' | 'yzj';
 }
 
+export interface LegacyPromptBuilderInput extends LegacyAssemblerInput {
+  channel: 'chat' | 'yzj';
+}
+
 export interface HarnessMemoryReadable {
   listActive(scope: HarnessMemoryScope): HarnessMemoryRecord[];
 }
 
-export class PromptBuilder {
-  constructor(private readonly deps: { memoryStore?: MemoryStore; harnessMemoryStore?: HarnessMemoryReadable } = {}) {}
+export type PromptMemoryReadable = Pick<MemoryStore, 'listRelevant' | 'search'>
+  & Partial<Omit<MemoryStore, 'listRelevant' | 'search'>>;
 
-  async build(input: PromptBuilderInput): Promise<PromptSnapshot> {
-    const memoryStore: MemoryStore = this.deps.memoryStore ?? new FileMemoryStore();
+export class PromptBuilder {
+  constructor(private readonly deps: { memoryStore?: PromptMemoryReadable; harnessMemoryStore?: HarnessMemoryReadable } = {}) {}
+
+  async build(input: PromptBuilderInput | LegacyPromptBuilderInput): Promise<PromptSnapshot> {
+    const memoryStore: PromptMemoryReadable = this.deps.memoryStore ?? new FileMemoryStore();
     const harnessMemoryStore = this.deps.harnessMemoryStore ?? new JsonHarnessMemoryStore(join(getConfigDir(), 'harness-memory.json'));
     const memories = memoryStore.search
       ? await memoryStore.search(input.cwd, 10)
@@ -29,7 +36,7 @@ export class PromptBuilder {
     });
 
     // Inject memories into assembler options for per-turn memory injection
-    const assemblerOpts: AssemblerOptions = {
+    const assemblerOpts: AssemblerInput = {
       ...input,
       memories: memories.length > 0 ? memories.slice(0, 10) : undefined,
       harnessMemories: harnessMemories.length > 0 ? harnessMemories.slice(0, 6) : undefined,

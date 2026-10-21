@@ -110,6 +110,9 @@ def build_cli_launch_command(
     env_overrides: dict[str, str] | None = None,
 ) -> str:
     node_cmd = resolve_command("node.exe" if os.name == "nt" else "node", "node")
+    profile_setup = Path(__file__).resolve().parent.parent / "support" / "profile-account-child.setup.mjs"
+    if not profile_setup.is_file():
+        raise FileNotFoundError(f"test profile preloader missing: {profile_setup}")
     auto_flag = " --auto" if auto_mode else ""
     extra_args = extra_args or []
     env_overrides = env_overrides or {}
@@ -119,6 +122,8 @@ def build_cli_launch_command(
         home_value = shell_quote_cmd(str(home_dir))
         node_value = str(node_cmd).replace('"', '""')
         cli_value = str(cli_entry).replace('"', '""')
+        profile_setup_value = str(profile_setup).replace('"', '""')
+        stderr_value = shell_quote_cmd(str(config_dir / "cli-stderr.log"))
         extra_args_value = f" {subprocess.list2cmdline(extra_args)}" if extra_args else ""
         extra_env = " ".join(
             f'&& set "{key}={shell_quote_cmd(value)}"'
@@ -130,14 +135,17 @@ def build_cli_launch_command(
             f'cd /d "{project_value}" && '
             f'set "XIAOK_CONFIG_DIR={config_value}" && '
             f'set "HOME={home_value}" && '
-            f'set "USERPROFILE={home_value}" {extra_env} && '
-            f'"{node_value}" "{cli_value}"{auto_flag}{extra_args_value} 2>nul'
+            f'set "USERPROFILE={home_value}" && '
+            f'set "XIAOK_TEST_ACCOUNT_HOME={home_value}" {extra_env} && '
+            f'"{node_value}" --import "{profile_setup_value}" "{cli_value}"{auto_flag}{extra_args_value} 2>"{stderr_value}"'
             '"'
         )
 
     env_parts = [
         f"XIAOK_CONFIG_DIR={shell_quote_posix(str(config_dir))}",
         f"HOME={shell_quote_posix(str(home_dir))}",
+        f"USERPROFILE={shell_quote_posix(str(home_dir))}",
+        f"XIAOK_TEST_ACCOUNT_HOME={shell_quote_posix(str(home_dir))}",
         *[
             f"{key}={shell_quote_posix(value)}"
             for key, value in env_overrides.items()
@@ -148,10 +156,12 @@ def build_cli_launch_command(
             f"cd {shell_quote_posix(str(project_dir))} &&",
             *env_parts,
             shell_quote_posix(node_cmd),
+            "--import",
+            shell_quote_posix(str(profile_setup)),
             shell_quote_posix(str(cli_entry)),
             *(["--auto"] if auto_mode else []),
             *[shell_quote_posix(arg) for arg in extra_args],
-            "2>/dev/null",
+            f"2>{shell_quote_posix(str(config_dir / 'cli-stderr.log'))}",
         ],
     )
 
@@ -261,6 +271,7 @@ class FakeOpenAIServer:
         self.responses = responses
         self.first_token_delay = first_token_delay
         self.requests: list[dict] = []
+        self.served_scripts: list[ResponseScript] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler_class())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
@@ -295,6 +306,7 @@ class FakeOpenAIServer:
                     outer.requests.append({"_raw": raw_body})
 
                 script = outer._next_response()
+                outer.served_scripts.append(script)
                 self.send_response(200)
                 self.send_header("content-type", "text/event-stream")
                 self.send_header("cache-control", "no-cache")
@@ -450,6 +462,85 @@ class TmuxHarness:
                 return last
             time.sleep(interval)
         raise AssertionError(f"timed out waiting for checked terminal state:\n{last}")
+
+
+class ExactPositiveCommandConsent:
+    """Only explicit positive waits may request one key for a reviewed SSE call."""
+    def __init__(
+        self, server: FakeOpenAIServer, tmux: TmuxHarness,
+        entries: list[tuple[str, str, str, tuple[str, ...], str, str | None]], columns: dict[str, int],
+    ) -> None:
+        self.server, self.tmux = server, tmux
+        self.entries, self.columns = entries, columns
+        self.approved: set[str] = set()
+        self.awaiting_modal_clear: str | None = None
+
+    def _clipped_row(self, value: str, scope: str) -> str:
+        # A display binding for these fixed fixture strings, not a formatter test.
+        margin = 2 if os.name == "nt" else 1  # These child CLIs are all inside tmux.
+        available = self.columns[scope] - margin
+        width = 0
+        result = ""
+        for char in value:
+            assert_true(ord(char) >= 32, "unexpected control character in reviewed modal row")
+            cells = 0 if unicodedata.combining(char) else (2 if unicodedata.east_asian_width(char) in ("W", "F") else 1)
+            if width + cells > available:
+                break
+            result += char
+            width += cells
+        return result.strip()
+
+    def require_modal_free(self, text: str) -> None:
+        # wait_for returns its last frame on timeout; never continue into later user input.
+        assert_true("⚡ xiaok 想要执行以下操作" not in text and self.awaiting_modal_clear is None,
+                    "positive wait ended before the approved modal cleared")
+
+    def check(self, text: str, scope: str) -> bool:
+        title = "⚡ xiaok 想要执行以下操作"
+        if title not in text:
+            # Partial/overwritten permission frames are never ordinary activity.
+            # Keep the pending decision fenced until the full modal really clears.
+            if '始终允许的范围:' in text or '数字直选' in text or '1. 允许一次' in text:
+                return False
+            self.awaiting_modal_clear = None
+            return True
+        if self.awaiting_modal_clear is not None:
+            return False  # Observe a real modal-free frame before any next decision.
+        assert_true(bool(self.server.served_scripts), "positive modal has no actually served SSE script")
+        last_script = self.server.served_scripts[-1]
+        matches: list[tuple[str, str, tuple[str, ...], str]] = []
+        for case, call_id, command, rules, display_rule, prefix in self.entries:
+            if case != scope:
+                continue
+            expected = (tool_call_response_events("bash", {"command": command}, call_id)
+                        if prefix is None else text_then_tool_call_events(prefix, "bash", {"command": command}, call_id))
+            if last_script == expected:
+                matches.append((call_id, command, rules, display_rule))
+        assert_true(len(matches) == 1, "positive modal is not the exact reviewed call for this active scenario")
+        call_id, command, rules, display_rule = matches[0]
+        assert_true(call_id not in self.approved, "the same positive call requested a second approval")
+        modal = strip_ansi(text[text.rfind(title):])
+        rows = [line.strip() for line in modal.splitlines()]
+        assert_true("工具: bash" in rows, "positive modal tool is not bash")
+        assert_true("这个操作有风险，每次都会询问" not in rows, "positive call changed from ordinary-five to mandatory-review mode")
+        command_text = " ".join(command.split())
+        command_text = command_text if len(command_text) <= 200 else command_text[:197] + "..."
+        command_rows = [line for line in rows if line.startswith("本次执行命令: ")]
+        assert_true(command_rows == [self._clipped_row("本次执行命令: " + command_text, scope)], "positive modal clipped command differs")
+        scope_rows = [line for line in rows if line.startswith("始终允许的范围: ")]
+        assert_true(scope_rows == [self._clipped_row(f"始终允许的范围: {rule}（* 表示任意参数，参数变化无需重复确认）", scope) for rule in rules], "positive modal rule display differs")
+        expected_options = [
+            "❯ 1. 允许一次", f"  2. 本次会话始终允许 {display_rule}",
+            f"  3. 始终允许 {display_rule} (保存到项目)",
+            f"  4. 始终允许 {display_rule} (保存到全局)", "  5. 拒绝",
+        ]
+        option_rows = [line for line in rows if re.match(r"^(?:❯ )?\d+\. ", line)]
+        assert_true(option_rows == [self._clipped_row(line, scope) for line in expected_options], "positive modal is not the exact default once/session/project/global/deny menu")
+        self.approved.add(call_id)
+        self.awaiting_modal_clear = call_id
+        self.tmux.send_key("1")
+        print(f"FIXTURE_ALLOW_ONCE: case={scope} call={call_id}")
+        return False
 
 
 def strip_ansi(text: str) -> str:
@@ -1089,12 +1180,64 @@ def wait_for_recorded_feedback(
     )
 
 
+def confirm_original_fixture_project_rules(
+    project_dir: Path, project_fixture: Path, config_dir: Path, home_dir: Path,
+    tmux_bin: str, session: str, e2e_env: dict[str, str],
+) -> None:
+    """Explicitly accept only this owned fixture's three existing project rules.
+
+    Invoke the real public consent UI in a separate real TTY. No handcrafted
+    adoption record, policy override, synthetic grant, or added CLI scenario.
+    """
+    rules = [f"write({project_fixture}/*)", "bash(printf *)", "bash(cd *)"]
+    settings_path = project_fixture / ".xiaok" / "settings.json"
+    settings_before = settings_path.read_bytes()
+    public_ui = project_dir / "dist" / "commands" / "project-rule-adoption.js"
+    entry = Path(__file__).resolve().parent / "fixtures" / "project-rule-consent-entry.mjs"
+    consent = TmuxHarness(
+        session + "-fixture-consent", project_fixture, config_dir, home_dir,
+        entry, tmux_bin, auto_mode=False,
+        extra_args=[str(public_ui), json.dumps(rules, ensure_ascii=False)],
+        env_overrides=e2e_env,
+    )
+    def unwrapped(text: str) -> str:
+        return "".join(visible_lines(text))
+    try:
+        consent.start()
+        for index, rule in enumerate(rules, 1):
+            def ready(text: str) -> bool:
+                flat = unwrapped(text)
+                marker = f"({index}/{len(rules)})"
+                return marker in flat and rule + " [y/N]" in flat[flat.rfind(marker):]
+            prompt = consent.wait_for(ready, timeout=10)
+            assert_true(ready(prompt), f"exact fixture consent prompt {index} did not render:\n{prompt}")
+            consent.send_key("y")  # Single explicit key; Enter/EOF still default-deny.
+        verified = consent.wait_for(
+            lambda text: "E2E_FIXTURE_PROJECT_RULE_CONSENT_VERIFIED" in unwrapped(text), timeout=10,
+        )
+        assert_true("已采纳 3 条，跳过 0 条" in unwrapped(verified), f"fixture rules were not actually accepted:\n{verified}")
+        assert_true("E2E_FIXTURE_PROJECT_RULE_CONSENT_VERIFIED" in unwrapped(verified), f"public readback failed:\n{verified}")
+        deadline = time.time() + 10
+        status = ""
+        while time.time() < deadline:
+            status = consent.tmux("display-message", "-p", "-t", consent.session,
+                                  "#{pane_dead}:#{pane_dead_status}").stdout.strip()
+            if status.startswith("1:"):
+                break
+            time.sleep(0.1)
+        assert_true(status == "1:0", f"public fixture consent process did not exit successfully: {status}")
+        assert_true(settings_path.read_bytes() == settings_before, "fixture consent changed shared project rules")
+        print("SETUP: three owned fixture rules explicitly confirmed and publicly read back")
+    finally:
+        consent.stop()
+
+
 def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     cli_entry = project_dir / "dist" / "index.js"
     assert_true(cli_entry.exists(), f"CLI entry not found: {cli_entry}")
     tmux_bin = resolve_tmux_binary()
 
-    work_root = Path(tempfile.mkdtemp(prefix="xiaok-terminal-e2e-"))
+    work_root = Path(tempfile.mkdtemp(prefix="xiaok-terminal-e2e-")).resolve()
     project_fixture = work_root / "project"
     sandbox_fixture = work_root / "outside-workdir"
     config_dir = work_root / "config"
@@ -1556,7 +1699,55 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         env_overrides=e2e_env,
     )
 
+    reviewed_positive_stress_commands = [
+        (
+            f'cd {shell_quote_posix(str(project_fixture))} && '
+            f'cat {shell_quote_posix(str(report_fixture_paths[0]))} >/dev/null && '
+            f'ls -la {shell_quote_posix(str(project_fixture))} >/dev/null && '
+            f'find {shell_quote_posix(str(project_fixture))} -maxdepth 2 -type f | sort >/dev/null && '
+            'printf "E2E_STRESS_RAN_1" && sleep 1'
+        ),
+        (
+            f'cd {shell_quote_posix(str(project_fixture))} && '
+            f'cat {shell_quote_posix(str(report_fixture_paths[1]))} >/dev/null && '
+            f'find {shell_quote_posix(str(project_fixture))} -maxdepth 2 -type f | sort >/dev/null && '
+            f'cat {shell_quote_posix(str(report_fixture_paths[2]))} >/dev/null && '
+            'printf "E2E_STRESS_RAN_2" && sleep 1'
+        ),
+        (
+            f'cd {shell_quote_posix(str(project_fixture))} && '
+            f'cat {shell_quote_posix(str(stress_report_write_path))} >/dev/null && '
+            f'ls -la {shell_quote_posix(str(project_fixture))} >/dev/null && '
+            'printf "E2E_STRESS_RAN_3" && sleep 1'
+        ),
+        (
+            f'cd {shell_quote_posix(str(project_fixture))} && '
+            f'find {shell_quote_posix(str(project_fixture))} -maxdepth 2 -type f | sort >/dev/null && '
+            f'cat {shell_quote_posix(str(stress_report_write_path))} >/dev/null && '
+            'printf "E2E_STRESS_RAN_4" && sleep 1'
+        ),
+    ]
+    reviewed_positive_bash_calls: list[tuple[str, str, str, tuple[str, ...], str, str | None]] = [
+        ('12', 'call_multi_tool_bash', 'printf "E2E_MULTI_TOOL_OK"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('14', 'call_feedback_intent_bash_merge', 'printf "E2E_FEEDBACK_INTENT_MERGED_MD"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('14', 'call_feedback_intent_bash_1', 'printf "E2E_FEEDBACK_INTENT_WRAP_BLOCK verifying footer stability after feedback skip"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('14', 'call_feedback_intent_bash_2', 'printf "E2E_FEEDBACK_INTENT_STAGE2_OK"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('15', 'call_feedback_confirm_bash_merge', 'printf "E2E_FEEDBACK_CONFIRM_MERGED_MD"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('15', 'call_feedback_confirm_bash_1', 'printf "E2E_FEEDBACK_CONFIRM_WRAP_BLOCK verifying footer stability after feedback confirmation"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('15', 'call_feedback_confirm_bash_2', 'printf "E2E_FEEDBACK_CONFIRM_STAGE2_OK"', ('bash(printf *)',), 'bash(printf *)', None),
+        ('17', 'call_stress_report_bash_1', reviewed_positive_stress_commands[0], ('bash(cd *)', 'bash(cat *)', 'bash(ls *)', 'bash(find *)', 'bash(sort *)', 'bash(printf *)', 'bash(sleep *)'), 'bash(cd *) + bash(cat *) + bash(ls *)...+ bash(printf *) + bash(sleep *)', None),
+        ('17', 'call_stress_report_bash_2', reviewed_positive_stress_commands[1], ('bash(cd *)', 'bash(cat *)', 'bash(find *)', 'bash(sort *)', 'bash(printf *)', 'bash(sleep *)'), 'bash(cd *) + bash(cat *) + bash(find ...+ bash(printf *) + bash(sleep *)', None),
+        ('17', 'call_stress_report_bash_3', reviewed_positive_stress_commands[2], ('bash(cd *)', 'bash(cat *)', 'bash(ls *)', 'bash(printf *)', 'bash(sleep *)'), 'bash(cd *) + bash(cat *) + bash(ls *) + bash(printf *) + bash(sleep *)', None),
+        ('17', 'call_stress_report_bash_4', reviewed_positive_stress_commands[3], ('bash(cd *)', 'bash(find *)', 'bash(sort *)', 'bash(cat *)', 'bash(printf *)', 'bash(sleep *)'), 'bash(cd *) + bash(find *) + bash(sort...+ bash(printf *) + bash(sleep *)', None),
+        ('18', 'call_answering_after_changed_bash', 'printf "E2E_ANSWERING_AFTER_CHANGED_STAGE" && sleep 1', ('bash(printf *)', 'bash(sleep *)'), 'bash(printf *) + bash(sleep *)', '我先起草报告结构，再继续补充分析。'),
+        ('23', 'call_report_slide_stage2_bash', 'printf "E2E_REPORT_SLIDE_STAGE2" && sleep 6', ('bash(printf *)', 'bash(sleep *)'), 'bash(printf *) + bash(sleep *)', None),
+    ]
+    positive_consent = ExactPositiveCommandConsent(
+        server, tmux, reviewed_positive_bash_calls, {"12": 120, "14": 60, "15": 60, "17": 60, "18": 60, "23": 120},
+    )
+
     try:
+        confirm_original_fixture_project_rules(project_dir, project_fixture, config_dir, home_dir, tmux_bin, session, e2e_env)
         tmux.start()
 
         print("--- E2E 1: welcome and fixed footer ---")
@@ -1812,7 +2003,34 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         welcome = tmux.wait_for(lambda text: has_welcome_screen(text) and has_input_prompt(text), timeout=12)
         assert_welcome_screen(welcome, "welcome screen did not render before permission flow")
 
+        # Establish and read back the original permission-flow precondition through the public CLI.
+        # Default mode is intentionally omitted from the footer; read the live manager in /mode.
+        tmux.send_text("/mode default")
+        tmux.send_key("Enter")
+        selected_mode = tmux.wait_for(
+            lambda text: "权限模式已切换为 default" in text and has_input_prompt(text),
+            timeout=12,
+        )
+        assert_contains(selected_mode, "权限模式已切换为 default", "public default mode selection did not finish")
+        tmux.send_text("/mode")
+        tmux.send_key("Enter")
+        current_mode = tmux.wait_for(
+            lambda text: "选择权限模式（当前：default）" in text and "❯ 1. default（当前）" in text,
+            timeout=12,
+        )
+        assert_contains(current_mode, "选择权限模式（当前：default）", "public mode readback did not report default")
+        assert_contains(current_mode, "❯ 1. default（当前）", "public mode readback did not select the current default")
+        tmux.send_key("Escape")
+        mode_closed = tmux.wait_for(
+            lambda text: "已取消模式切换。" in text and "选择权限模式" not in text and has_input_prompt(text),
+            timeout=12,
+        )
+        assert_contains(mode_closed, "已取消模式切换。", "public mode readback did not close through cancellation")
+        assert_true("选择权限模式" not in mode_closed, "mode readback overlay remained before the permission stimulus")
+
         print("--- E2E 8: permission menu remains intact and project allow persists ---")
+        project_settings_path = project_fixture / ".xiaok" / "settings.json"
+        project_settings_before_permission = project_settings_path.read_text(encoding="utf-8")
         tmux.send_text("trigger permission prompt")
         time.sleep(0.15)
         tmux.send_key("Enter")
@@ -1864,10 +2082,22 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true("xiaok 想要执行以下操作" not in first_permission_result, f"permission prompt text leaked after approval:\n{first_permission_result}")
         assert_single_footer_status(first_permission_result, "gpt-terminal-e2e")
 
-        settings_path = project_fixture / ".xiaok" / "settings.json"
-        assert_true(settings_path.exists(), f"project settings file was not written: {settings_path}")
-        settings_raw = settings_path.read_text(encoding="utf-8")
-        assert_true("bash(cmd *)" in settings_raw, f"project permission rule was not persisted:\n{settings_raw}")
+        local_rules_path = config_dir / "project-rule-adoptions.json"
+        assert_true(local_rules_path.exists(), f"local project permission record was not written: {local_rules_path}")
+        local_rules_raw = local_rules_path.read_text(encoding="utf-8")
+        local_rules_record = json.loads(local_rules_raw)
+        project_key = str(project_fixture.resolve())
+        if os.name == "nt":
+            project_key = project_key.lower()
+        project_rules = local_rules_record.get("localRules", {}).get(project_key, [])
+        assert_true(
+            isinstance(project_rules, list) and "bash(cmd *)" in project_rules,
+            f"project permission rule was not persisted for {project_key}:\n{local_rules_raw}",
+        )
+        assert_true(
+            project_settings_path.read_text(encoding="utf-8") == project_settings_before_permission,
+            "project allow selection rewrote repository-provided permission settings",
+        )
 
         tmux.stop()
         tmux.start()
@@ -1929,10 +2159,17 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(first_sandbox_result, sandbox_response_one, "sandbox approval response did not render")
 
-        sandbox_settings_raw = settings_path.read_text(encoding="utf-8")
+        sandbox_local_rules_raw = local_rules_path.read_text(encoding="utf-8")
+        sandbox_local_rules_record = json.loads(sandbox_local_rules_raw)
+        sandbox_project_rules = sandbox_local_rules_record.get("localRules", {}).get(project_key, [])
         assert_true(
-            "sandbox-expand:bash(" in sandbox_settings_raw,
-            f"sandbox expansion rule was not persisted to project settings:\n{sandbox_settings_raw}",
+            isinstance(sandbox_project_rules, list)
+            and any(isinstance(rule, str) and rule.startswith("sandbox-expand:bash(") for rule in sandbox_project_rules),
+            f"sandbox expansion rule was not persisted for {project_key}:\n{sandbox_local_rules_raw}",
+        )
+        assert_true(
+            project_settings_path.read_text(encoding="utf-8") == project_settings_before_permission,
+            "sandbox project allow selection rewrote repository-provided permission settings",
         )
 
         tmux.stop()
@@ -2041,9 +2278,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
 
         multi_tool_pending = tmux.wait_for(
-            lambda text: "Read notes.txt" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '12') and ("Read notes.txt" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(multi_tool_pending)
         assert_contains(multi_tool_pending, "Read notes.txt", "read tool block did not render during consecutive tool flow")
         assert_activity_above_prompt_with_gap(multi_tool_pending)
         assert_true(
@@ -2053,9 +2291,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_no_truncated_footer_status(multi_tool_pending)
 
         multi_tool_running = tmux.wait_for(
-            lambda text: 'printf "E2E_MULTI_TOOL_OK"' in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '12') and ('printf "E2E_MULTI_TOOL_OK"' in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(multi_tool_running)
         assert_contains(multi_tool_running, 'printf "E2E_MULTI_TOOL_OK"', "bash tool block did not render during consecutive tool flow")
         assert_activity_above_prompt_with_gap(multi_tool_running)
         assert_true(
@@ -2065,9 +2304,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_no_truncated_footer_status(multi_tool_running)
 
         multi_tool_final = tmux.wait_for(
-            lambda text: "连续多个工具块已完成。" in text and has_input_prompt(text),
+            lambda text: positive_consent.check(text, '12') and ("连续多个工具块已完成。" in text and has_input_prompt(text)),
             timeout=20,
         )
+        positive_consent.require_modal_free(multi_tool_final)
         line_before_prompt_with_gap(multi_tool_final, min_blank_rows=2)
         assert_true(
             "● Intent:" not in multi_tool_final,
@@ -2180,56 +2420,63 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
 
         intent_tool_pending = tmux.wait_for(
-            lambda text: "Read 01-market-overview.md" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '14') and ("Read 01-market-overview.md" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(intent_tool_pending)
         assert_intent_summary_hint(intent_tool_pending, "md -> 报告")
         assert_activity_above_prompt_with_gap(intent_tool_pending)
         assert_footer_chrome_is_singular(intent_tool_pending)
 
         intent_tool_second_read = tmux.wait_for(
-            lambda text: "Read 02-customer-signals.txt" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '14') and ("Read 02-customer-signals.txt" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(intent_tool_second_read)
         assert_activity_above_prompt_with_gap(intent_tool_second_read)
         assert_footer_chrome_is_singular(intent_tool_second_read)
 
         intent_tool_third_read = tmux.wait_for(
-            lambda text: "Read 03-execution-risks.txt" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '14') and ("Read 03-execution-risks.txt" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(intent_tool_third_read)
         assert_activity_above_prompt_with_gap(intent_tool_third_read)
         assert_footer_chrome_is_singular(intent_tool_third_read)
 
         intent_tool_merged_md = tmux.wait_for(
-            lambda text: "E2E_FEEDBACK_INTENT_MERGED_MD" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '14') and ("E2E_FEEDBACK_INTENT_MERGED_MD" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(intent_tool_merged_md)
         assert_activity_above_prompt_with_gap(intent_tool_merged_md)
         assert_footer_chrome_is_singular(intent_tool_merged_md)
 
         intent_tool_running = tmux.wait_for(
-            lambda text: "E2E_FEEDBACK_INTENT_WRAP_BLOCK" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '14') and ("E2E_FEEDBACK_INTENT_WRAP_BLOCK" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(intent_tool_running)
         assert_activity_above_prompt_with_gap(intent_tool_running)
         assert_footer_chrome_is_singular(intent_tool_running)
 
         intent_tool_stage_two = tmux.wait_for(
-            lambda text: "E2E_FEEDBACK_INTENT_STAGE2_OK" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '14') and ("E2E_FEEDBACK_INTENT_STAGE2_OK" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(intent_tool_stage_two)
         assert_activity_above_prompt_with_gap(intent_tool_stage_two)
         assert_footer_chrome_is_singular(intent_tool_stage_two)
 
         intent_tool_final_phrase = "三份文档已先合并为 Markdown，再生成报告。"
         intent_tool_final = tmux.wait_for(
-            lambda text: (
+            lambda text: positive_consent.check(text, '14') and ((
                 intent_tool_final_phrase in text
                 or "Stage 2/2 生成报告 · Completed" in latest_intent_summary_line(text)
-            ) and has_ready_input_prompt(text),
+            ) and has_ready_input_prompt(text)),
             timeout=20,
         )
+        positive_consent.require_modal_free(intent_tool_final)
         assert_true(
             intent_tool_final_phrase in intent_tool_final
             or "Stage 2/2 生成报告 · Completed" in latest_intent_summary_line(intent_tool_final),
@@ -2286,55 +2533,62 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
 
         confirm_tool_pending = tmux.wait_for(
-            lambda text: "Read 01-market-overview.md" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '15') and ("Read 01-market-overview.md" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(confirm_tool_pending)
         assert_activity_above_prompt_with_gap(confirm_tool_pending)
         assert_footer_chrome_is_singular(confirm_tool_pending)
 
         confirm_tool_second_read = tmux.wait_for(
-            lambda text: "Read 02-customer-signals.txt" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '15') and ("Read 02-customer-signals.txt" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(confirm_tool_second_read)
         assert_activity_above_prompt_with_gap(confirm_tool_second_read)
         assert_footer_chrome_is_singular(confirm_tool_second_read)
 
         confirm_tool_third_read = tmux.wait_for(
-            lambda text: "Read 03-execution-risks.txt" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '15') and ("Read 03-execution-risks.txt" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(confirm_tool_third_read)
         assert_activity_above_prompt_with_gap(confirm_tool_third_read)
         assert_footer_chrome_is_singular(confirm_tool_third_read)
 
         confirm_tool_merged_md = tmux.wait_for(
-            lambda text: "E2E_FEEDBACK_CONFIRM_MERGED_MD" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '15') and ("E2E_FEEDBACK_CONFIRM_MERGED_MD" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(confirm_tool_merged_md)
         assert_activity_above_prompt_with_gap(confirm_tool_merged_md)
         assert_footer_chrome_is_singular(confirm_tool_merged_md)
 
         confirm_tool_running = tmux.wait_for(
-            lambda text: "E2E_FEEDBACK_CONFIRM_WRAP_BLOCK" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '15') and ("E2E_FEEDBACK_CONFIRM_WRAP_BLOCK" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(confirm_tool_running)
         assert_activity_above_prompt_with_gap(confirm_tool_running)
         assert_footer_chrome_is_singular(confirm_tool_running)
 
         confirm_tool_stage_two = tmux.wait_for(
-            lambda text: "E2E_FEEDBACK_CONFIRM_STAGE2_OK" in text and any(label in text for label in SPINNER_LABELS),
+            lambda text: positive_consent.check(text, '15') and ("E2E_FEEDBACK_CONFIRM_STAGE2_OK" in text and any(label in text for label in SPINNER_LABELS)),
             timeout=12,
         )
+        positive_consent.require_modal_free(confirm_tool_stage_two)
         assert_activity_above_prompt_with_gap(confirm_tool_stage_two)
         assert_footer_chrome_is_singular(confirm_tool_stage_two)
 
         confirm_tool_final_phrase = "确认反馈后，三份文档已先合并为 Markdown，再生成报告。"
         confirm_tool_final = tmux.wait_for(
-            lambda text: (
+            lambda text: positive_consent.check(text, '15') and ((
                 confirm_tool_final_phrase in text
                 or "Stage 2/2 生成报告 · Completed" in latest_intent_summary_line(text)
-            ) and has_ready_input_prompt(text),
+            ) and has_ready_input_prompt(text)),
             timeout=20,
         )
+        positive_consent.require_modal_free(confirm_tool_final)
         assert_true(
             confirm_tool_final_phrase in confirm_tool_final
             or "Stage 2/2 生成报告 · Completed" in latest_intent_summary_line(confirm_tool_final),
@@ -2383,11 +2637,45 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_intent_summary_hint(narrow_report_write, "md -> 报告")
         assert_footer_chrome_is_singular(narrow_report_write)
 
+        # One real once-only decision for this exact controlled SSE call, never a rule.
+        narrow_risk_approvals = 0
+
+        def narrow_report_running_after_exact_once(text: str) -> bool:
+            nonlocal narrow_risk_approvals
+            title = "⚡ xiaok 想要执行以下操作"
+            if title in text:
+                if narrow_risk_approvals:
+                    return False  # Do not send another key while the modal disappears/reappears.
+                assert_true(
+                    narrow_report_bash_command == 'printf "E2E_NARROW_WRAPPED_ANALYSIS const fs = require(\'fs\'); const report = fs.readFileSync(\'report-analysis.report.md\', \'utf8\'); /* analyzing merged markdown and preparing the structured report */" && sleep 2',
+                    "E2E16 controlled command differs from the reviewed once-only fixture",
+                )
+                expected_script = tool_call_response_events(
+                    "bash", {"command": narrow_report_bash_command}, "call_narrow_report_bash",
+                )
+                assert_true(
+                    bool(server.served_scripts) and server.served_scripts[-1] == expected_script,
+                    "E2E16 risk modal is not bound to the last actual controlled SSE tool call",
+                )
+                modal = strip_ansi(text[text.rfind(title):])
+                rows = [line.strip() for line in modal.splitlines()]
+                assert_true("工具: bash" in rows, "E2E16 modal tool is not bash")
+                assert_true("这个操作有风险，每次都会询问" in rows, "E2E16 mandatory-review copy missing")
+                command_rows = [line for line in rows if line.startswith("本次执行命令: ")]
+                assert_true(command_rows == ['本次执行命令: printf "E2E_NARROW_WRAPPED_ANALYSIS const fs'], "E2E16 displayed command prefix changed")
+                option_rows = [line for line in rows if re.match(r"^(?:❯ )?\d+\. ", line)]
+                assert_true(option_rows == ["❯ 1. 允许一次", "2. 拒绝"], "E2E16 is not the exact once/deny modal")
+                narrow_risk_approvals += 1
+                tmux.send_key("1")
+                return False
+            return narrow_risk_approvals == 1 and "E2E_NARROW_WRAPPED_ANALYSIS" in text and any(label in text for label in SPINNER_LABELS)
+
         narrow_report_running = tmux.wait_for_checked(
-            lambda text: "E2E_NARROW_WRAPPED_ANALYSIS" in text and any(label in text for label in SPINNER_LABELS),
+            narrow_report_running_after_exact_once,
             assert_activity_frame_keeps_footer,
             timeout=12,
         )
+        assert_true(narrow_risk_approvals == 1, "E2E16 did not exercise exactly one real allow-once decision")
         assert_contains(narrow_report_running, "Wrote report-analysis.report.md", "changed block did not remain visible before the long ran block")
         assert_intent_summary_hint(narrow_report_running, "md -> 报告")
         assert_activity_above_prompt_with_gap(narrow_report_running)
@@ -2457,33 +2745,36 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
 
         stress_report_write = tmux.wait_for_checked(
-            lambda text: "Wrote combined-source.report.md" in text and has_activity_above_prompt_with_gap(text),
+            lambda text: positive_consent.check(text, '17') and ("Wrote combined-source.report.md" in text and has_activity_above_prompt_with_gap(text)),
             assert_activity_frame_keeps_footer,
             timeout=12,
         )
+        positive_consent.require_modal_free(stress_report_write)
         assert_contains(stress_report_write, "Wrote combined-source.report.md", "stress report write block did not render before the long ran blocks")
         assert_intent_summary_hint(stress_report_write, "md -> 报告")
         assert_activity_above_prompt_with_gap(stress_report_write)
         assert_footer_chrome_is_singular(stress_report_write)
 
         stress_report_running_one = tmux.wait_for_checked(
-            lambda text: "  │ cd " in text and has_activity_above_prompt_with_gap(text),
+            lambda text: positive_consent.check(text, '17') and ("  │ cd " in text and has_activity_above_prompt_with_gap(text)),
             assert_activity_frame_keeps_footer,
             timeout=16,
         )
+        positive_consent.require_modal_free(stress_report_running_one)
         assert_intent_summary_hint(stress_report_running_one, "md -> 报告")
         assert_activity_above_prompt_with_gap(stress_report_running_one)
         assert_footer_chrome_is_singular(stress_report_running_one)
 
         stress_report_running_two = tmux.wait_for_checked(
-            lambda text: (
+            lambda text: positive_consent.check(text, '17') and ((
                 text.count("  │ cd ") >= 3
                 and has_input_prompt(text)
                 and (has_activity_above_prompt_with_gap(text) or "高压复杂报告链路已完成。" in text)
-            ),
+            )),
             assert_activity_frame_keeps_footer,
             timeout=16,
         )
+        positive_consent.require_modal_free(stress_report_running_two)
         assert_true(
             stress_report_running_two.count("  │ cd ") >= 3,
             f"expected at least three long ran lines to stay visible in the stress flow:\n{stress_report_running_two}",
@@ -2494,10 +2785,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
 
         stress_report_final = tmux.wait_for_checked(
-            lambda text: "高压复杂报告链路已完成。" in text and has_ready_input_prompt(text),
+            lambda text: positive_consent.check(text, '17') and ("高压复杂报告链路已完成。" in text and has_ready_input_prompt(text)),
             assert_activity_frame_keeps_footer,
             timeout=24,
         )
+        positive_consent.require_modal_free(stress_report_final)
         assert_contains(stress_report_final, "高压复杂报告链路已完成。", "stress report flow did not finish")
         assert_footer_chrome_is_singular(stress_report_final, allow_completed_summary=True)
 
@@ -2535,7 +2827,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
 
         changed_answering_handoff = tmux.wait_for_checked(
-            lambda text: (
+            lambda text: positive_consent.check(text, '18') and ((
                 (
                     "tesla-salesforce-enterprise-ai-sales-report.report" in text
                     or "E2E_ANSWERING_AFTER_CHANGED_STAGE" in text
@@ -2548,10 +2840,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
                     or "Running command" in text
                     or "E2E_CHANGED_ANSWERING_DONE" in text
                 )
-            ),
+            )),
             assert_activity_frame_keeps_footer,
             timeout=16,
         )
+        positive_consent.require_modal_free(changed_answering_handoff)
         assert_true(
             "tesla-salesforce-enterprise-ai-sales-report.report" in changed_answering_handoff
             or "E2E_ANSWERING_AFTER_CHANGED_STAGE" in changed_answering_handoff
@@ -2561,10 +2854,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_footer_chrome_is_singular(changed_answering_handoff)
 
         changed_answering_final = tmux.wait_for_checked(
-            lambda text: "E2E_CHANGED_ANSWERING_DONE" in text and has_ready_input_prompt(text),
+            lambda text: positive_consent.check(text, '18') and ("E2E_CHANGED_ANSWERING_DONE" in text and has_ready_input_prompt(text)),
             assert_activity_frame_keeps_footer,
             timeout=20,
         )
+        positive_consent.require_modal_free(changed_answering_final)
         assert_contains(
             changed_answering_final,
             "E2E_CHANGED_ANSWERING_DONE",
@@ -2825,15 +3119,16 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
 
         report_slide_stage_three = tmux.wait_for_checked(
-            lambda text: (
+            lambda text: positive_consent.check(text, '23') and ((
                 "Wrote salesforce-ai-evolution-slides.html" in text
                 and "● Intent: md -> 报告 -> 幻灯片 · Stage 3/3 生成幻灯片" in latest_intent_summary_line(text)
                 and "Skill: kai-slide-creator" in latest_intent_summary_line(text)
                 and has_input_prompt(text)
-            ),
+            )),
             assert_activity_frame_keeps_footer,
             timeout=24,
         )
+        positive_consent.require_modal_free(report_slide_stage_three)
         assert_true(
             "skill-creator" not in latest_intent_summary_line(report_slide_stage_three),
             f"unrelated skill-creator leaked into the slide stage summary:\n{report_slide_stage_three}",
@@ -2841,15 +3136,16 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_footer_chrome_is_singular(report_slide_stage_three)
 
         report_slide_final = tmux.wait_for_checked(
-            lambda text: (
+            lambda text: positive_consent.check(text, '23') and ((
                 "╭─ Stages" in text
                 and "Stage 2/3 生成报告 · Skill: kai-report-creator · Completed" in text
                 and "Stage 3/3 生成幻灯片 · Skill: kai-slide-creator · Completed" in text
                 and has_ready_input_prompt(text)
-            ),
+            )),
             assert_activity_frame_keeps_footer,
             timeout=24,
         )
+        positive_consent.require_modal_free(report_slide_final)
         assert_true(
             "Stage 2/3 生成报告 · Skill: kai-report-creator · Completed" in report_slide_final,
             f"final report-to-slides screen did not keep the report stage visible:\n{report_slide_final}",

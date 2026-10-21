@@ -27,6 +27,15 @@ function baseConfig(overrides: Partial<Config> = {}): Config {
     models: {},
     defaultMode: 'interactive',
     channels: {},
+    intentBoundary: {
+      llmClassifier: 'off',
+      ambiguousFallback: 'legacy_validator',
+      confidenceThreshold: 0.75,
+      falseNegativeClarifyThreshold: 0.85,
+      timeoutMs: 1500,
+      maxInputTokens: 200,
+      maxOutputTokens: 100,
+    },
     ...overrides,
   };
 }
@@ -313,7 +322,7 @@ describe('System One key probe', () => {
     expect(rejected.status).toBe('invalid');
     expect(rejected.httpStatus).toBe(401);
 
-    const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('boom', { status: 500 }));
     global.fetch = fetchMock as unknown as typeof fetch;
     const result = await probeApiKey('system_one', 'https://proxy.example.com/', 'k-jev');
     expect(result.status).toBe('network_error');

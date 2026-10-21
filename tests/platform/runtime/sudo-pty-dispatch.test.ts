@@ -11,7 +11,7 @@ describe('sudo terminal host ownership', () => {
     } as any;
     const factory = createPlatformRegistryFactory({ platform, source, sessionId: 'sudo-test', runInteractiveBash,
       adapter: () => ({ getModelName: () => 'test' } as any), buildSystemPrompt: async () => '',
-      permissionManager: { getMode: () => 'auto', check: () => 'allow' } as any,
+      permissionManager: { getMode: () => 'auto', getRevision: () => 1, check: () => 'allow' } as any,
     });
     try {
       const main = factory.createRegistry(process.cwd());

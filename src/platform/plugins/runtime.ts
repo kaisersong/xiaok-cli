@@ -58,12 +58,12 @@ export async function loadPlatformPluginRuntime(
     if (typeof h === 'string') return h;
     // Convert PluginManifestHook to the appropriate HookConfig variant
     if (h.type === 'http' && h.url) {
-      return { type: 'http' as const, url: h.url, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, headers: h.headers };
+      return { type: 'http' as const, url: h.url, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, outputFormat: h.outputFormat, headers: h.headers };
     }
     if (h.type === 'prompt' && h.prompt) {
-      return { type: 'prompt' as const, prompt: h.prompt, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, model: h.model };
+      return { type: 'prompt' as const, prompt: h.prompt, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, outputFormat: h.outputFormat, model: h.model };
     }
-    return { type: 'command' as const, command: h.command, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage };
+    return { type: 'command' as const, command: h.command, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, outputFormat: h.outputFormat };
   });
   const hookCommands: string[] = rawHooks.map((h) =>
     typeof h === 'string' ? h : h.command,

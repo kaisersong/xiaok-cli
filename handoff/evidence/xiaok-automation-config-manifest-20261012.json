@@ -1,0 +1,1064 @@
+{
+  "historicalOnlyAcrossMachines": true,
+  "noLiveLeaseCredentialsInstalledIdentityNativeBinariesOrDependencies": true,
+  "parentComplete": false,
+  "masterMerged": false,
+  "originalAcceptanceUnchanged": true,
+  "entries": [
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automation-code-format-successor-r1.json",
+      "bytes": 20349,
+      "sha256": "c5b0394a2326e4cb7dac0a5535343533372c23cbe296c4524286efb2d1959bf8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automation-code-freeze-r1.json",
+      "bytes": 20190,
+      "sha256": "584959bfdd2f94b425a587edf925b5c115e5981cc6805484dc767ba217ec63fa"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automation-config-component-final-r1.json",
+      "bytes": 23878,
+      "sha256": "2c7491c6dd186008ca093b8ffaa0a86e392193d9c3a109974c781b411788c63b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automation-config-component-format-successor-r1.json",
+      "bytes": 24254,
+      "sha256": "95886a5ca73fdae2f04406460e4173cae30413c1d32fcd8c90ae11ecf8ae2d5c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automation-source-diff-r1.patch",
+      "bytes": 35870,
+      "sha256": "262be2727a63c4694859635c43febc694e373c1257f9112d56e5f039329757a2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-architecture-changed-r1-pid.json",
+      "bytes": 108,
+      "sha256": "6a6c4fb98d3fc26f384b7ea4a2fa920a0bc4813a6400902f18f545c12bb250a6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-architecture-changed-r1-process.json",
+      "bytes": 9503,
+      "sha256": "d1e46d46665e7f7c16e5833ab598a3cd377d83aea52f0dfb0f8ff106f28fd73a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-architecture-changed-r1-request.json",
+      "bytes": 3140,
+      "sha256": "d249b025d5cd62b53129d69e2780cd8be1aae969d2af8c31b100534adf298662"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-architecture-changed-r1.log",
+      "bytes": 163,
+      "sha256": "2b66dac37b41bc4cc63fd6731fcef6ee0b209832dba12d33f3b1cbf50a8f988b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-main-r1-pid.json",
+      "bytes": 108,
+      "sha256": "48b9cf9d6f9e1a84b0425bdcf254ae7bee6525c7e560a79077b9191f2d370bc3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-main-r1-process.json",
+      "bytes": 9465,
+      "sha256": "325fd355a9a61b039113fc3b8aef4e645bb20f6ce35e970c7b11a918fdba6a0f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-main-r1-request.json",
+      "bytes": 3103,
+      "sha256": "ba4ccb26e57cea9dfed365cacf8d3a8de2d0a2becefdd7bb72cfe5ed81c33989"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-main-r1.log",
+      "bytes": 1099,
+      "sha256": "95f579e2d5a35e5154985d0869829d1ba4cbdb51b46dc32defa61f9403df92b4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-renderer-r1-pid.json",
+      "bytes": 109,
+      "sha256": "c7bd61c1221cd4a8ee16b947cd69e7177436381722708ae3ad84df85cfeb080f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-renderer-r1-process.json",
+      "bytes": 9475,
+      "sha256": "28639e239910883946b4a83f49b5581f8607d9b5508bfe381709d30694468da4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-renderer-r1-request.json",
+      "bytes": 3111,
+      "sha256": "d01fd7017aa847ec57fa1a5f8fe4ad432ee5dffa5d71213e99451c65e078a70c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-build-renderer-r1.log",
+      "bytes": 37028,
+      "sha256": "90856f4f7118fb8fb4f3b78aa9298b74c2dda8ca5907a5188d94897316850682"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-candidate-parse-r2-pid.json",
+      "bytes": 108,
+      "sha256": "c8f8642024afd592ea4e694562c96f5a87ddf4359191777bd847cc0ee355d6f8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-candidate-parse-r2-process.json",
+      "bytes": 3787,
+      "sha256": "a3f60bab3dd18d31aaf0d2fc1434f9d7edf275a7f1b7bf2c44fe807d400fd26d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-candidate-parse-r2-request.json",
+      "bytes": 1806,
+      "sha256": "54b45f9111f3daecf6f78fb1350743bc534145e10fdabda4fd95fc988a688e4e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-candidate-parse-r2.log",
+      "bytes": 1003,
+      "sha256": "329816f1c695fb62348679994f89df4f32dd851ea010d4b5c7dbd461988df13b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-build-r1-pid.json",
+      "bytes": 109,
+      "sha256": "9a563a126fb445f6e03772e59dc9ab7968df8170c95ea0e8c25ade0fc15738c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-build-r1-process.json",
+      "bytes": 1368,
+      "sha256": "649309e85f77be3578f346afb445fabc0bc8dde442b94438cf17defcfa6b262d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-build-r1-request.json",
+      "bytes": 481,
+      "sha256": "b9192f6fc5e64befeaebf98f9f286a7517cd214fef1ca9f923cef80d2d5fae85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-build-r1.log",
+      "bytes": 423,
+      "sha256": "7a5def70f5e6d2364acab207011f8b79cceb11085860faa16b8a13c9acb944dc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-related-r1-pid.json",
+      "bytes": 108,
+      "sha256": "99cafc17d8e0eef3e6008f329861550fea8242f7fd7e33ab97c9ffd7a3da5eae"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-related-r1-process.json",
+      "bytes": 4867,
+      "sha256": "cb8aef2fb9c4d79cc12bc04dd109b829af694aad8b8d833fd05ce32ef964da85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-related-r1-request.json",
+      "bytes": 1993,
+      "sha256": "33d76137cf2b51fafec2761373b5037201b4867b1055c48a2ac7f1dac1d290d2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-related-r1.json",
+      "bytes": 44335,
+      "sha256": "96d48dbe0907cb3e5bc82cb8b06ac699f63783717125990a625a4a517a5e3453"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-cli-related-r1.log",
+      "bytes": 928,
+      "sha256": "7bac515cb595e7a177654a7fbdbbf2f0d2d2f64009788ecd2a352e1c274f50ee"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-code-independent-r1-pid.json",
+      "bytes": 109,
+      "sha256": "14a492de329930818164186543313a245a29562d8c7d97595887894a735810f0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-code-independent-r1-process.json",
+      "bytes": 61224,
+      "sha256": "d3d82e74d6cc1edf0b68a8e19c26e9396aed02a48c250f7c7159997d53e869ff"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-code-independent-r1-request.json",
+      "bytes": 27058,
+      "sha256": "f5e8458a6a455e37d1cc457f8b6293a362a7196297b3325284fb8b92af0ecb41"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-code-independent-r1.log",
+      "bytes": 3775,
+      "sha256": "b61f06e60bcf9a39bf54dab4d65baa3e4f2f39b6c5c0bb2929b1362b73fe525f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-design-independent-r1-pid.json",
+      "bytes": 107,
+      "sha256": "19d7f59243f8807a96329f72b036773311d074e5a9e57de12638003dfcc48cf5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-design-independent-r1-process.json",
+      "bytes": 23066,
+      "sha256": "0e8b8cc899dee80239bb1fc6bfabe7edf30235d06ad97eb04b4f8fdee7ca8a67"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-design-independent-r1-request.json",
+      "bytes": 11163,
+      "sha256": "7afbdeb2e40b75851b5ed825293a2c6c993e51aa23a68520a90f069cdb9d7614"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-design-independent-r1.log",
+      "bytes": 3498,
+      "sha256": "4f0db6b089d0963121f970a1e28e0a22794dd7596fef239540111e8e706bdc38"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-formatting-equality-r1-pid.json",
+      "bytes": 108,
+      "sha256": "3cdf0a441382e6d32269ed726db0eae6bc56c692eb3a3947d562f9152d6aa9f8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-formatting-equality-r1-process.json",
+      "bytes": 2591,
+      "sha256": "d60c109b655eb8543adfca2fa888060915c5c4789b1a1d03b29ba4a6657ec590"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-formatting-equality-r1-request.json",
+      "bytes": 1440,
+      "sha256": "ed90ce16a241487555fc4cd44dedcbeaba995eb37d398932ef71b05f1adf8cb1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-formatting-equality-r1.log",
+      "bytes": 301,
+      "sha256": "3cae80c6e4756ef66ec741e67c99c47774e6f896890ace0ddc90b2aa0b397e85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-gov-r1-pid.json",
+      "bytes": 108,
+      "sha256": "820e064f170872dd0ea3d27d8c8bc51226b1cc30f825010f894011b62ebac224"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-gov-r1-process.json",
+      "bytes": 9457,
+      "sha256": "7a8b7edef00205d6873159848af4383b75c9fa59c92785264c4a4e0955b8bafd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-gov-r1-request.json",
+      "bytes": 3094,
+      "sha256": "8d7570b66bef89a99d4f691241452d9d818da808ee006c82337c0413878626ac"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-gov-r1.log",
+      "bytes": 359,
+      "sha256": "2eccbef7f5fabbf56ba2ca7bbab4f614b6d9f87807270b64e3d9789522e494dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-green-r1-pid.json",
+      "bytes": 108,
+      "sha256": "456cae167e5717d8789c7f153495cab8e7520f16777f07c90958d601d86bd66b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-green-r1-process.json",
+      "bytes": 14185,
+      "sha256": "d0c1ea165fc5af6a2023955ed9dd0e622ee0cb2db23c73d330e4c45b93fdb93c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-green-r1-request.json",
+      "bytes": 4778,
+      "sha256": "67200a454bfa3421a302c3bbe02c4755bb8c9af2d5ee8abf148dfc146a4fff3f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-green-r1.json",
+      "bytes": 18630,
+      "sha256": "536494afa104ed3327fd6f15b5470a052f2ccc6ffaaad75a7781a166fbc23456"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-green-r1.log",
+      "bytes": 591,
+      "sha256": "27df00a826e9fcbad2370f081e4b678bf3ce0814fd9bd2d6848cca1487f84c13"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-navigation.test.tsx.patch",
+      "bytes": 1317,
+      "sha256": "562f029bf2c7d5fa1910eb06dfbda14cc26bc1b849d66ac190835b12d7d53428"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-equality-r1-pid.json",
+      "bytes": 108,
+      "sha256": "6bfd8c5841d9bd4839c22393c9773b94128ebed293e67edca7a0c10a66c10bbe"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-equality-r1-process.json",
+      "bytes": 2342,
+      "sha256": "8af433a610c427b27345c7e189dd2843e2da34d7b99e220c62a1246d6721537d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-equality-r1-request.json",
+      "bytes": 1222,
+      "sha256": "af8a7b1511d9c82f713056cbe0f8601408399dc6e45076efbdb83fc4bc65ec52"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-equality-r1.log",
+      "bytes": 198,
+      "sha256": "2dbfba3065e96514af38324a855c01e68112543ca72cacc1c2c52498636cec17"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-independent-r1-pid.json",
+      "bytes": 109,
+      "sha256": "2dfcb30f1350467ef3031b1a54eff4769f73bb7b5c19f9228934cc551fa61e34"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-independent-r1-process.json",
+      "bytes": 4355,
+      "sha256": "689aed2dc269cf10342cf5598b9259ad4c6f920c110868acd85328c18c312cd1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-independent-r1-request.json",
+      "bytes": 2996,
+      "sha256": "fdf47de6f5b29b1f83bb28e45b4a564342532d09a288f142d4cb3b14594b7df2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-pure-type-independent-r1.log",
+      "bytes": 1384,
+      "sha256": "74aa366faaf7e22223a25b0dab2fbcc0b0cd78662bd6e43ad278cfdb2ccf3e9d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-red-r1-pid.json",
+      "bytes": 108,
+      "sha256": "9357b0a90779893d80fcb72cd5d30953254b876df0c1b4c9cdf1ff015ccba717"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-red-r1-process.json",
+      "bytes": 10474,
+      "sha256": "ab4414793947622f7429cacd924ff10ec5dccf0e79c1de16f6efbead1c0d3f51"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-red-r1-request.json",
+      "bytes": 3600,
+      "sha256": "84cb3d66b686572f36a84a155772ea831fa603bf1223c0e946493ed7fedd4d1e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-red-r1.json",
+      "bytes": 200742,
+      "sha256": "0348a7078c8a2dff53ddedcb2100818cd740e88ad671e0285741efddddf2c765"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-red-r1.log",
+      "bytes": 587,
+      "sha256": "506c56643a3d452957a19204980bf14f62ec287df9cfd7a3269ec53b58256909"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r1-pid.json",
+      "bytes": 108,
+      "sha256": "a071e9a7cf7fa2bfbbe667f4144d91415acd06f7339b05f55652096819955bfe"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r1-process.json",
+      "bytes": 17320,
+      "sha256": "e2febd5938f9c322da47a81ccc3a57300d17d0d1748768296b1253b930a2a122"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r1-request.json",
+      "bytes": 5750,
+      "sha256": "e654658e544f76f049fd8157c1836c0b9c140c5d3e1a9e1b3a311f9dce0b17ee"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r1.json",
+      "bytes": 963122,
+      "sha256": "8d088c0bf014156b3050f3b63b8ca28bd33faa14d7c398681f51fd29e9d756a1"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r1.log",
+      "bytes": 5180,
+      "sha256": "af9b27d928f3351a19f5585dad8aea748090f9a328b68fec9f256f3f593bcae4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r2-pid.json",
+      "bytes": 108,
+      "sha256": "d1bc667425d27a566ae8c970093ade2608f7d332d9a3e84b89ffe93a328f0edd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r2-process.json",
+      "bytes": 17320,
+      "sha256": "44f00952f686c7065f3ff3fb329b3e4b0a0775d7c85087cec8aa4b36efa6a5ad"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r2-request.json",
+      "bytes": 5750,
+      "sha256": "32da55c99b5e8737f7a96196c90aa8a79cd566e78804aeaceeadea02fbd83d2f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r2.json",
+      "bytes": 961239,
+      "sha256": "979738abe3acc75dfc0ea7f446fde877d1a0587521a6f20604efd645f52def73"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-strict-r2.log",
+      "bytes": 91,
+      "sha256": "bd083a8ebaf5b852985f5a5506e42ac6d3eba80918376697c12156b5c07dda96"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r1-pid.json",
+      "bytes": 108,
+      "sha256": "5e39144c169bc7969ec89cb26db0fd66d517517c7e2220d9f5c8c100ef48ffbc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r1-process.json",
+      "bytes": 10220,
+      "sha256": "9b990df4d458cba050cc35e3c40a329fc93fc50aa3b3f8f683d2e98c6d1a8f7f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r1-request.json",
+      "bytes": 6036,
+      "sha256": "c89f98297aec226cdba36b44a696eec1adda3f740af6f80ab15e54b6cffcf6e9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r1.log",
+      "bytes": 3659,
+      "sha256": "055c3acdba198ba08207e3c4c223a4f75fd37c2c4e6cb17707cfac3c3b19bd9b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r2-pid.json",
+      "bytes": 108,
+      "sha256": "833c458cbd27738ba080c8471abb3244b4709fd0e07e74457c3eb9ec689eb27a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r2-process.json",
+      "bytes": 12768,
+      "sha256": "1df94047c2b81a228ac857418fe48492346160999409ce1a0030133928c6dd62"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r2-request.json",
+      "bytes": 6056,
+      "sha256": "3adac6393fa929ff2162a5b1f79cd879e153d08431075d49e9c48fc07575f671"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-fix-independent-r2.log",
+      "bytes": 1450,
+      "sha256": "299df312defcc882d98f678a3c3d7607646428efeae22117c40a14d0cc7157dd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-lint-r1-pid.json",
+      "bytes": 108,
+      "sha256": "2f3b72a1a6feae00d42c5baef4a50584d16f8a4d48d4cae030e021748317c036"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-lint-r1-process.json",
+      "bytes": 10630,
+      "sha256": "494f7459f84946afbc3e15d6027d7da318eb5e7cd3b317990ddb8bd65807f6cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-lint-r1-request.json",
+      "bytes": 3701,
+      "sha256": "8b20090c14519c83009ff41a78f40d2d6a7f17c6ba8c16633b4930b7009b4523"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-lint-r1.json",
+      "bytes": 1173,
+      "sha256": "8dea907e029393df6678aec9232d063e27a797792aa220ed20d548b8247009bc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-test-lint-r1.log",
+      "bytes": 48,
+      "sha256": "3cef26c67334fc60bcb6949aa5349134db45b6eeade700e14246d6468bb34271"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r1-pid.json",
+      "bytes": 107,
+      "sha256": "bc98695f2cc2045d8fc57b592531c5da541cd61e84b4ebd7cdf322d3661cc124"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r1-process.json",
+      "bytes": 21127,
+      "sha256": "2972fa76c05e6b8dc69b13f9aec40a99ca095f7ae4a4418b1e44e0df455350bd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r1-request.json",
+      "bytes": 9854,
+      "sha256": "88234c8544e8ce960e957cc2ce987a525a5ad9552a9b04641c1eee26fbb23290"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r1.json",
+      "bytes": 383401,
+      "sha256": "da3b0e36196f7b1aeb85b58cf25b30f6f548cd7ca6d955ccaf5de12928125d7a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r1.log",
+      "bytes": 336130,
+      "sha256": "1f9e1f6153cb22f124230625c48cb45009f96adfa9709e2ac9fc513fe1492410"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r2-pid.json",
+      "bytes": 108,
+      "sha256": "7698b8e1984ccdbe22576193fb3197c2a67b428454e75db5c09615f889f3e7a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r2-process.json",
+      "bytes": 21128,
+      "sha256": "b716a1d6aaa3f4cdab430365665392a62fc3dfd2ac2193e03859f8d93166ce77"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r2-request.json",
+      "bytes": 9854,
+      "sha256": "0159732bf462ba914a0070ea5c378f9b8b2ae59673756fd67ee48dff9cdd3b84"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r2.json",
+      "bytes": 324396,
+      "sha256": "2b175fee63c7f28f10d6dd05183923065072ffde0f197c38765bf6f57f773886"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r2.log",
+      "bytes": 139571,
+      "sha256": "61f72a8ce4000e21d0d6d0ce63c61cb35f836027f02213fb34f3eaf2046f7406"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r3-pid.json",
+      "bytes": 106,
+      "sha256": "9db671569a04d2a9ccb45a2243b2b4f19ed6b6295be39753986b56d9dbd92a75"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r3-process.json",
+      "bytes": 21126,
+      "sha256": "930f8e05e364caeaf7be301bc260887d5ded338ee80af7615ff7753827002a6a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r3-request.json",
+      "bytes": 9854,
+      "sha256": "12a5190b45eb67bcedc235f3a9a7dd4e07066f4456acdfa8300b1790f405d06a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r3.json",
+      "bytes": 324311,
+      "sha256": "d313ea0d6c109f9db12257d276a41066178a672573feca0769f6ce38290e7b55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/automations-whole-r3.log",
+      "bytes": 139677,
+      "sha256": "4ecbc553116c66577ddbc7b04b3bd02a2b50b182b7bb84a37e3d6d0622d32759"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/candidate-parse-r2.json",
+      "bytes": 1099,
+      "sha256": "5c89624bfc1aa8d4e3bb3a6560528487ae5ec9f68e018af6ff2331e8476c0f13"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/check-candidate-syntax-r2.mjs",
+      "bytes": 756,
+      "sha256": "f8038495644e984ba540c0fa72520c89ec3d4a6af029fd514f716044791570c0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/checkpoint-stage-failure-r1.json",
+      "bytes": 246,
+      "sha256": "12c9fe9b806ccbebdb25bb3daaf13ebc5e486e6c4ad1249092153c86d5aca19f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/automation-config-owner.ts",
+      "bytes": 2458,
+      "sha256": "62b150e9fdb06c9d92567a4e69c27abc6d05e35731bec7194cfceb86a30b27ad"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/automation-config-typed-ipc.ts",
+      "bytes": 2909,
+      "sha256": "88995eb2f15e4408d7103b0fa75409506c94e6138db8af03bcce68c0c9fb0028"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/automation-overview.ts",
+      "bytes": 14569,
+      "sha256": "1b8295316ba92389c53b683d9a393ca49325e8d7679ef9a98bf4c4eb9994ada6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/desktop-shutdown-coordinator.ts",
+      "bytes": 10075,
+      "sha256": "40c2badcdc032a76030df6a06764b39865eab39eac42dfe285abd80bda1779a9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/ipc-data-snapshot.ts",
+      "bytes": 2324,
+      "sha256": "64ef3e413c324642523bad12070e58b44e7ef04b63f40c60521917ae2eab976c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/ipc-native-promise.ts",
+      "bytes": 1317,
+      "sha256": "69ad5daffa7adaed0ad6109a044c6916226962811e45abde742e29827df3fa31"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/ipc-runtime.ts",
+      "bytes": 7187,
+      "sha256": "40eb10773ec61b34d9440253d692572de8e201bd6241e95e0fc267f0cfa23992"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/main.ts",
+      "bytes": 95147,
+      "sha256": "38f63f6ca5a6523b1c32ea3289cfdc9429254a03d988f5db597e89f37b410996"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/preload-api.ts",
+      "bytes": 121963,
+      "sha256": "823484c5ad6b16b9341c4c9b4b80a718d4372b57a8aaa28a2ee7903f2a2313d9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/preload.cjs",
+      "bytes": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/security.ts",
+      "bytes": 2163,
+      "sha256": "f83f35e56d59b632e0be52ce5f5ec1ffa89641b9dc5a08280e782dfadf627864"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/shutdown-aware-ipc-main.ts",
+      "bytes": 5492,
+      "sha256": "d7c6d9de51611e9dad094045e002c1d1bfeef9348f2cd3659cb7ae5373b56632"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/electron/timed-action-scheduler.ts",
+      "bytes": 16808,
+      "sha256": "827a295f1b6fe9aef7d5e25fc5a78350b5141ca3c2cc55f2cf2d96988aa9d66f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/api/bridge.ts",
+      "bytes": 57096,
+      "sha256": "e1a0564f0c98b49da48c0f25e614d4f976e4d26973464292c0649f61be0f22ac"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/api/types.ts",
+      "bytes": 11978,
+      "sha256": "1bd4b80da71f36ec23034720146630a8b54a5a4dfc733bdf771abb1e0eefe7e2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/components/WelcomePage.tsx",
+      "bytes": 21709,
+      "sha256": "af5e58983a83a486a28fcd790744e8ade9c096d3907fc0df056e179a016741bd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/components/automations/AutomationsPage.tsx",
+      "bytes": 14136,
+      "sha256": "553998cd03a875f477d1c2d05d798c1f02431967ba3010f7121eab7c50219c12"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/components/welcome-home-projection.ts",
+      "bytes": 3182,
+      "sha256": "a9f1c53fc5535862936d9a588d0f1f505e67c2dcb1913415aea7cd4510c512a7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/hooks/useAutomationOverview.ts",
+      "bytes": 2323,
+      "sha256": "f184ee26db6b38cac58fa60a9f24d21f615e786fa6ee06c93c9c19135a1f07ff"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/locales/en.ts",
+      "bytes": 209459,
+      "sha256": "679e9f04ba80e25f0e8c7d44b78d775763e396f1a6bbc54444e01443281a121b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/locales/index.ts",
+      "bytes": 131656,
+      "sha256": "877d5e09b79739e6969bbd28c35cc6cac7e41fd8c896fd1ec90123ed89d79a4a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/renderer/src/locales/zh.ts",
+      "bytes": 204134,
+      "sha256": "de27d331bc575cb94b9a43bc7cabb3df20e5e9d25173f1ac1357096fd517ef76"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/shared/automation-config-ipc-contract.ts",
+      "bytes": 1696,
+      "sha256": "b29aaadd5c8d587083d481e28687398e3cf98797cfcce38477cb8beadeccff92"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/main/automation-config-contract.test.ts",
+      "bytes": 3881,
+      "sha256": "f6cd77a25e27a358e52b26f2494fc601b25f0336ffa293f3164b66937528a2f9"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/main/automation-config-main-controls.test.ts",
+      "bytes": 14581,
+      "sha256": "d1de66ec4f9c22ca9871fc1f2f76b7d7e64580f2345c07c7e9a6991aaef805b3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/main/automation-config-persistence.test.ts",
+      "bytes": 3844,
+      "sha256": "7311fa559576aef9abb70f13e449a759e8a1ea040778fb388173140adc906e5c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/main/ipc-schema-coverage.test.ts",
+      "bytes": 4895,
+      "sha256": "61832c3768274600e505b2f84089c1ed540b264c26d73c56f3ce1a35c6494fa8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/main/preload-contract.test.ts",
+      "bytes": 56291,
+      "sha256": "3c6c7076f70c4747530de80993811f560b305fefcbdabff4e4503210d3991e2f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/automation-config-consistency.test.tsx",
+      "bytes": 7949,
+      "sha256": "971dee91f9963873186e5d7e2ceaa980fd529c326eec1c77aa2a55bd47a8d382"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/automations-navigation.test.tsx",
+      "bytes": 10050,
+      "sha256": "fb5241f1afa0b86eec60e39e991328b3936073a45faf9203581c148c65239ba7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/desktop-settings-loops.test.tsx",
+      "bytes": 21645,
+      "sha256": "b03dfd91d34afee9f244302e5cd8229996b22005f183b0616d4e9efe91229d52"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/kimi-k3-d9-automation-contract.test.tsx",
+      "bytes": 5954,
+      "sha256": "24d31ea8c30e83f678b179a85aeb70a2c83bca4f943f815f29dbf2c621635cf5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/welcome-home-projection.test.ts",
+      "bytes": 5503,
+      "sha256": "36c250f48f909aa77369c0c06135ec643d414fd6f12df87039645c1962be492f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/desktop/tests/renderer/welcome-home-source-contract.test.ts",
+      "bytes": 3066,
+      "sha256": "1c4086582c6e6eb7232765a0292cb161960d56d78fa6ec7b0d42d11cf222b137"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/src/ai/providers/normalize.ts",
+      "bytes": 7444,
+      "sha256": "d71788416f6c6ddbd11863c6a24b57a241d73c39205cee7a1aaee25a71bc4f85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/src/commands/login.ts",
+      "bytes": 16931,
+      "sha256": "7880e2c57aff6c912b3c3ee37d6a957d323cc6c54897fff49961a240e8d61732"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/src/types.ts",
+      "bytes": 10781,
+      "sha256": "85bb74a829c9c62f4dccc3ec0e56c8cf60a34c708ace54ec633fe88ad6479acb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-freeze-r1/src/utils/config.ts",
+      "bytes": 4760,
+      "sha256": "d19a76cdffb8f66927db38efd871c8ed03b56c858d889cec4f9643a6632b5417"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/code-review-wording-correction-r1.json",
+      "bytes": 423,
+      "sha256": "473823e87efa9fc6329d44629cf165d0df4583d332130207fb103e2541351e8b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/contract-driver-correction-r1.json",
+      "bytes": 318,
+      "sha256": "45860f841928f720d08b15d251e9ea99a057ce703661ea1074e58e80d68b853f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/design-r1.md",
+      "bytes": 7892,
+      "sha256": "c779ae522ce5933f1a9472aad700365061d4a6a69d6ceac46697d37b76ab0b2c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/desktop-settings-loops.test.tsx.patch",
+      "bytes": 1480,
+      "sha256": "9c4356b0e6d121e3e623503e057c84b5ae2900decd6c84299bfe325ef75fce03"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/final-owned-process-audit-r1.json",
+      "bytes": 4820,
+      "sha256": "68992e904f69f9c04018888013370294a75d6e3c5216dfde32a42a5cc74aa9e8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/format-successor-owned-audit-r1.json",
+      "bytes": 5041,
+      "sha256": "576b66e26886888b219f6e61a5d93a25bd2dc2304bc8e7cf981b4741680e5d7f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/format-successor-r1/desktop/renderer/src/components/automations/AutomationsPage.tsx",
+      "bytes": 14135,
+      "sha256": "d01d7e4a401816b7624868a385e6c98d0c584ea9fea1529f8d0650d70b06b0a5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/formatting-equality-r1.json",
+      "bytes": 321,
+      "sha256": "f95d58ff7e24cc237837d50d68891ebf5a04431e8597fea20c2a995bc5e8f05e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/formatting-equality-r1.mjs",
+      "bytes": 970,
+      "sha256": "4dcfe2da5a4ffab8f282bcfb13f042f858f58ee9b47315cab02c5f6ab7bd79c6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/kimi-k3-d9-automation-contract.test.tsx.patch",
+      "bytes": 758,
+      "sha256": "abd8c3ed6f6d404dc5a9a05bb65a4bdbe10f4ed1c7afdf27360f2e64a6cfb429"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/make-native-automations-probe.mjs",
+      "bytes": 7812,
+      "sha256": "729aabf8d280cae7a3bb9016f24d714af1681ffbb0b6e9f8e554cb4f3d74ca7a"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-cleanup-r1.json",
+      "bytes": 207,
+      "sha256": "0474d1b50485b7d032e7ea0163b5e52d1c05f06698689b3368d85e8edbca52fa"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-r1-pid.json",
+      "bytes": 108,
+      "sha256": "07f307f69ffb792131592f0350461cf1021c4c2680365db069ffd12d04bb45f0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-r1-process.json",
+      "bytes": 9834,
+      "sha256": "9547ca7a59121503b85cfd2937f928964f5b61530afda111674cbc7005036fa3"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-r1-request.json",
+      "bytes": 3411,
+      "sha256": "ec7ca570b0e4d3caf2d518c5f21b284620ac4a85a038540a24bcb64a33623cf4"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-r1.json",
+      "bytes": 5165,
+      "sha256": "2a478e6f19c28666282f59adc91e197886ccb7e45e6d58d72b3d1527a1ff40ed"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-r1.log",
+      "bytes": 3600,
+      "sha256": "a27f0329e8187737a4afef9d86149b9b70d4d4223861063171de17dabfd618cc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-script-r1.json",
+      "bytes": 2485,
+      "sha256": "822e060f494b071dd44d623257d8bbce89449e2810b845c52493f0f1a8d4cfaf"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/native-automations-script-r1.mjs",
+      "bytes": 8186,
+      "sha256": "b53419be45bcc9a3822d38ebbc3b1171bea1e8b2882c7d255da76db3ec8877c2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/old-source-contract-baseline-proof-r1.json",
+      "bytes": 505,
+      "sha256": "8fa914cd8af0fc94c1bb0272b393d0e7a07e2a858c6f0bb19c116eee0f2ecc7d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/old-test-fix-actual-apply-r2.json",
+      "bytes": 2746,
+      "sha256": "6cc0b8b6096b0210c949e8d0070587f2b6475d8d19b10287dcb6756ade9dd346"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/old-test-fix-candidates-r1.json",
+      "bytes": 2440,
+      "sha256": "492ddaeb4907d686f9d5d72d3be2d778e2a8b9658e6454a2faf0dcee9d7e1248"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/old-test-fix-candidates-r2.json",
+      "bytes": 2560,
+      "sha256": "92ca4667d3cfdc49e67cd037b0bba53c0a01366fbf7a3481f271ba47059944de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/electron/automation-overview.ts",
+      "bytes": 14569,
+      "sha256": "1b8295316ba92389c53b683d9a393ca49325e8d7679ef9a98bf4c4eb9994ada6"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/electron/desktop-services.ts",
+      "bytes": 429815,
+      "sha256": "d144a714bedcc49eec83b43c15f19b64ce4ef5e1fbfc4609e7bea7b35d26f24c"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/electron/ipc.ts",
+      "bytes": 106808,
+      "sha256": "c1c2c38f96304691e0df3c3458fa321ff443a60fa492d5ab06bed55469f9286b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/electron/main.ts",
+      "bytes": 95048,
+      "sha256": "0b98bdb3ccfe1a5cd8bf3109ebce1dd331f124c12a3766dd221eb2a9cffd6343"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/electron/preload-api.ts",
+      "bytes": 121920,
+      "sha256": "7dd3f1bb37bdddd7467d87f2a53ac862885a2b8fb1a654d67f046e7b2724e44b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/electron/preload.cjs",
+      "bytes": 40711,
+      "sha256": "2e794ceba4991044a0a315879a55042a83b3f9413802996aab43042c69380f55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/renderer/src/api/bridge.ts",
+      "bytes": 56624,
+      "sha256": "7a5c05b1b8a66511e2ba0d093fd3b3f0da9475e0bb37c7921fe2f67fc722aadc"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/renderer/src/api/types.ts",
+      "bytes": 12454,
+      "sha256": "83f4c45ac1690326b71748c74e896708b929346082cb9c2314e1277f37e92a3d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/renderer/src/components/WelcomePage.tsx",
+      "bytes": 21709,
+      "sha256": "af5e58983a83a486a28fcd790744e8ade9c096d3907fc0df056e179a016741bd"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/renderer/src/components/automations/AutomationsPage.tsx",
+      "bytes": 14277,
+      "sha256": "0a054a806e133ef0d5c77814d6b59cc4afeb4660778acd38819379affb42b2e8"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/tests/main/automation-overview.test.ts",
+      "bytes": 18596,
+      "sha256": "bdfafe3510d1ef2028efb6e6e619e4bdcef9c0949887bc91ea8852e3cda0f3a0"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/tests/renderer/automations-navigation.test.tsx",
+      "bytes": 9867,
+      "sha256": "001408288d3a871ed0f97a7cbc4fecacebf69dd42da5a819eb3f7c9a3d26c118"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/tests/renderer/desktop-settings-loops.test.tsx",
+      "bytes": 21597,
+      "sha256": "dcdf98fee7dd828e93a637822d561cd9e2d2e82ab129338934303333ab96cbd2"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/desktop/tests/renderer/welcome-page-home.test.tsx",
+      "bytes": 10818,
+      "sha256": "47dd62b1fdee4fc24a816c759df6ff0c445bc06a6d97bc53772fd875e96f76e5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/ai/permissions/workspace.ts",
+      "bytes": 1837,
+      "sha256": "ebe66cb508811b91deea30f9067324003ff91619e7f0541411a932190557162d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/ai/providers/normalize.ts",
+      "bytes": 7444,
+      "sha256": "d71788416f6c6ddbd11863c6a24b57a241d73c39205cee7a1aaee25a71bc4f85"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/ai/tools/bash.ts",
+      "bytes": 11812,
+      "sha256": "6da4f08605b7c8dc8446e3a9b120fb16edcbe7d079b6980593e86d6c80371654"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/ai/tools/write.ts",
+      "bytes": 3629,
+      "sha256": "475333681e66cf5370e08d8277e4e1941225c56d25090909bea06961f4ce7545"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/commands/chat.ts",
+      "bytes": 229543,
+      "sha256": "7a351d32ca34c0c1b3ecc6b971030d03b80f7be458fa7e479b33673be20bf333"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/commands/config.ts",
+      "bytes": 14621,
+      "sha256": "f833b33f4fa6e5d29af8d9ea8d178b4ff058057450e5fa17ef883a22274d8e7b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/commands/login.ts",
+      "bytes": 16931,
+      "sha256": "7880e2c57aff6c912b3c3ee37d6a957d323cc6c54897fff49961a240e8d61732"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/commands/yzj.ts",
+      "bytes": 31792,
+      "sha256": "6f212c2138769c69585090ffc2347c8e03f0647e2e029c0b3c00c3e8205de655"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/types.ts",
+      "bytes": 10781,
+      "sha256": "85bb74a829c9c62f4dccc3ec0e56c8cf60a34c708ace54ec633fe88ad6479acb"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/preflight-r1/src/utils/config.ts",
+      "bytes": 4061,
+      "sha256": "2d32ab1731ad3d24184fcb2c905c7720c4a11a323eeb3c1e7b2c9fca72dee303"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/pure-type-actual-apply-r1.json",
+      "bytes": 741,
+      "sha256": "c5327a09a54fb14569472c02e86e50520b00cd69fdc045baaa1c9a92eaaf530b"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/pure-type-candidate-r1/welcome-home-projection.test.ts",
+      "bytes": 5503,
+      "sha256": "36c250f48f909aa77369c0c06135ec643d414fd6f12df87039645c1962be492f"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/pure-type-candidate-r1.json",
+      "bytes": 613,
+      "sha256": "9329661b0c465bc7e9526e6a34b4ee1b02d972d4c049f7e92a6dc2cbce7f203e"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/pure-type-js-equality-r1.json",
+      "bytes": 210,
+      "sha256": "f40954ed3193fbae10b13791d2020ef1f4afb2c207cd470e1ab441953ba7f358"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/pure-type-js-equality-r1.mjs",
+      "bytes": 828,
+      "sha256": "4c9359b401a78222841b924ea94df18d917ffb8302152ddf67eba0cbafa30b48"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/run.py",
+      "bytes": 2107,
+      "sha256": "367a767227f319b28780b207cae7d61f749997584bf579b29ae49a7868f042de"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/source-census-r1.json",
+      "bytes": 10876,
+      "sha256": "797deda1ad2e6c21737a70dcbe27048529d5d896a061d43c9c0666cd4ef43a55"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/strict-base.mjs",
+      "bytes": 4044,
+      "sha256": "3204ac257d6b1b1bfa6615704048480456469513e104aebc3e8eeff463e5df58"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/strict.mjs",
+      "bytes": 4537,
+      "sha256": "fd3030c5bcf375590f89dc7e0fb182c7ffdaaae42fefd490371a8a04fc495967"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r1/desktop/tests/renderer/automations-navigation.test.tsx",
+      "bytes": 10050,
+      "sha256": "fb5241f1afa0b86eec60e39e991328b3936073a45faf9203581c148c65239ba7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r1/desktop/tests/renderer/desktop-settings-loops.test.tsx",
+      "bytes": 21645,
+      "sha256": "b03dfd91d34afee9f244302e5cd8229996b22005f183b0616d4e9efe91229d52"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r1/desktop/tests/renderer/kimi-k3-d9-automation-contract.test.tsx",
+      "bytes": 5954,
+      "sha256": "044f15f4841d595b4484bbd85668cb12663faf8c17689c45f3c28bbb4ed65d4d"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r1/desktop/tests/renderer/welcome-home-source-contract.test.ts",
+      "bytes": 3066,
+      "sha256": "1c4086582c6e6eb7232765a0292cb161960d56d78fa6ec7b0d42d11cf222b137"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r2/desktop/tests/renderer/automations-navigation.test.tsx",
+      "bytes": 10050,
+      "sha256": "fb5241f1afa0b86eec60e39e991328b3936073a45faf9203581c148c65239ba7"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r2/desktop/tests/renderer/desktop-settings-loops.test.tsx",
+      "bytes": 21645,
+      "sha256": "b03dfd91d34afee9f244302e5cd8229996b22005f183b0616d4e9efe91229d52"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r2/desktop/tests/renderer/kimi-k3-d9-automation-contract.test.tsx",
+      "bytes": 5954,
+      "sha256": "24d31ea8c30e83f678b179a85aeb70a2c83bca4f943f815f29dbf2c621635cf5"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-fix-candidates-r2/desktop/tests/renderer/welcome-home-source-contract.test.ts",
+      "bytes": 3066,
+      "sha256": "1c4086582c6e6eb7232765a0292cb161960d56d78fa6ec7b0d42d11cf222b137"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/test-lint.mjs",
+      "bytes": 1023,
+      "sha256": "66df31dcb0c0f808d80c85bf78f91fee882c46dd0888135b18442035b18035fe"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/automations-config3-20261012-kk-r1/welcome-home-source-contract.test.ts.patch",
+      "bytes": 663,
+      "sha256": "0cc5232eeb73efe88c9c1469d39c79efe29829e1e481ebe2d3ad5a086af892ec"
+    },
+    {
+      "path": ".artifacts/unfinished-closure-20261001/parent-complete-acceptance-queue-automation-config-20261012-kk-r1.json",
+      "bytes": 54334,
+      "sha256": "4f74eb39cdc4a3a34e9ad02035fe53ca5a150ce39bf6b496c5706047ea97c100"
+    }
+  ]
+}

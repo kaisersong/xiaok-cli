@@ -1,4 +1,7 @@
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { resolveSemanticSummaryAttempt } from '../../runtime/sol-pi/semantic-summary-attempt.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import OpenAI from 'openai';
 import type {
   ModelAdapter,
@@ -524,6 +527,13 @@ export class OpenAIAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+    if (disclosure !== undefined) {
+      assertProviderDisclosureActive(disclosure);
+      const disclosureSignal = getProviderDisclosureSignal(disclosure);
+      options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
+    }
+    try {
     assertKimiTransportAllowed(this.harnessContext.identity);
     const profileId = this.getOwnedHarnessProfileId();
     const strictProfile = profileId === 'kimi-k3-coding-openai'
@@ -619,6 +629,7 @@ export class OpenAIAdapter implements ModelAdapter {
         }
         return;
       } catch (error) {
+        if (disclosure !== undefined) assertProviderDisclosureActive(disclosure);
         clearTimeout(timer);
         const terminalError = options?.signal?.aborted
           ? (options.signal.reason ?? error)
@@ -626,6 +637,7 @@ export class OpenAIAdapter implements ModelAdapter {
         // 已产出 chunk 后重试会重复输出，必须放弃重试
         if (
           options?.signal?.aborted
+          || options?.semanticSummaryAttempt !== undefined
           || emittedAny
           || !isRetryableError(error)
           || attempt >= MAX_RETRIES
@@ -671,17 +683,21 @@ export class OpenAIAdapter implements ModelAdapter {
         clearTimeout(timer);
       }
     }
+    } finally { if (disclosure !== undefined) disposeProviderDisclosureContext(disclosure); }
   }
 
-  private async *streamOnce(
-    messages: Message[],
-    tools: ToolDefinition[],
-    systemPrompt: string,
-    options?: StreamOptions,
-    signal?: AbortSignal,
-    attemptState?: StreamAttemptState,
-    authorizeDispatch?: () => void,
-  ): AsyncIterable<StreamChunk> {
+  /** Host request planning only. Strict signed transcripts have no preview path. */
+  getObservationRequestPreview(
+    messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions,
+  ): { serializedBody: string; destination: string } | undefined {
+    if (this.harnessContext.profile.id !== 'generic-openai' || this.harnessContext.identity.protocol !== 'openai_legacy') return undefined;
+    return { serializedBody: JSON.stringify(this.buildChatRequest(messages, tools, systemPrompt, options)),
+      destination: `${this.client.baseURL.replace(/\/+$/, '')}/chat/completions` };
+  }
+
+  private buildChatRequest(
+    messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions,
+  ): OpenAI.ChatCompletionCreateParamsStreaming {
     const normalizeToolSchema = this.harnessContext.profile.normalizeToolSchema;
     const shouldNormalizeToolSchemas = (
       this.harnessContext.flags.normalizeToolSchema
@@ -889,6 +905,16 @@ export class OpenAIAdapter implements ModelAdapter {
       stream: true,
       stream_options: { include_usage: true },
     };
+    if (options?.semanticSummaryOutputTokens !== undefined) {
+      const maximum = options.semanticSummaryOutputTokens;
+      if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 8192 || tools.length
+        || this.harnessContext.profile.id !== 'generic-openai'
+        || this.harnessContext.identity.wireModel !== 'deepseek-flash'
+        || !['https://api.deepseek.com', 'https://api.deepseek.com/v1'].includes(this.client.baseURL.replace(/\/+$/, ''))) {
+        throw new Error('SEMANTIC_SUMMARY_OUTPUT_LIMIT_INVALID');
+      }
+      request.max_tokens = maximum;
+    }
 
     if (options?.maxOutputTokens !== undefined) {
       const official = new URL(this.harnessContext.identity.canonicalBaseUrl ?? 'https://api.openai.com/v1').hostname === 'api.openai.com';
@@ -920,11 +946,34 @@ export class OpenAIAdapter implements ModelAdapter {
       Object.assign(request, { reasoning_effort: selectedEffort } satisfies ReasoningEffortRequestExtension);
     }
 
+    return request;
+  }
+
+  private async *streamOnce(
+    messages: Message[],
+    tools: ToolDefinition[],
+    systemPrompt: string,
+    options?: StreamOptions,
+    signal?: AbortSignal,
+    attemptState?: StreamAttemptState,
+    authorizeDispatch?: () => void,
+  ): AsyncIterable<StreamChunk> {
+    const request = this.buildChatRequest(messages, tools, systemPrompt, options);
+
     const strictKimiK3 = this.harnessContext.profile.id !== 'generic-openai';
+    const semantic = options?.semanticSummaryAttempt === undefined ? undefined : resolveSemanticSummaryAttempt(options.semanticSummaryAttempt);
+    if ((options?.semanticSummaryOutputTokens !== undefined && !semantic)
+      || semantic && (strictKimiK3 || request.max_tokens !== semantic.maxOutputTokens || tools.length)) {
+      throw new Error('SEMANTIC_SUMMARY_ATTEMPT_REQUIRED');
+    }
+    const transport = semantic?.fetch ?? globalThis.fetch.bind(globalThis);
+    const guardedFetch = options?.providerDisclosure ? createProviderDisclosureFetch(options.providerDisclosure, transport) : transport;
+    const client = semantic ? this.client.withOptions({ fetch: guardedFetch, maxRetries: 0 })
+      : options?.providerDisclosure ? this.client.withOptions({ fetch: guardedFetch }) : this.client;
     authorizeDispatch?.();
     const stream = await runProviderOperation(
       strictKimiK3,
-      () => this.client.chat.completions.create(request, { signal }),
+      () => client.chat.completions.create(request, { signal }),
     );
 
     const toolBuffers = new Map<number, BufferedToolCall>();

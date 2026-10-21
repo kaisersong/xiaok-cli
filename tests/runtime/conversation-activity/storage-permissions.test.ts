@@ -136,7 +136,7 @@ it.skipIf(process.platform === 'win32')('real owner creates private files under 
     client = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } }, {
       timeoutMs: 5000,
       entryPath: join(process.cwd(), '.test-dist/src/runtime/conversation-activity/owner-entry.js'),
-      spawn: ((executable, args, options) => spawn(executable, ['--input-type=module', '-e', `process.umask(0o277); process.argv = [process.execPath, ${JSON.stringify(args![0])}, ${JSON.stringify(args![1])}]; await import(${JSON.stringify(pathToFileURL(args![0]).href)});`], options)) as typeof spawn,
+      spawn: ((executable, args, options) => spawn(executable, ['--input-type=module', '-e', `process.umask(0o277); process.argv = [process.execPath, ${JSON.stringify(args![0])}, ${JSON.stringify(args![1])}]; await import(${JSON.stringify(pathToFileURL(args![0]).href)});`], options)),
     });
     pid = (await client.request<{ pid: number }>('status')).pid;
     const check = (dir: string) => {

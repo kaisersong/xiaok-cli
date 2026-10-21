@@ -1,3 +1,4 @@
+import { measureProviderStream } from '../../runtime/trace/observation-metrics.js';
 import type { Message, ModelAdapter } from '../../types.js';
 import {
   computeEphemeralProviderTranscriptDigest,
@@ -114,7 +115,7 @@ function streamOwnedProviderConversation(
     ) {
       throw new Error('KIMI_K3_PROFILE_CAPABILITY_REQUIRED');
     }
-    return input.options === undefined
+    return measureProviderStream({ messages: input.messages, surface: surfaceKind }, () => input.options === undefined
       ? input.adapter.stream(
           input.messages,
           input.tools,
@@ -125,7 +126,7 @@ function streamOwnedProviderConversation(
           input.tools,
           input.systemPrompt,
           input.options,
-        );
+        ));
   }
   const providerConversationAuthorization =
     issueTaskLocalProviderConversationAuthorization({
@@ -134,7 +135,7 @@ function streamOwnedProviderConversation(
       invocationId: input.invocationId,
       messages: input.messages,
     });
-  return input.adapter.stream(
+  return measureProviderStream({ messages: input.messages, surface: surfaceKind }, () => input.adapter.stream(
     input.messages,
     input.tools,
     input.systemPrompt,
@@ -142,7 +143,7 @@ function streamOwnedProviderConversation(
       ...input.options,
       providerConversationAuthorization,
     },
-  );
+  ));
 }
 
 function readClaimedHarnessProfileId(

@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { validateToolInput } from '../../../src/ai/tools/validate-input.js';
 
 describe('validateToolInput', () => {
+  it.each([
+    [{ type: 'object', properties: { scope: { enum: ['project', 'global'] } } }, { scope: 'x' }],
+    [{ type: 'object', properties: { entries: { type: 'array', items: { type: 'integer', minimum: 1 } } } }, { entries: [0] }],
+    [{ type: 'object', properties: { nested: { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string' } } } } }, { nested: { id: 'ok', bypass: true } }],
+    [{ type: 'object', properties: { value: { type: 'number' } } }, { value: NaN }],
+  ])('enforces complete nested constraints %#', (schema, input) => {
+    expect(validateToolInput(schema, input).valid).toBe(false);
+  });
   it('passes when all required fields are present', () => {
     const result = validateToolInput(
       { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] },

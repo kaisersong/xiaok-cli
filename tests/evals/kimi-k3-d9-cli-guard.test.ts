@@ -28,7 +28,12 @@ async function loadModule(): Promise<any> {
   return import(pathToFileURL(guardPath).href);
 }
 
-function runGuarded(entry: string, closureRoot: string, allowedRealpaths: string[]) {
+function runGuarded(
+  entry: string,
+  closureRoot: string,
+  allowedRealpaths: string[],
+  extraEnv: Record<string, string> = {},
+) {
   return spawnSync(process.execPath, [
     '--no-global-search-paths',
     '--import',
@@ -42,6 +47,7 @@ function runGuarded(entry: string, closureRoot: string, allowedRealpaths: string
         closureRoot,
         allowedRealpaths,
       }),
+      ...extraEnv,
     },
     encoding: 'utf8',
   });
@@ -92,6 +98,23 @@ describe('Kimi K3 D9 synchronous runtime guard', () => {
     expect(result.status).not.toBe(0);
     expect(`${result.stderr}${result.stdout}`).toContain('KIMI_D9_GUARD_RESOLUTION_ESCAPE');
     expect(existsSync(sideEffect)).toBe(false);
+  });
+
+  it('redirects the guarded process account home to its isolated evaluation home', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kimi-d9-guard-account-'));
+    roots.push(root);
+    const closure = join(root, 'closure');
+    const accountHome = join(root, 'account');
+    mkdirSync(closure);
+    mkdirSync(accountHome);
+    const entry = join(closure, 'entry.mjs');
+    writeFileSync(entry, "import {userInfo} from 'node:os';process.stdout.write(String(userInfo().homedir));\n");
+
+    const result = runGuarded(entry, closure, [entry], {
+      XIAOK_TEST_ACCOUNT_HOME: accountHome,
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(accountHome);
   });
 
   it('detects guard bytes and mode drift in the digest used by every launch', async () => {

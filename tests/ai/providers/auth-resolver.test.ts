@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config } from '../../../src/types.js';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../../src/types.js';
 import {
   listCandidateApiKeys,
   resolveProviderApiKey,
@@ -20,6 +21,7 @@ function createConfig(providerId: string, apiKey?: string): Config {
     },
     models: {},
     defaultMode: 'interactive',
+    intentBoundary: { ...DEFAULT_INTENT_BOUNDARY_CONFIG },
     channels: {},
   };
 }

@@ -144,6 +144,8 @@ describe('Kimi K3 D9 CLI black-box product contract', () => {
     ]);
     expect(launch.cwd).toBe('/private/tmp/d9/arm/workspace');
     expect(launch.env.HOME).not.toBe(launch.env.XIAOK_CONFIG_DIR);
+    expect(launch.env.USERPROFILE).toBe(launch.env.HOME);
+    expect(launch.env.XIAOK_TEST_ACCOUNT_HOME).toBe(launch.env.HOME);
     expect(launch.env.NODE_PATH).toBe('');
     expect(launch.env.NODE_OPTIONS).toBe('');
     expect(launch.env.XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE).toBe('0');

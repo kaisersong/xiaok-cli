@@ -1,3 +1,4 @@
+import type { MobileProjectSummary } from '../../electron/mobile-snapshot.js';
 import { describe, expect, it } from 'vitest';
 import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
 import {
@@ -75,7 +76,7 @@ describe('mobile snapshot projection', () => {
         autoRunApproved: true,
         createdAt: 1,
         updatedAt: 1,
-      }],
+      }] as Parameters<typeof buildMobileSnapshotFromSources>[0]['userLoopTemplates'],
       loopRunsByLoopId: new Map([[
         'loop-daily',
         [{
@@ -125,7 +126,7 @@ describe('mobile snapshot projection', () => {
         messageCount: 1,
       }),
     ]));
-    expect(snapshot.projects.map(project => project.name)).toContain('Ship mobile pairing');
+    expect(snapshot.projects.map(project => (project as MobileProjectSummary).name)).toContain('Ship mobile pairing');
     expect(snapshot.approvals).toEqual([expect.objectContaining({
       id: 'task-waiting:q-approve',
       title: 'Allow the desktop task to continue?',
@@ -393,7 +394,7 @@ describe('mobile snapshot projection', () => {
   });
 });
 
-function taskSnapshot(input: Partial<TaskSnapshot> & Pick<TaskSnapshot, 'taskId' | 'status' | 'prompt'>): TaskSnapshot {
+function taskSnapshot(input: Omit<Partial<TaskSnapshot>, 'events'> & Pick<TaskSnapshot, 'taskId' | 'status' | 'prompt'> & { events?: (TaskSnapshot['events'][number] & { ts?: number })[] }): TaskSnapshot {
   return {
     sessionId: `${input.taskId}-session`,
     materials: [],

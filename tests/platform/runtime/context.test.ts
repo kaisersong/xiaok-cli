@@ -168,6 +168,26 @@ describe('platform runtime context', () => {
     await context.dispose();
   });
 
+  it('retains actual physical cleanup through the context dispose wrapper', async () => {
+    const context = await createPlatformRuntimeContext({ cwd: process.cwd(), builtinCommands: ['chat'], reminderMode: 'local' });
+    let rejectExecution!: (error: Error) => void;
+    const execution = new Promise<void>((_resolve, reject) => { rejectExecution = reject; });
+    const failure = new Error('wrapped original execution failed');
+    const runner = context.createBackgroundRunner(async () => { await execution; return 'late'; });
+    try {
+      await runner.start({ sessionId: 'wrapped-physical', source: 'chat', input: { agent: 'probe', prompt: 'run' } });
+      expect((await runner.dispose()).settled).toBe(false);
+      const physical = runner.waitForDisposedResources();
+      let settled = false;
+      void physical.then(() => { settled = true; }, () => { settled = true; });
+      await new Promise(setImmediate);
+      expect(settled).toBe(false);
+      rejectExecution(failure);
+      await expect(physical).rejects.toMatchObject({ errors: expect.arrayContaining([failure]) });
+      expect((await runner.dispose()).pendingJobs).toEqual([]);
+    } finally { rejectExecution(failure); await context.dispose(); }
+  });
+
   const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
 
   it.each(['factory', 'context'] as const)('cancels real background subagent execution when %s is disposed', async (owner) => {
@@ -210,25 +230,32 @@ describe('platform runtime context', () => {
     }] });
     const context = await createPlatformRuntimeContext({ cwd, builtinCommands: ['chat'], reminderMode: 'local' });
     const factory = createPlatformRegistryFactory({ platform: context, source: 'chat', sessionId: 'mutable',
-      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
+      adapter: () => ({ getModelName: () => 'probe', async *stream() {} }), buildSystemPrompt: async () => 'test',
     });
     const registry = factory.createRegistry(cwd);
     try {
       await context.mcpReady;
       const name = 'mcp__mutable__search';
       expect(registry.getToolDefinitions().map((tool) => tool.name)).toContain(name);
+      expect(context.capabilityRegistry.getDiscovery(name)).not.toHaveProperty('metadata');
+      expect(registry.searchToolDiscoveries('select:'+name)[0]).not.toHaveProperty('metadata');
+      expect(JSON.parse(await registry.executeTool('tool_search',{query:'select:'+name}))[0]).not.toHaveProperty('effect');
       expect(await registry.executeTool(name, { q: action })).toContain('fixture:');
       if (action === '__race__') {
         const fresh = 'mcp__mutable__fresh';
         await waitFor(() => expect(registry.getToolDefinitions().map((tool) => tool.name)).toContain(fresh));
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(context.mcpTools.map((tool) => tool.definition.name)).toContain(fresh);
+        expect(context.capabilityRegistry.getDiscovery(fresh)).not.toHaveProperty('metadata');
+        expect(registry.searchToolDiscoveries('select:'+fresh)[0]).not.toHaveProperty('metadata');
         expect(await registry.executeTool(fresh, { q: 'still current' })).toContain('fixture:still current');
         return;
       }
       await waitFor(() => {
         expect(context.mcpTools).toEqual([]);
         expect(context.capabilityRegistry.get(name)).toBeUndefined();
+        expect(context.capabilityRegistry.getDiscovery(name)).toBeUndefined();
+        expect(registry.searchToolDiscoveries('select:'+name)).toEqual([]);
         expect(registry.getToolDefinitions().map((tool) => tool.name)).not.toContain(name);
       });
       expect(await registry.executeTool(name, { q: 'stale' })).toContain('Error:');

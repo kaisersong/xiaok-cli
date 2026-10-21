@@ -1,0 +1,17 @@
+{
+  "records": [
+    {
+      "materialId": "mat_0001",
+      "taskId": "historical-task",
+      "originalName": "812a98ea-source.md",
+      "workspacePath": "<WORKSPACE>/historical-task/materials/mat_0001.md",
+      "mimeType": "text/markdown",
+      "sizeBytes": 28,
+      "sha256": "46160af2fb5b8e1aa72b962bcbf2d7e746eba1d7aa785c98dde18fc2d1851cb6",
+      "role": "customer_material",
+      "roleSource": "user",
+      "parseStatus": "pending",
+      "createdAt": 1
+    }
+  ]
+}

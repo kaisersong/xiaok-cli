@@ -139,6 +139,7 @@ describe('Automations navigation', () => {
   beforeEach(() => {
     apiMocks.getAutomationOverviewSnapshot.mockResolvedValue({
       generatedAt: 10_000,
+      sourceVersions: { loopStore: 0, timedActionStore: 0 },
       globalBackgroundAutoRunEnabled: true,
       totals: {
         loops: 3,
@@ -207,6 +208,7 @@ describe('Automations navigation', () => {
   it('routes built-in loop failures to diagnostics instead of a dead user-loop hash', async () => {
     apiMocks.getAutomationOverviewSnapshot.mockResolvedValueOnce({
       generatedAt: 10_000,
+      sourceVersions: { loopStore: 0, timedActionStore: 0 },
       globalBackgroundAutoRunEnabled: true,
       totals: { loops: 1, userLoops: 0, schedules: 0, activeSchedules: 0, diagnostics: 1, recentFailures: 1 },
       recentFailures: [{
@@ -229,6 +231,7 @@ describe('Automations navigation', () => {
   it('does not offer a dead schedule-detail link for inactive schedules', async () => {
     apiMocks.getAutomationOverviewSnapshot.mockResolvedValueOnce({
       generatedAt: 10_000,
+      sourceVersions: { loopStore: 0, timedActionStore: 0 },
       globalBackgroundAutoRunEnabled: true,
       totals: { loops: 0, userLoops: 0, schedules: 0, activeSchedules: 0, diagnostics: 1, recentFailures: 1 },
       recentFailures: [{

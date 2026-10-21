@@ -1,3 +1,4 @@
+import {withReservedTaskFixture} from '../support/loop-reserved-task-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -51,6 +52,7 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_success");
     const finishSuccess = vi.fn((input: { runId: string; evidenceIds: string[]; now: number; summary: string }) =>
       loopStore.finishLoopRunSuccess(input.runId, input.evidenceIds, input.now, input.summary)
     );
@@ -63,7 +65,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -108,6 +110,7 @@ describe('UserLoopTemplateRunner', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_missing_file', 'completed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_missing_file");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -116,7 +119,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -152,6 +155,7 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_evaluator_blocked");
     const finishSuccess = vi.fn((input: { runId: string; evidenceIds: string[]; now: number; summary: string }) =>
       loopStore.finishLoopRunSuccess(input.runId, input.evidenceIds, input.now, input.summary)
     );
@@ -171,7 +175,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -225,6 +229,7 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_command_verified");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -241,7 +246,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -275,6 +280,7 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_creates_dir");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-missing-dir', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -283,7 +289,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-missing-dir',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -308,6 +314,7 @@ describe('UserLoopTemplateRunner', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('should_not_start', 'completed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"should_not_start");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -316,7 +323,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -348,6 +355,7 @@ describe('UserLoopTemplateRunner', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_failed', 'failed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_failed");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -356,7 +364,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -391,6 +399,7 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask,
     };
+    withReservedTaskFixture(taskPort,"task_runaway");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -402,7 +411,7 @@ describe('UserLoopTemplateRunner', () => {
       sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -420,6 +429,7 @@ describe('UserLoopTemplateRunner', () => {
       recoverTask: vi.fn(async () => ({ snapshot: taskSnapshot('task_already_terminal', 'running') })),
       cancelTask,
     };
+    withReservedTaskFixture(taskPort,"task_already_terminal");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -431,14 +441,15 @@ describe('UserLoopTemplateRunner', () => {
       sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
     });
 
     expect(cancelTask).toHaveBeenCalled();
-    expect(result.status).toBe('failed');
+    expect(result.status).toBe('executing');
+    expect(loopStore.getLoopRun(run.id)?.status).toBe('running');
   });
 
   it('passes watchdogMs in createTask so host watchdog tolerates loop max poll', async () => {
@@ -451,6 +462,7 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_with_watchdog");
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -459,7 +471,7 @@ describe('UserLoopTemplateRunner', () => {
       now: () => now,
     });
 
-    await runner.runTemplateLoop({
+    await runner.runTemplateLoop({requestSource:'user',
       loopId: 'user-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -526,6 +538,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_tc_success', 'completed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_tc_success");
     const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -534,7 +547,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'tc-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -573,6 +586,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_tc_fail', 'failed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_tc_fail");
     const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -581,7 +595,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'tc-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -598,6 +612,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       recoverTask: vi.fn(),
       cancelTask: vi.fn(),
     };
+    withReservedTaskFixture(taskPort,"should_not_be_created");
     const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'scheduled' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -606,7 +621,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'tc-loop-1',
       runId: run.id,
       trigger: { kind: 'scheduled' },
@@ -637,6 +652,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_approved', 'completed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_approved");
     const run = expectStarted(loopStore.beginLoopRun('tc-loop-approved', { kind: 'scheduled' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -645,7 +661,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       now: () => now,
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'tc-loop-approved',
       runId: run.id,
       trigger: { kind: 'scheduled' },
@@ -691,6 +707,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_timeout");
     const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -702,7 +719,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       sleep: async () => { /* instant */ },
     });
 
-    const result = await runner.runTemplateLoop({
+    const result = await runner.runTemplateLoop({requestSource:'user',
       loopId: 'tc-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },
@@ -718,6 +735,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_persist_id', 'completed') }),
       cancelTask: vi.fn(async () => undefined),
     };
+    withReservedTaskFixture(taskPort,"task_persist_id");
     const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
@@ -726,7 +744,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       now: () => now,
     });
 
-    await runner.runTemplateLoop({
+    await runner.runTemplateLoop({requestSource:'user',
       loopId: 'tc-loop-1',
       runId: run.id,
       trigger: { kind: 'manual' },

@@ -87,7 +87,7 @@ describe('R1 actual Desktop factory MCP sibling cancellation', () => {
   it.each(['initial', 'refreshed'] as const)('M1 actual %s factory catalog reaches Chat root and a real managed child with separate per-call signals', async catalog => {
     const f = setup(); const registration = await f.services.registerMcpTools(); cleanup.push(() => registration.dispose());
     if (catalog === 'refreshed') await f.notifications.get('generic')!();
-    await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' });
+    await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }, undefined, 'user');
     let rootTurns = 0; let childTurns = 0; let childId = '';
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (messages, _defs, system) {
       yield { type: 'thinking', delta: '', reasoningProvenance: { captureVersion: 1, source: 'reasoning_content', fieldPresence: 'present' } };
@@ -120,7 +120,7 @@ describe('R1 actual Desktop factory MCP sibling cancellation', () => {
 
   it('M1/M3 actual root cancellation does not publish late tool success or consume another model request', async () => {
     const f = setup(); const registration = await f.services.registerMcpTools(); cleanup.push(() => registration.dispose());
-    await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }); const entered = barrier(); const held = barrier();
+    await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }, undefined, 'user'); const entered = barrier(); const held = barrier();
     f.setHandler(async () => { entered.release(); await held.wait; return textResult('LATE_MCP_SUCCESS'); });
     let modelCalls = 0;
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
@@ -143,7 +143,7 @@ describe('R1 actual Desktop factory MCP sibling cancellation', () => {
 
   it('M1/M4 real parent interrupts a running MCP child while its own sibling request succeeds on the shared connection', async () => {
     const f = setup(); const registration = await f.services.registerMcpTools(); cleanup.push(() => registration.dispose());
-    await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }); const entered = barrier(); const held = barrier();
+    await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }, undefined, 'user'); const entered = barrier(); const held = barrier();
     f.setHandler(async call => { if (call.arguments?.caller === 'child') { entered.release(); await held.wait; } else held.release(); return textResult('MCP_RESULT'); });
     let rootTurns = 0; let childTurns = 0; let childId = '';
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (messages, _defs, system) {

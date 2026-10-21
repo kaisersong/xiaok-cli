@@ -1,3 +1,5 @@
+import { type DelegatedObservationExecutionPlan } from '../../runtime/sol-pi/delegated-session-owner.js';
+import { type ObservationSessionOwner } from '../../runtime/sol-pi/observation-session-owner.js';
 import { type SubAgentProgressEvent } from './subagent-presentation.js';
 import type { CustomAgentDef } from './loader.js';
 import type { ModelAdapter, ToolExecutionContext } from '../../types.js';
@@ -6,7 +8,10 @@ import type { WorktreeAllocationRecord } from '../../platform/worktrees/manager.
 import type { WorktreeManager } from '../../platform/worktrees/manager.js';
 import { type ManagedAgentRunContext } from './multi-agent-coordinator.js';
 export interface ExecuteNamedSubAgentOptions {
+    observationExecutionPlan?: DelegatedObservationExecutionPlan;
     onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
+    onCompleted?: () => void;
+    onObservationOwnerReady?: (owner: ObservationSessionOwner) => void;
     taskDescription?: string;
     agentDef: CustomAgentDef;
     prompt: string;

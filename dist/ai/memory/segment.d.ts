@@ -8,8 +8,8 @@
  */
 export declare function rewriteAsarPath(filePath: string): string;
 /**
- * Resolve every dictionary to a path that is readable from JS, or null when
- * nodejieba is not installed.
+ * Resolve every dictionary to a native-compatible path, or null when
+ * nodejieba is not installed or cannot safely open that Windows path.
  */
 export declare function resolveJiebaDictPaths(): Record<string, string> | null;
 /**

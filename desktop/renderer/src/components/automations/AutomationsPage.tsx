@@ -1,4 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useAutomationOverview } from '../../hooks/useAutomationOverview';
+import { AUTOMATION_CONFIG_SCHEMA } from '../../../../shared/automation-config-ipc-contract';
+import {scheduledErrorMessage} from '../../lib/scheduled-timed-action-error';
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../../lib/loop-management-errors';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -8,7 +12,6 @@ import { LoopConstraintsTab } from './LoopConstraintsTab';
 import { DirectionAwareTabs, type DirectionAwareTab } from '../ui/direction-aware-tabs';
 import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
-import type { AutomationOverviewSnapshotView } from '../../api/types';
 import { automationFailureRoute } from '../welcome-home-projection';
 
 function formatRelativeTime(ts: number, t: Pick<import('../../locales').LocaleStrings, 'automationsRelativeJustNow' | 'automationsRelativeMinutesAgo' | 'automationsRelativeHoursAgo'>): string {
@@ -39,31 +42,15 @@ export function AutomationsPage() {
   const navigate = useNavigate();
   const { t } = useLocale();
   const activeTab = normalizeTab(tab);
-  const [globalBackgroundAutoRunEnabled, setGlobalBackgroundAutoRunEnabled] = useState(true);
+  const { snapshot: overviewSnapshot, readFailed, reading, refresh, beginMutation, commitFlag } = useAutomationOverview();
+  const globalBackgroundAutoRunEnabled = overviewSnapshot?.globalBackgroundAutoRunEnabled ?? null;
   const [savingGlobalAutoRun, setSavingGlobalAutoRun] = useState(false);
-  const [overviewSnapshot, setOverviewSnapshot] = useState<AutomationOverviewSnapshotView | null>(null);
-
+  const [mutationUnknown, setMutationUnknown] = useState(false);
+  const [loopActionError, setLoopActionError] = useState('');
+  const actionLife = useRef({ active: true, busy: false });
   useEffect(() => {
-    let cancelled = false;
-    api.getAutomationOverviewSnapshot()
-      .then(snapshot => {
-        if (cancelled) return;
-        setOverviewSnapshot(snapshot);
-        setGlobalBackgroundAutoRunEnabled(snapshot.globalBackgroundAutoRunEnabled !== false);
-      })
-      .catch(() => {
-        if (!cancelled) setOverviewSnapshot(emptyAutomationOverviewSnapshot(true));
-      });
-    api.getAutomationsConfig()
-      .then(snapshot => {
-        if (!cancelled) setGlobalBackgroundAutoRunEnabled(snapshot.globalBackgroundAutoRunEnabled !== false);
-      })
-      .catch(() => {
-        if (!cancelled) setGlobalBackgroundAutoRunEnabled(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+    const owner = { active: true, busy: false }; actionLife.current = owner;
+    return () => { owner.active = false; };
   }, []);
 
   const openTab = (nextTab: AutomationsTab) => {
@@ -71,22 +58,27 @@ export function AutomationsPage() {
   };
 
   const toggleGlobalAutoRun = async () => {
-    if (savingGlobalAutoRun) return;
-    const nextEnabled = !globalBackgroundAutoRunEnabled;
-    setSavingGlobalAutoRun(true);
+    const owner = actionLife.current;
+    if (!owner.active || owner.busy || globalBackgroundAutoRunEnabled === null) return;
+    owner.busy = true; setSavingGlobalAutoRun(true); beginMutation();
     try {
-      const snapshot = await api.setGlobalBackgroundAutoRun({ enabled: nextEnabled });
-      setGlobalBackgroundAutoRunEnabled(snapshot.globalBackgroundAutoRunEnabled !== false);
-      setOverviewSnapshot(current => current
-        ? { ...current, globalBackgroundAutoRunEnabled: snapshot.globalBackgroundAutoRunEnabled !== false }
-        : current);
+      const parsed = AUTOMATION_CONFIG_SCHEMA.safeParse(await api.setGlobalBackgroundAutoRun({ enabled: !globalBackgroundAutoRunEnabled }));
+      if (!owner.active || actionLife.current !== owner) return;
+      if (!parsed.success) throw Error('automation_config_operation_unknown');
+      commitFlag(parsed.data.globalBackgroundAutoRunEnabled); setMutationUnknown(false);
+    } catch {
+      if (owner.active && actionLife.current === owner) setMutationUnknown(true);
     } finally {
-      setSavingGlobalAutoRun(false);
+      owner.busy = false;
+      if (owner.active && actionLife.current === owner) setSavingGlobalAutoRun(false);
     }
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]" data-testid="automations-page">
+      {readFailed && <p role="alert" className="px-8 py-3 text-sm text-[var(--c-error)]">{t.automationsReadFailed}</p>}
+      {mutationUnknown && <p role="alert" className="px-8 py-3 text-sm text-[var(--c-error)]">{t.automationsMutationUnknown}</p>}
+      {loopActionError && <p role="alert" className="px-8 py-3 text-sm text-[var(--c-error)]">{loopActionError}</p>}
       <header className="border-b border-[var(--c-border)] px-8 py-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -110,13 +102,14 @@ export function AutomationsPage() {
             <section className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-[var(--c-border)] bg-[var(--c-bg-card)] px-4 py-3">
               <div>
                 <p className="text-sm font-medium text-[var(--c-text-primary)]">
-                  {globalBackgroundAutoRunEnabled ? t.automationsGlobalAutoRunEnabled : t.automationsGlobalAutoRunDisabled}
+                  {globalBackgroundAutoRunEnabled === null ? t.automationsStateUnknown : globalBackgroundAutoRunEnabled ? t.automationsGlobalAutoRunEnabled : t.automationsGlobalAutoRunDisabled}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)]">{t.automationsGlobalAutoRunDesc}</p>
               </div>
+              <button type="button" aria-busy={reading} onClick={() => refresh()} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm">{t.automationsReadRetry}</button>
               <button
                 type="button"
-                disabled={savingGlobalAutoRun}
+                disabled={savingGlobalAutoRun || globalBackgroundAutoRunEnabled === null}
                 onClick={toggleGlobalAutoRun}
                 className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-1.5 text-sm text-[var(--c-text-primary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -127,21 +120,21 @@ export function AutomationsPage() {
               <OverviewCard
                 icon={<Clock size={18} />}
                 title={t.automationsOverviewSchedulesCount}
-                value={overviewSnapshot?.totals.schedules ?? 0}
+                value={overviewSnapshot?.totals.schedules ?? null}
                 body={t.automationsSchedulesDesc}
                 onOpen={() => openTab('schedules')}
               />
               <OverviewCard
                 icon={<RefreshCw size={18} />}
                 title={t.automationsOverviewLoopsCount}
-                value={overviewSnapshot?.totals.loops ?? 0}
+                value={overviewSnapshot?.totals.loops ?? null}
                 body={t.automationsLoopsDesc}
                 onOpen={() => openTab('loops')}
               />
               <OverviewCard
                 icon={<AlertTriangle size={18} />}
                 title={t.automationsOverviewFailuresCount}
-                value={overviewSnapshot?.totals.recentFailures ?? 0}
+                value={overviewSnapshot?.totals.recentFailures ?? null}
                 body={t.automationsDiagnosticsDesc}
                 onOpen={() => {
                   document.getElementById('automations-recent-failures')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -183,11 +176,14 @@ export function AutomationsPage() {
                             onClick={async () => {
                               if (!confirm(t.automationsClearConfirm(item.title))) return;
                               try {
+                                setLoopActionError('');
                                 await api.clearLoopRunHistory(item.loopId!, ['failed', 'blocked']);
-                                const snapshot = await api.getAutomationOverviewSnapshot();
-                                setOverviewSnapshot(snapshot);
+                                refresh();
                               } catch (e) {
                                 console.error('[Automations] clear failures failed', e);
+                                if (loopManagementFailureKind(e)) {
+                                  setLoopActionError(loopManagementErrorMessage(e, t, t.loopOperationResultUnknown));
+                                }
                               }
                             }}
                             className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"
@@ -202,10 +198,9 @@ export function AutomationsPage() {
                               if (!confirm(t.automationsClearConfirm(item.title))) return;
                               try {
                                 await api.clearScheduledTaskRunHistory(item.actionId!, ['failed', 'failed_stale', 'pause', 'skip']);
-                                const snapshot = await api.getAutomationOverviewSnapshot();
-                                setOverviewSnapshot(snapshot);
+                                refresh();
                               } catch (e) {
-                                console.error('[Automations] clear schedule failures failed', e);
+                                setLoopActionError(scheduledErrorMessage(e,t));
                               }
                             }}
                             className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"
@@ -218,7 +213,7 @@ export function AutomationsPage() {
                   ))}
                 </div>
               ) : (
-                <p className="mt-2 text-xs leading-5 text-[var(--c-text-secondary)]">{t.automationsOverviewNoRecentFailures}</p>
+                overviewSnapshot && <p className="mt-2 text-xs leading-5 text-[var(--c-text-secondary)]">{t.automationsOverviewNoRecentFailures}</p>
               )}
             </section>
           </div>
@@ -261,7 +256,7 @@ function OverviewCard({
 }: {
   icon: ReactNode;
   title: string;
-  value: number;
+  value: number | null;
   body: string;
   onOpen: () => void;
 }) {
@@ -275,29 +270,9 @@ function OverviewCard({
         {icon}
         <span className="text-sm font-medium text-[var(--c-text-primary)]">{title}</span>
       </div>
-      <div className="text-2xl font-semibold text-[var(--c-text-primary)]">{value}</div>
+      <div className="text-2xl font-semibold text-[var(--c-text-primary)]">{value ?? '—'}</div>
       <p className="text-xs leading-5 text-[var(--c-text-secondary)]">{body}</p>
       <Activity size={14} className="mt-3 text-[var(--c-text-tertiary)]" />
     </button>
   );
-}
-
-function emptyAutomationOverviewSnapshot(globalBackgroundAutoRunEnabled: boolean): AutomationOverviewSnapshotView {
-  return {
-    generatedAt: Date.now(),
-    sourceVersions: {
-      loopStore: 0,
-      timedActionStore: 0,
-    },
-    globalBackgroundAutoRunEnabled,
-    totals: {
-      loops: 0,
-      userLoops: 0,
-      schedules: 0,
-      activeSchedules: 0,
-      diagnostics: 0,
-      recentFailures: 0,
-    },
-    recentFailures: [],
-  };
 }

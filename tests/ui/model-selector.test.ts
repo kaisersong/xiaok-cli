@@ -1,5 +1,6 @@
 import { OLD_MODEL_EFFORT_CONFIGS } from '../support/model-effort-compatibility.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../src/types.js';
 import { describe, expect, it } from 'vitest';
 import { buildModelOptions, selectModel } from '../../src/ui/model-selector.js';
 import { createTtyHarness } from '../support/tty.js';
@@ -38,6 +39,7 @@ const configFixture = {
     },
   },
   defaultMode: 'interactive' as const,
+  intentBoundary: { ...DEFAULT_INTENT_BOUNDARY_CONFIG },
   channels: {},
 };
 

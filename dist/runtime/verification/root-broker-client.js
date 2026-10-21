@@ -1,0 +1,173 @@
+import { parseProfileCaptureTransfer } from './profile-capture-transfer.js';
+import { createHash } from 'node:crypto';
+import { parseProfileSourceReview, profileSourceReviewBytes } from './profile-source-review.js';
+import { applicationBindingReviewBytes, parseApplicationBindingReview } from './application-binding-review.js';
+import { assertInstalledControllerLifetime } from './installed-controller-lifetime.js';
+import { parseArchiveOperationReview } from './archive-operation-review.js';
+import { hashVerificationTuple } from './protocol.js';
+import { parsePublicationOperationReview } from './publication-operation-review.js';
+import { parseOwnerEnrollmentReview } from './owner-enrollment-review.js';
+import { readFileSync, lstatSync } from 'node:fs';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { assertRootProtectedFile, assertRootProtectedExecutable } from './installed-identity.js';
+import { parseInstalledDeploymentManifest } from './deployment-manifest.js';
+import { parseDeploymentPackageInventory, verifyDeploymentPackage } from './deployment-package.js';
+import { canonicalVerificationJson } from './protocol.js';
+import { callControllerIpc } from './controller-ipc.js';
+import { readKernelContinuousNanoseconds } from './continuous-clock.js';
+const installedClients = new WeakMap();
+export function assertInstalledRootBrokerClient(client, lifetime) { assertInstalledControllerLifetime(lifetime); const known = installedClients.get(client); if (!known || known.manifest !== canonicalVerificationJson(lifetime.manifest))
+    throw Error('broker_client_identity'); known.current(); }
+/** Fixed protected-service -> root broker channel. Not available to ordinary P1
+ * identities, and never registered as a public model/renderer tool. */
+export function createInstalledRootBrokerClient() {
+    if (process.platform !== 'darwin')
+        throw Error('broker_client_platform');
+    const base = '/Library/Application Support/xiaok-verification', manifestPath = join(base, 'deployment.json');
+    assertRootProtectedFile(manifestPath);
+    if (lstatSync(manifestPath).size > 65536)
+        throw Error('broker_manifest');
+    const manifestBytes = readFileSync(manifestPath);
+    const manifest = parseInstalledDeploymentManifest(JSON.parse(manifestBytes.toString('utf8')));
+    if (process.getuid?.() !== manifest.serviceUid || process.geteuid?.() !== manifest.serviceUid)
+        throw Error('broker_service_identity');
+    const release = join(base, 'releases', manifest.packageHash), inventoryPath = join(base, 'releases', manifest.packageHash + '.json');
+    assertRootProtectedFile(inventoryPath);
+    if (lstatSync(inventoryPath).size > 8 * 1024 ** 2)
+        throw Error('broker_inventory');
+    const inventory = parseDeploymentPackageInventory(JSON.parse(readFileSync(inventoryPath, 'utf8')));
+    if (inventory.packageHash !== manifest.packageHash)
+        throw Error('broker_inventory');
+    verifyDeploymentPackage(release, inventory);
+    const node = join(release, 'bin/node'), transport = join(release, 'app/controller-transport.cjs'), clockHelper = join(release, 'bin/continuous-clock');
+    assertRootProtectedExecutable(node);
+    assertRootProtectedFile(transport);
+    assertRootProtectedExecutable(clockHelper);
+    const socketPath = join(base, 'broker.sock'), lifetime = new AbortController();
+    let clockDomain, lastLower = -1;
+    function current() { lifetime.signal.throwIfAborted(); assertRootProtectedFile(manifestPath); if (!readFileSync(manifestPath).equals(manifestBytes)) {
+        lifetime.abort();
+        throw Error('broker_manifest_changed');
+    } const socket = lstatSync(socketPath); if (!socket.isSocket() || socket.uid !== 0 || socket.nlink !== 1)
+        throw Error('broker_socket_identity'); }
+    function request(method, payload) { const bytes = Buffer.from(canonicalVerificationJson({ version: 1, method, payload })); if (bytes.length > 1024 ** 2)
+        throw Error('broker_request_budget'); return bytes; }
+    async function call(method, payload, signal, timeoutMs = 125000) { current(); const bytes = request(method, payload), active = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal; const response = await callControllerIpc(socketPath, bytes, { signal: active, timeoutMs }); current(); return JSON.parse(response.toString('utf8')); }
+    const sourceApprovals = new WeakMap();
+    const sourceCaptures = new WeakMap();
+    function sourceCapture(handle) { current(); const capture = sourceCaptures.get(handle); if (!capture)
+        throw Error('broker_source_capture_brand'); return capture; }
+    function sourceBytes(value, key, position, maximum) { const response = value; if (!response || Object.keys(response).sort().join(',') !== ['bytes', key].sort().join(',') || response[key] !== position || typeof response.bytes !== 'string')
+        throw Error('broker_source_page'); const bytes = Buffer.from(response.bytes, 'base64'); if (bytes.length > maximum || bytes.toString('base64') !== response.bytes)
+        throw Error('broker_source_page'); return bytes; }
+    const client = Object.freeze({
+        async authorizeProfileSources(input, signal) {
+            const requestSource = input.requestSource, raw = input.review;
+            if (requestSource !== 'user')
+                throw Error('profile_source_authorization_source');
+            const review = parseProfileSourceReview(raw), reviewHash = createHash('sha256').update(profileSourceReviewBytes(review)).digest('hex');
+            const fact = await call('sources.authorize', { requestSource, review }, signal), expected = { purpose: 'profile-source-custody', authorityId: review.authorityId, challengeId: review.challengeId, uid: review.principal.uid, auditSessionId: review.principal.auditSessionId, inventoryHash: review.inventoryHash, reviewHash };
+            if (canonicalVerificationJson(fact) !== canonicalVerificationJson(expected))
+                throw Error('broker_source_receipt');
+            const receipt = Object.freeze(expected);
+            sourceApprovals.set(receipt, review);
+            return receipt;
+        },
+        async captureProfileSources(receipt, signal) { const review = sourceApprovals.get(receipt); if (!review)
+            throw Error('broker_source_approval_brand'); sourceApprovals.delete(receipt); const value = await call('sources.capture', { challengeId: receipt.challengeId, reviewHash: receipt.reviewHash }, signal); if (!value || Object.keys(value).sort().join(',') !== 'capturedBytes,handle,inventoryHash,manifestBytes,manifestHash,reviewHash' || typeof value.handle !== 'string' || !/^[a-f0-9-]{36}$/.test(value.handle) || value.reviewHash !== receipt.reviewHash || value.inventoryHash !== receipt.inventoryHash || typeof value.manifestHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.manifestHash) || !Number.isSafeInteger(value.manifestBytes) || value.manifestBytes < 1 || value.manifestBytes > 128 * 1024 ** 2 || !Number.isSafeInteger(value.capturedBytes) || value.capturedBytes < 0 || value.capturedBytes > 128 * 1024 ** 2)
+            throw Error('broker_source_capture'); const handle = Object.freeze({}); sourceCaptures.set(handle, { handle: value.handle, review, manifestHash: value.manifestHash, manifestBytes: value.manifestBytes, capturedBytes: value.capturedBytes }); return handle; },
+        describeProfileCapture(handle) { const value = sourceCapture(handle); return Object.freeze({ review: value.review, manifestHash: value.manifestHash, manifestBytes: value.manifestBytes, capturedBytes: value.capturedBytes }); },
+        async readProfileManifest(handle, offset, length, signal) { const value = sourceCapture(handle); if (!Number.isSafeInteger(offset) || offset < 0 || offset > value.manifestBytes || !Number.isSafeInteger(length) || length < 1 || length > 256 * 1024)
+            throw Error('broker_source_range'); const bytes = sourceBytes(await call('sources.manifest', { handle: value.handle, offset, length }, signal), 'offset', offset, length); sourceCapture(handle); if (bytes.length !== Math.min(length, value.manifestBytes - offset))
+            throw Error('broker_source_page'); return bytes; },
+        async loadProfileCaptureManifest(handle, signal) { const value = sourceCapture(handle); if (value.manifest)
+            return value.manifest; if (value.loading)
+            return value.loading; return value.loading = (async () => { const bytes = Buffer.alloc(value.manifestBytes); try {
+            for (let offset = 0; offset < bytes.length; offset += 256 * 1024) {
+                const part = await client.readProfileManifest(handle, offset, Math.min(256 * 1024, bytes.length - offset), signal);
+                part.copy(bytes, offset);
+            }
+            if (createHash('sha256').update(bytes).digest('hex') !== value.manifestHash)
+                throw Error('broker_source_manifest_hash');
+            const manifest = parseProfileCaptureTransfer(bytes, value.review);
+            if (manifest.facts.capturedBytes !== value.capturedBytes)
+                throw Error('broker_source_manifest_total');
+            await client.checkProfileCapture(handle, signal);
+            sourceCapture(handle);
+            value.manifest = manifest;
+            return manifest;
+        }
+        finally {
+            bytes.fill(0);
+        } })(); },
+        async readProfileFile(handle, sourceId, entryIndex, offset, length, signal) { const value = sourceCapture(handle); if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 256 * 1024 || !Number.isSafeInteger(entryIndex) || entryIndex < 0 || !value.review.sourceSet.sources.some(s => s.sourceId === sourceId && s.kind !== 'sqlite-db'))
+            throw Error('broker_source_range'); const bytes = sourceBytes(await call('sources.file', { handle: value.handle, sourceId, entryIndex, offset, length }, signal), 'offset', offset, length); sourceCapture(handle); return bytes; },
+        async readProfileSqlitePage(handle, sourceId, pageNo, signal) { const value = sourceCapture(handle); if (!Number.isSafeInteger(pageNo) || pageNo < 1 || !value.review.sourceSet.sources.some(s => s.sourceId === sourceId && s.kind === 'sqlite-db'))
+            throw Error('broker_source_range'); const bytes = sourceBytes(await call('sources.page', { handle: value.handle, sourceId, pageNo }, signal), 'pageNo', pageNo, 65536); sourceCapture(handle); return bytes; },
+        async checkProfileCapture(handle, signal) { const value = sourceCapture(handle), response = await call('sources.check', { handle: value.handle }, signal); if (canonicalVerificationJson(response) !== '{}')
+            throw Error('broker_source_check'); sourceCapture(handle); },
+        async releaseProfileCapture(handle, signal) { const value = sourceCapture(handle); sourceCaptures.delete(handle); const response = await call('sources.release', { handle: value.handle }, signal); if (canonicalVerificationJson(response) !== '{}')
+            throw Error('broker_source_release'); },
+        async authorizePublicationOperation(raw, signal) { const review = parsePublicationOperationReview(raw), { tuple, ...metadata } = review; current(); const active = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal; const response = await callControllerIpc(socketPath, Buffer.from(canonicalVerificationJson(tuple)), { signal: active, timeoutMs: 5000 }); current(); const registered = JSON.parse(response.toString('utf8')); if (!registered || Object.keys(registered).sort().join(',') !== 'fullTupleHash,ticket' || typeof registered.ticket !== 'string' || !/^[a-f0-9]{64}$/.test(registered.ticket) || registered.fullTupleHash !== hashVerificationTuple(tuple))
+            throw Error('broker_publication_registration'); return call('publication.authorize', { metadata, ticket: registered.ticket, fullTupleHash: registered.fullTupleHash }, signal); },
+        async authorizeApplicationBinding(input, signal) { const requestSource = input.requestSource, raw = input.review; if (requestSource !== 'user')
+            throw Error('application_authorization_source'); const review = parseApplicationBindingReview(raw), bytes = applicationBindingReviewBytes(review); if (bytes.length > 65536) {
+            const reviewHash = createHash('sha256').update(bytes).digest('hex'), registered = await call('application.registerReview', { review }, signal);
+            if (!registered || Object.keys(registered).sort().join(',') !== 'reviewHash,ticket' || typeof registered.ticket !== 'string' || !/^[a-f0-9]{64}$/.test(registered.ticket) || registered.reviewHash !== reviewHash)
+                throw Error('broker_application_registration');
+            try {
+                return await call('application.authorize', { requestSource, ticket: registered.ticket, reviewHash }, signal);
+            }
+            finally {
+                try {
+                    await call('application.releaseReview', { ticket: registered.ticket, reviewHash }, undefined, 5000);
+                }
+                catch { /* Lost connectivity leaves only bounded, expiring data; it is never approval. */ }
+            }
+        } return call('application.authorize', { requestSource, review }, signal); },
+        async authorizeArchiveOperation(input, signal) { const requestSource = input.requestSource, raw = input.review; if (requestSource !== 'user')
+            throw Error('archive_authorization_source'); const review = parseArchiveOperationReview(raw); return call('archive.authorize', { requestSource, review }, signal); },
+        async authorizeOwnerEnrollment(raw, signal) { const review = parseOwnerEnrollmentReview(raw); return call('enrollment.authorize', { review }, signal); },
+        async authorizeMaterials(input, signal) { return call('materials.authorize', input, signal); },
+        async inspectMaterial(input, signal) { return call('materials.inspect', input, signal); },
+        async readMaterialPage(input, signal) { return call('materials.read', input, signal); },
+        resolvePrincipal(peer) {
+            current();
+            const captured = { uid: peer.uid, gid: peer.gid, auditSessionId: peer.auditSessionId };
+            if (!manifest.allowedUserIds.includes(captured.uid) || !Number.isSafeInteger(captured.gid) || captured.gid < 0 || !Number.isSafeInteger(captured.auditSessionId) || captured.auditSessionId < 1)
+                throw Error('broker_account_identity');
+            const body = request('principal.resolve', captured), response = spawnSync(node, [transport], { cwd: release, env: { PATH: '/usr/bin:/bin', ELECTRON_RUN_AS_NODE: '1' }, input: JSON.stringify({ socketPath, body: body.toString('base64') }), timeout: 7500, maxBuffer: 8192 });
+            current();
+            if (response.error || response.status !== 0 || response.signal)
+                throw Error('broker_account_unknown');
+            const facts = JSON.parse(response.stdout.toString('utf8'));
+            if (!facts || Object.keys(facts).sort().join(',') !== 'accountGeneration,auditSessionId,gid,source,uid' || facts.uid !== captured.uid || facts.gid !== captured.gid || facts.auditSessionId !== captured.auditSessionId || facts.source !== 'macos-local-generateduid' || typeof facts.accountGeneration !== 'string' || !/^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/.test(facts.accountGeneration))
+                throw Error('broker_account_identity');
+            return Object.freeze(facts);
+        },
+        clock() {
+            current();
+            const before = readKernelContinuousNanoseconds(clockHelper), body = request('clock.sample', {});
+            const response = spawnSync(node, [transport], { cwd: release, env: { PATH: '/usr/bin:/bin', ELECTRON_RUN_AS_NODE: '1' }, input: JSON.stringify({ socketPath, body: body.toString('base64') }), timeout: 7500, maxBuffer: 1024 ** 2 + 4096 });
+            current();
+            const after = readKernelContinuousNanoseconds(clockHelper);
+            if (response.error || response.status !== 0 || response.signal || after < before || after - before > 10000000000n)
+                throw Error('broker_clock_unknown');
+            const clock = JSON.parse(response.stdout.toString('utf8'));
+            if (!clock || Object.keys(clock).sort().join(',') !== 'domainId,evidenceHash,lowerBound,qualificationEpoch,upperBound' || typeof clock.domainId !== 'string' || !/^continuous-[a-f0-9-]{36}$/.test(clock.domainId) || clock.qualificationEpoch !== 1 || !/^[a-f0-9]{64}$/.test(clock.evidenceHash) || !Number.isSafeInteger(clock.lowerBound) || !Number.isSafeInteger(clock.upperBound) || clock.lowerBound < Number(before / 1000000n) || clock.upperBound < clock.lowerBound || clock.upperBound > Number((after + 999999n) / 1000000n) || clock.lowerBound < lastLower)
+                throw Error('broker_clock_unknown');
+            if (clockDomain && clockDomain !== clock.domainId) {
+                lifetime.abort();
+                throw Error('broker_clock_epoch');
+            }
+            clockDomain = clock.domainId;
+            lastLower = clock.lowerBound;
+            // Cover the full actual same-kernel IPC interval, including suspension and final receive.
+            return Object.freeze({ ...clock, upperBound: Number((after + 999999n) / 1000000n) });
+        },
+        dispose() { lifetime.abort(); },
+    });
+    installedClients.set(client, { manifest: canonicalVerificationJson(manifest), current });
+    return client;
+}

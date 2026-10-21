@@ -125,7 +125,7 @@ describe('Sidebar update reminder', () => {
       progress: 0,
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true }));
+    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true } as Parameters<typeof screen.getByRole>[1]));
     expect(await screen.findByRole('button', { name: '每日助理晨间建议 daily' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '每日助理晚间整理 daily' })).toBeInTheDocument();
     expect(screen.queryByText('Personal assistant morning briefing')).not.toBeInTheDocument();
@@ -487,16 +487,16 @@ describe('Sidebar update reminder', () => {
     expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['任务', '定时', '项目', '协作']);
     expect(screen.queryByText('主界面定时任务 4')).toBeNull();
     expect(screen.queryByText('主界面项目 4')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true }));
+    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true } as Parameters<typeof screen.getByRole>[1]));
     const scheduledList = (await screen.findByText('主界面定时任务 4')).closest('button')?.parentElement;
     expect(scheduledList?.className).not.toContain('max-h-');
     expect(screen.queryByText('主界面项目 4')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true }));
+    fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true } as Parameters<typeof screen.getByRole>[1]));
     expect(screen.getByTestId('sidebar-location')).toHaveTextContent('/');
     expect(await screen.findByText('主界面项目 4')).toBeVisible();
     expect(screen.queryByText('主界面定时任务 4')).toBeNull();
-    fireEvent.keyDown(screen.getByRole('tab', { name: '项目', exact: true }), { key: 'Home' });
-    expect(screen.getByRole('tab', { name: '任务', exact: true })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(screen.getByRole('tab', { name: '项目', exact: true } as Parameters<typeof screen.getByRole>[1]), { key: 'Home' });
+    expect(screen.getByRole('tab', { name: '任务', exact: true } as Parameters<typeof screen.getByRole>[1])).toHaveAttribute('aria-selected', 'true');
   });
 
   it('keeps every runtime thread for a scheduled task out of the recent list and shows the scheduled entry', async () => {
@@ -573,7 +573,7 @@ describe('Sidebar update reminder', () => {
       expect(screen.queryByTestId('thread-item-thread-old-dream')).toBeNull();
       expect(screen.queryByTestId('thread-item-thread-latest-dream')).toBeNull();
     });
-    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true }));
+    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true } as Parameters<typeof screen.getByRole>[1]));
     expect(await screen.findByText('Dream')).toBeInTheDocument();
   });
 });
@@ -582,13 +582,13 @@ it('lists collaboration rooms in their own tab and shows a retry for read failur
   const listRooms = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValue({ ok: true, rooms: [{ roomId: 'room-a', title: 'Agentic Working 验证', status: 'active' }] });
   Object.defineProperty(window, 'xiaokDesktop', { configurable: true, value: { listCollaborationRooms: listRooms } });
   renderSidebar({ checking: false, available: false, downloading: false, downloaded: false, progress: 0 });
-  fireEvent.click(screen.getByRole('tab', { name: '协作', exact: true }));
+  fireEvent.click(screen.getByRole('tab', { name: '协作', exact: true } as Parameters<typeof screen.getByRole>[1]));
   expect(await screen.findByRole('alert')).toHaveTextContent('无法读取协作空间');
-  fireEvent.click(screen.getByRole('button', { name: '重试', exact: true }));
-  expect(await screen.findByRole('button', { name: 'Agentic Working 验证', exact: true })).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Agentic Working 验证', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '重试', exact: true } as Parameters<typeof screen.getByRole>[1]));
+  expect(await screen.findByRole('button', { name: 'Agentic Working 验证', exact: true } as Parameters<typeof screen.findByRole>[1])).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Agentic Working 验证', exact: true } as Parameters<typeof screen.getByRole>[1]));
   expect(screen.getByTestId('sidebar-location')).toHaveTextContent('/collaboration/room-a');
-  expect(screen.getByRole('tab', { name: '协作', exact: true })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: '协作', exact: true } as Parameters<typeof screen.getByRole>[1])).toHaveAttribute('aria-selected', 'true');
 });
 
 it('keeps five primary destinations above instance tabs and navigates independently', async () => {
@@ -599,9 +599,9 @@ it('keeps five primary destinations above instance tabs and navigates independen
   for (const [label, path, tab] of [['自动化','/automations','定时'], ['项目','/projects','项目'], ['协作空间','/collaboration','协作'], ['知识库','/knowledge',null], ['新建任务','/','任务']] as const) {
     fireEvent.click(Array.from(nav.querySelectorAll('button')).find(button => button.textContent === label)!);
     expect(screen.getByTestId('sidebar-location')).toHaveTextContent(path);
-    if (tab) expect(screen.getByRole('tab', { name: tab, exact: true })).toHaveAttribute('aria-selected', 'true');
+    if (tab) expect(screen.getByRole('tab', { name: tab, exact: true } as Parameters<typeof screen.getByRole>[1])).toHaveAttribute('aria-selected', 'true');
   }
-  fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true }));
+  fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true } as Parameters<typeof screen.getByRole>[1]));
   expect(screen.getByTestId('sidebar-location').textContent).toBe('/');
   expect(nav.querySelectorAll('button')).toHaveLength(5);
 });

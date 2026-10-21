@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { createObserver } from './observer.mjs';
 import { analyzeWindow } from './metrics.mjs';
 
+const profileAccountChildSetupPath = fileURLToPath(new URL('../../../tests/support/profile-account-child.setup.mjs', import.meta.url));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 /** Windows uses the real executable; errors are handled and never claim tree cleanup. */
@@ -24,7 +26,7 @@ export function terminateOwnedProcess(child, { platform = process.platform, spaw
 
 export async function capturePrint({ cliEntry, cwd, upstream, model, prompt, totalMs = 180_000, onOutput = () => {}, signal } = {}) {
   if (!Number.isSafeInteger(totalMs) || totalMs <= 0 || totalMs > 3_600_000 || !model || typeof prompt !== 'string' || !prompt.trim()) throw new Error('invalid_capture_arguments');
-  const entry = resolve(cliEntry); const root = await mkdtemp(join(tmpdir(), 'xiaok-cache-capture-'));
+  const entry = resolve(cliEntry); const root = await realpath(await mkdtemp(join(tmpdir(), 'xiaok-cache-capture-')));
   const requests = []; const hashes = {};
   for (const [name, path] of Object.entries({ entry, openai: join(dirname(entry), 'ai', 'adapters', 'openai.js'), runtime: join(dirname(entry), 'ai', 'runtime', 'agent-runtime.js'), chat: join(dirname(entry), 'commands', 'chat.js') })) {
     hashes[name] = await readFile(path).then(sha, () => null);
@@ -43,8 +45,8 @@ export async function capturePrint({ cliEntry, cwd, upstream, model, prompt, tot
   try {
     await writeFile(join(root, 'config.json'), JSON.stringify(config), { mode: 0o600, flag: 'wx' });
     start = performance.now();
-    child = spawn(process.execPath, [entry, 'chat', '-p', prompt], { cwd: resolve(cwd), detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', XIAOK_CONFIG_DIR: root, XIAOK_DISABLE_GLOBAL_PLUGINS: '1', XIAOK_TURN_TIMEOUT_MS: String(totalMs), NO_COLOR: '1' } });
+    child = spawn(process.execPath, ['--import', profileAccountChildSetupPath, entry, 'chat', '-p', prompt], { cwd: resolve(cwd), detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, HOME: root, USERPROFILE: root, NODE_OPTIONS: '', NODE_PATH: '', XIAOK_CONFIG_DIR: root, XIAOK_TEST_ACCOUNT_HOME: root, XIAOK_DISABLE_GLOBAL_PLUGINS: '1', XIAOK_TURN_TIMEOUT_MS: String(totalMs), NO_COLOR: '1' } });
     const completion = new Promise(resolvePromise => {
       child.on('error', () => { stopReason ??= 'spawn_error'; });
       child.on('close', (code, signal) => resolvePromise({ code, signal, closedAt: performance.now() }));

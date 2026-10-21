@@ -21,7 +21,7 @@ export function evaluateArtifactEvidenceGuard(input: {
     return pass(input.taskId);
   }
 
-  if (input.expectation !== undefined || input.evidence !== undefined) {
+  {
     const validation = validateCompletionEvidence({
       ownerKind: 'task',
       ownerId: input.taskId,
@@ -32,15 +32,13 @@ export function evaluateArtifactEvidenceGuard(input: {
     return decideValidation(input, validation);
   }
 
-  return pass(input.taskId);
 }
 
 export async function evaluateArtifactEvidenceGuardAsync(
   input: Parameters<typeof evaluateArtifactEvidenceGuard>[0], options: EvidenceIoOptions,
 ): Promise<GuardDecision> {
   assertEvidenceActive(options);
-  if (!['success', 'done', 'submitted', 'completed'].includes(input.status)
-    || (input.expectation === undefined && input.evidence === undefined)) return pass(input.taskId);
+  if (!['success', 'done', 'submitted', 'completed'].includes(input.status)) return pass(input.taskId);
   const validation = await validateCompletionEvidenceAsync({ ownerKind: 'task', ownerId: input.taskId,
     targetStatus: input.status, expectation: input.expectation, evidence: input.evidence }, options);
   assertEvidenceActive(options);
@@ -48,7 +46,8 @@ export async function evaluateArtifactEvidenceGuardAsync(
 }
 
 function decideValidation(input: Parameters<typeof evaluateArtifactEvidenceGuard>[0], validation: ReturnType<typeof validateCompletionEvidence>): GuardDecision {
-  if (validation.ok) return pass(input.taskId);
+  if(validation.failureKind==='verification_unavailable'||validation.failureKind==='verification_required')return {...block(input.taskId,validation.message??'Protected verification required.'),allowOverride:false,action:'Complete protected verification and publication through the controller.'};
+  if (validation.ok || (input.expectation === undefined && input.evidence === undefined)) return pass(input.taskId);
   // A text answer is always sufficient evidence — even when the prompt classifier
   // guessed file_artifact / project_update / log_diagnostic etc. Users iterate via
   // chat; missing artifacts are fixed by follow-up turns, not by blocking the
@@ -71,7 +70,7 @@ function pass(taskId: string): GuardDecision {
   };
 }
 
-function block(taskId: string, reason: string): GuardDecision {
+function block(taskId: string, reason: string): Extract<GuardDecision,{ok:false}> {
   return {
     ok: false,
     mode: 'block',

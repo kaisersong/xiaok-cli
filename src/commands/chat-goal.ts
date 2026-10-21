@@ -10,6 +10,8 @@ export type GoalSlashCommand =
   | { kind: 'pause' }
   | { kind: 'resume'; turnLimit?: number }
   | { kind: 'cancel' }
+  | { kind: 'native'; action: 'status' | 'recover' | 'continue' | 'cancel' }
+  | { kind: 'publication'; action: 'recover' | 'continue' }
   | { kind: 'create'; objective: string }
   | { kind: 'replace'; objective: string }
   | { kind: 'invalid'; message: string };
@@ -32,6 +34,11 @@ export function parseGoalSlashCommand(input: string): GoalSlashCommand | null {
       ? { kind: 'resume', turnLimit }
       : { kind: 'invalid', message: '用法：/goal resume [newTurnLimit]' };
   }
+  if (rest === 'publication recover') return { kind: 'publication', action: 'recover' };
+  if (rest === 'publication continue') return { kind: 'publication', action: 'continue' };
+  if (/^publication(?:\s|$)/u.test(rest)) return { kind: 'invalid', message: '用法：/goal publication recover|continue' };
+  if (/^native (status|recover|continue|cancel)$/u.test(rest)) return { kind: 'native', action: rest.slice(7) as 'status' | 'recover' | 'continue' | 'cancel' };
+  if (/^native(?:\s|$)/u.test(rest)) return { kind: 'invalid', message: '用法：/goal native status|recover|continue|cancel' };
   if (rest === 'cancel') return { kind: 'cancel' };
   if (rest === 'replace') return { kind: 'invalid', message: '用法：/goal replace <objective>' };
   if (rest.startsWith('replace ')) {
@@ -95,6 +102,7 @@ export function buildGoalContinuationInput(goal: GoalState): {
   systemTrigger: 'goal_continuation';
   prompt: string;
 } {
+  if (goal.pendingCompletionIntentId) throw Error('goal_publication_pending');
   return {
     systemTrigger: 'goal_continuation',
     prompt: [
@@ -112,5 +120,8 @@ export const GOAL_COMMAND_HELP = [
   '/goal pause',
   '/goal resume [newTurnLimit]',
   '/goal cancel',
+  '/goal publication recover',
+  '/goal publication continue',
   '/goal replace <objective>',
+  '/goal native status|recover|continue|cancel',
 ].join('\n');

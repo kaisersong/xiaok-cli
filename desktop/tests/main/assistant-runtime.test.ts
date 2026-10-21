@@ -70,7 +70,7 @@ describe('assistant runtime wiring', () => {
     const assistantRuntime = createRuntime({ now, complete });
     const runner = createLoopExecutionAdapter({ genericRunner, assistantRuntime });
 
-    const result = await runner.runLoopNow(ASSISTANT_EVENING_LOOP_ID);
+    const result = await runner.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({ status: 'success' });
     expect(genericRunner.runLoopNow).not.toHaveBeenCalled();
@@ -102,8 +102,8 @@ describe('assistant runtime wiring', () => {
       recoveryReason: 'startup_recovery',
     };
 
-    const first = await assistantRuntime.runLoopNow(ASSISTANT_MORNING_LOOP_ID, trigger);
-    const second = await assistantRuntime.runLoopNow(ASSISTANT_MORNING_LOOP_ID, trigger);
+    const first = await assistantRuntime.runLoopNow(ASSISTANT_MORNING_LOOP_ID, trigger, undefined, {requestSource:'user'});
+    const second = await assistantRuntime.runLoopNow(ASSISTANT_MORNING_LOOP_ID, trigger, undefined, {requestSource:'user'});
 
     expect(first).toMatchObject({ status: 'success' });
     expect(second).toEqual({
@@ -131,8 +131,8 @@ describe('assistant runtime wiring', () => {
       complete,
     });
 
-    const first = await assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID);
-    const second = await assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID);
+    const first = await assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, undefined, {requestSource:'user'});
+    const second = await assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, undefined, {requestSource:'user'});
 
     expect(first).toMatchObject({ status: 'success' });
     expect(second).toMatchObject({ status: 'already_completed' });
@@ -147,7 +147,7 @@ describe('assistant runtime wiring', () => {
       complete: vi.fn().mockRejectedValue(new Error('provider unavailable')),
     });
 
-    const result = await assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID);
+    const result = await assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, undefined, {requestSource:'user'});
 
     expect(result).toMatchObject({
       status: 'failed',
@@ -173,7 +173,7 @@ describe('assistant runtime wiring', () => {
     });
     const assistantRuntime = createRuntime({ now, complete });
 
-    const running = assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, controller.signal);
+    const running = assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, controller.signal, {requestSource:'user'});
     await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
     controller.abort(new Error('executor_timeout'));
 
@@ -195,8 +195,8 @@ describe('assistant runtime wiring', () => {
     const assistantRuntime = { runLoopNow: vi.fn() } as unknown as AssistantRuntime;
     const runner = createLoopExecutionAdapter({ genericRunner, assistantRuntime });
 
-    await expect(runner.runLoopNow('artifact-evidence-regression', { kind: 'manual' })).resolves.toBe(genericResult);
-    expect(genericRunner.runLoopNow).toHaveBeenCalledWith('artifact-evidence-regression', { kind: 'manual' }, undefined);
+    await expect(runner.runLoopNow('artifact-evidence-regression', { kind: 'manual' }, undefined, {requestSource:'user'})).resolves.toBe(genericResult);
+    expect(genericRunner.runLoopNow).toHaveBeenCalledWith('artifact-evidence-regression', { kind: 'manual' }, undefined, {requestSource:'user'});
     expect(assistantRuntime.runLoopNow).not.toHaveBeenCalled();
   });
 

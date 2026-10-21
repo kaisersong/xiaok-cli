@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { createDesktopServices } from '../../electron/desktop-services.js';
+import type { KSwarmService } from '../../electron/kswarm-service.js';
+import * as kbStoreModule from '../../electron/kb-store-sqlite.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -56,7 +59,27 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     const deletion = (nonce: string) => { const expectedThreadRevision = store.getThread('thread')!.threadRevision!;
       return { access, requestSource: 'user' as const, operationId: `delete:${expectedThreadRevision}:${nonce}`, expectedThreadRevision, confirmTerminate: true as const }; };
     const start = async (threadId = 'thread') => { const prepared = await service.prepareRoot(host, threadId, { prompt: 'work', materials: [], context: { threadId } }); await host.startTask(prepared.taskId); return prepared.taskId; };
-    return { store, service, host, coordinator, access, start, deletion, beforeDelete, path, goal, goalStore, root };
+    // host.drain does not own service scans or Goal-stop IO. Wait for the
+    // already-admitted producers after bounded ACK, before a new user attempt.
+    const drainAcceptedDeletion = async () => {
+      const owners = service as unknown as {
+        deletionScans: Map<string, { promise: Promise<unknown> }>;
+        deletionStops: Map<string, { goal: Promise<void>; tasks: Map<string, { promise: Promise<void> }> }>;
+      };
+      const scan = owners.deletionScans.get('thread'), stops = owners.deletionStops.get('thread');
+      await Promise.all([...(scan ? [scan.promise] : []), ...(stops ? [stops.goal, ...[...stops.tasks.values()].map(stop => stop.promise)] : [])]);
+      await host.drain();
+    };
+    const deleteAfterAcceptedDrain = async (nonce: string) => {
+      await drainAcceptedDeletion();
+      const result = await service.deleteThread(deletion(nonce));
+      if (result.state !== 'cleanup_pending') return result;
+      // This attempt may have admitted cancellation after the original scan.
+      // Wait for that same producer before one final explicit user attempt.
+      await drainAcceptedDeletion();
+      return service.deleteThread(deletion(nonce + '-after-cancel'));
+    };
+    return { store, service, host, coordinator, access, start, deletion, beforeDelete, path, goal, goalStore, root, deleteAfterAcceptedDrain };
   }
 
   it('A25 Given an unbound legacy thread without live resources, Then main registers it and exposes the actual initial revision for deletion', async () => {
@@ -65,8 +88,43 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     await f.service.registerThreadWithOwnership(binding, 'user');
     expect(f.store.getThread(binding.threadId)).toMatchObject({ threadRevision: 0, deleteState: 'none' });
     await expect(f.service.registerThreadWithOwnership({ ...binding, workspaceId: 'foreign' }, 'user')).rejects.toThrow(/ownership/);
+    await expect(f.service.registerThreadWithOwnership({ ...binding, cwd: join(f.root,'foreign') }, 'user')).rejects.toThrow(/ownership/);
+    await expect(f.service.registerThreadWithOwnership({ ...binding, profileId: 'foreign' }, 'user')).rejects.toThrow(/ownership/);
+    await f.service.registerThreadWithOwnership(binding,'user');
+    expect(f.store.getThread(binding.threadId)).toMatchObject(binding);
     await expect(f.service.registerThreadWithOwnership({ ...binding, threadId: 'forged' }, 'agent')).rejects.toThrow(/source|permitted/);
     expect(f.store.getThread('forged')).toBeNull();
+  });
+
+  it('retains the real authorized historical binding across Desktop factory launch domains and denies revoked or forged domains',async()=>{
+    const root=realpathSync(mkdtempSync(join(tmpdir(),'xiaok-real-historical-binding-')));cleanup.push(()=>rmSync(root,{recursive:true,force:true,maxRetries:3}));
+    const oldWorkspace=join(root,'old-workspace'),newWorkspace=join(root,'new-workspace');mkdirSync(oldWorkspace);mkdirSync(newWorkspace);
+    vi.stubEnv('XIAOK_CONFIG_DIR',join(root,'config'));vi.stubEnv('XIAOK_DISABLE_GLOBAL_PLUGINS','1');cleanup.push(()=>{vi.unstubAllEnvs();});
+    const createKb=kbStoreModule.createKbStoreSqlite;vi.spyOn(kbStoreModule,'createKbStoreSqlite').mockImplementation(()=>createKb(join(root,'knowledge.sqlite')));
+    const sidecar={start:async()=>{},stop:async()=>{},restart:async()=>{},getStatus:()=>({running:false,port:0,pid:null,restartCount:0,lastError:null}),onStatusChange:()=>()=>{},getDesktopMutationToken:()=> 'fixture',request:async()=>new Response('{}',{status:503})} as unknown as KSwarmService;
+    const make=(workspaceRoot:string,restoreHistoricalLaunchWorkspaces:boolean)=>createDesktopServices({dataRoot:join(root,'data'),workspaceRoot,knowledgeDbPath:join(root,'knowledge.sqlite'),pluginRootDir:join(root,'plugins'),pluginDependencies:[],kswarmService:sidecar,restoreHistoricalLaunchWorkspaces});
+    const first=make(oldWorkspace,false);let firstDisposed=false;cleanup.push(async()=>{if(!firstDisposed)await first.disposeMultiAgent();});const old=first.multiAgent!;await old.ready;
+    const binding={threadId:'historical-binding',profileId:old.profileId,workspaceId:old.workspaceId,cwd:oldWorkspace};
+    await old.service.registerThreadWithOwnership(binding,'user');await first.disposeMultiAgent();firstDisposed=true;
+    const second=make(newWorkspace,true);let secondDisposed=false;cleanup.push(async()=>{if(!secondDisposed)await second.disposeMultiAgent();});const current=second.multiAgent!;await current.ready;
+    const store=(current.service as unknown as {options:{store:DesktopMultiAgentStore}}).options.store;
+    expect(current.profileId).toBe(old.profileId);expect(current.workspaceId).not.toBe(old.workspaceId);
+    const proposed={...binding,workspaceId:current.workspaceId,cwd:newWorkspace};
+    await current.service.registerThreadWithOwnership(proposed,'user');expect(store.getThread(binding.threadId)).toMatchObject(binding);
+    await expect(current.service.registerThreadWithOwnership({...proposed,workspaceId:'forged-hash'},'user')).rejects.toThrow();
+    await expect(current.service.registerThreadWithOwnership({...proposed,cwd:join(root,'forged')},'user')).rejects.toThrow();
+    expect(store.readWorkspaceAuthorization({profileId:old.profileId,workspaceId:old.workspaceId})?.executionAllowed).toBe(true);
+    await second.disposeMultiAgent();secondDisposed=true;
+    const revokeLaunch=make(oldWorkspace,false);let revokeDisposed=false;cleanup.push(async()=>{if(!revokeDisposed)await revokeLaunch.disposeMultiAgent();});const revoke=revokeLaunch.multiAgent!;await revoke.ready;
+    const authorization=revoke.service.getExecutionAuthorization();
+    const user=revoke.service.createWorkspaceUserAccess({requestSource:'user',actorId:`desktop-user:${revoke.profileId}`,profileId:revoke.profileId,workspaceId:revoke.workspaceId});
+    expect(await revoke.service.setExecutionAuthorization({access:user,requestSource:'user',operationId:`exec-auth:${authorization.bootId}:${authorization.permissionRevision}:revoke-history`,expectedPermissionRevision:authorization.permissionRevision,executionAllowed:false,confirm:true})).toMatchObject({state:'applied',executionAllowed:false,persistenceState:'confirmed'});
+    await revokeLaunch.disposeMultiAgent();revokeDisposed=true;
+    const deniedLaunch=make(newWorkspace,true);cleanup.push(()=>deniedLaunch.disposeMultiAgent());const denied=deniedLaunch.multiAgent!;await denied.ready;
+    const deniedStore=(denied.service as unknown as {options:{store:DesktopMultiAgentStore}}).options.store;
+    expect(deniedStore.readWorkspaceAuthorization({profileId:old.profileId,workspaceId:old.workspaceId})?.executionAllowed).toBe(false);
+    await expect(denied.service.registerThreadWithOwnership(proposed,'user')).rejects.toThrow(/workspace_execution_domain_mismatch/);
+    expect(deniedStore.getThread(binding.threadId)).toMatchObject(binding);
   });
 
   it('U7 Given actual core activity before its durable checkpoint, Then snapshot and page expose the current phase without writing an extra checkpoint', async () => {
@@ -122,8 +180,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     expect((await f.goal.getGoal('thread'))?.state.status).toBe('active');
     const first = await f.service.deleteThread(f.deletion('goal-delete'));
     if (first.state !== 'completed') {
-      await f.host.drain();
-      expect(await f.service.deleteThread(f.deletion('goal-after-drain'))).toMatchObject({ state: 'completed' });
+      const afterDrain=await f.deleteAfterAcceptedDrain('goal-after-drain');expect(afterDrain,JSON.stringify(afterDrain)).toMatchObject({state:'completed'});
     }
     expect(await f.goal.getGoal('thread')).toMatchObject({ state: { status: 'cancelled' }, activation: 'disarmed' });
     expect(f.goal.getPendingAttachmentForTest('thread')).toBeNull();
@@ -223,7 +280,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     const cancel = vi.spyOn(f.host, 'cancelTask').mockRejectedValueOnce(new Error('cancel_write_failed'));
     expect(await f.service.deleteThread(f.deletion('cancel-fails'))).toMatchObject({ state: 'unknown' });
     expect(f.store.getThread('thread')?.deleteState).toBe('delete_pending'); expect(await f.host.getActiveTasks()).toContainEqual({ taskId: task.taskId });
-    expect(await f.service.deleteThread(f.deletion('cancel-retry'))).toMatchObject({ state: 'completed' });
+    const retried=await f.deleteAfterAcceptedDrain('cancel-retry');expect(retried,JSON.stringify(retried)).toMatchObject({state:'completed'});
     expect(cancel).toHaveBeenCalledTimes(2); expect((await f.host.inspectTask(task.taskId))?.status).toBe('cancelled');
   });
 
@@ -338,7 +395,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     expect(await f.service.deleteThread(f.deletion('scan-rejected'))).toMatchObject({ state: 'unknown' });
     expect(scan).toHaveBeenCalledTimes(1); expect(cancel).not.toHaveBeenCalled();
     expect(f.store.getThread('thread')?.deleteState).toBe('delete_pending');
-    expect(await f.service.deleteThread(f.deletion('scan-retry'))).toMatchObject({ state: 'completed' });
+    const rescanned=await f.deleteAfterAcceptedDrain('scan-retry');expect(rescanned,JSON.stringify(rescanned)).toMatchObject({state:'completed'});
     expect(active).toHaveBeenCalledTimes(2); expect(cancel).toHaveBeenCalledTimes(2);
   });
 

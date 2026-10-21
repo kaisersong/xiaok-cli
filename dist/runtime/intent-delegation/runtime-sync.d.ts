@@ -5,4 +5,4 @@ export interface IntentRuntimeSyncOptions {
     ledgerStore: SessionIntentDelegationStore;
     sessionId: string;
 }
-export declare function wireIntentDelegationToRuntimeSync(options: IntentRuntimeSyncOptions): () => void;
+export declare function wireIntentDelegationToRuntimeSync(options: IntentRuntimeSyncOptions): () => Promise<void>;

@@ -6,6 +6,8 @@ import type { SurfaceState } from './surface-state.js';
 export interface PermissionModalRequest {
   toolName: string;
   targetLines: string[];
+  reviewScopes?: string[];
+  reviewRules?: string[];
   options: string[];
 }
 
@@ -192,6 +194,8 @@ export function createTerminalController({ prompt }: { prompt: string }): Termin
         type: 'permission',
         toolName: request.toolName,
         targetLines: request.targetLines,
+        reviewScopes: request.reviewScopes,
+        reviewRules: request.reviewRules,
         options: request.options,
         selectedIndex: 0,
       };

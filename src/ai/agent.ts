@@ -1,3 +1,4 @@
+import {ModelStreamPhysicalOwner} from './runtime/model-stream-physical-owner.js';
 import type {
   MessageBlock,
   ModelAdapter,
@@ -9,11 +10,13 @@ import type { ToolRegistry } from './tools/index.js';
 import { AgentRunController } from './runtime/controller.js';
 import type { AgentRuntimeEvent, RuntimeActivity } from './runtime/events.js';
 import { toLegacyStreamChunk } from './runtime/events.js';
+import type { CompactionCandidateDecision } from '../runtime/sol-pi/compaction-policy.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
 import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
 import type { MemoryStore } from './memory/store.js';
 import type { RunInvocationContext } from './runtime/model-capabilities.js';
+import type { ObservationSessionOwner } from '../runtime/sol-pi/observation-session-owner.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
 export type OnRuntimeEvent = (event: AgentRuntimeEvent) => void;
@@ -21,6 +24,12 @@ export type OnRuntimeEvent = (event: AgentRuntimeEvent) => void;
 let nextSessionOrdinal = 0;
 
 export interface AgentOptions {
+  semanticCompactionOwner?: import('../runtime/sol-pi/semantic-compaction-owner.js').SemanticCompactionOwner;
+  onSemanticCompactionOutcome?: (outcome: import('../runtime/sol-pi/semantic-compaction-owner.js').SemanticCompactionOutcome) => void;
+  /** Host-owned live identity; observation ownership cannot be attached to a copy. */
+  initialSession?: AgentSessionState;
+  observationOwner?: ObservationSessionOwner;
+  onSemanticCompactionDecision?: (decision: CompactionCandidateDecision) => void;
   onActivity?: (activity: RuntimeActivity) => void;
   takePendingInput?: () => string | undefined;
   maxIterations?: number;
@@ -33,7 +42,12 @@ export interface AgentOptions {
 }
 
 export class Agent {
-  private session = new AgentSessionState();
+  private session: AgentSessionState;
+  private readonly observationOwner?: ObservationSessionOwner;
+  private disposed = false;
+  private readonly modelPhysicalOwner=new ModelStreamPhysicalOwner();
+  private disposalScheduled=false;
+  private disposalWork:Promise<void>|undefined;
   private readonly controller = new AgentRunController();
   private readonly sessionId = `sess_${(nextSessionOrdinal += 1)}`;
   private turnCount = 0;
@@ -45,6 +59,10 @@ export class Agent {
     private systemPrompt: string,
     private options: AgentOptions = {},
   ) {
+    this.observationOwner = options.observationOwner;
+    if (this.observationOwner && !options.initialSession) throw new Error('SOL_PI_AGENT_INITIAL_SESSION_REQUIRED');
+    this.session = options.initialSession ?? new AgentSessionState();
+    this.observationOwner?.assertSession(this.session);
     this.runtime = this.createRuntime();
   }
 
@@ -55,9 +73,8 @@ export class Agent {
     invocationContext?: RunInvocationContext,
     onRuntimeEvent?: OnRuntimeEvent,
   ): Promise<void> {
-    if (signal?.aborted) {
-      throw new DOMException('agent aborted', 'AbortError');
-    }
+    signal?.throwIfAborted();
+    this.assertLive();
 
     const turnId = `turn_${(this.turnCount += 1)}`;
 
@@ -78,11 +95,13 @@ export class Agent {
   }
 
   clearHistory(): void {
+    this.assertHistoryMutationAllowed();
     this.session = new AgentSessionState();
     this.runtime = this.createRuntime();
   }
 
   forceCompact(): CompactionRecord | null {
+    this.assertHistoryMutationAllowed();
     return this.session.forceCompact();
   }
 
@@ -95,6 +114,7 @@ export class Agent {
   }
 
   restoreSession(snapshot: AgentSessionSnapshot): void {
+    this.assertHistoryMutationAllowed();
     this.session.restoreSnapshot(snapshot);
   }
 
@@ -103,24 +123,75 @@ export class Agent {
   }
 
   setAdapter(adapter: ModelAdapter): void {
+    this.assertLive();
+    if(adapter!==this.adapter&&(this.modelPhysicalOwner.hasPending()||this.modelPhysicalOwner.hasFailure()))throw Error('agent_model_resources_pending');
+    if (this.observationOwner) {
+      if (adapter !== this.adapter) throw new Error('SOL_PI_AGENT_FRESH_TASK_REQUIRED');
+      return;
+    }
     this.runtime.setAdapter(adapter);
     this.adapter = adapter;
   }
 
   setSystemPrompt(systemPrompt: string): void {
+    this.assertLive();
     this.systemPrompt = systemPrompt;
     this.runtime.setSystemPrompt(systemPrompt);
   }
 
+  notifySubtaskBoundary(): void {
+    this.assertLive();
+    this.runtime.notifySubtaskBoundary();
+  }
+
   setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void {
+    this.assertLive();
     this.runtime.setPromptSnapshot(promptSnapshot);
+  }
+
+  /** Host stop closes ingress without revoking an owner still used by writers. */
+  stopNewRuns(reason?:unknown):void {
+    if(this.disposed)return;this.disposed=true;
+    this.modelPhysicalOwner.stop(reason);
+    this.controller.abortActiveRun(this.modelPhysicalOwner.signal.reason);
+  }
+  waitForStoppedResources():Promise<void>{return this.modelPhysicalOwner.waitForStopped();}
+  waitForIdleResources():Promise<void>{return this.modelPhysicalOwner.waitForIdle();}
+  dispose(): void {
+    this.stopNewRuns();if(this.disposalScheduled)return;this.disposalScheduled=true;
+    if(!this.modelPhysicalOwner.hasPending()&&!this.modelPhysicalOwner.hasFailure()){
+      try{this.observationOwner?.dispose();this.disposalWork=Promise.resolve();}
+      catch(error){this.disposalWork=Promise.reject(error);void this.disposalWork.catch(()=>{});throw error;}
+      return;
+    }
+    this.disposalWork=this.waitForStoppedResources().then(()=>this.observationOwner?.dispose());
+    // Observe both outcomes while retaining the exact rejected cleanup Promise
+    // for a host. Never turn an unknown owner failure into successful release.
+    void this.disposalWork.catch(()=>{});
+  }
+  waitForDisposedResources():Promise<void>{
+    return this.disposalScheduled?this.disposalWork!:Promise.reject(Error('agent_disposal_not_started'));
+  }
+
+  private assertLive(): void {
+    if (this.disposed) throw new Error('agent_disposed');
+  }
+
+  private assertHistoryMutationAllowed(): void {
+    this.assertLive();
+    if(this.modelPhysicalOwner.hasPending()||this.modelPhysicalOwner.hasFailure())throw Error('agent_model_resources_pending');
+    if (this.observationOwner) throw new Error('SOL_PI_AGENT_FRESH_TASK_REQUIRED');
   }
 
   private createRuntime(): AgentRuntime {
     return new AgentRuntime({
+      modelPhysicalOwner:this.modelPhysicalOwner,
       adapter: this.adapter,
       registry: this.registry,
       session: this.session,
+      observationOwner: this.observationOwner,
+      semanticCompactionOwner: this.options.semanticCompactionOwner,
+      onSemanticCompactionOutcome: this.options.onSemanticCompactionOutcome,
       controller: this.controller,
       systemPrompt: this.systemPrompt,
       maxIterations: this.options.maxIterations,
@@ -131,6 +202,7 @@ export class Agent {
       providerSurfaceKind: this.options.providerSurfaceKind,
       onActivity: this.options.onActivity,
       takePendingInput: this.options.takePendingInput,
+      onSemanticCompactionDecision: this.options.onSemanticCompactionDecision,
     });
   }
 

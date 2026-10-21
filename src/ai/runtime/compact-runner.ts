@@ -16,7 +16,7 @@ Write in past tense. Be concise but complete.`;
 export class CompactRunner {
   constructor(private readonly adapter: ModelAdapter) {}
 
-  async run(messages: Message[], streamOptions?: StreamOptions, onProgress?: () => void): Promise<string> {
+  prepareRequest(messages: Message[]): { messages: Message[]; systemPrompt: string } {
     const summaryRequest: Message = {
       role: 'user',
       content: [{
@@ -34,11 +34,16 @@ export class CompactRunner {
           }],
         }]
       : messages;
+    return { messages: [...structuredClone(providerMessages), summaryRequest], systemPrompt: NO_TOOLS_PREAMBLE };
+  }
+
+  async run(messages: Message[], streamOptions?: StreamOptions, onProgress?: () => void): Promise<string> {
+    const prepared = this.prepareRequest(messages);
     return collectCompactionResponse(streamCliCompactionProviderConversation({
       adapter: this.adapter,
-      messages: [...providerMessages, summaryRequest],
+      messages: prepared.messages,
       tools: [],
-      systemPrompt: NO_TOOLS_PREAMBLE,
+      systemPrompt: prepared.systemPrompt,
       options: { ...streamOptions, requireCompleteResponse: true },
       invocationId: `inv_${randomUUID()}`,
     }), { signal: streamOptions?.signal, onProgress });

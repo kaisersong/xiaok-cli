@@ -129,7 +129,7 @@ describe('tool observation coverage via production ToolRegistry.execute', () => 
 
   it('records nothing when permission policy denies the call', async () => {
     const { registry, buffer } = createBufferedRegistry(
-      [makeTool('write', async () => 'written', 'dangerous')],
+      [makeTool('write', async () => 'written', 'write')],
       { permissionManager: new PermissionManager({ mode: 'plan' }) },
     );
 
@@ -141,7 +141,7 @@ describe('tool observation coverage via production ToolRegistry.execute', () => 
 
   it('records nothing when the permission prompt is declined', async () => {
     const { registry, buffer } = createBufferedRegistry(
-      [makeTool('custom_writer', async () => 'written', 'dangerous')],
+      [makeTool('custom_writer', async () => 'written', 'write')],
       { onPrompt: async () => false },
     );
 

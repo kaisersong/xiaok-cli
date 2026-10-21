@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
@@ -25,9 +25,9 @@ describe('R4/D18 host public recovery readers share the actual startup owner', (
   afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); });
 
   async function crashedOwner() {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-ready-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-ready-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
-    const processOwner = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, 'before-marker'], {
+    const processOwner = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, 'before-marker', inject('profileTestAccountRoot'), userInfo().homedir], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -109,7 +109,7 @@ describe('R4/D18 host public recovery readers share the actual startup owner', (
   });
 
   it('only the first main readiness Promise may bind; identical bind is idempotent', () => {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-ready-bind-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-ready-bind-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const f = open(root); const contract = readyContract(f.host); const ready = Promise.resolve();
     expect(typeof contract.bindMultiAgentRecovery).toBe('function');
@@ -118,7 +118,7 @@ describe('R4/D18 host public recovery readers share the actual startup owner', (
   });
 
   it('ordinary snapshots retain their existing recovery while internal inspect never waits or clears the index', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-ready-ordinary-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-ready-ordinary-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const f = open(root); const ready = deferred(); cleanup.push(() => ready.resolve());
     if (typeof readyContract(f.host).bindMultiAgentRecovery === 'function') readyContract(f.host).bindMultiAgentRecovery(ready.promise);

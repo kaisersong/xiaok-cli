@@ -1,4 +1,5 @@
-import { expect, test, _electron as electron, type ElectronApplication } from '@playwright/test';
+import { collectThreadDeletionPhase, type ThreadDeletionDiagnosticBuffer } from '../../renderer/src/api/thread-deletion-diagnostics';
+import { expect, test, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +10,19 @@ import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// Select through the existing real UI. These original scenarios each have one
+// child; retain exact count and actual public agent id checks rather than nth().
+async function selectOnlyChild(page: Page, agentId: string): Promise<void> {
+  const panel = page.getByTestId('chat-right-panel');
+  await expect(panel).toBeVisible();
+  await panel.locator('[role="tab"][id$="agents-tab"]').click();
+  const childRow = panel.locator('.multi-agent-row').filter({ has: page.locator('em.multi-agent-alias') });
+  await expect(childRow).toHaveCount(1);
+  await childRow.click();
+  await expect(panel.locator('.multi-agent-detail .multi-agent-meta > code')).toHaveText(agentId);
+}
+
 test('E2: saved result readback fences new turns and shows real UTF-8 truncation after process restart', async () => {
   const root = mkdtempSync(join(tmpdir(), 'xiaok-desktop-readback-electron-'));
   mkdirSync(join(root, 'workspace'));
@@ -72,6 +86,7 @@ test('E2: saved result readback fences new turns and shows real UTF-8 truncation
     await expect.poll(async () => (await snapshot()).agents.find(agent => agent.taskName === 'readback')?.status).toBe('completed');
     const initial = await snapshot(); const groupId = initial.group!.groupId;
     const child = initial.agents.find(agent => agent.taskName === 'readback')!;
+    await selectOnlyChild(page, child.id);
     const readButton = () => page.getByRole('button', { name: /读取(?:完整|已保存)内容/ });
     const displayed = () => page.locator('.multi-agent-saved-content pre');
     const savedNoticeIsWithinOutput = () => page.locator('.multi-agent-saved-content').evaluate(node => {
@@ -253,6 +268,8 @@ test('E1: actual Electron preload / services / renderer execute and display the 
     await composer.fill('E2E delegate one review and summarize.'); await composer.press('Enter');
     await expect.poll(async () => (await page.evaluate(() => window.xiaokDesktop.getMultiAgentSnapshot({ threadId: 'e2e-thread' }))).agents.find(agent => agent.taskName === 'review')?.status).toBe('completed');
     await expect(page.getByRole('tabpanel', { name: 'SubAgent' })).toBeVisible();
+    const completedReview = (await page.evaluate(() => window.xiaokDesktop.getMultiAgentSnapshot({ threadId: 'e2e-thread' }))).agents.find(agent => agent.taskName === 'review')!;
+    await selectOnlyChild(page, completedReview.id);
     await expect(page.getByText('E2E_CHILD_DONE', { exact: true }).first()).toBeVisible();
     const surface = page.getByTestId('chat-right-panel');
     await expect(surface).toHaveCount(1);
@@ -391,6 +408,11 @@ test('E1: actual Electron preload / services / renderer execute and display the 
     app.process().stdout?.on('data', chunk => output.push(String(chunk)));
     app.process().stderr?.on('data', chunk => output.push(String(chunk)));
     page = await app.firstWindow(); page.on('pageerror', error => consoleErrors.push(error.message));
+    const rendererDeletionDiagnostics: ThreadDeletionDiagnosticBuffer = { facts: [], overflow: 0, parseFailures: 0, readFailures: 0 };
+    page.on('console', message => {
+      try { collectThreadDeletionPhase(rendererDeletionDiagnostics, message.text()); }
+      catch { rendererDeletionDiagnostics.readFailures += 1; }
+    });
     await page.waitForLoadState('domcontentloaded'); await page.evaluate(() => { location.hash = '#/t/e2e-thread'; });
     await expect(page.locator('.chat-right-main textarea')).toBeVisible();
     const restarted = await page.evaluate(() => window.xiaokDesktop.getMultiAgentSnapshot({ threadId: 'e2e-thread' }));
@@ -465,7 +487,51 @@ test('E1: actual Electron preload / services / renderer execute and display the 
     await expect.poll(async () => (await page.evaluate(() => window.xiaokDesktop.getMultiAgentSnapshot({ threadId: 'e2e-thread' }))).agents.find(agent => agent.taskName === 'deletion_review')?.resourcesReleased).toBe(true);
     await row.hover(); await row.getByRole('button', { name: '删除', exact: true }).click();
     await row.getByRole('button', { name: '停止并删除?', exact: true }).click();
-    await expect(row).toHaveCount(0);
+    try { await expect(row).toHaveCount(0); }
+    catch (originalFailure) {
+      // Observe only after the original failure. Keep the real DELETE, its
+      // exact count assertion/deadline and the original thrown failure.
+      try {
+        const deletion = await page.evaluate(() => window.xiaokDesktop.getMultiAgentThreadDeletion({ threadId: 'e2e-thread' }));
+        const error = typeof deletion.operation?.error === 'string' ? deletion.operation.error : null;
+        const runtimeDeletionTrace = await app.evaluate(() => {
+          const fixture: unknown = Reflect.get(globalThis, 'multiAgentE2E');
+          if (!fixture || typeof fixture !== 'object') throw new Error('E1 diagnostic fixture is absent');
+          const read: unknown = Reflect.get(fixture, 'threadDeletionDiagnostics');
+          if (typeof read !== 'function') throw new Error('E1 diagnostic getter is absent');
+          const facts: unknown = read();
+          if (!Array.isArray(facts)) throw new Error('E1 diagnostic result is invalid');
+          return facts;
+        });
+        const safeCodes = ['known_writer_fence_owner', 'known_writer_fence_port_owner_epoch', 'known_writer_fence',
+          'stale thread deletion', 'multi_agent_thread_goal_cancellation_failed', 'multi_agent_thread_task_cancellation_failed',
+          'thread deletion cleanup pending', 'multi_agent_runtime_not_ready'];
+        writeFileSync(join(root, 'second-delete-failure-diagnostic.json'), JSON.stringify({
+          threadId: deletion.threadId, threadRevision: deletion.threadRevision, deleteState: deletion.deleteState,
+          operation: deletion.operation ? { operationId: deletion.operation.operationId, state: deletion.operation.state,
+            errorPresent: error !== null, errorBytes: error === null ? null : Buffer.byteLength(error),
+            errorSHA256: error === null ? null : createHash('sha256').update(error).digest('hex'),
+            matchedErrorCodes: error === null ? [] : safeCodes.filter(code => error.includes(code)),
+          } : null,
+          runtimeDeletionTrace,
+          rendererDeletionDiagnostics,
+          deletionOperationHash: deletion.operation ? createHash('sha256').update(deletion.operation.operationId).digest('hex') : null,
+          earlierDeletionOperationHash: pendingDeletion.operation ? createHash('sha256').update(pendingDeletion.operation.operationId).digest('hex') : null,
+          observedRowCount: await row.count(),
+          deleteUnknownAlertCount: await page.getByText('删除结果尚未确认，会话已保留。请查看状态后再次确认删除。', { exact: true }).count(),
+          knownEarlierPending: { provenance: 'existing original pendingRecord, not a fresh IDB read',
+            id: pendingRecord?.id ?? null, currentTaskId: pendingRecord?.currentTaskId ?? null,
+            taskCount: Array.isArray(pendingRecord?.taskIds) ? pendingRecord.taskIds.length : null,
+          },
+          observedAt: Date.now(),
+        }, null, 2), { mode: 0o600 });
+      } catch {
+        try { writeFileSync(join(root, 'second-delete-failure-diagnostic.json'), JSON.stringify({
+          diagnosticFailed: true, code: 'DELETE_RECEIPT_READ_OR_DIAGNOSTIC_WRITE_FAILED',
+        }), { mode: 0o600 }); } catch { console.error('E1_DELETE_DIAGNOSTIC_WRITE_FAILED'); }
+      }
+      throw originalFailure;
+    }
     expect(await page.evaluate(() => window.xiaokDesktop.getMultiAgentThreadDeletion({ threadId: 'e2e-thread' }))).toMatchObject({ deleteState: 'deleted', operation: { state: 'completed' } });
     expect(await page.evaluate(() => (window as any).multiAgentBridgeProbe.getThread('e2e-thread'))).toBeNull();
     // Reproduce two entries recovering a lost local acknowledgement using real

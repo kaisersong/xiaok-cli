@@ -11,6 +11,8 @@ describe('BDD: Desktop tool surface is scoped and cannot route through the CLI c
     const actor = Object.freeze({ groupId: 'group', agentId: 'child', turnId: 'turn' });
     const context = { ...actor, actor, signal: new AbortController().signal } as DesktopAgentExecutionContext;
     const methods = Object.fromEntries(['spawn', 'send', 'followup', 'wait', 'list', 'interrupt', 'close'].map(name => [name, vi.fn(async () => ({ state: 'applied' }))]));
+    methods.getFixedObservationAck=vi.fn(()=>undefined);
+    methods.listForModel=methods.list;
     const seed = Object.freeze({ seedId: 'seed' }); const createSeed = vi.fn(() => seed);
     const tools = createDesktopMultiAgentTools({ service: methods as unknown as DesktopMultiAgentService, context, allowedControls, agents, createSeed });
     const registry = new ToolRegistry({ autoMode: true }, tools);

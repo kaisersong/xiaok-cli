@@ -1,3 +1,7 @@
+import { type CompoundFinalPublicationTicket } from '../sol-pi/compound-publication-producer.js';
+import { type ProtectedObservationClosure } from '../../ai/runtime/protected-observation-closure.js';
+import type { DesktopExecutionPersistence } from './protected-observation-store.js';
+import type { AgentSessionSnapshot } from '../../ai/runtime/session.js';
 import type { RuntimeEvent } from '../events.js';
 import { type DeliverableGateFunction } from './deliverable-gate.js';
 import type { HostDeliveryRecord, HostDeliveryReport, HostDeliveryRecoveryAuthority, HostDeliveryRecoveryInvocation } from './delivery-types.js';
@@ -8,7 +12,25 @@ export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
 }
+export interface TaskHostCompoundFinalPublicationReceipt {
+    readonly opaqueTaskHostCompoundFinalPublicationReceipt: never;
+}
+export declare function getTaskHostCompoundFinalPublicationReceipt(receipt: unknown): Readonly<{
+    ticket: CompoundFinalPublicationTicket;
+    sessionId: string;
+    turnId: string;
+    historyDigest: string;
+    snapshotRevision: number;
+    snapshotDigest: string;
+    taskId: string;
+}>;
 export interface TaskRunnerInput {
+    /** Main-only exact execution tail; never included in task/renderer DTOs. */
+    registerCompoundFinalPublication?: (ticket: CompoundFinalPublicationTicket, notify: (receipt: TaskHostCompoundFinalPublicationReceipt) => Promise<void>) => Promise<void>;
+    /** Main-issued durable barrier; never sourced from TaskCreateInput or renderer DTO. */
+    persistObservationSnapshot?: (snapshot: AgentSessionSnapshot) => Promise<void>;
+    /** Main-only, task/incarnation scoped; never accepted from a renderer draft. */
+    executionPersistence?: DesktopExecutionPersistence;
     taskId: string;
     sessionId: string;
     prompt: string;
@@ -45,7 +67,20 @@ export interface TaskCancellationDecision {
     hostAbortAllowed: boolean;
     ack?: 'applied' | 'unknown';
 }
+/** Fixed main service owns the private ticket map. Diagnostic fields confer no authority. */
+export interface GroupObservationReferenceTicket {
+    readonly id: string;
+}
+export interface GroupObservationReferenceSource {
+    inspectGroupObservationReference(ticket: GroupObservationReferenceTicket): {
+        taskId: string;
+        canonicalTaskId: string;
+        closure: ProtectedObservationClosure;
+    };
+    commitGroupObservationReference(ticket: GroupObservationReferenceTicket): Promise<void>;
+}
 export interface InProcessTaskRuntimeHostOptions {
+    groupObservationSource?: GroupObservationReferenceSource;
     materialRegistry: MaterialRegistry;
     snapshotStore: FileTaskSnapshotStore;
     runner: TaskRunner;
@@ -92,8 +127,25 @@ export interface BuildHistoryFromTaskSnapshotsResult {
     skipped: TaskContextSkip[];
 }
 export declare function buildHistoryFromTaskSnapshots(snapshots: TaskSnapshot[], options?: BuildHistoryFromTaskSnapshotsOptions): BuildHistoryFromTaskSnapshotsResult;
+/** Main-owned factory: membership is the actual constructed Host, never a ready report. */
+export declare function createTaskSourceWriterPopulation(store: FileTaskSnapshotStore): Readonly<{
+    assertAccepting: () => void;
+    readonly retainedHostCount: number;
+    retireHost(host: InProcessTaskRuntimeHost): Promise<void>;
+    createHost(options: Omit<InProcessTaskRuntimeHostOptions, "snapshotStore">): InProcessTaskRuntimeHost;
+    close: () => Promise<void>;
+}>;
 export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly options;
+    private sourceClosing;
+    private sourceTailClosed;
+    private sourceClosePromise;
+    private sourceDrainPromise;
+    private readonly sourceOperations;
+    private readonly sourceInvocations;
+    private readonly sourceClosingInvocations;
+    private readonly sourceCloseFailures;
+    private readonly sourceClosingExecutions;
     private readonly questions;
     private readonly subscribers;
     private readonly mutationChains;
@@ -133,13 +185,30 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;
+    private prepareTaskSourceOwned;
+    /** Main-only ordinary identity path; multiagent hosts must supply their real marker. */
+    prepareReservedTask(input: TaskCreateInput, reservation: TaskIdentityReservation): Promise<{
+        taskId: string;
+        understanding?: TaskUnderstanding;
+    }>;
+    private prepareReservedTaskSourceOwned;
+    assertTaskIdentityReservation(reservation: TaskIdentityReservation): void;
+    private prepareTaskSnapshot;
     startTask(taskId: string): Promise<void>;
+    private startTaskSourceOwned;
     /**
      * The single production entry point that registers a background execution.
      * Both `startTask()` and the confirm path of `answerQuestion()` go through
      * here, so `drain()` observes a real map rather than a second counter.
      */
     private startTrackedExecution;
+    private continuingSourceInvocation;
+    private runSourceOperation;
+    private isOriginalSourceTail;
+    /** Permanent metadata source close. Never a native-runtime or import receipt. */
+    closeSourceWriterForMigration(): Promise<void>;
+    private sealSourceIngress;
+    private drainSourceParticipant;
     /** Shutdown owner API (§5.5 phase ③). */
     stopAccepting(reason?: string): void;
     abortAllActive(reason?: string): void;
@@ -153,6 +222,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;
+    private createTaskSourceOwned;
     subscribeTask(taskId: string, options?: {
         sinceIndex?: number;
         signal?: AbortSignal;
@@ -165,7 +235,9 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         taskId: string;
         answer: UserAnswer;
     }): Promise<void>;
+    private answerQuestionSourceOwned;
     cancelTask(taskId: string, reason?: string): Promise<void>;
+    private cancelTaskSourceOwned;
     private cancelTaskOwned;
     /** Only original FileStore facts can confirm a save which rejected. Its cache
      * is committed only after append; an append rejection invalidates that cache. */
@@ -179,12 +251,14 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     getActiveTasks(): Promise<{
         taskId: string;
     }[]>;
+    private getActiveTasksSourceOwned;
     getActiveTask(): Promise<{
         taskId: string;
     } | null>;
     recoverTask(taskId: string): Promise<{
         snapshot: TaskSnapshot;
     }>;
+    private recoverTaskSourceOwned;
     /** Read-only startup inspection; unlike recoverTask, this never changes status. */
     inspectTask(taskId: string, options?: {
         trackPending(raw: Promise<unknown>): void;
@@ -206,6 +280,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         /** Main recovery owner records original IO, never an outward abort waiter. */
         trackPending?: (raw: Promise<unknown>) => void;
     }): Promise<void>;
+    private abandonMultiAgentPreparationSourceOwned;
     isExecutingForTest(taskId: string): boolean;
     private executeTask;
     private finishExplicitDelivery;
@@ -228,6 +303,13 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private schedulePersistedEvent;
     private enqueueMutation;
     private flushMutations;
+    /** Metadata-only monotonic protection, including terminal tasks. Does not reactivate execution. */
+    publishGroupObservationReference(ticket: GroupObservationReferenceTicket): Promise<void>;
+    private publishGroupObservationReferenceSourceOwned;
+    private persistObservationSnapshot;
+    private registerCompoundFinalPublication;
+    private recordSourcePersistence;
+    private clearSourceActiveTask;
     private saveSnapshot;
     private requireSnapshot;
     private rehydrateWaitingQuestion;

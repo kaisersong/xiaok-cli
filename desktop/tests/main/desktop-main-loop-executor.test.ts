@@ -1,3 +1,5 @@
+import {createLoopTimedCompletionHost} from '../../electron/loop-timed-completion.js';
+import {withReservedTaskFixture} from '../support/loop-reserved-task-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,6 +46,7 @@ describe('desktop main loop executor wiring', () => {
         policy: {},
         status: 'active',
         source: 'agent',
+        ownerKind:'agent_task',ownerId:'test-agent',
         runCount: 0,
         consecutiveFailures: 0,
         createdAt: 1,
@@ -95,6 +98,7 @@ describe('desktop main loop executor wiring', () => {
 
       now = 2_000;
       const scheduler = new TimedActionScheduler(timedActionStore, {
+        loopCompletion:createLoopTimedCompletionHost({timedStore:timedActionStore,loopStore:loopRuntime.loopStore,captureAdmission:()=>()=>{},now:()=>now}),
         executors: {
           loop: loopRuntime.executor,
         },
@@ -155,6 +159,7 @@ describe('desktop main loop executor wiring', () => {
       now = 66 * 60_000;
       const execute = vi.fn();
       const scheduler = new TimedActionScheduler(timedActionStore, {
+        loopCompletion:createLoopTimedCompletionHost({timedStore:timedActionStore,loopStore:loopRuntime.loopStore,captureAdmission:()=>()=>{},now:()=>now}),
         executors: {
           loop: {
             kind: 'loop',
@@ -201,7 +206,8 @@ describe('desktop main loop executor wiring', () => {
       dataRoot: rootDir,
       now: () => now,
       staleAfterMs: 60_000,
-      taskPort: {
+      taskPort: withReservedTaskFixture({
+        cancelTask:async()=>{},
         createTask: async () => ({ taskId: 'task_user_loop' }),
         recoverTask: async () => {
           writeFileSync(outputPath, '# Note\n');
@@ -218,7 +224,7 @@ describe('desktop main loop executor wiring', () => {
             },
           };
         },
-      },
+      },'task_user_loop'),
     });
     try {
       loopRuntime.loopStore.createUserLoopTemplate({
@@ -232,7 +238,7 @@ describe('desktop main loop executor wiring', () => {
       });
 
       now = 2_000;
-      const result = await loopRuntime.runner.runLoopNow('user-loop-runtime');
+      const result = await loopRuntime.runner.runLoopNow('user-loop-runtime', undefined, undefined, {requestSource:'user'});
 
       expect(result).toMatchObject({
         status: 'success',

@@ -204,3 +204,10 @@ describe('BDD: retained agent output is rendered as bounded semantic blocks', ()
     expect(textBlocks(output, '输出')[0].textContent).toContain('仅显示部分内容');
   });
 });
+
+it('shows the localized factual unavailable result without its uncommitted body', () => {
+  const unavailable = event(1, 'result', { bodyUnavailable: true, preview: 'uncommitted private result', text: 'uncommitted private error' });
+  const view = buildAgentOutputView({ groupId: 'g', agent: { ...root, bodyUnavailable: true },
+    details: (_id, before) => before === Infinity ? [unavailable] : [], userSender: '用户', bodyUnavailableLabel: '最终内容暂不可读取' });
+  expect(view.entries.map(item => item.text)).toEqual(['最终内容暂不可读取']);
+});
