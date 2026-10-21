@@ -95,11 +95,12 @@ it('actual afterPack rejects unsupported targets before package access',async()=
  await expect(packHelper({electronPlatformName:'win32',arch:Arch.ia32})).rejects.toThrow('unsupported');
 });
 it('the single afterPack entry retains both existing gates before the helper gate',async()=>{
- const entry=require.resolve('../../scripts/after-pack.cjs');const names=['verify-packaged-main-freshness','verify-packaged-runtime-dependencies','pack-bundled-runtimes','pack-artifact-export-helper'];const calls:string[]=[];
+ const entry=require.resolve('../../scripts/after-pack.cjs');const names=['verify-packaged-main-freshness','verify-packaged-runtime-dependencies','verify-packaged-service-contracts','pack-bundled-runtimes','pack-artifact-export-helper'];const calls:string[]=[];
  const modules=names.map(name=>require.resolve(`../../scripts/${name}.cjs`));const originals=modules.map(file=>require.cache[file]);const originalEntry=require.cache[entry];
  try{modules.forEach((file,index)=>{require.cache[file]={id:file,filename:file,loaded:true,exports:async()=>{calls.push(names[index]);}} as NodeJS.Module;});delete require.cache[entry];await require(entry)({});expect(calls).toEqual(names);
  // A failure in an earlier gate must prevent the helper mutation.
  calls.length=0;require.cache[modules[1]]!.exports=async()=>{throw new Error('old gate refused');};delete require.cache[entry];await expect(require(entry)({})).rejects.toThrow('old gate refused');expect(calls).toEqual([names[0]]);
+ calls.length=0;require.cache[modules[1]]!.exports=async()=>{calls.push(names[1]);};require.cache[modules[2]]!.exports=async()=>{throw new Error('service gate refused');};delete require.cache[entry];await expect(require(entry)({})).rejects.toThrow('service gate refused');expect(calls).toEqual(names.slice(0,2));
  }finally{modules.forEach((file,index)=>{if(originals[index])require.cache[file]=originals[index];else delete require.cache[file];});if(originalEntry)require.cache[entry]=originalEntry;else delete require.cache[entry];}
 });
 it.each(['linux-other','.staging-crashed'])('rejects an occupied helper parent containing %s',name=>{
