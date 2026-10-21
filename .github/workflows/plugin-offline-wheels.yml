@@ -1,5 +1,13 @@
-name: Plugin offline wheels (manual only)
+name: Plugin offline wheels
 on:
+  push:
+    branches:
+      - work/plugin-offline-wheel-ci-20261021
+    paths:
+      - .github/workflows/plugin-offline-wheels.yml
+      - scripts/diagnostics/plugin-offline-command.ps1
+      - scripts/diagnostics/plugin-offline-wheels-inputs.json
+      - scripts/diagnostics/plugin-offline-wheels.py
   workflow_dispatch:
     inputs:
       verify_windows_offline:
@@ -11,7 +19,9 @@ permissions:
   contents: read
 jobs:
   windows-offline:
-    if: ${{ inputs.verify_windows_offline == true }}
+    if: >-
+      ${{ (github.event_name == 'push' && github.ref == 'refs/heads/work/plugin-offline-wheel-ci-20261021') ||
+          (github.event_name == 'workflow_dispatch' && inputs.verify_windows_offline == true) }}
     runs-on: windows-2022
     steps:
       - name: Preserve exact Git blob line endings
