@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create Draft GitHub Release
-        run: gh release create "${{ env.RELEASE_TAG }}" --title "Xiaok CLI & Desktop ${RELEASE_TAG#desktop-v}" --generate-notes --draft || true
+        run: gh release view "${{ env.RELEASE_TAG }}" >/dev/null 2>&1 || gh release create "${{ env.RELEASE_TAG }}" --title "Xiaok CLI & Desktop ${RELEASE_TAG#desktop-v}" --generate-notes --draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
