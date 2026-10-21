@@ -456,6 +456,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('reconciles report renderer css compatibility even when bundled-managed plugin is already current', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -490,6 +491,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('reconciles missing report renderer runtime files even when bundled-managed plugin is already current', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -524,6 +526,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('replaces a stale symlinked bundled plugin with packaged resources', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -647,6 +650,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('deploys the bundled CUA computer-use plugin from packaged resources', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -669,6 +673,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('deploys the bundled meeting assistant transcriber plugin from packaged resources', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -695,6 +700,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('upgrades the bundled CUA plugin so v0.2 window tools replace stale v0.1 metadata', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
