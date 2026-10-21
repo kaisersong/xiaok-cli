@@ -42,6 +42,80 @@ jobs:
         with:
           python-version: '3.14'
           architecture: x64
+      - name: Materialize the single pinned Git symlink as exact blob text
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          import subprocess
+
+
+          class Rejected(Exception):
+              pass
+
+
+          def materialize(root, pins):
+              root = root.resolve(strict=True)
+              rel = 'plugins/kai-slide-creator/SKILL.md'
+              expected = '62fedac8c59abfb80c75378b4cf179710c1860fcccec3012ee1d5ad31f496efa'
+              def require(value, reason):
+                  if not value:
+                      raise Rejected(reason)
+              def git(*args):
+                  return subprocess.check_output(['git', '-C', str(root), *args], stderr=subprocess.DEVNULL)
+              def sha(data):
+                  return hashlib.sha256(data).hexdigest()
+              links = [r for r in pins['files'] if r['mode'] == '120000']
+              require(len(links) == 1 and links[0]['path'] == rel and links[0]['size'] == 29
+                      and links[0]['sha256'] == expected, 'manifest_single_link_mismatch')
+              head = git('rev-parse', 'HEAD').decode('ascii').strip()
+              require(head == pins['pluginHead'] == '210998993f6a95ff0f5fcf0a431edca08676a195', 'head_pin_mismatch')
+              index = git('ls-files', '--stage', '-z')
+              entries = [r for r in index.split(b'\0') if r.endswith(b'\t' + rel.encode())]
+              require(len(entries) == 1 and entries[0].startswith(b'120000 ')
+                      and entries[0].split(b'\t')[0].endswith(b' 0'), 'index_link_mismatch')
+              blob = git('cat-file', 'blob', head + ':' + rel)
+              require(len(blob) == 29 and sha(blob) == expected, 'git_blob_mismatch')
+              leaf = root / rel
+              require(leaf.parent.resolve(strict=True).is_relative_to(root), 'leaf_parent_outside')
+              info = leaf.lstat()
+              require(stat.S_ISLNK(info.st_mode) or (stat.S_ISREG(info.st_mode) and info.st_size == 29), 'leaf_kind_unknown')
+              body = os.readlink(leaf).encode('utf-8') if stat.S_ISLNK(info.st_mode) else leaf.read_bytes()
+              require(len(body) == 29 and sha(body) in (expected, sha(blob.replace(b'/', b'\\'))), 'leaf_representation_unknown')
+              output = git('checkout-index', '--temp', '-z', '--', rel)
+              match = re.fullmatch(rb'([.]merge_link_[A-Za-z0-9]{6})\t' + re.escape(rel.encode()) + rb'\x00', output)
+              require(match is not None, 'git_temp_format_unknown')
+              temporary = root / match.group(1).decode('ascii')
+              info = temporary.lstat()
+              require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size == 29, 'git_temp_not_owned_regular_shape')
+              require(sha(temporary.read_bytes()) == expected, 'git_temp_blob_mismatch')
+              os.replace(temporary, leaf)  # Replace this owned leaf itself; never copy through its symlink.
+              info = leaf.lstat()
+              require(stat.S_ISREG(info.st_mode) and info.st_size == 29
+                      and sha(leaf.read_bytes()) == expected, 'materialized_bytes_mismatch')
+              require(git('ls-files', '--stage', '-z') == index
+                      and git('rev-parse', 'HEAD').decode('ascii').strip() == head, 'git_state_changed')
+              return {'status': 'MATERIALIZED', 'path': rel, 'size': 29, 'sha256': expected,
+                      'regularLeaf': True, 'indexUnchanged': True, 'headUnchanged': True}
+
+
+          if __name__ == '__main__':
+              try:
+                  pins = json.loads(Path('cli/scripts/diagnostics/plugin-offline-wheels-inputs.json').read_text(encoding='utf-8'))
+                  print(json.dumps(materialize(Path('plugin'), pins)))
+              except Rejected as exc:
+                  print(json.dumps({'status': 'REJECTED', 'reason': str(exc)}))
+                  raise SystemExit(1)
+              except Exception:
+                  print('{"status":"REJECTED","reason":"owned_git_text_materialization_unconfirmed"}')
+                  raise SystemExit(1)
+          '@ | python -
+          exit $LASTEXITCODE
       - name: Offline closure then original Python wholes
         shell: pwsh
         working-directory: cli
