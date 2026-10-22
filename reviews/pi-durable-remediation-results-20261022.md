@@ -1,6 +1,6 @@
 # PR #74 全量失败修复与验证
 
-后续实际CI暴露KSwarm源码装配、Windows活动测试预算及macOS Loop超时；前两项增量与新源码80项绑定见[CI修复记录](pi-durable-ci-remediation-20261022.md)。下列全量本机记录按eade的79项冻结保留，不能代替新HEAD真实CI；macOS Loop仍在诊断。
+后续实际CI暴露KSwarm源码装配、Windows活动测试预算、Windows runtime fixture遗留SQLite句柄及Loop间歇超时。前两项历史80源增量见[CI修复记录](pi-durable-ci-remediation-20261022.md)；本次Windows完整owner关闭、原错误保留和最终81源绑定见[生命周期修复](pi-durable-windows-runtime-cleanup-20261022.md)及[实际证据](pi-durable-windows-runtime-evidence-20261022.json)。原七文件在本机Node24与22.22各93/93，真实新HEAD Windows仍待验。下列全量本机记录按eade的79项冻结保留，不重复累计新93。Loop相同源码在713的Ubuntu两版/macOS24完整8通过，而macOS22.22仍5通过3失败；诊断job真实worker也超时。旧绿和单次微实验均不能证明稳定或关闭故障，Loop与远端128项仍未完成。
 
 本轮承接用户“解决失败问题”，不把此前基线失败当成结案。PR #73 已于 2026-10-21 合并；本分支已集成主干 `6770092945a42fb0e45ef0d68d0971bfc01b51a8`。本轮起点为 `d0e35e73014add369748de77fe2a868a62777f13`。原始失败记录保留在 [集成记录](pi-durable-integration-results-20261022.md) 和 [不可变失败清单](failure-remediation-ledger.json)。
 
