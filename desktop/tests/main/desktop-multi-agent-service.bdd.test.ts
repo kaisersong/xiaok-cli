@@ -1,4 +1,4 @@
-import {captureQualifiedServiceCallbacks,awaitQualifiedServiceCallbackObservations,sealQualifiedServiceCallbacks,beginQualifiedGroupCallbackStop,finishQualifiedServiceCallbacks,proveQualifiedPreparedCallbackFailure,restoreQualifiedServiceCallbackObservers,type QualifiedServiceCallbacks,type QualifiedCallbackCall} from '../fixtures/qualified-group-callback-closure.js';
+import {captureQualifiedSourceCallbacks,armQualifiedSourceFailure,bindQualifiedSourceFailureSpy,restoreQualifiedSourceFailureSpy,beginQualifiedSourceFailurePublication,consumeQualifiedSourceFailure,finishQualifiedSourceCallbacks,restoreQualifiedSourceCallbacks,type QualifiedSourceCallbacks,type QualifiedSourceFailureOccurrence,type QualifiedSourceCallbackReceipt,consumeQualifiedPreparationFailure,finishQualifiedPreparationCallbacks,hasQualifiedPreparationNativePoison,captureQualifiedServiceCallbacks,awaitQualifiedServiceCallbackObservations,sealQualifiedServiceCallbacks,beginQualifiedGroupCallbackStop,finishQualifiedServiceCallbacks,proveQualifiedPreparedCallbackFailure,restoreQualifiedServiceCallbackObservers,type QualifiedServiceCallbacks,type QualifiedCallbackCall} from '../fixtures/qualified-group-callback-closure.js';
 import nativeProcess from 'node:process';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {types as qualifiedUtilTypes} from 'node:util';
@@ -128,7 +128,7 @@ async function hideOwnedRegisteredEnvironmentForNegativeFixture(registerCleanup:
 // File-private test lifecycle; this candidate is not applied or execution-approved.
 type QualifiedOutcome={ok:true;value:unknown}|{ok:false;error:unknown};
 type QualifiedSlot={label:string;kind:'stop'|'owner'|'callback'|'source'|'material'|'rescue'|'leaf'|'native';receiver:any;method:Function;args:unknown[];called:boolean;rawWritten:boolean;raw?:unknown;outcome?:QualifiedOutcome;reaction?:Promise<void>;workers:any[];errorIndex?:number};
-type QualifiedRecord={ctx:TestContext;nonce:string;refs:unknown[];registrations:unknown[];sequence:number;seal?:number;closing:boolean;late:boolean;errors:unknown[];acceptedErrorIndices:Set<number>;callbacks:QualifiedCallbackOwner[];assertions:unknown[];expectedFailures:Set<unknown>;slots:QualifiedSlot[];closingSlots?:readonly QualifiedSlot[];pending:Set<object>;roots:any[];natives:any[];services:any[];coordinators:any[];sessions:any[];operations:any[];hostMaterials:any[];workers:any[];opaque:boolean;callbackClosed:boolean;leavesClosed:boolean;accountReleased:boolean;account:any;lease?:{release():void};workP?:Promise<void>;workOutcome?:QualifiedOutcome;scenarioP?:Promise<void>;hookFailure?:{error:unknown};abort?:()=>void;abortInstalled:boolean;closeStarted:boolean};
+type QualifiedRecord={ctx:TestContext;nonce:string;refs:unknown[];registrations:unknown[];sequence:number;seal?:number;closing:boolean;late:boolean;errors:unknown[];acceptedErrorIndices:Set<number>;callbacks:QualifiedCallbackOwner[];sources:QualifiedSourceOwner[];assertions:unknown[];expectedFailures:Set<unknown>;slots:QualifiedSlot[];closingSlots?:readonly QualifiedSlot[];pending:Set<object>;roots:any[];natives:any[];services:any[];coordinators:any[];sessions:any[];operations:any[];hostMaterials:any[];workers:any[];opaque:boolean;nativePoison:boolean;callbackClosed:boolean;leavesClosed:boolean;accountReleased:boolean;account:any;lease?:{release():void};workP?:Promise<void>;workOutcome?:QualifiedOutcome;scenarioP?:Promise<void>;hookFailure?:{error:unknown};abort?:()=>void;abortInstalled:boolean;closeStarted:boolean};
 type QualifiedOrigin={record:QualifiedRecord;slot?:QualifiedSlot;callbackCall?:QualifiedCallbackCall};
 const qualifiedAnchor=Symbol('qualified-complex-fixture-strong-registry');
 const qualifiedRecords:QualifiedRecord[]=[];
@@ -141,8 +141,11 @@ const qDOMNameGetter=qOwnDescriptor(DOMException.prototype,'name')?.get;
 function qknownAbort(error:unknown):boolean{
  try{
   if((typeof error!=='object'&&typeof error!=='function')||error===null||qIsProxy(error))return false;
+  // Native DOMException is also a native Error on supported Node versions;
+  // its name lives behind the captured branded getter rather than own data.
+  if(qDOMNameGetter)try{return qNativeApply(qDOMNameGetter,error,[])==='AbortError';}catch{/* A non-DOM native Error follows the original own-data path. */}
   if(qIsNativeError(error)){const descriptor=qOwnDescriptor(error,'name');return Boolean(descriptor&&qHasOwn(descriptor,'value')&&descriptor.value==='AbortError');}
-  return Boolean(qDOMNameGetter&&qNativeApply(qDOMNameGetter,error,[])==='AbortError');
+  return false;
  }catch{return false;}
 }
 
@@ -195,14 +198,38 @@ function qprobeNative(native:any):boolean{
  if(!open||open.get!==native.get||open.set!==undefined||open.configurable!==false||typeof native.get!=='function')throw Error('qualified_fixture_native_getter_changed');
  const state=qNativeApply(native.get,native.db,[]);if(state!==true&&state!==false)throw Error('qualified_fixture_native_state_unknown');return state;
 }
-type QualifiedCallbackOwner={service:object;cap?:QualifiedServiceCallbacks;expectedSpec:Error|(()=>Error|undefined)|undefined;dispose:QualifiedSlot;stops:QualifiedSlot[];receipt?:{callbacksTerminal:true;nativeHealthy:false;originalServiceError:unknown};expected?:Error;observationFailed?:boolean};
-function qservice<T extends {dispose():unknown;runtimeStatus():{blocked:boolean}}>(r:QualifiedRecord,value:T,coordinator:DesktopExecutionCoordinator,store?:DesktopMultiAgentStore,expectedSpec?:Error|(()=>Error|undefined),observeCallbacks=false):T{
+type QualifiedSourceOwner={host:InProcessTaskRuntimeHost;cap?:QualifiedSourceCallbacks;sourceSlot:QualifiedSlot;occurrence?:QualifiedSourceFailureOccurrence;receipt?:QualifiedSourceCallbackReceipt};
+function qcaptureSourceFailure(r:QualifiedRecord,host:InProcessTaskRuntimeHost):QualifiedSourceOwner{
+ if(r.closing||r.sources.some(owner=>owner.host===host))throw Error('qualified_source_fixed_owner_population');
+ const slots=r.slots.filter(slot=>slot.kind==='source'&&slot.receiver===host);if(slots.length!==1)throw Error('qualified_source_original_slot_missing');
+ const options=qOwnDescriptor(host,'options'),store=options&&qHasOwn(options,'value')?qOwnDescriptor(options.value,'snapshotStore'):undefined;if(!store||!qHasOwn(store,'value'))throw Error('qualified_source_original_store_missing');
+ const owner=qregister(r,'source-failure-callback-owner',{host,sourceSlot:slots[0]} as QualifiedSourceOwner);r.sources.push(owner);
+ owner.cap=qconstruct(r,'source-failure-observers',()=>captureQualifiedSourceCallbacks(host,store.value,{retain:(_label,held)=>qhold(r,held),isClosing:()=>r.closing}));
+ qslot(r,'source-failure-observers.restore','leaf',undefined,()=>restoreQualifiedSourceCallbacks(owner.cap!));return owner;
+}
+function qsourceReceipt(r:QualifiedRecord,slot:QualifiedSlot):boolean{
+ const owners=r.sources.filter(owner=>owner.sourceSlot===slot);if(owners.length!==1)return false;const owner=owners[0],receipt=owner.receipt;
+ return Boolean(owner.cap&&owner.occurrence&&receipt&&Object.isFrozen(receipt)&&receipt.callbacksTerminal===true&&receipt.nativeHealthy===false&&receipt.occurrence===owner.occurrence&&receipt.originalSourceClose===slot.raw&&slot.outcome?.ok===false&&receipt.originalSourceError===slot.outcome.error);
+}
+async function qfinishSourceReceipts(r:QualifiedRecord):Promise<void>{
+ for(const owner of r.sources){const slot=owner.sourceSlot;
+  if(!slot.called)continue;
+  try{
+   if(!owner.cap||!owner.occurrence||slot.outcome?.ok!==false||slot.errorIndex===undefined||r.errors[slot.errorIndex]!==slot.outcome.error)throw Error('qualified_source_original_failure_occurrence_missing');
+   owner.receipt=await finishQualifiedSourceCallbacks(owner.cap,owner.occurrence,slot);
+   if(!qsourceReceipt(r,slot))throw Error('qualified_source_original_receipt_missing');r.acceptedErrorIndices.add(slot.errorIndex);r.nativePoison=true;
+  }catch(error){qerror(r,error);}
+ }
+}
+
+type QualifiedCallbackOwner={service:object;cap?:QualifiedServiceCallbacks;expectedSpec:Error|(()=>Error|undefined)|undefined;dispose:QualifiedSlot;stops:QualifiedSlot[];receipt?:{callbacksTerminal:true;nativeHealthy:false;originalServiceError?:unknown};expected?:Error;observationFailed?:boolean};
+function qservice<T extends {dispose():unknown;runtimeStatus():{blocked:boolean}}>(r:QualifiedRecord,value:T,coordinator:DesktopExecutionCoordinator,store?:DesktopMultiAgentStore,expectedSpec?:Error|(()=>Error|undefined),observeCallbacks=false,observeExpectedPreparation=false):T{
  qregister(r,'service',value);qregister(r,'coordinator',coordinator);r.services.push(value);r.coordinators.push(coordinator);const dispose=qslot(r,'service.dispose','owner',value,value.dispose);
  if(expectedSpec!==undefined||observeCallbacks){
   if(!store)throw Error('qualified_group_store_binding_missing');
   const owner=qregister(r,'group-callback-owner',{service:value,expectedSpec,dispose,stops:[]} as QualifiedCallbackOwner);r.callbacks.push(owner);
   owner.cap=captureQualifiedServiceCallbacks(value,store,{
-   retain:(_label,held)=>qhold(r,held),isClosing:()=>r.closing,
+   retain:(_label,held)=>qhold(r,held),isClosing:()=>r.closing,observeExpectedPreparation:observeExpectedPreparation?true:undefined,
    invokeOriginal:(call,invoke)=>{const origin=qualifiedALS.getStore();call.originRecord=origin?.record;call.originSlot=origin?.slot;call.preClosing=!r.closing;call.parentCall=origin?.callbackCall;return qualifiedALS.run({record:r,slot:origin?.record===r?origin.slot:undefined,callbackCall:call},invoke);},
    allowedCloseOrigin:(receiver,call)=>{
     if(call.originRecord!==r||typeof call.preClosing!=='boolean')return false;
@@ -234,20 +261,34 @@ function qsealCallbackOwners(r:QualifiedRecord,service?:object){
 }
 async function qcallbackTerminalReceipts(r:QualifiedRecord){
  for(const owner of r.callbacks){
-  if(owner.dispose.outcome?.ok!==false)continue;
+  const hasPreparationPoison=Boolean(owner.cap&&hasQualifiedPreparationNativePoison(owner.cap));
+  if(owner.dispose.outcome?.ok!==false&&!hasPreparationPoison)continue;
   try{
    const expected=typeof owner.expectedSpec==='function'?owner.expectedSpec():owner.expectedSpec;
    if(!expected||!owner.cap)throw Error('qualified_group_expected_source_missing');
    owner.expected=expected;
-   owner.receipt=await finishQualifiedServiceCallbacks(owner.cap,expected,owner.dispose.outcome.error);
-   if(owner.dispose.errorIndex===undefined||r.errors[owner.dispose.errorIndex]!==owner.dispose.outcome.error)throw Error('qualified_group_dispose_occurrence_missing');
-   r.acceptedErrorIndices.add(owner.dispose.errorIndex);
+   if(owner.dispose.outcome?.ok===false){
+    owner.receipt=await finishQualifiedServiceCallbacks(owner.cap,expected,owner.dispose.outcome.error);
+    if(owner.dispose.errorIndex===undefined||r.errors[owner.dispose.errorIndex]!==owner.dispose.outcome.error)throw Error('qualified_group_dispose_occurrence_missing');
+    r.acceptedErrorIndices.add(owner.dispose.errorIndex);
+   }else{
+    if(owner.dispose.outcome?.ok!==true||!owner.dispose.rawWritten)throw Error('qualified_group_preparation_dispose_terminal_missing');
+    const calls=owner.cap.methods.filter(method=>method.key==='dispose'&&method.receiver===owner.service).flatMap(method=>method.calls).filter(call=>call.originSlot===owner.dispose&&call.raw===owner.dispose.raw&&call.outcome?.ok===true);
+    if(calls.length!==1)throw Error('qualified_group_preparation_dispose_call_population');
+    owner.receipt=await finishQualifiedPreparationCallbacks(owner.cap,expected,calls[0]);
+   }
+   if(hasPreparationPoison){if(!Object.isFrozen(owner.receipt)||owner.receipt.callbacksTerminal!==true||owner.receipt.nativeHealthy!==false)throw Error('qualified_group_preparation_terminal_receipt');r.nativePoison=true;}
   }catch(error){qerror(r,error);}
  }
  for(const owner of r.callbacks)try{if(!owner.cap)throw Error('qualified_group_partial_observation');await awaitQualifiedServiceCallbackObservations(owner.cap);}catch(error){owner.observationFailed=true;qerror(r,error);}
  const prepared=qpreparedAcceptedErrorIndices(r,(role,call,error)=>r.callbacks.some(owner=>Boolean(owner.receipt&&owner.cap&&owner.expected&&proveQualifiedPreparedCallbackFailure(owner.cap,role.factory,call,error,owner.expected))));
  for(const index of prepared)r.acceptedErrorIndices.add(index);
  for(const role of qpreparedRoles(r))role.terminal=true;
+}
+
+function qconsumeExpectedPreparation(r:QualifiedRecord,service:object,error:Error,bodyOutcomeP:Promise<unknown>,bodyOutcomeValue:unknown):void{
+ const owners=r.callbacks.filter(owner=>owner.service===service);if(owners.length!==1||!owners[0].cap)throw Error('qualified_preparation_case_owner_population');
+ consumeQualifiedPreparationFailure(owners[0].cap,error,bodyOutcomeP,bodyOutcomeValue);r.nativePoison=true;
 }
 
 function qhost<T extends InProcessTaskRuntimeHost>(r:QualifiedRecord,value:T):T{
@@ -465,6 +506,7 @@ async function qcloseGeneration(r:QualifiedRecord,store:DesktopMultiAgentStore,s
  if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_fixture_generation_close_failed',{cause:failures[0]});
  for(const coordinator of r.coordinators){const snapshot=coordinator.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)throw Error('qualified_fixture_generation_not_idle');}
  if(service.runtimeStatus().blocked!==false||r.sessions.some(session=>!session.disposeSeen||session.calls.some((call:any)=>!call.outcome))||r.workers.some(worker=>!worker.exited))throw Error('qualified_fixture_generation_callbacks_unknown');
+ if(r.nativePoison||r.callbacks.some(owner=>owner.cap&&hasQualifiedPreparationNativePoison(owner.cap)))throw Error('qualified_fixture_generation_preparation_native_poison');
  qprobeNative(native);qcall(r,native.closeSlot);await native.closeSlot.reaction;
  if(native.closeSlot.outcome?.ok!==true||!native.closeSlot.rawWritten)throw native.closeSlot.outcome?.ok===false?native.closeSlot.outcome.error:Error('qualified_fixture_generation_native_close_unknown');
  if(qprobeNative(native)!==false)throw Error('qualified_fixture_generation_native_open');native.closed=true;
@@ -482,7 +524,8 @@ async function qfinish(r:QualifiedRecord){
  const beforeSource=Boolean(r.workOutcome)&&r.callbacks.every(owner=>Boolean(owner.cap)&&owner.cap!.errors.length===0&&!owner.observationFailed)&&population.filter(s=>['stop','owner','rescue','callback'].includes(s.kind)).every(s=>s.called&&(s.outcome?.ok===true||r.callbacks.some(owner=>owner.dispose===s&&owner.receipt?.callbacksTerminal===true)))&&r.sessions.every(session=>session.disposeSeen&&session.calls.every((call:any)=>Boolean(call.outcome)&&(call.name==='run'||call.outcome.ok===true)))&&preparedBeforeSource&&r.operations.every(operation=>Boolean(operation.outcome))&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(worker=>worker.exited);
  if(beforeSource)for(const kind of ['source','material'] as const){
   for(const slot of population)if(slot.kind===kind)qcall(r,slot);for(const slot of population)if(slot.kind===kind)await slot.reaction;
-  if(population.some(slot=>slot.kind===kind&&(!slot.called||slot.outcome?.ok!==true)))break;
+  if(kind==='source')await qfinishSourceReceipts(r);
+  if(population.some(slot=>slot.kind===kind&&(!slot.called||(slot.outcome?.ok!==true&&!qsourceReceipt(r,slot)))))break;
  }
  // Never infer child callback closure from a rejected dispose/status/UI receipt.
  const ownerHealthy=population.filter(s=>['stop','owner','source','material','rescue'].includes(s.kind)).every(s=>s.called&&s.outcome?.ok===true);
@@ -490,7 +533,7 @@ async function qfinish(r:QualifiedRecord){
  const operationsSettled=r.operations.every(operation=>Boolean(operation.outcome));
  const sessionHealthy=r.sessions.every(s=>s.disposeSeen&&s.calls.every((c:any)=>Boolean(c.outcome)&&(c.name==='run'||c.outcome.ok===true)));
  const preparedHealthy=qpreparedRoles(r).every(role=>role.factory.outcome?.ok===true&&!role.observerErrors.length&&(!role.session||(role.calls.some(call=>call.name==='dispose')&&role.calls.every(call=>Boolean(call.outcome)&&(call.outcome?.ok===true||call.name==='run'||role.errors.some(entry=>entry.call===call&&r.acceptedErrorIndices.has(entry.index)))))));
- const callbackOwnersHealthy=r.callbacks.every(owner=>Boolean(owner.cap)&&owner.cap!.errors.length===0&&!owner.observationFailed)&&population.filter(s=>['stop','owner','source','material','rescue','callback'].includes(s.kind)).every(s=>s.called&&(s.outcome?.ok===true||r.callbacks.some(owner=>owner.dispose===s&&owner.receipt?.callbacksTerminal===true)));
+ const callbackOwnersHealthy=r.callbacks.every(owner=>Boolean(owner.cap)&&owner.cap!.errors.length===0&&!owner.observationFailed)&&population.filter(s=>['stop','owner','source','material','rescue','callback'].includes(s.kind)).every(s=>s.called&&(s.outcome?.ok===true||r.callbacks.some(owner=>owner.dispose===s&&owner.receipt?.callbacksTerminal===true)||(s.kind==='source'&&qsourceReceipt(r,s))));
  r.callbackClosed=Boolean(r.workOutcome)&&callbackOwnersHealthy&&sessionHealthy&&preparedHealthy&&operationsSettled&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(w=>w.exited);
  if(r.callbackClosed){
   for(const slot of [...population].reverse())if(slot.kind==='leaf')qcall(r,slot);
@@ -499,7 +542,7 @@ async function qfinish(r:QualifiedRecord){
   if(r.leavesClosed&&r.abortInstalled&&r.abort){try{r.ctx.signal.removeEventListener('abort',r.abort);r.abortInstalled=false;}catch(error){qerror(r,error);r.leavesClosed=false;}}
   if(r.leavesClosed){try{r.lease?.release();r.accountReleased=Boolean(r.lease);}catch(error){qerror(r,error);}}
  }
- let nativeAllowed=r.callbackClosed&&r.leavesClosed&&ownerHealthy&&!r.late;
+ let nativeAllowed=!r.nativePoison&&!r.callbacks.some(owner=>owner.cap&&hasQualifiedPreparationNativePoison(owner.cap))&&r.callbackClosed&&r.leavesClosed&&ownerHealthy&&!r.late;
  try{for(const c of r.coordinators){const snapshot=c.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)nativeAllowed=false;}for(const s of r.services)if(s.runtimeStatus().blocked!==false)nativeAllowed=false;}catch(error){qerror(r,error);nativeAllowed=false;}
  for(const native of r.natives)try{if(!native.probeValid)throw Error('qualified_fixture_native_probe_unknown_before_close');qprobeNative(native);}catch(error){qerror(r,error);nativeAllowed=false;}
  if(nativeAllowed){for(const slot of population)if(slot.kind==='native')qcall(r,slot);for(const slot of population)if(slot.kind==='native')await slot.reaction;
@@ -515,7 +558,7 @@ async function qfinish(r:QualifiedRecord){
  }catch(error){qerror(r,error);}
 }
 function runCase(ctx:TestContext,work:(r:QualifiedRecord)=>Promise<void>):Promise<void>{
- const r:QualifiedRecord={ctx,nonce:randomBytes(16).toString('hex'),refs:[],registrations:[],sequence:0,closing:false,late:false,errors:[],acceptedErrorIndices:new Set(),callbacks:[],assertions:[],expectedFailures:new Set(),slots:[],pending:new Set(),roots:[],natives:[],services:[],coordinators:[],sessions:[],operations:[],hostMaterials:[],workers:[],opaque:false,callbackClosed:false,leavesClosed:false,accountReleased:false,account:undefined,abortInstalled:false,closeStarted:false};qualifiedRecords.push(r);qhold(r,ctx);qhold(r,work);
+ const r:QualifiedRecord={ctx,nonce:randomBytes(16).toString('hex'),refs:[],registrations:[],sequence:0,closing:false,late:false,errors:[],acceptedErrorIndices:new Set(),callbacks:[],sources:[],assertions:[],expectedFailures:new Set(),slots:[],pending:new Set(),roots:[],natives:[],services:[],coordinators:[],sessions:[],operations:[],hostMaterials:[],workers:[],opaque:false,nativePoison:false,callbackClosed:false,leavesClosed:false,accountReleased:false,account:undefined,abortInstalled:false,closeStarted:false};qualifiedRecords.push(r);qhold(r,ctx);qhold(r,work);
  const scenario=(async()=>{
   await Promise.resolve();let failure:{error:unknown}|undefined;
   try{
@@ -539,7 +582,7 @@ Object.defineProperty(nativeProcess,qualifiedCompiledAnchor,{value:nativeWorker,
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('BDD: durable service uses the real shared coordinator', () => {
-  async function setup(__q:QualifiedRecord,createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { observeCallbacks?:boolean; expectedDisposeError?:Error; isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
+  async function setup(__q:QualifiedRecord,createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { observeCallbacks?:boolean; observeExpectedPreparation?:true; expectedDisposeError?:Error; isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
     const root = qroot(__q,'xiaok-multi-agent-service-');
     if(policy.isolatedConfigRoot){const previous=process.env.XIAOK_CONFIG_DIR;qaction(__q,'old-cleanup-line-128','leaf',()=>{if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;});process.env.XIAOK_CONFIG_DIR=root;}
     void 0 /* typed actual-resource close slot registered at acquisition */;
@@ -549,7 +592,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const service = qservice(__q,qconstruct(__q,'multi-agent-service',()=>new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
       const session = await qraw(__q,'ordinary-session-factory',()=>createSession(input));
       return qsession(__q,session);
-    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 })),coordinator,store,policy.expectedDisposeError,policy.observeCallbacks);
+    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 })),coordinator,store,policy.expectedDisposeError,policy.observeCallbacks,policy.observeExpectedPreparation);
     void 0 /* typed actual-resource close slot registered at acquisition */;
     service.registerThread({ threadId: 't1', profileId: 'p1', workspaceId: 'w1', cwd: root });
     let deliveryAuthority!: DesktopHostDeliveryAuthority;
@@ -1006,11 +1049,20 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         port.append('second result'); port.finalize({ executionState: 'terminal', outcome: 'success' }); await owner.projectToolResult('capture-second', 'second result');
         const failed = f.service.prepareGroupObservationReference({ actor: context.actor, requestSource: 'agent', taskId: canonical, operationId: 'failed-terminal-save' });
         const originalSave = FileTaskSnapshotStore.prototype.save;
+        const sourceFailureOwner=qcaptureSourceFailure(__q,f.host),sourceFailure=Error('actual terminal journal failure');
+        armQualifiedSourceFailure(sourceFailureOwner.cap!,{taskId:canonical,ticket:failed,expected:sourceFailure});
         const failingSave = qspy(__q,()=>vi.spyOn(FileTaskSnapshotStore.prototype, 'save')).mockImplementation(function(this: FileTaskSnapshotStore, ...args: Parameters<FileTaskSnapshotStore['save']>) {
-          return args[0].taskId === canonical ? Promise.reject(new Error('actual terminal journal failure')) : originalSave.apply(this, args);
+          return args[0].taskId === canonical ? Promise.reject(sourceFailure) : originalSave.apply(this, args);
         });
-        try { await expect(f.host.publishGroupObservationReference(failed)).rejects.toThrow('actual terminal journal failure'); }
-        finally { failingSave.mockRestore(); }
+        let sourceBodyFailure:{error:unknown}|undefined;
+        try { bindQualifiedSourceFailureSpy(sourceFailureOwner.cap!,FileTaskSnapshotStore.prototype.save);const originalFailurePublication=beginQualifiedSourceFailurePublication(sourceFailureOwner.cap!,failed);await expect(originalFailurePublication).rejects.toThrow('actual terminal journal failure');sourceFailureOwner.occurrence=await consumeQualifiedSourceFailure(sourceFailureOwner.cap!,originalFailurePublication,sourceFailure);__q.nativePoison=true; }
+        catch(error){sourceBodyFailure={error};}
+        finally {
+          const failures:unknown[]=sourceBodyFailure?[sourceBodyFailure.error]:[];
+          try{if(sourceFailureOwner.cap!.role?.spy?.active)restoreQualifiedSourceFailureSpy(sourceFailureOwner.cap!);}catch(error){failures.push(error);}
+          try{failingSave.mockRestore();}catch(error){failures.push(error);}
+          if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_source_fault_body_and_restore_failed',{cause:failures[0]});
+        }
         expect(f.store.getOperation(context.groupId, 'failed-terminal-save')).toBeNull();
         const failedAfter = (await f.host.recoverTask(canonical)).snapshot;
         expect({ ...failedAfter, protectedObservationClosure: undefined }).toEqual({ ...before, protectedObservationClosure: undefined });

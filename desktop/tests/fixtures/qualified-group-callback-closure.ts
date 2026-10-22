@@ -145,11 +145,12 @@ type CapturedMethod={receiver:object;key:string;before:PropertyDescriptor|undefi
 type GroupPending={kind:'preparation'|'physical'|'child-execution'|'managed-final'|'managed-release';raw:Promise<void>;agentId?:string;outcome?:Outcome;reaction?:Promise<void>};
 type CoreExecutionOrigin={id:string;record:object;parentId:unknown;execution?:Promise<void>;executionOutcome?:Outcome;reaction?:Promise<void>};
 export type QualifiedPreparedCallbackCall={name:string;factoryCall:object;session:object;groupId:string;agentId:string;receiver:unknown;rawWritten:boolean;raw?:unknown;outcome?:Outcome;reaction?:Promise<void>;parentCall?:object};
+export type QualifiedPreparationSource={begin:QualifiedCallbackCall;group?:QualifiedGroupCallbacks;child?:object;pending?:object;ticket?:object;context?:object;coreRecord?:object;rawFacts?:object;operationId?:string;expectedTurn?:number;producer?:QualifiedCallbackCall;preparation?:object;facts?:object;consumption?:Readonly<{error:Error;bodyOutcomeP:Promise<unknown>;bodyOutcomeValue:unknown}>;bodyOutcome?:Outcome;bodyReaction?:Promise<void>};
 type GroupSnapshot={children:Array<[string,object]>;promises:Promise<void>[];pending:GroupPending[];coreExecutions:CoreExecutionOrigin[];finals:Array<[unknown,object]>;releases:Array<[unknown,object]>};
 export type QualifiedGroupCallbacks={service:QualifiedServiceCallbacks;groupId:string;group:object;core:QualifiedCoreCallbacks;commands:object;commandsRun:Function;children:Map<string,unknown>;snapshot?:GroupSnapshot;coreReceipt?:QualifiedCoreCallbackReceipt};
-export type QualifiedServiceCallbackHooks={retain:Retain;isClosing():boolean;allowedCloseOrigin(receiver:object,call:QualifiedCallbackCall):boolean;invokeOriginal(call:QualifiedCallbackCall,invoke:()=>unknown):unknown;onGroup(binding:QualifiedGroupCallbacks):void;preparedCalls(factory:QualifiedCallbackCall):readonly QualifiedPreparedCallbackCall[];onPreparedFactory(call:QualifiedCallbackCall,groupId:string,agentId:string):void;onPreparedSession(call:QualifiedCallbackCall,session:object,groupId:string,agentId:string):void;onError(error:unknown):void};
-export type QualifiedServiceCallbackReceipt=Readonly<{callbacksTerminal:true;nativeHealthy:false;originalServiceError:unknown}>;
-export type QualifiedServiceCallbacks={service:object;store:object;hooks:QualifiedServiceCallbackHooks;groups:Map<string,unknown>;bindings:QualifiedGroupCallbacks[];errors:unknown[];methods:CapturedMethod[];physicalCalls:Call[];factoryCalls:Call[];bindingReactions:Promise<void>[];acceptedPreparedCalls:Set<object>;sealed:boolean;terminal:boolean;containers:{preparations:WeakMap<object,Set<Promise<void>>>;physical:Map<object,Set<Promise<void>>>;finals:Map<unknown,object>;releases:Map<string,object>};finish?:Promise<QualifiedServiceCallbackReceipt>;finishArguments?:{expected:Error;originalServiceError:unknown}};
+export type QualifiedServiceCallbackHooks={retain:Retain;isClosing():boolean;allowedCloseOrigin(receiver:object,call:QualifiedCallbackCall):boolean;invokeOriginal(call:QualifiedCallbackCall,invoke:()=>unknown):unknown;onGroup(binding:QualifiedGroupCallbacks):void;preparedCalls(factory:QualifiedCallbackCall):readonly QualifiedPreparedCallbackCall[];onPreparedFactory(call:QualifiedCallbackCall,groupId:string,agentId:string):void;onPreparedSession(call:QualifiedCallbackCall,session:object,groupId:string,agentId:string):void;onError(error:unknown):void;observeExpectedPreparation?:true};
+export type QualifiedServiceCallbackReceipt=Readonly<{callbacksTerminal:true;nativeHealthy:false;originalServiceOutcome:Outcome;originalServiceError?:unknown}>;
+export type QualifiedServiceCallbacks={service:object;store:object;hooks:QualifiedServiceCallbackHooks;groups:Map<string,unknown>;bindings:QualifiedGroupCallbacks[];errors:unknown[];methods:CapturedMethod[];physicalCalls:Call[];factoryCalls:Call[];preparationSources:QualifiedPreparationSource[];preparationNativePoisoned:boolean;preparationAuthority?:{inspectOriginal:Function;inspectPrototype:object;inspectDescriptor:PropertyDescriptor;preparations:WeakMap<object,object>};bindingReactions:Promise<void>[];acceptedPreparedCalls:Set<object>;sealed:boolean;terminal:boolean;containers:{preparations:WeakMap<object,Set<Promise<void>>>;physical:Map<object,Set<Promise<void>>>;finals:Map<unknown,object>;releases:Map<string,object>;globalPreparations?:Set<Promise<void>>};finish?:Promise<QualifiedServiceCallbackReceipt>;finishArguments?:{expected:Error;outcome:Outcome}};
 const weakMapGet=WeakMap.prototype.get,setValues=Set.prototype.values,setIteratorNext=proto(new Set().values()).next,mapGet=Map.prototype.get;
 function retainedError(binding:QualifiedServiceCallbacks,error:unknown):void{
  // Observer failures are retained without replacing an original return/throw.
@@ -208,9 +209,9 @@ function install(binding:QualifiedServiceCallbacks,receiver:object,key:string,or
  const record={receiver,key,before,original,installed,calls};binding.methods.push(record);retainObserved(binding,'qualified-group-method-original-descriptor',record);
  Object.defineProperty(receiver,key,{value:installed,configurable:true,writable:true,enumerable:before?.enumerable??false});need(own(receiver,key)?.value===installed,'same_installed_method');return record;
 }
-function recordCall(binding:QualifiedServiceCallbacks,call:Call,original:Function):unknown{
+function recordCall(binding:QualifiedServiceCallbacks,call:Call,original:Function,beforeOriginal?:()=>void):unknown{
  let raw:unknown;
- try{raw=binding.hooks.invokeOriginal(call,()=>apply(original,call.receiver,call.args));}catch(error){call.outcome={ok:false,error};retainObserved(binding,'qualified-group-call-threw',call.outcome);throw error;}
+ try{raw=binding.hooks.invokeOriginal(call,()=>{if(beforeOriginal)try{beforeOriginal();}catch(error){retainedError(binding,error);}return apply(original,call.receiver,call.args);});}catch(error){call.outcome={ok:false,error};retainObserved(binding,'qualified-group-call-threw',call.outcome);throw error;}
  call.raw=raw;call.rawWritten=true;retainObserved(binding,'qualified-group-original-call-value',raw);
  if(isPromise(raw)){
   try{call.reaction=apply(nativeThen,raw,[(value:unknown)=>{call.outcome={ok:true,value};retainObserved(binding,'qualified-group-call-fulfilled',call.outcome);},(error:unknown)=>{call.outcome={ok:false,error};retainObserved(binding,'qualified-group-call-rejected',call.outcome);}])as Promise<void>;retainObserved(binding,'qualified-group-call-reaction',call.reaction);}catch(error){retainedError(binding,error);}
@@ -234,7 +235,7 @@ export function captureQualifiedServiceCallbacks(service:object,store:object,hoo
  object(service);object(store);const groups=slot(service,'groups');entries(groups);
  const preparations=slot(service,'groupObservationPreparationDrains'),physical=slot(service,'physicalSessionClosures'),finals=slot(service,'managedFinalPublications'),releases=slot(service,'managedReleaseOwners');
  object(preparations);need(proto(preparations)===WeakMap.prototype,'native_group_preparation_map');object(physical);need(proto(physical)===Map.prototype,'native_physical_map');anyEntries(finals);anyEntries(releases);
- const binding:QualifiedServiceCallbacks={service,store,hooks,groups:groups as Map<string,unknown>,bindings:[],errors:[],methods:[],physicalCalls:[],factoryCalls:[],bindingReactions:[],acceptedPreparedCalls:new Set(),sealed:false,terminal:false,containers:{preparations:preparations as WeakMap<object,Set<Promise<void>>>,physical:physical as Map<object,Set<Promise<void>>>,finals:finals as Map<unknown,object>,releases:releases as Map<string,object>}};hooks.retain('qualified-service-callback-owner',binding);
+ const binding:QualifiedServiceCallbacks={service,store,hooks,groups:groups as Map<string,unknown>,bindings:[],errors:[],methods:[],physicalCalls:[],factoryCalls:[],preparationSources:[],preparationNativePoisoned:false,bindingReactions:[],acceptedPreparedCalls:new Set(),sealed:false,terminal:false,containers:{preparations:preparations as WeakMap<object,Set<Promise<void>>>,physical:physical as Map<object,Set<Promise<void>>>,finals:finals as Map<unknown,object>,releases:releases as Map<string,object>}};hooks.retain('qualified-service-callback-owner',binding);
  const originalPrepare=method(service,'prepareRoot'),originalDispose=method(service,'dispose'),originalPhysical=method(service,'closeManagedSession');
  install(binding,service,'prepareRoot',originalPrepare,call=>{
   const raw=recordCall(binding,call,originalPrepare);
@@ -258,6 +259,7 @@ export function captureQualifiedServiceCallbacks(service:object,store:object,hoo
  for(const key of ['bindManagedObservationAdmission','registerManagedFinalPublication']){
   const original=method(service,key);install(binding,service,key,original,call=>{try{need(call.receiver===service&&!binding.sealed&&!binding.terminal&&!hooks.isClosing(),'late_managed_producer:'+key);}catch(error){retainedError(binding,error);}return recordCall(binding,call,original);});
  }
+ if(hooks.observeExpectedPreparation===true)installQualifiedPreparationSources(binding);
  const options=slot(service,'options');object(options);const originalPreparation=slot(options,'prepareObservationSession',true);
  if(originalPreparation!==undefined){need(typeof originalPreparation==='function','original_observation_factory');install(binding,options,'prepareObservationSession',originalPreparation,call=>{
   try{need(!binding.sealed&&!binding.terminal&&!hooks.isClosing(),'late_prepared_factory');const group=preparedOrigin(binding,call);binding.factoryCalls.push(call);hooks.onPreparedFactory(call,group.groupId,call.agentId!);}catch(error){retainedError(binding,error);}
@@ -278,10 +280,20 @@ export function beginQualifiedGroupCallbackStop(binding:QualifiedGroupCallbacks)
  need(binding.service.sealed,'service_close_sealed');sameGroup(binding);return beginQualifiedCoreCallbacks(binding.core);
 }
 export function finishQualifiedServiceCallbacks(binding:QualifiedServiceCallbacks,expected:Error,originalServiceError:unknown):Promise<QualifiedServiceCallbackReceipt>{
- if(binding.finish){need(binding.finishArguments?.expected===expected&&binding.finishArguments.originalServiceError===originalServiceError,'same_service_finish_arguments');return binding.finish;}
- need(binding.sealed&&binding.bindings.length>0&&isQualifiedExpectedCallbackFailure(originalServiceError,expected),'exact_service_dispose_failure');binding.finishArguments={expected,originalServiceError};
+ need(isQualifiedExpectedCallbackFailure(originalServiceError,expected),'exact_service_dispose_failure');
+ return finishQualifiedServiceOutcome(binding,expected,{ok:false,error:originalServiceError});
+}
+export function finishQualifiedPreparationCallbacks(binding:QualifiedServiceCallbacks,expected:Error,originalDisposeCall:QualifiedCallbackCall):Promise<QualifiedServiceCallbackReceipt>{
+ need(hasQualifiedPreparationNativePoison(binding)&&binding.hooks.observeExpectedPreparation===true,'preparation_healthy_service_sticky_poison');
+ need(binding.methods.some(method=>method.receiver===binding.service&&method.key==='dispose'&&method.calls.includes(originalDisposeCall))&&originalDisposeCall.receiver===binding.service&&originalDisposeCall.args.length===0&&originalDisposeCall.rawWritten&&isPromise(originalDisposeCall.raw)&&originalDisposeCall.outcome?.ok===true,'preparation_original_fulfilled_service_call');
+ return finishQualifiedServiceOutcome(binding,expected,originalDisposeCall.outcome);
+}
+function finishQualifiedServiceOutcome(binding:QualifiedServiceCallbacks,expected:Error,originalServiceOutcome:Outcome):Promise<QualifiedServiceCallbackReceipt>{
+ if(binding.finish){const prior=binding.finishArguments?.outcome;need(binding.finishArguments?.expected===expected&&prior?.ok===originalServiceOutcome.ok&&(prior?.ok===false&&originalServiceOutcome.ok===false?prior.error===originalServiceOutcome.error:prior===originalServiceOutcome),'same_service_finish_arguments');return binding.finish;}
+ need(binding.sealed&&binding.bindings.length>0,'sealed_service_dispose_outcome');binding.finishArguments={expected,outcome:originalServiceOutcome};
  const finish=(async():Promise<QualifiedServiceCallbackReceipt>=>{
-  const allFailures:unknown[]=[originalServiceError],invalid:unknown[]=[];
+  const allFailures:unknown[]=originalServiceOutcome.ok?[]:[originalServiceOutcome.error],invalid:unknown[]=[];
+  try{await verifyQualifiedPreparationSources(binding,expected);}catch(error){invalid.push(error);}
   for(const group of binding.bindings){try{need(group.core.started,'original_independent_core_stop_called');group.coreReceipt=await finishQualifiedCoreCallbacks(group.core,expected);}catch(error){invalid.push(error);}}
   for(const group of binding.bindings)try{need(group.snapshot,'group_close_snapshot');for(const promise of group.snapshot.promises){try{await promise;}catch(error){allFailures.push(error);}}}catch(error){invalid.push(error);}
   // Every actual call is held. Observer reactions only record outcomes; their
@@ -303,14 +315,17 @@ export function finishQualifiedServiceCallbacks(binding:QualifiedServiceCallback
    else if(call.outcome.ok===false){
     // Only the exact disposal/physical stop roles use the expected-F classifier.
     // Business/factory/producer failures are never waived by sharing that F.
-    if(captured.key==='dispose'||captured.key==='closeManagedSession')allFailures.push(call.outcome.error);else invalid.push(call.outcome.error);
+    if(captured.key==='dispose'||captured.key==='closeManagedSession')allFailures.push(call.outcome.error);else if(!isConsumedPreparationCall(binding,call))invalid.push(call.outcome.error);
    }
   }
   try{need(binding.physicalCalls.length===count,'physical_population_after_barrier');for(let i=0;i<binding.methods.length;i++)need(binding.methods[i].calls.length===methodPopulations[i],'call_population_after_barrier');sameService(binding);}catch(error){invalid.push(error);}
   for(const group of binding.bindings){for(const entry of group.snapshot?.coreExecutions??[])await entry.reaction;for(const entry of group.snapshot?.pending??[])await entry.reaction;try{verifyQualifiedGroupFailureOrigins(group,expected);}catch(error){invalid.push(error);}}
+  try{recheckQualifiedPreparationSources(binding,expected);}catch(error){invalid.push(error);}
   for(const error of binding.errors)invalid.push(error);let known=true;for(const error of allFailures)if(!isQualifiedExpectedCallbackFailure(error,expected))known=false;
-  if(!known||invalid.length)throwAll([...allFailures,...invalid]);binding.terminal=true;
-  return retainObserved(binding,'qualified-service-callback-terminal',Object.freeze({callbacksTerminal:true as const,nativeHealthy:false as const,originalServiceError}));
+  if(!known||invalid.length)throwAll([...allFailures,...invalid]);
+  const receipt=retainObserved(binding,'qualified-service-callback-terminal',Object.freeze({callbacksTerminal:true as const,nativeHealthy:false as const,originalServiceOutcome,...(originalServiceOutcome.ok?{}:{originalServiceError:originalServiceOutcome.error})}));
+  try{recheckQualifiedPreparationSources(binding,expected);}catch(error){invalid.push(error);}
+  if(binding.errors.length||invalid.length)throwAll([...allFailures,...invalid,...binding.errors]);binding.terminal=true;return receipt;
  })();binding.finish=retainObserved(binding,'qualified-service-callback-finish',finish);return finish;
 }
 export async function awaitQualifiedServiceCallbackObservations(binding:QualifiedServiceCallbacks):Promise<void>{
@@ -320,9 +335,10 @@ export async function awaitQualifiedServiceCallbackObservations(binding:Qualifie
  for(const captured of binding.methods)for(const call of captured.calls){
   await call.reaction;
   if(!call.outcome)failures.push(Error('qualified_original_callback_outcome_missing'));
-  else if(call.outcome.ok===false&&!(binding.terminal&&(captured.key==='dispose'||captured.key==='closeManagedSession')&&binding.finishArguments&&isQualifiedExpectedCallbackFailure(call.outcome.error,binding.finishArguments.expected)))failures.push(call.outcome.error);
+  else if(call.outcome.ok===false&&!(binding.terminal&&binding.finishArguments&&((captured.key==='dispose'||captured.key==='closeManagedSession')?isQualifiedExpectedCallbackFailure(call.outcome.error,binding.finishArguments.expected):(call.outcome.error===binding.finishArguments.expected&&isConsumedPreparationCall(binding,call)))))failures.push(call.outcome.error);
  }
  for(let index=0;index<binding.methods.length;index++)if(binding.methods[index].calls.length!==populations[index])failures.push(Error('qualified_callback_observation_population_changed'));
+ if(binding.terminal&&binding.finishArguments)try{recheckQualifiedPreparationSources(binding,binding.finishArguments.expected);}catch(error){failures.push(error);}
  for(const error of binding.errors)failures.push(error);
  if(failures.length)throwAll(failures);
 }
@@ -390,11 +406,12 @@ function verifyQualifiedGroupFailureOrigins(group:QualifiedGroupCallbacks,expect
   if(call.name==='run'||call.outcome?.ok!==false)continue;
   need(consumed.has(call),'origin_unmatched_or_extra_prepared_failure');binding.acceptedPreparedCalls.add(call);
  }
+ const preparationConsumed=new Set<object>();
  for(const pending of snapshot.pending){if(pending.outcome?.ok!==false)continue;const pendingError=pending.outcome.error;
   if(pending.kind==='physical')need(binding.physicalCalls.some(call=>call.group===group&&call.raw===pending.raw&&call.outcome?.ok===false&&call.outcome.error===pendingError),'origin_physical_snapshot_propagation');
   else if(pending.kind==='child-execution'){
    const execution=byId.get(pending.agentId!);need(execution?.execution&&execution.executionOutcome?.ok===false&&execution.executionOutcome.error===pending.outcome.error,'origin_child_handle_execution_propagation');
-  }else throw pending.outcome.error;
+  }else if(pending.kind==='preparation'){const source=consumedPreparationPending(binding,group,pending);need(source&&!preparationConsumed.has(source),'origin_unconsumed_or_extra_preparation_failure');preparationConsumed.add(source);}else throw pending.outcome.error;
  }
 }
 export function restoreQualifiedServiceCallbackObservers(binding:QualifiedServiceCallbacks):void{
@@ -404,4 +421,209 @@ export function restoreQualifiedServiceCallbackObservers(binding:QualifiedServic
   if(captured.before)Object.defineProperty(captured.receiver,captured.key,captured.before);else need(Reflect.deleteProperty(captured.receiver,captured.key),'observer_descriptor_delete');
  }catch(error){errors.push(error);}
  if(errors.length)throwAll(errors);
+}
+
+
+const qualifiedPreparationPoisoned=new WeakSet<object>(),qualifiedPreparationPoisonHas=WeakSet.prototype.has,qualifiedPreparationPoisonAdd=WeakSet.prototype.add;
+export function hasQualifiedPreparationNativePoison(binding:QualifiedServiceCallbacks):boolean{return apply(qualifiedPreparationPoisonHas,qualifiedPreparationPoisoned,[binding])===true;}
+// Opt-in only for a case which deliberately consumes an original managed
+// preparation rejection. The occurrence remains separate from native health.
+function sameQualifiedPreparationAuthority(binding:QualifiedServiceCallbacks):void{
+ const authority=binding.preparationAuthority;need(authority&&proto(binding.service)===authority.inspectPrototype&&own(binding.service,'inspectManagedFollowupPreparation')===undefined&&slot(binding.service,'managedFollowupPreparations')===authority.preparations,'preparation_fixed_inspect_and_map');
+ const current=own(authority.inspectPrototype,'inspectManagedFollowupPreparation'),original=authority.inspectDescriptor;need(current&&keys(current).length===keys(original).length&&keys(original).every(key=>has(current,key)&&slot(current,key)===slot(original,key))&&current.value===authority.inspectOriginal,'preparation_inspect_original_descriptor');
+}
+function equalQualifiedPreparationClosure(left:unknown,right:unknown):boolean{
+ const aSeen=new Set<object>(),bSeen=new Set<object>();let population=0;
+ const equal=(a:unknown,b:unknown,depth:number):boolean=>{
+  if(++population>10000||depth>64)return false;
+  if(a===null||b===null||typeof a!=='object'||typeof b!=='object')return a===b&&!(typeof a==='function'||typeof b==='function')&&!(typeof a==='number'&&!Number.isFinite(a));
+  object(a);object(b);if(aSeen.has(a)||bSeen.has(b))return false;aSeen.add(a);bSeen.add(b);
+  const pa=proto(a),pb=proto(b);if(pa!==pb||![Object.prototype,Array.prototype,null].includes(pa))return false;
+  const ak=keys(a),bk=keys(b);if(ak.length!==bk.length)return false;
+  for(let i=0;i<ak.length;i++){const key=ak[i];if(typeof key!=='string'||bk[i]!==key)return false;const x=own(a,key),y=own(b,key);if(!x||!y||!has(x,'value')||!has(y,'value')||!equal(x.value,y.value,depth+1))return false;}
+  return true;
+ };return equal(left,right,0);
+}
+function installQualifiedPreparationSources(binding:QualifiedServiceCallbacks):void{
+ const service=binding.service,options=slot(service,'options');object(options);
+ const global=slot(service,'observationPreparationDrains');promises(global);binding.containers.globalPreparations=global as Set<Promise<void>>;
+ const inspectPrototype=proto(service);object(inspectPrototype);need(own(service,'inspectManagedFollowupPreparation')===undefined,'preparation_no_own_inspect_replacement');const inspectDescriptor=own(inspectPrototype,'inspectManagedFollowupPreparation');need(inspectDescriptor&&has(inspectDescriptor,'value')&&typeof inspectDescriptor.value==='function','preparation_original_inspect_descriptor');
+ const preparations=slot(service,'managedFollowupPreparations');object(preparations);need(proto(preparations)===WeakMap.prototype,'preparation_original_token_map');binding.preparationAuthority={inspectOriginal:inspectDescriptor.value,inspectPrototype,inspectDescriptor,preparations:preparations as WeakMap<object,object>};
+ const beginOriginal=method(service,'beginManagedFollowup'),producerOriginal=slot(options,'prepareObservationFollowup');need(typeof producerOriginal==='function','preparation_original_own_producer');
+ install(binding,service,'beginManagedFollowup',beginOriginal,call=>{
+  const source:QualifiedPreparationSource={begin:call};binding.preparationSources.push(retainObserved(binding,'qualified-preparation-fixed-begin-source',source));
+  let returned:unknown;
+  try{returned=recordCall(binding,call,beginOriginal,()=>{
+   need(call.receiver===service&&call.args.length===4&&call.originRecord!==undefined&&call.preClosing===true&&call.originSlot===undefined&&!binding.sealed&&!binding.terminal&&!binding.hooks.isClosing(),'preparation_begin_origin');
+   need(binding.methods.some(method=>method.key==='prepareRoot'&&method.calls.some(prior=>prior.originRecord===call.originRecord)),'preparation_begin_same_case_origin');
+   const[group,child,pending,ticket]=call.args;object(group);object(child);object(pending);object(ticket);
+   const bound=binding.bindings.find(entry=>entry.group===group);need(bound,'preparation_begin_bound_group');sameGroup(bound);
+   const id=slot(child,'id');need(typeof id==='string'&&apply(mapGet,bound.children,[id])===child&&apply(mapGet,bound.core.originalRecords,[id])!==undefined,'preparation_begin_child');
+   const operationId=slot(pending,'operationId'),expectedTurn=slot(pending,'expectedTurn');need(typeof operationId==='string'&&typeof expectedTurn==='number'&&Number.isSafeInteger(expectedTurn),'preparation_begin_operation');
+   const operation=apply(method(binding.store,'getOperation'),binding.store,[bound.groupId,operationId]);object(operation);
+   need(slot(pending,'ticket')===ticket&&array(slot(child,'followups'))[0]===pending,'preparation_begin_current_pending_ticket');
+   const context=slot(child,'context'),coreRecord=apply(mapGet,bound.core.originalRecords,[id]);object(context);object(coreRecord);
+   source.group=bound;source.child=child;source.pending=pending;source.ticket=ticket;source.context=context;source.coreRecord=coreRecord;source.operationId=operationId;source.expectedTurn=expectedTurn as number;
+  });return returned;}finally{try{
+   need(source.group&&call.rawWritten&&isPromise(call.raw),'preparation_begin_original_promise');
+   need(slot(service,'observationPreparationDrains')===global,'preparation_global_set_identity');
+   need(promises(global).includes(call.raw as Promise<void>)&&promises(apply(weakMapGet,binding.containers.preparations,[source.group.group])).includes(call.raw as Promise<void>),'preparation_original_return_membership');
+  }catch(error){retainedError(binding,error);}}
+ });
+ install(binding,options,'prepareObservationFollowup',producerOriginal,call=>recordCall(binding,call,producerOriginal,()=>{
+  need(call.receiver===options&&call.args.length===1&&!binding.terminal,'preparation_producer_receiver');
+  const source=binding.preparationSources.find(entry=>entry.begin===call.parentCall);need(source&&source.group&&source.child&&source.pending&&source.ticket&&!source.producer,'preparation_producer_exact_begin');sameGroup(source.group);
+  const preparation=call.args[0];object(preparation);sameQualifiedPreparationAuthority(binding);const authority=binding.preparationAuthority!;const facts=apply(authority.inspectOriginal,service,[preparation]);object(facts);
+  need(slot(facts,'operationId')===source.operationId&&slot(facts,'nextTurnId')!==slot(facts,'previousTurnId'),'preparation_producer_operation');
+  const childSession=slot(facts,'childSession');object(childSession);
+  // The existing public inspection is used while the token is live, before
+  // the original producer. No caller is reopened after sealing.
+  const entry=apply(weakMapGet,authority.preparations,[preparation]);object(entry);
+  const rawFacts=slot(entry,'facts');object(rawFacts);need(source.context&&source.coreRecord&&slot(entry,'group')===source.group.group&&slot(entry,'child')===source.child&&slot(entry,'pending')===source.pending&&slot(entry,'oldContext')===source.context&&slot(source.child,'context')===source.context&&slot(source.context,'turnId')===slot(facts,'previousTurnId')&&apply(mapGet,source.group.core.originalRecords,[slot(source.child,'id')])===source.coreRecord,'preparation_token_same_actual_owner');
+  const rawKeys=keys(rawFacts),publicKeys=keys(facts);need(rawKeys.length===publicKeys.length&&rawKeys.every(key=>typeof key==='string'&&publicKeys.includes(key)),'preparation_public_facts_population');
+  for(const key of rawKeys){const original=slot(rawFacts,key),published=slot(facts,key);if(key==='closure')need(equalQualifiedPreparationClosure(original,published),'preparation_public_closure_copy');else need(original===published,'preparation_public_facts_field');}
+  source.rawFacts=rawFacts;
+  need(call.originRecord===source.begin.originRecord&&call.originSlot===source.begin.originSlot,'preparation_producer_same_origin');
+  source.producer=call;source.preparation=preparation;source.facts=facts;
+ }));
+}
+export function consumeQualifiedPreparationFailure(binding:QualifiedServiceCallbacks,error:Error,bodyOutcomeP:Promise<unknown>,bodyOutcomeValue:unknown):void{
+ need(binding.hooks.observeExpectedPreparation===true&&!binding.sealed&&!binding.terminal&&binding.preparationSources.length===1,'preparation_case_fixed_population');
+ need(isQualifiedExpectedCallbackFailure(error,error)&&isPromise(bodyOutcomeP),'preparation_case_original_native_refs');
+ const source=binding.preparationSources[0];need(source.group&&source.producer&&source.preparation&&source.facts&&source.begin.rawWritten&&isPromise(source.begin.raw)&&source.producer.rawWritten&&isPromise(source.producer.raw)&&!source.consumption,'preparation_case_single_original_source');
+ source.consumption=retainObserved(binding,'qualified-preparation-existing-case-consumption',Object.freeze({error,bodyOutcomeP,bodyOutcomeValue}));
+ source.bodyReaction=retainObserved(binding,'qualified-preparation-original-case-outcome-reaction',apply(nativeThen,bodyOutcomeP,[(value:unknown)=>{source.bodyOutcome={ok:true,value};},(failure:unknown)=>{source.bodyOutcome={ok:false,error:failure};}])as Promise<void>);
+ // Sticky memory-only health poison, independent of later fulfilled close slots.
+ apply(qualifiedPreparationPoisonAdd,qualifiedPreparationPoisoned,[binding]);binding.preparationNativePoisoned=true;
+}
+async function verifyQualifiedPreparationSources(binding:QualifiedServiceCallbacks,expected:Error):Promise<void>{
+ if(binding.hooks.observeExpectedPreparation!==true){need(binding.preparationSources.length===0&&!binding.preparationNativePoisoned,'preparation_disabled_population');return;}
+ const global=binding.containers.globalPreparations;need(global&&slot(binding.service,'observationPreparationDrains')===global,'preparation_original_global_set');
+ need(binding.preparationSources.length===1,'preparation_final_population');const source=binding.preparationSources[0],producer=source.producer,consumed=source.consumption;
+ need(source.group&&source.child&&source.pending&&source.ticket&&source.facts&&source.preparation&&producer&&consumed,'preparation_complete_original_source');
+ need(source.begin.reaction&&producer.reaction&&source.bodyReaction,'preparation_original_reactions');await source.begin.reaction;await producer.reaction;await source.bodyReaction;
+ recheckQualifiedPreparationSources(binding,expected);
+}
+function recheckQualifiedPreparationSources(binding:QualifiedServiceCallbacks,expected:Error):void{
+ if(binding.hooks.observeExpectedPreparation!==true){need(binding.preparationSources.length===0&&!binding.preparationNativePoisoned,'preparation_disabled_population');return;}
+ const global=binding.containers.globalPreparations;need(global&&slot(binding.service,'observationPreparationDrains')===global,'preparation_original_global_set');
+ need(binding.preparationSources.length===1,'preparation_final_population');const source=binding.preparationSources[0],producer=source.producer,consumed=source.consumption;
+ need(source.group&&source.child&&source.pending&&source.ticket&&source.facts&&source.preparation&&producer&&consumed,'preparation_complete_original_source');
+ need(source.begin.reaction&&producer.reaction&&source.bodyReaction,'preparation_original_reactions');
+ const beginMethods=binding.methods.filter(method=>method.key==='beginManagedFollowup'),producerMethods=binding.methods.filter(method=>method.key==='prepareObservationFollowup');need(beginMethods.length===1&&producerMethods.length===1&&beginMethods[0].calls.length===1&&beginMethods[0].calls[0]===source.begin&&producerMethods[0].calls.length===1&&producerMethods[0].calls[0]===producer,'preparation_exact_call_occurrence_population');
+ need(source.begin.rawWritten&&isPromise(source.begin.raw)&&producer.rawWritten&&isPromise(producer.raw)&&source.begin.outcome?.ok===false&&producer.outcome?.ok===false,'preparation_both_original_rejected');
+ need(consumed.error===expected&&source.begin.outcome.error===expected&&producer.outcome.error===expected&&source.bodyOutcome?.ok===true&&source.bodyOutcome.value===consumed.bodyOutcomeValue,'preparation_original_error_and_body_refs');
+ need(producer.parentCall===source.begin&&producer.receiver===slot(binding.service,'options')&&producer.args.length===1&&producer.args[0]===source.preparation&&source.begin.receiver===binding.service,'preparation_final_call_identity');
+ sameGroup(source.group);need(source.begin.args[0]===source.group.group&&source.begin.args[1]===source.child&&source.begin.args[2]===source.pending&&source.begin.args[3]===source.ticket,'preparation_final_begin_arguments');
+ need(promises(global).length===0&&!promises(global).includes(source.begin.raw as Promise<void>)&&!promises(apply(weakMapGet,binding.containers.preparations,[source.group.group])).includes(source.begin.raw as Promise<void>),'preparation_original_membership_removed');
+ sameQualifiedPreparationAuthority(binding);need(hasQualifiedPreparationNativePoison(binding),'preparation_sticky_native_poison');
+}
+function isConsumedPreparationCall(binding:QualifiedServiceCallbacks,call:Call):boolean{
+ return binding.preparationSources.some(source=>source.consumption!==undefined&&(source.begin===call||source.producer===call)&&call.outcome?.ok===false&&call.outcome.error===source.consumption.error&&source.begin.outcome?.ok===false&&source.producer?.outcome?.ok===false&&source.begin.outcome.error===source.consumption.error&&source.producer.outcome.error===source.consumption.error);
+}
+function consumedPreparationPending(binding:QualifiedServiceCallbacks,group:QualifiedGroupCallbacks,pending:GroupPending):QualifiedPreparationSource|undefined{
+ return binding.preparationSources.find(source=>source.group===group&&source.consumption!==undefined&&pending.raw===source.begin.raw&&pending.outcome?.ok===false&&pending.outcome.error===source.consumption.error&&source.begin.outcome?.ok===false&&source.begin.outcome.error===source.consumption.error);
+}
+
+// Appended to the test-only callback helper; uses its captured native readers.
+import {AsyncLocalStorage as SourceAsyncLocalStorage} from 'node:async_hooks';
+type SourceCall={receiver:unknown;args:unknown[];rawWritten:boolean;raw?:unknown;outcome?:Outcome;reaction?:Promise<void>};
+type SourceStoreCall=SourceCall&{queue?:Promise<void>;queueOutcome?:Outcome;queueReaction?:Promise<void>};
+type SourceRole={taskId:string;ticket:object;expected:Error;writes:SourceCall[];publications:SourceCall[];spy?:{callee:Function;installed:Function;active:boolean;prototypeDescriptor:PropertyDescriptor;before?:PropertyDescriptor}};
+type SourceCollections=ReadonlyArray<readonly [string,object,'set'|'map']>;
+export type QualifiedSourceCallbacks={host:object;store:object;options:object;retain:Retain;isClosing:()=>boolean;sourceMethod:Function;publicationMethod:Function;saveMethod:Function;storeMethod:Function;storePrototype:object;storePrototypeDescriptor:PropertyDescriptor;savePrototypeDescriptor:PropertyDescriptor;storeBefore?:PropertyDescriptor;storeInstalled:Function;collections:SourceCollections;calls:SourceStoreCall[];errors:unknown[];role?:SourceRole;restored:boolean;finish?:Promise<QualifiedSourceCallbackReceipt>};
+export type QualifiedSourceFailureOccurrence=Readonly<{sourceBinding:QualifiedSourceCallbacks;originalPublication:Promise<unknown>;originalWrite:Promise<unknown>;originalError:Error}>;
+export type QualifiedSourceCallbackReceipt=Readonly<{callbacksTerminal:true;nativeHealthy:false;originalSourceClose:Promise<unknown>;originalSourceError:unknown;occurrence:QualifiedSourceFailureOccurrence}>;
+const qualifiedSourcePublicationOrigin=new SourceAsyncLocalStorage<{binding:QualifiedSourceCallbacks;call:SourceCall}>();
+const qualifiedSourceConsumptions=new WeakMap<QualifiedSourceFailureOccurrence,SourceRole>();
+const qualifiedSourceConsumedRoles=new WeakSet<SourceRole>();
+const sourceSetSize=own(Set.prototype,'size')!.get!,sourceMapSize=own(Map.prototype,'size')!.get!;
+function sourceRetain<T>(binding:QualifiedSourceCallbacks,label:string,value:T):T{try{binding.retain(label,value);}catch(error){binding.errors.push(error);}return value;}
+function sourceInstalledDescriptor(fn:Function):PropertyDescriptor{return {value:fn,writable:true,configurable:true,enumerable:false};}
+function sourceObserve(binding:QualifiedSourceCallbacks,raw:unknown,label:string,accept:(outcome:Outcome)=>void):Promise<void>{
+ need(isPromise(raw),'source_original_native_promise');
+ const reaction=apply(nativeThen,raw,[(value:unknown)=>{try{accept(sourceRetain(binding,label+':fulfilled',{ok:true,value}));}catch(error){binding.errors.push(error);}},(error:unknown)=>{try{accept(sourceRetain(binding,label+':rejected',{ok:false,error}));}catch(failure){binding.errors.push(failure);}}]) as Promise<void>;
+ return sourceRetain(binding,label+':reaction',reaction);
+}
+function sameSourceDescriptor(actual:PropertyDescriptor|undefined,expected:PropertyDescriptor):boolean{if(!actual)return false;const names=keys(actual);return names.length===keys(expected).length&&names.every(key=>has(expected,key)&&slot(actual,key)===slot(expected,key));}
+function sourceSame(binding:QualifiedSourceCallbacks){
+ need(slot(binding.host,'options')===binding.options&&slot(binding.options,'snapshotStore')===binding.store,'source_same_host_store');
+ need(method(binding.host,'closeSourceWriterForMigration')===binding.sourceMethod&&method(binding.host,'publishGroupObservationReference')===binding.publicationMethod,'source_same_original_methods');
+ need(own(binding.host,'closeSourceWriterForMigration')===undefined&&own(binding.host,'publishGroupObservationReference')===undefined,'source_no_replaced_host_method');
+ for(const[name,value,kind]of binding.collections){need(slot(binding.host,name)===value,'source_same_collection:'+name);object(value);need(proto(value)===(kind==='set'?Set.prototype:Map.prototype),'source_native_collection:'+name);}
+ need(!binding.restored&&sameSourceDescriptor(own(binding.store,'closeAndDrain'),sourceInstalledDescriptor(binding.storeInstalled)),'source_same_store_observer');
+ need(proto(binding.store)===binding.storePrototype&&sameSourceDescriptor(own(binding.storePrototype,'closeAndDrain'),binding.storePrototypeDescriptor),'source_same_store_prototype_descriptor');
+ if(binding.role?.spy?.active){need(sameSourceDescriptor(own(binding.store,'save'),sourceInstalledDescriptor(binding.role.spy.installed))&&sameSourceDescriptor(own(binding.storePrototype,'save'),binding.role.spy.prototypeDescriptor),'source_same_active_save_observer');}else need(own(binding.store,'save')===undefined&&sameSourceDescriptor(own(binding.storePrototype,'save'),binding.savePrototypeDescriptor),'source_original_save_restored');
+}
+function sourceCaptureCall(binding:QualifiedSourceCallbacks,call:SourceCall,invoke:()=>unknown):unknown{
+ let raw:unknown;try{raw=invoke();}catch(error){call.outcome={ok:false,error};try{sourceRetain(binding,'qualified-source-original-throw',error);}catch(failure){binding.errors.push(failure);}throw error;}
+ call.raw=raw;call.rawWritten=true;try{sourceRetain(binding,'qualified-source-original-value',raw);call.reaction=sourceObserve(binding,raw,'qualified-source-call',outcome=>{call.outcome=outcome;});}catch(error){binding.errors.push(error);}return raw;
+}
+export function captureQualifiedSourceCallbacks(host:object,store:object,hooks:{retain:Retain;isClosing:()=>boolean}):QualifiedSourceCallbacks{
+ object(host);object(store);const options=slot(host,'options');object(options);need(slot(options,'snapshotStore')===store,'source_original_store');
+ const storeMethod=method(store,'closeAndDrain'),saveMethod=method(store,'save'),storeBefore=own(store,'closeAndDrain'),storePrototype=proto(store),storePrototypeDescriptor=own(storePrototype,'closeAndDrain')!,savePrototypeDescriptor=own(storePrototype,'save')!;need(!storeBefore&&own(store,'save')===undefined,'source_store_methods_unmodified');
+ const collections:SourceCollections=[...['sourceOperations','sourceInvocations','sourceClosingInvocations','cancellingTaskIds'].map(name=>[name,slot(host,name),'set'] as const),...['sourceClosingExecutions','executionPromises','activeExecutions','cancellationPromises','mutationChains'].map(name=>[name,slot(host,name),'map'] as const)] as SourceCollections;
+ const binding:QualifiedSourceCallbacks={host,store,options,retain:hooks.retain,isClosing:hooks.isClosing,sourceMethod:method(host,'closeSourceWriterForMigration'),publicationMethod:method(host,'publishGroupObservationReference'),storeMethod,saveMethod,storePrototype,storePrototypeDescriptor,savePrototypeDescriptor,storeBefore,storeInstalled:()=>{},collections,calls:[],errors:[],restored:false};
+ const installed=function(this:unknown,...args:unknown[]){
+  const call:SourceStoreCall={receiver:this,args,rawWritten:false};binding.calls.push(sourceRetain(binding,'qualified-source-store-call',call));
+  // Observation failures retain evidence, and never replace original behavior.
+  try{sourceSame(binding);need(this===store&&args.length===0&&binding.isClosing(),'source_store_close_origin');const queue=slot(store,'writerQueue');need(isPromise(queue),'source_writer_queue');call.queue=queue as Promise<void>;call.queueReaction=sourceObserve(binding,queue,'qualified-source-writer-queue',outcome=>{call.queueOutcome=outcome;});}catch(error){binding.errors.push(error);}
+  return sourceCaptureCall(binding,call,()=>apply(storeMethod,this,args));
+ };
+ binding.storeInstalled=installed;Object.defineProperty(store,'closeAndDrain',{value:installed,writable:true,configurable:true,enumerable:false});sourceSame(binding);
+ sourceRetain(binding,'qualified-source-fixed-binding',binding);return binding;
+}
+export function armQualifiedSourceFailure(binding:QualifiedSourceCallbacks,input:{taskId:string;ticket:object;expected:Error}):void{
+ sourceSame(binding);need(!binding.isClosing()&&!binding.role&&typeof input.taskId==='string'&&closedExpectedLeaf(input.expected),'source_one_prebody_role');object(input.ticket);
+ need(slot(binding.host,'sourceClosing')===false&&array(slot(binding.host,'sourceCloseFailures')).length===0,'source_clean_initial_failure_population');
+ binding.role=sourceRetain(binding,'qualified-source-expected-occurrence',{taskId:input.taskId,ticket:input.ticket,expected:input.expected,writes:[],publications:[]});
+}
+// Install after the original prototype spy, without changing its fault behavior.
+export function bindQualifiedSourceFailureSpy(binding:QualifiedSourceCallbacks,callee:Function):void{
+ const role=binding.role;need(role&&!role.spy&&!binding.isClosing()&&own(binding.store,'save')===undefined&&own(binding.storePrototype,'save')?.value===callee,'source_installed_fault_spy');
+ const installed=function(this:unknown,...args:unknown[]){
+  const call:SourceCall={receiver:this,args,rawWritten:false};role.writes.push(sourceRetain(binding,'qualified-source-write-occurrence',call));
+  try{const origin=qualifiedSourcePublicationOrigin.getStore();sourceSame(binding);need(origin?.binding===binding&&role.publications.includes(origin.call)&&this===binding.store&&!binding.isClosing(),'source_write_publication_origin');const values=array(args);need(values.length===2&&slot(values[0],'taskId')===role.taskId&&slot(values[1],'taskId')===role.taskId,'source_write_task');}catch(error){binding.errors.push(error);}
+  return sourceCaptureCall(binding,call,()=>apply(callee,this,args));
+ };
+ role.spy=sourceRetain(binding,'qualified-source-save-spy-binding',{callee,installed,active:true,prototypeDescriptor:own(binding.storePrototype,'save')!});Object.defineProperty(binding.store,'save',{value:installed,writable:true,configurable:true,enumerable:false});sourceSame(binding);
+}
+export function restoreQualifiedSourceFailureSpy(binding:QualifiedSourceCallbacks):void{
+ sourceSame(binding);const spy=binding.role?.spy;need(spy?.active&&sameSourceDescriptor(own(binding.store,'save'),sourceInstalledDescriptor(spy.installed)),'source_restore_save_observer');need(Reflect.deleteProperty(binding.store,'save'),'source_remove_save_observer');need(own(binding.store,'save')===undefined&&sameSourceDescriptor(own(binding.storePrototype,'save'),spy.prototypeDescriptor),'source_save_observer_removed_exactly');spy.active=false;
+}
+export function beginQualifiedSourceFailurePublication(binding:QualifiedSourceCallbacks,ticket:object):Promise<unknown>{
+ sourceSame(binding);const role=binding.role;need(role&&!binding.isClosing()&&ticket===role.ticket,'source_publication_origin');
+ const call:SourceCall={receiver:binding.host,args:[ticket],rawWritten:false};role.publications.push(sourceRetain(binding,'qualified-source-publication-occurrence',call));
+ return sourceCaptureCall(binding,call,()=>qualifiedSourcePublicationOrigin.run({binding,call},()=>apply(binding.publicationMethod,binding.host,[ticket]))) as Promise<unknown>;
+}
+// The caller places this after the original rejection assertion succeeds.
+export async function consumeQualifiedSourceFailure(binding:QualifiedSourceCallbacks,originalPublication:Promise<unknown>,expected:Error):Promise<QualifiedSourceFailureOccurrence>{
+ sourceSame(binding);const role=binding.role;need(role&&!qualifiedSourceConsumedRoles.has(role)&&role.expected===expected&&!binding.isClosing()&&role.writes.length===1&&role.publications.length===1,'source_one_consumed_occurrence');
+ const write=role.writes[0],publication=role.publications[0];await write.reaction;await publication.reaction;
+ need(!binding.errors.length&&write.rawWritten&&isPromise(write.raw)&&write.outcome?.ok===false&&write.outcome.error===expected&&publication.rawWritten&&publication.raw===originalPublication&&publication.outcome?.ok===false&&publication.outcome.error===expected,'source_exact_consumed_originals');
+ const occurrence=sourceRetain(binding,'qualified-source-body-consumption',Object.freeze({sourceBinding:binding,originalPublication,originalWrite:write.raw as Promise<unknown>,originalError:expected}));qualifiedSourceConsumptions.set(occurrence,role);qualifiedSourceConsumedRoles.add(role);return occurrence;
+}
+export function finishQualifiedSourceCallbacks(binding:QualifiedSourceCallbacks,occurrence:QualifiedSourceFailureOccurrence,sourceSlot:{receiver:unknown;method:Function;args:unknown[];rawWritten:boolean;raw?:unknown;outcome?:Outcome}):Promise<QualifiedSourceCallbackReceipt>{
+ need(!binding.finish,'source_finish_once');
+ const finish=(async():Promise<QualifiedSourceCallbackReceipt>=>{
+  sourceSame(binding);const role=binding.role;need(role&&qualifiedSourceConsumptions.get(occurrence)===role&&occurrence.sourceBinding===binding&&role.writes.length===1&&role.publications.length===1,'source_authentic_consumption');
+  need(role.spy&&!role.spy.active&&binding.isClosing()&&sourceSlot.receiver===binding.host&&sourceSlot.method===binding.sourceMethod&&array(sourceSlot.args).length===0&&sourceSlot.rawWritten&&isPromise(sourceSlot.raw)&&sourceSlot.raw===slot(binding.host,'sourceClosePromise')&&sourceSlot.outcome?.ok===false,'source_original_rejected_close_slot');
+  const error=sourceSlot.outcome.error;let closeOutcome:Outcome|undefined;await sourceObserve(binding,sourceSlot.raw,'qualified-source-original-close',outcome=>{closeOutcome=outcome;});need(closeOutcome?.ok===false&&closeOutcome.error===error,'source_original_close_rejection_identity');object(error);need(isError(error)&&proto(error)===AggregateProto&&trustedStack(error,aggregateStackShape),'source_native_aggregate');
+  for(const key of keys(error))need(typeof key==='string'&&['stack','message','errors'].includes(key),'source_closed_error_shape');
+  need(slot(error,'message')==='task_source_close_unconfirmed','source_error_role');const failures=array(slot(error,'errors'));need(failures.length===1&&failures[0]===role.expected&&closedExpectedLeaf(role.expected),'source_exact_error_occurrence');
+  need(slot(binding.host,'sourceClosing')===true&&slot(binding.host,'sourceTailClosed')===true,'source_sealed_tail');const drain=slot(binding.host,'sourceDrainPromise');need(isPromise(drain),'source_original_drain_promise');
+  let drained:Outcome|undefined;await sourceObserve(binding,drain,'qualified-source-original-drain',outcome=>{drained=outcome;});need(drained?.ok===true,'source_drain_fulfilled');const values=array(drained.value);need(values.length===1&&values[0]===role.expected,'source_drain_exact_occurrence');
+  const sticky=array(slot(binding.host,'sourceCloseFailures'));need(sticky.length===1&&sticky[0]===role.expected,'source_sticky_exact_occurrence');
+  for(const[name,value,kind]of binding.collections)if(name!=='sourceClosingExecutions')need(apply(kind==='set'?sourceSetSize:sourceMapSize,value,[])===0,'source_callbacks_remaining:'+name);
+  const executions=slot(binding.host,'sourceClosingExecutions');const initial=entries(executions),history=initial.map(([id,entry])=>({id,entry,promise:slot(entry,'promise'),outcome:undefined as Outcome|undefined}));for(const row of history){await sourceObserve(binding,row.promise,'qualified-source-historical-execution',value=>{row.outcome=value;});need(row.outcome?.ok===true,'source_historical_execution_failed');}sameMembers(entries(executions),initial,'source_historical_execution_population');
+  need(binding.calls.length===1,'source_single_store_close');const call=binding.calls[0];await call.reaction;await call.queueReaction;
+  need(call.receiver===binding.store&&array(call.args).length===0&&call.rawWritten&&isPromise(call.raw)&&call.outcome?.ok===true&&isPromise(call.queue)&&call.queueOutcome?.ok===true&&slot(binding.store,'writerQueue')===call.queue&&slot(binding.store,'writerClosed')===true,'source_original_writer_closed_terminal');
+  sourceSame(binding);need(!binding.errors.length&&role.writes.length===1&&role.publications.length===1&&binding.calls.length===1&&slot(binding.host,'sourceDrainPromise')===drain&&slot(binding.host,'sourceClosePromise')===sourceSlot.raw&&slot(binding.host,'sourceClosing')===true&&slot(binding.host,'sourceTailClosed')===true&&slot(binding.store,'writerQueue')===call.queue&&slot(binding.store,'writerClosed')===true,'source_stable_final_originals');
+  for(const[name,value,kind]of binding.collections)if(name!=='sourceClosingExecutions')need(apply(kind==='set'?sourceSetSize:sourceMapSize,value,[])===0,'source_final_callbacks_remaining:'+name);sameMembers(entries(executions),initial,'source_final_execution_population');for(const row of history)need(slot(row.entry,'promise')===row.promise&&row.outcome?.ok===true,'source_final_execution_original_promise');const finalSticky=array(slot(binding.host,'sourceCloseFailures'));need(finalSticky.length===1&&finalSticky[0]===role.expected,'source_final_sticky_occurrence');const finalDrain=array(drained.value);need(finalDrain.length===1&&finalDrain[0]===role.expected,'source_final_drain_occurrence');const finalFailures=array(slot(error,'errors'));need(finalFailures.length===1&&finalFailures[0]===role.expected,'source_final_error_occurrence');
+  const receipt=sourceRetain(binding,'qualified-source-callback-terminal',Object.freeze({callbacksTerminal:true as const,nativeHealthy:false as const,originalSourceClose:sourceSlot.raw as Promise<unknown>,originalSourceError:error,occurrence}));if(binding.errors.length)throwAll(binding.errors);return receipt;
+ })();binding.finish=sourceRetain(binding,'qualified-source-callback-finish',finish);return finish;
+}
+export function restoreQualifiedSourceCallbacks(binding:QualifiedSourceCallbacks):void{
+ sourceSame(binding);need(!binding.restored&&sameSourceDescriptor(own(binding.store,'closeAndDrain'),sourceInstalledDescriptor(binding.storeInstalled)),'source_restore_original_descriptor');
+ if(binding.storeBefore)Object.defineProperty(binding.store,'closeAndDrain',binding.storeBefore);else need(Reflect.deleteProperty(binding.store,'closeAndDrain'),'source_remove_observer');need(own(binding.store,'closeAndDrain')===binding.storeBefore&&sameSourceDescriptor(own(binding.storePrototype,'closeAndDrain'),binding.storePrototypeDescriptor),'source_store_observer_removed_exactly');binding.restored=true;
 }
