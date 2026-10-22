@@ -111,7 +111,12 @@ it('a genuinely prepared observed session attempts independent stops after its o
    let operationFailure:{error:unknown}|undefined;const receiptErrors:unknown[]=[];
    try{phaseJournal?.record(code,'entered');}catch(error){receiptErrors.push(error);recordError('finally-phase-enter',error);}
    try{await keep('original-finally-stop-result',action());}catch(error){operationFailure=keep('finally-operation-error',{error});recordError('finally-operation',error);
-    if(isKnownOwnedSessionServiceStopFailure(code,bodyAccepted,acceptedOriginalPhysical,error))acceptedServiceStopFailure=keep('accepted-service-stop-failure',{error});
+    if(code==='finally_service_stop'&&bodyAccepted&&acceptedOriginalPhysical&&prepared){
+     try{
+      const snapshot=keep('service-stop-suspend-snapshot',probe.snapshot(prepared.session));
+      if(isKnownOwnedSessionServiceStopFailure(code,bodyAccepted,acceptedOriginalPhysical,error,snapshot.suspendFailures,F))acceptedServiceStopFailure=keep('accepted-service-stop-failure',{error});
+     }catch(observationError){receiptErrors.push(observationError);recordError('finally-suspend-observation',observationError);}
+    }
    }
    try{if(operationFailure)phaseJournal?.rejected(code,operationFailure.error);else phaseJournal?.record(code,'fulfilled');}catch(error){receiptErrors.push(error);recordError('finally-phase-result',error);}
    const all=[...(operationFailure?[operationFailure.error]:[]),...receiptErrors];

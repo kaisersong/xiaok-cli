@@ -48,7 +48,7 @@ test('the exact original source reverses byte for byte and only caller stop/tail
  assert.equal(restoreOwnedSessionShutdown(changed,url),source);
  assert.equal(changed.split('observeOwnedSessionStop(this,').length-1,2);
  assert.equal(changed.split('observeOwnedSessionTail(this);').length-1,1);
- const before=source.slice(0,source.indexOf('  private async disposeOwned():'));
+ const before=source.slice(0,source.indexOf('  async suspend():'));
  assert.ok(changed.endsWith(source.slice(source.lastIndexOf('\n}'))));
  assert.ok(changed.includes(before));
  assert.throws(()=>instrumentOwnedSessionShutdown(source+'\n',url),/owned_session_probe_source_changed/);
@@ -92,4 +92,83 @@ test('known service stop classifier never invokes Proxy or unknown descriptor ge
  const itemGetter=new AggregateError([P],'multi_agent_cleanup_unconfirmed',{cause:P});Object.defineProperty(itemGetter.errors,'0',{get(){touches++;throw Error('item getter');}});
  assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,itemGetter),false);
  assert.equal(touches,0);
+});
+
+const physicalFailure=leaf=>new AggregateError([leaf],'agent_model_physical_drain_unconfirmed');
+const serviceFailure=(idle,close)=>new AggregateError([idle,close],'multi_agent_cleanup_unconfirmed',{cause:idle});
+function captureIdle(idle){const p=createOwnedSessionShutdownProbe(),session={};p.register(session);p.suspendFailure(session,idle);return p.snapshot(session).suspendFailures;}
+test('suspend observer retains every original nullable and opaque value without reading it and marks duplicate capture unknown',()=>{
+ let touched=0;const opaque=new Proxy({},{get(){touched++;throw Error('read');},getOwnPropertyDescriptor(){touched++;throw Error('read');}});
+ for(const value of [undefined,null,opaque]){const p=createOwnedSessionShutdownProbe(),session={};p.register(session);p.suspendFailure(session,value);const snapshot=p.snapshot(session);assert.equal(snapshot.suspendFailures.length,1);assert.equal(snapshot.suspendFailures[0].error,value);assert.equal(snapshot.observerErrors,0);p.suspendFailure(session,value);assert.equal(p.snapshot(session).suspendFailures.length,2);assert.ok(p.quality().observerErrors>0);}
+ const p=createOwnedSessionShutdownProbe();assert.doesNotThrow(()=>p.suspendFailure({},opaque));assert.ok(p.quality().observerErrors>0);assert.equal(touched,0);
+});
+test('double physical service shape requires the single original suspend capture and exact ordered references',()=>{
+ const F=Error('F'),close=physicalFailure(F),idle=physicalFailure(F),S=serviceFailure(idle,close),physical={error:close},captures=captureIdle(idle);
+ assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,S,captures,F),true);
+ for(const c of [undefined,[],[captures[0],captures[0]],captureIdle(close)])assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,S,c,F),false);
+ for(const bad of [serviceFailure(close,idle),new AggregateError([idle,close,Error('U')],'multi_agent_cleanup_unconfirmed',{cause:idle}),new AggregateError([idle,close],'multi_agent_cleanup_unconfirmed',{cause:close})])assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,bad,captures,F),false);
+ for(const slot of ['finally_session_stop','finally_host_stop'])assert.equal(isKnownOwnedSessionServiceStopFailure(slot,true,physical,S,captures,F),false);
+ assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',false,physical,S,captures,F),false);
+ assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,S,captures,Error('different F')),false);
+ assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,S,captures),false);
+ const noLeafClose=physicalFailure(undefined),noLeafIdle=physicalFailure(undefined);assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,{error:noLeafClose},serviceFailure(noLeafIdle,noLeafClose),captureIdle(noLeafIdle),undefined),false);
+ const single=new AggregateError([close],'multi_agent_cleanup_unconfirmed',{cause:close});assert.equal(isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,physical,single),true);
+});
+test('double physical classifier rejects every malformed level without touching unknown getters or Proxy traps',()=>{
+ const F=Error('F'),close=physicalFailure(F),idle=physicalFailure(F),captures=captureIdle(idle);let touched=0;
+ const check=(p,i,s,c=captures)=>isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,{error:p},s,c,F);
+ for(const level of ['close','idle','service'])for(const key of ['message','cause','errors','stack']){
+  const p=physicalFailure(F),i=physicalFailure(F),s=serviceFailure(i,p),target=level==='close'?p:level==='idle'?i:s;Object.defineProperty(target,key,{get(){touched++;throw Error('getter');}});assert.equal(check(p,i,s,captureIdle(i)),false);
+ }
+ for(const level of ['close','idle','service']){
+  const p=physicalFailure(F),i=physicalFailure(F),s=serviceFailure(i,p);const proxy=new Proxy(level==='close'?p:level==='idle'?i:s,{get(){touched++;throw Error('proxy');},getOwnPropertyDescriptor(){touched++;throw Error('proxy');},ownKeys(){touched++;throw Error('proxy');},getPrototypeOf(){touched++;throw Error('proxy');}});
+  assert.equal(check(level==='close'?proxy:p,level==='idle'?proxy:i,level==='service'?proxy:s,captureIdle(level==='idle'?proxy:i)),false);
+ }
+ const c=physicalFailure(F),i=physicalFailure(F);c.errors.push(Error('U'));assert.equal(check(c,i,serviceFailure(i,c),captureIdle(i)),false);
+ for(const mode of ['sparse','extra','symbol','nonarray','prototype']){
+  const p=physicalFailure(F),i=physicalFailure(F),s=serviceFailure(i,p);
+  if(mode==='sparse')delete s.errors[0];if(mode==='extra')s.errors.extra=F;if(mode==='symbol')s.errors[Symbol('extra')]=F;if(mode==='nonarray')s.errors={0:i,1:p,length:2};if(mode==='prototype')Object.setPrototypeOf(i,Error.prototype);
+  assert.equal(check(p,i,s,captureIdle(i)),false);
+ }
+ const getterCapture={get error(){touched++;throw Error('capture getter');}};assert.equal(check(close,idle,serviceFailure(idle,close),[getterCapture]),false);assert.equal(touched,0);
+});
+test('the actual transformed suspend catch preserves its original rejection when observation is unknown',async()=>{
+ const source=readFileSync(new URL('../../'+OWNED_SESSION_SOURCE.path,import.meta.url),'utf8'),url=new URL('../../desktop/tests/fixtures/owned-session-shutdown-probe.mjs',import.meta.url).href;
+ const changed=instrumentOwnedSessionShutdown(source,url);assert.equal(changed.split('observeOwnedSessionSuspendFailure(this, error);').length-1,1);
+ const start=changed.indexOf('  async suspend(): Promise<void> {'),end=changed.indexOf('  deactivate():',start);assert.ok(start>=0&&end>start);
+ const body=changed.slice(start,end).trim().replace('async suspend(): Promise<void>','async function suspend()');
+ const p=createOwnedSessionShutdownProbe();const invoke=Function('waitDesktopModelPhysicalIdle','observeOwnedSessionSuspendFailure','return ('+body+');')(()=>Promise.reject(undefined),(session,error)=>p.suspendFailure(session,error));
+ let caught=false,value=Symbol('not set');try{await invoke.call({running:undefined,modelPhysicalScope:{},scope:undefined});}catch(error){caught=true;value=error;}
+ assert.equal(caught,true);assert.equal(value,undefined);assert.ok(p.quality().observerErrors>0);assert.equal(restoreOwnedSessionShutdown(changed,url),source);
+});
+
+test('double physical stack accepts data or exact same native accessor and rejects changed getter setter or flags without touching them',()=>{
+ const nativeStack=Object.getOwnPropertyDescriptor(new AggregateError([],'native stack descriptor only'),'stack');
+ const nativeAccessor=!!nativeStack&&!Object.hasOwn(nativeStack,'value')&&Object.hasOwn(nativeStack,'get')&&Object.hasOwn(nativeStack,'set');
+ const F=Error('F');let touched=0;
+ const accepts=(close,idle,service)=>isKnownOwnedSessionServiceStopFailure('finally_service_stop',true,{error:close},service,captureIdle(idle),F);
+ for(const level of ['close','idle','service']){
+  for(const form of ['absent','data']){
+   const close=physicalFailure(F),idle=physicalFailure(F),service=serviceFailure(idle,close),target=level==='close'?close:level==='idle'?idle:service;
+   if(form==='absent')delete target.stack;
+   else Object.defineProperty(target,'stack',{value:'fixed data value is never read',writable:true,enumerable:false,configurable:true});
+   assert.equal(accepts(close,idle,service),true);
+  }
+  if(nativeAccessor){
+   const close=physicalFailure(F),idle=physicalFailure(F),service=serviceFailure(idle,close),target=level==='close'?close:level==='idle'?idle:service;
+   Object.defineProperty(target,'stack',{get:nativeStack.get,set:nativeStack.set,enumerable:nativeStack.enumerable,configurable:nativeStack.configurable});
+   assert.equal(accepts(close,idle,service),true);
+  }
+  for(const changed of ['get','set','enumerable','configurable']){
+   const close=physicalFailure(F),idle=physicalFailure(F),service=serviceFailure(idle,close),target=level==='close'?close:level==='idle'?idle:service;
+   const descriptor={get:nativeAccessor?nativeStack.get:undefined,set:nativeAccessor?nativeStack.set:undefined,enumerable:nativeAccessor?nativeStack.enumerable:false,configurable:nativeAccessor?nativeStack.configurable:true};
+   if(changed==='get')descriptor.get=()=>{touched++;throw Error('user stack getter');};
+   if(changed==='set')descriptor.set=()=>{touched++;throw Error('user stack setter');};
+   if(changed==='enumerable')descriptor.enumerable=!descriptor.enumerable;
+   if(changed==='configurable')descriptor.configurable=!descriptor.configurable;
+   Object.defineProperty(target,'stack',descriptor);
+   assert.equal(accepts(close,idle,service),false);
+  }
+ }
+ assert.equal(touched,0);
 });
