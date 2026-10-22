@@ -6,21 +6,22 @@ import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { DesktopMultiAgentService } from '../../electron/desktop-multi-agent-service.js';
 import type { DesktopApprovalOwner } from '../../electron/desktop-multi-agent-approval-transport.js';
 import type { MultiAgentEnvelope, MultiAgentGroupSnapshot } from '../../shared/multi-agent-types.js';
+import { Ap10CaseOwner } from '../fixtures/ap10-native-fault-cleanup.js';
 import { authorizationFixture, deferred } from '../fixtures/multi-agent-authorization.js';
 
 describe('BDD AP10: approval failure notification survives persistent native SQLite READ denial', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
-  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  let activeOwner: Ap10CaseOwner | undefined;
+  afterEach(async () => { if (activeOwner) await activeOwner.finish(); });
 
-  async function fixture() {
+  async function fixture(caseOwner: Ap10CaseOwner) {
     // Observe the real factory's unique bind. Copying its diagnostic fields is
     // not authorization, and the fixture never constructs a replacement owner.
     const owners = new WeakMap<DesktopMultiAgentService, DesktopApprovalOwner>();
-    const bind = DesktopMultiAgentService.prototype.bindApprovalTransport;
-    vi.spyOn(DesktopMultiAgentService.prototype, 'bindApprovalTransport').mockImplementation(function (this: DesktopMultiAgentService, transport) {
-      const owner = bind.call(this, transport); owners.set(this, owner); return owner;
-    });
-    const f = await authorizationFixture(cleanup), service = f.boundary.service;
+    caseOwner.installBeforeFactory((service, owner) => { owners.set(service, owner); });
+    const f = await authorizationFixture(cleanup, caseOwner.root, {}, {
+      callerOwnsServiceDisposal: true, onAcquired: services => { caseOwner.onAcquired(services); },
+    }), service = f.boundary.service;
     const threadId = 'approval-read-failure', foreignThread = 'other-approval-thread';
     for (const id of [threadId, foreignThread]) service.registerThread({ threadId: id, profileId: f.boundary.profileId,
       workspaceId: f.boundary.workspaceId, cwd: f.root });
@@ -63,13 +64,16 @@ describe('BDD AP10: approval failure notification survives persistent native SQL
 
   it.each(['native-finalize-commit', 'owner-freeze-while-unreadable'] as const)(
     'AP10 %s still sends only the main-signed unknown union to live same-thread current/history viewers', async kind => {
-      const f = await fixture();
+      const caseOwner = new Ap10CaseOwner(kind, cleanup); activeOwner = caseOwner;
+      try {
+      const f = await fixture(caseOwner);
+      const faultProbe = caseOwner.startNative(f.db);
       let commitFaults = 0, readFaults = 0, approvalTouched = false, unreadable = kind === 'owner-freeze-while-unreadable';
       // Native COMMIT denial leaves the real pending row, then every READ fails.
       // The sibling only denies thread reads so freezeGroup's group wake can
       // finish and independently expose publish's redundant authorization read.
       // No async mock replaces SQLite transactions.
-      f.db.setAuthorizer((action, table) => {
+      faultProbe.arm((action, table) => {
         if ((action === 18 || action === 23) && table === 'operations') approvalTouched = true;
         if (kind === 'native-finalize-commit' && action === 22 && table === 'COMMIT' && approvalTouched && !commitFaults) {
           commitFaults++; unreadable = true; return 1;
@@ -77,7 +81,7 @@ describe('BDD AP10: approval failure notification survives persistent native SQL
         if (unreadable && action === 20 && (kind === 'native-finalize-commit' || table === 'thread_bindings')) { readFaults++; return 1; }
         return 0;
       });
-      cleanup.push(() => f.db.setAuthorizer(null));
+      cleanup.push(() => faultProbe.clear());
       if (kind === 'native-finalize-commit') {
         const decision = await f.invoke('decideMultiAgentApproval', { threadId: f.threadId, groupId: f.context.groupId,
           approvalId: f.pending.approvalId, operationId: 'read-failure-decision', decision: 'approve' })
@@ -111,10 +115,12 @@ describe('BDD AP10: approval failure notification survives persistent native SQL
         channel: 'runtime_error', groupId: f.context.groupId, code: 'runtime_blocked',
       });
       expect(f.sent).toHaveLength(beforeOrdinary);
-      f.db.setAuthorizer(null);
+      faultProbe.clear();
       expect(f.store.getOperation(f.context.groupId, `approval-request:${f.pending.approvalId}`)).toMatchObject({ result: { approval: { status: 'pending' } } });
       f.release.resolve();
       await vi.waitFor(async () => expect(['failed', 'cancelled', 'interrupted']).toContain((await f.services.recoverTask(f.task.taskId)).snapshot.status));
       expect(existsSync(f.effect)).toBe(false); expect(f.requests()).toBe(1);
+      caseOwner.acceptBody(commitFaults + readFaults);
+      } catch (error) { caseOwner.failBody(error); throw error; }
     });
 });
