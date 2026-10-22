@@ -166,7 +166,7 @@ it('uses the sealed public population after an earlier genuine Core stop closed 
 
 }
 
-// Original directly-imported helper guard block: root-qualified-service-callback-guards-v11-extra-occurrence.test.ts
+// Original directly-imported helper guard block: root-qualified-service-detached-v13.test.ts
 {
 
 function gate<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>{resolve=done;});return {promise,resolve};}
@@ -179,9 +179,10 @@ async function fixedService(F:Error){
  class Store{getRootBinding(){return {groupId:'owned-group'};}}
  const originalDisposeRaw:Promise<void>[]=[],originalPreparedDispose=()=>{const raw=Promise.reject(F);originalDisposeRaw.push(raw);return raw;};
  const preparedSession={run:async()=>{entered.resolve();return execution.promise;},dispose:originalPreparedDispose};
+ const factoryReceivers:unknown[]=[],factoryOriginalPs:Promise<unknown>[]=[];
  class Service{
   groups=new Map([['owned-group',group]]);groupObservationPreparationDrains=new WeakMap();physicalSessionClosures=new Map();managedFinalPublications=new Map();managedReleaseOwners=new Map();
-  options={prepareObservationSession:(_input:unknown):Promise<unknown>=>this.result('prepareObservationSession',{session:preparedSession})};
+  options={prepareObservationSession:function(this:unknown,_input:unknown):Promise<unknown>{factoryReceivers.push(this);const raw=service.result('prepareObservationSession',{session:preparedSession});factoryOriginalPs.push(raw);return raw;}};
   nextFailure:{method:string;error:unknown}|undefined;originalServicePromise?:Promise<void>;originalPhysicalPromise?:Promise<void>;physicalCalls=0;
   prepareRoot(){return this.result('prepareRoot',{taskId:'owned-task'});}
   result(method:string,value?:unknown){return this.nextFailure?.method===method?Promise.reject(this.nextFailure.error):Promise.resolve(value);}
@@ -214,7 +215,7 @@ async function fixedService(F:Error){
  await service.prepareRoot();await Promise.resolve();expect(cap.bindings).toHaveLength(1);
  const handle=core.prepareSpawn({requestSource:'agent',callerId:'main',taskName:'owned',message:'run',createSession:async()=>({run:()=>preparedSession.run(),dispose:()=>service.closeManagedSession(group,child,()=>preparedSession.dispose())})});
  expect(handle.agentId).toBe('owned-child');group.children.set(handle.agentId,child);
- await service.options.prepareObservationSession({context,identity:{id:handle.agentId}});
+ const actualDetachedFactory=service.options.prepareObservationSession;await actualDetachedFactory({context,identity:{id:handle.agentId}});expect(observerErrors).toEqual([]);expect(factoryReceivers).toEqual([undefined]);
  core.activatePreparedTurn(handle);await entered.promise;
  async function close(){
   const raw=service.dispose(),serviceOutcome=raw.then(()=>({ok:true as const}),error=>({ok:false as const,error}));
@@ -222,10 +223,10 @@ async function fixedService(F:Error){
   const stop=als.run({slot:coreSlot},()=>beginQualifiedGroupCallbackStop(cap.bindings[0]));
   execution.resolve('owned finished');physicalGate.resolve();await stop;
   const outcome=await serviceOutcome;expect(outcome.ok).toBe(false);if(outcome.ok)throw Error('expected original failure');
-  expect(outcome.error).toBeInstanceOf(AggregateError);if(!(outcome.error instanceof AggregateError))throw Error('expected_original_callback_aggregate');expect(outcome.error.errors[0]).toBe(F);expect(outcome.error.cause).toBe(F);
+  expect(outcome.error).toBeInstanceOf(AggregateError);if(!(outcome.error instanceof AggregateError))throw Error('expected actual original aggregate');expect(outcome.error.errors[0]).toBe(F);expect(outcome.error.cause).toBe(F);
   return {raw,error:outcome.error,finish:()=>finishQualifiedServiceCallbacks(cap,F,outcome.error)};
  }
- return {service,cap,refs,observerErrors,core,context,child,close,originalDisposeRaw,preparedSession,prepared};
+ return {service,cap,refs,observerErrors,core,context,child,close,originalDisposeRaw,preparedSession,prepared,factoryReceivers,factoryOriginalPs};
 }
 it('keeps an early body dispose source through the real Core and same observed physical session call',async()=>{
  const F=Error('same original F'),f=await fixedService(F);
@@ -236,7 +237,7 @@ for(const method of ['prepareRoot','bindManagedObservationAdmission','registerMa
  for(const fault of ['undefined','null','same-F'] as const)it(`refuses an additional ${fault} from actual ${method}, retaining its original occurrence`,async()=>{
   const F=Error('original cleanup F'),U=fault==='undefined'?undefined:fault==='null'?null:F,f=await fixedService(F);
   try{
-   f.service.nextFailure={method,error:U};const raw=method==='prepareObservationSession'?f.service.options.prepareObservationSession({context:f.context,identity:{id:'owned-child'}}):f.service[method]();
+   f.service.nextFailure={method,error:U};const raw=method==='prepareObservationSession'?Reflect.apply(f.service.options.prepareObservationSession,undefined,[{context:f.context,identity:{id:'owned-child'}}]):f.service[method]();
    const captured=await raw.then(()=>({ok:true as const}),error=>({ok:false as const,error}));expect(captured.ok).toBe(false);if(captured.ok)throw Error('expected original rejection');expect(captured.error).toBe(U);
    const stopped=await f.close();let rejection:{error:unknown}|undefined;try{await stopped.finish();}catch(error){rejection={error};}
    expect(rejection).toBeDefined();expect(f.cap.terminal).toBe(false);
@@ -250,6 +251,16 @@ it('refuses an extra same-F cleanup occurrence without another original session 
  try{const stopped=await f.close(),row=(f.core as any).records.get('owned-child');expect(row.cleanupFailures).toEqual([F]);row.cleanupFailures.push(F);
   let failure:{error:unknown}|undefined;try{await stopped.finish();}catch(error){failure={error};}
   expect(failure).toBeDefined();expect(f.cap.terminal).toBe(false);expect([...f.prepared.values()].flat()).toHaveLength(1);expect(row.cleanupFailures[0]).toBe(F);expect(row.cleanupFailures[1]).toBe(F);
+ }finally{restoreQualifiedServiceCallbackObservers(f.cap);}
+});
+
+for(const wrong of ['options','foreign-object'] as const)it(`forwards an unexpected ${wrong} factory receiver unchanged but refuses new roles and terminal authority`,async()=>{
+ const F=Error('original physical F'),f=await fixedService(F);
+ try{const receiver=wrong==='options'?f.service.options:Object.freeze({foreign:true}),input={context:f.context,identity:{id:'owned-child'}};
+  const raw=Reflect.apply(f.service.options.prepareObservationSession,receiver,[input]);
+  expect(raw).toBe(f.factoryOriginalPs.at(-1));expect(f.factoryReceivers.at(-1)).toBe(receiver);
+  await raw;await Promise.resolve();expect(f.cap.factoryCalls).toHaveLength(1);expect(f.observerErrors.length).toBeGreaterThan(0);
+  const stopped=await f.close();await expect(stopped.finish()).rejects.toBeDefined();expect(f.cap.terminal).toBe(false);expect(f.factoryOriginalPs).toHaveLength(2);
  }finally{restoreQualifiedServiceCallbackObservers(f.cap);}
 });
 
