@@ -2,12 +2,14 @@ import { defineConfig } from 'vitest/config'
 import { resolve } from 'path'
 import { readFileSync } from 'node:fs'
 import { normalizePath } from 'vite'
+import { createDiagnosticPlugin } from './tests/fixtures/loop-read-error-diagnostic-loader.mjs'
 
 const servicesTestEntry = normalizePath(resolve(__dirname, 'electron/desktop-services.ts'))
+const loopReadDiagnostic = createDiagnosticPlugin({repoRoot: resolve(__dirname, '..'), mode: process.env.XIAOK_LOOP_READ_ERROR_DIAGNOSTIC})
 
 export default defineConfig({
   // This alias exists only in the test loader; production source stays private.
-  plugins: [{
+  plugins: [...(loopReadDiagnostic ? [loopReadDiagnostic] : []), {
     name: 'real-private-finalization-test-entry',
     enforce: 'pre',
     load(id) {
