@@ -1,3 +1,11 @@
+import nativeProcess from 'node:process';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import {types as qualifiedUtilTypes} from 'node:util';
+import {randomBytes} from 'node:crypto';
+import {lstatSync} from 'node:fs';
+import {userInfo} from 'node:os';
+import {type TestContext} from 'vitest';
+import {acquireProfileAccountLease,assertProfileAccountWorkerReleased} from '../../../tests/support/profile-account-ownership.mjs';
 import {mkdirSync,writeFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {relative,isAbsolute} from 'node:path';
@@ -33,7 +41,7 @@ beforeAll(() => {
 
 // Source-mode Vitest does not emit the fixed .js Worker entry. Map only that
 // URL to the test-owned compiled production entry; execution and exit are native.
-const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput:'',protectionRoot:'',starts: 0, exits: 0, originalEntries: [] as Array<{entry:string,protection:boolean,start:number,exit?:number,exitCode?:number,terminateCalls:number}> }));
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput:'',protectionRoot:'',starts: 0, exits: 0, receipts:[] as any[],unknown:false,compiled:[] as any[],builds:[] as any[], originalEntries: [] as Array<{entry:string,protection:boolean,start:number,exit?:number,exitCode?:number,terminateCalls:number}> }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const sourceUrl = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url);
@@ -51,15 +59,24 @@ vi.mock('node:worker_threads', async importOriginal => {
       const originalEntry={entry:String(filename),protection:protectionMapped,start:Date.now(),exit:undefined as number|undefined,exitCode:undefined as number|undefined,terminateCalls:0};
       if(mapped||protectionMapped)nativeWorker.originalEntries.push(originalEntry);
       super(mapped?nativeWorker.output:protectionMapped?nativeWorker.protectionOutput:filename,options);
+      qobserveWorker(this,mapped||protectionMapped);
       this.originalEntry=originalEntry;this.once('exit',(code)=>{originalEntry.exit=Date.now();originalEntry.exitCode=code;});
       if (mapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
   } };
 });
-beforeAll(async()=>{Object.assign(nativeWorker,await compileVerifierEntry('delivery-verifier-worker.ts'));const protection=await compileProtectionWorkerEntry();nativeWorker.protectionOutput=protection.output;nativeWorker.protectionRoot=protection.root;});
-afterAll(() => {
-  try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
-  finally { for(const root of [nativeWorker.root,nativeWorker.protectionRoot])if(root)rmSync(root,{recursive:true,force:true,maxRetries:3}); }
+beforeAll(async()=>{
+ const acquired=(root:string)=>{const canonical=realpathSync(root),stat=lstatSync(canonical);const identity={root:canonical,uid:stat.uid,dev:stat.dev,ino:stat.ino,birthtimeMs:stat.birthtimeMs};nativeWorker.compiled.push(identity);if(canonical!==root||!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==userInfo().uid)throw Error('qualified_compiled_root_identity');};
+ const open=async<T,>(invoke:()=>Promise<T>):Promise<T>=>{const record={raw:undefined as Promise<T>|undefined,outcome:undefined as QualifiedOutcome|undefined};nativeWorker.builds.push(record);try{const raw=invoke();record.raw=raw;const value=await raw;record.outcome={ok:true,value};return value;}catch(error){record.outcome={ok:false,error};throw error;}};
+ Object.assign(nativeWorker,await open(()=>compileVerifierEntry('delivery-verifier-worker.ts',{onAcquired:acquired})));const protection=await open(()=>compileProtectionWorkerEntry({onAcquired:acquired}));nativeWorker.protectionOutput=protection.output;nativeWorker.protectionRoot=protection.root;
+});
+afterAll(()=>{
+ const errors:unknown[]=[];
+ try{expect(nativeWorker.exits).toBe(nativeWorker.starts);}catch(error){errors.push(error);}
+ const safe=qualifiedRecords.length>0&&nativeWorker.compiled.length===2&&nativeWorker.builds.length===2&&nativeWorker.builds.every(build=>build.raw&&build.outcome?.ok===true)&&!nativeWorker.unknown&&nativeWorker.receipts.every(item=>item.exited)&&qualifiedRecords.every(r=>r.callbackClosed&&r.leavesClosed&&r.accountReleased);
+ if(safe){for(const identity of nativeWorker.compiled)try{const stat=lstatSync(identity.root);if(realpathSync(identity.root)!==identity.root||stat.isSymbolicLink()||['uid','dev','ino','birthtimeMs'].some(k=>(stat as any)[k]!==identity[k]))throw Error('qualified_compiled_root_changed');rmSync(identity.root,{recursive:true,force:true,maxRetries:3});}catch(error){errors.push(error);}}
+ else {for(const record of qualifiedRecords)if(record.late)errors.push(...record.errors);errors.push(Error('qualified_compiled_root_retained_until_worker_exit'));}
+ if(errors.length===1)throw errors[0];if(errors.length)throw new AggregateError(errors,'qualified_compiler_cleanup_failed',{cause:errors[0]});
 });
 
 
@@ -107,56 +124,231 @@ async function hideOwnedRegisteredEnvironmentForNegativeFixture(registerCleanup:
   renameSync(file, backup); moved = true; assertIdentity(backup);
 }
 
+// File-private test lifecycle; this candidate is not applied or execution-approved.
+type QualifiedOutcome={ok:true;value:unknown}|{ok:false;error:unknown};
+type QualifiedSlot={label:string;kind:'stop'|'owner'|'source'|'material'|'rescue'|'leaf'|'native';receiver:any;method:Function;args:unknown[];called:boolean;rawWritten:boolean;raw?:unknown;outcome?:QualifiedOutcome;reaction?:Promise<void>;workers:any[]};
+type QualifiedRecord={ctx:TestContext;nonce:string;refs:unknown[];registrations:unknown[];sequence:number;seal?:number;closing:boolean;late:boolean;errors:unknown[];assertions:unknown[];expectedFailures:Set<unknown>;slots:QualifiedSlot[];closingSlots?:readonly QualifiedSlot[];pending:Set<object>;roots:any[];natives:any[];services:any[];coordinators:any[];sessions:any[];operations:any[];hostMaterials:any[];workers:any[];opaque:boolean;callbackClosed:boolean;leavesClosed:boolean;accountReleased:boolean;account:any;lease?:{release():void};workP?:Promise<void>;workOutcome?:QualifiedOutcome;scenarioP?:Promise<void>;hookFailure?:{error:unknown};abort?:()=>void;abortInstalled:boolean;closeStarted:boolean};
+type QualifiedOrigin={record:QualifiedRecord;slot?:QualifiedSlot};
+const qualifiedAnchor=Symbol('qualified-complex-fixture-strong-registry');
+const qualifiedRecords:QualifiedRecord[]=[];
+Object.defineProperty(nativeProcess,qualifiedAnchor,{value:qualifiedRecords,enumerable:false,configurable:false,writable:false});
+if(Object.getOwnPropertyDescriptor(nativeProcess,qualifiedAnchor)?.value!==qualifiedRecords)throw Error('qualified_fixture_registry_unanchored');
+const qualifiedALS=new AsyncLocalStorage<QualifiedOrigin>();
+const qHasOwn=Object.hasOwn,qOwnDescriptor=Object.getOwnPropertyDescriptor,qNativeApply=Reflect.apply,qIsProxy=qualifiedUtilTypes.isProxy,qIsNativeError=qualifiedUtilTypes.isNativeError;
+const qDOMNameGetter=qOwnDescriptor(DOMException.prototype,'name')?.get;
+function qknownAbort(error:unknown):boolean{
+ try{
+  if((typeof error!=='object'&&typeof error!=='function')||error===null||qIsProxy(error))return false;
+  if(qIsNativeError(error)){const descriptor=qOwnDescriptor(error,'name');return Boolean(descriptor&&qHasOwn(descriptor,'value')&&descriptor.value==='AbortError');}
+  return Boolean(qDOMNameGetter&&qNativeApply(qDOMNameGetter,error,[])==='AbortError');
+ }catch{return false;}
+}
+
+const qhold=<T,>(r:QualifiedRecord,value:T):T=>{r.refs.push(value);return value;};
+function qerror(r:QualifiedRecord,error:unknown){qhold(r,error);r.errors.push(error);}
+function qregister<T>(r:QualifiedRecord,label:string,value:T):T{
+ qhold(r,value);r.registrations.push({label,value});r.sequence++;
+ if(r.closing){r.late=true;r.callbackClosed=false;qerror(r,Error('qualified_fixture_late_registration'));}
+ return value;
+}
+function qconstruct<T>(r:QualifiedRecord,label:string,construct:()=>T):T{
+ const pending=qregister(r,label+':construction',{label,construct});r.pending.add(pending);
+ const value=construct();qregister(r,label,value);r.pending.delete(pending);return value;
+}
+function qslot(r:QualifiedRecord,label:string,kind:QualifiedSlot['kind'],receiver:any,method:Function,args:unknown[]=[]):QualifiedSlot{
+ const slot=qregister(r,label+':slot',{label,kind,receiver,method,args,called:false,rawWritten:false,workers:[]} as QualifiedSlot);r.slots.push(slot);return slot;
+}
+function qspy<T extends {mockRestore():unknown}>(r:QualifiedRecord,invoke:()=>T):T{
+ const value=qconstruct(r,'spy',invoke);qslot(r,'original-spy-restore','leaf',value,value.mockRestore);return value;
+}
+function qstub<T>(r:QualifiedRecord,invoke:()=>T):T{
+ qslot(r,'original-unstub-all','leaf',vi,vi.unstubAllGlobals);return qconstruct(r,'global-stub',invoke);
+}
+function qaction(r:QualifiedRecord,label:string,kind:QualifiedSlot['kind'],action:()=>unknown){qslot(r,label,kind,undefined,action);}
+function qcall(r:QualifiedRecord,slot:QualifiedSlot){
+ if(slot.called)return;slot.called=true;
+ try{
+  // The ALS close context belongs only to this already-bound actual owner slot.
+  // Internal Workers fill its existing observation collection, never add owners.
+  const raw=qualifiedALS.run({record:r,slot},()=>Reflect.apply(slot.method,slot.receiver,slot.args));slot.raw=qhold(r,raw);slot.rawWritten=true;
+  slot.reaction=qhold(r,Promise.resolve(raw).then(value=>{slot.outcome=qhold(r,{ok:true,value});},error=>{slot.outcome=qhold(r,{ok:false,error});qerror(r,error);}));
+ }catch(error){slot.outcome=qhold(r,{ok:false,error});qerror(r,error);}
+}
+function qroot(r:QualifiedRecord,prefix:string):string{
+ const root=qregister(r,'root-presence',{raw:undefined as string|undefined,identity:undefined as any,written:false});r.roots.push(root);
+ root.raw=qregister(r,'root-raw',mkdtempSync(join(tmpdir(),prefix)));
+ const canonical=qregister(r,'root-canonical',realpathSync(root.raw)),stat=qregister(r,'root-stat',lstatSync(canonical));
+ if(canonical!==root.raw||!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==userInfo().uid)throw Error('qualified_fixture_root_identity');
+ root.identity={root:canonical,nonce:r.nonce,runNonce:r.account.runNonce,pid:nativeProcess.pid,ppid:nativeProcess.ppid,uid:stat.uid,dev:stat.dev,ino:stat.ino,birthtimeMs:stat.birthtimeMs};
+ writeFileSync(join(canonical,'qualified-fixture-identity.json'),JSON.stringify(root.identity)+'\n',{flag:'wx',mode:0o600});root.written=true;return canonical;
+}
+function qnative<T extends {close():unknown}>(r:QualifiedRecord,value:T):T{
+ qregister(r,'native-store',value);const descriptor=Object.getOwnPropertyDescriptor(value,'db');const db=descriptor&&qHasOwn(descriptor,'value')?descriptor.value:undefined;
+ const descriptorOpen=db&&Object.getOwnPropertyDescriptor(db,'isOpen');const native=qregister(r,'native-receiver',{value,db,get:descriptorOpen?.get,closed:false,closeSlot:undefined as QualifiedSlot|undefined,probeValid:Boolean(db&&typeof descriptorOpen?.get==='function'&&descriptorOpen.configurable===false)});r.natives.push(native);native.closeSlot=qslot(r,'store.close','native',value,value.close);return value;
+}
+function qprobeNative(native:any):boolean{
+ const storeDescriptor=qOwnDescriptor(native.value,'db');
+ if(!storeDescriptor||!qHasOwn(storeDescriptor,'value')||storeDescriptor.value!==native.db)throw Error('qualified_fixture_native_receiver_changed');
+ const open=qOwnDescriptor(native.db,'isOpen');
+ if(!open||open.get!==native.get||open.set!==undefined||open.configurable!==false||typeof native.get!=='function')throw Error('qualified_fixture_native_getter_changed');
+ const state=qNativeApply(native.get,native.db,[]);if(state!==true&&state!==false)throw Error('qualified_fixture_native_state_unknown');return state;
+}
+function qservice<T extends {dispose():unknown;runtimeStatus():{blocked:boolean}}>(r:QualifiedRecord,value:T,coordinator:DesktopExecutionCoordinator):T{
+ qregister(r,'service',value);qregister(r,'coordinator',coordinator);r.services.push(value);r.coordinators.push(coordinator);qslot(r,'service.dispose','owner',value,value.dispose);return value;
+}
+function qhost<T extends InProcessTaskRuntimeHost>(r:QualifiedRecord,value:T):T{
+ qregister(r,'host',value);qslot(r,'host.stopAccepting','stop',value,value.stopAccepting,['app_shutdown']);qslot(r,'host.abortAllActive','stop',value,value.abortAllActive,['app_shutdown']);qslot(r,'host.drain','owner',value,value.drain);qslot(r,'host.sourceClose','source',value,value.closeSourceWriterForMigration);
+ const options=qOwnDescriptor(value,'options'),material=options&&qHasOwn(options,'value')?qOwnDescriptor(options.value,'materialRegistry'):undefined;
+ const registry=material&&qHasOwn(material,'value')?material.value:undefined,close=r.slots.find(slot=>slot.kind==='material'&&slot.receiver===registry);
+ const binding=qregister(r,'actual-host-material-binding',{host:value,registry,close});r.hostMaterials.push(binding);if(!close)throw Error('qualified_fixture_host_material_inventory_unknown');return value;
+}
+function qmaterial<T extends MaterialRegistry>(r:QualifiedRecord,value:T):T{qregister(r,'material',value);qslot(r,'material.seal','material',value,value.sealAndDrainInstanceMutations);return value;}
+function qopaque<T>(r:QualifiedRecord,open:()=>T):T{r.opaque=true;return qconstruct(r,'opaque-native-owner',open);}
+function qproduct<T extends {dispose():unknown}>(r:QualifiedRecord,label:string,open:()=>Promise<T>):Promise<T>{
+ r.opaque=true;const pending=qregister(r,label+':pending',{});r.pending.add(pending);const raw=open();qregister(r,label+':raw',raw);
+ const reaction=raw.then(value=>{qregister(r,label,value);qslot(r,label+'.dispose','owner',value,value.dispose);r.pending.delete(pending);},error=>{qhold(r,error);r.pending.delete(pending);});qhold(r,reaction);return raw;
+}
+function qraw<T>(r:QualifiedRecord,label:string,invoke:()=>Promise<T>):Promise<T>{
+ const operation=qregister(r,label+':operation',{label,raw:undefined as Promise<T>|undefined,outcome:undefined as QualifiedOutcome|undefined,reaction:undefined as Promise<void>|undefined});r.operations.push(operation);
+ const raw=invoke();operation.raw=qhold(r,raw);operation.reaction=qhold(r,raw.then(value=>{operation.outcome=qhold(r,{ok:true,value});},error=>{operation.outcome=qhold(r,{ok:false,error});}));return raw;
+}
+function qsession<T extends {run:Function}>(r:QualifiedRecord,session:T):T{
+ qregister(r,'session',session);const observed=qregister(r,'session-observations',{session,calls:[] as any[],disposeSeen:false});r.sessions.push(observed);
+ for(const name of ['run','dispose','suspend'] as const){const method=(session as any)[name];if(typeof method!=='function')continue;
+  const spy=vi.spyOn(session as any,name).mockImplementation(function(this:unknown,...args:unknown[]){
+   if(r.closing&&name==='run'){r.late=true;qerror(r,Error('qualified_fixture_late_session_run'));}
+   const call={name,receiver:this,args,raw:undefined as unknown,outcome:undefined as QualifiedOutcome|undefined,reaction:undefined as Promise<void>|undefined};observed.calls.push(call);qhold(r,call);
+   try{const raw=Reflect.apply(method,this,args);call.raw=qhold(r,raw);if(name==='dispose')observed.disposeSeen=true;
+    call.reaction=qhold(r,Promise.resolve(raw).then(value=>{call.outcome=qhold(r,{ok:true,value});},error=>{call.outcome=qhold(r,{ok:false,error});if(name==='run'){if(!qknownAbort(error))r.assertions.push(error);}else qerror(r,error);}));return raw;
+   }catch(error){call.outcome=qhold(r,{ok:false,error});if(name==='run'){if(!qknownAbort(error))r.assertions.push(error);}else qerror(r,error);throw error;}
+  });qslot(r,'session.'+name+'.restore','leaf',spy,spy.mockRestore);
+ }
+ return session;
+}
+function qobserveWorker(worker:any,knownProductionEntry:boolean){
+ const origin=qualifiedALS.getStore();const actual={worker,threadId:worker.threadId,origin,exited:false,code:undefined as number|undefined,raw:undefined as Promise<void>|undefined};
+ const pending=new Promise<void>(resolve=>worker.once('exit',(code:number)=>{actual.exited=true;actual.code=code;resolve();}));actual.raw=pending;
+ nativeWorker.receipts.push(actual);
+ if(!origin||!knownProductionEntry){nativeWorker.unknown=true;if(origin){qhold(origin.record,actual);origin.record.late=true;origin.record.callbackClosed=false;qerror(origin.record,Error('qualified_fixture_worker_entry_or_origin_unknown'));}return;}
+ const r=origin.record;qhold(r,actual);r.workers.push(actual);
+ if(r.closing){
+  const slot=origin.slot;
+  if(!slot||!slot.receiver||!r.slots.includes(slot)||!slot.called||slot.outcome!==undefined||!['owner','source','material'].includes(slot.kind)){r.late=true;r.callbackClosed=false;qerror(r,Error('qualified_fixture_worker_origin_unknown'));}
+  else slot.workers.push(actual);
+ }else qregister(r,'actual-worker',actual);
+}
+async function qcloseGeneration(r:QualifiedRecord,store:DesktopMultiAgentStore,service:DesktopMultiAgentService,host:InProcessTaskRuntimeHost){
+ const dispose=r.slots.find(s=>s.kind==='owner'&&s.receiver===service&&s.method===service.dispose);
+ const drain=r.slots.find(s=>s.kind==='owner'&&s.receiver===host&&s.method===host.drain);
+ const stops=r.slots.filter(s=>s.kind==='stop'&&s.receiver===host);
+ const source=r.slots.find(s=>s.kind==='source'&&s.receiver===host),material=r.hostMaterials.find(item=>item.host===host)?.close;
+ const native=r.natives.find(n=>n.value===store);
+ if(!dispose||!drain||stops.length!==2||!source||!material||!native?.probeValid)throw Error('qualified_fixture_generation_inventory_unknown');
+ const failures:unknown[]=[];
+ const phases:QualifiedSlot[][]=[[...stops,dispose,drain],[source],[material]];
+ for(const phase of phases){
+  for(const slot of phase)qcall(r,slot);
+  for(const slot of phase){await slot.reaction;if(slot.outcome?.ok!==true)failures.push(slot.outcome&&slot.outcome.ok===false?slot.outcome.error:Error('qualified_fixture_generation_close_unknown'));}
+ }
+ if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_fixture_generation_close_failed',{cause:failures[0]});
+ for(const coordinator of r.coordinators){const snapshot=coordinator.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)throw Error('qualified_fixture_generation_not_idle');}
+ if(service.runtimeStatus().blocked!==false||r.sessions.some(session=>!session.disposeSeen||session.calls.some((call:any)=>!call.outcome))||r.workers.some(worker=>!worker.exited))throw Error('qualified_fixture_generation_callbacks_unknown');
+ qprobeNative(native);qcall(r,native.closeSlot);await native.closeSlot.reaction;
+ if(native.closeSlot.outcome?.ok!==true||!native.closeSlot.rawWritten)throw native.closeSlot.outcome?.ok===false?native.closeSlot.outcome.error:Error('qualified_fixture_generation_native_close_unknown');
+ if(qprobeNative(native)!==false)throw Error('qualified_fixture_generation_native_open');native.closed=true;
+}
+function qbeginClose(r:QualifiedRecord){
+ if(r.closeStarted)return;r.closeStarted=true;r.closing=true;r.seal=r.sequence;r.closingSlots=Object.freeze(r.slots.slice());
+ for(const kind of ['rescue','stop','owner'] as const)for(const slot of r.closingSlots)if(slot.kind===kind)qcall(r,slot);
+}
+async function qfinish(r:QualifiedRecord){
+ qbeginClose(r);const population=r.closingSlots!;
+ for(const slot of population)if(slot.kind==='stop'||slot.kind==='owner'||slot.kind==='rescue')await slot.reaction;
+ for(const kind of ['source','material'] as const){for(const slot of population)if(slot.kind===kind)qcall(r,slot);for(const slot of population)if(slot.kind===kind)await slot.reaction;}
+ // Never infer child callback closure from a rejected dispose/status/UI receipt.
+ const ownerHealthy=population.filter(s=>['stop','owner','source','material','rescue'].includes(s.kind)).every(s=>s.called&&s.outcome?.ok===true);
+ for(const operation of r.operations)await operation.reaction;
+ const operationsSettled=r.operations.every(operation=>Boolean(operation.outcome));
+ const sessionHealthy=r.sessions.every(s=>s.disposeSeen&&s.calls.every((c:any)=>Boolean(c.outcome)&&(c.name==='run'||c.outcome.ok===true)));
+ r.callbackClosed=Boolean(r.workOutcome)&&ownerHealthy&&sessionHealthy&&operationsSettled&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(w=>w.exited);
+ if(r.callbackClosed){
+  for(const slot of [...population].reverse())if(slot.kind==='leaf')qcall(r,slot);
+  for(const slot of population)if(slot.kind==='leaf')await slot.reaction;
+  r.leavesClosed=population.filter(s=>s.kind==='leaf').every(s=>s.outcome?.ok===true)&&!r.late&&r.sequence===r.seal;
+  if(r.leavesClosed&&r.abortInstalled&&r.abort){try{r.ctx.signal.removeEventListener('abort',r.abort);r.abortInstalled=false;}catch(error){qerror(r,error);r.leavesClosed=false;}}
+  if(r.leavesClosed){try{r.lease?.release();r.accountReleased=Boolean(r.lease);}catch(error){qerror(r,error);}}
+ }
+ let nativeAllowed=r.callbackClosed&&r.leavesClosed&&ownerHealthy&&!r.late;
+ try{for(const c of r.coordinators){const snapshot=c.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)nativeAllowed=false;}for(const s of r.services)if(s.runtimeStatus().blocked!==false)nativeAllowed=false;}catch(error){qerror(r,error);nativeAllowed=false;}
+ for(const native of r.natives)try{if(!native.probeValid)throw Error('qualified_fixture_native_probe_unknown_before_close');qprobeNative(native);}catch(error){qerror(r,error);nativeAllowed=false;}
+ if(nativeAllowed){for(const slot of population)if(slot.kind==='native')qcall(r,slot);for(const slot of population)if(slot.kind==='native')await slot.reaction;
+  for(const n of r.natives)try{if(!n.closeSlot||!n.closeSlot.called||!n.closeSlot.rawWritten||n.closeSlot.outcome?.ok!==true||n.closeSlot.receiver!==n.value||typeof n.get!=='function'||qprobeNative(n)!==false)throw Error('qualified_fixture_native_close_unknown');n.closed=true;}catch(error){qerror(r,error);}}
+ const assertions=r.assertions.filter(error=>!r.expectedFailures.has(error));r.errors.unshift(...assertions);
+ if(!r.callbackClosed)qerror(r,Error('qualified_fixture_callback_close_unknown'));
+ // No approved seam exposes product-internal betterSQLite receivers. Every root
+ // stays strongly held for parent-only exact cleanup after actual worker exit.
+ for(const root of r.roots)try{
+  if(!root.written)throw Error('qualified_fixture_partial_root_identity');const stat=lstatSync(root.identity.root);
+  if(realpathSync(root.identity.root)!==root.identity.root||stat.isSymbolicLink()||['uid','dev','ino','birthtimeMs'].some(key=>(stat as any)[key]!==root.identity[key]))throw Error('qualified_fixture_retained_identity_changed');
+  console.info('QUALIFIED_FIXTURE_RETAINED '+JSON.stringify({...root.identity,callbackClosed:r.callbackClosed,leavesClosed:r.leavesClosed,accountReleased:r.accountReleased,opaqueNativeUnconfirmed:r.opaque,publicNativeClosed:r.natives.length?r.natives.every(n=>n.closed):null,rootDeleted:false,retainedForParent:true,late:r.late,sequence:r.sequence,seal:r.seal}));
+ }catch(error){qerror(r,error);}
+}
+function runCase(ctx:TestContext,work:(r:QualifiedRecord)=>Promise<void>):Promise<void>{
+ const r:QualifiedRecord={ctx,nonce:randomBytes(16).toString('hex'),refs:[],registrations:[],sequence:0,closing:false,late:false,errors:[],assertions:[],expectedFailures:new Set(),slots:[],pending:new Set(),roots:[],natives:[],services:[],coordinators:[],sessions:[],operations:[],hostMaterials:[],workers:[],opaque:false,callbackClosed:false,leavesClosed:false,accountReleased:false,account:undefined,abortInstalled:false,closeStarted:false};qualifiedRecords.push(r);qhold(r,ctx);qhold(r,work);
+ const scenario=(async()=>{
+  await Promise.resolve();let failure:{error:unknown}|undefined;
+  try{
+   if(r.hookFailure)throw r.hookFailure.error;
+   r.abort=()=>{try{qhold(r,{reason:ctx.signal.reason});qbeginClose(r);}catch(error){qerror(r,error);}};qhold(r,r.abort);ctx.signal.addEventListener('abort',r.abort,{once:true});r.abortInstalled=true;ctx.signal.throwIfAborted();
+   for(const previous of qualifiedRecords){if(previous===r)break;if(!previous.callbackClosed||!previous.leavesClosed||!previous.accountReleased)throw Error('qualified_fixture_previous_callback_unknown');}
+   r.account=qhold(r,inject('profileTestAccountOwnership' as never));assertProfileAccountWorkerReleased(r.account);
+   r.lease=qhold(r,acquireProfileAccountLease(r.account,realpathSync(userInfo().homedir),r.nonce));
+   const raw=qualifiedALS.run({record:r},()=>work(r));r.workP=qhold(r,raw);
+   try{const value=await raw;r.workOutcome=qhold(r,{ok:true,value});}catch(error){r.workOutcome=qhold(r,{ok:false,error});throw error;}
+  }catch(error){failure=qhold(r,{error});}
+  finally{try{await qfinish(r);}catch(error){qerror(r,error);}}
+  const errors=[...(failure?[failure.error]:[]),...r.errors];if(errors.length===1)throw errors[0];if(errors.length)throw new AggregateError(errors,'qualified_fixture_body_and_cleanup_failed',{cause:errors[0]});
+ })();r.scenarioP=qhold(r,scenario);const finished=()=>scenario;qhold(r,finished);
+ try{ctx.onTestFinished(finished);}catch(error){r.hookFailure=qhold(r,{error});}return scenario;
+}
+
+const qualifiedCompiledAnchor=Symbol('qualified-compiled-worker-strong-registry');
+Object.defineProperty(nativeProcess,qualifiedCompiledAnchor,{value:nativeWorker,enumerable:false,configurable:false,writable:false});
+
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('BDD: durable service uses the real shared coordinator', () => {
-  const cleanup: Array<() => void | Promise<void>> = [];
-  const capturedAssertions: unknown[] = [];
-  afterEach(async () => {
-    const cleanupErrors:unknown[]=[];
-    for (const action of cleanup.splice(0).reverse()) {try{await action();}catch(error){cleanupErrors.push(error);}}
-    // Always restore every fixture, even when an unknown physical outcome makes
-    // disposal reject; report that original failure without contaminating the next case.
-    const assertions=capturedAssertions.splice(0);
-    if(cleanupErrors.length)throw new AggregateError([...assertions,...cleanupErrors],'runner and cleanup failures: '+[...assertions,...cleanupErrors].map(value=>value instanceof Error?value.stack:String(value)).join('\n'));
-    // Host/core intentionally catch runner failures. A test assertion inside a
-    // real runner must still fail this test, not be mistaken for product output.
-    expect(assertions.map(error=>error instanceof Error?error.stack+(error.cause instanceof Error?"\nCAUSE: "+error.cause.stack:""):error)).toEqual([]);
-  });
-  async function setup(createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { expectedDisposeError?:Error; isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-multi-agent-service-')));
-    if(policy.isolatedConfigRoot){const previous=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=root;cleanup.push(()=>{if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;});}
-    cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
-    const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
-    cleanup.push(() => store.close());
-    const coordinator = new DesktopExecutionCoordinator({ multiAgentLeaseMs: policy.multiAgentLeaseMs });
-    const service = new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
-      const session = await createSession(input);
-      return { ...session, run: async (...args) => {
-        try { return await session.run(...args); }
-        catch (error) { if (!(error instanceof Error && error.name === 'AbortError')) capturedAssertions.push(error); throw error; }
-      } };
-    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 });
-    cleanup.push(async () => {try{await service.dispose();}catch(error){if(error!==policy.expectedDisposeError)throw error;}});
+  async function setup(__q:QualifiedRecord,createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { expectedDisposeError?:Error; isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
+    const root = qroot(__q,'xiaok-multi-agent-service-');
+    if(policy.isolatedConfigRoot){const previous=process.env.XIAOK_CONFIG_DIR;qaction(__q,'old-cleanup-line-128','leaf',()=>{if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;});process.env.XIAOK_CONFIG_DIR=root;}
+    void 0 /* typed actual-resource close slot registered at acquisition */;
+    const store = qnative(__q,qconstruct(__q,'multi-agent-store',()=>new DesktopMultiAgentStore(join(root, 'groups.sqlite'))));
+    void 0 /* typed actual-resource close slot registered at acquisition */;
+    const coordinator = qconstruct(__q,'coordinator',()=>new DesktopExecutionCoordinator({ multiAgentLeaseMs: policy.multiAgentLeaseMs }));
+    const service = qservice(__q,qconstruct(__q,'multi-agent-service',()=>new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
+      const session = await qraw(__q,'ordinary-session-factory',()=>createSession(input));
+      return qsession(__q,session);
+    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 })),coordinator);
+    void 0 /* typed actual-resource close slot registered at acquisition */;
     service.registerThread({ threadId: 't1', profileId: 'p1', workspaceId: 'w1', cwd: root });
     let deliveryAuthority!: DesktopHostDeliveryAuthority;
-    const host = new InProcessTaskRuntimeHost({
+    const host = qhost(__q,qconstruct(__q,'task-host',()=>new InProcessTaskRuntimeHost({
       snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),
       groupObservationSource: service,
-      materialRegistry: new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 * 1024 }),
-      runner: input => service.runRoot(input, async context => {
+      materialRegistry: qmaterial(__q,qconstruct(__q,'materials',()=>new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 * 1024 }))),
+      runner: input => qraw(__q,'actual-root-run',()=>service.runRoot(input, async context => {
         try { return await body(context,input); }
-        catch (error) { capturedAssertions.push(error); throw error; }
-      }),
+        catch (error) { __q.assertions.push(error); throw error; }
+      })),
       authorizePreparation: (taskId, marker) => service.assertHostPreparation(taskId, marker),
       assertTaskAdmission: snapshot => service.assertHostAdmission(snapshot),
       decideCancellation: (snapshot, reason) => service.decideHostCancellation(snapshot, reason),
       getExecutionPolicy: () => ({ deliveryRepair: 'explicit' }),
       onDeliveryReport: report => service.recordHostDelivery({ requestSource: 'scheduler', authority: deliveryAuthority, report }),
-    });
+    })));
     await service.initialize(host);
     deliveryAuthority = service.bindHostDeliveryOwner(host);
-    cleanup.push(() => host.drain());
+    void 0 /* typed actual-resource close slot registered at acquisition */;
     const start = async () => {
       const prepared = await service.prepareRoot(host, 't1', { prompt: 'run root', materials: [] });
       if (policy.coreIdleTimeoutMs !== undefined) {
@@ -171,14 +363,14 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     return { root, store, service, coordinator, host, start };
   }
 
-  it.each([false,true,'activation-failure','aggregate-revoke'] as const)('commits only a real delegated publication before activating its prepared child identity (message port=%s)',async(messagePort)=>{
+  it.for([false,true,'activation-failure','aggregate-revoke'] as const)('commits only a real delegated publication before activating its prepared child identity (message port=%s)',(messagePort,ctx)=>runCase(ctx,async(__q)=>{
     let activated=0,disposedSessions=0;let firstReadOwner:import('../../../src/runtime/sol-pi/observation-session-owner.js').ObservationSessionOwner|undefined;const childUsers=new Map<object,object>();let sourceOwner:import('../../../src/runtime/sol-pi/observation-session-owner.js').ObservationSessionOwner;let approval:object;
-    const f=await setup(async()=>{throw Error('late unprepared factory must not run');},async(context,input)=>{
+    const f=await setup(__q,async()=>{throw Error('late unprepared factory must not run');},async(context,input)=>{
       const {createObservationService}=await import('../../../src/runtime/sol-pi/observation-service.js');
       const {createObservationSessionOwner}=await import('../../../src/runtime/sol-pi/observation-session-owner.js');
       const {AgentSessionState}=await import('../../../src/ai/runtime/session.js');
       const {desktopObservationSessionId}=await import('../../../src/runtime/task-host/protected-observation-store.js');
-      const archive=createObservationService({profileRoot:join(f.root,'archive'),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}});
+      const archive=qopaque(__q,()=>createObservationService({profileRoot:join(f.root,'archive'),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}}));
       const session=new AgentSessionState();session.restoreSnapshot({...session.exportSnapshot(),sessionId:desktopObservationSessionId(input.taskId)});
       const claims={sessionId:session.exportSnapshot().sessionId,ownerAgentId:'root',scopeId:'root',permissionGeneration:1,surface:'ordinary-owner' as const};
       const caller=archive.bindCaller({...claims,requestSource:'agent'}),user=archive.bindCaller({...claims,requestSource:'user'});
@@ -189,7 +381,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const lifetime=f.service.bindObservationGroupLifetime(context.actor,sourceOwner);lifetime.onClose(async()=>{sourceOwner.dispose();archive.dispose();lifetime.release();});
       if(messagePort==='activation-failure'){
         const core=(f.service as unknown as {groups:Map<string,{core:{activatePreparedTurn(...args:unknown[]):unknown}}>}).groups.get(context.groupId)!.core;
-        const original=core.activatePreparedTurn.bind(core),activation=vi.spyOn(core,'activatePreparedTurn').mockImplementation((...args)=>{original(...args);throw Error('activation response lost');});
+        const original=core.activatePreparedTurn.bind(core),activation=qspy(__q,()=>vi.spyOn(core,'activatePreparedTurn')).mockImplementation((...args)=>{original(...args);throw Error('activation response lost');});
         try{await expect(f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'real-protected-prepare',taskName:'child',message:'authorized prepared task'})).rejects.toThrow('activation response lost');
           expect(f.store.getOperation(context.groupId,'real-protected-prepare')!.applyState).toBe('applied');expect(f.store.requireGroup(context.groupId).mutationBlockedReason).toBe('multi_agent_activation_unknown');expect(disposedSessions).toBeGreaterThan(0);
           await expect(f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'real-protected-prepare',taskName:'child',message:'authorized prepared task'})).rejects.toThrow();expect(activation).toHaveBeenCalledOnce();
@@ -212,7 +404,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const parent=getObservationSessionOwnerHostBinding(sourceOwner),session=new AgentSessionState();session.restoreSnapshot({...session.exportSnapshot(),sessionId:desktopObservationSessionId(input.identity.id)});
       const recipient=parent.service.bindCaller({sessionId:session.exportSnapshot().sessionId,ownerAgentId:input.identity.id,scopeId:input.identity.id,permissionGeneration:1,surface:'ordinary-owner',requestSource:'agent'});
       const capability=parent.service.issueDelegationWithApproval({requestSource:'agent',caller:parent.caller,approval,recipient,observationIds:[],destination:parent.destination,expiresAt:Date.now()+20000});
-      const registry=new ToolRegistry({autoMode:true},[]);const sidecar=new FileTaskSnapshotStore(join(f.root,'tasks')).observations;
+      const registry=qconstruct(__q,'registry-or-catalog',()=>new ToolRegistry({autoMode:true},[]));const sidecar=new FileTaskSnapshotStore(join(f.root,'tasks')).observations;
       const plan=createDelegatedObservationExecutionPlan({parentOwner:sourceOwner,service:parent.service,recipient,capability,session,destination:parent.destination,persist:snapshot=>sidecar.persistSession(input.identity.id,snapshot)});
       const child=await consumeDelegatedObservationExecutionPlan(plan,registry);
       childUsers.set(child.owner,parent.service.bindCaller({sessionId:session.exportSnapshot().sessionId,ownerAgentId:input.identity.id,scopeId:input.identity.id,permissionGeneration:1,surface:'ordinary-owner',requestSource:'user'}));
@@ -222,23 +414,23 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       return {owner:child.owner,registry,publication,observationStore:sidecar,session:{run:async(message)=>{f.service.assertInvocation(input.context.actor,input.context);expect(f.store.getOperation(input.context.groupId,input.operationId)!.applyState).toBe('applied');expect(message).toBe('authorized prepared task');activated++;return 'terminal';},dispose:async()=>{disposedSessions++;registry.dispose();child.owner.dispose();}}};
     }});
     await f.start();await f.host.drain();
-  });
+  }));
 
-  it.each([false,true,'reserve-failure'] as const)('holds protected child text outside the visible journal and drains preparation before shutdown (%s)',async(shutdownDuringPreparation)=>{
+  it.for([false,true,'reserve-failure'] as const)('holds protected child text outside the visible journal and drains preparation before shutdown (%s)',(shutdownDuringPreparation,ctx)=>runCase(ctx,async(__q)=>{
     let preparedCalls=0,runCalls=0,resourceClosed=false;let disposal:Promise<void>|undefined;
-    const f=await setup(async()=>({run:async()=>{runCalls++;return 'must not execute';},dispose:async()=>{}}),async(context,input)=>{
+    const f=await setup(__q,async()=>({run:async()=>{runCalls++;return 'must not execute';},dispose:async()=>{}}),async(context,input)=>{
       const {createObservationService}=await import('../../../src/runtime/sol-pi/observation-service.js');
       const {createObservationSessionOwner}=await import('../../../src/runtime/sol-pi/observation-session-owner.js');
       const {AgentSessionState}=await import('../../../src/ai/runtime/session.js');
       const {desktopObservationSessionId}=await import('../../../src/runtime/task-host/protected-observation-store.js');
-      const archive=createObservationService({profileRoot:join(f.root,'archive'),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}});
+      const archive=qopaque(__q,()=>createObservationService({profileRoot:join(f.root,'archive'),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}}));
       const session=new AgentSessionState();session.restoreSnapshot({...session.exportSnapshot(),sessionId:desktopObservationSessionId(input.taskId)});
       const caller=archive.bindCaller({sessionId:session.exportSnapshot().sessionId,ownerAgentId:'root',scopeId:'root',permissionGeneration:1,surface:'ordinary-owner',requestSource:'agent'});
       const owner=createObservationSessionOwner({service:archive,caller,session,destination:{provider:'fixture',model:'fixture',url:'https://example.test/chat'},persist:snapshot=>new FileTaskSnapshotStore(join(f.root,'tasks')).observations.persistSession(input.taskId,snapshot)});
       f.service.registerGroupObservationOwner({actor:context.actor,requestSource:'agent',owner,canonicalTaskId:input.taskId});
       const lifetime=f.service.bindObservationGroupLifetime(context.actor,owner);lifetime.onClose(async()=>{resourceClosed=true;owner.dispose();archive.dispose();lifetime.release();});
       const original=f.store.putOperation.bind(f.store);
-      const fault=shutdownDuringPreparation==='reserve-failure'?vi.spyOn(f.store,'putOperation').mockImplementation((row,control)=>{if(row.operationId==='protected-prepare'&&row.applyState==='prepared'&&row.result.targetAgentId)throw Error('prepared identity persistence failed');return original(row,control);}):undefined;
+      const fault=shutdownDuringPreparation==='reserve-failure'?qspy(__q,()=>vi.spyOn(f.store,'putOperation')).mockImplementation((row,control)=>{if(row.operationId==='protected-prepare'&&row.applyState==='prepared'&&row.result.targetAgentId)throw Error('prepared identity persistence failed');return original(row,control);}):undefined;
       try{await expect(f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'protected-prepare',taskName:'child',message:'protected initial message'})).rejects.toThrow(shutdownDuringPreparation==='reserve-failure'?'prepared identity persistence failed':'actual preparation rejected');}finally{fault?.mockRestore();}
       if(shutdownDuringPreparation===false){
         const replay=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'protected-prepare',taskName:'child',message:'protected initial message'});
@@ -255,16 +447,16 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       throw Error('actual preparation rejected');
     }});
     await f.start();await f.host.drain();await disposal;
-  });
+  }));
 
-  it('stopping an observation-owned root turn retains its child while closing the real group aborts and drains it', async () => {
+  it('stopping an observation-owned root turn retains its child while closing the real group aborts and drains it', (ctx)=>runCase(ctx,async(__q)=>{
     const entered=deferred<void>(), rootDone=deferred<void>();let childSignal:AbortSignal|undefined;
-    const f=await setup(async()=>({run:async(_message,signal)=>{childSignal=signal;entered.resolve();await new Promise<void>(resolve=>signal!.addEventListener('abort',()=>resolve(),{once:true}));return 'stopped';},dispose:async()=>{}}),async(context,input)=>{
+    const f=await setup(__q,async()=>({run:async(_message,signal)=>{childSignal=signal;entered.resolve();await new Promise<void>(resolve=>signal!.addEventListener('abort',()=>resolve(),{once:true}));return 'stopped';},dispose:async()=>{}}),async(context,input)=>{
       const {createObservationService}=await import('../../../src/runtime/sol-pi/observation-service.js');
       const {createObservationSessionOwner}=await import('../../../src/runtime/sol-pi/observation-session-owner.js');
       const {AgentSessionState}=await import('../../../src/ai/runtime/session.js');
       const {desktopObservationSessionId}=await import('../../../src/runtime/task-host/protected-observation-store.js');
-      const archive=createObservationService({profileRoot:join(f.root,'archive'),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}});
+      const archive=qopaque(__q,()=>createObservationService({profileRoot:join(f.root,'archive'),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}}));
       const session=new AgentSessionState();session.restoreSnapshot({...session.exportSnapshot(),sessionId:desktopObservationSessionId(input.taskId)});
       const caller=archive.bindCaller({sessionId:session.exportSnapshot().sessionId,ownerAgentId:'root',scopeId:'root',permissionGeneration:1,surface:'ordinary-owner',requestSource:'agent'});
       const owner=createObservationSessionOwner({service:archive,caller,session,destination:{provider:'fixture',model:'fixture',url:'https://example.test/chat'},persist:snapshot=>new FileTaskSnapshotStore(join(f.root,'tasks')).observations.persistSession(input.taskId,snapshot)});
@@ -282,19 +474,19 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     try{await Promise.race([rootDone.promise,f.host.drain()]);expect(childSignal!.aborted).toBe(false);}
     finally{await f.service.dispose();}
     expect(childSignal!.aborted).toBe(true);
-  });
+  }));
 
-  it('closes only its actual group while another group preparation remains pending',async()=>{
+  it('closes only its actual group while another group preparation remains pending',(ctx)=>runCase(ctx,async(__q)=>{
     const preparingB=deferred<void>(),releaseB=deferred<void>();let closedA=false;
     let firstGroup:string|undefined,closeA:(()=>Promise<void>)|undefined;
-    const f=await setup(async()=>({run:async()=> 'completed A',dispose:async()=>{closedA=true;}}),async(context,input)=>{
+    const f=await setup(__q,async()=>({run:async()=> 'completed A',dispose:async()=>{closedA=true;}}),async(context,input)=>{
       const first=!firstGroup;if(first)firstGroup=context.groupId;
       if(first){const child=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'ordinary-A',taskName:'child',message:'A'});await vi.waitFor(()=>expect(f.store.getAgent(context.groupId,child.targetAgentId!)?.executionActive).toBe(false));}
       const {createObservationService}=await import('../../../src/runtime/sol-pi/observation-service.js');
       const {createObservationSessionOwner}=await import('../../../src/runtime/sol-pi/observation-session-owner.js');
       const {AgentSessionState}=await import('../../../src/ai/runtime/session.js');
       const {desktopObservationSessionId}=await import('../../../src/runtime/task-host/protected-observation-store.js');
-      const archive=createObservationService({profileRoot:join(f.root,'archive-'+context.groupId),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}});
+      const archive=qopaque(__q,()=>createObservationService({profileRoot:join(f.root,'archive-'+context.groupId),profileId:'fixture',redactor:{version:'fixture',redact:text=>text}}));
       const session=new AgentSessionState();session.restoreSnapshot({...session.exportSnapshot(),sessionId:desktopObservationSessionId(input.taskId)});
       const caller=archive.bindCaller({sessionId:session.exportSnapshot().sessionId,ownerAgentId:'root',scopeId:'root',permissionGeneration:1,surface:'ordinary-owner',requestSource:'agent'});
       const owner=createObservationSessionOwner({service:archive,caller,session,destination:{provider:'fixture',model:'fixture',url:'https://example.test/chat'},persist:snapshot=>new FileTaskSnapshotStore(join(f.root,'tasks')).observations.persistSession(input.taskId,snapshot)});
@@ -309,10 +501,10 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const closing=closeA!();
     try{await vi.waitFor(()=>expect(closedA,'A physical resources must close without awaiting B').toBe(true),{timeout:500});await closing;expect(f.store.getOperation(f.store.getThread('t2')!.activeGroupId!,'prepared-B')?.applyState).toBe('prepared');}
     finally{releaseB.resolve();await f.host.drain();await closing;}
-  });
+  }));
 
-  it('validates message metadata only against the original actual service operation and exact native result',async()=>{
-    const f=await setup(async()=>({run:async()=> 'child',dispose:async()=>{}}),async(context)=>{
+  it('validates message metadata only against the original actual service operation and exact native result',(ctx)=>runCase(ctx,async(__q)=>{
+    const f=await setup(__q,async()=>({run:async()=> 'child',dispose:async()=>{}}),async(context)=>{
       const child=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'metadata-child',taskName:'child',message:'work'});
       const {createDesktopMultiAgentTools}=await import('../../electron/desktop-multi-agent-tools.js');
       const tool=createDesktopMultiAgentTools({service:f.service,context,agents:[],allowedControls:['send_message'],createSeed(){throw Error('unused');}})[0]!;
@@ -323,19 +515,19 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       for(const changed of [{nativeInvocationId:'other',finalInput,result},{nativeInvocationId,finalInput:{...finalInput,message:'different'},result},{nativeInvocationId,finalInput,result:'{"state":"applied"}'}])expect(()=>f.service.inspectCommittedManagedMessage(context,changed)).toThrow();
       expect(()=>f.service.inspectCommittedManagedMessage({...context}, {nativeInvocationId,finalInput,result})).toThrow();
     });await f.start();await f.host.drain();
-  });
+  }));
 
-  it.each([false,true,'publication-persist-failure','semantic-next-turn','closed-result-read','compound-group','compound-managed','group-close-drain','compound-managed-close','compound-managed-parallel','compound-managed-followup','compound-managed-agent-followup','compound-managed-agent-followup-busy','compound-managed-followup-cancel','compound-managed-followup-ack-loss','compound-managed-followup-close-preparing','compound-root-orphan'] as const)('uses the actual prepared Runtime and managed session before its first SDK send (product runner=%s)',async(mode)=>{
+  it.for([false,true,'publication-persist-failure','semantic-next-turn','closed-result-read','compound-group','compound-managed','group-close-drain','compound-managed-close','compound-managed-parallel','compound-managed-followup','compound-managed-agent-followup','compound-managed-agent-followup-busy','compound-managed-followup-cancel','compound-managed-followup-ack-loss','compound-managed-followup-close-preparing','compound-root-orphan'] as const)('uses the actual prepared Runtime and managed session before its first SDK send (product runner=%s)',(mode,ctx)=>runCase(ctx,async(__q)=>{
     const rootOrphan=mode==='compound-root-orphan',compoundRoot=mode==='compound-group'||rootOrphan;let orphanInjected=false;
     const followupClosePreparing=mode==='compound-managed-followup-close-preparing';
     const followupAckLoss=mode==='compound-managed-followup-ack-loss',followupCancel=mode==='compound-managed-followup-cancel',userFollowup=mode==='compound-managed-followup'||followupCancel||followupAckLoss||followupClosePreparing;
     const followupFailure=deferred<unknown>();const ackLossError=Error('actual followup active acknowledgement lost');
-    const followupPrepared=deferred<void>(),releaseFollowup=deferred<void>();cleanup.push(()=>releaseFollowup.resolve());
+    const followupPrepared=deferred<void>(),releaseFollowup=deferred<void>();qaction(__q,'old-cleanup-line-333','rescue',()=>releaseFollowup.resolve());
     const agentFollowup=mode==='compound-managed-agent-followup'||mode==='compound-managed-agent-followup-busy';
     const compoundManaged=mode==='compound-managed'||mode==='compound-managed-close'||mode==='compound-managed-parallel'||userFollowup||agentFollowup;
     const productRunner=mode===true||compoundRoot||compoundManaged||mode==='group-close-drain';
     const closeEntered=deferred<void>(),allowClose=deferred<void>();
-    const firstTransportHeld=deferred<void>(),releaseFirstTransport=deferred<void>();let parallelObserved=false;cleanup.push(()=>releaseFirstTransport.resolve());
+    const firstTransportHeld=deferred<void>(),releaseFirstTransport=deferred<void>();let parallelObserved=false;qaction(__q,'old-cleanup-line-338','rescue',()=>releaseFirstTransport.resolve());
     const {homedir}=await import('node:os');const {writeFileSync,realpathSync}=await import('node:fs');
     const {createDesktopProductObservationGroup}=await import('../../electron/desktop-observation-group.js');
     const {DesktopMultiAgentRuntime}=await import('../../electron/desktop-multi-agent-runtime.js');
@@ -343,22 +535,22 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const {ToolRegistry}=await import('../../../src/ai/tools/index.js');
     const capturedTools:import('../../../src/types.js').Tool[]=[];
     const originalRegister=ToolRegistry.prototype.registerTool;
-    if(rootOrphan){const original=ToolRegistry.prototype.publishCompoundHistory;const spy=vi.spyOn(ToolRegistry.prototype,'publishCompoundHistory').mockImplementation(async function(this:InstanceType<typeof ToolRegistry>){await original.call(this);if(orphanInjected)return;orphanInjected=true;const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js');const {AgentSessionState}=await import('../../../src/ai/runtime/session.js');const orphan=new AgentSessionState();orphan.appendUserText('Unregistered actual canonical session');await new FileSessionStore(join(f.root,'compound-sessions')).save({...orphan.exportSnapshot(),sessionId:'actual-root-orphan'});});cleanup.push(()=>spy.mockRestore());}
-    if(mode===false){const capture=vi.spyOn(ToolRegistry.prototype,'registerTool').mockImplementation(function(this:InstanceType<typeof ToolRegistry>,tool){capturedTools.push(tool);return originalRegister.call(this,tool);});cleanup.push(()=>capture.mockRestore());}
-    if(compoundManaged){const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js');const save=FileSessionStore.prototype.save;const spy=vi.spyOn(FileSessionStore.prototype,'save').mockImplementation(async function(this:InstanceType<typeof FileSessionStore>,...args){try{return await save.apply(this,args);}catch(error){capturedAssertions.push(error);throw error;}});cleanup.push(()=>spy.mockRestore());}
+    if(rootOrphan){const original=ToolRegistry.prototype.publishCompoundHistory;const spy=qspy(__q,()=>vi.spyOn(ToolRegistry.prototype,'publishCompoundHistory')).mockImplementation(async function(this:InstanceType<typeof ToolRegistry>){await original.call(this);if(orphanInjected)return;orphanInjected=true;const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js');const {AgentSessionState}=await import('../../../src/ai/runtime/session.js');const orphan=new AgentSessionState();orphan.appendUserText('Unregistered actual canonical session');await new FileSessionStore(join(f.root,'compound-sessions')).save({...orphan.exportSnapshot(),sessionId:'actual-root-orphan'});});void 0 /* original leaf restore registered before mutation */;}
+    if(mode===false){const capture=qspy(__q,()=>vi.spyOn(ToolRegistry.prototype,'registerTool')).mockImplementation(function(this:InstanceType<typeof ToolRegistry>,tool){capturedTools.push(tool);return originalRegister.call(this,tool);});void 0 /* original leaf restore registered before mutation */;}
+    if(compoundManaged){const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js');const save=FileSessionStore.prototype.save;const spy=qspy(__q,()=>vi.spyOn(FileSessionStore.prototype,'save')).mockImplementation(async function(this:InstanceType<typeof FileSessionStore>,...args){try{return await save.apply(this,args);}catch(error){__q.assertions.push(error);throw error;}});void 0 /* original leaf restore registered before mutation */;}
     const {parseObservationPolicyFile}=await import('../../../src/runtime/sol-pi/product-bootstrap.js');
     const {createAdapterFromBinding}=await import('../../../src/ai/models.js');
     const {createSkillCatalog}=await import('../../../src/ai/skills/loader.js');
     let retainedGroup:Awaited<ReturnType<typeof createDesktopProductObservationGroup>>|undefined;let previousSemanticBinding:import('../../electron/desktop-observation-owner.js').DesktopObservationBinding|undefined;
     let runtime!:InstanceType<typeof DesktopMultiAgentRuntime>;let sends=0,rootSends=0;let source='';const bodies:unknown[]=[];let retainedRunner:ReturnType<typeof import('../../electron/desktop-services.js').createDesktopModelRunnerWithRegistry>|undefined;let retainedActivation:import('../../electron/desktop-observation-owner.js').DesktopObservationTaskActivation|undefined;
-    vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{const body=JSON.parse(String(init?.body));bodies.push(body);
+    qstub(__q,()=>vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{const body=JSON.parse(String(init?.body));bodies.push(body);
       if(compoundManaged&&JSON.stringify(body.messages[0]).includes('Assigned Desktop agent:')){
         const child=f.store.allAgents(f.store.getThread('t1')!.activeGroupId!).find(agent=>agent.parentId&&String(body.messages[0].content).includes(`Assigned Desktop agent: ${agent.canonicalName}\n`))!;
         expect(child,'actual Main child identity').toBeDefined();
         const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js');
         const {desktopObservationSessionId}=await import('../../../src/runtime/task-host/protected-observation-store.js');
         const durable=await new FileSessionStore(join(f.root,'compound-sessions')).load(desktopObservationSessionId(child.id));
-        try{expect(durable?.compoundOperations?.managedTurns?.records.at(-1),'current generation must be durable before physical SDK fetch').toMatchObject({generation:followupCancel&&child.turn===2?3:child.turn,state:'active',turnId:child.turnId});}catch(error){capturedAssertions.push(error);throw error;}
+        try{expect(durable?.compoundOperations?.managedTurns?.records.at(-1),'current generation must be durable before physical SDK fetch').toMatchObject({generation:followupCancel&&child.turn===2?3:child.turn,state:'active',turnId:child.turnId});}catch(error){__q.assertions.push(error);throw error;}
       }
       if(mode==='compound-managed-parallel'){
         const response=(delta:unknown,tool=false)=>new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:tool?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
@@ -388,10 +580,10 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         const delta=tool?{tool_calls:[{index:0,id:tool.id,type:'function',function:{name:tool.name,arguments:JSON.stringify(tool.args)}}]}:{content:'Root completed.'};
         return new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:tool?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
       }
-      if(productRunner&&!JSON.stringify(body.messages[0]).includes('Assigned Desktop agent:')){rootSends++;const delta=compoundRoot?(rootSends===1?{tool_calls:[{index:0,id:'compound-group-read',type:'function',function:{name:'read',arguments:JSON.stringify({file_path:source})}}]}:{content:'Root completed.'}):rootSends===1?{tool_calls:[{index:0,id:'product-spawn',type:'function',function:{name:'spawn_agent',arguments:JSON.stringify({task_name:'managed',message:'Reply briefly.'})}}]}:rootSends===2?{tool_calls:[{index:0,id:'product-wait',type:'function',function:{name:'wait_agent',arguments:JSON.stringify({targets:['/root/managed'],timeout_ms:1000})}}]}:mode==='compound-managed-close'&&rootSends===3?{tool_calls:[{index:0,id:'product-close',type:'function',function:{name:'close_agent',arguments:JSON.stringify({target:'/root/managed'})}}]}:{content:'Root completed.'};return new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:rootSends<(compoundRoot?2:mode==='compound-managed-close'?4:3)?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});}sends++;const delta=sends===1?{tool_calls:[{index:0,id:'actual-managed-read',type:'function',function:{name:'read',arguments:JSON.stringify({file_path:source})}},{index:1,id:'actual-managed-message',type:'function',function:{name:'send_message',arguments:JSON.stringify({target:'main',message:'Managed progress'})}}]}:{content:'Managed real SDK result'};return new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:sends===1?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});}));
-    cleanup.push(()=>{vi.unstubAllGlobals();});
+      if(productRunner&&!JSON.stringify(body.messages[0]).includes('Assigned Desktop agent:')){rootSends++;const delta=compoundRoot?(rootSends===1?{tool_calls:[{index:0,id:'compound-group-read',type:'function',function:{name:'read',arguments:JSON.stringify({file_path:source})}}]}:{content:'Root completed.'}):rootSends===1?{tool_calls:[{index:0,id:'product-spawn',type:'function',function:{name:'spawn_agent',arguments:JSON.stringify({task_name:'managed',message:'Reply briefly.'})}}]}:rootSends===2?{tool_calls:[{index:0,id:'product-wait',type:'function',function:{name:'wait_agent',arguments:JSON.stringify({targets:['/root/managed'],timeout_ms:1000})}}]}:mode==='compound-managed-close'&&rootSends===3?{tool_calls:[{index:0,id:'product-close',type:'function',function:{name:'close_agent',arguments:JSON.stringify({target:'/root/managed'})}}]}:{content:'Root completed.'};return new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:rootSends<(compoundRoot?2:mode==='compound-managed-close'?4:3)?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});}sends++;const delta=sends===1?{tool_calls:[{index:0,id:'actual-managed-read',type:'function',function:{name:'read',arguments:JSON.stringify({file_path:source})}},{index:1,id:'actual-managed-message',type:'function',function:{name:'send_message',arguments:JSON.stringify({target:'main',message:'Managed progress'})}}]}:{content:'Managed real SDK result'};return new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:sends===1?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});})));
+    void 0 /* original leaf restore registered before mutation */;
     const adapter=createAdapterFromBinding({providerId:'deepseek',providerType:'custom',modelId:'deepseek-flash',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only',wireModel:'deepseek-flash',headers:{},capabilities:['tools']});
-    const f=await setup(input=>runtime.createSession(input),async(context,input)=>{
+    const f=await setup(__q,input=>runtime.createSession(input),async(context,input)=>{
       if(mode==='semantic-next-turn'&&retainedGroup){const {takeDesktopSemanticBoundary}=await import('../../electron/desktop-observation-owner.js');expect(()=>takeDesktopSemanticBoundary(previousSemanticBinding!)).toThrow();await retainedGroup.runRootTurn(context,'auto',input.signal,async turn=>{expect(takeDesktopSemanticBoundary(turn.binding)).toBe(true);expect(takeDesktopSemanticBoundary(turn.binding)).toBe(false);});return;}
       if(productRunner&&retainedRunner){await retainedRunner({...input,permissionMode:'auto'},context);expect(rootSends).toBeGreaterThanOrEqual(compoundRoot?3:4);expect(JSON.stringify(retainedActivation!.group!.session.getMessages())).toContain('Root completed.');return;}
       source=join(realpathSync(f.root),'source.txt');writeFileSync(source,'authorized source '.repeat(100));
@@ -402,11 +594,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         const {createDesktopModelRunnerWithRegistry}=await import('../../electron/desktop-services.js');
         const {createReadTool}=await import('../../../src/ai/tools/read.js');
         const config=await import('../../../src/utils/config.js');
-        const mock=vi.spyOn(config,'loadConfig').mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'old-alias',label:'Current'}},defaultMode:'interactive'} as never);cleanup.push(()=>mock.mockRestore());
-        const read=(compoundRoot||compoundManaged)?(await import('../../../src/ai/tools/index.js')).buildToolList(undefined,{cwd:realpathSync(f.root)}).find(tool=>tool.definition.name==='read')!:createReadTool({cwd:realpathSync(f.root)}),base=new DesktopOwnedToolRegistry({autoMode:true},[read]);cleanup.push(()=>base.dispose());
-        const bridge=new DesktopToolCatalogBridge({registry:base,workspaceId:'w1',getService:()=>f.service});cleanup.push(()=>bridge.dispose());
+        const mock=qspy(__q,()=>vi.spyOn(config,'loadConfig')).mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'old-alias',label:'Current'}},defaultMode:'interactive'} as never);void 0 /* original leaf restore registered before mutation */;
+        const read=(compoundRoot||compoundManaged)?(await import('../../../src/ai/tools/index.js')).buildToolList(undefined,{cwd:realpathSync(f.root)}).find(tool=>tool.definition.name==='read')!:createReadTool({cwd:realpathSync(f.root)}),base=qconstruct(__q,'registry-or-catalog',()=>new DesktopOwnedToolRegistry({autoMode:true},[read]));qaction(__q,'old-cleanup-line-406','leaf',()=>base.dispose());
+        const bridge=qconstruct(__q,'registry-or-catalog',()=>new DesktopToolCatalogBridge({registry:base,workspaceId:'w1',getService:()=>f.service}));qaction(__q,'old-cleanup-line-407','leaf',()=>bridge.dispose());
         const activation:import('../../electron/desktop-observation-owner.js').DesktopObservationTaskActivation={policy:parseObservationPolicyFile(policyFile),profileRoot:join(f.root,'profile'),environmentRoot:join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1'),onPrompt:async()=>true,consumed:false};
-        const materials=new MaterialRegistry({workspaceRoot:join(f.root,'runner-materials'),maxBytes:1048576});
+        const materials=qmaterial(__q,qconstruct(__q,'materials',()=>new MaterialRegistry({workspaceRoot:join(f.root,'runner-materials'),maxBytes:1048576})));
         const runner=createDesktopModelRunnerWithRegistry(base,[read],f.root,{} as never,materials,{}, {observationTasks:new Map([[input.taskId,activation]]),observationGroupHost:{getHost:()=>f.host,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations},multiAgent:{runtime,service:f.service,catalog:bridge,workspaceId:'w1',cwd:realpathSync(f.root)}});
         retainedRunner=runner;retainedActivation=activation;
         if(rootOrphan){await expect(runner({...input,permissionMode:'auto'},context)).rejects.toThrow('SOL_PI_TRANSPORT_AUTHORIZATION_REJECTED');expect(orphanInjected).toBe(true);expect(rootSends,'orphan must stop the actual root second SDK').toBe(1);return;}
@@ -425,19 +617,19 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         }
         return;
       }
-      const base=new ToolRegistry({autoMode:true});cleanup.push(()=>base.dispose());
-      const group=await createDesktopProductObservationGroup({service:f.service,host:f.host,context,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations,
-        taskId:input.taskId,cwd:realpathSync(f.root),policy:parseObservationPolicyFile(policyFile),sourceRegistry:base,profileRoot:join(f.root,'profile'),environmentRoot:join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1'),credentialSecrets:[],permissionMode:'auto',onPrompt:async()=>true});
+      const base=qconstruct(__q,'registry-or-catalog',()=>new ToolRegistry({autoMode:true}));qaction(__q,'old-cleanup-line-428','leaf',()=>base.dispose());
+      const group=await qproduct(__q,'product-group',()=>createDesktopProductObservationGroup({service:f.service,host:f.host,context,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations,
+        taskId:input.taskId,cwd:realpathSync(f.root),policy:parseObservationPolicyFile(policyFile),sourceRegistry:base,profileRoot:join(f.root,'profile'),environmentRoot:join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1'),credentialSecrets:[],permissionMode:'auto',onPrompt:async()=>true}));
       retainedGroup=group;
-      cleanup.push(()=>group.dispose());
+      void 0 /* typed actual-resource close slot registered at acquisition */;
       let publicationReady=false;const publicationReleases:ReturnType<typeof vi.fn>[]=[];
       if(mode==='publication-persist-failure'){
         const {getObservationSessionOwnerHostBinding}=await import('../../../src/runtime/sol-pi/observation-session-owner.js');const {requireDesktopProductHost}=await import('../../electron/desktop-observation-owner.js');const port=getObservationSessionOwnerHostBinding(requireDesktopProductHost(group.productBinding).product.owner).service.transportPort;
         const originalSubscribe=port.onRevoke.bind(port);let collecting=false;
-        const subscribe=vi.spyOn(port,'onRevoke').mockImplementation(listener=>{const release=vi.fn(originalSubscribe(listener));if(collecting)publicationReleases.push(release);return release;});cleanup.push(()=>subscribe.mockRestore());
+        const subscribe=qspy(__q,()=>vi.spyOn(port,'onRevoke')).mockImplementation(listener=>{const release=vi.fn(originalSubscribe(listener));if(collecting)publicationReleases.push(release);return release;});void 0 /* original leaf restore registered before mutation */;
         const module=await import('../../../src/runtime/sol-pi/observation-message-publication.js');const originalPrepare=module.prepareObservationMessagePublication;
-        const prepare=vi.spyOn(module,'prepareObservationMessagePublication').mockImplementation(async input=>{collecting=true;try{const result=await originalPrepare(input);publicationReady=true;return result;}finally{collecting=false;}});cleanup.push(()=>prepare.mockRestore());
-        const originalPersist=group.observationStore.persistSession.bind(group.observationStore);const persist=vi.spyOn(group.observationStore,'persistSession').mockImplementation(async(...args)=>{if(publicationReady){publicationReady=false;throw Error('post-publication sidecar persistence failure');}return originalPersist(...args);});cleanup.push(()=>persist.mockRestore());
+        const prepare=qspy(__q,()=>vi.spyOn(module,'prepareObservationMessagePublication')).mockImplementation(async input=>{collecting=true;try{const result=await originalPrepare(input);publicationReady=true;return result;}finally{collecting=false;}});void 0 /* original leaf restore registered before mutation */;
+        const originalPersist=group.observationStore.persistSession.bind(group.observationStore);const persist=qspy(__q,()=>vi.spyOn(group.observationStore,'persistSession')).mockImplementation(async(...args)=>{if(publicationReady){publicationReady=false;throw Error('post-publication sidecar persistence failure');}return originalPersist(...args);});void 0 /* original leaf restore registered before mutation */;
       }
       await group.runRootTurn(context,'auto',input.signal,async turn=>{
         const {takeDesktopSemanticBoundary,requireDesktopObservationBinding}=await import('../../electron/desktop-observation-owner.js');
@@ -447,7 +639,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         expect(()=>f.service.takeGroupSubtaskBoundary({actor:context.actor,requestSource:'user',ticket:semanticClaims.groupReference!.ticket})).toThrow();
         expect(takeDesktopSemanticBoundary(turn.binding)).toBe(false);
         group.session.appendUserText('Create a bounded child.');
-        const catalog=new DesktopCapabilityCatalog();const {createReadTool}=await import('../../../src/ai/tools/read.js');const read=createReadTool({cwd:realpathSync(f.root)});const descriptor=catalog.publish({requestSource:'scheduler',ownerId:'builtin',entry:{definition:read.definition,aliases:[],permission:read.permission,scope:{workspaceId:'w1',materialIds:[],permissions:[read.permission]},bindInvocation:()=>read.execute}});catalog.authorize({requestSource:'user',capabilityId:descriptor.capabilityId});
+        const catalog=qconstruct(__q,'registry-or-catalog',()=>new DesktopCapabilityCatalog());const {createReadTool}=await import('../../../src/ai/tools/read.js');const read=createReadTool({cwd:realpathSync(f.root)});const descriptor=catalog.publish({requestSource:'scheduler',ownerId:'builtin',entry:{definition:read.definition,aliases:[],permission:read.permission,scope:{workspaceId:'w1',materialIds:[],permissions:[read.permission]},bindInvocation:()=>read.execute}});catalog.authorize({requestSource:'user',capabilityId:descriptor.capabilityId});
         const scope=runtime.bindRoot(context,{adapter,systemPrompt:'Root',catalog,policy:catalog.snapshotPolicy(),workspaceId:'w1',materialIds:[],registryOptions:{autoMode:true},materials:[],skillCatalog:createSkillCatalog(undefined,f.root),dataRoot:f.root,agents:[],emitRuntimeEvent:input.emitRuntimeEvent,observation:group});
         try{
           const raw=await scope.registry.executeTool('spawn_agent',{task_name:'managed',message:'Reply briefly.'},{signal:input.signal,taskId:input.taskId,session:group.session.exportSnapshot(),systemPrompt:'Root',toolDefinitions:scope.registry.getToolDefinitions(),toolInvocationId:'actual-spawn',messages:group.session.getMessages()});
@@ -472,23 +664,23 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     },{expectedDisposeError:followupAckLoss?ackLossError:undefined,isolatedConfigRoot:compoundRoot||compoundManaged,prepareObservationSession:async input=>{const prepared=await runtime.prepareObservationSession(input);if(mode==='group-close-drain'){const original=prepared.session.dispose.bind(prepared.session);prepared.session.dispose=async()=>{closeEntered.resolve();await allowClose.promise;return original();};}if(mode===false){try{const {getManagedCompoundSpawnAdapter}=await import('../../../src/runtime/sol-pi/compound-managed-tool.js');const matches=capturedTools.flatMap(tool=>{const adapter=getManagedCompoundSpawnAdapter(tool);if(!adapter)return [];try{return [adapter.inspectPreparation(input.preparation)];}catch{return [];}});expect(matches).toHaveLength(1);expect(matches[0]).toMatchObject({nativeInvocationId:'actual-spawn',childSessionId:expect.any(String),childTurnId:input.context.turnId,initialMessage:input.message,agentId:input.identity.id,operationId:input.operationId});expect(JSON.parse(matches[0].ackBytes).targetAgentId).toBe(input.identity.id);for(const tool of capturedTools){const adapter=getManagedCompoundSpawnAdapter(tool);if(adapter)expect(()=>adapter.inspectPreparation({...input.preparation})).toThrow();}}catch(error){prepared.publication.dispose();try{await prepared.session.dispose();}finally{prepared.releasePreparation();}throw error;}}return prepared;},prepareObservationMessage:input=>runtime.prepareObservationMessage(input),prepareObservationFollowup:async preparation=>{expect(()=>f.service.inspectManagedFollowupPreparation({...preparation})).toThrow();const facts=f.service.inspectManagedFollowupPreparation(preparation);if(agentFollowup){expect(facts.origin?.session).toBe(retainedActivation!.group!.session);expect(facts.origin?.nativeInvocationId).toEqual(expect.any(String));expect(facts.operationId.endsWith(':'+facts.origin!.nativeInvocationId)).toBe(true);}else expect(facts.origin).toBeUndefined();const result=await runtime.prepareObservationFollowup(preparation);if(followupCancel||followupClosePreparing){followupPrepared.resolve();await releaseFollowup.promise;}return {commitApplied:async receipt=>{await expect(result.commitApplied({...receipt as object})).rejects.toThrow();await result.commitApplied(receipt);if(followupAckLoss)throw ackLossError;},cancelBeforeApplied:async receipt=>{await expect(result.cancelBeforeApplied({...receipt as object})).rejects.toThrow();return result.cancelBeforeApplied(receipt);}};}});
     if(userFollowup||agentFollowup){
       const target=f.service as unknown as {activateManagedFollowup(...args:unknown[]):Promise<void>},original=target.activateManagedFollowup.bind(target);
-      const spy=vi.spyOn(target,'activateManagedFollowup').mockImplementation(async(...args)=>{try{return await original(...args);}catch(error){if(followupAckLoss&&error===ackLossError)followupFailure.resolve(error);else capturedAssertions.push(error);throw error;}});cleanup.push(()=>spy.mockRestore());
+      const spy=qspy(__q,()=>vi.spyOn(target,'activateManagedFollowup')).mockImplementation(async(...args)=>{try{return await original(...args);}catch(error){if(followupAckLoss&&error===ackLossError)followupFailure.resolve(error);else __q.assertions.push(error);throw error;}});void 0 /* original leaf restore registered before mutation */;
     }
     let resourcePreparation:Parameters<typeof f.service.assertObservationChildPersistence>[0]|undefined;
     let resourceAdmission:import('../../../src/runtime/sol-pi/compound-managed-admission.js').ManagedCompoundAdmission|undefined;
     if(mode==='compound-managed'){
       const original=f.service.bindManagedObservationAdmission.bind(f.service);
-      const spy=vi.spyOn(f.service,'bindManagedObservationAdmission').mockImplementation((preparation,input)=>{const result=original(preparation,input);resourceAdmission=input.admission;resourcePreparation=preparation;expect(()=>f.service.assertObservationChildPersistence(preparation,input.admission)).not.toThrow();expect(()=>f.service.assertObservationChildPersistence(preparation,{...input.admission})).toThrow();return result;});cleanup.push(()=>spy.mockRestore());
+      const spy=qspy(__q,()=>vi.spyOn(f.service,'bindManagedObservationAdmission')).mockImplementation((preparation,input)=>{const result=original(preparation,input);resourceAdmission=input.admission;resourcePreparation=preparation;expect(()=>f.service.assertObservationChildPersistence(preparation,input.admission)).not.toThrow();expect(()=>f.service.assertObservationChildPersistence(preparation,{...input.admission})).toThrow();return result;});void 0 /* original leaf restore registered before mutation */;
     }
     let cancellationTicket:object|undefined,wrongKindCheck:Promise<unknown>|undefined;
     if(mode==='compound-managed-close'){
       const original=f.service.prepareManagedCancellation.bind(f.service);
-      const spy=vi.spyOn(f.service,'prepareManagedCancellation').mockImplementation((context,kind,input)=>{
+      const spy=qspy(__q,()=>vi.spyOn(f.service,'prepareManagedCancellation')).mockImplementation((context,kind,input)=>{
         const ticket=original(context,kind,input);cancellationTicket=ticket;
         const other=original(context,kind,input);
         wrongKindCheck=expect(f.service.runManagedCancellation(other,async()=>JSON.stringify(await f.service.interrupt({actor:context.actor,requestSource:'agent',operationId:`${context.turnId}:${input.nativeInvocationId}`,target:String(input.finalInput.target)})))).rejects.toThrow('SOL_PI_DESKTOP_CANCEL_STALE');
         return ticket;
-      });cleanup.push(()=>spy.mockRestore());
+      });void 0 /* original leaf restore registered before mutation */;
     }
     runtime=new DesktopMultiAgentRuntime({service:f.service});await f.start();await f.host.drain();if(!rootOrphan&&(productRunner||mode==='semantic-next-turn')){await f.start();await f.host.drain();}
     if(userFollowup){
@@ -542,9 +734,9 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     }
     if(mode==='compound-managed-close'){await wrongKindCheck;expect(cancellationTicket).toBeDefined();const work=vi.fn(async()=> 'must not run');await expect(f.service.runManagedCancellation({...cancellationTicket},work)).rejects.toThrow();await expect(f.service.runManagedCancellation(cancellationTicket,work)).rejects.toThrow();expect(work).not.toHaveBeenCalled();}
     if(mode==='group-close-drain'){const closing=f.service.dispose();try{await closeEntered.promise;await new Promise(resolve=>setTimeout(resolve,25));expect(retainedActivation!.group!.product.getStatus().disposed).toBe(false);}finally{allowClose.resolve();await closing;}expect(retainedActivation!.group!.product.getStatus().disposed).toBe(true);}
-  },120000);
+  }),120000);
 
-  it('retains an actual product group owner and native history across two real root tasks with durable alias publication', async () => {
+  it('retains an actual product group owner and native history across two real root tasks with durable alias publication', (ctx)=>runCase(ctx,async(__q)=>{
     const {homedir}=await import('node:os');const {existsSync,writeFileSync,realpathSync}=await import('node:fs');
     const environmentRoot=join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1');
     if(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(environmentRoot,'manifest.json')))throw Error('actual product capacity environment required');
@@ -554,14 +746,14 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const {requireDesktopObservationBinding}=await import('../../electron/desktop-observation-owner.js');
     let group:Awaited<ReturnType<typeof createDesktopProductObservationGroup>>|undefined;
     let count=0,firstSession:unknown, retiredRegistry:InstanceType<typeof ToolRegistry>|undefined;const ids:string[]=[];
-    const f=await setup(async()=>{throw Error('no child in group lifetime case');},async(context,input)=>{
+    const f=await setup(__q,async()=>{throw Error('no child in group lifetime case');},async(context,input)=>{
       if(!group){
         const source=realpathSync(join(f.root,'source.txt')),policyFile=join(f.root,'policy.json'),expiresAt=Date.now()+120000;
         writeFileSync(policyFile,JSON.stringify({version:1,environmentId:'deepseek-recipe-0.1.1',model:'deepseek-flash',destination:{provider:'deepseek',url:'https://api.deepseek.com/chat/completions'},localPersistence:true,allowUnclassifiedText:true,allowModelDisclosure:true,allowIncomplete:false,expiresAt,readFileScopes:[{filePath:source,startLine:1}],bashSources:[],ordinaryChildren:{enabled:true,maxDepth:1,maxChildren:2,expiresAt,nativeTools:['read']}}));
-        const registry=new ToolRegistry({autoMode:true},buildToolList(undefined,{cwd:realpathSync(f.root)}));cleanup.push(()=>registry.dispose());
-        group=await createDesktopProductObservationGroup({service:f.service,host:f.host,context,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations,
-          taskId:input.taskId,cwd:realpathSync(f.root),policy:parseObservationPolicyFile(policyFile),sourceRegistry:registry,profileRoot:join(f.root,'profile'),environmentRoot,credentialSecrets:[],permissionMode:'auto',onPrompt:async()=>true});
-        cleanup.push(()=>group!.dispose());
+        const registry=qconstruct(__q,'registry-or-catalog',()=>new ToolRegistry({autoMode:true},buildToolList(undefined,{cwd:realpathSync(f.root)})));qaction(__q,'old-cleanup-line-561','leaf',()=>registry.dispose());
+        group=await qproduct(__q,'product-group',()=>createDesktopProductObservationGroup({service:f.service,host:f.host,context,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations,
+          taskId:input.taskId,cwd:realpathSync(f.root),policy:parseObservationPolicyFile(policyFile),sourceRegistry:registry,profileRoot:join(f.root,'profile'),environmentRoot,credentialSecrets:[],permissionMode:'auto',onPrompt:async()=>true}));
+        void 0 /* typed actual-resource close slot registered at acquisition */;
       }
       await group.runRootTurn(context,'auto',input.signal,async turn=>{
         const facts=requireDesktopObservationBinding(turn.binding,input.taskId,turn.registry);
@@ -580,11 +772,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await expect(retiredRegistry!.executeTool('read',{file_path:realpathSync(join(f.root,'source.txt'))})).resolves.toBe('Error: tool registry is disposed');
     await f.start();await f.host.drain();
     expect(count).toBe(2);expect(ids[0]).not.toBe(ids[1]);
-  },120000);
+  }),120000);
 
-  it('publishes a real archived root closure through the actual group journal and rejects copied tickets', async () => {
+  it('publishes a real archived root closure through the actual group journal and rejects copied tickets', (ctx)=>runCase(ctx,async(__q)=>{
     let retained: any;
-    const f = await setup(async () => { throw new Error('no child'); }, async (context, input) => {
+    const f = await setup(__q,async () => { throw new Error('no child'); }, async (context, input) => {
       if (retained) {
         const { owner, session, canonical } = retained;
         const before = (await f.host.recoverTask(canonical)).snapshot;
@@ -593,7 +785,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         port.append('second result'); port.finalize({ executionState: 'terminal', outcome: 'success' }); await owner.projectToolResult('capture-second', 'second result');
         const failed = f.service.prepareGroupObservationReference({ actor: context.actor, requestSource: 'agent', taskId: canonical, operationId: 'failed-terminal-save' });
         const originalSave = FileTaskSnapshotStore.prototype.save;
-        const failingSave = vi.spyOn(FileTaskSnapshotStore.prototype, 'save').mockImplementation(function(this: FileTaskSnapshotStore, ...args: Parameters<FileTaskSnapshotStore['save']>) {
+        const failingSave = qspy(__q,()=>vi.spyOn(FileTaskSnapshotStore.prototype, 'save')).mockImplementation(function(this: FileTaskSnapshotStore, ...args: Parameters<FileTaskSnapshotStore['save']>) {
           return args[0].taskId === canonical ? Promise.reject(new Error('actual terminal journal failure')) : originalSave.apply(this, args);
         });
         try { await expect(f.host.publishGroupObservationReference(failed)).rejects.toThrow('actual terminal journal failure'); }
@@ -614,7 +806,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         expect(await new FileTaskSnapshotStore(join(f.root, 'tasks')).observations.read(input.taskId)).toEqual(session.getProtectedObservationClosure());
         const { bindDesktopGroupObservationSession, requireDesktopObservationBinding } = await import('../../electron/desktop-observation-owner.js');
         const { ToolRegistry } = await import('../../../src/ai/tools/index.js');
-        const registry = new ToolRegistry({}, []);
+        const registry = qconstruct(__q,'registry-or-catalog',()=>new ToolRegistry({}, []));
         try {
           expect(() => bindDesktopGroupObservationSession({ service: f.service, ticket: { ...alias }, registry })).toThrow();
           const binding = bindDesktopGroupObservationSession({ service: f.service, ticket: alias, registry });
@@ -640,7 +832,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const { AgentSessionState } = await import('../../../src/ai/runtime/session.js');
       const { desktopObservationSessionId } = await import('../../../src/runtime/task-host/protected-observation-store.js');
       const { testOnlyCapacity } = await import('../../../tests/support/sol-pi-capacity.js');
-      const archive = createObservationService({ profileRoot: join(f.root, 'archive'), profileId: 'test', redactor: { version: 'test', redact: text => text } });
+      const archive = qopaque(__q,()=>createObservationService({ profileRoot: join(f.root, 'archive'), profileId: 'test', redactor: { version: 'test', redact: text => text } }));
       const session = new AgentSessionState(); session.restoreSnapshot({ ...session.exportSnapshot(), sessionId: desktopObservationSessionId(input.taskId) });
       const claims = { sessionId: session.exportSnapshot().sessionId, ownerAgentId: 'root', scopeId: 'root', permissionGeneration: 1, surface: 'ordinary-owner' as const };
       const caller = archive.bindCaller({ ...claims, requestSource: 'agent' });
@@ -654,7 +846,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         const caller = archive.bindCaller({ ...claims, sessionId: next.exportSnapshot().sessionId, requestSource: 'agent' });
         return createObservationSessionOwner({ service: archive, caller, session: next, destination, capacityProfile: testOnlyCapacity(destination.url, destination.model), persist: snapshot => sidecar.persistSession(taskId, snapshot) });
       } };
-      cleanup.push(() => { owner.dispose(); archive.dispose(); });
+      qslot(__q,'old-cleanup-line-657-owner','owner',owner,owner.dispose);qslot(__q,'old-cleanup-line-657-archive','owner',archive,archive.dispose);
       {
         f.service.registerGroupObservationOwner({ actor: context.actor, requestSource: 'agent', owner, canonicalTaskId: input.taskId });
         const port = owner.collectorFor('capture').begin({ toolName: 'bash', source: { command: 'fixture', workdir: f.root } });
@@ -676,11 +868,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     });
     await f.start(); await f.host.drain();
     await f.start(); await f.host.drain();
-  });
+  }));
 
-  it('activity completion requires native host proof and physical child settlement, without waiting for warm-session TTL', async () => {
+  it('activity completion requires native host proof and physical child settlement, without waiting for warm-session TTL', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<string>(); let groupId = '', childId = '';
-    const f = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'activity-child', taskName: 'activity', message: 'work' })).targetAgentId!;
       await entered.promise;
@@ -700,11 +892,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority, taskId });
       expect(f.store.readEvents(groupId, 0, 100).filter(event => event.kind === 'activity_run' && event.eventId === eventId)).toHaveLength(1);
     } finally { release.resolve('cleanup'); }
-  });
+  }));
 
-  it('namespaces user followup run identity by its native group across a confirmed group reset', async () => {
+  it('namespaces user followup run identity by its native group across a confirmed group reset', (ctx)=>runCase(ctx,async(__q)=>{
     const groups: string[] = [], children: string[] = [];
-    const f = await setup(async () => ({ run: async () => 'child result', suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run: async () => 'child result', suspend: async () => {}, dispose: async () => {} }), async context => {
       groups.push(context.groupId);
       children.push((await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'repeat-spawn', taskName: 'repeat', message: 'work' })).targetAgentId!);
     });
@@ -722,13 +914,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await expect(follow(1)).resolves.toMatchObject({ state: 'queued_next_admission' });
     expect(f.store.requireGroup(groups[1]).mutationBlockedReason).toBeFalsy();
     expect(f.store.getActivityRuns(groups[0]).find(run => run.kind === 'user_followup')?.runId).not.toBe(f.store.getActivityRuns(groups[1]).find(run => run.kind === 'user_followup')?.runId);
-  });
+  }));
 
-  it('isolates a malformed host proof so other committed runs reconcile successfully', async () => {
-    const f = await setup(async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
+  it('isolates a malformed host proof so other committed runs reconcile successfully', (ctx)=>runCase(ctx,async(__q)=>{
+    const f = await setup(__q,async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
     const ids = [await f.start()]; await f.host.drain(); ids.push(await f.start()); await f.host.drain(); ids.sort();
     const inspect = f.host.inspectTask.bind(f.host);
-    const fault = vi.spyOn(f.host, 'inspectTask').mockImplementation(async taskId => {
+    const fault = qspy(__q,()=>vi.spyOn(f.host, 'inspectTask')).mockImplementation(async taskId => {
       const snapshot = await inspect(taskId);
       return taskId === ids[0] && snapshot ? { ...snapshot, multiAgentPreparation: { ...snapshot.multiAgentPreparation!, rootTurnId: 'mismatched' } } : snapshot;
     });
@@ -737,11 +929,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(f.store.getActivityRun(`root:${ids[0]}`)?.state).toBe('unknown');
       expect(f.store.getActivityRun(`root:${ids[1]}`)?.state).toBe('completed');
     } finally { fault.mockRestore(); }
-  });
+  }));
 
-  it('settles an abandoned preparation without inventing a host terminal when no host snapshot was created', async () => {
-    const f = await setup(async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
-    const fault = vi.spyOn(f.host, 'prepareTask').mockRejectedValueOnce(new Error('prepare failed before snapshot'));
+  it('settles an abandoned preparation without inventing a host terminal when no host snapshot was created', (ctx)=>runCase(ctx,async(__q)=>{
+    const f = await setup(__q,async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
+    const fault = qspy(__q,()=>vi.spyOn(f.host, 'prepareTask')).mockRejectedValueOnce(new Error('prepare failed before snapshot'));
     try { await expect(f.start()).rejects.toThrow('prepare failed before snapshot'); }
     finally { fault.mockRestore(); }
     const group = f.store.activeGroup('t1')!;
@@ -749,10 +941,10 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(run).toMatchObject({ state: 'unknown', sourceUnavailable: 'preparation_abandoned' });
     expect(run.terminalEventId).toBeUndefined();
     expect(f.store.getActivityMembers(run.runId).every(member => member.physicalSettled)).toBe(true);
-  });
+  }));
 
-  it('U1 Given a root-only thread and a foreign child, Then the real snapshot and first-root notification deny history while explicit audit reads remain available', async () => {
-    const createSession = vi.fn(); const f = await setup(createSession, async () => {});
+  it('U1 Given a root-only thread and a foreign child, Then the real snapshot and first-root notification deny history while explicit audit reads remain available', (ctx)=>runCase(ctx,async(__q)=>{
+    const createSession = vi.fn(); const f = await setup(__q,createSession, async () => {});
     f.service.registerThread({ threadId: 'foreign', profileId: 'other-profile', workspaceId: 'other-workspace', cwd: f.root });
     const foreign = f.store.createGroup('foreign');
     f.store.putAgent(foreign.groupId, { id: 'foreign-child', parentId: `root_${foreign.groupId}`, taskName: 'foreign', canonicalName: '/root/foreign',
@@ -772,12 +964,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(() => f.service.getSnapshot({ access: { ...access } })).toThrow(/authority/);
       expect(createSession).not.toHaveBeenCalled();
     } finally { unsubscribe(); }
-  });
+  }));
 
-  it('summary recovery requires a current root with fully settled current-turn children', async () => {
+  it('summary recovery requires a current root with fully settled current-turn children', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<string>();
     let current: DesktopAgentExecutionContext | undefined;
-    const f = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       current = context;
       expect(f.service.canResumeSummary(context)).toBe(false);
       const child = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'summary-spawn', taskName: 'summary', message: 'work' })).targetAgentId!;
@@ -795,11 +987,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     });
     try { await f.start(); await f.host.drain(); expect(current).toBeDefined(); expect(() => f.service.canResumeSummary(current!)).toThrow(); }
     finally { release.resolve('cleanup'); }
-  });
+  }));
 
-  it('U1 Given a real settled child, Then reset creates an empty current group without losing thread history or authorizing the historical child', async () => {
+  it('U1 Given a real settled child, Then reset creates an empty current group without losing thread history or authorizing the historical child', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<string>(); let oldGroupId = '', childId = '';
-    const f = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       oldGroupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'history-spawn', taskName: 'history', message: 'work' })).targetAgentId!;
       await entered.promise;
@@ -825,10 +1017,10 @@ describe('BDD: durable service uses the real shared coordinator', () => {
           operationId: 'history-cannot-run', expectedTurn: 1, message: 'must not start' })).rejects.toThrow(/historical|read.only/);
       } finally { unsubscribe(); }
     } finally { release.resolve('cleanup'); }
-  });
+  }));
 
-  it('U1 Given an inactive historical child group, Then a null-expected reset publishes its history fact without creating a session', async () => {
-    const createSession = vi.fn(); const f = await setup(createSession, async () => {});
+  it('U1 Given an inactive historical child group, Then a null-expected reset publishes its history fact without creating a session', (ctx)=>runCase(ctx,async(__q)=>{
+    const createSession = vi.fn(); const f = await setup(__q,createSession, async () => {});
     const old = f.store.createGroup('t1');
     f.store.putAgent(old.groupId, { id: 'old-child', parentId: `root_${old.groupId}`, taskName: 'old', canonicalName: '/root/old',
       depth: 1, status: 'closed', turn: 1, resourcesReleased: true, activationState: 'settled' });
@@ -843,12 +1035,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         newGroupId: result.groupId, hasAgentHistory: true, threadDeleteState: 'none' }));
       expect(createSession).not.toHaveBeenCalled();
     } finally { unsubscribe(); }
-  });
+  }));
 
-  it('A1/A31 Given capacity=1, When the real root spawns two children and waits, Then both run under its lease and root receives durable results', async () => {
+  it('A1/A31 Given capacity=1, When the real root spawns two children and waits, Then both run under its lease and root receives durable results', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<void>();
     let started = 0; let groupId = ''; let rootId = '';
-    const fixture = await setup(async () => ({
+    const fixture = await setup(__q,async () => ({
       async run(message) { if (++started === 2) entered.resolve(); await release.promise; return `${message} result`; },
       async suspend() {}, async dispose() {},
     }), async context => {
@@ -880,11 +1072,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(started).toBe(2);
     expect(fixture.coordinator.snapshot().active).toBe(0);
     expect(fixture.store.getAgent(groupId, rootId)).toMatchObject({ status: 'completed', executionActive: false });
-  });
+  }));
 
-  it('A17/A37/A40 Given a suspended child, When a confirmed user reset awaits real dispose, Then no root/followup is admitted and settlement alone creates exactly one new group', async () => {
+  it('A17/A37/A40 Given a suspended child, When a confirmed user reset awaits real dispose, Then no root/followup is admitted and settlement alone creates exactly one new group', (ctx)=>runCase(ctx,async(__q)=>{
     const released = deferred<void>(); const entered = deferred<void>(); let groupId = ''; let childId = '';
-    const fixture = await setup(async () => ({ run: async () => { entered.resolve(); return 'done'; }, suspend: async () => {}, dispose: () => released.promise }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async () => { entered.resolve(); return 'done'; }, suspend: async () => {}, dispose: () => released.promise }), async context => {
       groupId = context.groupId;
       childId = (await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'work' })).targetAgentId!;
       await entered.promise;
@@ -912,10 +1104,10 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(fixture.store.listGroups('t1').items).toHaveLength(2);
       expect(fixture.store.getOperation(groupId, 'reset-once')).toMatchObject({ applyState: 'applied', result: { phase: 'completed' } });
     } finally { released.resolve(); }
-  });
+  }));
 
-  it('A17/A40 Given no active group, When a new user resets with null expected ID, Then a group is created idempotently and stale expected IDs cannot replace it', async () => {
-    const fixture = await setup(vi.fn(), async () => {});
+  it('A17/A40 Given no active group, When a new user resets with null expected ID, Then a group is created idempotently and stale expected IDs cannot replace it', (ctx)=>runCase(ctx,async(__q)=>{
+    const fixture = await setup(__q,vi.fn(), async () => {});
     const access = fixture.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     const request = { access, requestSource: 'user' as const, expectedGroupId: null, confirmTerminate: true as const, operationId: 'first-group' };
     const created = await fixture.service.resetGroup(request);
@@ -923,15 +1115,15 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(await fixture.service.resetGroup(request)).toEqual(created);
     await expect(fixture.service.resetGroup({ ...request, operationId: 'stale-null' })).rejects.toThrow(/expected|stale/);
     expect(fixture.store.listGroups('t1').items).toHaveLength(1);
-  });
+  }));
 
-  it('A15/A40 Given reset intent committed but unused root projection write fails, Then the operation is unknown and a fresh confirmed operation can recover after storage recovers', async () => {
-    const fixture = await setup(vi.fn(), async () => {});
+  it('A15/A40 Given reset intent committed but unused root projection write fails, Then the operation is unknown and a fresh confirmed operation can recover after storage recovers', (ctx)=>runCase(ctx,async(__q)=>{
+    const fixture = await setup(__q,vi.fn(), async () => {});
     const group = fixture.store.createGroup('t1');
     const access = fixture.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     const input = { access, requestSource: 'user' as const, expectedGroupId: group.groupId, confirmTerminate: true as const, operationId: 'reset-write-fails' };
     const original = fixture.store.putAgent.bind(fixture.store);
-    const fault = vi.spyOn(fixture.store, 'putAgent').mockImplementation((groupId, agent, control) => {
+    const fault = qspy(__q,()=>vi.spyOn(fixture.store, 'putAgent')).mockImplementation((groupId, agent, control) => {
       if (agent.status === 'closed') throw new Error('SQLITE_FULL'); return original(groupId, agent, control);
     });
     let result: unknown;
@@ -940,17 +1132,17 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(fixture.store.getOperation(group.groupId, input.operationId)?.applyState).toBe('unknown');
     expect(await fixture.service.resetGroup({ ...input, operationId: 'reset-after-recovery' })).toMatchObject({ state: 'completed' });
     expect(fixture.store.activeGroup('t1')?.groupId).not.toBe(group.groupId);
-  });
+  }));
 
-  it.each(['rejected', 'synchronous', 'late'] as const)('A40 Given host cancel acknowledgement fails (%s) but its root physically settles, Then reset completes from real settlement without a second user reset', async mode => {
+  it.for(['rejected', 'synchronous', 'late'] as const)('A40 Given host cancel acknowledgement fails (%s) but its root physically settles, Then reset completes from real settlement without a second user reset', (mode,ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<void>(); let groupId = '';
-    const fixture = await setup(vi.fn(), async context => { groupId = context.groupId; entered.resolve(); await release.promise; });
+    const fixture = await setup(__q,vi.fn(), async context => { groupId = context.groupId; entered.resolve(); await release.promise; });
     await fixture.start(); await entered.promise;
     const access = fixture.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     let rejectLate!: (error: Error) => void;
     const late = new Promise<void>((_resolve, reject) => { rejectLate = reject; }); void late.catch(() => {});
     const error = new Error('host acknowledgement unavailable');
-    const fault = vi.spyOn(fixture.host, 'cancelTask').mockImplementation(() => { if (mode === 'synchronous') throw error; return mode === 'late' ? late : Promise.reject(error); });
+    const fault = qspy(__q,()=>vi.spyOn(fixture.host, 'cancelTask')).mockImplementation(() => { if (mode === 'synchronous') throw error; return mode === 'late' ? late : Promise.reject(error); });
     try {
       expect(await fixture.service.resetGroup({ access, requestSource: 'user', expectedGroupId: groupId, confirmTerminate: true, operationId: 'reset-host-warning' })).toMatchObject({ state: 'cleanup_pending' });
       await Promise.resolve(); release.resolve(); await fixture.host.drain();
@@ -958,21 +1150,21 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       if (mode === 'late') rejectLate(error);
       await vi.waitFor(() => expect(fixture.store.getOperation(groupId, 'reset-host-warning')?.result).toMatchObject({ state: 'completed', cancellationError: 'host acknowledgement unavailable' }));
     } finally { rejectLate(error); release.resolve(); fault.mockRestore(); }
-  });
+  }));
 
-  it('A40 Given two concurrent null-expected resets, Then the real command and transaction owners grant only one group', async () => {
-    const fixture = await setup(vi.fn(), async () => {});
+  it('A40 Given two concurrent null-expected resets, Then the real command and transaction owners grant only one group', (ctx)=>runCase(ctx,async(__q)=>{
+    const fixture = await setup(__q,vi.fn(), async () => {});
     const access = fixture.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     const input = { access, requestSource: 'user' as const, expectedGroupId: null, confirmTerminate: true as const };
     const results = await Promise.allSettled(['a', 'b'].map(operationId => fixture.service.resetGroup({ ...input, operationId })));
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter(result => result.status === 'rejected')).toHaveLength(1);
     expect(fixture.store.listGroups('t1').items).toHaveLength(1);
-  });
+  }));
 
-  it('A25/A40 Given a reset waiting for a never-settled child, Then it never creates a replacement or clears audit rows and the original execution remains blocked', async () => {
+  it('A25/A40 Given a reset waiting for a never-settled child, Then it never creates a replacement or clears audit rows and the original execution remains blocked', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); let groupId = ''; let childId = '';
-    const fixture = await setup(async () => ({ run: () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       childId = (await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'work' })).targetAgentId!;
       await entered.promise;
@@ -987,12 +1179,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(fixture.store.getOperation(groupId, 'reset-stalled')?.result.phase).toBe('cleanup_pending');
       expect(fixture.store.listGroups('t1').items).toHaveLength(1);
     } finally { release.resolve('late'); await vi.waitFor(() => expect(fixture.coordinator.snapshot().active).toBe(0)); }
-  });
+  }));
 
-  it('A15 Given the applied transaction fails, When spawn is attempted, Then factory is never entered, the group freezes and its unused lease is released', async () => {
+  it('A15 Given the applied transaction fails, When spawn is attempted, Then factory is never entered, the group freezes and its unused lease is released', (ctx)=>runCase(ctx,async(__q)=>{
     const factory = vi.fn(async () => ({ run: async () => 'done', dispose: async () => {} }));
     let rejected: unknown;
-    const fixture = await setup(factory, async context => {
+    const fixture = await setup(__q,factory, async context => {
       const fault = installNativeSqlFault(fixture.store, 'operations', context.groupId,
         "NEW.operation_id='spawn-fail' AND json_extract(NEW.data_json,'$.command')='spawn' AND json_extract(NEW.data_json,'$.applyState')='applied'", 'SQLITE_FULL');
       try {
@@ -1005,11 +1197,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(factory).not.toHaveBeenCalled();
     expect(fixture.coordinator.snapshot().active).toBe(0);
     expect(fixture.store.activeGroup('t1')?.mutationBlockedReason).toBeTruthy();
-  });
+  }));
 
-  it('A12 Given many public deltas and repeated usage IDs, When the real turn seals, Then output is coalesced and flushed before terminal status with usage counted once', async () => {
+  it('A12 Given many public deltas and repeated usage IDs, When the real turn seals, Then output is coalesced and flushed before terminal status with usage counted once', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId = ''; let rootId = '';
-    const fixture = await setup(vi.fn(), async context => {
+    const fixture = await setup(__q,vi.fn(), async context => {
       groupId = context.groupId; rootId = context.agentId;
       for (let index = 0; index < 20; index++) await fixture.service.recordRuntimeEvent(context, {
         type: 'assistant_delta', sessionId: 'session', turnId: context.turnId, intentId: 'intent', stepId: 'step', delta: `delta-${index};`,
@@ -1025,13 +1217,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(events.filter(event => event.kind === 'usage')).toHaveLength(1);
     expect(declaredMainGroupsRows(fixture.store,'events').find(row=>row.body.kind==='usage')?.unmapped).toEqual([]);
     expect(fixture.store.getAgent(groupId, rootId)).toMatchObject({ usage: { inputTokens: 10, outputTokens: 2 } });
-  });
+  }));
 
-  it('A12/U5 Given rapid phase changes, When activity is projected, Then it emits at most once per second, checkpoints after five seconds and never allocates durable sequence for activity', async () => {
+  it('A12/U5 Given rapid phase changes, When activity is projected, Then it emits at most once per second, checkpoints after five seconds and never allocates durable sequence for activity', (ctx)=>runCase(ctx,async(__q)=>{
     const envelopes: Array<{ channel: string; activityRevision?: number; phase?: string }> = [];
-    const fixture = await setup(vi.fn(), async context => {
+    const fixture = await setup(__q,vi.fn(), async context => {
       const before = fixture.store.requireGroup(context.groupId).lastSeq;
-      const instant = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(instant);
+      const instant = Date.now(); const clock = qspy(__q,()=>vi.spyOn(Date, 'now')).mockReturnValue(instant);
       try {
         for (let index = 0; index < 20; index++) await fixture.service.recordActivity(context, { phase: index % 2 ? 'thinking' : 'model' });
         expect(envelopes.filter(event => event.channel === 'activity')).toHaveLength(1);
@@ -1049,15 +1241,15 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await fixture.start(); await fixture.host.drain(); unsubscribe();
     const revisions = envelopes.filter(event => event.channel === 'activity').map(event => event.activityRevision!);
     expect(revisions).toEqual([...new Set(revisions)].sort((a, b) => a - b));
-  });
+  }));
 
-  it('A12 Given public output persistence fails at seal, When a turn ends, Then it cannot publish success after losing its output', async () => {
+  it('A12 Given public output persistence fails at seal, When a turn ends, Then it cannot publish success after losing its output', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId = ''; let failed: unknown;
-    const fixture = await setup(vi.fn(), async context => {
+    const fixture = await setup(__q,vi.fn(), async context => {
       groupId = context.groupId;
       await fixture.service.recordRuntimeEvent(context, { type: 'assistant_delta', sessionId: 'session', turnId: context.turnId, intentId: 'i', stepId: 's', delta: 'must persist' });
       const original = fixture.store.appendEvent.bind(fixture.store);
-      const fault = vi.spyOn(fixture.store, 'appendEvent').mockImplementation((group, event) => {
+      const fault = qspy(__q,()=>vi.spyOn(fixture.store, 'appendEvent')).mockImplementation((group, event) => {
         if (event.kind === 'output') throw new Error('SQLITE_FULL'); return original(group, event);
       });
       try { await context.mailbox.trySealTurn(); } catch (error) { failed = error; } finally { fault.mockRestore(); }
@@ -1065,11 +1257,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await fixture.start(); await fixture.host.drain();
     expect(failed).toBeTruthy(); expect(fixture.store.requireGroup(groupId).mutationBlockedReason).toBeTruthy();
     expect(fixture.store.getAgent(groupId, `root_${groupId}`)?.status).not.toBe('completed');
-  });
+  }));
 
-  it('A11 Given an existing canonical task name, When another spawn is rejected, Then it does not freeze or abort the healthy group', async () => {
+  it('A11 Given an existing canonical task name, When another spawn is rejected, Then it does not freeze or abort the healthy group', (ctx)=>runCase(ctx,async(__q)=>{
     const release = deferred<string>(); const entered = deferred<void>();
-    const fixture = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       try {
         await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'original', taskName: 'same', message: 'first' });
         await entered.promise;
@@ -1080,11 +1272,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       } finally { release.resolve('done'); }
     });
     await fixture.start(); await fixture.host.drain();
-  });
+  }));
 
-  it('A34 Given queued followups behind a live child, When interrupted, Then old future work is cancelled and its operation is durably terminal', async () => {
+  it('A34 Given queued followups behind a live child, When interrupted, Then old future work is cancelled and its operation is durably terminal', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); const calls: string[] = [];
-    const fixture = await setup(async () => ({ run: async message => { calls.push(message); entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async message => { calls.push(message); entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       const input = { actor: context.actor, requestSource: 'agent' as const };
       const child = await fixture.service.spawn({ ...input, operationId: 'spawn', taskName: 'child', message: 'first' });
       try {
@@ -1097,12 +1289,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await fixture.start(); await fixture.host.drain();
     await vi.waitFor(() => expect(fixture.coordinator.snapshot().active).toBe(0));
     expect(calls).toEqual(['first']);
-  });
+  }));
 
-  it('A14 Given an old interrupt operation was applied, When replayed during a newer child turn, Then the cached acknowledgement cannot interrupt that new execution', async () => {
+  it('A14 Given an old interrupt operation was applied, When replayed during a newer child turn, Then the cached acknowledgement cannot interrupt that new execution', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const first = deferred<string>(); const second = deferred<string>(); const secondEntered = deferred<void>();
     let call = 0; let currentSignal: AbortSignal | undefined;
-    const fixture = await setup(async () => ({ run: async (_message, signal) => {
+    const fixture = await setup(__q,async () => ({ run: async (_message, signal) => {
       currentSignal = signal; if (++call === 1) { entered.resolve(); return first.promise; }
       secondEntered.resolve(); return second.promise;
     }, suspend: async () => {}, dispose: async () => {} }), async context => {
@@ -1122,11 +1314,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const batch = await context.mailbox.drainInput(); if (batch.claimId) await context.mailbox.confirmApplied(batch.claimId);
     });
     await fixture.start(); await fixture.host.drain(); expect(call).toBe(2);
-  });
+  }));
 
-  it.each(['interrupt', 'close'] as const)('A15/A34 Given queued followup audit writes fail, When agent %s is authorized, Then physical abort still happens and acknowledgement is unknown', async command => {
+  it.for(['interrupt', 'close'] as const)('A15/A34 Given queued followup audit writes fail, When agent %s is authorized, Then physical abort still happens and acknowledgement is unknown', (command,ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); let childSignal: AbortSignal | undefined;
-    const fixture = await setup(async () => ({ run: async (_message, signal) => { childSignal = signal; entered.resolve(); return release.promise; }, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async (_message, signal) => { childSignal = signal; entered.resolve(); return release.promise; }, dispose: async () => {} }), async context => {
       const auth = { actor: context.actor, requestSource: 'agent' as const };
       const child = await fixture.service.spawn({ ...auth, operationId: 'spawn-audit', taskName: 'audit', message: 'work' });
       await entered.promise;
@@ -1142,13 +1334,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       } finally { fault.remove(); release.resolve('late'); }
     });
     await fixture.start(); await fixture.host.drain();
-  });
+  }));
 
-  it('LIFE-D1 Given root and child execution explicitly waiting for approval, When 31 minutes elapse, Then total duration does not expire lease or approval actors', async () => {
+  it('LIFE-D1 Given root and child execution explicitly waiting for approval, When 31 minutes elapse, Then total duration does not expire lease or approval actors', (ctx)=>runCase(ctx,async(__q)=>{
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const entered = deferred<void>(), releaseChild = deferred<string>(), releaseRoot = deferred<void>();
     let root!: DesktopAgentExecutionContext, child!: DesktopAgentExecutionContext;
-    const fixture = await setup(async input => ({ run: async () => {
+    const fixture = await setup(__q,async input => ({ run: async () => {
       child = input.getTurnContext(); entered.resolve(); return releaseChild.promise;
     }, suspend: async () => {}, dispose: async () => {} }), async (context,input) => {
       root = context;
@@ -1177,13 +1369,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       releaseChild.resolve('done'); releaseRoot.resolve(); await fixture.host.drain();
       await transport.dispose(); vi.useRealTimers();
     }
-  });
+  }));
 
-  it('A6/A33 Given an explicitly configured core watchdog wins before the child exception seals, When the late interruption is sealed, Then the durable failed outcome is not overwritten', async () => {
+  it('A6/A33 Given an explicitly configured core watchdog wins before the child exception seals, When the late interruption is sealed, Then the durable failed outcome is not overwritten', (ctx)=>runCase(ctx,async(__q)=>{
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const entered = deferred<void>(); const late = deferred<string>(); const rootRelease = deferred<void>();
     let childContext: DesktopAgentExecutionContext; let observed: string | undefined;
-    const fixture = await setup(async input => ({ run: async () => { childContext = input.getTurnContext(); entered.resolve(); return late.promise; }, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async input => ({ run: async () => { childContext = input.getTurnContext(); entered.resolve(); return late.promise; }, dispose: async () => {} }), async context => {
       await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'timeout-seal', taskName: 'timeout', message: 'work' });
       await rootRelease.promise;
     }, { coreIdleTimeoutMs: 5 * 60_000 });
@@ -1195,29 +1387,29 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       observed = fixture.store.getAgent(childContext!.groupId, childContext!.agentId)?.status;
     } finally { late.resolve('late'); rootRelease.resolve(); await fixture.host.drain(); vi.useRealTimers(); }
     expect(observed).toBe('failed');
-  });
+  }));
 
-  it('A33 Given a sealed root with a live child, When its lease deadline expires, Then the child stops without cancelling the completed host or releasing unsettled work', async () => {
+  it('A33 Given a sealed root with a live child, When its lease deadline expires, Then the child stops without cancelling the completed host or releasing unsettled work', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); let context!: DesktopAgentExecutionContext; let signal!: AbortSignal;
-    const fixture = await setup(async () => ({ run: async (_message, turnSignal) => { signal = turnSignal!; entered.resolve(); return release.promise; }, dispose: async () => {} }), async current => {
+    const fixture = await setup(__q,async () => ({ run: async (_message, turnSignal) => { signal = turnSignal!; entered.resolve(); return release.promise; }, dispose: async () => {} }), async current => {
       context = current;
       await fixture.service.spawn({ actor: current.actor, requestSource: 'agent', operationId: 'lease-child', taskName: 'child', message: 'work' });
       await entered.promise;
     }, { multiAgentLeaseMs: 30 * 60_000 });
     try {
       const taskId = await fixture.start(); await fixture.host.drain();
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(context.memberTicket.deadlineAt! + 1);
+      const clock = qspy(__q,()=>vi.spyOn(Date, 'now')).mockReturnValue(context.memberTicket.deadlineAt! + 1);
       try { await fixture.service.expireLease({ requestSource: 'scheduler', groupId: context.groupId, leaseEpoch: context.memberTicket.epoch }); } finally { clock.mockRestore(); }
       expect(signal.aborted).toBe(true);
       expect((await fixture.host.inspectTask(taskId))?.status).toBe('completed');
       expect(fixture.store.getAgent(context.groupId, context.agentId)?.status).toBe('completed');
       expect(fixture.coordinator.snapshot().active).toBe(1);
     } finally { release.resolve('late'); }
-  });
+  }));
 
-  it('A33 preserves the original host cancellation cause after the stalled-root grace blocks its group', async () => {
+  it('A33 preserves the original host cancellation cause after the stalled-root grace blocks its group', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<void>(); let context!: DesktopAgentExecutionContext;
-    const fixture = await setup(vi.fn(), async current => { context = current; entered.resolve(); await release.promise; });
+    const fixture = await setup(__q,vi.fn(), async current => { context = current; entered.resolve(); await release.promise; });
     try {
       const taskId = await fixture.start(); await entered.promise;
       await fixture.host.cancelTask(taskId, 'original_host_cancel');
@@ -1226,17 +1418,17 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(context.signal.reason.message).toBe('original_host_cancel');
       expect(context.signal.aborted).toBe(true);
     } finally { release.resolve(); await fixture.host.drain(); }
-  });
+  }));
 
-  it('A33 Given an active root, When a stale or early lease expiry is followed by a real expiry, Then only the real deadline wins and cancels its host execution', async () => {
+  it('A33 Given an active root, When a stale or early lease expiry is followed by a real expiry, Then only the real deadline wins and cancels its host execution', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<void>(); let context!: DesktopAgentExecutionContext;
-    const fixture = await setup(vi.fn(), async current => { context = current; entered.resolve(); await release.promise; }, { multiAgentLeaseMs: 30 * 60_000 });
+    const fixture = await setup(__q,vi.fn(), async current => { context = current; entered.resolve(); await release.promise; }, { multiAgentLeaseMs: 30 * 60_000 });
     try {
       const taskId = await fixture.start(); await entered.promise;
       await fixture.service.expireLease({ requestSource: 'scheduler', groupId: context.groupId, leaseEpoch: context.memberTicket.epoch - 1 });
       await fixture.service.expireLease({ requestSource: 'scheduler', groupId: context.groupId, leaseEpoch: context.memberTicket.epoch });
       expect(context.signal.aborted).toBe(false);
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(context.memberTicket.deadlineAt! + 1);
+      const clock = qspy(__q,()=>vi.spyOn(Date, 'now')).mockReturnValue(context.memberTicket.deadlineAt! + 1);
       try { await fixture.service.expireLease({ requestSource: 'scheduler', groupId: context.groupId, leaseEpoch: context.memberTicket.epoch }); } finally { clock.mockRestore(); }
       expect(context.signal.aborted).toBe(true);
       expect((await fixture.host.inspectTask(taskId))?.status).toBe('cancelled');
@@ -1244,12 +1436,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await context.mailbox.trySealTurn();
       expect(fixture.store.getAgent(context.groupId, context.agentId)?.status).toBe('interrupted');
     } finally { release.resolve(); await fixture.host.drain(); }
-  });
+  }));
 
-  it('A18/A42 Given host preparation persisted but queued journal write fails, When root admission aborts, Then the host checkpoint is compensated immediately without waiting for restart', async () => {
-    const fixture = await setup(vi.fn(), async () => {});
+  it('A18/A42 Given host preparation persisted but queued journal write fails, When root admission aborts, Then the host checkpoint is compensated immediately without waiting for restart', (ctx)=>runCase(ctx,async(__q)=>{
+    const fixture = await setup(__q,vi.fn(), async () => {});
     const original = fixture.store.putRootBinding.bind(fixture.store); let taskId = '';
-    const fault = vi.spyOn(fixture.store, 'putRootBinding').mockImplementation((binding, control) => {
+    const fault = qspy(__q,()=>vi.spyOn(fixture.store, 'putRootBinding')).mockImplementation((binding, control) => {
       taskId = binding.sourceTaskId;
       if (binding.phase === 'queued') throw new Error('SQLITE_FULL');
       return original(binding, control);
@@ -1258,11 +1450,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect((await fixture.host.inspectTask(taskId))?.status).toBe('failed');
     expect(await fixture.host.getActiveTasks()).toEqual([]);
     expect(fixture.coordinator.snapshot().active).toBe(0);
-  });
+  }));
 
-  it('A29 Given a live peer sends a message, When wait observes it, Then it returns notification IDs without consuming the mailbox', async () => {
+  it('A29 Given a live peer sends a message, When wait observes it, Then it returns notification IDs without consuming the mailbox', (ctx)=>runCase(ctx,async(__q)=>{
     const childReady = deferred<void>(); const release = deferred<string>();
-    const fixture = await setup(async input => ({ run: async () => {
+    const fixture = await setup(__q,async input => ({ run: async () => {
       await fixture.service.send({ actor: input.getTurnContext().actor, requestSource: 'agent', operationId: 'progress', target: 'parent', message: 'progress sentinel' });
       childReady.resolve(); return release.promise;
     }, suspend: async () => {}, dispose: async () => {} }), async context => {
@@ -1277,11 +1469,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       } finally { release.resolve('done'); }
     });
     await fixture.start(); await fixture.host.drain();
-  });
+  }));
 
-  it('A12/A43 Given a child with a live execution, When closed through the service, Then descendants stop, resources stay pending, and root controls are denied', async () => {
+  it('A12/A43 Given a child with a live execution, When closed through the service, Then descendants stop, resources stay pending, and root controls are denied', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); let agentId = ''; let groupId = '';
-    const fixture = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async () => { entered.resolve(); return release.promise; }, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       const input = { actor: context.actor, requestSource: 'agent' as const };
       await expect(fixture.service.close({ ...input, operationId: 'deny-root', target: 'main' })).rejects.toThrow(/root|permitted/);
@@ -1296,11 +1488,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     });
     await fixture.start(); await fixture.host.drain();
     await vi.waitFor(() => expect(fixture.store.getAgent(groupId, agentId)).toMatchObject({ status: 'closed', executionActive: false, resourcesReleased: true }));
-  });
+  }));
 
-  it('A37/A43 Given a child authority, When it sends to main but tries to control main or forge its actor, Then only the message succeeds', async () => {
+  it('A37/A43 Given a child authority, When it sends to main but tries to control main or forge its actor, Then only the message succeeds', (ctx)=>runCase(ctx,async(__q)=>{
     const childDone = deferred<void>(); let rootContext!: DesktopAgentExecutionContext;
-    const fixture = await setup(async input => ({
+    const fixture = await setup(__q,async input => ({
       async run() {
         try {
         const context = input.getTurnContext();
@@ -1319,11 +1511,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await context.mailbox.confirmApplied(batch.claimId!);
     });
     await fixture.start(); await fixture.host.drain();
-  });
+  }));
 
-  it('A34 Given a child ignores abort, When interrupted and waited on, Then stopping is reported without claiming settlement or freeing its lease', async () => {
+  it('A34 Given a child ignores abort, When interrupted and waited on, Then stopping is reported without claiming settlement or freeing its lease', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); let waited: unknown;
-    const fixture = await setup(async () => ({ async run() { entered.resolve(); return release.promise; }, async dispose() {} }), async context => {
+    const fixture = await setup(__q,async () => ({ async run() { entered.resolve(); return release.promise; }, async dispose() {} }), async context => {
       const child = await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-stuck', taskName: 'stuck', message: 'work' });
       await entered.promise;
       await fixture.service.interrupt({ actor: context.actor, requestSource: 'agent', operationId: 'interrupt-stuck', target: child.targetAgentId! });
@@ -1333,13 +1525,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     });
     await fixture.start(); await fixture.host.drain();
     expect(waited).toMatchObject({ reason: 'stopping', settled: false });
-  });
+  }));
 
-  it('A6/A16 Given an explicitly idle-limited child never settles, When its real core watchdog and cleanup grace expire, Then the whole runtime blocks rather than running forever behind a failed status', async () => {
+  it('A6/A16 Given an explicitly idle-limited child never settles, When its real core watchdog and cleanup grace expire, Then the whole runtime blocks rather than running forever behind a failed status', (ctx)=>runCase(ctx,async(__q)=>{
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const entered = deferred<void>(); const childRelease = deferred<string>(); const rootRelease = deferred<void>();
     let groupId = ''; let childId = '';
-    const fixture = await setup(async () => ({ run: async () => { entered.resolve(); return childRelease.promise; }, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async () => { entered.resolve(); return childRelease.promise; }, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       const child = await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-timeout', taskName: 'timeout', message: 'work' });
       childId = child.targetAgentId!; await rootRelease.promise;
@@ -1350,22 +1542,22 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(fixture.store.getAgent(groupId, childId)).toMatchObject({ status: 'failed', executionActive: true, stopState: 'stalled', resourcesReleased: false });
       await expect(fixture.coordinator.run(undefined, async () => {})).rejects.toThrow('runtime_blocked');
     } finally { childRelease.resolve('late'); rootRelease.resolve(); await fixture.host.drain(); vi.useRealTimers(); }
-  });
+  }));
 
-  it('A16/A33 Given the root provider ignores user cancellation, When the cleanup grace expires, Then root execution retains its ticket and blocks all future work', async () => {
+  it('A16/A33 Given the root provider ignores user cancellation, When the cleanup grace expires, Then root execution retains its ticket and blocks all future work', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<void>(); let groupId = ''; let rootId = '';
-    const fixture = await setup(vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; entered.resolve(); await release.promise; });
+    const fixture = await setup(__q,vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; entered.resolve(); await release.promise; });
     try {
       const taskId = await fixture.start(); await entered.promise; await fixture.host.cancelTask(taskId);
       await vi.waitFor(() => expect(fixture.store.getAgent(groupId, rootId)).toMatchObject({ stopState: 'stalled', executionActive: true }));
       expect(fixture.coordinator.snapshot().active).toBe(1);
       await expect(fixture.coordinator.run(undefined, async () => {})).rejects.toThrow('runtime_blocked');
     } finally { release.resolve(); await fixture.host.drain(); }
-  });
+  }));
 
-  it('A33 Given cancel and pure-text seal enter the same sequencer in that order, When both settle, Then seal cannot overwrite the cancelled root with completed', async () => {
+  it('A33 Given cancel and pure-text seal enter the same sequencer in that order, When both settle, Then seal cannot overwrite the cancelled root with completed', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId = ''; let rootId = '';
-    const fixture = await setup(vi.fn(), async context => {
+    const fixture = await setup(__q,vi.fn(), async context => {
       groupId = context.groupId; rootId = context.agentId;
       const cancelling = fixture.service.cancelRootTurn({ requestSource: 'scheduler', sourceTaskId: context.sourceTaskId!, expectedRootEpoch: context.rootEpoch, reason: 'user_cancelled' });
       const sealing = context.mailbox.trySealTurn();
@@ -1374,10 +1566,10 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     });
     await fixture.start(); await fixture.host.drain();
     expect(fixture.store.getAgent(groupId, rootId)?.status).toBe('interrupted');
-  });
+  }));
 
-  it('A18/A33 Given a root waits in global FIFO without starting, When preparation is cancelled, Then pending identity is visible and the next root does not inherit a busy preparation', async () => {
-    const fixture = await setup(vi.fn(), async () => {});
+  it('A18/A33 Given a root waits in global FIFO without starting, When preparation is cancelled, Then pending identity is visible and the next root does not inherit a busy preparation', (ctx)=>runCase(ctx,async(__q)=>{
+    const fixture = await setup(__q,vi.fn(), async () => {});
     const release = deferred<void>(); const entered = deferred<void>();
     const ordinary = fixture.coordinator.run(undefined, async () => { entered.resolve(); await release.promise; });
     await entered.promise;
@@ -1392,11 +1584,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await fixture.host.cancelTask(second.taskId);
       expect(fixture.coordinator.snapshot().waiting).toBe(0);
     } finally { release.resolve(); await ordinary; }
-  });
+  }));
 
-  it('A16 Given a settled root with a running child, When ordinary work queues, Then it waits until the last real execution member settles', async () => {
+  it('A16 Given a settled root with a running child, When ordinary work queues, Then it waits until the last real execution member settles', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>();
-    const fixture = await setup(async () => ({ async run() { entered.resolve(); return release.promise; }, async suspend() {}, async dispose() {} }), async context => {
+    const fixture = await setup(__q,async () => ({ async run() { entered.resolve(); return release.promise; }, async suspend() {}, async dispose() {} }), async context => {
       await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-long', taskName: 'long', message: 'work' });
       await entered.promise;
     });
@@ -1407,11 +1599,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     release.resolve('done');
     await queued;
     expect(ordinary).toHaveBeenCalledOnce();
-  });
+  }));
 
-  it('A2 Given eight suspended child sessions, When another spawn requests capacity, Then reclamation starts without awaiting dispose and the slot stays reserved until actual release', async () => {
+  it('A2 Given eight suspended child sessions, When another spawn requests capacity, Then reclamation starts without awaiting dispose and the slot stays reserved until actual release', (ctx)=>runCase(ctx,async(__q)=>{
     const releaseCleanup = deferred<void>(); let disposing = 0;
-    const fixture = await setup(async () => ({ run: async () => 'done', suspend: async () => {}, dispose: async () => { disposing++; await releaseCleanup.promise; } }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async () => 'done', suspend: async () => {}, dispose: async () => { disposing++; await releaseCleanup.promise; } }), async context => {
       const actor = { actor: context.actor, requestSource: 'agent' as const };
       try {
         for (let index = 0; index < 8; index++) {
@@ -1428,11 +1620,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const batch = await context.mailbox.drainInput(); if (batch.claimId) await context.mailbox.confirmApplied(batch.claimId);
     });
     await fixture.start(); await fixture.host.drain();
-  });
+  }));
 
-  it('A20 Given many fully settled groups, When runtime objects become dormant, Then only bounded metadata remains and returning to a group rebuilds its core without changing historical results', async () => {
+  it('A20 Given many fully settled groups, When runtime objects become dormant, Then only bounded metadata remains and returning to a group rebuilds its core without changing historical results', (ctx)=>runCase(ctx,async(__q)=>{
     const nativeEntryStart=nativeWorker.originalEntries.length;
-    const fixture = await setup(vi.fn(), async () => {});
+    const fixture = await setup(__q,vi.fn(), async () => {});
     const first = await fixture.start(); await fixture.host.drain();
     const firstGroup = fixture.store.activeGroup('t1')!;
     for (let index = 0; index < 10; index++) {
@@ -1450,11 +1642,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(originalWorkers.filter(worker=>worker.protection).length).toBeGreaterThan(0);
     expect(originalWorkers.filter(worker=>!worker.protection).length).toBeGreaterThan(0);
     expect(originalWorkers.every(worker=>worker.exit!==undefined&&worker.exitCode===0&&worker.terminateCalls===0)).toBe(true);
-  });
+  }));
 
-  it('A8/A28 Given an idle child and no active root, When the authenticated user follows up behind ordinary X, Then it uses FIFO and a new epoch without requiring a live root actor', async () => {
+  it('A8/A28 Given an idle child and no active root, When the authenticated user follows up behind ordinary X, Then it uses FIFO and a new epoch without requiring a live root actor', (ctx)=>runCase(ctx,async(__q)=>{
     const order: string[] = []; const epochs: number[] = []; let groupId = ''; let childId = '';
-    const fixture = await setup(async input => ({ run: async message => { order.push(message); epochs.push(input.getTurnContext().memberTicket.epoch); return 'done'; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async input => ({ run: async message => { order.push(message); epochs.push(input.getTurnContext().memberTicket.epoch); return 'done'; }, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       const child = await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'first' }); childId = child.targetAgentId!;
       await vi.waitFor(() => expect(fixture.store.getAgent(groupId, childId)?.executionActive).toBe(false));
@@ -1472,11 +1664,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       release.resolve(); await x; await y;
       expect(order).toEqual(['first', 'X', 'second', 'Y']); expect(epochs[1]).toBeGreaterThan(epochs[0]);
     } finally { release.resolve(); await x; }
-  });
+  }));
 
-  it('A8/A17/A37 Given main-issued user access, When source or expected turn is forged or root is targeted by lifecycle controls, Then no physical control is allowed and user messages keep their actual sender', async () => {
+  it('A8/A17/A37 Given main-issued user access, When source or expected turn is forged or root is targeted by lifecycle controls, Then no physical control is allowed and user messages keep their actual sender', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId = ''; let rootId = '';
-    const fixture = await setup(vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; });
+    const fixture = await setup(__q,vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; });
     await fixture.start(); await fixture.host.drain();
     const access = fixture.service.createUserAccess({ requestSource: 'user', actorId: 'actual-user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     const request = { access, requestSource: 'user' as const, groupId, agentId: rootId, operationId: 'root-control', expectedTurn: 1 };
@@ -1491,12 +1683,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(fixture.store.listMessages(groupId, rootId)).toEqual([]);
     await fixture.service.userSend({ ...request, operationId: 'actual-message', message: 'user context' });
     expect(fixture.store.listMessages(groupId, rootId)[0].sender).toEqual({ kind: 'user', actorId: 'actual-user' });
-  });
+  }));
 
-  it.each(['userSend', 'userFollowup', 'userInterrupt', 'userClose'] as const)('A15 Given an authenticated stale %s, Then main records a known refusal with no control effect and the same ID never replays it', async method => {
+  it.for(['userSend', 'userFollowup', 'userInterrupt', 'userClose'] as const)('A15 Given an authenticated stale %s, Then main records a known refusal with no control effect and the same ID never replays it', (method,ctx)=>runCase(ctx,async(__q)=>{
     let groupId = '', childId = '';
     const run = vi.fn(async () => 'done');
-    const f = await setup(async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'first' })).targetAgentId!;
     });
@@ -1519,12 +1711,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await expect(f.service[method]({ ...input, expectedTurn: 1 })).rejects.toThrow(/operation_id_conflict/);
     expect(await f.service.userSend({ ...input, expectedTurn: 1, operationId: 'fresh-send' })).toMatchObject({ state: 'applied' });
     expect(f.store.listMessages(groupId, childId)).toHaveLength(1);
-  });
+  }));
 
-  it.each(['userSend', 'userFollowup', 'userInterrupt', 'userClose'] as const)('A15 Given an authenticated unknown target for %s, Then rejection is durable without a synthetic agent and foreign or purged groups stay denied', async method => {
+  it.for(['userSend', 'userFollowup', 'userInterrupt', 'userClose'] as const)('A15 Given an authenticated unknown target for %s, Then rejection is durable without a synthetic agent and foreign or purged groups stay denied', (method,ctx)=>runCase(ctx,async(__q)=>{
     let groupId = '', rootId = '';
     const createSession = vi.fn();
-    const f = await setup(createSession, async context => { groupId = context.groupId; rootId = context.agentId; });
+    const f = await setup(__q,createSession, async context => { groupId = context.groupId; rootId = context.agentId; });
     await f.start(); await f.host.drain();
     const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'actual-user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     const input = { access, requestSource: 'user' as const, groupId, agentId: 'missing-child', operationId: 'missing-control', expectedTurn: 1, message: 'keep draft' };
@@ -1549,13 +1741,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       .toMatchObject({ state: 'completed' });
     await expect(f.service[method]({ ...input, operationId: 'after-purge' })).rejects.toThrow();
     expect(f.store.getOperation(groupId, 'after-purge')).toBeNull();
-  });
+  }));
 
-  it('A15 Given model and user followups race for the same child, Then the shared queue admits only four and the excess user command gets a durable refusal', async () => {
+  it('A15 Given model and user followups race for the same child, Then the shared queue admits only four and the excess user command gets a durable refusal', (ctx)=>runCase(ctx,async(__q)=>{
     const ready = deferred<void>(), rootRelease = deferred<void>(), childRelease = deferred<string>();
     let context!: DesktopAgentExecutionContext; let childId = '';
     const run = vi.fn(async () => childRelease.promise);
-    const f = await setup(async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async current => {
+    const f = await setup(__q,async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async current => {
       context = current;
       childId = (await f.service.spawn({ actor: current.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'first' })).targetAgentId!;
       await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1)); ready.resolve(); await rootRelease.promise;
@@ -1573,12 +1765,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await expect(model('model-excess')).rejects.toThrow('multi_agent_followup_queue_full');
       expect(f.store.getOperation(groupId, 'model-excess')).toBeNull(); expect(run).toHaveBeenCalledTimes(1);
     } finally { rootRelease.resolve(); childRelease.resolve('done'); await f.host.drain(); }
-  });
+  }));
 
-  it('A15 Given a child cannot yet resume, Then its rejected operation stays rejected after real settlement and only a new explicit ID may follow up', async () => {
+  it('A15 Given a child cannot yet resume, Then its rejected operation stays rejected after real settlement and only a new explicit ID may follow up', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<string>(); let groupId = '', childId = '';
     const run = vi.fn(async () => { entered.resolve(); return release.promise; });
-    const f = await setup(async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'first' })).targetAgentId!;
       await entered.promise;
@@ -1595,11 +1787,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(await f.service.userFollowup({ ...input, operationId: 'new-followup' })).toMatchObject({ state: 'queued_next_admission' });
       await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
     } finally { release.resolve('done'); }
-  });
+  }));
 
-  it('A15 Given rejection receipt persistence fails, Then main freezes the group without sending the message or pretending the refusal was durably acknowledged', async () => {
+  it('A15 Given rejection receipt persistence fails, Then main freezes the group without sending the message or pretending the refusal was durably acknowledged', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId = '', rootId = '';
-    const f = await setup(vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; });
+    const f = await setup(__q,vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; });
     await f.start(); await f.host.drain();
     const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'actual-user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
     const fault = installNativeSqlFault(f.store, 'operations', groupId, "NEW.operation_id='rejected-write'", 'rejected_receipt_write_failed');
@@ -1609,12 +1801,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(f.store.getOperation(groupId, 'rejected-write')).toBeNull(); expect(f.store.listMessages(groupId, rootId)).toEqual([]);
       expect(f.store.requireGroup(groupId).mutationBlockedReason).toBe('multi_agent_persistence_failed');
     } finally { fault.remove(); }
-  });
+  }));
 
-  it('A15 Given four queued user followups or a closed child, Then excess queue/send requests have durable refusals without hidden work', async () => {
+  it('A15 Given four queued user followups or a closed child, Then excess queue/send requests have durable refusals without hidden work', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId = '', childId = '';
     const run = vi.fn(async () => 'done');
-    const f = await setup(async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn', taskName: 'child', message: 'first' })).targetAgentId!;
     });
@@ -1647,12 +1839,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(f.service.readOperation({ access, groupId, operationId: 'close-again' })).not.toBeNull();
       expect(await f.service.userFollowup({ ...input, operationId: 'queue-0' })).toMatchObject({ outcome: 'cancelled' });
     } finally { release.resolve(); await blocker; }
-  });
+  }));
 
-  it('A31 Given one child never settles after abort, When its grace expires, Then all global waiters fail and the live slot is not released', async () => {
+  it('A31 Given one child never settles after abort, When its grace expires, Then all global waiters fail and the live slot is not released', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>();
     const rootEnded = deferred<void>(); let childId = '';
-    const fixture = await setup(async () => ({ async run() { entered.resolve(); return release.promise; }, async dispose() {} }), async context => {
+    const fixture = await setup(__q,async () => ({ async run() { entered.resolve(); return release.promise; }, async dispose() {} }), async context => {
       const child = await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-never', taskName: 'never', message: 'work' });
       childId = child.targetAgentId!;
       await entered.promise;
@@ -1670,13 +1862,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(fixture.coordinator.snapshot().active).toBe(1);
       expect(fixture.store.getAgent(fixture.store.activeGroup('t1')!.groupId, childId)).toMatchObject({ stopState: 'stalled', executionActive: true, resourcesReleased: false });
     } finally { release.resolve('cleanup after assertions'); }
-  });
+  }));
 
-  it.each(['before-close', 'consuming', 'after-close', 'applied', 'multiple-ancestors'] as const)('A18 Given a child handoff %s, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once', async order => {
+  it.for(['before-close', 'consuming', 'after-close', 'applied', 'multiple-ancestors'] as const)('A18 Given a child handoff %s, When its receiver closes, Then unconfirmed results reach a live ancestor exactly once', (order,ctx)=>runCase(ctx,async(__q)=>{
     const rootGate = deferred<void>(), parentGate = deferred<void>(), leafGate = deferred<void>(), entered = deferred<void>(), leafEntered = deferred<void>();
     let groupId = '', rootId = '', parentId = '', leafId = '';
     const contexts = new Map<string, DesktopAgentExecutionContext>();
-    const fixture = await setup(async input => ({
+    const fixture = await setup(__q,async input => ({
       async run() {
         const context = input.getTurnContext(); contexts.set(context.agentId, context);
         if (input.identity.taskName === 'leaf') { leafId = context.agentId; leafEntered.resolve(); await leafGate.promise; return 'LEAF_RESULT'; }
@@ -1728,11 +1920,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       rootGate.resolve(); await fixture.host.drain();
       expect(fixture.service.goalReadiness('t1')).toBe('ready');
     } finally { leafGate.resolve(); parentGate.resolve(); rootGate.resolve(); await fixture.host.drain(); }
-  });
+  }));
 
-  it.each([true, false])('A17 Given a real granted followup with cancelFirst=%s, Then cancellation and activation have only one winner without freezing the group', async cancelFirst => {
+  it.for([true, false])('A17 Given a real granted followup with cancelFirst=%s, Then cancellation and activation have only one winner without freezing the group', (cancelFirst,ctx)=>runCase(ctx,async(__q)=>{
     const release = deferred<void>(), first = deferred<void>(); let runs = 0, groupId = '', childId = '';
-    const fixture = await setup(async () => ({
+    const fixture = await setup(__q,async () => ({
       async run() { runs++; if (runs === 1) { first.resolve(); return 'FIRST_RESULT'; } await release.promise; return 'LATE_RESULT'; },
       async suspend() {}, async dispose() {},
     }), async context => {
@@ -1748,7 +1940,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       let interrupted: Promise<unknown> | undefined;
       if (cancelFirst) {
         const enqueue = fixture.coordinator.enqueueGroupTurn.bind(fixture.coordinator);
-        vi.spyOn(fixture.coordinator, 'enqueueGroupTurn').mockImplementation((...args) => {
+        qspy(__q,()=>vi.spyOn(fixture.coordinator, 'enqueueGroupTurn')).mockImplementation((...args) => {
           const realRequest = enqueue(...args);
           // Observe the real grant before service registers its admission callback.
           // Both controls still execute through the actual group sequencer.
@@ -1770,11 +1962,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       if (cancelFirst) expect(cancellations[0].preview).toContain('followup_cancelled');
       else expect(cancellations[0].preview).toBe('agent_interrupted');
     } finally { release.resolve(); vi.restoreAllMocks(); }
-  });
+  }));
 
-  it('A37 Given interrupt has revoked a child turn, When it tries another side effect, Then its stale scoped actor is rejected immediately', async () => {
+  it('A37 Given interrupt has revoked a child turn, When it tries another side effect, Then its stale scoped actor is rejected immediately', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); let childContext!: DesktopAgentExecutionContext;
-    const fixture = await setup(async input => ({
+    const fixture = await setup(__q,async input => ({
       async run() { childContext = input.getTurnContext(); entered.resolve(); return release.promise; }, async dispose() {},
     }), async context => {
       const child = await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-revoke', taskName: 'revoke', message: 'work' });
@@ -1786,13 +1978,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       } finally { release.resolve('late'); }
     });
     await fixture.start(); await fixture.host.drain();
-  });
+  }));
 
-  it.each(['agent', 'user-busy', 'user-idle', 'unknown-source'] as const)('A12/A32 Given %s followup from A waits behind X, Then a later prepared B cannot change its accepted provenance', async mode => {
+  it.for(['agent', 'user-busy', 'user-idle', 'unknown-source'] as const)('A12/A32 Given %s followup from A waits behind X, Then a later prepared B cannot change its accepted provenance', (mode,ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), first = deferred<string>(), externalEntered = deferred<void>(), externalRelease = deferred<void>();
     const turns: DesktopAgentExecutionContext[] = []; const order: string[] = [];
     let rootCalls = 0, childId = '', groupId = '', ordinary!: Promise<void>;
-    const f = await setup(async input => ({ run: async () => {
+    const f = await setup(__q,async input => ({ run: async () => {
       const current = input.getTurnContext(); turns.push(current);
       if (turns.length === 1) { entered.resolve(); return first.promise; }
       order.push('followup');
@@ -1848,12 +2040,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(turns[1].memberTicket.epoch).not.toBe(turns[0].memberTicket.epoch);
       expect(f.store.getOperation(groupId, 'source-followup')?.result.state).toBe('applied');
     } finally { first.resolve('cleanup'); externalRelease.resolve(); await f.host.drain(); }
-  });
+  }));
 
-  it.each([false, true])('A12/A32 Given root B follows up A child with earlier A followup=%s, Then each queued operation preserves its own caller source after both roots end', async includeA => {
+  it.for([false, true])('A12/A32 Given root B follows up A child with earlier A followup=%s, Then each queued operation preserves its own caller source after both roots end', (includeA,ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<string>(); const sources: Array<string | undefined> = [];
     let childId = '', groupId = '', rootCalls = 0;
-    const f = await setup(async input => ({ run: async () => {
+    const f = await setup(__q,async input => ({ run: async () => {
       const context = input.getTurnContext(); sources.push(context.sourceTaskId);
       if (sources.length === 1) { entered.resolve(); return release.promise; }
       await f.service.recordRuntimeEvent(context, { type: 'artifact_recorded', sessionId: 'child', turnId: context.turnId,
@@ -1887,12 +2079,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(f.store.getAgent(groupId, childId)?.sourceTaskId).toBe(b);
       expect(f.store.readEvents(groupId).filter(event => event.kind === 'artifact').map(event => event.payload.sourceTaskId)).toEqual(includeA ? [a, b] : [b]);
     } finally { release.resolve('cleanup'); }
-  });
+  }));
 
-  it.each(['agent', 'user'] as const)('A15 Given %s followup receipt persistence fails, Then no new source-bearing turn is queued or executed', async source => {
+  it.for(['agent', 'user'] as const)('A15 Given %s followup receipt persistence fails, Then no new source-bearing turn is queued or executed', (source,ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(), release = deferred<string>(); const run = vi.fn(async () => { entered.resolve(); return release.promise; });
     let groupId = '', childId = '';
-    const f = await setup(async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const f = await setup(__q,async () => ({ run, suspend: async () => {}, dispose: async () => {} }), async context => {
       groupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'failure-spawn', taskName: 'failure', message: 'first' })).targetAgentId!;
       await entered.promise;
@@ -1911,13 +2103,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(f.store.getOperation(groupId, 'failure-followup')).toBeNull();
       expect(f.store.getAgent(groupId, childId)?.sourceTaskId).toBe(taskId);
     } finally { release.resolve('cleanup'); }
-  });
+  }));
 
-  it('LIFE-F1 Given B is busy and X waits, When root waits for its followup, Then B2 settles in the current epoch before root exits and X runs', async () => {
+  it('LIFE-F1 Given B is busy and X waits, When root waits for its followup, Then B2 settles in the current epoch before root exits and X runs', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); const release = deferred<string>(); const followupDone = deferred<void>();
     const order: string[] = []; const epochs: number[] = [];
     let requests = 0; let ordinary!: Promise<void>;
-    const fixture = await setup(async input => ({
+    const fixture = await setup(__q,async input => ({
       async run() {
         epochs.push(input.getTurnContext().memberTicket.epoch);
         if (++requests === 1) { entered.resolve(); return release.promise; }
@@ -1952,11 +2144,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await vi.waitFor(() => expect(requests).toBe(2));
     await followupDone.promise;
     expect(order).toEqual(['B2', 'X']); expect(epochs[1]).toBe(epochs[0]);
-  });
+  }));
 
-  it('LIFE-F2 Given a future user turn, Then agent followup is durably refused and impossible waits cannot spin', async () => {
+  it('LIFE-F2 Given a future user turn, Then agent followup is durably refused and impossible waits cannot spin', (ctx)=>runCase(ctx,async(__q)=>{
     const release = deferred<string>();
-    const fixture = await setup(async () => ({ run: async () => release.promise, suspend: async () => {}, dispose: async () => {} }), async context => {
+    const fixture = await setup(__q,async () => ({ run: async () => release.promise, suspend: async () => {}, dispose: async () => {} }), async context => {
       const auth = { actor: context.actor, requestSource: 'agent' as const };
       const child = await fixture.service.spawn({ ...auth, operationId: 'spawn-barrier', taskName: 'barrier', message: 'first' });
       await vi.waitFor(() => expect(fixture.store.getAgent(context.groupId, child.targetAgentId!)?.sessionResident).toBe(true));
@@ -1978,11 +2170,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       release.resolve('done');
     });
     try { await fixture.start(); await fixture.host.drain(); } finally { release.resolve('done'); }
-  });
+  }));
 
-  it('LIFE-F3 Given child session initialization is pending, Then followup remains queueable and interrupt removes that capability', async () => {
+  it('LIFE-F3 Given child session initialization is pending, Then followup remains queueable and interrupt removes that capability', (ctx)=>runCase(ctx,async(__q)=>{
     const initialized = deferred<void>();
-    const fixture = await setup(async () => { await initialized.promise; return { run: async () => 'done', suspend: async () => {}, dispose: async () => {} }; }, async context => {
+    const fixture = await setup(__q,async () => { await initialized.promise; return { run: async () => 'done', suspend: async () => {}, dispose: async () => {} }; }, async context => {
       const auth = { actor: context.actor, requestSource: 'agent' as const };
       const child = await fixture.service.spawn({ ...auth, operationId: 'init-spawn', taskName: 'init', message: 'first' });
       try {
@@ -1993,13 +2185,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       } finally { initialized.resolve(); }
     });
     try { await fixture.start(); await fixture.host.drain(); } finally { initialized.resolve(); }
-  });
+  }));
 
-  it('A33 Given root seal committed before host terminal, When user cancellation arrives, Then host and root complete while its child keeps running', async () => {
+  it('A33 Given root seal committed before host terminal, When user cancellation arrives, Then host and root complete while its child keeps running', (ctx)=>runCase(ctx,async(__q)=>{
     const sealed = deferred<void>(); const rootFinish = deferred<void>(); const childFinish = deferred<string>();
     const childEntered = deferred<void>();
     let rootContext!: DesktopAgentExecutionContext; let childSignal!: AbortSignal;
-    const fixture = await setup(async () => ({ async run(_message, signal) { childSignal = signal!; childEntered.resolve(); return childFinish.promise; }, async suspend() {}, async dispose() {} }), async context => {
+    const fixture = await setup(__q,async () => ({ async run(_message, signal) { childSignal = signal!; childEntered.resolve(); return childFinish.promise; }, async suspend() {}, async dispose() {} }), async context => {
       rootContext = context;
       await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-seal', taskName: 'seal_child', message: 'work' });
       await childEntered.promise;
@@ -2014,12 +2206,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect((await fixture.host.recoverTask(taskId)).snapshot.status).toBe('completed');
       expect(fixture.store.getAgent(rootContext.groupId, rootContext.agentId)?.status).toBe('completed');
     } finally { rootFinish.resolve(); childFinish.resolve('done'); }
-  });
+  }));
 
-  it('A33 Given cancellation wins before root seal, When the actual host cancellation runs, Then both root and child signals are aborted', async () => {
+  it('A33 Given cancellation wins before root seal, When the actual host cancellation runs, Then both root and child signals are aborted', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); let rootContext!: DesktopAgentExecutionContext; let childSignal!: AbortSignal;
     const childEntered = deferred<void>();
-    const fixture = await setup(async () => ({ async run(_message, signal) {
+    const fixture = await setup(__q,async () => ({ async run(_message, signal) {
       childSignal = signal!;
       childEntered.resolve();
       return new Promise<string>(resolve => signal!.addEventListener('abort', () => resolve('aborted'), { once: true }));
@@ -2034,11 +2226,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await fixture.host.cancelTask(taskId); await fixture.host.drain();
     expect(rootContext.signal.aborted).toBe(true); expect(childSignal.aborted).toBe(true);
     expect((await fixture.host.recoverTask(taskId)).snapshot.status).toBe('cancelled');
-  });
+  }));
 
-  it('A33 Given an authorized cancellation cannot persist its intent, When SQLite fails, Then physical abort still happens but the host call returns unknown', async () => {
+  it('A33 Given an authorized cancellation cannot persist its intent, When SQLite fails, Then physical abort still happens but the host call returns unknown', (ctx)=>runCase(ctx,async(__q)=>{
     const entered = deferred<void>(); let rootContext!: DesktopAgentExecutionContext;
-    const fixture = await setup(async () => ({ async run() { return 'unused'; }, async dispose() {} }), async context => {
+    const fixture = await setup(__q,async () => ({ async run() { return 'unused'; }, async dispose() {} }), async context => {
       rootContext = context; entered.resolve();
       await new Promise<void>(resolve => context.signal.addEventListener('abort', () => resolve(), { once: true }));
     });
@@ -2050,22 +2242,23 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(rootContext.signal.aborted).toBe(true);
     } finally { fault.remove(); }
     await fixture.host.drain();
-  });
+  }));
 
-  it('A42 Given queued host checkpoints from the previous boot, When startup reconciles both stores, Then roots fail without replay and ordinary preparations remain untouched', async () => {
-    const fixture = await setup(async () => ({ async run() { return 'unused'; }, async dispose() {} }), async () => {});
+  it('A42 Given queued host checkpoints from the previous boot, When startup reconciles both stores, Then roots fail without replay and ordinary preparations remain untouched', (ctx)=>runCase(ctx,async(__q)=>{
+    const fixture = await setup(__q,async () => ({ async run() { return 'unused'; }, async dispose() {} }), async () => {});
     const ordinary = await fixture.host.prepareTask({ prompt: 'ordinary preparation', materials: [] });
     const prepared = await fixture.service.prepareRoot(fixture.host, 't1', { prompt: 'old root', materials: [] });
-    await fixture.service.dispose(); fixture.store.close();
-    const store = new DesktopMultiAgentStore(join(fixture.root, 'groups.sqlite'), { bootId: 'second-boot' });
-    cleanup.push(() => store.close());
+    await qcloseGeneration(__q,fixture.store,fixture.service,fixture.host);
+    const store = qnative(__q,qconstruct(__q,'multi-agent-store',()=>new DesktopMultiAgentStore(join(fixture.root, 'groups.sqlite'), { bootId: 'second-boot' })));
+    void 0 /* typed actual-resource close slot registered at acquisition */;
     const runner = vi.fn(async () => {});
-    const service = new DesktopMultiAgentService({ store, coordinator: new DesktopExecutionCoordinator(), createSession: vi.fn() });
-    cleanup.push(() => service.dispose());
-    const host = new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(fixture.root, 'tasks')),
-      materialRegistry: new MaterialRegistry({ workspaceRoot: join(fixture.root, 'materials'), maxBytes: 1024 * 1024 }), runner,
+    const secondCoordinator=qconstruct(__q,'second-coordinator',()=>new DesktopExecutionCoordinator());
+    const service = qservice(__q,qconstruct(__q,'multi-agent-service',()=>new DesktopMultiAgentService({ store, coordinator: secondCoordinator, createSession: vi.fn() })),secondCoordinator);
+    void 0 /* typed actual-resource close slot registered at acquisition */;
+    const host = qhost(__q,qconstruct(__q,'task-host',()=>new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(fixture.root, 'tasks')),
+      materialRegistry: qmaterial(__q,qconstruct(__q,'materials',()=>new MaterialRegistry({ workspaceRoot: join(fixture.root, 'materials'), maxBytes: 1024 * 1024 }))), runner,
       assertTaskAdmission: snapshot => service.assertHostAdmission(snapshot),
-    });
+    })));
     await service.initialize(host);
     expect((await host.inspectTask(prepared.taskId))?.status).toBe('failed');
     expect((await host.inspectTask(prepared.taskId))?.salvage?.reason).toBe('multi_agent_prepare_interrupted');
@@ -2074,9 +2267,9 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await expect(host.startTask(prepared.taskId)).rejects.toThrow(/interrupted|terminal/);
     expect(runner).not.toHaveBeenCalled();
     expect(await host.getActiveTasks()).toEqual([{ taskId: ordinary.taskId }]);
-  });
-  it.each(['reset', 'dispose', 'renew'] as const)('retains a real protected initialization failure across two root task identities without an ordinary SDK fallback (%s)', async mode => {
-    await hideOwnedRegisteredEnvironmentForNegativeFixture(restore => cleanup.push(restore));
+  }));
+  it.for(['reset', 'dispose', 'renew'] as const)('retains a real protected initialization failure across two root task identities without an ordinary SDK fallback (%s)', (mode,ctx)=>runCase(ctx,async(__q)=>{
+    await hideOwnedRegisteredEnvironmentForNegativeFixture(restore => qaction(__q,'old-cleanup-line-2079','leaf',restore));
     const {parseObservationPolicyFile}=await import('../../../src/runtime/sol-pi/product-bootstrap.js');
     const {DesktopMultiAgentRuntime}=await import('../../electron/desktop-multi-agent-runtime.js');
     const {OpenAIAdapter}=await import('../../../src/ai/adapters/openai.js');
@@ -2084,16 +2277,16 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const {DesktopOwnedToolRegistry}=await import('../../electron/desktop-multi-agent-catalog-bridge.js');
     const {DesktopToolCatalogBridge}=await import('../../electron/desktop-multi-agent-catalog-bridge.js');
     const config=await import('../../../src/utils/config.js');
-    const modelConfig=vi.spyOn(config,'loadConfig').mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'deepseek-flash',label:'Current'}},defaultMode:'interactive'} as never);
-    cleanup.push(()=>modelConfig.mockRestore());
+    const modelConfig=qspy(__q,()=>vi.spyOn(config,'loadConfig')).mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'deepseek-flash',label:'Current'}},defaultMode:'interactive'} as never);
+    void 0 /* original leaf restore registered before mutation */;
     let providerCalls=0,firstFailure:unknown,secondFailure:unknown,turns=0,allowAfterReset=false;
     const forbiddenProvider=new Error('ordinary provider reached after protected init failure');
-    const stream=vi.spyOn(OpenAIAdapter.prototype,'stream').mockImplementation(async function*(){providerCalls++;if(!allowAfterReset)throw forbiddenProvider;yield {type:'text',delta:'Explicitly reset group completed its ordinary task.'};yield {type:'done'};});cleanup.push(()=>stream.mockRestore());
+    const stream=qspy(__q,()=>vi.spyOn(OpenAIAdapter.prototype,'stream')).mockImplementation(async function*(){providerCalls++;if(!allowAfterReset)throw forbiddenProvider;yield {type:'text',delta:'Explicitly reset group completed its ordinary task.'};yield {type:'done'};});void 0 /* original leaf restore registered before mutation */;
     let runner:ReturnType<typeof createDesktopModelRunnerWithRegistry>|undefined, renewOnNextTask=false;
     const observationTasks=new Map<string,import('../../electron/desktop-observation-owner.js').DesktopObservationTaskActivation>();
     let firstIssuedScope:ReturnType<DesktopMultiAgentService['captureObservationInitializationScope']>|undefined;
-    const {MultiAgentCoordinator}=await import('../../../src/ai/agents/multi-agent-coordinator.js');const coreDispose=vi.spyOn(MultiAgentCoordinator.prototype,'dispose');cleanup.push(()=>coreDispose.mockRestore());
-    const f=await setup(async()=>{throw Error('no child should be created');},async(context,input)=>{
+    const {MultiAgentCoordinator}=await import('../../../src/ai/agents/multi-agent-coordinator.js');const coreDispose=qspy(__q,()=>vi.spyOn(MultiAgentCoordinator.prototype,'dispose'));void 0 /* original leaf restore registered before mutation */;
+    const f=await setup(__q,async()=>{throw Error('no child should be created');},async(context,input)=>{
       const issuedScope=f.service.captureObservationInitializationScope(context);firstIssuedScope??=issuedScope;
       expect(()=>f.service.retainFailedObservationInitializationScope({...issuedScope})).toThrow('SOL_PI_DESKTOP_OBSERVATION_SCOPE');
       expect(()=>f.service.retainFailedObservationInitializationScope({incarnation:Object.freeze({}),rootEpoch:context.rootEpoch})).toThrow('SOL_PI_DESKTOP_OBSERVATION_SCOPE');
@@ -2101,9 +2294,9 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       if(renewOnNextTask){const original=[...observationTasks.values()][0]!;observationTasks.set(input.taskId,{...original,consumed:false,group:undefined,live:undefined,environmentRoot:join(f.root,'unregistered-environment')});renewOnNextTask=false;}
       if(!runner){
         const {buildToolList}=await import('../../../src/ai/tools/index.js');const tools=buildToolList(undefined,{cwd:f.root}).filter(tool=>tool.definition.name==='read');
-        const registry=new DesktopOwnedToolRegistry({autoMode:true},tools);cleanup.push(()=>registry.dispose());
-        const catalog=new DesktopToolCatalogBridge({registry,workspaceId:'w1',getService:()=>f.service});cleanup.push(()=>catalog.dispose());
-        const materialRegistry=new MaterialRegistry({workspaceRoot:join(f.root,'materials'),maxBytes:1048576});cleanup.push(()=>materialRegistry.sealAndDrainInstanceMutations());
+        const registry=qconstruct(__q,'registry-or-catalog',()=>new DesktopOwnedToolRegistry({autoMode:true},tools));qaction(__q,'old-cleanup-line-2104','leaf',()=>registry.dispose());
+        const catalog=qconstruct(__q,'registry-or-catalog',()=>new DesktopToolCatalogBridge({registry,workspaceId:'w1',getService:()=>f.service}));qaction(__q,'old-cleanup-line-2105','leaf',()=>catalog.dispose());
+        const materialRegistry=qmaterial(__q,qconstruct(__q,'materials',()=>new MaterialRegistry({workspaceRoot:join(f.root,'materials'),maxBytes:1048576})));void 0 /* typed actual-resource close slot registered at acquisition */;
         const source=join(realpathSync(f.root),'authorized-source.txt');writeFileSync(source,'authorized temporary source');
         const policyFile=join(f.root,'missing-environment-policy.json');writeFileSync(policyFile,JSON.stringify({version:1,environmentId:'deepseek-recipe-0.1.1',model:'deepseek-flash',destination:{provider:'deepseek',url:'https://api.deepseek.com/chat/completions'},localPersistence:true,allowUnclassifiedText:true,allowModelDisclosure:true,allowIncomplete:false,expiresAt:Date.now()+120000,readFileScopes:[{filePath:source,startLine:1}],bashSources:[],compoundExecution:{version:1,mode:'mechanism-experiment'},ordinaryChildren:{enabled:true,maxDepth:1,maxChildren:2,expiresAt:Date.now()+120000,nativeTools:['read']}}));
         const activation={policy:parseObservationPolicyFile(policyFile),profileRoot:join(f.root,'profile'),environmentRoot:join(homedir(),'.cache','xiaok','sol-pi','deepseek-recipe-0.1.1'),onPrompt:async()=>true,consumed:false};
@@ -2130,11 +2323,11 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await vi.waitFor(()=>expect(f.store.activeGroup('t1')?.groupId).not.toBe(oldGroupId));
     f.service.retainFailedObservationInitializationScope(firstIssuedScope!);
     const callsBeforeResetTask=providerCalls;allowAfterReset=true;await f.start();await f.host.drain();expect(f.store.activeGroup('t1')?.groupId).not.toBe(oldGroupId);expect(providerCalls-callsBeforeResetTask).toBe(1);expect.soft(providerCalls).toBe(1);expect(turns).toBe(2);
-  });
+  }));
 
-  it('retains actual Core unknown cleanup when its physical-close factual SQLite publication fails', async () => {
+  it('retains actual Core unknown cleanup when its physical-close factual SQLite publication fails', (ctx)=>runCase(ctx,async(__q)=>{
     let groupId='',childId='',rawFailure:unknown,core:import('../../../src/ai/agents/multi-agent-coordinator.js').MultiAgentCoordinator|undefined;
-    const f=await setup(async()=>({run:async()=> 'completed',dispose:async()=>{}}),async context=>{
+    const f=await setup(__q,async()=>({run:async()=> 'completed',dispose:async()=>{}}),async context=>{
       groupId=context.groupId;
       const result=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'physical-publication-child',taskName:'child',message:'work'});
       childId=result.targetAgentId!;
@@ -2158,6 +2351,6 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     let rejected:unknown;try{await core!.waitForDisposedResources();}catch(error){rejected=error;}
     expect(rejected).toBeInstanceOf(AggregateError);expect((rejected as AggregateError).errors).toContain(rawFailure);
     expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(false);
-  });
+  }));
 
 });

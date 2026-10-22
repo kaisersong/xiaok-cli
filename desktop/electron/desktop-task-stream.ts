@@ -1,5 +1,6 @@
 import { ModelStreamPhysicalOwner, type ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
 import { randomUUID } from 'node:crypto';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 import { recoverModelStream, type ModelRecoveryNotice, type ModelRecoveryPolicy } from '../../src/ai/runtime/model-stream-recovery.js';
@@ -12,6 +13,7 @@ type Input = Request & {
   prepareRequest?: DesktopTaskRequestPreparer;
   onInvocation?: (id: string) => void;
   onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
+  admitUsage?: (invocationId: string) => DesktopModelUsageAdmission;
   onRecovery?: (notice: ModelRecoveryNotice & { summaryOnly: boolean }) => void | Promise<void>;
   canRecover?: () => boolean;
   summaryOnly?: boolean;
@@ -63,11 +65,11 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
   armDeadline();
   let messages = input.messages;
   let invocationId = input.invocationId;
-  let prepared = false, prefix = '', sawTool = false, usageConsumerFailed = false;
+  let prepared = false, prefix = '', sawTool = false, usageConsumerFailed = false, usageAdmissionFailed = false;
   let summaryOnly = Boolean(input.summaryOnly);
   try {
     yield* recoverModelStream({ signal, policy: input.policy, physicalRun,
-      shouldRetry: () => prepared && !usageConsumerFailed,
+      shouldRetry: () => prepared && !usageConsumerFailed && !usageAdmissionFailed,
       onRetry: async notice => {
         if (!summaryOnly && !sawTool && prefix.trim() && input.canRecover?.()) summaryOnly = true;
         // These fragments were visible, but no tool from this interrupted request ran.
@@ -83,7 +85,7 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
         let closeFailure: { error: unknown } | undefined;
         let originalBodyFailure: { error: unknown } | undefined;
         const source = (async function*() {
-        prepared = false;
+        prepared = false; usageAdmissionFailed = false;
         await input.beforeRequest?.();
         requestSignal.throwIfAborted();
         const request = { ...input, messages, tools: summaryOnly ? [] : input.tools, invocationId,
@@ -98,8 +100,16 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
         // return, even when recovery's outward read has already cancelled.
         const providerRun = claimOwner?.admit();
         let iterator: AsyncIterator<StreamChunk> | undefined;
+        let usageAdmission: DesktopModelUsageAdmission | undefined;
         let text = '';
         try {
+          if (input.admitUsage) {
+            try {
+              if (!providerRun) throw Error('desktop_usage_physical_claim_required');
+              providerRun.assertCurrent();
+              usageAdmission = input.admitUsage(current.invocationId);
+            } catch (error) { usageAdmissionFailed = true; throw error; }
+          }
           iterator = streamDesktopTaskProviderConversation(current)[Symbol.asyncIterator]();
           for (;;) {
             const raw = iterator.next();
@@ -110,7 +120,10 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
             if (next.done) break;
             const chunk = next.value;
             if (chunk.type === 'usage') {
-              try { await captureDesktopTaskUsage(input.onUsage, chunk, current.invocationId, providerRun); }
+              const consumer = usageAdmission
+                ? (value: Extract<StreamChunk, { type: 'usage' }>) => usageAdmission!.commit(value.usage?.inputTokens ?? 0, value.usage?.outputTokens ?? 0)
+                : input.onUsage;
+              try { await captureDesktopTaskUsage(consumer, chunk, current.invocationId, providerRun); }
               catch (error) { usageConsumerFailed = true; throw error; }
             }
             if (chunk.type !== 'usage') requestSignal.throwIfAborted();
@@ -132,7 +145,13 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
               if (!observed) providerRun?.noteReturnFailure(physicalError);
               closeFailure = { error: physicalError };
             }
-          } finally { providerRun?.finish(); }
+          } finally {
+            try { usageAdmission?.revoke(); }
+            catch (error) {
+              providerRun?.noteReturnFailure(error);
+              closeFailure = { error: closeFailure ? new AggregateError([closeFailure.error, error], 'desktop_provider_return_and_usage_revoke_failed', { cause: closeFailure.error }) : error };
+            } finally { providerRun?.finish(); }
+          }
         }
         })();
         const checked = async (raw: Promise<IteratorResult<StreamChunk>>): Promise<IteratorResult<StreamChunk>> => {

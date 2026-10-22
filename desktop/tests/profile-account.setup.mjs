@@ -3,6 +3,7 @@ import {afterAll,inject} from 'vitest';
 import {mkdtempSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
 import {createRequire,syncBuiltinESMExports} from 'node:module';
+import {assertProfileAccountWorkerReleased} from '../../tests/support/profile-account-ownership.mjs';
 const ownDescriptor=Object.getOwnPropertyDescriptor,define=Object.defineProperty;
 const own=Object.hasOwn,apply=Reflect.apply;
 const descriptorFields=['value','writable','get','set','enumerable','configurable'];
@@ -52,6 +53,13 @@ export function installTestAccountHome(os,accountHome,registerCleanup,synchroniz
 }
 const root=inject('profileTestAccountRoot');
 if(typeof root!=='string'||!root)throw Error('test_profile_account_root_required');
+const ownership=inject('profileTestAccountOwnership');
+assertProfileAccountWorkerReleased(ownership);
 const accountHome=realpathSync(mkdtempSync(join(root,'account-')));
 const require=createRequire(import.meta.url),os=require('node:os');
-installTestAccountHome(os,accountHome,afterAll);
+installTestAccountHome(os,accountHome,restore=>afterAll(()=>{
+ // Keep the account wrapper while an actual qualified callback may still read
+ // it; a later file fails admission before allocating or changing its home.
+ assertProfileAccountWorkerReleased(ownership);
+ restore();
+}));

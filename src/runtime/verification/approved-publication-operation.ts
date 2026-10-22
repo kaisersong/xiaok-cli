@@ -190,6 +190,9 @@ export function createApprovedPublicationOperations(input:{database:Database;aut
   const p=shape(raw,['ownerKind','ownerId','operationId','fullTupleHash','offset','maxBytes']),who=peer(rawPeer),originalPrincipal=principal(who),active=AbortSignal.any([signal,lifetime.signal]);
   if(typeof p.operationId!=='string'||!p.operationId||p.operationId.length>160||typeof p.fullTupleHash!=='string'||!/^[a-f0-9]{64}$/.test(p.fullTupleHash)||!Number.isSafeInteger(p.offset)||p.offset<0||!Number.isSafeInteger(p.maxBytes)||p.maxBytes<1||p.maxBytes>262144)throw Error('publication_payload_request');
   const observed=await observeOwner({ownerKind:p.ownerKind,ownerId:p.ownerId},who,active);
+  return readObservedPayload(p,who,originalPrincipal,active,observed);
+ }
+ function readObservedPayload(p:Record<string,any>,who:ControllerPeer,originalPrincipal:Principal,active:AbortSignal,observed:Awaited<ReturnType<typeof observeOwner>>){
   if(observed.publication.status!=='committed'||!observed.publication.current||observed.publication.operationId!==p.operationId||observed.publication.fullTupleHash!==p.fullTupleHash)throw Error('publication_payload_not_current');
   const rows=db.prepare("SELECT * FROM publication_operations WHERE owner_key=? AND json_extract(review_json,'$.tuple.operationId')=?").all(json(observed.owner),p.operationId) as Row[];
   if(rows.length!==1)throw Error('publication_payload_binding');const row=rows[0],review=parsePublicationOperationReview(JSON.parse(row.review_json)),tuple=review.tuple;
@@ -201,6 +204,17 @@ export function createApprovedPublicationOperations(input:{database:Database;aut
   const end=Math.min(body.length,p.offset+p.maxBytes),bytes=body.subarray(p.offset,end).toString('base64');
   assertCurrentTuple(tuple);captured.assertCurrent();check();const last=clock();if(last.domainId!==tuple.clockDomainId||last.qualificationEpoch!==tuple.clockQualificationEpoch||last.lowerBound<tuple.notBefore||last.upperBound>=tuple.validUntil)throw Error('publication_operation_not_current');
   return Object.freeze({owner:observed.owner,businessRevision:observed.businessRevision,operationId:tuple.operationId,fullTupleHash:p.fullTupleHash,payloadHash:tuple.immutablePayloadHash,totalBytes:body.length,offset:p.offset,bytes,eof:end===body.length});
+ }
+ async function readCurrentOwnerPayload(raw:unknown,rawPeer:ControllerPeer,signal:AbortSignal){
+  current();if(db.inTransaction)throw Error('publication_operation_outer_transaction');
+  const p=shape(raw,['ownerKind','ownerId']);
+  if(p.ownerKind!=='loop')throw Error('publication_payload_owner');
+  const who=peer(rawPeer),originalPrincipal=principal(who),active=AbortSignal.any([signal,lifetime.signal]);
+  const observed=await observeOwner(p,who,active);
+  current();active.throwIfAborted();if(json(principal(who))!==json(originalPrincipal))throw Error('publication_operation_principal');
+  if(observed.currentVerification!=='valid'||observed.publication.status!=='committed'||!observed.publication.current)return Object.freeze({observation:observed,page:null});
+  const page=readObservedPayload({...p,operationId:observed.publication.operationId,fullTupleHash:observed.publication.fullTupleHash,offset:0,maxBytes:262144},who,originalPrincipal,active,observed);
+  return Object.freeze({observation:observed,page});
  }
  async function recoverExpired(raw:unknown,rawPeer:ControllerPeer,signal:AbortSignal){
   current();if(db.inTransaction)throw Error('publication_operation_outer_transaction');
@@ -225,5 +239,5 @@ export function createApprovedPublicationOperations(input:{database:Database;aut
   return result;
  }
  function track<T>(work:Promise<T>){pending.add(work);void work.then(()=>pending.delete(work),()=>pending.delete(work));return work;}
- return Object.freeze({observeIntentCompletion(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeIntentDependencies(raw,p,signal,true));},observeIntentDependencies(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeIntentDependencies(raw,p,signal));},observeLoopSet(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeLoopSet(raw,p,signal));},prepare: (raw:unknown,p:ControllerPeer)=>prepare(raw,p),prepareRequest,lookupRequest,recoverRequest,recoverUnapproved,readOwnerPayload(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(readOwnerPayload(raw,p,signal));},observeOwner(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeOwner(raw,p,signal));},recoverExpired(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(recoverExpired(raw,p,signal));},approve(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(approve(raw,p,signal));},reconcile(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(reconcile(raw,p,signal));},close(){if(!closing){closing=Promise.resolve().then(async()=>{await Promise.allSettled([...pending]);});closed=true;lifetime.abort();}return closing;}});
+ return Object.freeze({observeIntentCompletion(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeIntentDependencies(raw,p,signal,true));},observeIntentDependencies(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeIntentDependencies(raw,p,signal));},observeLoopSet(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeLoopSet(raw,p,signal));},prepare: (raw:unknown,p:ControllerPeer)=>prepare(raw,p),prepareRequest,lookupRequest,recoverRequest,recoverUnapproved,readCurrentOwnerPayload(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(readCurrentOwnerPayload(raw,p,signal));},readOwnerPayload(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(readOwnerPayload(raw,p,signal));},observeOwner(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(observeOwner(raw,p,signal));},recoverExpired(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(recoverExpired(raw,p,signal));},approve(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(approve(raw,p,signal));},reconcile(raw:unknown,p:ControllerPeer,signal:AbortSignal){return track(reconcile(raw,p,signal));},close(){if(!closing){closing=Promise.resolve().then(async()=>{await Promise.allSettled([...pending]);});closed=true;lifetime.abort();}return closing;}});
 }

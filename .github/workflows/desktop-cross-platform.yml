@@ -107,18 +107,7 @@ jobs:
             desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm ci --ignore-scripts --prefix desktop
-      - name: Verify temporary Loop diagnostic guards
-        run: node --test tests/support/loop-read-error-diagnostic.test.mjs tests/support/loop-read-error-diagnostic-schema.test.mjs tests/support/loop-read-error-diagnostic-gate.test.mjs tests/support/loop-read-error-diagnostic-observation.test.mjs
-      - name: Test complete signed Loop controller paths and cleanup with temporary diagnostic
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
-        working-directory: desktop
-        env:
-          XIAOK_LOOP_READ_ERROR_DIAGNOSTIC: '1'
-        run: |
-          node ../tests/support/loop-read-error-diagnostic-attempt.mjs
-          npm test -- --maxWorkers=1 tests/main/loop-verification-execution-controller.test.ts
-      - name: Test complete signed Loop controller paths and cleanup with diagnostic off
-        if: github.event_name == 'workflow_dispatch'
+      - name: Test complete signed Loop controller paths and cleanup
         working-directory: desktop
         run: npm test -- --maxWorkers=1 tests/main/loop-verification-execution-controller.test.ts
 

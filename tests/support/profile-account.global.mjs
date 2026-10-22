@@ -1,6 +1,7 @@
-import {mkdtempSync,realpathSync,rmSync} from 'node:fs';
+import {mkdtempSync,realpathSync} from 'node:fs';
 import {homedir,tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {createProfileAccountOwnership,teardownProfileAccount} from './profile-account-ownership.mjs';
 
 /** Test infrastructure only. No production path or environment override. */
 export default function setup(project){
@@ -11,6 +12,8 @@ export default function setup(project){
   marker:join(installedRuntime,'.deps-installed'),
  });
  const root=realpathSync(mkdtempSync(join(tmpdir(),'xiaok-vitest-accounts-')));
+ const ownership=createProfileAccountOwnership(root);
  project.provide('profileTestAccountRoot',root);
- return ()=>rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:50});
+ project.provide('profileTestAccountOwnership',ownership);
+ return ()=>teardownProfileAccount(ownership);
 }

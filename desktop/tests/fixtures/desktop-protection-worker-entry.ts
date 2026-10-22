@@ -57,10 +57,12 @@ function sourceTreeHash(): string {
 
 /** Fresh actual production JS, including every sibling dynamically imported by
  * the fixed Worker. No payload, result, exit or read implementation is replaced. */
-export async function compileProtectionWorkerEntry() {
+export async function compileProtectionWorkerEntry(ownership: { onAcquired?: (root: string) => void } = {}) {
+  const onAcquired = ownership.onAcquired;
   const artifacts = join(projectRoot, '.artifacts');
   mkdirSync(artifacts, { recursive: true });
   const root = mkdtempSync(join(artifacts, 'fresh-protection-worker-'));
+  onAcquired?.(root);
   const source = join(projectRoot, 'src/runtime/task-host/protection-read-worker.ts');
   const sourceSha = hash(source);
   const treeSha = sourceTreeHash();
@@ -122,7 +124,7 @@ export async function compileProtectionWorkerEntry() {
     return { root, output, sourceSha, treeSha, emittedSha: hash(output), audit,
       compilation: { roots, noCheck: false as const, firstReadHashes: compilerAudit.firstReads, readDrift, emittedOutputs } };
   } catch (error) {
-    rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    if (!onAcquired) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
     throw error;
   }
 }

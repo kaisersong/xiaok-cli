@@ -1,6 +1,7 @@
 /** Fixed host lifetime. Counts original model promises, never outward races. */
 export interface ModelReadReceipt {consume():void; classifyFailure(error:unknown):void}
 export interface ModelStreamPhysicalRun {
+ assertCurrent():void;
  observeRead<T>(raw:Promise<T>,knownReasons:()=>readonly unknown[]):ModelReadReceipt;
  observeReturn<T>(raw:Promise<T>):void;
  noteReturnFailure(error:unknown):void;
@@ -24,6 +25,7 @@ export class ModelStreamPhysicalOwner {
   const current=()=>{if(!this.claims.has(claim))throw Error('agent_model_claim_retired');};
   const failure=(error:unknown)=>{this.failures.push(error);};
   return Object.freeze({
+   assertCurrent:current,
    observeRead:<T>(raw:Promise<T>,knownReasons:()=>readonly unknown[]):ModelReadReceipt=>{
     current();let outcome:'pending'|'fulfilled'|'rejected'='pending',reason:unknown;
     let classification:'pending'|'consumed'|'failed'='pending',visibleError:unknown,recorded=false;

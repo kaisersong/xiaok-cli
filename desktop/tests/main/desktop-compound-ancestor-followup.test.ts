@@ -1,3 +1,12 @@
+import nativeProcess from 'node:process';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import {types as qualifiedUtilTypes} from 'node:util';
+import {randomBytes} from 'node:crypto';
+import {lstatSync} from 'node:fs';
+import {userInfo} from 'node:os';
+import {type TestContext,inject} from 'vitest';
+import {acquireProfileAccountLease,assertProfileAccountWorkerReleased} from '../../../tests/support/profile-account-ownership.mjs';
+import {writeFileSync} from 'node:fs';
 // @vitest-environment node
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, realpathSync } from 'node:fs';
@@ -18,7 +27,7 @@ import * as publicationProducer from '../../../src/runtime/sol-pi/compound-publi
 
 // Source-mode Vitest does not emit the fixed .js Worker entry. Map only that
 // URL to the test-owned compiled production entry; execution and exit are native.
-const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0, receipts:[] as any[],unknown:false,compiled:[] as any[],builds:[] as any[] }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const sourceUrl = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url);
@@ -34,67 +43,250 @@ vi.mock('node:worker_threads', async importOriginal => {
       try { const path = typeof filename === 'string' ? filename : fileURLToPath(filename); protectionMapped = join(realpathSync(dirname(path)), basename(path)) === protectionSource; } catch { /* unowned native entry */ }
       if (protectionMapped && !nativeWorker.protectionOutput) throw Error('fresh fixed protection Worker required');
       super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
+      qobserveWorker(this,mapped||protectionMapped);
       if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
   } };
 });
-beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); const protection = await compileProtectionWorkerEntry(); nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root; });
-afterAll(() => {
-  try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
-  finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
+beforeAll(async()=>{
+ const acquired=(root:string)=>{const canonical=realpathSync(root),stat=lstatSync(canonical);const identity={root:canonical,uid:stat.uid,dev:stat.dev,ino:stat.ino,birthtimeMs:stat.birthtimeMs};nativeWorker.compiled.push(identity);if(canonical!==root||!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==userInfo().uid)throw Error('qualified_compiled_root_identity');};
+ const open=async<T,>(invoke:()=>Promise<T>):Promise<T>=>{const record={raw:undefined as Promise<T>|undefined,outcome:undefined as QualifiedOutcome|undefined};nativeWorker.builds.push(record);try{const raw=invoke();record.raw=raw;const value=await raw;record.outcome={ok:true,value};return value;}catch(error){record.outcome={ok:false,error};throw error;}};
+ Object.assign(nativeWorker,await open(()=>compileVerifierEntry('delivery-verifier-worker.ts',{onAcquired:acquired})));const protection=await open(()=>compileProtectionWorkerEntry({onAcquired:acquired}));nativeWorker.protectionOutput=protection.output;nativeWorker.protectionRoot=protection.root;
 });
+afterAll(()=>{
+ const errors:unknown[]=[];
+ try{expect(nativeWorker.exits).toBe(nativeWorker.starts);}catch(error){errors.push(error);}
+ const safe=qualifiedRecords.length>0&&nativeWorker.compiled.length===2&&nativeWorker.builds.length===2&&nativeWorker.builds.every(build=>build.raw&&build.outcome?.ok===true)&&!nativeWorker.unknown&&nativeWorker.receipts.every(item=>item.exited)&&qualifiedRecords.every(r=>r.callbackClosed&&r.leavesClosed&&r.accountReleased);
+ if(safe){for(const identity of nativeWorker.compiled)try{const stat=lstatSync(identity.root);if(realpathSync(identity.root)!==identity.root||stat.isSymbolicLink()||['uid','dev','ino','birthtimeMs'].some(k=>(stat as any)[k]!==identity[k]))throw Error('qualified_compiled_root_changed');rmSync(identity.root,{recursive:true,force:true,maxRetries:3});}catch(error){errors.push(error);}}
+ else {for(const record of qualifiedRecords)if(record.late)errors.push(...record.errors);errors.push(Error('qualified_compiled_root_retained_until_worker_exit'));}
+ if(errors.length===1)throw errors[0];if(errors.length)throw new AggregateError(errors,'qualified_compiler_cleanup_failed',{cause:errors[0]});
+});
+
+// File-private test lifecycle; this candidate is not applied or execution-approved.
+type QualifiedOutcome={ok:true;value:unknown}|{ok:false;error:unknown};
+type QualifiedSlot={label:string;kind:'stop'|'owner'|'source'|'material'|'rescue'|'leaf'|'native';receiver:any;method:Function;args:unknown[];called:boolean;rawWritten:boolean;raw?:unknown;outcome?:QualifiedOutcome;reaction?:Promise<void>;workers:any[]};
+type QualifiedRecord={ctx:TestContext;nonce:string;refs:unknown[];registrations:unknown[];sequence:number;seal?:number;closing:boolean;late:boolean;errors:unknown[];assertions:unknown[];expectedFailures:Set<unknown>;slots:QualifiedSlot[];closingSlots?:readonly QualifiedSlot[];pending:Set<object>;roots:any[];natives:any[];services:any[];coordinators:any[];sessions:any[];operations:any[];hostMaterials:any[];workers:any[];opaque:boolean;callbackClosed:boolean;leavesClosed:boolean;accountReleased:boolean;account:any;lease?:{release():void};workP?:Promise<void>;workOutcome?:QualifiedOutcome;scenarioP?:Promise<void>;hookFailure?:{error:unknown};abort?:()=>void;abortInstalled:boolean;closeStarted:boolean};
+type QualifiedOrigin={record:QualifiedRecord;slot?:QualifiedSlot};
+const qualifiedAnchor=Symbol('qualified-complex-fixture-strong-registry');
+const qualifiedRecords:QualifiedRecord[]=[];
+Object.defineProperty(nativeProcess,qualifiedAnchor,{value:qualifiedRecords,enumerable:false,configurable:false,writable:false});
+if(Object.getOwnPropertyDescriptor(nativeProcess,qualifiedAnchor)?.value!==qualifiedRecords)throw Error('qualified_fixture_registry_unanchored');
+const qualifiedALS=new AsyncLocalStorage<QualifiedOrigin>();
+const qHasOwn=Object.hasOwn,qOwnDescriptor=Object.getOwnPropertyDescriptor,qNativeApply=Reflect.apply,qIsProxy=qualifiedUtilTypes.isProxy,qIsNativeError=qualifiedUtilTypes.isNativeError;
+const qDOMNameGetter=qOwnDescriptor(DOMException.prototype,'name')?.get;
+function qknownAbort(error:unknown):boolean{
+ try{
+  if((typeof error!=='object'&&typeof error!=='function')||error===null||qIsProxy(error))return false;
+  if(qIsNativeError(error)){const descriptor=qOwnDescriptor(error,'name');return Boolean(descriptor&&qHasOwn(descriptor,'value')&&descriptor.value==='AbortError');}
+  return Boolean(qDOMNameGetter&&qNativeApply(qDOMNameGetter,error,[])==='AbortError');
+ }catch{return false;}
+}
+
+const qhold=<T,>(r:QualifiedRecord,value:T):T=>{r.refs.push(value);return value;};
+function qerror(r:QualifiedRecord,error:unknown){qhold(r,error);r.errors.push(error);}
+function qregister<T>(r:QualifiedRecord,label:string,value:T):T{
+ qhold(r,value);r.registrations.push({label,value});r.sequence++;
+ if(r.closing){r.late=true;r.callbackClosed=false;qerror(r,Error('qualified_fixture_late_registration'));}
+ return value;
+}
+function qconstruct<T>(r:QualifiedRecord,label:string,construct:()=>T):T{
+ const pending=qregister(r,label+':construction',{label,construct});r.pending.add(pending);
+ const value=construct();qregister(r,label,value);r.pending.delete(pending);return value;
+}
+function qslot(r:QualifiedRecord,label:string,kind:QualifiedSlot['kind'],receiver:any,method:Function,args:unknown[]=[]):QualifiedSlot{
+ const slot=qregister(r,label+':slot',{label,kind,receiver,method,args,called:false,rawWritten:false,workers:[]} as QualifiedSlot);r.slots.push(slot);return slot;
+}
+function qspy<T extends {mockRestore():unknown}>(r:QualifiedRecord,invoke:()=>T):T{
+ const value=qconstruct(r,'spy',invoke);qslot(r,'original-spy-restore','leaf',value,value.mockRestore);return value;
+}
+function qstub<T>(r:QualifiedRecord,invoke:()=>T):T{
+ qslot(r,'original-unstub-all','leaf',vi,vi.unstubAllGlobals);return qconstruct(r,'global-stub',invoke);
+}
+function qaction(r:QualifiedRecord,label:string,kind:QualifiedSlot['kind'],action:()=>unknown){qslot(r,label,kind,undefined,action);}
+function qcall(r:QualifiedRecord,slot:QualifiedSlot){
+ if(slot.called)return;slot.called=true;
+ try{
+  // The ALS close context belongs only to this already-bound actual owner slot.
+  // Internal Workers fill its existing observation collection, never add owners.
+  const raw=qualifiedALS.run({record:r,slot},()=>Reflect.apply(slot.method,slot.receiver,slot.args));slot.raw=qhold(r,raw);slot.rawWritten=true;
+  slot.reaction=qhold(r,Promise.resolve(raw).then(value=>{slot.outcome=qhold(r,{ok:true,value});},error=>{slot.outcome=qhold(r,{ok:false,error});qerror(r,error);}));
+ }catch(error){slot.outcome=qhold(r,{ok:false,error});qerror(r,error);}
+}
+function qroot(r:QualifiedRecord,prefix:string):string{
+ const root=qregister(r,'root-presence',{raw:undefined as string|undefined,identity:undefined as any,written:false});r.roots.push(root);
+ root.raw=qregister(r,'root-raw',mkdtempSync(join(tmpdir(),prefix)));
+ const canonical=qregister(r,'root-canonical',realpathSync(root.raw)),stat=qregister(r,'root-stat',lstatSync(canonical));
+ if(canonical!==root.raw||!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==userInfo().uid)throw Error('qualified_fixture_root_identity');
+ root.identity={root:canonical,nonce:r.nonce,runNonce:r.account.runNonce,pid:nativeProcess.pid,ppid:nativeProcess.ppid,uid:stat.uid,dev:stat.dev,ino:stat.ino,birthtimeMs:stat.birthtimeMs};
+ writeFileSync(join(canonical,'qualified-fixture-identity.json'),JSON.stringify(root.identity)+'\n',{flag:'wx',mode:0o600});root.written=true;return canonical;
+}
+function qnative<T extends {close():unknown}>(r:QualifiedRecord,value:T):T{
+ qregister(r,'native-store',value);const descriptor=Object.getOwnPropertyDescriptor(value,'db');const db=descriptor&&qHasOwn(descriptor,'value')?descriptor.value:undefined;
+ const descriptorOpen=db&&Object.getOwnPropertyDescriptor(db,'isOpen');const native=qregister(r,'native-receiver',{value,db,get:descriptorOpen?.get,closed:false,closeSlot:undefined as QualifiedSlot|undefined,probeValid:Boolean(db&&typeof descriptorOpen?.get==='function'&&descriptorOpen.configurable===false)});r.natives.push(native);native.closeSlot=qslot(r,'store.close','native',value,value.close);return value;
+}
+function qprobeNative(native:any):boolean{
+ const storeDescriptor=qOwnDescriptor(native.value,'db');
+ if(!storeDescriptor||!qHasOwn(storeDescriptor,'value')||storeDescriptor.value!==native.db)throw Error('qualified_fixture_native_receiver_changed');
+ const open=qOwnDescriptor(native.db,'isOpen');
+ if(!open||open.get!==native.get||open.set!==undefined||open.configurable!==false||typeof native.get!=='function')throw Error('qualified_fixture_native_getter_changed');
+ const state=qNativeApply(native.get,native.db,[]);if(state!==true&&state!==false)throw Error('qualified_fixture_native_state_unknown');return state;
+}
+function qservice<T extends {dispose():unknown;runtimeStatus():{blocked:boolean}}>(r:QualifiedRecord,value:T,coordinator:DesktopExecutionCoordinator):T{
+ qregister(r,'service',value);qregister(r,'coordinator',coordinator);r.services.push(value);r.coordinators.push(coordinator);qslot(r,'service.dispose','owner',value,value.dispose);return value;
+}
+function qhost<T extends InProcessTaskRuntimeHost>(r:QualifiedRecord,value:T):T{
+ qregister(r,'host',value);qslot(r,'host.stopAccepting','stop',value,value.stopAccepting,['app_shutdown']);qslot(r,'host.abortAllActive','stop',value,value.abortAllActive,['app_shutdown']);qslot(r,'host.drain','owner',value,value.drain);qslot(r,'host.sourceClose','source',value,value.closeSourceWriterForMigration);
+ const options=qOwnDescriptor(value,'options'),material=options&&qHasOwn(options,'value')?qOwnDescriptor(options.value,'materialRegistry'):undefined;
+ const registry=material&&qHasOwn(material,'value')?material.value:undefined,close=r.slots.find(slot=>slot.kind==='material'&&slot.receiver===registry);
+ const binding=qregister(r,'actual-host-material-binding',{host:value,registry,close});r.hostMaterials.push(binding);if(!close)throw Error('qualified_fixture_host_material_inventory_unknown');return value;
+}
+function qmaterial<T extends MaterialRegistry>(r:QualifiedRecord,value:T):T{qregister(r,'material',value);qslot(r,'material.seal','material',value,value.sealAndDrainInstanceMutations);return value;}
+function qopaque<T>(r:QualifiedRecord,open:()=>T):T{r.opaque=true;return qconstruct(r,'opaque-native-owner',open);}
+function qproduct<T extends {dispose():unknown}>(r:QualifiedRecord,label:string,open:()=>Promise<T>):Promise<T>{
+ r.opaque=true;const pending=qregister(r,label+':pending',{});r.pending.add(pending);const raw=open();qregister(r,label+':raw',raw);
+ const reaction=raw.then(value=>{qregister(r,label,value);qslot(r,label+'.dispose','owner',value,value.dispose);r.pending.delete(pending);},error=>{qhold(r,error);r.pending.delete(pending);});qhold(r,reaction);return raw;
+}
+function qraw<T>(r:QualifiedRecord,label:string,invoke:()=>Promise<T>):Promise<T>{
+ const operation=qregister(r,label+':operation',{label,raw:undefined as Promise<T>|undefined,outcome:undefined as QualifiedOutcome|undefined,reaction:undefined as Promise<void>|undefined});r.operations.push(operation);
+ const raw=invoke();operation.raw=qhold(r,raw);operation.reaction=qhold(r,raw.then(value=>{operation.outcome=qhold(r,{ok:true,value});},error=>{operation.outcome=qhold(r,{ok:false,error});}));return raw;
+}
+function qsession<T extends {run:Function}>(r:QualifiedRecord,session:T):T{
+ qregister(r,'session',session);const observed=qregister(r,'session-observations',{session,calls:[] as any[],disposeSeen:false});r.sessions.push(observed);
+ for(const name of ['run','dispose','suspend'] as const){const method=(session as any)[name];if(typeof method!=='function')continue;
+  const spy=vi.spyOn(session as any,name).mockImplementation(function(this:unknown,...args:unknown[]){
+   if(r.closing&&name==='run'){r.late=true;qerror(r,Error('qualified_fixture_late_session_run'));}
+   const call={name,receiver:this,args,raw:undefined as unknown,outcome:undefined as QualifiedOutcome|undefined,reaction:undefined as Promise<void>|undefined};observed.calls.push(call);qhold(r,call);
+   try{const raw=Reflect.apply(method,this,args);call.raw=qhold(r,raw);if(name==='dispose')observed.disposeSeen=true;
+    call.reaction=qhold(r,Promise.resolve(raw).then(value=>{call.outcome=qhold(r,{ok:true,value});},error=>{call.outcome=qhold(r,{ok:false,error});if(name==='run'){if(!qknownAbort(error))r.assertions.push(error);}else qerror(r,error);}));return raw;
+   }catch(error){call.outcome=qhold(r,{ok:false,error});if(name==='run'){if(!qknownAbort(error))r.assertions.push(error);}else qerror(r,error);throw error;}
+  });qslot(r,'session.'+name+'.restore','leaf',spy,spy.mockRestore);
+ }
+ return session;
+}
+function qobserveWorker(worker:any,knownProductionEntry:boolean){
+ const origin=qualifiedALS.getStore();const actual={worker,threadId:worker.threadId,origin,exited:false,code:undefined as number|undefined,raw:undefined as Promise<void>|undefined};
+ const pending=new Promise<void>(resolve=>worker.once('exit',(code:number)=>{actual.exited=true;actual.code=code;resolve();}));actual.raw=pending;
+ nativeWorker.receipts.push(actual);
+ if(!origin||!knownProductionEntry){nativeWorker.unknown=true;if(origin){qhold(origin.record,actual);origin.record.late=true;origin.record.callbackClosed=false;qerror(origin.record,Error('qualified_fixture_worker_entry_or_origin_unknown'));}return;}
+ const r=origin.record;qhold(r,actual);r.workers.push(actual);
+ if(r.closing){
+  const slot=origin.slot;
+  if(!slot||!slot.receiver||!r.slots.includes(slot)||!slot.called||slot.outcome!==undefined||!['owner','source','material'].includes(slot.kind)){r.late=true;r.callbackClosed=false;qerror(r,Error('qualified_fixture_worker_origin_unknown'));}
+  else slot.workers.push(actual);
+ }else qregister(r,'actual-worker',actual);
+}
+async function qcloseGeneration(r:QualifiedRecord,store:DesktopMultiAgentStore,service:DesktopMultiAgentService,host:InProcessTaskRuntimeHost){
+ const dispose=r.slots.find(s=>s.kind==='owner'&&s.receiver===service&&s.method===service.dispose);
+ const drain=r.slots.find(s=>s.kind==='owner'&&s.receiver===host&&s.method===host.drain);
+ const stops=r.slots.filter(s=>s.kind==='stop'&&s.receiver===host);
+ const source=r.slots.find(s=>s.kind==='source'&&s.receiver===host),material=r.hostMaterials.find(item=>item.host===host)?.close;
+ const native=r.natives.find(n=>n.value===store);
+ if(!dispose||!drain||stops.length!==2||!source||!material||!native?.probeValid)throw Error('qualified_fixture_generation_inventory_unknown');
+ const failures:unknown[]=[];
+ const phases:QualifiedSlot[][]=[[...stops,dispose,drain],[source],[material]];
+ for(const phase of phases){
+  for(const slot of phase)qcall(r,slot);
+  for(const slot of phase){await slot.reaction;if(slot.outcome?.ok!==true)failures.push(slot.outcome&&slot.outcome.ok===false?slot.outcome.error:Error('qualified_fixture_generation_close_unknown'));}
+ }
+ if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_fixture_generation_close_failed',{cause:failures[0]});
+ for(const coordinator of r.coordinators){const snapshot=coordinator.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)throw Error('qualified_fixture_generation_not_idle');}
+ if(service.runtimeStatus().blocked!==false||r.sessions.some(session=>!session.disposeSeen||session.calls.some((call:any)=>!call.outcome))||r.workers.some(worker=>!worker.exited))throw Error('qualified_fixture_generation_callbacks_unknown');
+ qprobeNative(native);qcall(r,native.closeSlot);await native.closeSlot.reaction;
+ if(native.closeSlot.outcome?.ok!==true||!native.closeSlot.rawWritten)throw native.closeSlot.outcome?.ok===false?native.closeSlot.outcome.error:Error('qualified_fixture_generation_native_close_unknown');
+ if(qprobeNative(native)!==false)throw Error('qualified_fixture_generation_native_open');native.closed=true;
+}
+function qbeginClose(r:QualifiedRecord){
+ if(r.closeStarted)return;r.closeStarted=true;r.closing=true;r.seal=r.sequence;r.closingSlots=Object.freeze(r.slots.slice());
+ for(const kind of ['rescue','stop','owner'] as const)for(const slot of r.closingSlots)if(slot.kind===kind)qcall(r,slot);
+}
+async function qfinish(r:QualifiedRecord){
+ qbeginClose(r);const population=r.closingSlots!;
+ for(const slot of population)if(slot.kind==='stop'||slot.kind==='owner'||slot.kind==='rescue')await slot.reaction;
+ for(const kind of ['source','material'] as const){for(const slot of population)if(slot.kind===kind)qcall(r,slot);for(const slot of population)if(slot.kind===kind)await slot.reaction;}
+ // Never infer child callback closure from a rejected dispose/status/UI receipt.
+ const ownerHealthy=population.filter(s=>['stop','owner','source','material','rescue'].includes(s.kind)).every(s=>s.called&&s.outcome?.ok===true);
+ for(const operation of r.operations)await operation.reaction;
+ const operationsSettled=r.operations.every(operation=>Boolean(operation.outcome));
+ const sessionHealthy=r.sessions.every(s=>s.disposeSeen&&s.calls.every((c:any)=>Boolean(c.outcome)&&(c.name==='run'||c.outcome.ok===true)));
+ r.callbackClosed=Boolean(r.workOutcome)&&ownerHealthy&&sessionHealthy&&operationsSettled&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(w=>w.exited);
+ if(r.callbackClosed){
+  for(const slot of [...population].reverse())if(slot.kind==='leaf')qcall(r,slot);
+  for(const slot of population)if(slot.kind==='leaf')await slot.reaction;
+  r.leavesClosed=population.filter(s=>s.kind==='leaf').every(s=>s.outcome?.ok===true)&&!r.late&&r.sequence===r.seal;
+  if(r.leavesClosed&&r.abortInstalled&&r.abort){try{r.ctx.signal.removeEventListener('abort',r.abort);r.abortInstalled=false;}catch(error){qerror(r,error);r.leavesClosed=false;}}
+  if(r.leavesClosed){try{r.lease?.release();r.accountReleased=Boolean(r.lease);}catch(error){qerror(r,error);}}
+ }
+ let nativeAllowed=r.callbackClosed&&r.leavesClosed&&ownerHealthy&&!r.late;
+ try{for(const c of r.coordinators){const snapshot=c.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)nativeAllowed=false;}for(const s of r.services)if(s.runtimeStatus().blocked!==false)nativeAllowed=false;}catch(error){qerror(r,error);nativeAllowed=false;}
+ for(const native of r.natives)try{if(!native.probeValid)throw Error('qualified_fixture_native_probe_unknown_before_close');qprobeNative(native);}catch(error){qerror(r,error);nativeAllowed=false;}
+ if(nativeAllowed){for(const slot of population)if(slot.kind==='native')qcall(r,slot);for(const slot of population)if(slot.kind==='native')await slot.reaction;
+  for(const n of r.natives)try{if(!n.closeSlot||!n.closeSlot.called||!n.closeSlot.rawWritten||n.closeSlot.outcome?.ok!==true||n.closeSlot.receiver!==n.value||typeof n.get!=='function'||qprobeNative(n)!==false)throw Error('qualified_fixture_native_close_unknown');n.closed=true;}catch(error){qerror(r,error);}}
+ const assertions=r.assertions.filter(error=>!r.expectedFailures.has(error));r.errors.unshift(...assertions);
+ if(!r.callbackClosed)qerror(r,Error('qualified_fixture_callback_close_unknown'));
+ // No approved seam exposes product-internal betterSQLite receivers. Every root
+ // stays strongly held for parent-only exact cleanup after actual worker exit.
+ for(const root of r.roots)try{
+  if(!root.written)throw Error('qualified_fixture_partial_root_identity');const stat=lstatSync(root.identity.root);
+  if(realpathSync(root.identity.root)!==root.identity.root||stat.isSymbolicLink()||['uid','dev','ino','birthtimeMs'].some(key=>(stat as any)[key]!==root.identity[key]))throw Error('qualified_fixture_retained_identity_changed');
+  console.info('QUALIFIED_FIXTURE_RETAINED '+JSON.stringify({...root.identity,callbackClosed:r.callbackClosed,leavesClosed:r.leavesClosed,accountReleased:r.accountReleased,opaqueNativeUnconfirmed:r.opaque,publicNativeClosed:r.natives.length?r.natives.every(n=>n.closed):null,rootDeleted:false,retainedForParent:true,late:r.late,sequence:r.sequence,seal:r.seal}));
+ }catch(error){qerror(r,error);}
+}
+function runCase(ctx:TestContext,work:(r:QualifiedRecord)=>Promise<void>):Promise<void>{
+ const r:QualifiedRecord={ctx,nonce:randomBytes(16).toString('hex'),refs:[],registrations:[],sequence:0,closing:false,late:false,errors:[],assertions:[],expectedFailures:new Set(),slots:[],pending:new Set(),roots:[],natives:[],services:[],coordinators:[],sessions:[],operations:[],hostMaterials:[],workers:[],opaque:false,callbackClosed:false,leavesClosed:false,accountReleased:false,account:undefined,abortInstalled:false,closeStarted:false};qualifiedRecords.push(r);qhold(r,ctx);qhold(r,work);
+ const scenario=(async()=>{
+  await Promise.resolve();let failure:{error:unknown}|undefined;
+  try{
+   if(r.hookFailure)throw r.hookFailure.error;
+   r.abort=()=>{try{qhold(r,{reason:ctx.signal.reason});qbeginClose(r);}catch(error){qerror(r,error);}};qhold(r,r.abort);ctx.signal.addEventListener('abort',r.abort,{once:true});r.abortInstalled=true;ctx.signal.throwIfAborted();
+   for(const previous of qualifiedRecords){if(previous===r)break;if(!previous.callbackClosed||!previous.leavesClosed||!previous.accountReleased)throw Error('qualified_fixture_previous_callback_unknown');}
+   r.account=qhold(r,inject('profileTestAccountOwnership' as never));assertProfileAccountWorkerReleased(r.account);
+   r.lease=qhold(r,acquireProfileAccountLease(r.account,realpathSync(userInfo().homedir),r.nonce));
+   const raw=qualifiedALS.run({record:r},()=>work(r));r.workP=qhold(r,raw);
+   try{const value=await raw;r.workOutcome=qhold(r,{ok:true,value});}catch(error){r.workOutcome=qhold(r,{ok:false,error});throw error;}
+  }catch(error){failure=qhold(r,{error});}
+  finally{try{await qfinish(r);}catch(error){qerror(r,error);}}
+  const errors=[...(failure?[failure.error]:[]),...r.errors];if(errors.length===1)throw errors[0];if(errors.length)throw new AggregateError(errors,'qualified_fixture_body_and_cleanup_failed',{cause:errors[0]});
+ })();r.scenarioP=qhold(r,scenario);const finished=()=>scenario;qhold(r,finished);
+ try{ctx.onTestFinished(finished);}catch(error){r.hookFailure=qhold(r,{error});}return scenario;
+}
+
+const qualifiedCompiledAnchor=Symbol('qualified-compiled-worker-strong-registry');
+Object.defineProperty(nativeProcess,qualifiedCompiledAnchor,{value:nativeWorker,enumerable:false,configurable:false,writable:false});
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('P2 actual managed ancestor followup', () => {
-  const cleanup: Array<() => void | Promise<void>> = [];
-  const capturedAssertions: unknown[] = [];
-  const expectedRunnerFailures=new Set<unknown>();
-  afterEach(async () => {
-    const cleanupErrors:unknown[]=[];
-    for (const action of cleanup.splice(0).reverse()) {try{await action();}catch(error){cleanupErrors.push(error);}}
-    // Always restore every fixture, even when an unknown physical outcome makes
-    // disposal reject; report that original failure without contaminating the next case.
-    const assertions=capturedAssertions.splice(0).filter(error=>!expectedRunnerFailures.has(error));expectedRunnerFailures.clear();
-    if(cleanupErrors.length)throw new AggregateError([...assertions,...cleanupErrors],'runner and cleanup failures: '+[...assertions,...cleanupErrors].map(value=>value instanceof Error?value.stack:String(value)).join('\n'));
-    // Host/core intentionally catch runner failures. A test assertion inside a
-    // real runner must still fail this test, not be mistaken for product output.
-    expect(assertions.map(error=>error instanceof Error?error.stack+(error.cause instanceof Error?"\nCAUSE: "+error.cause.stack:""):error)).toEqual([]);
-  });
-  async function setup(createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { expectedDisposeError?:Error|(()=>Error|undefined); isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-multi-agent-service-')));
-    if(policy.isolatedConfigRoot){const previous=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=root;cleanup.push(()=>{if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;});}
-    cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
-    const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
-    cleanup.push(() => store.close());
-    const coordinator = new DesktopExecutionCoordinator({ multiAgentLeaseMs: policy.multiAgentLeaseMs });
-    const service = new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
-      const session = await createSession(input);
-      return { ...session, run: async (...args) => {
-        try { return await session.run(...args); }
-        catch (error) { if (!(error instanceof Error && error.name === 'AbortError')) capturedAssertions.push(error); throw error; }
-      } };
-    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 });
-    cleanup.push(async () => {try{await service.dispose();}catch(error){if(error!==(typeof policy.expectedDisposeError==='function'?policy.expectedDisposeError():policy.expectedDisposeError))throw error;}});
+  async function setup(__q:QualifiedRecord,createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { expectedDisposeError?:Error|(()=>Error|undefined); isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
+    const root = qroot(__q,'xiaok-multi-agent-service-');
+    if(policy.isolatedConfigRoot){const previous=process.env.XIAOK_CONFIG_DIR;qaction(__q,'old-cleanup-line-66','leaf',()=>{if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;});process.env.XIAOK_CONFIG_DIR=root;}
+    void 0 /* typed actual-resource close slot registered at acquisition */;
+    const store = qnative(__q,qconstruct(__q,'multi-agent-store',()=>new DesktopMultiAgentStore(join(root, 'groups.sqlite'))));
+    void 0 /* typed actual-resource close slot registered at acquisition */;
+    const coordinator = qconstruct(__q,'coordinator',()=>new DesktopExecutionCoordinator({ multiAgentLeaseMs: policy.multiAgentLeaseMs }));
+    const service = qservice(__q,qconstruct(__q,'multi-agent-service',()=>new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
+      const session = await qraw(__q,'ordinary-session-factory',()=>createSession(input));
+      return qsession(__q,session);
+    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 })),coordinator);
+    void 0 /* typed actual-resource close slot registered at acquisition */;
     service.registerThread({ threadId: 't1', profileId: 'p1', workspaceId: 'w1', cwd: root });
     let deliveryAuthority!: DesktopHostDeliveryAuthority;
-    const host = new InProcessTaskRuntimeHost({
+    const host = qhost(__q,qconstruct(__q,'task-host',()=>new InProcessTaskRuntimeHost({
       snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),
       groupObservationSource: service,
-      materialRegistry: new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 * 1024 }),
-      runner: input => service.runRoot(input, async context => {
+      materialRegistry: qmaterial(__q,qconstruct(__q,'materials',()=>new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 * 1024 }))),
+      runner: input => qraw(__q,'actual-root-run',()=>service.runRoot(input, async context => {
         try { return await body(context,input); }
-        catch (error) { capturedAssertions.push(error); throw error; }
-      }),
+        catch (error) { __q.assertions.push(error); throw error; }
+      })),
       authorizePreparation: (taskId, marker) => service.assertHostPreparation(taskId, marker),
       assertTaskAdmission: snapshot => service.assertHostAdmission(snapshot),
       decideCancellation: (snapshot, reason) => service.decideHostCancellation(snapshot, reason),
       getExecutionPolicy: () => ({ deliveryRepair: 'explicit' }),
       onDeliveryReport: report => service.recordHostDelivery({ requestSource: 'scheduler', authority: deliveryAuthority, report }),
-    });
+    })));
     await service.initialize(host);
     deliveryAuthority = service.bindHostDeliveryOwner(host);
-    cleanup.push(() => host.drain());
+    void 0 /* typed actual-resource close slot registered at acquisition */;
     const start = async () => {
       const prepared = await service.prepareRoot(host, 't1', { prompt: 'run root', materials: [] });
       if (policy.coreIdleTimeoutMs !== undefined) {
@@ -109,10 +301,10 @@ describe('P2 actual managed ancestor followup', () => {
     return { root, store, service, coordinator, host, start };
   }
 
-  it.each(['success','unpublished-ack','unknown-resource','own-effect','active-window','final-history-failure','final-history-failure-shutdown','root-tail'] as const)('uses exact drained descendant resources for a fresh user turn: %s',async scenario=>{
+  it.for(['success','unpublished-ack','unknown-resource','own-effect','active-window','final-history-failure','final-history-failure-shutdown','root-tail'] as const)('uses exact drained descendant resources for a fresh user turn: %s',(scenario,ctx)=>runCase(ctx,async(__q)=>{
     const finalHistoryFailure=scenario==='final-history-failure'||scenario==='final-history-failure-shutdown';
     const negative=!['success','active-window','final-history-failure','final-history-failure-shutdown','root-tail'].includes(scenario);
-    const finalPublication=vi.spyOn(publicationProducer,'publishCompoundFinalPublication');cleanup.push(()=>finalPublication.mockRestore());
+    const finalPublication=qspy(__q,()=>vi.spyOn(publicationProducer,'publishCompoundFinalPublication'));void 0 /* original leaf restore registered before mutation */;
     const {writeFileSync,readFileSync}=await import('node:fs'),{homedir}=await import('node:os');
     const {DesktopMultiAgentRuntime}=await import('../../electron/desktop-multi-agent-runtime.js');
     const {DesktopOwnedToolRegistry,DesktopToolCatalogBridge}=await import('../../electron/desktop-multi-agent-catalog-bridge.js');
@@ -124,17 +316,17 @@ describe('P2 actual managed ancestor followup', () => {
     const entered=deferred<void>(),release=deferred<void>(),outcome=deferred<string>(),rootPublished=deferred<void>();
     const response=(delta:unknown,tool=false)=>new Response('data: '+JSON.stringify({choices:[{delta,finish_reason:tool?'tool_calls':'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
     const tool=(id:string,name:string,args:unknown)=>response({tool_calls:[{index:0,id,type:'function',function:{name,arguments:JSON.stringify(args)}}]},true);
-    const f=await setup(input=>runtime.createSession(input),async(context,input)=>{
+    const f=await setup(__q,input=>runtime.createSession(input),async(context,input)=>{
       const source=join(f.root,'source.txt');writeFileSync(source,'Selected source');const policyFile=join(f.root,'policy.json'),expiresAt=Date.now()+240000;
       writeFileSync(policyFile,JSON.stringify({version:1,environmentId:'deepseek-recipe-0.1.1',model:'deepseek-flash',destination:{provider:'deepseek',url:'https://api.deepseek.com/chat/completions'},localPersistence:true,allowUnclassifiedText:true,allowModelDisclosure:true,allowIncomplete:false,expiresAt,readFileScopes:[{filePath:source,startLine:1}],bashSources:[],compoundExecution:{version:1,mode:'mechanism-experiment'},ordinaryChildren:{enabled:true,maxDepth:2,maxChildren:3,expiresAt,nativeTools:['read']}}));
-      const config=await import('../../../src/utils/config.js'),mock=vi.spyOn(config,'loadConfig').mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'deepseek-flash',label:'Current'}},defaultMode:'interactive'} as never);cleanup.push(()=>mock.mockRestore());
-      const read=buildToolList(undefined,{cwd:f.root}).find(t=>t.definition.name==='read')!,base=new DesktopOwnedToolRegistry({autoMode:true},[read]);cleanup.push(()=>base.dispose());
-      const bridge=new DesktopToolCatalogBridge({registry:base,workspaceId:'w1',getService:()=>f.service});cleanup.push(()=>bridge.dispose());
+      const config=await import('../../../src/utils/config.js'),mock=qspy(__q,()=>vi.spyOn(config,'loadConfig')).mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'deepseek-flash',label:'Current'}},defaultMode:'interactive'} as never);void 0 /* original leaf restore registered before mutation */;
+      const read=buildToolList(undefined,{cwd:f.root}).find(t=>t.definition.name==='read')!,base=qconstruct(__q,'registry-or-catalog',()=>new DesktopOwnedToolRegistry({autoMode:true},[read]));qaction(__q,'old-cleanup-line-131','leaf',()=>base.dispose());
+      const bridge=qconstruct(__q,'registry-or-catalog',()=>new DesktopToolCatalogBridge({registry:base,workspaceId:'w1',getService:()=>f.service}));qaction(__q,'old-cleanup-line-132','leaf',()=>bridge.dispose());
       const activation:import('../../electron/desktop-observation-owner.js').DesktopObservationTaskActivation=retainedActivation??{policy:parseObservationPolicyFile(policyFile),profileRoot:join(f.root,'profile'),environmentRoot:join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1'),onPrompt:async()=>true,consumed:false};
       retainedActivation=activation;
-      const runner=createDesktopModelRunnerWithRegistry(base,[read],f.root,{} as never,new MaterialRegistry({workspaceRoot:join(f.root,'runner-materials'),maxBytes:1048576}),{}, {observationTasks:new Map([[input.taskId,activation]]),observationGroupHost:{getHost:()=>f.host,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations},multiAgent:{runtime,service:f.service,catalog:bridge,workspaceId:'w1',cwd:f.root}});
+      const runner=createDesktopModelRunnerWithRegistry(base,[read],f.root,{} as never,qmaterial(__q,qconstruct(__q,'materials',()=>new MaterialRegistry({workspaceRoot:join(f.root,'runner-materials'),maxBytes:1048576}))),{}, {observationTasks:new Map([[input.taskId,activation]]),observationGroupHost:{getHost:()=>f.host,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations},multiAgent:{runtime,service:f.service,catalog:bridge,workspaceId:'w1',cwd:f.root}});
       try{await runner({...input,permissionMode:'auto'},context);}
-      catch(error){if(scenario==='final-history-failure-shutdown'&&context.signal.aborted&&error instanceof Error&&error.name==='AbortError')expectedRunnerFailures.add(error);throw error;}
+      catch(error){if(scenario==='final-history-failure-shutdown'&&context.signal.aborted&&error instanceof Error&&error.name==='AbortError')__q.expectedFailures.add(error);throw error;}
     },{expectedDisposeError:()=>expectedFailure,isolatedConfigRoot:true,prepareObservationSession:input=>runtime.prepareObservationSession(input),prepareObservationMessage:input=>runtime.prepareObservationMessage(input),prepareObservationFollowup:async preparation=>{
       const facts=f.service.inspectManagedFollowupPreparation(preparation),path=join(f.root,'compound-sessions',facts.childSession.exportSnapshot().sessionId+'.json'),original=readFileSync(path,'utf8');
       if(negative){
@@ -152,45 +344,45 @@ describe('P2 actual managed ancestor followup', () => {
     if(scenario==='success'){
       const {DesktopManagedAgentSession}=await import('../../electron/desktop-managed-agent-session.js');
       const originalRun=DesktopManagedAgentSession.prototype.run;
-      const rejectionObserver=vi.spyOn(DesktopManagedAgentSession.prototype,'run').mockImplementation(function(this:InstanceType<typeof DesktopManagedAgentSession>,...args){
+      const rejectionObserver=qspy(__q,()=>vi.spyOn(DesktopManagedAgentSession.prototype,'run')).mockImplementation(function(this:InstanceType<typeof DesktopManagedAgentSession>,...args){
         const raw=originalRun.apply(this,args);
         void raw.then(()=>{},error=>{outcome.resolve(String(error));});
         return raw;
-      });cleanup.push(()=>rejectionObserver.mockRestore());
+      });void 0 /* original leaf restore registered before mutation */;
     }
     const followupTarget=f.service as unknown as {activateManagedFollowup(...args:unknown[]):Promise<void>},activate=followupTarget.activateManagedFollowup.bind(followupTarget);
-    const activationSpy=vi.spyOn(followupTarget,'activateManagedFollowup').mockImplementation(async(...args)=>{try{return await activate(...args);}catch(error){outcome.resolve(String(error));throw error;}});cleanup.push(()=>activationSpy.mockRestore());
+    const activationSpy=qspy(__q,()=>vi.spyOn(followupTarget,'activateManagedFollowup')).mockImplementation(async(...args)=>{try{return await activate(...args);}catch(error){outcome.resolve(String(error));throw error;}});void 0 /* original leaf restore registered before mutation */;
     if(scenario==='active-window'){
-      const followup=f.service.followup.bind(f.service),spy=vi.spyOn(f.service,'followup').mockImplementation(async input=>{const result=await followup(input);expect(result.state).toBe('queued_next_admission');release.resolve();return result;});cleanup.push(()=>spy.mockRestore());
+      const followup=f.service.followup.bind(f.service),spy=qspy(__q,()=>vi.spyOn(f.service,'followup')).mockImplementation(async input=>{const result=await followup(input);expect(result.state).toBe('queued_next_admission');release.resolve();return result;});void 0 /* original leaf restore registered before mutation */;
     }
     if(finalHistoryFailure){
-      const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js'),original=FileSessionStore.prototype.compareAndSave,error=Error('actual final assistant history save failed');expectedRunnerFailures.add(error);
-      const spy=vi.spyOn(FileSessionStore.prototype,'compareAndSave').mockImplementation(async function(this:InstanceType<typeof FileSessionStore>,input){
+      const {FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js'),original=FileSessionStore.prototype.compareAndSave,error=Error('actual final assistant history save failed');__q.expectedFailures.add(error);
+      const spy=qspy(__q,()=>vi.spyOn(FileSessionStore.prototype,'compareAndSave')).mockImplementation(async function(this:InstanceType<typeof FileSessionStore>,input){
         if(input.nextSnapshot.messages.at(-1)?.content.some(block=>block.type==='text'&&block.text==='First child turn completed.')){
           throw error;
         }
         return original.call(this,input);
-      });cleanup.push(()=>spy.mockRestore());
+      });void 0 /* original leaf restore registered before mutation */;
     }
     if(scenario==='final-history-failure-shutdown'){
       const eventOwner=f.service as unknown as {captureCoreEvent(group:unknown,event:{kind:string;agent:{error?:string;status:string}}):void},capture=eventOwner.captureCoreEvent.bind(eventOwner);let stopped=false;
-      const eventSpy=vi.spyOn(eventOwner,'captureCoreEvent').mockImplementation((group,event)=>{
+      const eventSpy=qspy(__q,()=>vi.spyOn(eventOwner,'captureCoreEvent')).mockImplementation((group,event)=>{
         if(!stopped&&event.kind==='status'&&event.agent.error==='actual final assistant history save failed'){
-          stopped=true;release.resolve();void f.service.dispose().catch(failure=>{expectedFailure=failure as Error;expectedRunnerFailures.add(failure);});
+          stopped=true;release.resolve();const actualDispose=f.service.dispose();qhold(__q,actualDispose);qhold(__q,actualDispose.then(()=>{},failure=>{qhold(__q,failure);}));
         }
         capture(group,event);
-      });cleanup.push(()=>eventSpy.mockRestore());
+      });void 0 /* original leaf restore registered before mutation */;
     }
     const tailEntered=deferred<void>(),tailRelease=deferred<void>();
     if(scenario==='root-tail'){
       const original=FileTaskSnapshotStore.prototype.saveWithReceipt;let held=false;
-      const spy=vi.spyOn(FileTaskSnapshotStore.prototype,'saveWithReceipt').mockImplementation(async function(this:FileTaskSnapshotStore,snapshot,previous){
+      const spy=qspy(__q,()=>vi.spyOn(FileTaskSnapshotStore.prototype,'saveWithReceipt')).mockImplementation(async function(this:FileTaskSnapshotStore,snapshot,previous){
         if(!held&&snapshot.status==='completed'){held=true;tailEntered.resolve();await tailRelease.promise;}
         return original.call(this,snapshot,previous);
-      });cleanup.push(()=>spy.mockRestore());cleanup.push(()=>tailRelease.resolve());
+      });void 0 /* original leaf restore registered before mutation */;qaction(__q,'old-cleanup-line-190','rescue',()=>tailRelease.resolve());
     }
     runtime=new DesktopMultiAgentRuntime({service:f.service});
-    vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{
+    qstub(__q,()=>vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{
       try{
       const body=JSON.parse(String(init?.body)),system=String(body.messages[0].content),groupId=f.store.getThread('t1')!.activeGroupId!;
       if(system.includes('Assigned Desktop agent: /root/managed/descendant\n')){
@@ -220,8 +412,8 @@ describe('P2 actual managed ancestor followup', () => {
       rootPublished.resolve();await vi.waitFor(()=>expect(f.store.allAgents(groupId).find(a=>a.canonicalName==='/root/managed'),JSON.stringify(f.store.allAgents(groupId).map(a=>({name:a.canonicalName,status:a.status,error:a.error})))).toMatchObject({status:scenario==='final-history-failure-shutdown'?expect.stringMatching(/^(failed|interrupted|closed)$/):finalHistoryFailure?'failed':'completed',executionActive:false}),{timeout:20000});
       if(scenario==='active-window'&&rootCalls===2)return tool('ancestor-followup','followup_task',{target:'/root/managed',message:'Continue with the descendant publication.'});
       return response({content:'Root completed.'});
-      }catch(error){capturedAssertions.push(error);outcome.resolve(String(error));throw error;}
-    }));cleanup.push(()=>{vi.unstubAllGlobals();});
+      }catch(error){__q.assertions.push(error);outcome.resolve(String(error));throw error;}
+    })));void 0 /* original leaf restore registered before mutation */;
     try{
       await f.start();
       if(scenario==='root-tail'){
@@ -230,7 +422,7 @@ describe('P2 actual managed ancestor followup', () => {
         controller.abort(Error('cancel only this new waiter'));await expect(cancelled).rejects.toThrow('cancel only this new waiter');
         expect(()=>publicationProducer.bindCompoundFinalPublicationConsumer(owner,'replacement',{register:async()=>{},inspectReceipt:()=>{throw Error('not called');}})).toThrow('compound_final_consumer_already_bound');
         await f.start();
-        await new Promise(resolve=>setTimeout(resolve,40));expect(rootCalls).toBe(previousCalls);expect(capturedAssertions).toEqual([]);
+        await new Promise(resolve=>setTimeout(resolve,40));expect(rootCalls).toBe(previousCalls);expect(__q.assertions).toEqual([]);
         tailRelease.resolve();await f.host.drain();expect(rootCalls).toBe(previousCalls+1);return;
       }
       if(scenario==='final-history-failure-shutdown'){
@@ -272,5 +464,5 @@ describe('P2 actual managed ancestor followup', () => {
       else{expect(actual).toMatch(scenario==='unpublished-ack'?/compound_tree_branch_unpublished/:/compound_followup_old_turn_not_drained/);expect(childCalls).toBe(2);}
       expect(descendantCalls).toBe(1);
     }finally{rootPublished.resolve();release.resolve();}
-  },120000);
+  }),120000);
 });

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import type { ExecutionLease } from '../../electron/desktop-execution-coordinator.js';
+import type { DesktopModelUsageAdmission } from '../../electron/desktop-model-usage-admission.js';
 import { cleanupActivityCase, activityFixture, barrier, nativeAuthorizer, serviceSite, spawnChunk, sqliteFault, tick, writeChunk, type Cleanup } from '../fixtures/multi-agent-activity-failure.js';
 
 describe.runIf(nativeAuthorizer)('R6 AF real factory activity and sibling SQLite failures', () => {
@@ -48,9 +49,18 @@ describe.runIf(nativeAuthorizer)('R6 AF real factory activity and sibling SQLite
 
   it.each(['recordRuntimeEvent', 'recordUsage'] as const)('AF2b root awaited %s read failure must abort its already running child', async method => {
     const f = await activityFixture(cleanup), entered = barrier(), release = barrier(), effect = join(f.root, 'child-after-root-fault.txt');
-    const usage = method === 'recordUsage' ? vi.spyOn(f.service, 'recordUsage') : undefined;
+    const usage = method === 'recordUsage' ? vi.fn((admission: DesktopModelUsageAdmission, incoming: number, outgoing: number) => admission.commit(incoming, outgoing)) : undefined;
+    if (usage) {
+      const capture = f.service.captureAdmittedUsage;
+      vi.spyOn(f.service, 'captureAdmittedUsage').mockImplementation(function(this: typeof f.service, ...args) {
+        const original = capture.apply(this, args);
+        return Object.freeze({ commit: (incoming: number, outgoing: number) => usage(original, incoming, outgoing), revoke: () => original.revoke() });
+      });
+    }
     cleanup.push(() => { release.release(); });
-    const fault = sqliteFault(f, { table: 'groups', column: 'data_json', site: method });
+    const fault = sqliteFault(f, { table: 'groups', column: 'data_json',
+      site: usage ? serviceSite('captureAdmittedUsage(', '() => store.readUsageIdentity(captured.groupId') : method,
+      ...(usage ? { extra: (stack: string) => stack.includes(serviceSite('private applyUsageCommand(', 'assertCurrent();')) } : {}) });
     f.setProgram(async function* ({ child, call }) {
       if (child) { if (call === 1) { entered.release(); await release.wait; yield writeChunk(effect); } else yield { type: 'text', delta: 'child done' }; return; }
       if (call === 1) yield spawnChunk();

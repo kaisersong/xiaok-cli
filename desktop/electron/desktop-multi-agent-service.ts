@@ -1,4 +1,5 @@
 import { createDesktopModelPhysicalScope, closeDesktopModelPhysicalScope, type DesktopModelPhysicalScope } from './desktop-task-stream.js';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import type {ManagedCompoundFollowupFacts,PreparedManagedCompoundFollowup} from '../../src/runtime/sol-pi/compound-managed-followup.js';
 import {getCompoundFinalPublicationBinding,openCompoundFollowupPublicationWindow,type CompoundFinalPublicationTicket} from '../../src/runtime/sol-pi/compound-publication-producer.js';
 import {computeSessionHistoryDigest} from '../../src/ai/runtime/session-store/store.js';
@@ -124,6 +125,12 @@ type Source = 'user' | 'agent' | 'scheduler';
 export type DesktopGoalChildReadiness = 'ready' | 'waiting_children' | 'children_need_attention';
 interface AgentRequest { actor: DesktopAgentActor; requestSource: Source; operationId: string }
 interface ActorState { context: DesktopAgentExecutionContext; group: LiveGroup; active: boolean; sealed: boolean; preparing?: boolean; outcome?: DesktopAgentSnapshot['status'] }
+interface UsageFailure { error: unknown }
+interface UsageQuarantineFailure {
+  failures: UsageFailure[];
+  result: unknown;
+  composites: Array<{ result: object; failures: UsageFailure[] }>;
+}
 interface LiveChild {
   id: string; parentId: string; context: DesktopAgentExecutionContext; prepared: PreparedAgentHandle;
   execution?: AgentExecutionHandle; sessionResident: boolean; fullResult?: string;
@@ -236,6 +243,13 @@ export class DesktopMultiAgentService {
   private readonly failedObservationInitializationGroups = new WeakSet<LiveGroup>();
   private readonly dormant = new Map<string, number>();
   private readonly actors = new WeakMap<DesktopAgentActor, ActorState>();
+  private readonly usageAdmissions = new WeakMap<DesktopModelUsageAdmission, {
+    open: boolean;
+    assertCurrent(): void;
+    memo?: { inputTokens: number; outputTokens: number; promise: Promise<void> };
+  }>();
+  private usageIdentityQuarantine?: UsageQuarantineFailure;
+  private usageIdentityQuarantined = false;
   private readonly slots = new Set<string>();
   private readonly resourceCommands = new Map<string, { commands: MultiAgentCommandSequencer; users: number }>();
   private readonly uncertainOperations = new Set<string>();
@@ -1170,23 +1184,137 @@ export class DesktopMultiAgentService {
 
   async recordUsage(context: DesktopAgentExecutionContext, usage: { usageId: string; inputTokens: number; outputTokens: number }): Promise<void> {
     const state = this.requireActor(context.actor, 'agent', context);
-    if (!usage.usageId || usage.usageId.length > 96 || !Number.isSafeInteger(usage.inputTokens) || usage.inputTokens < 0
-      || !Number.isSafeInteger(usage.outputTokens) || usage.outputTokens < 0) throw new Error('invalid usage');
-    await state.group.commands.run(() => {
-      this.requireActor(context.actor, 'agent', context);
-      const operationId = `usage:${createHash('sha256').update(`${context.agentId}:${context.turnId}:${usage.usageId}`).digest('hex')}`;
+    this.assertUsageValues(usage);
+    await this.applyUsageCommand(state.group, context.agentId, context.turnId, context.turn, usage,
+      () => { this.requireActor(context.actor, 'agent', context); });
+  }
+
+  /** Capture only after request preparation and the original physical admission,
+   * before opening its SDK iterator. Settlement cannot authorize new execution. */
+  captureAdmittedUsage(context: DesktopAgentExecutionContext, invocationId: string): DesktopModelUsageAdmission {
+    const state = this.requireActor(context.actor, 'agent', context);
+    const store = this.options.store, group = state.group, actor = context.actor;
+    if (this.disposed || store.isClosed()) throw Error('desktop_model_usage_admission_stale');
+    if (typeof invocationId !== 'string' || !invocationId || invocationId.length > 96) throw Error('invalid usage');
+    const bootId = store.bootId;
+    const { group: durableGroup, agent } = this.persistenceIO(group,
+      () => store.readUsageIdentity(group.id, context.agentId, group.threadId));
+    const captured = {
+      groupId: context.groupId, agentId: context.agentId, turnId: context.turnId, turn: context.turn,
+      rootEpoch: context.rootEpoch, sourceTaskId: context.sourceTaskId, permissionRevision: context.permissionRevision,
+      cwd: context.cwd, effectiveDeadline: context.effectiveDeadline,
+      activityRunId: context.activityRunId, activityMemberId: context.activityMemberId,
+      signal: context.signal, memberTicket: context.memberTicket,
+    };
+    const groupIdentity = { createdAt: durableGroup.createdAt, threadId: durableGroup.threadId };
+    const agentIdentity = { id: agent.id, createdAt: agent.createdAt, parentId: agent.parentId,
+      canonicalName: agent.canonicalName, taskName: agent.taskName, depth: agent.depth, sourceTaskId: agent.sourceTaskId };
+    if (captured.groupId !== group.id || actor.groupId !== group.id || actor.agentId !== captured.agentId
+      || actor.turnId !== captured.turnId || durableGroup.groupId !== group.id || durableGroup.threadId !== group.threadId
+      || durableGroup.bootId !== bootId || durableGroup.historicalOnly || agent.id !== captured.agentId
+      || agent.turn !== captured.turn || agent.turnId !== captured.turnId
+      || this.groups.get(group.id) !== group || this.actors.get(actor) !== state || state.context !== context
+      || this.disposed || store.isClosed() || this.options.store !== store || !state.active
+      || state.preparing || state.sealed || context.signal.aborted) throw Error('desktop_model_usage_admission_stale');
+    this.assertExecutionAuthorization(captured.permissionRevision);
+    const service = this;
+    const admission: DesktopModelUsageAdmission = {
+      commit(inputTokens, outputTokens) {
+        if (this !== admission) throw Error('desktop_model_usage_admission_invalid');
+        const known = service.usageAdmissions.get(admission);
+        if (!known?.open) throw Error('desktop_model_usage_admission_revoked');
+        known.assertCurrent();
+        const usage = { usageId: invocationId, inputTokens, outputTokens };
+        service.assertUsageValues(usage);
+        if (known.memo) {
+          if (known.memo.inputTokens !== inputTokens || known.memo.outputTokens !== outputTokens) throw Error('usage_id_conflict');
+          return known.memo.promise;
+        }
+        // The sequencer creates P synchronously and runs no command until its
+        // queued microtask. Save that exact P before its factual transaction.
+        const promise = service.applyUsageCommand(group, captured.agentId, captured.turnId, captured.turn, usage, () => {
+          if (!known.open) throw Error('desktop_model_usage_admission_revoked');
+          known.assertCurrent();
+        });
+        known.memo = { inputTokens, outputTokens, promise };
+        return promise;
+      },
+      revoke() {
+        if (this !== admission) throw Error('desktop_model_usage_admission_invalid');
+        const known = service.usageAdmissions.get(admission);
+        if (!known) throw Error('desktop_model_usage_admission_invalid');
+        known.open = false;
+      },
+    };
+    this.usageAdmissions.set(admission, {
+      open: true,
+      assertCurrent: () => {
+        // Aborted/sealed/inactive actors and newer permission revisions do not
+        // erase this already-admitted request's historical accounting right.
+        if (service.options.store !== store || store.isClosed() || store.bootId !== bootId
+          || service.groups.get(captured.groupId) !== group || service.actors.get(actor) !== state
+          || state.context !== context || state.group !== group || context.actor !== actor
+          || context.groupId !== captured.groupId || context.agentId !== captured.agentId
+          || context.turnId !== captured.turnId || context.turn !== captured.turn
+          || context.rootEpoch !== captured.rootEpoch || context.sourceTaskId !== captured.sourceTaskId
+          || context.permissionRevision !== captured.permissionRevision || context.cwd !== captured.cwd
+          || context.effectiveDeadline !== captured.effectiveDeadline || context.signal !== captured.signal
+          || context.memberTicket !== captured.memberTicket || context.activityRunId !== captured.activityRunId
+          || context.activityMemberId !== captured.activityMemberId) throw Error('desktop_model_usage_admission_stale');
+        const { group: currentGroup, agent: current } = service.persistenceIO(group,
+          () => store.readUsageIdentity(captured.groupId, captured.agentId, group.threadId));
+        if (currentGroup.groupId !== captured.groupId || currentGroup.threadId !== group.threadId
+          || currentGroup.bootId !== bootId || currentGroup.historicalOnly || current.id !== captured.agentId
+          || currentGroup.createdAt !== groupIdentity.createdAt || currentGroup.threadId !== groupIdentity.threadId
+          || current.id !== agentIdentity.id || current.createdAt !== agentIdentity.createdAt
+          || current.parentId !== agentIdentity.parentId || current.canonicalName !== agentIdentity.canonicalName
+          || current.taskName !== agentIdentity.taskName || current.depth !== agentIdentity.depth
+          || current.sourceTaskId !== agentIdentity.sourceTaskId || current.turn !== captured.turn
+          || current.turnId !== captured.turnId) throw Error('desktop_model_usage_admission_stale');
+      },
+    });
+    try { return Object.freeze(admission); }
+    catch (error) {
+      // A partially constructed factory must not leave a live settlement right.
+      this.usageAdmissions.get(admission)!.open = false;
+      throw error;
+    }
+  }
+
+  private assertUsageValues(usage: { usageId: string; inputTokens: number; outputTokens: number }): void {
+    if (typeof usage.usageId !== 'string' || !usage.usageId || usage.usageId.length > 96
+      || !Number.isSafeInteger(usage.inputTokens) || usage.inputTokens < 0
+      || !Number.isSafeInteger(usage.outputTokens) || usage.outputTokens < 0) throw Error('invalid usage');
+  }
+
+  /** Shared factual transaction: ordinary mutation and admitted settlement keep
+   * their distinct authorization checks, but never duplicate billing logic. */
+  private applyUsageCommand(group: LiveGroup, agentId: string, turnId: string, turn: number,
+    usage: { usageId: string; inputTokens: number; outputTokens: number }, assertCurrent: () => void): Promise<void> {
+    return group.commands.run(() => {
+      assertCurrent();
+      this.assertUsageValues(usage);
+      const operationId = `usage:${createHash('sha256').update(`${agentId}:${turnId}:${usage.usageId}`).digest('hex')}`;
       const requestHash = this.requestHash(operationId, usage);
-      const previous = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, operationId));
+      const previous = this.persistenceIO(group, () => this.options.store.getOperation(group.id, operationId));
       if (previous) { if (previous.requestHash !== requestHash) throw new Error('usage_id_conflict'); return; }
       try {
         this.options.store.transaction((acceptedPort) => {
-          const agent = this.requireAgent(state.group.id, context.agentId);
-          const total = { inputTokens: (agent.usage?.inputTokens ?? 0) + usage.inputTokens, outputTokens: (agent.usage?.outputTokens ?? 0) + usage.outputTokens };
-          acceptedPort.putAgent(state.group.id, { ...agent, usage: total });
-          acceptedPort.appendEvent(state.group.id, { kind: 'usage', agentId: context.agentId, turnId: context.turnId, payload: { ...usage, total } });
-          acceptedPort.putOperation({ groupId: state.group.id, operationId, command: 'usage', requestHash, applyState: 'applied', result: { state: 'completed' } });
+          const { agent } = this.persistenceIO(group,
+            () => this.options.store.readUsageIdentity(group.id, agentId, group.threadId));
+          if (agent.id !== agentId || agent.turnId !== turnId || agent.turn !== turn) throw Error('desktop_model_usage_admission_stale');
+          const before = agent.usage ?? { inputTokens: 0, outputTokens: 0 };
+          this.assertUsageValues({ usageId: usage.usageId, inputTokens: before.inputTokens, outputTokens: before.outputTokens });
+          const total = { inputTokens: before.inputTokens + usage.inputTokens, outputTokens: before.outputTokens + usage.outputTokens };
+          this.assertUsageValues({ usageId: usage.usageId, ...total });
+          acceptedPort.putAgent(group.id, { ...agent, usage: total });
+          acceptedPort.appendEvent(group.id, { kind: 'usage', agentId, turnId, payload: { ...usage, total } });
+          acceptedPort.putOperation({ groupId: group.id, operationId, command: 'usage', requestHash, applyState: 'applied', result: { state: 'completed' } });
         });
-      } catch (error) { this.freezeGroup(state.group, 'multi_agent_usage_persistence_failed'); throw error; }
+      } catch (error) {
+        this.freezeGroup(group, 'multi_agent_usage_persistence_failed');
+        throw this.combineUsageFailures([{ error }], 'multi_agent_usage_and_stop_failed');
+      }
     });
   }
 
@@ -2320,6 +2448,7 @@ export class DesktopMultiAgentService {
     if (input.signal.aborted) abortQueued();
     let context: DesktopAgentExecutionContext | undefined;
     let modelBodyFailure: { error: unknown } | undefined;
+    const bodyStopFailures: UsageFailure[] = [];
     let modelResult: T | undefined;
     try {
       root.ticket = await root.request;
@@ -2355,7 +2484,7 @@ export class DesktopMultiAgentService {
       modelBodyFailure = { error };
       if (context) {
         try { await context.mailbox.trySealTurn({ outcome: context.signal.aborted ? 'interrupted' : 'failed' }); }
-        catch { this.freezeGroup(group, 'multi_agent_persistence_failed'); }
+        catch (error) { bodyStopFailures.push({ error }); this.freezeGroup(group, 'multi_agent_persistence_failed'); }
       }
     }
     {
@@ -2363,7 +2492,9 @@ export class DesktopMultiAgentService {
       try { await closeDesktopModelPhysicalScope(root.modelPhysicalScope, root.controller.signal.reason); }
       catch (physicalError) {
         // Admission closes before any best-effort SQLite unknown receipt.
-        this.runtimeBlockedReason = 'runtime_blocked'; this.options.coordinator.block('runtime_blocked');
+        const stopFailures: UsageFailure[] = [];
+        this.runtimeBlockedReason = 'runtime_blocked';
+        try { this.options.coordinator.block('runtime_blocked'); } catch (error) { stopFailures.push({ error }); }
         let persistenceFailure: { error: unknown } | undefined;
         try { await group.commands.run(() => {
           if (context) {
@@ -2372,13 +2503,17 @@ export class DesktopMultiAgentService {
             this.options.store.putAgent(group.id, { ...previous, executionActive: false, resourcesReleased: false, cleanupPending: true }, true);
           }
         }); } catch (error) { persistenceFailure = { error }; }
-        const failures: unknown[] = modelBodyFailure ? [modelBodyFailure.error, physicalError] : [physicalError];
-        if (persistenceFailure) failures.push(persistenceFailure.error);
-        if (failures.length > 1) throw new AggregateError(failures, 'desktop_root_business_model_and_persistence_failed', { cause: modelBodyFailure?.error ?? physicalError });
-        throw physicalError;
+        // Physical failure retains the original unknown owner/ticket. Include
+        // every recorded stop value without turning that failure into release.
+        throw this.combineUsageFailures([
+          ...(modelBodyFailure ? [modelBodyFailure] : []), { error: physicalError },
+          ...(persistenceFailure ? [persistenceFailure] : []), ...bodyStopFailures, ...stopFailures,
+        ], 'desktop_root_business_model_and_persistence_failed');
       }
-      input.signal.removeEventListener('abort', abortQueued);
-      clearTimeout(root.stopTimer);
+      const cleanupFailures: UsageFailure[] = [];
+      try { input.signal.removeEventListener('abort', abortQueued); } catch (error) { cleanupFailures.push({ error }); }
+      try { clearTimeout(root.stopTimer); } catch (error) { cleanupFailures.push({ error }); }
+      let settlementFailure: UsageFailure | undefined;
       try {
         await group.commands.run(() => {
           if (context) {
@@ -2391,9 +2526,21 @@ export class DesktopMultiAgentService {
           if (group.root === root) group.root = undefined;
           this.wake(group);
         });
-      } finally { root.ticket?.release(); this.clearReleasedLease(group); }
+      } catch (error) { settlementFailure = { error }; }
+      finally {
+        // Each original cleanup is attempted even when the other fails. Neither
+        // can replace an earlier business/settlement/nullable rejection.
+        try { root.ticket?.release(); } catch (error) { cleanupFailures.push({ error }); }
+        try { this.clearReleasedLease(group); } catch (error) { cleanupFailures.push({ error }); }
+      }
+      const failures: UsageFailure[] = [
+        ...(modelBodyFailure ? [modelBodyFailure] : []), ...(settlementFailure ? [settlementFailure] : []),
+        ...bodyStopFailures, ...cleanupFailures,
+      ];
+      if (failures.length || this.usageIdentityQuarantine) {
+        throw this.combineUsageFailures(failures, 'desktop_root_business_settlement_and_cleanup_failed');
+      }
     }
-    if (modelBodyFailure) throw modelBodyFailure.error;
     return modelResult!;
   }
 
@@ -3202,7 +3349,10 @@ export class DesktopMultiAgentService {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
-    this.disposal = Promise.resolve().then(() => this.disposeOwned());
+    this.disposal = Promise.resolve().then(() => this.disposeOwned()).then(
+      () => { if (this.usageIdentityQuarantine) throw this.usageIdentityQuarantine.result; },
+      error => { throw this.combineUsageFailures([{ error }], 'multi_agent_dispose_and_stop_failed'); },
+    );
     return this.disposal;
   }
 
@@ -3808,7 +3958,12 @@ export class DesktopMultiAgentService {
   /** Only trusted owners enter this synchronous, actual-IO boundary. */
   private persistenceIO<T>(group: LiveGroup, action: () => T, reason = 'multi_agent_persistence_failed'): T {
     try { return action(); }
-    catch (error) { group.persistenceFailed = true; this.freezeGroup(group, reason); throw error; }
+    catch (error) {
+      group.persistenceFailed = true;
+      if (this.options.store.hasUsageIdentityFailure()) throw this.quarantineUsageIdentity(group, error);
+      this.freezeGroup(group, reason);
+      throw this.combineUsageFailures([{ error }], 'multi_agent_persistence_and_stop_failed');
+    }
   }
   private requestHash(operationId: string, input: unknown): string {
     if (typeof operationId !== 'string' || !operationId || operationId.length > 128) throw new Error('invalid operationId');
@@ -3859,16 +4014,131 @@ export class DesktopMultiAgentService {
     if (group.frozen || durable.mutationBlockedReason || durable.historicalOnly) throw new Error(group.frozen ?? durable.mutationBlockedReason ?? 'historical group is read-only');
   }
   private freezeGroup(group: LiveGroup, reason: string): void {
+    // A prior frozen/disposed state cannot authorize spreading a corrupt row.
+    // Narrow reads throw the original owning-store sticky error, including when
+    // another callback was the first to discover the identity contradiction.
+    const quarantineIfPoisoned = () => {
+      if (!this.options.store.hasUsageIdentityFailure()) return false;
+      try { this.options.store.readUsageGroupIdentity(group.id, group.threadId); }
+      catch (error) { this.quarantineUsageIdentity(group, error); }
+      return true;
+    };
+    if (quarantineIfPoisoned()) return;
     if (group.frozen || this.disposed) return;
-    group.frozen = reason;
-    try { this.options.store.putGroup({ ...this.options.store.requireGroup(group.id), mutationBlockedReason: reason }, true); } catch { /* No false durable ACK. */ }
-    this.abortExecutionSignal(group, group.lifetime, new Error(reason)); group.root && this.abortExecutionSignal(group, group.root.controller, new Error(reason));
-    if (group.root?.context) this.markRootStopping(group, group.root);
-    for (const child of group.children.values()) {
-      try { this.cancelFollowups(group, child, new Error(reason)); } catch { /* Physical stop still proceeds. */ }
-      if (child.execution) this.markStopping(group, child, new Error(reason));
+    let durable: DesktopMultiAgentGroup | undefined;
+    try { durable = this.options.store.readUsageGroupIdentity(group.id, group.threadId); }
+    catch (error) {
+      if (this.options.store.hasUsageIdentityFailure()) { this.quarantineUsageIdentity(group, error); return; }
+      this.recordUsageStopFailure({ error });
     }
-    this.wake(group);
+    group.frozen = reason;
+    try { if (durable) this.options.store.putGroup({ ...durable, mutationBlockedReason: reason }, true); }
+    catch (error) {
+      if (this.options.store.hasUsageIdentityFailure()) { this.quarantineUsageIdentity(group, error); return; }
+      this.recordUsageStopFailure({ error });
+    }
+    if (quarantineIfPoisoned()) return;
+    const attempt = (action: () => void) => { try { action(); } catch (error) { this.recordUsageStopFailure({ error }); } };
+    attempt(() => this.abortExecutionSignal(group, group.lifetime, new Error(reason)));
+    // Original abort listeners may synchronously discover an identity failure.
+    // Do not schedule an ordinary grace timer after that quarantine took over.
+    if (quarantineIfPoisoned()) return;
+    if (group.root) attempt(() => this.abortExecutionSignal(group, group.root!.controller, new Error(reason)));
+    if (quarantineIfPoisoned()) return;
+    if (group.root?.context) attempt(() => this.markRootStopping(group, group.root!));
+    if (quarantineIfPoisoned()) return;
+    for (const child of group.children.values()) {
+      attempt(() => this.cancelFollowups(group, child, new Error(reason)));
+      if (quarantineIfPoisoned()) return;
+      if (child.execution) attempt(() => this.markStopping(group, child, new Error(reason)));
+      if (quarantineIfPoisoned()) return;
+    }
+    attempt(() => this.wake(group));
+  }
+
+  /** The store has installed its sticky mutation gate before reaching here.
+   * This stop deliberately performs no durable mutation, normal wake/reset,
+   * follow-up cancellation helper, or new physical-release/grace timer. */
+  private quarantineUsageIdentity(group: LiveGroup, original: unknown): unknown {
+    const record = this.recordUsageStopFailure({ error: original });
+    if (this.usageIdentityQuarantined) return record.result;
+    // Publish before abort: an original synchronous listener may re-enter us.
+    // A prior ordinary stop failure is a record, not a quarantine receipt.
+    this.usageIdentityQuarantined = true;
+    const attempt = (action: () => void) => { try { action(); } catch (error) { this.rememberUsageFailure(record, { error }); } };
+    const reason = 'multi_agent_usage_identity_failed';
+    const affected = [...this.groups.values()];
+    if (!affected.includes(group)) affected.push(group);
+    const controllers: Array<{ group: LiveGroup; controller: AbortController; context?: DesktopAgentExecutionContext }> = [];
+    const waiters: Array<() => void> = [];
+    // Capture the original stop targets before any abort callback can replace
+    // a live root/child or remove a waiter from its owning collection.
+    for (const current of affected) {
+      controllers.push({ group: current, controller: current.lifetime });
+      if (current.leaseController) controllers.push({ group: current, controller: current.leaseController });
+      if (current.root) controllers.push({ group: current, controller: current.root.controller, context: current.root.context });
+      for (const child of current.children.values()) {
+        controllers.push({ group: current, controller: child.controller, context: child.context });
+        for (const pending of child.followups) controllers.push({ group: current, controller: pending.controller, context: child.context });
+      }
+      for (const notify of current.waiters) waiters.push(notify);
+    }
+    for (const current of affected) { current.frozen = reason; current.persistenceFailed = true; }
+    this.runtimeBlockedReason = reason;
+    attempt(() => this.options.coordinator.block(reason));
+    // Invalidate all related actors before the first abort listener can run.
+    for (const current of affected) {
+      if (current.root?.context) {
+        const state = this.actors.get(current.root.context.actor); if (state) state.active = false;
+      }
+      for (const child of current.children.values()) {
+        const state = this.actors.get(child.context.actor); if (state) state.active = false;
+        child.stopRequested = true;
+      }
+    }
+    for (const target of controllers) attempt(() => this.abortExecutionSignal(target.group, target.controller, original, target.context));
+    for (const notify of waiters) attempt(notify);
+    return record.result;
+  }
+
+  private recordUsageStopFailure(failure: UsageFailure): UsageQuarantineFailure {
+    if (!this.usageIdentityQuarantine) {
+      this.usageIdentityQuarantine = { failures: [failure], result: failure.error, composites: [] };
+    } else this.rememberUsageFailure(this.usageIdentityQuarantine, failure);
+    return this.usageIdentityQuarantine;
+  }
+
+  /** Only service-created quarantine composites may be expanded. Unknown error
+   * objects are opaque: never inspect their errors/cause/message/getters. */
+  private combineUsageFailures(failures: readonly UsageFailure[], message: string, includeQuarantine = true): unknown {
+    const combined: UsageFailure[] = [];
+    const record = this.usageIdentityQuarantine;
+    const append = (failure: UsageFailure) => {
+      const value = failure.error;
+      const reference = value !== null && (typeof value === 'object' || typeof value === 'function');
+      if (combined.some(known => known === failure || (reference && known.error === value))) return;
+      combined.push(failure);
+    };
+    for (const failure of failures) {
+      const known = record?.composites.find(composite => composite.result === failure.error);
+      if (known) for (const original of known.failures) append(original);
+      else append(failure);
+    }
+    if (includeQuarantine && record) for (const failure of record.failures) append(failure);
+    if (combined.length === 1) return combined[0].error;
+    return new AggregateError(combined.map(failure => failure.error), message, { cause: combined[0]?.error });
+  }
+
+  private rememberUsageFailure(record: UsageQuarantineFailure, failure: UsageFailure): void {
+    const value = failure.error;
+    const reference = value !== null && (typeof value === 'object' || typeof value === 'function');
+    if (record.composites.some(composite => composite.result === value)
+      || record.failures.some(known => known === failure || (reference && known.error === value))) return;
+    record.failures.push(failure);
+    record.result = this.combineUsageFailures(record.failures, 'multi_agent_identity_and_stop_failed', false);
+    // More than one failure produces a composite owned by this service. Keep
+    // its exact leaf boxes so later nullable failures retain their presence.
+    record.composites.push({ result: record.result as AggregateError, failures: [...record.failures] });
   }
 
   private abortExecutionSignal(group: LiveGroup, controller: AbortController, reason: unknown,

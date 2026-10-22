@@ -95,6 +95,7 @@ import { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approv
 import { DesktopMultiAgentRuntime } from './desktop-multi-agent-runtime.js';
 import { getDesktopDelegationPolicy } from './desktop-delegation-policy.js';
 import { streamDesktopTaskRecovery, createDesktopModelPhysicalScope, admitDesktopModelPhysicalRead, closeDesktopModelPhysicalScope, type DesktopModelPhysicalScope, type DesktopTaskRequestPreparer } from './desktop-task-stream.js';
+import { mapDesktopModelUsageAdmission, type DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import { DesktopMultiAgentWorktrees } from './desktop-multi-agent-worktrees.js';
 import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from './desktop-multi-agent-catalog-bridge.js';
 import { DesktopMcpCatalogRegistration } from './desktop-mcp-catalog-registration.js';
@@ -6041,6 +6042,7 @@ async function streamDesktopToolLoopFinalization(input: {
   stepId: string;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
   onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
+  admitUsage?: (invocationId: string) => DesktopModelUsageAdmission;
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const local = !input.modelPhysicalScope;
   const modelPhysicalScope = input.modelPhysicalScope ?? createDesktopModelPhysicalScope();
@@ -6060,6 +6062,7 @@ async function streamDesktopToolLoopFinalization(input: {
     },
     onInvocation: (id: string) => { providerInvocationId = id; },
     onUsage: input.onUsage,
+    admitUsage: input.admitUsage,
     beforeRequest: input.beforeRequest,
     adapter: input.adapter,
     messages: input.apiMessages,
@@ -6177,6 +6180,7 @@ interface ToolLoopContext {
   strategies: ToolLoopStrategies;
   maxIterations?: number;
   onUsage?: (inputTokens: number, outputTokens: number, usageId?: string) => void | Promise<void>;
+  admitUsage?: (invocationId: string) => DesktopModelUsageAdmission;
   mailbox?: DesktopMailboxPort;
   roomExecution?:{authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined;takePendingImages?:()=>MessageBlock[]};
   onActivity?: (activity: { phase: 'model' | 'thinking' | 'tool'; toolName?: string }) => void;
@@ -6609,6 +6613,14 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
   let toolResultsAwaitingFinalResponse = false;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  const admitUsage = ctx.admitUsage ? (invocationId: string) => mapDesktopModelUsageAdmission(
+    ctx.admitUsage!(invocationId),
+    (incoming, outgoing) => {
+      lastRequestInputTokens = incoming;
+      totalInputTokens += incoming;
+      totalOutputTokens += outgoing;
+    },
+  ) : undefined;
   let { skillInvocation } = ctx;
   let skillNamesDetected: string[] = [];
   let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
@@ -6677,6 +6689,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'});
       },
       onInvocation: id => { providerInvocationId = id; },
+      admitUsage,
       onUsage: async (chunk, invocationId) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
@@ -7092,6 +7105,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       intentId: ctx.intentId,
       stepId: ctx.stepId,
       emitRuntimeEvent: ctx.emitRuntimeEvent,
+      admitUsage,
       onUsage: async (chunk, invocationId) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
@@ -8279,8 +8293,15 @@ export function createDesktopModelRunnerWithRegistry(
       dataRoot,
       taskStartTime,
       maxIterations: maxToolLoopIterations,
+      admitUsage: rootContext ? invocationId => mapDesktopModelUsageAdmission(
+        runnerOptions.multiAgent!.service.captureAdmittedUsage(rootContext, invocationId),
+        (inputTokens, outputTokens) => {
+          const write = emitUsage({ inputTokens, outputTokens });
+          pendingUsageWrites.push(write);
+          return write;
+        },
+      ) : undefined,
       onUsage: async (inputTokens, outputTokens, usageId) => {
-        if (rootContext) await runnerOptions.multiAgent!.service.recordUsage(rootContext, { usageId: usageId!, inputTokens, outputTokens });
         const write = emitUsage({ inputTokens, outputTokens });
         pendingUsageWrites.push(write);
         await write;

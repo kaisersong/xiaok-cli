@@ -15,6 +15,7 @@ export function createInstalledCompletionPublisher(raw:Pick<VerificationOwner,'o
   const publication=createPublicationClient({owner,requestSource,transport:client.publicationTransport});
   return Object.freeze({
    async readArtifact(observation:Readonly<OwnerPublicationObservation>,selection:PublishedArtifactSelection,signal?:AbortSignal){current();const payload=await publication.readPayload(observation,signal);current();const artifact=readPublishedArtifact(payload,selection);signal?.throwIfAborted();current();return artifact;},
+   async readCurrentPayload(signal?:AbortSignal){current();const result=await publication.readCurrentPayload(signal);current();return result;},
    async readPayload(observation:Readonly<OwnerPublicationObservation>,signal?:AbortSignal){current();const result=await publication.readPayload(observation,signal);current();return result;},
    async observe(signal?:AbortSignal){current();const result=await publication.observe(signal);current();return result;},
    async prepare(signal?:AbortSignal){current();const result=await publication.prepare(signal);current();return result;},

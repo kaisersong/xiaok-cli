@@ -154,7 +154,7 @@ describe.runIf(nativeAuthorizer)('R6 AF real service trusted IO and ordinary ref
       : stage === 'artifact' || stage === 'flush' ? 'recordRuntimeEvent' : stage === 'send' ? 'DesktopMultiAgentService.mutate' : 'DesktopMultiAgentService.spawn';
     const fault = sqliteFault(f, { table, action: constants.SQLITE_INSERT, site: stage === 'run-start' ? serviceSite('async recordRunStarted(', 'store.transaction(')
       : stage === 'tool-finished' ? serviceSite('async recordToolFinished(', 'store.transaction(')
-      : stage === 'usage' ? serviceSite('async recordUsage(', 'store.transaction(')
+      : stage === 'usage' ? serviceSite('private applyUsageCommand(', 'store.transaction(')
       : stage === 'artifact' ? serviceSite('async recordRuntimeEvent(', "{ kind: 'artifact'")
       : stage === 'flush' ? 'flushOutput'
       : stage === 'spawn' ? serviceSite('async spawn(', 'this.options.store.putOperation(') : site });
@@ -180,9 +180,31 @@ describe.runIf(nativeAuthorizer)('R6 AF real service trusted IO and ordinary ref
     const outcome = await caught(() => f.service.recordActivity(f.context, { phase: 'model' }));
     expect(outcome).toHaveProperty('error');
     expect.soft(f.live().frozen).toBe('multi_agent_persistence_failed'); expect.soft(f.context.signal.aborted).toBe(true);
-    const traces = [...fault.traces]; fault.clear();
-    expect.soft(traces.some(stack => stack.includes('freezeGroup'))).toBe(true);
+    let stops: unknown[] = [];
+    try {
+      // The persistent native authorizer rejects the original read and both
+      // independent stop reads. Preserve their actual references before clear.
+      const failure = outcome.error as AggregateError;
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(failure.message).toBe('multi_agent_persistence_and_stop_failed');
+      expect(failure.errors).toHaveLength(3); expect(failure.cause).toBe(failure.errors[0]);
+      expect(new Set(failure.errors).size).toBe(3);
+      for (const error of failure.errors) { expect(error).toBeInstanceOf(Error); expect(error).toMatchObject({ code: 'ERR_SQLITE_ERROR', errcode: 23 }); }
+      stops = failure.errors.slice(1);
+      const traces = [...fault.traces]; expect(traces).toHaveLength(3);
+      expect(traces[0]).toContain('assertWritable');
+      expect(traces[1]).toContain('readUsageGroupIdentity'); expect(traces[1]).toContain('freezeGroup');
+      expect(traces[2]).toContain('wake'); expect(traces[2]).toContain('freezeGroup');
+      expect.soft(traces.some(stack => stack.includes('freezeGroup'))).toBe(true);
+    } finally { fault.clear(); }
     expect(f.store.getAgent(f.context.groupId, f.context.agentId)?.resourcesReleased).toBe(false);
     f.release.release(); await f.settled(f.taskId); expect(existsSync(f.effect)).toBe(false);
+    await f.assertFailedDisposal(error => {
+      expect(error).toBeInstanceOf(AggregateError);
+      const failure = error as AggregateError;
+      expect(failure.message).toBe('multi_agent_identity_and_stop_failed');
+      expect(failure.errors).toHaveLength(2); expect(failure.cause).toBe(stops[0]);
+      expect(failure.errors[0]).toBe(stops[0]); expect(failure.errors[1]).toBe(stops[1]);
+    });
   });
 });
