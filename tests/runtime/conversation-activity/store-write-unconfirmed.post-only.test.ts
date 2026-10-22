@@ -2,7 +2,10 @@
 // Proposed copy path: tests/runtime/conversation-activity/store-write-unconfirmed.post-only.test.ts
 import { afterEach, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, realpathSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import process from 'node:process';
+import { randomBytes } from 'node:crypto';
+import { isProxy, isNativeError } from 'node:util/types';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -51,12 +54,17 @@ function fixture(): Fixture {
   fixtures.push(f);
   vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string) {
     f.handles.add(this); f.execCalls.push(sql);
-    if (sql.includes('BEGIN EXCLUSIVE')) { f.owner = this; if (f.faults.ownerSetup) throw f.faults.ownerSetup; }
+    if (sql === 'PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN IMMEDIATE') { f.owner = this; if (f.faults.ownerSetup) throw f.faults.ownerSetup; }
     if (sql.startsWith('PRAGMA journal_mode=WAL')) f.data = this;
     if (sql === 'BEGIN IMMEDIATE' && f.faults.begin) throw f.faults.begin;
     if (sql === 'COMMIT' && f.faults.commitBefore) throw f.faults.commitBefore;
     if (sql === 'ROLLBACK' && f.faults.rollback) throw f.faults.rollback;
-    const result = originalExec.call(this, sql);
+    const compatibility = nativeCompatibilityFixtures.get(f); let witness: NativeCompatCall | undefined;
+    if (compatibility) try { witness = nativeCompatExecEnter(compatibility, this, sql); } catch (error) { compatibility.observerErrors.push(error); }
+    let result: ReturnType<DatabaseSync['exec']>;
+    try { result = originalExec.call(this, sql); }
+    catch (error) { if (witness) witness.failure = { error }; throw error; }
+    if (witness) witness.returned = true;
     // Deliberate lower-call lost-ACK fault; not a claim native COMMIT usually does this.
     if (sql === 'COMMIT' && f.faults.commitAfter) throw f.faults.commitAfter;
     return result;
@@ -144,10 +152,131 @@ function metadata(calls: readonly (readonly unknown[])[]) {
     return value && typeof value === 'object' && !Array.isArray(value) ? [value] : [];
   });
 }
+// Only the two new synchronous native compatibility cases use this opt-out.
+type NativeCompatRole = 'old-holder' | 'new-holder' | 'new-contender' | 'raw-contender' | 'data';
+type NativeCompatSlot = { db: DatabaseSync; role: NativeCompatRole; open: () => boolean; transaction: () => boolean };
+type NativeCompatCall = { db: DatabaseSync; sql: string; returned: boolean; failure?: { error: unknown } };
+type NativeCompatRecord = {
+  f: Fixture; direction: 'old-to-new' | 'new-to-old'; slots: Map<DatabaseSync, NativeCompatSlot>;
+  calls: NativeCompatCall[]; observerErrors: unknown[]; rawReferences: unknown[]; rejections: unknown[]; rejectionAccepted: boolean;
+  root?: { canonical: string; uid: number; dev: number; ino: number; birthtimeMs: number };
+  marker?: { path: string; nonce: string; uid: number; dev: number; ino: number; birthtimeMs: number };
+  inventoryComplete: boolean; bodyPassed: boolean; deleted: boolean;
+};
+const nativeCompatibilityFixtures = new Map<Fixture, NativeCompatRecord>();
+const nativeCompatibilityRegistryKey = Symbol('actual-native-owner-compatibility-fixtures');
+Object.defineProperty(process, nativeCompatibilityRegistryKey, { value: nativeCompatibilityFixtures,
+  configurable: false, enumerable: false, writable: false });
+const nativeCompatibilityRegistryDescriptor = Object.getOwnPropertyDescriptor(process, nativeCompatibilityRegistryKey)!;
+if (nativeCompatibilityRegistryDescriptor.value !== nativeCompatibilityFixtures
+  || nativeCompatibilityRegistryDescriptor.configurable || nativeCompatibilityRegistryDescriptor.enumerable
+  || nativeCompatibilityRegistryDescriptor.writable) throw Error('native_compat_registry_identity_unknown');
+const NEW_OWNER_SQL = 'PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN IMMEDIATE';
+const OLD_OWNER_SQL = 'PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE';
+function nativeCompatRequire(value: unknown, code: string): asserts value { if (!value) throw Error(code); }
+function nativeCompatData(value: unknown, key: PropertyKey): unknown {
+  nativeCompatRequire(value !== null && (typeof value === 'object' || typeof value === 'function') && !isProxy(value), 'native_compat_data_receiver');
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  nativeCompatRequire(descriptor && Object.hasOwn(descriptor, 'value'), 'native_compat_own_data_missing');
+  return descriptor.value;
+}
+function nativeCompatSlot(r: NativeCompatRecord, db: DatabaseSync, role: NativeCompatRole): NativeCompatSlot {
+  r.rawReferences.push(db); // Before any getter/descriptor verification.
+  const previous = r.slots.get(db);
+  if (previous) { nativeCompatRequire(previous.role === role, 'native_compat_role_changed'); return previous; }
+  nativeCompatRequire(!isProxy(db), 'native_compat_native_receiver_unknown');
+  const readers = (['isOpen', 'isTransaction'] as const).map(key => {
+    const captured = Object.getOwnPropertyDescriptor(db, key);
+    nativeCompatRequire(captured && typeof captured.get === 'function' && captured.set === undefined
+      && captured.configurable === false, 'native_compat_native_getter_missing');
+    return () => {
+      const current = Object.getOwnPropertyDescriptor(db, key);
+      nativeCompatRequire(current?.get === captured.get && current.set === undefined && current.configurable === false, 'native_compat_native_getter_changed');
+      const value = Reflect.apply(captured.get!, db, []);
+      nativeCompatRequire(typeof value === 'boolean', 'native_compat_native_boolean_unknown'); return value;
+    };
+  });
+  const slot = { db, role, open: readers[0], transaction: readers[1] }; r.slots.set(db, slot); return slot;
+}
+function nativeCompatExecEnter(r: NativeCompatRecord, db: DatabaseSync, sql: string): NativeCompatCall | undefined {
+  r.rawReferences.push(db);
+  if (sql === NEW_OWNER_SQL) nativeCompatSlot(r, db, r.direction === 'old-to-new' ? 'new-contender' : 'new-holder');
+  else if (sql.startsWith('PRAGMA journal_mode=WAL')) nativeCompatSlot(r, db, 'data');
+  if (sql !== NEW_OWNER_SQL && sql !== OLD_OWNER_SQL) return;
+  if (sql === OLD_OWNER_SQL) nativeCompatRequire(r.slots.get(db)?.role === (r.direction === 'old-to-new' ? 'old-holder' : 'raw-contender'), 'native_compat_old_receiver_unregistered');
+  const call = { db, sql, returned: false }; r.calls.push(call); return call;
+}
+function nativeCompatBusy(error: unknown): void {
+  nativeCompatRequire(!isProxy(error) && isNativeError(error), 'native_compat_native_failure_missing');
+  const code = nativeCompatData(error, 'code'), errno = nativeCompatData(error, 'errcode'), text = nativeCompatData(error, 'errstr');
+  nativeCompatRequire(code === 'ERR_SQLITE_ERROR' && (errno === 5 && text === 'database is locked'
+    || errno === 6 && text === 'database table is locked'), 'native_compat_failure_not_busy_locked');
+}
+function nativeCompatRole(r: NativeCompatRecord, role: NativeCompatRole): NativeCompatSlot {
+  const values = [...r.slots.values()].filter(slot => slot.role === role);
+  nativeCompatRequire(values.length === 1, 'native_compat_slot_population'); return values[0];
+}
+function nativeCompatIdentity(r: NativeCompatRecord): void {
+  nativeCompatRequire(r.root && r.marker, 'native_compat_identity_missing'); const root = lstatSync(r.root.canonical), marker = lstatSync(r.marker.path);
+  nativeCompatRequire(root.isDirectory() && !root.isSymbolicLink() && realpathSync(r.root.canonical) === r.root.canonical
+    && root.uid === r.root.uid && root.dev === r.root.dev && root.ino === r.root.ino && root.birthtimeMs === r.root.birthtimeMs, 'native_compat_root_changed');
+  nativeCompatRequire(marker.isFile() && !marker.isSymbolicLink() && marker.nlink === 1 && marker.uid === r.marker.uid
+    && marker.dev === r.marker.dev && marker.ino === r.marker.ino && marker.birthtimeMs === r.marker.birthtimeMs
+    && readFileSync(r.marker.path, 'utf8') === r.marker.nonce, 'native_compat_nonce_changed');
+}
+function withNativeCompatibility(direction: NativeCompatRecord['direction'], work: (r: NativeCompatRecord) => void): void {
+  const f = fixture(), r: NativeCompatRecord = { f, direction, slots: new Map(), calls: [], observerErrors: [], rawReferences: [], rejections: [], rejectionAccepted: false, inventoryComplete: false, bodyPassed: false, deleted: false };
+  nativeCompatibilityFixtures.set(f, r); // Never delete: strong native ownership until actual worker exit.
+  const failures: unknown[] = [];
+  try {
+    f.root = realpathSync(f.root); f.file = join(f.root, 'conversation-activity.sqlite'); const state = lstatSync(f.root);
+    nativeCompatRequire(state.isDirectory() && !state.isSymbolicLink() && (typeof process.getuid !== 'function' || state.uid === process.getuid()), 'native_compat_owned_root_unknown');
+    r.root = { canonical: f.root, uid: state.uid, dev: state.dev, ino: state.ino, birthtimeMs: state.birthtimeMs };
+    const path = join(f.root, '.native-compatibility-nonce'), nonce = randomBytes(16).toString('hex'); writeFileSync(path, nonce, { flag: 'wx', mode: 0o600 });
+    const marker = lstatSync(path); r.marker = { path, nonce, uid: marker.uid, dev: marker.dev, ino: marker.ino, birthtimeMs: marker.birthtimeMs }; nativeCompatIdentity(r);
+    work(r);
+    nativeCompatRequire(r.calls.length === 2 && r.observerErrors.length === 0 && f.handles.size === r.slots.size
+      && [...f.handles].every(db => r.slots.has(db)), 'native_compat_closed_inventory_unknown');
+    nativeCompatRequire(r.slots.size === (direction === 'old-to-new' ? 2 : 3), 'native_compat_native_population');
+    r.inventoryComplete = true; r.bodyPassed = true;
+  } catch (error) {
+    failures.push(error);
+    if (!r.rejectionAccepted) {
+      const originals = [...r.rejections, ...r.calls.filter(call => call.failure !== undefined).map(call => call.failure!.error)];
+      for (const original of originals) {
+        const reference = original !== null && (typeof original === 'object' || typeof original === 'function');
+        if (!reference || !failures.some(known => known === original)) failures.push(original);
+      }
+    }
+  }
+  // All native calls above are synchronous. Unknown body/setup keeps actual handles;
+  // no fallback disposer/GC/root deletion is used to manufacture a passing gate.
+  if (r.bodyPassed && failures.length === 0) try {
+    const loser = nativeCompatRole(r, direction === 'old-to-new' ? 'new-contender' : 'raw-contender');
+    if (direction === 'new-to-old') loser.db.close();
+    nativeCompatRequire(loser.open() === false && f.closed.has(loser.db), 'native_compat_loser_close_unconfirmed');
+    if (direction === 'old-to-new') nativeCompatRole(r, 'old-holder').db.close();
+    else { nativeCompatRequire(f.store !== undefined, 'native_compat_actual_store_missing'); f.store.close(); }
+    for (const slot of r.slots.values()) nativeCompatRequire(slot.open() === false && f.closed.has(slot.db), 'native_compat_native_close_unconfirmed');
+    const order = f.closeCalls, expected = direction === 'old-to-new'
+      ? [loser.db, nativeCompatRole(r, 'old-holder').db]
+      : [loser.db, nativeCompatRole(r, 'data').db, nativeCompatRole(r, 'new-holder').db];
+    nativeCompatRequire(order.length === expected.length && order.every((db, index) => db === expected[index]) && f.realCloseFailed.size === 0, 'native_compat_actual_close_order');
+    nativeCompatIdentity(r); rmSync(r.root!.canonical, { recursive: true, force: false }); r.deleted = true;
+  } catch (error) { failures.push(error); }
+  failures.push(...r.observerErrors);
+  if (!r.deleted) try { console.log('NATIVE_OWNER_COMPATIBILITY_RETAINED ' + JSON.stringify({ root: r.root?.canonical ?? f.root, nonce: r.marker?.nonce,
+    pid: process.pid, ppid: process.ppid, direction, bodyPassed: r.bodyPassed, inventoryComplete: r.inventoryComplete, rootDeleted: false })); }
+  catch (error) { failures.push(error); }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'native_compatibility_body_and_cleanup_failed', { cause: failures[0] });
+}
+
 afterEach(() => {
   const failures: unknown[] = [];
   fsSeam.armed = false;
   for (const f of fixtures.splice(0)) {
+    if (nativeCompatibilityFixtures.has(f)) continue; // New native cases own strict close/retain; never use legacy rm.
     disarm(f);
     try { f.store?.close(); } catch (error) { failures.push(error); }
     const closeActual = (db: DatabaseSync | undefined) => {
@@ -271,4 +400,40 @@ it('POST ONLY: owner setup and close faults retain the existing owner-held mappi
   expect(observed.error.cause).toBe(setup);
   expect(f.data).toBeUndefined(); expect(f.owner).toBeDefined();
   expect(f.closeCalls).toEqual([f.owner]);
+});
+
+
+it('POST ONLY: an established old native EXCLUSIVE holder rejects the new actual Store owner', () => {
+  withNativeCompatibility('old-to-new', r => {
+    const old = new DatabaseSync(`${r.f.file}.owner.sqlite`); nativeCompatSlot(r, old, 'old-holder'); r.f.handles.add(old);
+    old.exec(OLD_OWNER_SQL); const oldSlot = nativeCompatRole(r, 'old-holder');
+    expect(oldSlot.open()).toBe(true); expect(oldSlot.transaction()).toBe(true);
+    const observed = attempt(() => open(r.f)); r.rawReferences.push(observed); if (observed.threw) r.rejections.push(observed.error); expect(observed.threw).toBe(true);
+    if (!observed.threw) throw Error('native_compat_new_store_expected_rejection');
+    const calls = r.calls.filter(call => call.sql === NEW_OWNER_SQL); expect(calls).toHaveLength(1);
+    const contender = nativeCompatRole(r, 'new-contender'); expect(calls[0].db).toBe(contender.db);
+    expect(calls[0].returned).toBe(false); expect(calls[0].failure).toBeDefined();
+    const F = calls[0].failure!.error; nativeCompatBusy(F);
+    expect(isNativeError(observed.error) && !isProxy(observed.error)).toBe(true);
+    expect(nativeCompatData(observed.error, 'message')).toBe('conversation_activity_owner_held');
+    expect(nativeCompatData(observed.error, 'cause')).toBe(F);
+    expect(contender.open()).toBe(false); expect(r.f.closed.has(contender.db)).toBe(true); expect(r.f.data).toBeUndefined();
+    expect(oldSlot.open()).toBe(true); expect(oldSlot.transaction()).toBe(true);
+    expect(r.calls[0].db).toBe(old); expect(r.calls[0].sql).toBe(OLD_OWNER_SQL); expect(r.calls[0].returned).toBe(true); expect(r.calls[0].failure).toBeUndefined(); r.rejectionAccepted = true;
+  });
+});
+
+it('POST ONLY: an established new actual Store owner rejects the old native EXCLUSIVE contender', () => {
+  withNativeCompatibility('new-to-old', r => {
+    const store = open(r.f), holder = nativeCompatRole(r, 'new-holder'), data = nativeCompatRole(r, 'data');
+    expect(r.f.store).toBe(store); expect(holder.open()).toBe(true); expect(holder.transaction()).toBe(true); expect(data.open()).toBe(true);
+    const old = new DatabaseSync(`${r.f.file}.owner.sqlite`); nativeCompatSlot(r, old, 'raw-contender'); r.f.handles.add(old);
+    const observed = attempt(() => old.exec(OLD_OWNER_SQL)); r.rawReferences.push(observed); if (observed.threw) r.rejections.push(observed.error); expect(observed.threw).toBe(true);
+    if (!observed.threw) throw Error('native_compat_old_batch_expected_rejection');
+    const calls = r.calls.filter(call => call.sql === OLD_OWNER_SQL); expect(calls).toHaveLength(1);
+    expect(calls[0].db).toBe(old); expect(calls[0].returned).toBe(false); expect(calls[0].failure?.error).toBe(observed.error); nativeCompatBusy(observed.error);
+    expect(nativeCompatRole(r, 'raw-contender').open()).toBe(true); expect(nativeCompatRole(r, 'raw-contender').transaction()).toBe(false);
+    expect(holder.open()).toBe(true); expect(holder.transaction()).toBe(true); expect(data.open()).toBe(true);
+    expect(r.calls[0].db).toBe(holder.db); expect(r.calls[0].sql).toBe(NEW_OWNER_SQL); expect(r.calls[0].returned).toBe(true); expect(r.calls[0].failure).toBeUndefined(); r.rejectionAccepted = true;
+  });
 });

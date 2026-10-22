@@ -111,9 +111,10 @@ export class ConversationActivityStore {
     } catch { throw new Error('activity_storage_not_private'); }
     this.owner = new DatabaseSync(`${file}.owner.sqlite`);
     try {
-      // A separate rollback-journal database supplies an OS-managed exclusive lock.
-      // It is held for this owner's lifetime and released by process exit, never mtime.
-      this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
+      // A separate rollback-journal database supplies an OS-managed single-writer lock.
+      // BEGIN IMMEDIATE holds its unique RESERVED slot for this owner's lifetime;
+      // acknowledged close or process exit releases it, never mtime.
+      this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN IMMEDIATE');
       this.secureSidecars();
     } catch (error) {
       // Preserve the existing public owner-held mapping and retain its real cause.
