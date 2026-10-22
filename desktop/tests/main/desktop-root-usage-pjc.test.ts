@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,6 +12,20 @@ import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-s
 import { createDesktopServices, getDesktopMemoryStore } from '../../electron/desktop-services.js';
 import { assertDesktopModelPhysicalIdle } from '../../electron/desktop-task-stream.js';
 import { withRootUsageOwner, deferred, turn } from '../fixtures/root-usage-ownership.js';
+
+
+// Bind the exact actual operation's current source frame. Line insertions in a
+// sibling launch path must not change this physical-owner/cancellation contract.
+function expectExactSourceOperationFrame(stack: unknown, source: URL, operation: string): void {
+  expect(typeof stack).toBe('string');
+  const text = readFileSync(source, 'utf8'), first = text.indexOf(operation);
+  expect(first).toBeGreaterThanOrEqual(0);
+  expect(text.indexOf(operation, first + operation.length)).toBe(-1);
+  const line = text.slice(0, first).split('\n').length;
+  const path = fileURLToPath(source).replaceAll('\\', '/');
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  expect((stack as string).replaceAll('\\', '/')).toMatch(new RegExp(`${escaped}:${line}:\\d+\\)?(?=\\r?\\n|$)`));
+}
 
 const probe = vi.hoisted(() => ({ active: undefined as any }));
 vi.mock('node:fs/promises', async importOriginal => {
@@ -261,7 +276,7 @@ it('default Main keeps exact P/J/D/C and both original physical returns through 
   await vi.waitFor(() => { expect(leafR).toBeDefined(); expect(outerR).toBeDefined(); expect(closes).toHaveLength(1); });
   expect(sources).toHaveLength(1); expect(sources[0]).toBe(nativeIterator); expect(checkedSources).toHaveLength(1); expect(leafR).not.toBe(outerR);
   expect(owner.result(leafR)).toBeUndefined(); expect(owner.result(outerR)).toBeUndefined(); expect(owner.result(closes[0].raw)).toBeUndefined();
-  expect(closes[0].scope).toBe(actualScope); expect(closes[0].stack).toContain('desktop-services.ts:8340');
+  expect(closes[0].scope).toBe(actualScope); expectExactSourceOperationFrame(closes[0].stack, new URL('../../electron/desktop-services.ts', import.meta.url), 'try { await closeDesktopModelPhysicalScope(modelPhysicalScope, signal.reason); }');
   expect(owner.result(rootP)).toBeUndefined(); expect(owner.result(hostDrain)).toBeUndefined(); expect(owner.host!.inFlightTaskIds()).toContain(taskId); expect(context.memberTicket.released).toBe(false); expect(() => assertDesktopModelPhysicalIdle(actualScope)).toThrow();
   expect(cap.commit(17, 19)).toBe(P); expect(streamCalls).toBe(1); expect(nativeAppends).toBe(1);
   releaseReturn.resolve(); await leafR; await outerR;
@@ -274,13 +289,13 @@ it('default Main keeps exact P/J/D/C and both original physical returns through 
   expect(rootResult.error).toBeInstanceOf(DOMException);
   const originalAbort = rootResult.error as DOMException;
   expect(originalAbort.name).toBe('AbortError'); expect(originalAbort.message).toBe('user_cancelled'); expect(originalAbort.code).toBe(20);
-  expect(originalAbort.stack).toContain('desktop-services.ts:6513');
+  expectExactSourceOperationFrame(originalAbort.stack, new URL('../../electron/desktop-services.ts', import.meta.url), "throw new DOMException(reason instanceof Error ? reason.message : 'multi-agent turn aborted', 'AbortError');");
   expect(Object.hasOwn(originalAbort, 'cause')).toBe(false); expect(Object.hasOwn(originalAbort, 'errors')).toBe(false);
   expect(context.signal.aborted).toBe(true); expect(hostSignal.aborted).toBe(true);
   expect(originalAbort).not.toBe(context.signal.reason); expect(originalAbort).not.toBe(hostSignal.reason);
   owner.acceptRejection(rootActionP, actionResult.error); owner.acceptRejection(rootP, rootResult.error);
   await hostDrain;
-  expect(closes).toHaveLength(2); expect(closes[1].scope).toBe(actualScope); expect(closes[1].raw).toBe(closes[0].raw); expect(closes[1].stack).toContain('desktop-multi-agent-service.ts:2492'); await closes[0].raw;
+  expect(closes).toHaveLength(2); expect(closes[1].scope).toBe(actualScope); expect(closes[1].raw).toBe(closes[0].raw); expectExactSourceOperationFrame(closes[1].stack, new URL('../../electron/desktop-multi-agent-service.ts', import.meta.url), 'try { await closeDesktopModelPhysicalScope(root.modelPhysicalScope, root.controller.signal.reason); }'); await closes[0].raw;
   expect(nativeReturnCalls).toBe(1); expect(outerReturnCalls).toBe(1); expect(tracks).toHaveLength(3);
   const physicalOwner = tracks.find(record => record.raw === C)!.owner;
   for (const raw of [C, leafR, outerR]) expect(tracks.filter(record => record.owner === physicalOwner && record.raw === raw)).toHaveLength(1);

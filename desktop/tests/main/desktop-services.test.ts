@@ -1,4 +1,5 @@
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
+import * as mcpTransport from '../../../src/platform/mcp/transport.js';
 import * as atomicUserFile from '../../../src/utils/atomic-file.js';
 import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
 import { types } from 'node:util';
@@ -1189,9 +1190,31 @@ describe('desktop services', () => {
       }],
     }));
     const previousPythonCommand = process.env.XIAOK_PYTHON_CMD;
-    process.env.XIAOK_PYTHON_CMD = process.execPath;
     let managedPythonCommand: string | undefined;
+    let translatedManagedLaunches = 0;
+    let connectionSpy: { mockRestore(): unknown } | undefined;
+    let registration: { dispose(): void } | undefined;
+    let bodyFailure: { error: unknown } | undefined;
     try {
+      process.env.XIAOK_PYTHON_CMD = process.execPath;
+    const nativeConnect = mcpTransport.createMcpClientConnection;
+    // Explicit test executor adaptation: the owned MCP fixture is JavaScript,
+    // while real managed Python now receives -B. Observe the actual Main-built
+    // launch at its transport boundary before translating ONLY this Node leaf.
+    connectionSpy = vi.spyOn(mcpTransport, 'createMcpClientConnection').mockImplementation(function(this: unknown, ...args: Parameters<typeof nativeConnect>) {
+      const [name, launch, options] = args;
+      if (name !== 'python-test-server') return Reflect.apply(nativeConnect, this, args);
+      expect(options?.cwd).toBe(pluginDir);
+      expect(launch.type).toBe('stdio');
+      if (launch.type !== 'stdio') throw Error('owned_python_fixture_transport_mismatch');
+      expect(launch.command).toBe(process.execPath);
+      expect(launch.args).toEqual(['-B', serverPath]);
+      expect(launch.env).toEqual({ PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' });
+      translatedManagedLaunches++;
+      // One original connection invocation / same returned Promise and actual
+      // client. Args differ intentionally; this is NOT a transparent observer.
+      return Reflect.apply(nativeConnect, this, [name, { ...launch, args: [serverPath] }, options]);
+    });
       const services = createDesktopServices({
         dataRoot: join(rootDir, 'data'),
         kswarmService: mockKSwarmService(),
@@ -1201,7 +1224,7 @@ describe('desktop services', () => {
         getManagedPythonCommand: () => managedPythonCommand,
       });
 
-      const registration = await services.registerMcpTools();
+      registration = await services.registerMcpTools();
       expect(services.listPluginMcpServers()).toEqual([
         expect.objectContaining({
           name: 'python-test-server',
@@ -1210,6 +1233,7 @@ describe('desktop services', () => {
         }),
       ]);
 
+      expect(translatedManagedLaunches).toBe(0);
       managedPythonCommand = process.execPath;
       await services.registerDeferredPythonMcpTools();
       expect(services.listPluginMcpServers()).toEqual([
@@ -1219,11 +1243,19 @@ describe('desktop services', () => {
         }),
       ]);
 
-      registration.dispose();
-    } finally {
+      expect(translatedManagedLaunches).toBe(1);
+    } catch (error) { bodyFailure = { error }; }
+    // The actual registration and both restore actions are attempted and preserve the original
+    // body error value, including undefined/null. No production cleanup changed.
+    const failures: unknown[] = bodyFailure ? [bodyFailure.error] : [];
+    try { registration?.dispose(); } catch (error) { failures.push(error); }
+    try { connectionSpy?.mockRestore(); } catch (error) { failures.push(error); }
+    try {
       if (previousPythonCommand === undefined) delete process.env.XIAOK_PYTHON_CMD;
       else process.env.XIAOK_PYTHON_CMD = previousPythonCommand;
-    }
+    } catch (error) { failures.push(error); }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length) throw new AggregateError(failures, 'owned_python_fixture_body_and_restore_failed', { cause: failures[0] });
   });
 
   it('marks deferred Python MCP servers unavailable when background preparation finishes without a runtime', async () => {

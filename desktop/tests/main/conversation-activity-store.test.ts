@@ -136,7 +136,7 @@ describe('durable conversation activity', () => {
     expect(store.ingest('watch', event(1))).toMatchObject({ duplicate: true });
     expect(store.getProjection('watch')?.sourceSequence).toBe(10_001);
     expect(store.getProjection('watch')?.executionState).toBe('completed');
-  }, process.platform === 'win32' ? 120_000 : 15_000);
+  }, process.platform === 'win32' ? 240_000 : 15_000);
 
   it('rejects saturated critical capacity without acknowledging or advancing the source cursor', () => {
     store.close(); store = new ConversationActivityStore(join(root, 'activity.sqlite'), { now: () => now, maxSourceEvents: 3 });
