@@ -1,6 +1,12 @@
 # PR #74 全量失败修复与验证
 
-后续实际CI暴露KSwarm源码装配、Windows活动测试预算、Windows runtime fixture遗留SQLite句柄及Loop间歇超时。前两项历史80源增量见[CI修复记录](pi-durable-ci-remediation-20261022.md)；本次Windows完整owner关闭、原错误保留和最终81源绑定见[生命周期修复](pi-durable-windows-runtime-cleanup-20261022.md)及[实际证据](pi-durable-windows-runtime-evidence-20261022.json)。原七文件在本机Node24与22.22各93/93，真实新HEAD Windows仍待验。下列全量本机记录按eade的79项冻结保留，不重复累计新93。Loop相同源码在713的Ubuntu两版/macOS24完整8通过，而macOS22.22仍5通过3失败；诊断job真实worker也超时。旧绿和单次微实验均不能证明稳定或关闭故障，Loop与远端128项仍未完成。
+后续实际CI暴露KSwarm源码装配、Windows活动测试预算、Windows runtime fixture遗留SQLite句柄及Loop间歇超时。前两项历史80源增量见[CI修复记录](pi-durable-ci-remediation-20261022.md)；Windows完整owner关闭、原错误保留和81源绑定见[生命周期修复](pi-durable-windows-runtime-cleanup-20261022.md)及[实际证据](pi-durable-windows-runtime-evidence-20261022.json)。c7的真实Windows24恢复作业已成功，原七文件93/93且全部原native句柄关闭；Windows22.22作业在安装依赖时被原15分钟job上限取消，未运行这93项。
+
+最新增量修复[TTY退出观察](pi-durable-permission-hook-exit-wait-20261022.md)及[四个相邻入口](pi-durable-permission-sibling-exit-wait-20261022.md)：用同一pane的真实正常退出回执替换固定1秒采样，保留全部业务断言、范围和命令变体，并完整保留业务及清理原错误。11项守门回归、真实permission场景在Node24/22.14通过；新增四入口在两版各完整8变体、15份stop前正常退出回执。和未修改yolo的已有成功组成六入口本机Node24成功union，并非同一shell六连跑。不同模型gpt-5.6-sol已实际审查初始四域及新增四域并APPROVE。外层[CI预算修订](pi-durable-ci-job-budget-20261022.md)只给安装和完整测试有界执行机会；原用例、产品和hook期限不变。新HEAD真实CI仍待验。
+
+c7后续Windows路径106项、formatter/Room/activity68项断言通过，但Vitest内部onTaskUpdate超时导致作业失败。新增[runner确认屏障](pi-durable-vitest-storm-rpc-ack-20261022.md)只在原同步10000条事件前等待真实状态和注解RPC确认，并以原ctx信号阻止取消后迟到继续；循环内不yield、原终态/重开/replay/5断言和120秒Windows预算均不变。五完整文件在本机Node24/22.22各68项通过、exit0且无未处理错误，实码经独立不同模型APPROVE；新HEAD真实Windows仍待验，不能由本机快速storm外推Windows超60秒重现。
+
+Loop在c7 Ubuntu24和macOS22.22各完整2通过6失败；macOS22输出场景另明确触发原产品10秒读取期限，macOS24及Ubuntu22被原20分钟job上限取消，未得到完整八项结果。完整原worker profile和一次本机被动RPC诊断保留；后者方法识别不全，不能称完整观测。无足够收益的descriptor微候选已拒绝实施。另案[一次手动CI调用边界诊断](pi-durable-loop-ci-rpc-diagnostic-20261022.md)只定位原实际超时，不授权生产优化或期限修订。旧绿或取消不能关闭这些失败，Loop与远端128项仍未完成。下列全量本机记录按eade的79项冻结保留，不重复累计新93、Python或跨版本重复。
 
 本轮承接用户“解决失败问题”，不把此前基线失败当成结案。PR #73 已于 2026-10-21 合并；本分支已集成主干 `6770092945a42fb0e45ef0d68d0971bfc01b51a8`。本轮起点为 `d0e35e73014add369748de77fe2a868a62777f13`。原始失败记录保留在 [集成记录](pi-durable-integration-results-20261022.md) 和 [不可变失败清单](failure-remediation-ledger.json)。
 

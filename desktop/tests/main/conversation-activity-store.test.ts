@@ -123,7 +123,10 @@ describe('durable conversation activity', () => {
     expect(store.getDiagnostics().sourceEvents).toBe(2);
   });
 
-  it('bounds a 10000-progress storm while retaining the critical terminal and replay cursor', () => {
+  it('bounds a 10000-progress storm while retaining the critical terminal and replay cursor', async (ctx) => {
+    // Vitest flushes and acknowledges task updates before annotate resolves.
+    await ctx.annotate('Runner task updates acknowledged before synchronous activity storm');
+    ctx.signal.throwIfAborted();
     bind();
     for (let sequence = 1; sequence <= 10_000; sequence++) store.ingest('watch', event(sequence));
     store.ingest('watch', event(10_001, 'completed'));

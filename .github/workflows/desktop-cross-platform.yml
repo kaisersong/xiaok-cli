@@ -90,7 +90,7 @@ jobs:
     # Public peer authentication is closed on Windows in controller-ipc.ts.
     # Covers all eight bounded cases, dependency installation and cleanup.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -110,107 +110,6 @@ jobs:
       - name: Test complete signed Loop controller paths and cleanup
         working-directory: desktop
         run: npm test -- --maxWorkers=1 tests/main/loop-verification-execution-controller.test.ts
-
-  loop-controller-macos-diagnostic:
-    name: Loop macOS CPU diagnostic (not qualification)
-    runs-on: macos-14
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            desktop/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm ci --ignore-scripts --prefix desktop
-      - name: Profile the original output consumer in its own process group
-        shell: bash
-        env:
-          LOOP_DIAGNOSTIC_DIR: ${{ runner.temp }}/loop-controller-profile
-        run: |
-          node --input-type=module <<'NODE'
-          import {spawn} from 'node:child_process';
-          import {mkdirSync,readFileSync,writeFileSync,openSync,closeSync,readdirSync} from 'node:fs';
-          import {createHash} from 'node:crypto';
-          import {resolve,join} from 'node:path';
-          const root=resolve(process.env.LOOP_DIAGNOSTIC_DIR);
-          mkdirSync(root,{mode:0o700});
-          const workspace=process.cwd(), hash=path=>createHash('sha256').update(readFileSync(join(workspace,path))).digest('hex');
-          const paths=['desktop/tests/main/loop-verification-execution-controller.test.ts','package-lock.json','desktop/package-lock.json','src/runtime/loop/published-candidate.ts'];
-          const metadata={diagnosticOnly:true,startedAt:new Date().toISOString(),node:process.version,platform:process.platform,arch:process.arch,checkout:process.env.GITHUB_SHA,sources:Object.fromEntries(paths.map(path=>[path,hash(path)])),caseFilter:'output-consumer$',originalCaseBudgetMs:300000,productReadBudgetMs:10000,profilePerturbsTiming:true};
-          const failureCode=error=>error&&typeof error.code==='string'?error.code:'unknown';
-          const ioFailure=(operation,error)=>{(metadata.ioFailures??=[]).push({operation,code:failureCode(error)});};
-          const safeSave=()=>{try{writeFileSync(join(root,'metadata.json'),JSON.stringify(metadata,null,2)+'\n');return true;}catch(error){ioFailure('metadata',error);return false;}};
-          // Finish all potentially throwing setup before assigning a detached child owner.
-          if(!safeSave())process.exit(1);
-          const logPath=join(root,'test.log'),logFd=openSync(logPath,'wx',0o600);
-          const args=['--cpu-prof',`--cpu-prof-dir=${root}`,'node_modules/vitest/vitest.mjs','run','tests/main/loop-verification-execution-controller.test.ts','--maxWorkers=1','--reporter=verbose','-t','output-consumer$'];
-          let child;
-          try{child=spawn(process.execPath,args,{cwd:join(workspace,'desktop'),detached:true,stdio:['ignore',logFd,logFd]});}
-          catch(error){try{closeSync(logFd);}catch(closeError){ioFailure('close-log-fd',closeError);}metadata.spawnError=failureCode(error);safeSave();process.exit(1);}
-          try{closeSync(logFd);}catch(error){ioFailure('close-log-fd',error);}
-          metadata.pid=child.pid;metadata.pgid=child.pid;metadata.argv=[process.execPath,...args];
-          const hasPid=()=>Number.isSafeInteger(child.pid)&&child.pid>0;
-          const groupState=()=>{if(!hasPid())return 'not-started';try{process.kill(-child.pid,0);return 'present';}catch(error){return error.code==='ESRCH'?'absent':'unknown';}};
-          let killTimer,giveUpTimer,terminationRequested=false,closed=false;
-          const unreaped=()=>hasPid()&&child.exitCode===null&&child.signalCode===null;
-          const signalOwned=signal=>{if(unreaped()){try{process.kill(-child.pid,signal);metadata[signal==='SIGTERM'?'sentTerm':'sentKill']=true;}catch(error){metadata[signal==='SIGTERM'?'termError':'killError']=failureCode(error);}}};
-          const stop=reason=>{
-            if(closed||terminationRequested)return;
-            terminationRequested=true;metadata.terminationReason=reason;
-            if(unreaped())signalOwned('SIGTERM');else metadata.unresolvedGroup=groupState();
-            killTimer=setTimeout(()=>{signalOwned('SIGKILL');safeSave();},5000);
-            giveUpTimer=setTimeout(()=>{metadata.cleanupUnknown=true;metadata.groupAtGiveUp=groupState();metadata.finishedAt=new Date().toISOString();safeSave();process.exit(1);},10000);
-            safeSave();
-          };
-          const onTerm=()=>stop('owner_SIGTERM'),onInt=()=>stop('owner_SIGINT');
-          process.on('SIGTERM',onTerm);process.on('SIGINT',onInt);
-          const timer=setTimeout(()=>{metadata.outerTimedOut=true;stop('outer_timeout');},420000);
-          child.on('error',error=>{metadata.spawnError=failureCode(error);safeSave();});
-          child.on('close',(code,signal)=>{
-            closed=true;clearTimeout(timer);clearTimeout(killTimer);clearTimeout(giveUpTimer);
-            process.off('SIGTERM',onTerm);process.off('SIGINT',onInt);
-            metadata.exitCode=code;metadata.signal=signal;metadata.reaped=true;metadata.finishedAt=new Date().toISOString();metadata.groupAfterClose=groupState();
-            metadata.profiles=[];
-            try{metadata.profiles=readdirSync(root).filter(name=>name.endsWith('.cpuprofile')).map(name=>{
-              const item={name,complete:false,worker:false};
-              try{
-                const bytes=readFileSync(join(root,name)),profile=JSON.parse(bytes.toString('utf8')),identity=/^CPU\.\d{8}\.\d{6}\.(\d+)\.(\d+)(?:\.(\d+))?\.cpuprofile$/.exec(name);
-                const nodes=profile.nodes,samples=profile.samples,deltas=profile.timeDeltas;
-                item.sha256=createHash('sha256').update(bytes).digest('hex');item.bytes=bytes.length;
-                item.pid=identity?Number(identity[1]):null;item.threadId=identity?Number(identity[2]):null;item.sequence=identity&&identity[3]!==undefined?Number(identity[3]):null;
-                if(!Array.isArray(nodes)||!Array.isArray(samples)||!samples.length||!Array.isArray(deltas)||deltas.length!==samples.length||!Number.isFinite(profile.startTime)||!Number.isFinite(profile.endTime)||profile.endTime<=profile.startTime)throw Error('profile_shape');
-                const ids=new Set(nodes.map(node=>node.id));
-                if(ids.size!==nodes.length||nodes.some(node=>!Number.isSafeInteger(node.id)||!node.callFrame||typeof node.callFrame.url!=='string')||samples.some(id=>!ids.has(id))||deltas.some(delta=>!Number.isFinite(delta)||delta<0))throw Error('profile_samples');
-                item.samples=samples.length;item.nodes=nodes.length;item.startTime=profile.startTime;item.endTime=profile.endTime;
-                item.hasOriginalTestFrame=nodes.some(node=>node.callFrame.url.includes('/desktop/tests/main/loop-verification-execution-controller.test.ts'));
-                item.hasVerificationFrame=nodes.some(node=>node.callFrame.url.includes('/src/runtime/verification/'));
-                item.complete=true;item.worker=identity!==null&&Number.isSafeInteger(item.pid)&&item.pid>0&&item.pid!==child.pid&&item.threadId===0&&(item.sequence===null||Number.isSafeInteger(item.sequence))&&item.hasOriginalTestFrame&&item.hasVerificationFrame;
-              }catch(error){item.error=error instanceof Error?error.message:'profile_unknown';}
-              return item;
-            });}catch(error){metadata.profileCollectionError=failureCode(error);}
-            metadata.workerProfileConfirmed=metadata.profiles.some(item=>item.complete&&item.worker);
-            safeSave();
-            // Replay only after child close: diagnostics can no longer orphan an active owner.
-            const replayError=error=>{ioFailure('log-replay',error);safeSave();process.exitCode=1;};
-            process.stdout.on('error',replayError);
-            try{process.stdout.write(readFileSync(logPath));}catch(error){replayError(error);}
-            safeSave();
-            process.exitCode=!terminationRequested&&!metadata.outerTimedOut&&!metadata.spawnError&&!metadata.ioFailures?.length&&!metadata.profileCollectionError&&code===0&&metadata.groupAfterClose==='absent'&&metadata.workerProfileConfirmed?0:code||1;
-          });
-          safeSave();
-          NODE
-      - name: Preserve this job's original diagnostic evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: loop-macos-cpu-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/loop-controller-profile/
-          retention-days: 3
-          if-no-files-found: warn
 
   windows-kimi-packaged-smoke:
     name: Windows packaged Kimi K3 smoke

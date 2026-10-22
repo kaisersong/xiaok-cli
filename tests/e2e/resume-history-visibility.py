@@ -10,10 +10,18 @@ import tempfile
 import time
 
 
+class TtyCleanupError(RuntimeError):
+    """Preserve the original body and every cleanup exception object."""
+    def __init__(self, errors):
+        self.errors = tuple(errors)
+        super().__init__('TTY body and cleanup failures: ' +
+                         ', '.join(type(error).__name__ for error in errors))
+
+
 def run(entry: Path):
     spec = importlib.util.spec_from_file_location('helpers', Path(__file__).with_name('tmux-e2e.py'))
     helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
-    root = Path(tempfile.mkdtemp(prefix='xiaok-resume-visibility-'))
+    root = Path(tempfile.mkdtemp(prefix='xiaok-resume-visibility-')).resolve()
     work, config, home = root / 'project', root / 'config', root / 'home'
     work.mkdir(); home.mkdir(); (config / 'sessions').mkdir(parents=True)
     summary = '# Context Summary: INTERNAL_COMPACTION_CANARY'
@@ -52,6 +60,13 @@ def run(entry: Path):
         auto_mode=False, extra_args=['--resume', sid],
         env_overrides={'XIAOK_DISABLE_GLOBAL_PLUGINS': '1', 'PAGER': str(pager)})
     owned = []
+    primary_error = None
+    exit_receipts = []
+
+    def observe_exit():
+        receipt = tty.wait_for_exit(timeout=10)
+        exit_receipts.append(receipt)
+        (root / 'exit-receipts.json').write_text(json.dumps(exit_receipts, indent=2))
 
     def full_history():
         return tty.tmux('capture-pane', '-p', '-S', '-', '-t', tty.session).stdout
@@ -73,7 +88,7 @@ def run(entry: Path):
         assert '[Image]' in history
 
     def exit_session():
-        tty.send_text('/exit'); tty.send_key('Enter'); time.sleep(1)
+        tty.send_text('/exit'); tty.send_key('Enter'); observe_exit()
         saved = json.loads(target.read_text())
         assert saved['messages'][:len(messages)] == messages
         assert saved['compactions'] == compactions
@@ -99,24 +114,47 @@ def run(entry: Path):
         request = json.dumps(server.requests[0])
         assert summary in request and raw in request and 'TOOL_COMMAND_CANARY' in request
         exit_session(); start(2); exit_session()
-        (root / 'result.json').write_text(json.dumps({'passed': True, 'entry': str(entry),
+        (root / 'result.json').write_text(json.dumps({'passed': True, 'exitReceipts': exit_receipts, 'entry': str(entry),
             'defaultReplayClean': True, 'detailsAvailableInPager': True, 'modelContextPreserved': True,
             'genuineHeadingVisible': True, 'retainedImagesVisible': True, 'repeatedResumePassed': True,
             'storedHistoryUnchanged': True}, indent=2))
         print('PASS: clean replay; Ctrl+O details; model context; genuine text/images; repeated resume; history unchanged')
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
-        tty.stop(); server.close(); remaining = list(owned)
+        cleanup_errors = []
+        for close in (tty.stop, server.close):
+            try: close()
+            except BaseException as error: cleanup_errors.append(error)
+        remaining = list(owned)
         deadline = time.monotonic() + 5
         while remaining and time.monotonic() < deadline:
             alive = []
+            probe_failed = False
             for pid in remaining:
                 try: os.kill(pid, 0); alive.append(pid)
                 except ProcessLookupError: pass
+                except BaseException as error:
+                    cleanup_errors.append(error)
+                    alive.append(pid)
+                    probe_failed = True
             remaining = alive
+            if probe_failed: break  # Unknown is failure; do not repeat/erase its original exception.
             if remaining: time.sleep(0.05)
-        (root / 'owned-pids.json').write_text(json.dumps({'pids': owned, 'remaining': remaining}))
-        print(f'CLEANUP: owned CLI processes remaining={len(remaining)}; local SSE closed')
-        print('EVIDENCE', root); assert not remaining
+        try:
+            (root / 'owned-pids.json').write_text(json.dumps({'pids': owned, 'remaining': remaining,
+                'cleanupErrors': [type(error).__name__ for error in cleanup_errors]}))
+        except BaseException as error: cleanup_errors.append(error)
+        for values in ((f'CLEANUP: owned CLI processes remaining={len(remaining)}; cleanup errors={len(cleanup_errors)}',),
+                       ('EVIDENCE', root)):
+            try: print(*values)
+            except BaseException as error: cleanup_errors.append(error)
+        if remaining: cleanup_errors.append(AssertionError(f'owned processes survived or unknown: {remaining}'))
+        if cleanup_errors:
+            errors = ([primary_error] if primary_error is not None else []) + cleanup_errors
+            if len(errors) == 1: raise errors[0]
+            raise TtyCleanupError(errors) from errors[0]
 
 
 if __name__ == '__main__':

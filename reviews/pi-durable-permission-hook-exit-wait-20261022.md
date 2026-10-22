@@ -1,0 +1,43 @@
+# Permission hook E2E：等待真实退出后验证ownership（test-only）
+
+本案基线c7c7837576b567cf68737c9570e2ba825164337e，只修失败E2E的退出同步/证据，不修改产品或扩大任何产品期限。已读AGENTS及terminal/verification/evidence专项，独立docs台账49要求同owner真实释放回执、未知保失败、全cleanup保原首因；不清理foreign进程。
+
+## 真实失败与根因界限
+
+原run39712807439/job119607868743的ci-c7-permission-hooks-linux24.log：前48files1906pass57skip与另28pass不代表TTY通过；permission-hook-fallback.py134在2026-10-22T02:48:38读到owned，snapshot paneDead0、actualExitKnownfalse，随后专有tmux清理CLI/hook剩余0。可证明采样时CLI尚活，不能证明它稍后会成功退出，也不能据cleanup强停后0推出正常退出。该job后续五个Python脚本被bash-e阻断，不能称已跑。上传artifact12397886464、zip digest2eded14f236f0147c0ba05ece6d1fcd5d6a52024c024038eb4560b2ce90a2046保留。设计初稿时尚未下载；后续root另授权的精确artifact只读取证见末附录。
+
+原脚本130发/exit，131固定sleep1，132–134直接读ownership。该文件在eade543a3e4a0a9e7d1558beb9162744824eac27与c7逐字相同；da27597ab631f6f79aa7f92cae542a08015af108仅增加失败取证，没有改变同步点。
+
+真实chat4203接/exit先break；5066finally加入原finalizeChatPromise；1499–1540先drain原agent/hooks/registry/continuations/writers、检查原失败，再1537await releaseDrainedSessionOwnership，随后资源close。846–869使用同instance与CAS租约真实释放；不能用UI再见、session存在或dead0替代。现raw不支持宣判产品hang已排除。
+
+TmuxHarness为本测试专有-L socket、POSIX pane command启动真实CLI，remain-on-exit开启。tmux-e2e.py1221–1228已有10秒bounded真实pane_dead/status退出检查。其它resume/text/persistent/exact/yolo脚本也有sleep1：本次不迁移所有兄弟，不宣称全部TTY同步缺陷已修；它们保持原人口和原断言，最终本机原六script顺序验证如有新红另报。
+
+## 最小实施边界
+
+1. tests/e2e/tmux-e2e.py新增wait_for_exit(timeout=10)方法，使用monotonic固定deadline。每次只查询同session的pane_dead/pane_dead_status/pane_dead_signal；tmux可选keyword timeout保持旧默认10，退出helper传min(原10,剩余预算)，防末次query把整体10秒无界延长。poll间隔最多0.1且不越剩余预算。成功仅返回dead1、明确status0、无signal；nonzero/signal/未知字段/丢pane/query失败立即红；活pane到界仍红。不会调用stop/kill使条件成立。该helper只用于POSIX pane-command资格；Windows cmd交互pane不借此声称CLI退出。
+2. permission-hook-fallback.py只将sleep1观察改为wait_for_exit(10)，其后保原单session/released及全部业务断言；result附实际exit receipt。这是从固定1秒采样改为已有兄弟10秒退出观察预算，确实增加最大测试等待，但不改变生产deadline/permission500ms/原UI20s，更不强制release或写session。
+3. 同文件finally各cleanup独立尝试，保原business/exit异常对象，cleanup失败追加聚合不覆盖原首因；保原CLI/hook真实PID清单和严格剩余0。正常退出验收在cleanup之前完成；cleanup强停永远不是成功证据。失败原session/屏幕/stderr取证保留且不泄露账户配置或请求payload。Python聚合使用实际支持的运行时能力，不为异常聚合引入未经声明的最低Python升级。
+4. 新tests/e2e/test_tmux_exit_wait.py回归实际helper：专有socket/实际受控pane进程延迟2s后0、nonzero、signal、仍活至短测试预算、missing/invalid回执；不运行模型。负例接受必须检查精确错误/未伪造退出，finally独立清理自己记录的pane/session/child。permission-hooks.yml仅将新helper相关输入加入两on paths，并在原六Python脚本前运行该小回归；原六入口/全部JS人口/资格/预算不删不变。跨平台既有gate保持。
+
+## 先红、后改与真实验收
+
+设计A/B/root票齐且root授权后执行，当前未改源码/未跑CPU。
+
+- 先冻结root已fresh构建dist入口e8554df59894526cf65920c92424be1798fd0faa13aea0677a1c81907a055bef及实际chat.js/closure manifest。自有临时完整dist副本只在原await releaseDrainedSessionOwnership前插入一次await setTimeout2000；原调用和所有drain都保留。归档复制前后SHA、唯一差异、实际Node/entry/CPU和parent PID/PGID、canonical/stat身份，不改工作树production/dist。原完整permission脚本对该copy在sleep1位置应有效owned红，pane尚活；新等待对同copy须exit0且原released/全部业务断言绿。若前置失败则不是有效红；失败/未退出不扩预算。此为控制变量诊断，不能替代原CLI通过。
+- 原helper回归先呈现旧缺真实等待/1秒快照的红，最小实现后实际延迟0/nonzero/signal/短预算hang/unknown场景守门。所有真实进程仅在记录身份后清自己的；不global kill-server，不复用共享socket。临时copy只在自身runner/worker/group都退出且stat身份匹配后精确删。
+- 使用root真实fresh未加延迟CLI运行原permission全场景，保原业务/模型请求/确认结果和ownership断言；本机原六TTY脚本按CI顺序可验证兄弟交互，若其它fixedsleep红保留另案，不改它们断言或期限。Node24先验，CLI最低22.14按实际资格后验；本地不冒称同HEAD远端CI已绿。完整CI矩阵c7仍进行，不中断；新HEAD真实permission job及原六脚本通过才关闭该CI红。
+- 所有数据对应原log与runner metadata；记录退出前receipt和cleanup后PID0分别含义。任何产品真实hang、release错误、nonzero或cleanup错误保红，不能因等待机制改正便自动归因纯fixture。无production、安全授权、性能或发布完成声明。
+
+## 新授权的实际artifact核对（设计后、尚未实施）
+
+C实际通过run39712807439的API枚举精确两ID并下载：Node24 artifact12397886464 zip SHA2eded14f236f0147c0ba05ece6d1fcd5d6a52024c024038eb4560b2ce90a2046；Node22.14 artifact12397827834 zip SHAa9a977b319de4524249c7dfb349f1d2f49f693d16b512b83b6e8732372e73f9e。API digest均一致，只在ignored C-permission-c7-artifacts新目录解出四个受限regular文件，拒绝绝对/父路径/symlink，不followlinks；逐条SHA/bytes见download-manifest.json。
+
+两份failure-pane均包含本次FOLLOWUP_OK、输入/exit和原“再见！继续上次工作…”（chat4207的break前notice），排除该失败现场尚未处理/exit或仅看到旧ready提示的解释。两snapshot仍owned/paneDead0/actualExitKnownfalse；owned-pids清单各3项且强停后remaining空，只证明原cleanup这些PID回收，不能推出正常finalization完成或全部后代自然退出。无证据表明后来exit0/released，保留产品hang/真实drain错误未排除。新增事实支持先校正观察同步点，但不自动关闭CI失败。当前不改源码、不运行CPU/模型。
+
+## 本机资格前置失败的最小fixture修正（不放宽生产）
+
+首次本机python3默认3.9.6在既有ResponseScript=str|list导入失败，不算业务红；本轮改用CI同版本族精确python3.13，不修改原Python资格声明。随后copy ready前失败的原错误链已被动完整记录为AggregateError(chat_finalization_unconfirmed)→Error(known_writer_fence_directory)，不是有效2s退出红。
+
+根因是macOS tempfile返回/var/folders别名；原permission脚本root未resolve，account preloader传该home，而known-directory-writer-fence.ts18–22、27要求home及全部祖先realpath===resolve，/var本身是/private/var别名。保持此生产拒绝完全不变，仅将该脚本owned mkdtemp root立即Path.resolve()；其work/config/home均沿此canonical根创建，仍是同一真实文件与权限，不改账户uid、目录mode或任何guard。此修正也适用于真实freshCLI，不把copy失败误归缺资产。
+
+本地有效race对照将明确使用“仅canonical fixture路径修正、仍保原sleep1”的归档旧脚本，再对唯一release前2s延迟copy运行；此baseline不是原c7 Python逐字输入，原c7 Linux两真实red独立保留。新等待与此对照只差退出同步/allcleanup，不以canonical修正令owned→released。原copy额外错误树观察行只用于启动诊断，先恢复为原crash-reporter SHA，确保有效red/green时dist唯一差异仍是release前诊断延迟。任一校验不成立或实际original fixture仍启动失败保红，不继续改生产/权限/期限。
