@@ -15,9 +15,11 @@ function fixtureReservationCleanupFailure(cause:unknown,cleanupError:unknown):Er
 }
 const H='a'.repeat(64),hash=(text:string|Buffer)=>createHash('sha256').update(text).digest('hex'),invocation={sessionIdentity:'s',compoundOperationId:'o',validationInvocationId:'v'};
 /** Actual installed start mints all private owners; only native/engine leaves are fixtures. */
-export async function verifiedOperationFixture(mode:string='dispatch',fixtureOptions:{controllerMetadataMinimumBytes?:number;onClock?:()=>void;onQualified?:()=>void|Promise<void>;onRunCurrent?:()=>void;onAuthorityQualified?:()=>void}={}){
+export async function verifiedOperationFixture(mode:string='dispatch',fixtureOptions:{onAcquired?:(fixture:Awaited<ReturnType<typeof installedControllerFixture>>)=>void;controllerMetadataMinimumBytes?:number;onClock?:()=>void;onQualified?:()=>void|Promise<void>;onRunCurrent?:()=>void;onAuthorityQualified?:()=>void}={}){
  const artifact=mode==='maximum-artifact'?Buffer.alloc(12*1024**2-32768,97):mode==='large-artifact'?Buffer.alloc(300*1024,97):Buffer.from('result');
- const f=await installedControllerFixture({artifact,incompleteOutput:mode==='incomplete-output',onClock:fixtureOptions.onClock,onQualified:fixtureOptions.onQualified,onAuthorityQualified:fixtureOptions.onAuthorityQualified}),peer=f.peer,material=f.material,command={argv:['/bin/true'],cwdRelative:'.'};
+ const f=await installedControllerFixture({artifact,incompleteOutput:mode==='incomplete-output',onClock:fixtureOptions.onClock,onQualified:fixtureOptions.onQualified,onAuthorityQualified:fixtureOptions.onAuthorityQualified});
+ fixtureOptions.onAcquired?.(f);
+ const peer=f.peer,material=f.material,command={argv:['/bin/true'],cwdRelative:'.'};
   if(fixtureOptions.controllerMetadataMinimumBytes!==undefined){try{f.reserveControllerMetadata(fixtureOptions.controllerMetadataMinimumBytes);}catch(error){try{await f.close();}catch(cleanupError){throw fixtureReservationCleanupFailure(error,cleanupError);}throw error;}}
   const checks=[{id:'content',path:'result',sha256:hash(artifact),structure:'bytes'},...(mode==='maximum-artifact'?[{id:'content-second',path:'second-result',sha256:hash(artifact),structure:'bytes'}]:[])];
   const recipe={kind:'artifact-content',checks},obligation={obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject',definitionHash:hash(json(recipe)),requiredCheckIds:checks.map(check=>check.id)};

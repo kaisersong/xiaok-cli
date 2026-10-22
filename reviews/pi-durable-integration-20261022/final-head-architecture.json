@@ -1,0 +1,18 @@
+{
+  "label": "final-head-architecture",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "architecture:check",
+    "--",
+    "--changed"
+  ],
+  "startedAt": "2026-10-21T20:07:42.503887+00:00",
+  "runnerPid": 92618,
+  "pid": 92629,
+  "pgid": 92629,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:07:44.779809+00:00",
+  "reaped": true
+}

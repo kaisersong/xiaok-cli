@@ -58,7 +58,7 @@ it('reads the original receiver Loop payload then rejects the same historical co
   const result=await readCurrentLoopPublishedCandidate(binding),body=JSON.parse(result.bytes.toString());
   expect(result.operationId).toBe(committed.operationId);expect(result.businessRevision).toBe(committed.businessRevision);expect(body.application).toEqual(active);
   expect(Buffer.from(body.evaluations[0].artifacts[0].bytesBase64,'base64').toString()).toBe('result');
-  expect(calls.every(method=>['application.inspect','publication.observeOwner','publication.readOwnerPayload'].includes(method))).toBe(true);
+  expect(calls.every(method=>['application.inspect','publication.observeOwner','publication.readOwnerPayload','publication.readCurrentOwnerPayload'].includes(method))).toBe(true);
   const count=(f.database.prepare('SELECT COUNT(*) n FROM execution_attempts').get() as {n:number}).n;
   f.setTime(10000);
   await expect(readCurrentLoopPublishedCandidate(binding)).rejects.toThrow();

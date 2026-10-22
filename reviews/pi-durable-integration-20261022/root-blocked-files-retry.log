@@ -1,0 +1,169 @@
+
+ RUN  v3.2.6 <worktree>
+
+Debugger listening on ws://127.0.0.1:9229/b1df6939-7898-486b-8f12-4e9fd404ee93
+For help, see: https://nodejs.org/learn/getting-started/debugging
+Debugger attached.
+Debugger listening on ws://127.0.0.1:9229/eb429527-38e1-4f70-8923-f9f68a02a564
+For help, see: https://nodejs.org/learn/getting-started/debugging
+Debugger attached.
+Starting inspector on 127.0.0.1:9229 failed: address already in use
+Debugger listening on ws://127.0.0.1:9229/5e33e673-6a57-463d-9eda-96093182b3de
+For help, see: https://nodejs.org/learn/getting-started/debugging
+Debugger attached.
+Debugger listening on ws://127.0.0.1:9229/c96560ec-b1fe-472c-9742-af78b62b138c
+For help, see: https://nodejs.org/learn/getting-started/debugging
+Debugger attached.
+Debugger listening on ws://127.0.0.1:9229/46848128-fc19-4db8-9fc7-0e831e468603
+For help, see: https://nodejs.org/learn/getting-started/debugging
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts (23 tests | 10 failed | 1 skipped) 901699ms
+   × actual original Intent dependency observation derives empty first-stage and whole parent inventory from native receipts 45093ms
+     → Test timed out in 45000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × late expiration of an earlier dependency cannot be spliced into an otherwise-current parent set 41446ms
+     → Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × foreign subject and caller-selected inventory cannot redefine original native dependencies 41956ms
+     → Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ final whole-set check rejects a dependency application entering pending during the last receiver query  46798ms
+   ✓ actual signed controller routes full original payload pages and last complete dependency observation through fixed reader  74110ms
+   × no qualified callback occurs after the final qualified authority clock in the dependency result 40911ms
+     → Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × final authority clock expire still fences the result without a wrapper callback 46401ms
+     → Test timed out in 45000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × final authority clock close still fences the result without a wrapper callback 41178ms
+     → Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ↓ near-limit original contract retains its whole stage population through actual signed set RPC
+   ✓ whole graph read refuses actual sibling noncanonical drift even for empty dependencies  36789ms
+   ✓ whole graph read refuses actual sibling subject drift even for empty dependencies  32029ms
+   ✓ whole graph read refuses actual sibling mandatory drift even for empty dependencies  35564ms
+   × whole graph read refuses actual sibling registration drift even for empty dependencies 33360ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ actual invocation-only append retains complete parent graph: valid  32560ms
+   ✓ actual invocation-only append retains complete parent graph: missing-parent  31284ms
+   × actual invocation-only append retains complete parent graph: missing-sibling-edge 31008ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × actual invocation-only append retains complete parent graph: extra-edge 30326ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × actual invocation-only append retains complete parent graph: parent-noncanonical 31058ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ completion observation includes its own actual publication and every original dependency without publishing the parent implicitly  37166ms
+   ✓ completion observation final clock expire rejects the entire self and dependency set  34362ms
+   ✓ completion observation final clock close rejects the entire self and dependency set  34622ms
+   ✓ parent completion final set rejects old native-approved child publication references after a same-proof child republishes  89124ms
+   ✓ the original final dependency set carries actual receiver identity for parent capture  34551ms
+ ❯ tests/runtime/intent-delegation/verification-host-controller.test.ts (16 tests | 1 failed) 1409201ms
+   ✓ Intent signed controller actual material and independent recipe: normal  19468ms
+   ✓ Intent signed controller actual material and independent recipe: lost-dispatch  20669ms
+   ✓ Intent signed controller actual material and independent recipe: lost-prepare  16190ms
+   ✓ Intent signed controller actual material and independent recipe: lost-stage  15471ms
+   ✓ Intent signed controller actual material and independent recipe: receiver  31937ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-lost-prepare  33877ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-lost-ack  35103ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-sqlite  37198ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-self  46157ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-route-switch  22803ms
+   × Intent signed controller actual material and independent recipe: receiver-project 111282ms
+     → controller_ipc_timeout_unknown
+   ✓ Intent signed controller actual material and independent recipe: receiver-project-sqlite  110276ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-project-parent  327440ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-project-parent-sqlite  325498ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-project-parent-recovery-route  126881ms
+   ✓ Intent signed controller actual material and independent recipe: receiver-project-parent-retry-route  128951ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/intent-delegation/verification-host-controller.test.ts > Intent signed controller actual material and independent recipe: receiver-project
+Error: controller_ipc_timeout_unknown
+ ❯ Timeout.<anonymous> src/runtime/verification/controller-ipc.ts:96:43
+     94|     };
+     95|     const abort = () => finish(Error('controller_ipc_aborted_unknown')…
+     96|     const timer = setTimeout(() => finish(Error('controller_ipc_timeou…
+       |                                           ^
+     97|     socket.on('error', error => finish(error)); socket.on('close', () …
+     98|     socket.on('connect', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > actual original Intent dependency observation derives empty first-stage and whole parent inventory from native receipts
+Error: Test timed out in 45000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:48:1
+     46|  return {f,receiver,subjects,owners,bindings,contract,async close(){aw…
+     47| }
+     48| it('actual original Intent dependency observation derives empty first-…
+       | ^
+     49|  const f=await fixture();try{
+     50|   const observe=(subject:any)=>(f.receiver.publication as any).observe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > late expiration of an earlier dependency cannot be spliced into an otherwise-current parent set
+Error: Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:58:1
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > foreign subject and caller-selected inventory cannot redefine original native dependencies
+Error: Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:61:1
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > no qualified callback occurs after the final qualified authority clock in the dependency result
+Error: Test timed out in 40000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:88:1
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > final authority clock expire still fences the result without a wrapper callback
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > final authority clock close still fences the result without a wrapper callback
+Error: Test timed out in 45000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:95:15
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > whole graph read refuses actual sibling registration drift even for empty dependencies
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:111:15
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > actual invocation-only append retains complete parent graph: missing-sibling-edge
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > actual invocation-only append retains complete parent graph: extra-edge
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > actual invocation-only append retains complete parent graph: parent-noncanonical
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:121:15
+    119| },row==="noncanonical"?40000:row==="subject"?40000:row==="mandatory"?4…
+    120| for(const row of ['valid','missing-parent','missing-sibling-edge','ext…
+    121|  it.each([row])('actual invocation-only append retains complete parent…
+       |               ^
+    122|  const f=await fixture();try{
+    123|   const parent=json(f.owners.at(-1)),sibling=json(f.owners[1]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/11]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  11 failed | 27 passed | 1 skipped (39)
+   Start at  04:02:00
+   Duration  1412.32s (transform 2.08s, setup 56ms, collect 5.80s, tests 2310.90s, environment 0ms, prepare 61ms)

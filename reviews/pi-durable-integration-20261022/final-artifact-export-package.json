@@ -1,0 +1,18 @@
+{
+  "label": "final-artifact-export-package",
+  "cwd": "<worktree>/desktop",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/artifact-export-package.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:05:09.616987+00:00",
+  "runnerPid": 81705,
+  "pid": 81715,
+  "pgid": 81715,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:05:11.275753+00:00",
+  "reaped": true
+}

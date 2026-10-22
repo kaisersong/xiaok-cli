@@ -210,10 +210,10 @@ it('rejects a self-consistent injected invocation against the original approved 
  expect(()=>f.composition.privateHost.enrollment.resolveOwnerKey(f.peer,invocation)).toThrow('enrollment_kswarm_roster');
  }finally{await f.close();}
 });
-it.each(['prepare','prepareRequest','recoverRequest','observeOwner','readOwnerPayload'] as const)('keeps KSwarm out of the actual publication.%s router without issuing scopes or writing request rows',async method=>{
- const f=await installedControllerFixture({completionOwnerSchema:2});try{await enroll(f);const payload=method==='observeOwner'?mapped():method==='readOwnerPayload'?{...mapped(),operationId:'not-enabled',fullTupleHash:H,offset:0,maxBytes:1024}:{...mapped(),requestSource:'user',...(method==='prepare'?{}:{requestId:'ks-no-publication'})};
+it.each(['prepare','prepareRequest','recoverRequest','observeOwner','readOwnerPayload','readCurrentOwnerPayload'] as const)('keeps KSwarm out of the actual publication.%s router without issuing scopes or writing request rows',async method=>{
+ const f=await installedControllerFixture({completionOwnerSchema:2});try{await enroll(f);const payload=(method==='observeOwner'||method==='readCurrentOwnerPayload')?mapped():method==='readOwnerPayload'?{...mapped(),operationId:'not-enabled',fullTupleHash:H,offset:0,maxBytes:1024}:{...mapped(),requestSource:'user',...(method==='prepare'?{}:{requestId:'ks-no-publication'})};
  const snapshot=()=>['completion_access_grants','publication_prepare_requests','publication_request_tombstones'].map(table=>f.database.prepare(`SELECT * FROM ${table}`).all());const before=snapshot();
- await expect(f.invoke(`publication.${method}`,payload,f.peer,signal)).rejects.toThrow('publication_operation_owner_kind');expect(snapshot()).toEqual(before);
+ await expect(f.invoke(`publication.${method}`,payload,f.peer,signal)).rejects.toThrow(method==='readCurrentOwnerPayload'?'publication_payload_owner':'publication_operation_owner_kind');expect(snapshot()).toEqual(before);
  }finally{await f.close();}
 });
 

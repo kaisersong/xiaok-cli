@@ -1,0 +1,13 @@
+{
+  "time": "2026-10-21T20:14:33.027112+00:00",
+  "path": "<master-baseline>",
+  "head": "3b4061489a612337fdb2fc1eb92e96c1d4fbe9a1",
+  "trackedCleanBefore": true,
+  "matchingProcessCommandsBefore": [],
+  "exactCwdUsersBefore": 0,
+  "action": "remove this task created baseline worktree only",
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "removed": true
+}

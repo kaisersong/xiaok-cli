@@ -1,0 +1,29 @@
+
+ RUN  v3.2.4 <worktree>/desktop
+
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at marker-committed uses committed marker truth and never replays
+[post-seal-crash] {
+  mode: 'marker-committed',
+  ownerPid: 15473,
+  signal: 'SIGKILL',
+  committedMarker: true,
+  terminalCount: 1
+}
+
+stdout | tests/main/desktop-post-seal-process.bdd.test.ts > R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at snapshot uses committed marker truth and never replays
+[post-seal-crash] {
+  mode: 'snapshot',
+  ownerPid: 15698,
+  signal: 'SIGKILL',
+  committedMarker: true,
+  terminalCount: 1
+}
+
+ ✓ tests/main/desktop-post-seal-process.bdd.test.ts (17 tests | 15 skipped) 6279ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at marker-committed uses committed marker truth and never replays  3102ms
+   ✓ R4 actual post-seal owner CPU/IO and crash boundary > D10/D18 actual OS crash at snapshot uses committed marker truth and never replays  3176ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 15 skipped (17)
+   Start at  03:50:51
+   Duration  8.82s (transform 1.55s, setup 65ms, collect 2.35s, tests 6.28s, environment 0ms, prepare 23ms)

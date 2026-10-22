@@ -1,0 +1,9 @@
+{
+  "pid": 6497,
+  "pgid": 24448,
+  "before": "6497 24464 24448 04:32 node (vitest 2)",
+  "time": "2026-10-21T19:54:02.629556+00:00",
+  "signal": "SIGTERM",
+  "case": "tests/runtime/intent-delegation/verification-host-controller.test.ts :: receiver-self",
+  "reason": "microtask busy loop beyond original 60000ms deadline; diagnostic/sample retained; record as blocked not passed"
+}

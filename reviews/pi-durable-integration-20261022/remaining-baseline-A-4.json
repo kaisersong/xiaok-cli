@@ -1,0 +1,18 @@
+{
+  "label": "remaining-baseline-A-4",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/conversation-activity/owner-launcher-exit.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:02:41.065928+00:00",
+  "runnerPid": 71434,
+  "pid": 71442,
+  "pgid": 71442,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:04:05.757065+00:00",
+  "reaped": true
+}

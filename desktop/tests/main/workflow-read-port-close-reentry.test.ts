@@ -1,7 +1,8 @@
+// @vitest-environment node
 import type {KSwarmService} from '../../electron/kswarm-service.js';
-import {fileURLToPath} from 'node:url';
+import {realpathSync} from 'node:fs';
 import {resolve} from 'node:path';
-const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
+const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||resolve(import.meta.dirname,'../../..');
 import {it,expect,vi} from 'vitest';
 import {createOwnedWorkflowNetworkFixture} from '../support/owned-workflow-network-fixture.mjs';
 vi.mock('electron',()=>({app:{isPackaged:false}}));
@@ -10,7 +11,7 @@ it.each(['port','service'] as const)('real held GET: %s close reentry returns th
  const fixture=await createOwnedWorkflowNetworkFixture(null);const previousFetch=globalThis.fetch,priorEntry=process.env.KSWARM_SERVER_PATH;
  const entered=deferred(),release=deferred();let ks:KSwarmService|undefined,reading,closing,reentered;let acknowledged=false;
  try{
-  globalThis.fetch=fixture.forwardedFetch;process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');
+  globalThis.fetch=fixture.forwardedFetch;process.env.KSWARM_SERVER_PATH=realpathSync(resolve(repositoryRoot,'..','kswarm','src/server/index.js'));
   const serviceModule=await import('../../electron/kswarm-service.ts');
   const check=await import('../../../src/runtime/task-host/workflow-restriction-checkpoint.ts');
   ks=serviceModule.createKSwarmService({spawnProcess:(()=>{throw Error('fixture_foreign_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_foreign_kill_denied');}});

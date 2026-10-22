@@ -1,0 +1,16 @@
+{
+  "label": "test-compile",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "test:sandbox:build"
+  ],
+  "startedAt": "2026-10-21T19:38:28.758077+00:00",
+  "runnerPid": 22909,
+  "pid": 22945,
+  "pgid": 22945,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:38:44.675066+00:00",
+  "reaped": true
+}

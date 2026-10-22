@@ -1,0 +1,188 @@
+{
+  "scope": "C9 test/fixture only, not whole product/release approval",
+  "sourceFreezeVerifiedAt": "2026-10-22T01:27:09.946329+00:00",
+  "sourceFiles": [
+    {
+      "path": "desktop/tests/fixtures/multi-agent-activity-failure.ts",
+      "sha256": "eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0",
+      "unchanged": true
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+      "sha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966",
+      "unchanged": true
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+      "sha256": "5eb0ed6ea194a4d652e8e62ce9a3b972ed5d98e99811365688d4a9c93eaba379",
+      "unchanged": true
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+      "sha256": "dcbaf379ca9076fb1280fe1ffe757b0d0f3efd52c461ee9279929422704918e8",
+      "unchanged": true
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+      "sha256": "3dbc0bb0dca2a6e09cf8657f159bd45de25a82299b2ff5c6da9181e107d13783",
+      "unchanged": true
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+      "sha256": "51bbf026869b171cddf9127d51943601aaaaa629a00977b8888e9bd7967bb4d4",
+      "unchanged": true
+    }
+  ],
+  "sourceChangesProduction": 0,
+  "originalPopulation": 130,
+  "newCases": {
+    "cleanupUnknownFailures": 1,
+    "actualLeaseTiming": 2
+  },
+  "finalPopulation": 133,
+  "runs": [
+    {
+      "label": "C-usage-related-final-node24",
+      "node": "24.16.0",
+      "rawLog": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-final-node24.log",
+      "metadata": {
+        "label": "C-usage-related-final-node24",
+        "cwd": "<worktree>/desktop",
+        "argv": [
+          "/usr/local/bin/node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+          "tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+          "tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+          "tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+          "tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+          "--maxWorkers=1",
+          "--reporter=verbose"
+        ],
+        "startedAt": "2026-10-22T01:25:28.520998+00:00",
+        "runnerPid": 89543,
+        "activityForensicsSchemaVersion": 1,
+        "activityForensicsRunToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "pid": 89551,
+        "pgid": 89551,
+        "exitCode": 0,
+        "finishedAt": "2026-10-22T01:26:14.369316+00:00",
+        "reaped": true
+      },
+      "perFile": {
+        "tests/main/desktop-multi-agent-activity-factory.bdd.test.ts": {
+          "passed": 18,
+          "failed": 0,
+          "skipped": 0
+        },
+        "tests/main/desktop-multi-agent-activity-service.bdd.test.ts": {
+          "passed": 67,
+          "failed": 0,
+          "skipped": 0
+        },
+        "tests/main/desktop-multi-agent-activity-admission.bdd.test.ts": {
+          "passed": 23,
+          "failed": 0,
+          "skipped": 0
+        },
+        "tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts": {
+          "passed": 11,
+          "failed": 0,
+          "skipped": 0
+        },
+        "tests/main/desktop-multi-agent-mailbox.bdd.test.ts": {
+          "passed": 14,
+          "failed": 0,
+          "skipped": 0
+        }
+      },
+      "sum": {
+        "passed": 133,
+        "failed": 0,
+        "skipped": 0
+      },
+      "retainedRootCount": 11,
+      "parentDeletedAfterActualExit": true,
+      "cleanupEvidence": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-final-node24.forensics-cleanup.json"
+    },
+    {
+      "label": "C-usage-related-final-node22-22",
+      "node": "22.22.0",
+      "rawLog": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-final-node22-22.log",
+      "metadata": {
+        "label": "C-usage-related-final-node22-22",
+        "cwd": "<worktree>/desktop",
+        "argv": [
+          "<local-user>/.npm/_npx/6d82ddbdd7da268b/node_modules/node/bin/node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+          "tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+          "tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+          "tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+          "tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+          "--maxWorkers=1",
+          "--reporter=verbose"
+        ],
+        "startedAt": "2026-10-22T01:26:18.945846+00:00",
+        "runnerPid": 94060,
+        "activityForensicsSchemaVersion": 1,
+        "activityForensicsRunToken": "a83a681b5986425caf71fc123a7e6584",
+        "pid": 94068,
+        "pgid": 94068,
+        "exitCode": 0,
+        "finishedAt": "2026-10-22T01:26:23.480944+00:00",
+        "reaped": true
+      },
+      "perFile": {
+        "tests/main/desktop-multi-agent-activity-service.bdd.test.ts": {
+          "passed": 0,
+          "failed": 0,
+          "skipped": 67
+        },
+        "tests/main/desktop-multi-agent-activity-admission.bdd.test.ts": {
+          "passed": 0,
+          "failed": 0,
+          "skipped": 23
+        },
+        "tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts": {
+          "passed": 0,
+          "failed": 0,
+          "skipped": 11
+        },
+        "tests/main/desktop-multi-agent-activity-factory.bdd.test.ts": {
+          "passed": 3,
+          "failed": 0,
+          "skipped": 15
+        },
+        "tests/main/desktop-multi-agent-mailbox.bdd.test.ts": {
+          "passed": 14,
+          "failed": 0,
+          "skipped": 0
+        }
+      },
+      "sum": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 116
+      },
+      "retainedRootCount": 2,
+      "parentDeletedAfterActualExit": true,
+      "cleanupEvidence": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-final-node22-22.forensics-cleanup.json"
+    }
+  ],
+  "originalRedsRetained": [
+    "C-usage-contract-diagnostic",
+    "C-usage-related-node24",
+    "C-root-gate-red"
+  ],
+  "standardNpmFailureForensics": "retain owned journal until worker exit, no teardown-deleted claim",
+  "unknownOrChangedIdentityParentCleanup": "refuse deletion/report",
+  "notClaimed": [
+    "all133 executed on Node22.22",
+    "whole repository green",
+    "release-ready",
+    "capacity/cache/P3 completion"
+  ]
+}

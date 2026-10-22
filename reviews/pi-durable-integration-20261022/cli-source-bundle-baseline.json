@@ -1,0 +1,16 @@
+{
+  "label": "cli-source-bundle-baseline",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "--test",
+    "tests/package/cli-source-bundle.test.mjs"
+  ],
+  "startedAt": "2026-10-21T20:03:01.419416+00:00",
+  "runnerPid": 73450,
+  "pid": 73466,
+  "pgid": 73466,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:03:02.002175+00:00",
+  "reaped": true
+}

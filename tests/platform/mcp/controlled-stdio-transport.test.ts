@@ -41,6 +41,14 @@ process.stdin.resume();
 setInterval(() => {}, 1000);
 `);
 
+/** Holds the direct-child startup-abort path without creating an unowned descendant. */
+const stubbornLeafServer = join(scratch, 'stubborn-leaf.mjs');
+writeFileSync(stubbornLeafServer, `
+process.on('SIGTERM', () => {});
+process.stdin.resume();
+setInterval(() => {}, 1000);
+`);
+
 function makeTransport(script: string, overrides: Partial<ControlledStdioOptions> = {}) {
   return new ControlledStdioClientTransport({
     command: process.execPath,
@@ -175,7 +183,7 @@ describe('ControlledStdioClientTransport startup abort ownership (design §5.5, 
 
   it('closes the spawned child when the startup signal fires after spawn', async () => {
     const controller = new AbortController();
-    const transport = makeTransport(stubbornServer, { startupSignal: controller.signal });
+    const transport = makeTransport(stubbornLeafServer, { startupSignal: controller.signal });
     await transport.start();
     const pid = transport.getChildPid()!;
     survivors.push(pid);

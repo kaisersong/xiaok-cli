@@ -39,9 +39,10 @@ describe('K3 with the full builtin registry',()=>{
 
 describe('builtin bash definition is plain platform-specific data',()=>{
   it.each(['win32','darwin'] as const)('exports a data description for %s',async value=>{
-    const moduleUrl=new URL('../../../src/ai/tools/bash.js',import.meta.url).href;
+    const sourceMode=import.meta.url.endsWith('.ts');
+    const moduleUrl=new URL(`../../../src/ai/tools/bash.${sourceMode?'ts':'js'}`,import.meta.url).href;
     const script=`Object.defineProperty(process,'platform',{value:${JSON.stringify(value)}});const {bashTool}=await import(${JSON.stringify(moduleUrl)});const d=Object.getOwnPropertyDescriptor(bashTool.definition,'description');console.log(JSON.stringify({hasValue:Object.hasOwn(d,'value'),hasGetter:typeof d.get==='function',description:bashTool.definition.description}));`;
-    const child=spawnSync(process.execPath,['--input-type=module','-e',script],{encoding:'utf8'});
+    const child=spawnSync(process.execPath,[...(sourceMode?['--import','tsx']:[]),'--input-type=module','-e',script],{encoding:'utf8'});
     expect(child.status,child.stderr).toBe(0);
     const definition=JSON.parse(child.stdout);
     expect(definition.hasValue).toBe(true);expect(definition.hasGetter).toBe(false);

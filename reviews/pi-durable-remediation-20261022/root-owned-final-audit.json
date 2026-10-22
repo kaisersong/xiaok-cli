@@ -1,0 +1,1352 @@
+{
+  "checkedAt": "2026-10-22T01:40:26.115103+00:00",
+  "scope": "Actual current members of every recorded runner PGID. Nested children additionally use A/B/C closure evidence. No claim to a complete transient process birth census.",
+  "recordedRunners": 146,
+  "checks": [
+    {
+      "record": "A-desktop-physical-errors.json",
+      "label": "A-desktop-physical-errors",
+      "pid": 29631,
+      "pgid": 29631,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-emitted-green.json",
+      "label": "A-emitted-green",
+      "pid": 32007,
+      "pgid": 32007,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-focused-green-1.json",
+      "label": "A-focused-green-1",
+      "pid": 26951,
+      "pgid": 26951,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-goal-source-fixture-green-v1.json",
+      "label": "A-goal-source-fixture-green-v1",
+      "pid": 81306,
+      "pgid": 81306,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-hook-full-diagnostic.json",
+      "label": "A-hook-full-diagnostic",
+      "pid": 38342,
+      "pgid": 38342,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-hygiene.json",
+      "label": "A-hygiene",
+      "pid": 17705,
+      "pgid": 17705,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-initial-red.json",
+      "label": "A-initial-red",
+      "pid": 21585,
+      "pgid": 21585,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-ipc-workflow-green-v2.json",
+      "label": "A-ipc-workflow-green-v2",
+      "pid": 83228,
+      "pgid": 83228,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-ipc-workflow-green-v3.json",
+      "label": "A-ipc-workflow-green-v3",
+      "pid": 87012,
+      "pgid": 87012,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-ipc-workflow-node22-22.json",
+      "label": "A-ipc-workflow-node22-22",
+      "pid": 96226,
+      "pgid": 96226,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-main-binding-green.json",
+      "label": "A-main-binding-green",
+      "pid": 49342,
+      "pgid": 49342,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-main-binding-red.json",
+      "label": "A-main-binding-red",
+      "pid": 46625,
+      "pgid": 46625,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-room-classification-green.json",
+      "label": "A-room-classification-green",
+      "pid": 57061,
+      "pgid": 57061,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-room-classification-red.json",
+      "label": "A-room-classification-red",
+      "pid": 50973,
+      "pgid": 50973,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-room-new-cases-red.json",
+      "label": "A-room-new-cases-red",
+      "pid": 56606,
+      "pgid": 56606,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-room-sensitivity-regression.json",
+      "label": "A-room-sensitivity-regression",
+      "pid": 58894,
+      "pgid": 58894,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-root-desktop-8-fresh.json",
+      "label": "A-root-desktop-8-fresh",
+      "pid": 14374,
+      "pgid": 14374,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-root-full-remaining.json",
+      "label": "A-root-full-remaining",
+      "pid": 68288,
+      "pgid": 68288,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "A-sibling-regressions.json",
+      "label": "A-sibling-regressions",
+      "pid": 28766,
+      "pgid": 28766,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-B6-diagnostic-red.json",
+      "label": "B-B6-diagnostic-red",
+      "pid": 83863,
+      "pgid": 83863,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-B6-green.json",
+      "label": "B-B6-green",
+      "pid": 89072,
+      "pgid": 89072,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-D6-family-green.json",
+      "label": "B-D6-family-green",
+      "pid": 55390,
+      "pgid": 55390,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-D6-late-writer.json",
+      "label": "B-D6-late-writer",
+      "pid": 58977,
+      "pgid": 58977,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-artifact-process-real.json",
+      "label": "B-artifact-process-real",
+      "pid": 24788,
+      "pgid": 24788,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-cancellation-details-red.json",
+      "label": "B-cancellation-details-red",
+      "pid": 33992,
+      "pgid": 33992,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-checkpoint-green.json",
+      "label": "B-checkpoint-green",
+      "pid": 37177,
+      "pgid": 37177,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-clock-and-entry.json",
+      "label": "B-clock-and-entry",
+      "pid": 6018,
+      "pgid": 6018,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-clock-final-node24.json",
+      "label": "B-clock-final-node24",
+      "pid": 8550,
+      "pgid": 8550,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-desktop-full-v1.json",
+      "label": "B-desktop-full-v1",
+      "pid": 87794,
+      "pgid": 87794,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-final-related-node22-22-fixed.json",
+      "label": "B-final-related-node22-22-fixed",
+      "pid": 23620,
+      "pgid": 23620,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-final-related-node22-22.json",
+      "label": "B-final-related-node22-22",
+      "pid": 16078,
+      "pgid": 16078,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-finalization-controlled-red.json",
+      "label": "B-finalization-controlled-red",
+      "pid": 54057,
+      "pgid": 54057,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-finalization-original-red.json",
+      "label": "B-finalization-original-red",
+      "pid": 51174,
+      "pgid": 51174,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-finalization-real-entry-red.json",
+      "label": "B-finalization-real-entry-red",
+      "pid": 52257,
+      "pgid": 52257,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-fixtures-green.json",
+      "label": "B-fixtures-green",
+      "pid": 28964,
+      "pgid": 28964,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-fixtures-red.json",
+      "label": "B-fixtures-red",
+      "pid": 25832,
+      "pgid": 25832,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-host-related-node22-22.json",
+      "label": "B-host-related-node22-22",
+      "pid": 62902,
+      "pgid": 62902,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-hygiene-before.json",
+      "label": "B-hygiene-before",
+      "pid": 17950,
+      "pgid": 17950,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-adapted-full-node24.json",
+      "label": "B-loop-adapted-full-node24",
+      "pid": 14516,
+      "pgid": 14516,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-budget-full-node24.json",
+      "label": "B-loop-budget-full-node24",
+      "pid": 69265,
+      "pgid": 69265,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-final-node24.json",
+      "label": "B-loop-final-node24",
+      "pid": 63591,
+      "pgid": 63591,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-package-full.json",
+      "label": "B-loop-package-full",
+      "pid": 9191,
+      "pgid": 9191,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-payload-green.json",
+      "label": "B-loop-payload-green",
+      "pid": 11039,
+      "pgid": 11039,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-payload-red-v2.json",
+      "label": "B-loop-payload-red-v2",
+      "pid": 94936,
+      "pgid": 94936,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-payload-red.json",
+      "label": "B-loop-payload-red",
+      "pid": 94139,
+      "pgid": 94139,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-loop-timeout-isolation.json",
+      "label": "B-loop-timeout-isolation",
+      "pid": 83656,
+      "pgid": 83656,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-nominal-clock-diagnostic.json",
+      "label": "B-nominal-clock-diagnostic",
+      "pid": 7900,
+      "pgid": 7900,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-remaining-main-v1.json",
+      "label": "B-remaining-main-v1",
+      "pid": 63665,
+      "pgid": 63665,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-remote-preflight-bounded.json",
+      "label": "B-remote-preflight-bounded",
+      "pid": 62874,
+      "pgid": 62874,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-remote-preflight.json",
+      "label": "B-remote-preflight",
+      "pid": 60870,
+      "pgid": 60870,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-diagnostic-green.json",
+      "label": "B-usage-diagnostic-green",
+      "pid": 62228,
+      "pgid": 62228,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-diagnostic-matrix-red.json",
+      "label": "B-usage-diagnostic-matrix-red",
+      "pid": 60469,
+      "pgid": 60469,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-diagnostic-red.json",
+      "label": "B-usage-diagnostic-red",
+      "pid": 59671,
+      "pgid": 59671,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-family-final.json",
+      "label": "B-usage-family-final",
+      "pid": 70888,
+      "pgid": 70888,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-family-green.json",
+      "label": "B-usage-family-green",
+      "pid": 54628,
+      "pgid": 54628,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-green.json",
+      "label": "B-usage-green",
+      "pid": 49025,
+      "pgid": 49025,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-negative-red.json",
+      "label": "B-usage-negative-red",
+      "pid": 46579,
+      "pgid": 46579,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "B-usage-red.json",
+      "label": "B-usage-red",
+      "pid": 44203,
+      "pgid": 44203,
+      "runnerRecordedReaped": true,
+      "members": [
+        {
+          "pid": 44203,
+          "ppid": 1,
+          "pgid": 44203,
+          "uid": 502,
+          "startedAt": "2026-10-22T09:03:35+08:00",
+          "comm": "/System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/ContextStoreAgent"
+        }
+      ],
+      "classification": "reused-foreign-no-signal"
+    },
+    {
+      "record": "C-dynamic-contract-diagnostic.json",
+      "label": "C-dynamic-contract-diagnostic",
+      "pid": 45754,
+      "pgid": 45754,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-electron-sqlite-runtime.json",
+      "label": "C-electron-sqlite-runtime",
+      "pid": 63333,
+      "pgid": 63333,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-forensics-negative-probe.json",
+      "label": "C-forensics-negative-probe",
+      "pid": 71703,
+      "pgid": 71703,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-glob-emitted-electron.json",
+      "label": "C-glob-emitted-electron",
+      "pid": 66687,
+      "pgid": 66687,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-glob-emitted-node22-22.json",
+      "label": "C-glob-emitted-node22-22",
+      "pid": 66663,
+      "pgid": 66663,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-glob-emitted-node24.json",
+      "label": "C-glob-emitted-node24",
+      "pid": 66398,
+      "pgid": 66398,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-glob-source-node22-22.json",
+      "label": "C-glob-source-node22-22",
+      "pid": 66732,
+      "pgid": 66732,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-glob-source-node22.json",
+      "label": "C-glob-source-node22",
+      "pid": 47918,
+      "pgid": 47918,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-glob-source-node24.json",
+      "label": "C-glob-source-node24",
+      "pid": 47715,
+      "pgid": 47715,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-hygiene.json",
+      "label": "C-hygiene",
+      "pid": 27586,
+      "pgid": 27586,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-intent-setup-timeout.json",
+      "label": "C-intent-setup-timeout",
+      "pid": 42397,
+      "pgid": 42397,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-intl-red-valid.json",
+      "label": "C-intl-red-valid",
+      "pid": 37011,
+      "pgid": 37011,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-intl-red.json",
+      "label": "C-intl-red",
+      "pid": 36488,
+      "pgid": 36488,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-loop-collector-counts.json",
+      "label": "C-loop-collector-counts",
+      "pid": 48743,
+      "pgid": 48743,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-loop-fullprojection-diagnostic.json",
+      "label": "C-loop-fullprojection-diagnostic",
+      "pid": 31481,
+      "pgid": 31481,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-loop-txn-control.json",
+      "label": "C-loop-txn-control",
+      "pid": 42088,
+      "pgid": 42088,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-loop-txn-variant.json",
+      "label": "C-loop-txn-variant",
+      "pid": 43990,
+      "pgid": 43990,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-node22-22-binary.json",
+      "label": "C-node22-22-binary",
+      "pid": 60272,
+      "pgid": 60272,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-node22-binary.json",
+      "label": "C-node22-binary",
+      "pid": 47496,
+      "pgid": 47496,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-node22-sqlite-probe.json",
+      "label": "C-node22-sqlite-probe",
+      "pid": 56912,
+      "pgid": 56912,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-node22-transaction-api.json",
+      "label": "C-node22-transaction-api",
+      "pid": 59120,
+      "pgid": 59120,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-node24-transaction-api.json",
+      "label": "C-node24-transaction-api",
+      "pid": 59161,
+      "pgid": 59161,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-owned13-red.json",
+      "label": "C-owned13-red",
+      "pid": 33837,
+      "pgid": 33837,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-owned14-green-v1.json",
+      "label": "C-owned14-green-v1",
+      "pid": 41405,
+      "pgid": 41405,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-owned14-green-v2.json",
+      "label": "C-owned14-green-v2",
+      "pid": 44516,
+      "pgid": 44516,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-owned14-green-v3.json",
+      "label": "C-owned14-green-v3",
+      "pid": 46329,
+      "pgid": 46329,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-root-gate-red.json",
+      "label": "C-root-gate-red",
+      "pid": 84641,
+      "pgid": 84641,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-source-node22-22-final.json",
+      "label": "C-source-node22-22-final",
+      "pid": 61548,
+      "pgid": 61548,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-source-node22-final.json",
+      "label": "C-source-node22-final",
+      "pid": 57734,
+      "pgid": 57734,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-source-node24-final-v2.json",
+      "label": "C-source-node24-final-v2",
+      "pid": 59345,
+      "pgid": 59345,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-source-node24-final.json",
+      "label": "C-source-node24-final",
+      "pid": 54282,
+      "pgid": 54282,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-split-cli-node22-14.json",
+      "label": "C-split-cli-node22-14",
+      "pid": 1680,
+      "pgid": 1680,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-split-emitted-electron.json",
+      "label": "C-split-emitted-electron",
+      "pid": 1581,
+      "pgid": 1581,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-split-emitted-node22-22.json",
+      "label": "C-split-emitted-node22-22",
+      "pid": 1557,
+      "pgid": 1557,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-split-emitted-node24.json",
+      "label": "C-split-emitted-node24",
+      "pid": 1498,
+      "pgid": 1498,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-stored-green-node22-22.json",
+      "label": "C-stored-green-node22-22",
+      "pid": 87939,
+      "pgid": 87939,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-stored-green-node24.json",
+      "label": "C-stored-green-node24",
+      "pid": 85287,
+      "pgid": 85287,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-stored-red-with-negative.json",
+      "label": "C-stored-red-with-negative",
+      "pid": 83467,
+      "pgid": 83467,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-stored-red.json",
+      "label": "C-stored-red",
+      "pid": 76329,
+      "pgid": 76329,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-timezone-red.json",
+      "label": "C-timezone-red",
+      "pid": 51875,
+      "pgid": 51875,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-ui-node22-final.json",
+      "label": "C-ui-node22-final",
+      "pid": 53398,
+      "pgid": 53398,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-ui-node22.json",
+      "label": "C-ui-node22",
+      "pid": 48406,
+      "pgid": 48406,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-usage-contract-diagnostic.json",
+      "label": "C-usage-contract-diagnostic",
+      "pid": 53776,
+      "pgid": 53776,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-usage-related-final-node22-22.json",
+      "label": "C-usage-related-final-node22-22",
+      "pid": 94068,
+      "pgid": 94068,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-usage-related-final-node24.json",
+      "label": "C-usage-related-final-node24",
+      "pid": 89551,
+      "pgid": 89551,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C-usage-related-node24.json",
+      "label": "C-usage-related-node24",
+      "pid": 72479,
+      "pgid": 72479,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "C9-runtime-contract.json",
+      "label": "C9-runtime-contract",
+      "pid": 92159,
+      "pgid": 92159,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "remediation-glm-delta.json",
+      "label": "remediation-glm-delta",
+      "pid": 14065,
+      "pgid": 14065,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "remediation-glm-final-delta.json",
+      "label": "remediation-glm-final-delta",
+      "pid": 86434,
+      "pgid": 86434,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "remediation-glm-final-setup.json",
+      "label": "remediation-glm-final-setup",
+      "pid": 89821,
+      "pgid": 89821,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "remediation-glm.json",
+      "label": "remediation-glm",
+      "pid": 9957,
+      "pgid": 9957,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-activity-five-node22-22.json",
+      "label": "root-activity-five-node22-22",
+      "pid": 67440,
+      "pgid": 67440,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-activity-five-node24.json",
+      "label": "root-activity-five-node24",
+      "pid": 60768,
+      "pgid": 60768,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-capacity-full.json",
+      "label": "root-capacity-full",
+      "pid": 42387,
+      "pgid": 42387,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-capacity-profile.json",
+      "label": "root-capacity-profile",
+      "pid": 24392,
+      "pgid": 24392,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-ci-desktop-node22-floor.json",
+      "label": "root-ci-desktop-node22-floor",
+      "pid": 82686,
+      "pgid": 82686,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-ci-formatter-room-node22.json",
+      "label": "root-ci-formatter-room-node22",
+      "pid": 99702,
+      "pgid": 99702,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-cli-build.json",
+      "label": "root-cli-build",
+      "pid": 62728,
+      "pgid": 62728,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-data-green.json",
+      "label": "root-data-green",
+      "pid": 26627,
+      "pgid": 26627,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-data-red.json",
+      "label": "root-data-red",
+      "pid": 18799,
+      "pgid": 18799,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-desktop-final-main-build.json",
+      "label": "root-desktop-final-main-build",
+      "pid": 96167,
+      "pgid": 96167,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-desktop-main-build.json",
+      "label": "root-desktop-main-build",
+      "pid": 63045,
+      "pgid": 63045,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-desktop-renderer-build.json",
+      "label": "root-desktop-renderer-build",
+      "pid": 63046,
+      "pgid": 63046,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-emitted-build.json",
+      "label": "root-emitted-build",
+      "pid": 29738,
+      "pgid": 29738,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-final-static.json",
+      "label": "root-final-static",
+      "pid": 94580,
+      "pgid": 94580,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-fixture-green.json",
+      "label": "root-fixture-green",
+      "pid": 23150,
+      "pgid": 23150,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-helper-build.json",
+      "label": "root-helper-build",
+      "pid": 22241,
+      "pgid": 22241,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-intent-dependencies-final.json",
+      "label": "root-intent-dependencies-final",
+      "pid": 50742,
+      "pgid": 50742,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-intent-dependencies-green.json",
+      "label": "root-intent-dependencies-green",
+      "pid": 45624,
+      "pgid": 45624,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-intent-dependencies-quiet.json",
+      "label": "root-intent-dependencies-quiet",
+      "pid": 94914,
+      "pgid": 94914,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-intent-full.json",
+      "label": "root-intent-full",
+      "pid": 51365,
+      "pgid": 51365,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-intent-project-profile.json",
+      "label": "root-intent-project-profile",
+      "pid": 46499,
+      "pgid": 46499,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-intent-semantic-compile.json",
+      "label": "root-intent-semantic-compile",
+      "pid": 20919,
+      "pgid": 20919,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-loop-red-check.json",
+      "label": "root-loop-red-check",
+      "pid": 26650,
+      "pgid": 26650,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-node22-native-prepare.json",
+      "label": "root-node22-native-prepare",
+      "pid": 52151,
+      "pgid": 52151,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-node22-native-verify.json",
+      "label": "root-node22-native-verify",
+      "pid": 53674,
+      "pgid": 53674,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-postfix-build.json",
+      "label": "root-postfix-build",
+      "pid": 83833,
+      "pgid": 83833,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-postfix-static.json",
+      "label": "root-postfix-static",
+      "pid": 86942,
+      "pgid": 86942,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-publication-near-limit.json",
+      "label": "root-publication-near-limit",
+      "pid": 37717,
+      "pgid": 37717,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-registration-benchmark.json",
+      "label": "root-registration-benchmark",
+      "pid": 28519,
+      "pgid": 28519,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-registration-reader-benchmark.json",
+      "label": "root-registration-reader-benchmark",
+      "pid": 67439,
+      "pgid": 67439,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-registration-shape-benchmark.json",
+      "label": "root-registration-shape-benchmark",
+      "pid": 49349,
+      "pgid": 49349,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-remote-final-recheck.json",
+      "label": "root-remote-final-recheck",
+      "pid": 9285,
+      "pgid": 9285,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-remote-recheck-0058.json",
+      "label": "root-remote-recheck-0058",
+      "pid": 90992,
+      "pgid": 90992,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-remote-recheck-lan.json",
+      "label": "root-remote-recheck-lan",
+      "pid": 71957,
+      "pgid": 71957,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-remote-recheck.json",
+      "label": "root-remote-recheck",
+      "pid": 31602,
+      "pgid": 31602,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-sdk-download.json",
+      "label": "root-sdk-download",
+      "pid": 20342,
+      "pgid": 20342,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    },
+    {
+      "record": "root-sqlite-read-scope-probe.json",
+      "label": "root-sqlite-read-scope-probe",
+      "pid": 42454,
+      "pgid": 42454,
+      "runnerRecordedReaped": true,
+      "members": [],
+      "classification": "absent"
+    }
+  ],
+  "unresolved": [],
+  "reusedForeign": [
+    {
+      "record": "B-usage-red.json",
+      "label": "B-usage-red",
+      "pid": 44203,
+      "pgid": 44203,
+      "runnerRecordedReaped": true,
+      "members": [
+        {
+          "pid": 44203,
+          "ppid": 1,
+          "pgid": 44203,
+          "uid": 502,
+          "startedAt": "2026-10-22T09:03:35+08:00",
+          "comm": "/System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/ContextStoreAgent"
+        }
+      ],
+      "classification": "reused-foreign-no-signal"
+    }
+  ],
+  "signalsSent": []
+}

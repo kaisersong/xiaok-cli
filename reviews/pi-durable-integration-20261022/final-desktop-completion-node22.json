@@ -1,0 +1,22 @@
+{
+  "label": "final-desktop-completion-node22",
+  "cwd": "<worktree>/desktop",
+  "argv": [
+    "npx",
+    "--yes",
+    "--package=node@22.14.0",
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/context-manager.test.ts",
+    "tests/main/compaction-completion.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:00:21.978897+00:00",
+  "runnerPid": 63689,
+  "pid": 63716,
+  "pgid": 63716,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:00:27.605757+00:00",
+  "reaped": true
+}

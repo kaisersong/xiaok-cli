@@ -1,0 +1,22 @@
+{
+  "runnerCount": 13,
+  "allReaped": true,
+  "recordedGroups": [
+    17705,
+    21585,
+    26951,
+    28766,
+    29631,
+    32007,
+    38342,
+    46625,
+    49342,
+    50973,
+    56606,
+    57061,
+    58894
+  ],
+  "remaining": [],
+  "manualKill": false,
+  "scope": "runner groups only; diagnostic original detached child closure separately captured in A-hook-diagnostic-summary.json"
+}

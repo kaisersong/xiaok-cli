@@ -1,0 +1,20 @@
+{
+  "label": "semantic-red-node24",
+  "cwd": "<remote-validation>/red-node24",
+  "argv": [
+    "<remote-validation>/node24",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "actual Runtime semantic lifecycle: empty$"
+  ],
+  "startedAt": "2026-10-21T19:49:27.117236+00:00",
+  "runnerPid": 17758,
+  "pid": 17841,
+  "pgid": 17841,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:49:32.504717+00:00",
+  "reaped": true
+}

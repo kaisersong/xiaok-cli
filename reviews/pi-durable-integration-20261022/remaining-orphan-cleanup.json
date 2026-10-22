@@ -1,0 +1,10 @@
+{
+  "time": "2026-10-21T20:11:06.513280+00:00",
+  "pid": 70643,
+  "pgid": 29590,
+  "before": "70643     1 29590 Thu Oct 22 04:02:24 2026     /usr/local/bin/node -e setInterval(()=>{},1000)",
+  "cwd": "<worktree>",
+  "evidence": "member of recorded root-full-remaining-node24 PGID; start after runner; exact private worktree cwd; parent runner already reaped",
+  "action": "SIGTERM own orphan only",
+  "remaining": ""
+}

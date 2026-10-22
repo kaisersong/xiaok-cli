@@ -1,0 +1,16 @@
+{
+  "label": "final-hygiene",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "hygiene:check"
+  ],
+  "startedAt": "2026-10-21T20:11:42.416844+00:00",
+  "runnerPid": 1676,
+  "pid": 1685,
+  "pgid": 1685,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:11:49.264664+00:00",
+  "reaped": true
+}

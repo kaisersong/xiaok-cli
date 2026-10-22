@@ -1,0 +1,166 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+stderr | tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts > MCP cancellation R1: real ToolRegistry boundaries > M3 rejects late-success after caller abort before observers or failure hooks
+[tool-health] mcp__cancel__probe: waiting for actual execution settlement
+
+stderr | tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts > MCP cancellation R1: real ToolRegistry boundaries > M3 rejects late-failure after caller abort before observers or failure hooks
+[tool-health] mcp__cancel__probe: waiting for actual execution settlement
+
+stderr | tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts > MCP cancellation R1: real ToolRegistry boundaries > M4 observes first-winner reason identity on a composed scope signal
+[tool-health] mcp__cancel__probe: waiting for actual execution settlement
+
+ ❯ tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts (31 tests | 1 failed) 103ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting permission dependency, while ordinary rejection is unchanged 14ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting permission-request dependency, while ordinary rejection is unchanged 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting policy-denied dependency, while ordinary rejection is unchanged 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting request-denied dependency, while ordinary rejection is unchanged 2ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting prompt dependency, while ordinary rejection is unchanged 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting prompt-denied dependency, while ordinary rejection is unchanged 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting pre-hook dependency, while ordinary rejection is unchanged 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting protected-output dependency, while ordinary rejection is unchanged 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 preserves cancellation over a rejecting failure-hook dependency, while ordinary rejection is unchanged 3ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M4 preserves the exact pre-aborted DOMException reason and makes zero tool calls 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M4 preserves the exact pre-aborted Error reason and makes zero tool calls 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M4 preserves the exact pre-aborted string reason and makes zero tool calls 0ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 rejects late-success after caller abort before observers or failure hooks 2ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 rejects late-failure after caller abort before observers or failure hooks 4ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 checks cancellation after the observer await before post-success hooks or returning a result 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 checks cancellation after the post-hook await before returning the model result 2ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M9 preserves the original reason after a real approval await and never starts the tool 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3 does not reclassify an ordinary failure without caller abort 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3/M9 preserves abort at the declined-approval await instead of returning an ordinary result 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3/M9 preserves abort at the denied-prehook await instead of returning an ordinary result 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M3/M9 preserves abort at the failure-hook await instead of returning an ordinary result 1ms
+   ✓ MCP cancellation R1: real ToolRegistry boundaries > M4 observes first-winner reason identity on a composed scope signal 1ms
+   × MCP cancellation R1: generic builder and CUA production multi-step wrapper > M8 passes only per-call signal through the actual generic builder and does not retain the previous caller 18ms
+     → expected [ [ 'probe', {}, { …(2) } ], …(1) ] to deeply equal [ [ 'probe', {}, { …(1) } ], …(1) ]
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 stops at the actual CUA list_windows barrier with no later backend action 2ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 stops at the actual CUA click barrier with no later backend action 1ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 stops at the actual CUA capture_after_lookup barrier with no later backend action 1ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 stops at the actual CUA capture_after_result barrier with no later backend action 2ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 preabort touches neither CUA availability nor backend and never converts cancellation into reconnect guidance 1ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 cancellation wins before a late recoverable backend error can trigger reconnect guidance 2ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M5 retains the real dangerous-input gate and translator without cancellation 4ms
+   ✓ MCP cancellation R1: generic builder and CUA production multi-step wrapper > M8/M11 cancellation during shared CUA connect keeps pending ownership and never cancels sibling B 30ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts > MCP cancellation R1: generic builder and CUA production multi-step wrapper > M8 passes only per-call signal through the actual generic builder and does not retain the previous caller
+AssertionError: expected [ [ 'probe', {}, { …(2) } ], …(1) ] to deeply equal [ [ 'probe', {}, { …(1) } ], …(1) ]
+
+- Expected
++ Received
+
+@@ -1,10 +1,48 @@
+  [
+    [
+      "probe",
+      {},
+      {
++       "executionContext": {
++         "messages": [],
++         "session": {
++           "approvalRefs": [],
++           "backgroundJobRefs": [],
++           "compactions": [],
++           "compoundOperations": undefined,
++           "createdAt": 1792611801764,
++           "cwd": "<master-baseline>",
++           "lineage": [
++             "transient",
++           ],
++           "memoryRefs": [],
++           "messages": [],
++           "protectedObservationClosure": undefined,
++           "semanticCompaction": undefined,
++           "sessionId": "transient",
++           "updatedAt": 1792611801764,
++           "usage": {
++             "inputTokens": 0,
++             "outputTokens": 0,
++           },
++         },
++         "signal": AbortSignal {
++           Symbol(kEvents): Map {},
++           Symbol(events.maxEventTargetListeners): 0,
++           Symbol(events.maxEventTargetListenersWarned): false,
++           Symbol(kHandlers): Map {},
++           Symbol(kAborted): true,
++           Symbol(kReason): Error {
++             "message": "old turn",
++           },
++           Symbol(kComposite): false,
++         },
++         "systemPrompt": "fixture",
++         "taskId": "private-task",
++         "toolDefinitions": [],
++       },
+        "signal": AbortSignal {
+          Symbol(kEvents): Map {},
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): Map {},
+@@ -18,10 +56,46 @@
+    ],
+    [
+      "probe",
+      {},
+      {
++       "executionContext": {
++         "messages": [],
++         "session": {
++           "approvalRefs": [],
++           "backgroundJobRefs": [],
++           "compactions": [],
++           "compoundOperations": undefined,
++           "createdAt": 1792611801765,
++           "cwd": "<master-baseline>",
++           "lineage": [
++             "transient",
++           ],
++           "memoryRefs": [],
++           "messages": [],
++           "protectedObservationClosure": undefined,
++           "semanticCompaction": undefined,
++           "sessionId": "transient",
++           "updatedAt": 1792611801765,
++           "usage": {
++             "inputTokens": 0,
++             "outputTokens": 0,
++           },
++         },
++         "signal": AbortSignal {
++           Symbol(kEvents): Map {},
++           Symbol(events.maxEventTargetListeners): 0,
++           Symbol(events.maxEventTargetListenersWarned): false,
++           Symbol(kHandlers): Map {},
++           Symbol(kAborted): false,
++           Symbol(kReason): undefined,
++           Symbol(kComposite): false,
++         },
++         "systemPrompt": "fixture",
++         "taskId": "mcp-cancellation-fixture",
++         "toolDefinitions": [],
++       },
+        "signal": AbortSignal {
+          Symbol(kEvents): Map {},
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): Map {},
+
+ ❯ tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts:194:33
+    192|     await tools[0]!.execute({}, mcpTestContext(a.signal, { taskId: 'pr…
+    193|     a.abort(new Error('old turn')); await tools[0]!.execute({}, mcpTes…
+    194|     expect(callTool.mock.calls).toEqual([['probe', {}, { signal: a.sig…
+       |                                 ^
+    195|   });
+    196|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 passed (31)
+   Start at  03:43:19
+   Duration  2.52s (transform 1.14s, setup 36ms, collect 2.17s, tests 103ms, environment 0ms, prepare 41ms)

@@ -2,9 +2,9 @@ name: Bounded glob search
 on:
   push:
     branches: [master]
-    paths: ['src/ai/tools/glob*', 'src/ai/tools/bounded-glob.ts', 'src/ai/tools/grep.ts', 'tests/ai/tools/*glob*', 'tests/ai/tools/grep.test.ts', 'tests/package/glob-worker.test.mjs', 'scripts/copy-glob-worker.mjs', 'package.json', 'desktop/package.json', '.github/workflows/glob-search.yml']
+    paths: ['src/ai/tools/glob*', 'src/ai/tools/bounded-glob.ts', 'src/ai/tools/grep.ts', 'tests/ai/tools/*glob*', 'tests/ai/tools/grep.test.ts', 'tests/package/glob-worker.test.mjs', 'tests/package/support/glob-worker-contract.mjs', 'scripts/copy-glob-worker.mjs', 'package.json', 'desktop/package.json', '.github/workflows/glob-search.yml']
   pull_request:
-    paths: ['src/ai/tools/glob*', 'src/ai/tools/bounded-glob.ts', 'src/ai/tools/grep.ts', 'tests/ai/tools/*glob*', 'tests/ai/tools/grep.test.ts', 'tests/package/glob-worker.test.mjs', 'scripts/copy-glob-worker.mjs', 'package.json', 'desktop/package.json', '.github/workflows/glob-search.yml']
+    paths: ['src/ai/tools/glob*', 'src/ai/tools/bounded-glob.ts', 'src/ai/tools/grep.ts', 'tests/ai/tools/*glob*', 'tests/ai/tools/grep.test.ts', 'tests/package/glob-worker.test.mjs', 'tests/package/support/glob-worker-contract.mjs', 'scripts/copy-glob-worker.mjs', 'package.json', 'desktop/package.json', '.github/workflows/glob-search.yml']
   workflow_dispatch: {}
 permissions:
   contents: read

@@ -1,0 +1,16 @@
+{
+  "label": "baseline-testcompile",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "npm",
+    "run",
+    "test:sandbox:build"
+  ],
+  "startedAt": "2026-10-21T19:46:27.259486+00:00",
+  "runnerPid": 88276,
+  "pid": 88315,
+  "pgid": 88315,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:46:27.488784+00:00",
+  "reaped": true
+}

@@ -1,0 +1,30 @@
+{
+  "label": "focused-node24",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/ai/runtime/compaction-completion.test.ts",
+    "tests/ai/runtime/compact-runner.test.ts",
+    "tests/ai/runtime/agent-runtime.test.ts",
+    "tests/ai/runtime/portable-compaction-executor.test.ts",
+    "tests/ai/adapters/claude.test.ts",
+    "tests/ai/adapters/openai-responses.test.ts",
+    "tests/ai/adapters/openai.test.ts",
+    "tests/runtime/sol-pi/provider-disclosure.test.ts",
+    "tests/runtime/sol-pi/semantic-compaction-owner.test.ts",
+    "tests/runtime/sol-pi/semantic-summary-attempt.test.ts",
+    "tests/runtime/sol-pi/semantic-compaction-ledger.test.ts",
+    "tests/runtime/sol-pi/capacity-admission.test.ts",
+    "tests/runtime/sol-pi/deepseek-capacity-profile.test.ts",
+    "tests/runtime/sol-pi/compaction-policy.test.ts"
+  ],
+  "startedAt": "2026-10-21T19:38:13.915722+00:00",
+  "runnerPid": 22305,
+  "pid": 22315,
+  "pgid": 22315,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:38:18.533428+00:00",
+  "reaped": true
+}

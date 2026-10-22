@@ -33,7 +33,11 @@ export type SqliteWithAuthorizer = DatabaseSync & {
 
 // Only the network adapter and Electron shell are substituted. The factory,
 // default TaskRunner, registry, service, coordinator, store and IPC are real.
-export async function authorizationFixture(cleanup: Array<() => void | Promise<void>>, existingRoot?: string, overrides: Partial<Parameters<typeof createDesktopServices>[0]> = {}) {
+export async function authorizationFixture(cleanup: Array<() => void | Promise<void>>, existingRoot?: string, overrides: Partial<Parameters<typeof createDesktopServices>[0]> = {}, lifecycle: { callerOwnsServiceDisposal?: boolean; onAcquired?: (services: ReturnType<typeof createDesktopServices>) => void } = {}) {
+  if (lifecycle.callerOwnsServiceDisposal !== undefined && typeof lifecycle.callerOwnsServiceDisposal !== 'boolean') throw Error('authorization_fixture_lifecycle_flag_invalid');
+  if (lifecycle.onAcquired !== undefined && typeof lifecycle.onAcquired !== 'function') throw Error('authorization_fixture_acquisition_callback_invalid');
+  if ((lifecycle.callerOwnsServiceDisposal === true) !== (typeof lifecycle.onAcquired === 'function')) throw Error('authorization_fixture_lifecycle_pair_required');
+  if (lifecycle.callerOwnsServiceDisposal === true && !existingRoot) throw Error('authorization_fixture_caller_owner_required_before_allocation');
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'xiaok-execution-auth-'));
   if (!existingRoot) cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
   vi.stubEnv('XIAOK_CONFIG_DIR', join(root, 'config'));
@@ -44,7 +48,11 @@ export async function authorizationFixture(cleanup: Array<() => void | Promise<v
   } as unknown as KSwarmService;
   const services = createDesktopServices({ dataRoot: join(root, 'data'), knowledgeDbPath: join(root, 'knowledge.sqlite'),
     kswarmService, workspaceRoot: root, pluginRootDir: join(root, 'plugins'), pluginDependencies: [], ...overrides });
-  cleanup.push(() => services.disposeMultiAgent());
+  if (lifecycle.callerOwnsServiceDisposal) {
+    if (typeof lifecycle.onAcquired !== 'function') throw Error('authorization_fixture_acquisition_callback_missing');
+    const returned = lifecycle.onAcquired(services);
+    if (returned !== undefined) throw Error('authorization_fixture_acquisition_callback_not_synchronous_void');
+  } else cleanup.push(() => services.disposeMultiAgent());
   const boundary = services.multiAgent!;
   await boundary.ready;
   await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
@@ -53,9 +61,15 @@ export async function authorizationFixture(cleanup: Array<() => void | Promise<v
   const contexts: DesktopAgentExecutionContext[] = [];
   const scopes: Array<{ catalog: DesktopCapabilityCatalog; handle: DesktopScopedRegistry }> = [];
   const createScope = DesktopCapabilityCatalog.prototype.createScopedRegistry;
+  // AP10's opt-in owner already owns the exact ordinary scope observer. A
+  // second vi.spyOn here would retain its original wrapper in Vitest's global
+  // mock Set and restore the prior case's wrapper during a later restoreAll.
+  // Default callers retain the original collector and returned scopes array.
+  if (!lifecycle.callerOwnsServiceDisposal) {
   vi.spyOn(DesktopCapabilityCatalog.prototype, 'createScopedRegistry').mockImplementation(function(this: DesktopCapabilityCatalog, ...args) {
     const handle = createScope.apply(this, args); scopes.push({ catalog: this, handle }); return handle;
   });
+  }
   const activity = boundary.service.recordActivity.bind(boundary.service);
   vi.spyOn(boundary.service, 'recordActivity').mockImplementation((context, fact) => {
     if (!contexts.includes(context)) contexts.push(context);

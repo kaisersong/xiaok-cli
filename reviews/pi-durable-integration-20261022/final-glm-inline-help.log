@@ -1,0 +1,98 @@
+Usage: qodercli [options] [command] [query...]
+
+Qoder CLI - Defaults to interactive mode. Use -p/--print for non-interactive
+output.
+
+Arguments:
+  query                                Initial prompt.
+
+Options:
+  -d, --debug                          Run in debug mode (default: false)
+  -m, --model <model>                  Model for the current session. Default
+                                       and New Models use model name; Custom
+                                       uses modelID
+  --reasoning-effort <level>           Set reasoning effort level
+  --thinking <mode>                    Set thinking mode (auto, adaptive,
+                                       enabled, or disabled)
+  --thinking-budget <tokens>           Set a fixed thinking token budget
+                                       (implies --thinking enabled)
+  --context-window <size>              Explicit context window for supported
+                                       models
+  --list-models                        List available models for the current
+                                       user
+  -i, --prompt-interactive <text>      Execute prompt and continue in
+                                       interactive mode
+  -w, --cwd <dir>                      Change working directory before startup
+  --config-dir <dir>                   Use a custom user-level config root for
+                                       this run
+  --worktree [name]                    Start in a new git worktree
+  --permission-mode <mode>             Set the permission mode (choices:
+                                       default, accept_edits,
+                                       bypass_permissions, dont_ask, auto)
+  --dangerously-skip-permissions       Bypass all permission checks
+  --allowed-mcp-server-names <name>    Allowed MCP server names
+  --tools <tools...>                   Restrict available built-in tools ("" to
+                                       disable all, "default" for all; use -p or
+                                       -- to separate from query)
+  --allowed-tools <tool>               Tools to allow
+  --disallowed-tools <tool>            Tools to deny
+  --attachment <file>                  Attach files to the initial prompt
+  --plugin-dir <dir>                   Plugin directories to load
+  -c, --continue                       Continue the most recent session
+  --fork-session                       Create a new session from a resumed
+                                       conversation
+  -r, --resume [id]                    Resume a previous session by identifier
+  -n, --name <name>                    Set a display name for this session
+  --session-id <id>                    Use a specific session ID
+  --remote [task]                      Create a cloud remote session and print
+                                       its access URL
+  --remote-session <id>                Cold-load and attach to an existing
+                                       remote session
+  --teleport <id>                      Load and attach to a remote session
+  --list-sessions                      List available sessions and exit
+  --delete-session <index>             Delete a session by index number
+  --add-dir <dir>                      Additional directories to include in the
+                                       workspace
+  -o, --output-format <format>         The format of the CLI output
+  --input-format <format>              The format of the CLI input
+  --max-output-tokens <size>           Set maximum model output tokens
+  -p, --print                          Print response and exit (non-interactive)
+  --no-session-persistence             Disable session persistence - sessions
+                                       will not be saved to disk and cannot be
+                                       resumed (only works with --print)
+  --agent <name>                       Agent for the current session
+  --agents <json>                      JSON object defining custom agents
+  --append-system-prompt <text>        Append to the default system prompt
+  --system-prompt <text>               System prompt for the session
+  --output-style <style>               Output style for this session
+  --max-model-request-retries <count>  Maximum retries for Qoder and Custom
+                                       Provider model requests
+  --mcp-config <config>                Load MCP servers from JSON file(s) or
+                                       inline JSON
+  --strict-mcp-config                  Only use MCP servers from --mcp-config
+                                       (default: false)
+  --setting-sources <source>           Setting sources to load (user, project,
+                                       local)
+  --settings <json>                    Load additional settings from a JSON file
+                                       path or inline JSON string
+  -v, --version                        output the version number
+  --remote-control <id>                Run as a headless remote-control worker
+  -h, --help                           display help for command
+
+Commands:
+  mcp                                  Configure and manage MCP servers
+  plugins|plugin                       Manage plugins
+  skills|skill                         Manage agent skills.
+  hooks|hook                           Manage hooks
+  agents|agent [options]               Manage agents
+  login                                Sign in to your account
+  rollback [options]                   Rollback to a previous version
+  update [options]                     Update to the latest version
+  status [options]                     Show session status
+  commit [options]                     Generate a commit message and commit
+                                       changes
+  feedback [options]                   Submit feedback
+  security                             Scan source code for security issues
+  remote-control [options]             Start the remote-control daemon
+  sites [args...]                      Build, publish and manage Qoder Sites
+  wiki [args...]                       Generate wiki documentation for projects

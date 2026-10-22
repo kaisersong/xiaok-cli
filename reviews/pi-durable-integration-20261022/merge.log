@@ -1,0 +1,8 @@
+Auto-merging src/ai/adapters/claude.ts
+Auto-merging src/ai/adapters/openai-responses.ts
+Auto-merging src/ai/adapters/openai.ts
+Auto-merging src/ai/runtime/compact-runner.ts
+CONFLICT (content): Merge conflict in src/ai/runtime/compact-runner.ts
+Auto-merging src/ai/runtime/model-capabilities.ts
+Auto-merging tests/ai/adapters/openai.test.ts
+Automatic merge failed; fix conflicts and then commit the result.

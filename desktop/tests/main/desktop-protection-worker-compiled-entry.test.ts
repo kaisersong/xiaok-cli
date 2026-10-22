@@ -2,7 +2,7 @@
 import { afterAll, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DesktopTaskObservationStore } from '../../../src/runtime/task-host/protected-observation-store.js';
 import { compileProtectionWorkerEntry, preserveOriginalModuleUrls } from '../fixtures/desktop-protection-worker-entry.js';
 import { pathToFileURL } from 'node:url';
@@ -44,7 +44,15 @@ it('preserves only lexical module URLs, including spaces and hashes in the origi
   expect(transformed.contents).toContain(JSON.stringify(pathToFileURL(file).href));
   expect(transformed.contents).toContain('const literal="import.meta.url"; // import.meta.url');
 });
-it.each(["import.meta['url']", 'import.meta', 'import.meta.env', 'import.meta?.url'])('rejects unsupported lexical %s without changing its meaning', expression => {
+it('preserves lexical module dirname without treating path punctuation as URL syntax', () => {
+  const file = join(tmpdir(), 'actual emitted # directory', 'module.js');
+  const source = `export const directory=import.meta.dirname; export const literal="import.meta.dirname"; // import.meta.dirname\n`;
+  const transformed = preserveOriginalModuleUrls(source, file);
+  expect(transformed.replacements).toBe(1);
+  expect(transformed.contents).toContain(`directory=${JSON.stringify(dirname(file))}`);
+  expect(transformed.contents).toContain('const literal="import.meta.dirname"; // import.meta.dirname');
+});
+it.each(["import.meta['url']", "import.meta['dirname']", 'import.meta', 'import.meta.env', 'import.meta?.url', 'import.meta?.dirname'])('rejects unsupported lexical %s without changing its meaning', expression => {
   expect(() => preserveOriginalModuleUrls(`export const value=${expression};`, join(tmpdir(), 'original.js')))
     .toThrow('unsupported_worker_module_meta');
 });

@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { DesktopSettings } from '../../renderer/src/components/DesktopSettings';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { api } from '../../renderer/src/api';
+import { MEETING_MODELS_OUTPUT_SCHEMA } from '../../shared/meeting-readonly-ipc-contract';
 
 const meetingMocks = vi.hoisted(() => ({
   meetingGetAsrConfig: vi.fn(),
@@ -86,7 +87,7 @@ describe('DesktopSettings voice pane', () => {
         model: input.aliyun?.model ?? 'fun-asr',
       },
     }));
-    meetingMocks.meetingListModels.mockResolvedValue([
+    meetingMocks.meetingListModels.mockResolvedValue(MEETING_MODELS_OUTPUT_SCHEMA.parse([
       {
         id: 'base',
         capability: 'asr',
@@ -96,6 +97,8 @@ describe('DesktopSettings voice pane', () => {
         sizeLabel: '145 MB',
         downloaded: true,
         status: 'downloaded',
+        cacheDir: '/owned/meeting-models', path: '/owned/meeting-models/base.pt', packageId: 'base', packageType: 'single-file',
+        packageState: 'verified', manifestTrusted: true, runtimeAutoDownloadAllowed: false,
       },
       {
         id: 'medium',
@@ -106,6 +109,8 @@ describe('DesktopSettings voice pane', () => {
         sizeLabel: '1.5 GB',
         downloaded: false,
         status: 'incomplete',
+        cacheDir: '/owned/meeting-models', path: '/owned/meeting-models/medium.pt', packageId: 'medium', packageType: 'single-file',
+        packageState: 'incomplete', manifestTrusted: true, runtimeAutoDownloadAllowed: false,
         localSizeBytes: 66_142_208,
         localSizeLabel: '66 MB',
       },
@@ -118,8 +123,11 @@ describe('DesktopSettings voice pane', () => {
         sizeLabel: '65 MB',
         downloaded: false,
         status: 'not_downloaded',
+        cacheDir: '/owned/meeting-models', path: '/owned/meeting-models/punctuation',
+        packageId: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-int8', packageType: 'directory',
+        packageState: 'missing', manifestTrusted: true, runtimeAutoDownloadAllowed: false,
       },
-    ]);
+    ]));
     meetingMocks.meetingDownloadModel.mockResolvedValue({ ok: true });
     meetingMocks.meetingUninstallModel.mockResolvedValue({ ok: true });
   });
@@ -127,6 +135,17 @@ describe('DesktopSettings voice pane', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it('keeps malformed model facts unknown and does not invent a downloadable model', async () => {
+    meetingMocks.meetingListModels.mockResolvedValue([{ id: 'base', downloaded: true, status: 'downloaded' }]);
+    renderSettings();
+    fireEvent.click(await screen.findByRole('button', { name: '语音' }));
+    expect(await screen.findByText('无法读取会议模型')).toBeVisible();
+    expect(screen.getByText('会议模型信息未知')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /下载.*Base|卸载.*Base/ })).not.toBeInTheDocument();
+    expect(meetingMocks.meetingDownloadModel).not.toHaveBeenCalled();
+    expect(meetingMocks.meetingUninstallModel).not.toHaveBeenCalled();
   });
 
   it('renders voice settings and saves online ASR providers', async () => {

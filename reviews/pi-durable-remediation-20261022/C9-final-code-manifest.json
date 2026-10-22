@@ -1,0 +1,31 @@
+{
+  "files": [
+    {
+      "path": "desktop/tests/fixtures/multi-agent-activity-failure.ts",
+      "sha256": "eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+      "sha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+      "sha256": "5eb0ed6ea194a4d652e8e62ce9a3b972ed5d98e99811365688d4a9c93eaba379"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+      "sha256": "dcbaf379ca9076fb1280fe1ffe757b0d0f3efd52c461ee9279929422704918e8"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+      "sha256": "3dbc0bb0dca2a6e09cf8657f159bd45de25a82299b2ff5c6da9181e107d13783"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+      "sha256": "51bbf026869b171cddf9127d51943601aaaaa629a00977b8888e9bd7967bb4d4"
+    }
+  ],
+  "productionChanges": 0,
+  "parseDiagnostics": 0,
+  "notSemanticTypecheck": true
+}

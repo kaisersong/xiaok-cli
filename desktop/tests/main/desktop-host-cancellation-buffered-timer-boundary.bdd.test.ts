@@ -32,14 +32,18 @@ describe('BDD: a real buffered timer already dispatched when cancellation drains
     cleanup.push(async () => { releaseModel.resolve(); releaseWrite.resolve(); await host.drain(); });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
-      for (let i = 0; i < 253; i++) yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } };
+      for (let i = 0; i < 252; i++) yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } };
       yield { type: 'text', delta: 'The original buffered timer owns this delta before cancellation.' };
       modelEntered.resolve(); await releaseModel.promise;
     });
     const task = await host.prepareTask({ prompt: 'Hello', materials: [] });
     await host.startTask(task.taskId); await modelEntered.promise; await internals.flushMutations(task.taskId);
     while (internals.persistedEventDispatchChains.size) await Promise.all([...internals.persistedEventDispatchChains.values()]);
-    expect((await new FileTaskSnapshotStore(join(f.root, 'data', 'tasks')).recoverTask(task.taskId))!.events).toHaveLength(255);
+    const before = (await new FileTaskSnapshotStore(join(f.root, 'data', 'tasks')).recoverTask(task.taskId))!;
+    expect(before.events.filter(event => event.type === 'task_execution_started')).toHaveLength(1);
+    expect(before.events.filter(event => event.type === 'usage_recorded')).toHaveLength(252);
+    expect(before.events).toHaveLength(255);
+    expect(before.usage).toEqual({ inputTokens: 252, outputTokens: 252, known: true });
     const callback = vi.spyOn(DesktopGoalCoordinator.prototype, 'handlePersistedTaskEvent');
     const failure = Object.assign(new Error('timer-owned original interim checkpoint EIO'), { code: 'EIO' });
     let faults = 0;

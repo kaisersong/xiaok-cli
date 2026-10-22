@@ -55,9 +55,9 @@ export async function readCurrentLoopPublishedCandidate(raw:Readonly<LoopApplica
   const originalApplication=parseActiveBusinessApplicationBinding(before.current);
   if(originalApplication.binding.kind!=='loop'||json(originalApplication.binding)!==json(binding))throw notCurrent('loop_publication_application_changed');
   publisher=createInstalledCompletionPublisher(requested,'scheduler');
-  const observed=await wait(()=>publisher!.observe(active));current();const publication=observed.publication;
+  const currentPayload=await wait(()=>publisher!.readCurrentPayload(active));current();const observed=currentPayload.observation,publication=observed.publication;
   if(json(observed.owner)!==json(owner)||observed.currentVerification!=='valid'||publication.status!=='committed'||!publication.current)throw notCurrent('loop_publication_not_current');
-  const payload=await wait(()=>publisher!.readPayload(observed,active));current();
+  const payload=currentPayload.payload;if(!payload)throw Error('loop_publication_payload');
   if(json(payload.owner)!==json(owner)||payload.businessRevision!==observed.businessRevision||payload.operationId!==publication.operationId
    ||payload.fullTupleHash!==publication.fullTupleHash||!Buffer.isBuffer(payload.bytes)||payload.bytes.length>32*1024**2
    ||createHash('sha256').update(payload.bytes).digest('hex')!==payload.payloadHash)throw Error('loop_publication_payload');

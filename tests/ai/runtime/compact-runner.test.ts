@@ -33,6 +33,32 @@ describe('CompactRunner', () => {
     expect(captured[0]).toContain('Do NOT call any tools');
   });
 
+  it('runs the prepared request without retaining or mutating the original history', async () => {
+    let sentMessages: Message[] | undefined;
+    let sentSystem: string | undefined;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (messages, _tools, systemPrompt) => {
+        sentMessages = messages; sentSystem = systemPrompt;
+        return textStream('summary');
+      },
+    };
+    const runner = new CompactRunner(adapter);
+    const source: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'original request' }] }];
+    const before = structuredClone(source);
+    const prepared = runner.prepareRequest(source);
+    expect(prepared.messages[0]).not.toBe(source[0]);
+    expect(prepared.messages[0]!.content[0]).not.toBe(source[0]!.content[0]);
+    await runner.run(source);
+    expect(sentMessages).toEqual(prepared.messages);
+    expect(sentSystem).toBe(prepared.systemPrompt);
+    expect(source).toEqual(before);
+    const block = prepared.messages[0]!.content[0]!;
+    if (block.type === 'text') block.text = 'mutated preview';
+    expect(source).toEqual(before);
+    expect(sentMessages).toEqual(runner.prepareRequest(source).messages);
+  });
+
   it('passes empty tools list to prevent tool calls', async () => {
     let capturedTools: unknown;
     const adapter: ModelAdapter = {
@@ -49,7 +75,7 @@ describe('CompactRunner', () => {
     expect(capturedTools).toEqual([]);
   });
 
-  it('passes the exact stream options object through to adapter', async () => {
+  it('preserves caller options without mutation and requires a complete summary response', async () => {
     let capturedOptions: StreamOptions | undefined;
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
@@ -74,7 +100,9 @@ describe('CompactRunner', () => {
       streamOptions,
     );
 
-    expect(capturedOptions).toBe(streamOptions);
+    expect(capturedOptions).toEqual({ ...streamOptions, requireCompleteResponse: true });
+    expect(capturedOptions?.signal).toBe(controller.signal);
+    expect(streamOptions).toEqual({ signal: controller.signal, cacheKey: `pc1_${'a'.repeat(64)}` });
   });
 
   it('drains usage and rethrows the same pending adapter error', async () => {

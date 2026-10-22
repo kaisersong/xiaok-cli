@@ -136,3 +136,45 @@ describe('Room field classification contracts', () => {
     expect(projectMetadataOnly('RoomWorkspaceSnapshot', { claims })).toEqual({});
   });
 });
+
+it.each([
+  ['RoomWorkspaceInstructions', 'instructions', {
+    roomId: 'room-1', snapshotDigest: 'a'.repeat(64), publishedAt: '2026-10-22T00:00:00.000Z',
+  }, {
+    description: canary, directoryNotes: [canary], publishedBy: { kind: 'user', userId: canary },
+  }],
+  ['RoomWorkspaceClaim', 'claims', {
+    roomId: 'room-1', logicalAgentId: 'agent-1', parentClaimId: null, projectMappingRevision: 2,
+    taskId: 'task-1', protocolVersion: 1, hostIncarnation: 3, bindingId: 'binding-1', generation: 4,
+    workspaceRevision: 5, instructionsDigest: 'b'.repeat(64), membershipRevision: 6,
+    createdAt: '2026-10-22T00:00:00.000Z', mappingRevision: 7, roomSequence: 8,
+    updatedAt: '2026-10-22T00:01:00.000Z', lastHeartbeatAt: '2026-10-22T00:02:00.000Z',
+  }, {
+    contextScope: { kind: 'project', projectId: canary }, workspaceId: canary, originHostId: canary,
+    hostPrincipal: canary, acquireDigest: canary, taskName: canary,
+    terminationEvidence: { executorInstanceId: canary, kind: 'process-exit', verified: true },
+  }],
+  ['RoomWorkspaceArtifact', 'artifacts', {
+    roomId: 'room-1', workspaceRevision: 9, producerClaimId: 'claim-1',
+    observedAt: '2026-10-22T00:00:00.000Z', sourceSequence: 10,
+  }, {
+    workspaceId: canary, originHostId: canary, contextScope: { kind: 'project', projectId: canary },
+    handoff: { reportedSummary: canary, completionStatus: canary, unfinished: null, blockers: null, sourceMessageIds: [canary] },
+    commitTicketId: canary, confirmationTicketId: canary,
+  }],
+] as const)('classifies all added %s fields through direct and Snapshot projection without reading sensitive getters', (kind, nestedKey, metadata, sensitive) => {
+  const input: Record<string, unknown> = { ...metadata, ...sensitive, unclassifiedCanary: canary };
+  const nested = () => ({ [nestedKey]: nestedKey === 'instructions' ? input : [input] });
+  const expected = { [nestedKey]: nestedKey === 'instructions' ? metadata : [metadata] };
+  expect(projectMetadataOnly(kind, input)).toEqual(metadata);
+  const projected = projectMetadataOnly('RoomWorkspaceSnapshot', nested());
+  expect(projected).toEqual(expected);
+  expect(JSON.stringify(projected)).not.toContain(canary);
+  let reads = 0;
+  for (const key of [...Object.keys(sensitive), 'unclassifiedCanary']) {
+    Object.defineProperty(input, key, { configurable: true, enumerable: true, get() { reads++; throw Error(canary); } });
+  }
+  expect(projectMetadataOnly(kind, input)).toEqual(metadata);
+  expect(projectMetadataOnly('RoomWorkspaceSnapshot', nested())).toEqual(expected);
+  expect(reads).toBe(0);
+});

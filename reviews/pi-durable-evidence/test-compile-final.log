@@ -1,0 +1,3 @@
+
+> xiaokcode@1.5.14 test:sandbox:build
+> tsc -p tsconfig.tests.json && node scripts/copy-glob-worker.mjs .test-dist/src/ai/tools && node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));"

@@ -1,0 +1,20 @@
+{
+  "label": "hook-paired-integration",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/commands/chat-finalization-process.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "actual configured hook-(sync|async) remains owned until the original hook process drains"
+  ],
+  "startedAt": "2026-10-21T19:58:11.157194+00:00",
+  "runnerPid": 51476,
+  "pid": 51500,
+  "pgid": 51500,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:58:21.818225+00:00",
+  "reaped": true
+}

@@ -1,0 +1,39 @@
+{
+  "file": "desktop/tests/main/loop-verification-execution-controller.test.ts",
+  "sourceSHA256": "83582426fda875e785ddf75b03ebdb2a7a1b528e1c861c5008fa8052912ef4e6",
+  "originalExpectCalls": 59,
+  "currentExpectCalls": 59,
+  "expectCallBytesIdentical": true,
+  "logicalSetTimeCallsBytesIdentical": true,
+  "currentLogicalSetTimeCalls": 5,
+  "stageMarks": [
+    "mark('fixture-ready')",
+    "mark('root-publication-current')",
+    "mark('output-stage-publications-ready')",
+    "mark('output-business-projected')",
+    "mark('output-preview-read')",
+    "mark('output-artifacts-listed')",
+    "mark('output-task-read')",
+    "mark('output-workspace-mutation-refused')",
+    "mark('output-navigation-complete')",
+    "mark('output-late-navigation-refused')",
+    "mark('output-expiry-refusals-complete')",
+    "mark('scenario-body-complete')",
+    "mark('stage-publication-ready')",
+    "mark('business-projected')",
+    "mark('desktop-inspection-complete')",
+    "mark('stage-publication-ready')",
+    "mark('business-projected')",
+    "mark('fresh-view-branch-complete')",
+    "mark('dedupe-current-branch-complete')",
+    "mark('expired-runner-view-refusals-complete')",
+    "mark('scenario-body-complete')",
+    "mark('scenario-finally-complete')"
+  ],
+  "runnerBoundsMs": {
+    "simple": 30000,
+    "consumer": 120000,
+    "outputConsumer": 300000
+  },
+  "defaultHookTimeoutChanged": false
+}

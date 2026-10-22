@@ -1,0 +1,16 @@
+{
+  "label": "final-test-compile",
+  "cwd": "<final-validation>",
+  "argv": [
+    "npm",
+    "run",
+    "test:sandbox:build"
+  ],
+  "startedAt": "2026-10-21T20:09:58.360262+00:00",
+  "runnerPid": 98281,
+  "pid": 98289,
+  "pgid": 98289,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:10:14.556421+00:00",
+  "reaped": true
+}

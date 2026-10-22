@@ -1,0 +1,310 @@
+{
+  "sourceCommit": "d7f9a5a07b8695fc05b1a406c0863eafaac4a421",
+  "sourceChecksAfter": [
+    {
+      "file": ".github/workflows/model-recovery.yml",
+      "expected": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "temporary": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "main": "ae978ffafb4102da7f6d810856ff6a2a4d6a97e1dfa37834943c5c0d804efa28",
+      "allMatch": true
+    },
+    {
+      "file": "desktop/electron/context-manager.ts",
+      "expected": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "temporary": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "main": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "allMatch": true
+    },
+    {
+      "file": "desktop/tests/main/compaction-completion.test.ts",
+      "expected": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "temporary": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "main": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "allMatch": true
+    },
+    {
+      "file": "desktop/tests/main/context-manager.test.ts",
+      "expected": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "temporary": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "main": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/adapters/claude.ts",
+      "expected": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "temporary": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "main": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/adapters/openai-responses.ts",
+      "expected": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "temporary": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "main": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/adapters/openai.ts",
+      "expected": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "temporary": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "main": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/runtime/compact-runner.ts",
+      "expected": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "temporary": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "main": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/runtime/compaction-response.ts",
+      "expected": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "temporary": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "main": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "allMatch": true
+    },
+    {
+      "file": "src/ai/runtime/model-capabilities.ts",
+      "expected": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "temporary": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "main": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "allMatch": true
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-owner.ts",
+      "expected": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "temporary": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "main": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/adapters/openai.test.ts",
+      "expected": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "temporary": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "main": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/compact-runner.test.ts",
+      "expected": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "temporary": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "main": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/compaction-completion.test.ts",
+      "expected": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "temporary": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "main": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "allMatch": true
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "expected": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "temporary": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "main": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/adapters/openai.test.ts",
+      "expected": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "temporary": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "main": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/adapters/claude.test.ts",
+      "expected": "0bb7b250c83d1af42fab20536c5b175dbce3995f158f924220af6d454012f38b",
+      "temporary": "0bb7b250c83d1af42fab20536c5b175dbce3995f158f924220af6d454012f38b",
+      "main": "0bb7b250c83d1af42fab20536c5b175dbce3995f158f924220af6d454012f38b",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/adapters/openai-responses.test.ts",
+      "expected": "1149349eddf4d63bfbc3fdfe80a10cf447eb4159e8b9a6b82bfbb05ff77b9ad2",
+      "temporary": "1149349eddf4d63bfbc3fdfe80a10cf447eb4159e8b9a6b82bfbb05ff77b9ad2",
+      "main": "1149349eddf4d63bfbc3fdfe80a10cf447eb4159e8b9a6b82bfbb05ff77b9ad2",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/compaction-completion.test.ts",
+      "expected": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "temporary": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "main": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/compact-runner.test.ts",
+      "expected": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "temporary": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "main": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/portable-compaction-executor.test.ts",
+      "expected": "eac7101d9df1cd7da68f1a7500b9e5376dc04a48d9a04fa30251b2e0e5641f4e",
+      "temporary": "eac7101d9df1cd7da68f1a7500b9e5376dc04a48d9a04fa30251b2e0e5641f4e",
+      "main": "eac7101d9df1cd7da68f1a7500b9e5376dc04a48d9a04fa30251b2e0e5641f4e",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/model-stream-recovery.test.ts",
+      "expected": "c6bdaf463535e464cad7f4d2c96c3b39a302cfdc4d8f22eaceaa49303f6cce54",
+      "temporary": "c6bdaf463535e464cad7f4d2c96c3b39a302cfdc4d8f22eaceaa49303f6cce54",
+      "main": "c6bdaf463535e464cad7f4d2c96c3b39a302cfdc4d8f22eaceaa49303f6cce54",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/abort-error-discrimination.test.ts",
+      "expected": "f0754094f850ec94e7bb5214345caf3a4c2c18b1abbcc39eb480473d32b0a85d",
+      "temporary": "f0754094f850ec94e7bb5214345caf3a4c2c18b1abbcc39eb480473d32b0a85d",
+      "main": "f0754094f850ec94e7bb5214345caf3a4c2c18b1abbcc39eb480473d32b0a85d",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/agent-runtime.test.ts",
+      "expected": "5315c3e14185075eda9f0de5ffc5a8fab7750815339ceeba8adafd58c6b2f5b6",
+      "temporary": "5315c3e14185075eda9f0de5ffc5a8fab7750815339ceeba8adafd58c6b2f5b6",
+      "main": "5315c3e14185075eda9f0de5ffc5a8fab7750815339ceeba8adafd58c6b2f5b6",
+      "allMatch": true
+    },
+    {
+      "file": "tests/ai/runtime/provider-request-error.test.ts",
+      "expected": "899e7de887958544abc6384936cf72511271b620c84266b91fd16b94a1229d7f",
+      "temporary": "899e7de887958544abc6384936cf72511271b620c84266b91fd16b94a1229d7f",
+      "main": "899e7de887958544abc6384936cf72511271b620c84266b91fd16b94a1229d7f",
+      "allMatch": true
+    },
+    {
+      "file": "package.json",
+      "expected": "d50d9bda6c1f28906e6160fec1246c4f0b8397986b97aecc81ef1b2df8a8e4e6",
+      "temporary": "d50d9bda6c1f28906e6160fec1246c4f0b8397986b97aecc81ef1b2df8a8e4e6",
+      "main": "d50d9bda6c1f28906e6160fec1246c4f0b8397986b97aecc81ef1b2df8a8e4e6",
+      "allMatch": true
+    },
+    {
+      "file": "package-lock.json",
+      "expected": "6141044e2ee97a5811c5af04bf936199fb6e6fe58d51738335d4cc88a3a0221a",
+      "temporary": "6141044e2ee97a5811c5af04bf936199fb6e6fe58d51738335d4cc88a3a0221a",
+      "main": "6141044e2ee97a5811c5af04bf936199fb6e6fe58d51738335d4cc88a3a0221a",
+      "allMatch": true
+    },
+    {
+      "file": "tsconfig.json",
+      "expected": "7385a600bc34fc6e80052dc8ae391b95858d5393bca9ae2d3b5e1fc3df9e4a8a",
+      "temporary": "7385a600bc34fc6e80052dc8ae391b95858d5393bca9ae2d3b5e1fc3df9e4a8a",
+      "main": "7385a600bc34fc6e80052dc8ae391b95858d5393bca9ae2d3b5e1fc3df9e4a8a",
+      "allMatch": true
+    },
+    {
+      "file": "tsconfig.tests.json",
+      "expected": "75ae022df3277bb66a58c0375345eac4c86eabbc991d865b28301a5491f45a51",
+      "temporary": "75ae022df3277bb66a58c0375345eac4c86eabbc991d865b28301a5491f45a51",
+      "main": "75ae022df3277bb66a58c0375345eac4c86eabbc991d865b28301a5491f45a51",
+      "allMatch": true
+    },
+    {
+      "file": "vitest.sandbox.config.mjs",
+      "expected": "b4aa814057a8f15f6e082b382eb510cb3874195f361c6e9f838d35ec202e7292",
+      "temporary": "b4aa814057a8f15f6e082b382eb510cb3874195f361c6e9f838d35ec202e7292",
+      "main": "b4aa814057a8f15f6e082b382eb510cb3874195f361c6e9f838d35ec202e7292",
+      "allMatch": true
+    },
+    {
+      "file": "scripts/set-build-flavor.mjs",
+      "expected": "e123354d2793d5ef84ddbb0230e8c41dcce28ee1f647879a11935065f5d2d1a0",
+      "temporary": "e123354d2793d5ef84ddbb0230e8c41dcce28ee1f647879a11935065f5d2d1a0",
+      "main": "e123354d2793d5ef84ddbb0230e8c41dcce28ee1f647879a11935065f5d2d1a0",
+      "allMatch": true
+    },
+    {
+      "file": "scripts/clean-cli-build.mjs",
+      "expected": "359f1fc9966006bf6e55c3ad30cb38d7fb6201c59a808a2a6ad9870652107575",
+      "temporary": "359f1fc9966006bf6e55c3ad30cb38d7fb6201c59a808a2a6ad9870652107575",
+      "main": "359f1fc9966006bf6e55c3ad30cb38d7fb6201c59a808a2a6ad9870652107575",
+      "allMatch": true
+    },
+    {
+      "file": "scripts/copy-glob-worker.mjs",
+      "expected": "a5e72ff4695e233b5f050ba3e74c44485c8123c825f056c6906216918530cdc3",
+      "temporary": "a5e72ff4695e233b5f050ba3e74c44485c8123c825f056c6906216918530cdc3",
+      "main": "a5e72ff4695e233b5f050ba3e74c44485c8123c825f056c6906216918530cdc3",
+      "allMatch": true
+    },
+    {
+      "file": "scripts/copy-test-assets.mjs",
+      "expected": "78fdf9d1d2bd2f614ac949a1445fdcd418a0962746115b66de0bbf21c1c00734",
+      "temporary": "78fdf9d1d2bd2f614ac949a1445fdcd418a0962746115b66de0bbf21c1c00734",
+      "main": "78fdf9d1d2bd2f614ac949a1445fdcd418a0962746115b66de0bbf21c1c00734",
+      "allMatch": true
+    },
+    {
+      "file": "scripts/repair-better-sqlite3-types.cjs",
+      "expected": "1a7d0c1d32a53e4f98577f35dd2ae963e781512dc4b3543e325fea87d31cdb27",
+      "temporary": "1a7d0c1d32a53e4f98577f35dd2ae963e781512dc4b3543e325fea87d31cdb27",
+      "main": "1a7d0c1d32a53e4f98577f35dd2ae963e781512dc4b3543e325fea87d31cdb27",
+      "allMatch": true
+    },
+    {
+      "file": "scripts/verification/copy-windows-absence.mjs",
+      "expected": "46fe9a366ba591dafb044587fe23a5df514ccc7976aef4234032d5d1a3054593",
+      "temporary": "46fe9a366ba591dafb044587fe23a5df514ccc7976aef4234032d5d1a3054593",
+      "main": "46fe9a366ba591dafb044587fe23a5df514ccc7976aef4234032d5d1a3054593",
+      "allMatch": true
+    },
+    {
+      "file": "tests/support/vite-net-use-patch.cjs",
+      "expected": "941ae604c831db986cb184d1824e1e73c6d20e01f0b5b379e6872ed14efe1d31",
+      "temporary": "941ae604c831db986cb184d1824e1e73c6d20e01f0b5b379e6872ed14efe1d31",
+      "main": "941ae604c831db986cb184d1824e1e73c6d20e01f0b5b379e6872ed14efe1d31",
+      "allMatch": true
+    }
+  ],
+  "allMatchAfter": true,
+  "mainTypesSha256After": "8413bb67e4f57a5a9b41af969d018982db63e245f5cedd87f18394c6db6bad69",
+  "mainTypesUnchanged": true,
+  "emittedEntriesHashes": [
+    {
+      "file": ".test-dist/tests/ai/adapters/openai.test.js",
+      "sha256": "fded96513a29ac0e9d8be854928d526b1c5be9610c97c080d5fbb07b4f72e6b1"
+    },
+    {
+      "file": ".test-dist/tests/ai/adapters/claude.test.js",
+      "sha256": "874478686b59ff78635928a9766d0a71b460d77d973ea1aefb845dd8e20c04a3"
+    },
+    {
+      "file": ".test-dist/tests/ai/adapters/openai-responses.test.js",
+      "sha256": "7b55c73286e7341a9814ddc3d0f4b9f43628de8f5f14f4a67e83faeb50a24e64"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/compaction-completion.test.js",
+      "sha256": "ae3b3da56b7d86b1af49ba5a58cb1539ebabf1c4f7b81b2b88da38b1ead3ed82"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/compact-runner.test.js",
+      "sha256": "846d9fc1c88ef48803ce0b6654b5d6b6b25e6ca63bc3b0aa54dca5353940a755"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/portable-compaction-executor.test.js",
+      "sha256": "1ef51ca8ee6620265047cf1aa4f4c3dfc90322af4e39db21c3bdc60412d14050"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/model-stream-recovery.test.js",
+      "sha256": "12bc963ebb9f847096b2b1942357f87470003fb65d50acedd1b70bd02fd68b87"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/abort-error-discrimination.test.js",
+      "sha256": "a0c896b66bdb5b1ab7790e388b98b7627655113847b0885384bfba73ce7c8146"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/agent-runtime.test.js",
+      "sha256": "ad238e42cb016a76ec2089ace5bc3a650fd10ae0d09e2a64da4b689e902b2f6b"
+    },
+    {
+      "file": ".test-dist/tests/ai/runtime/provider-request-error.test.js",
+      "sha256": "54c1d6b2de3a336269aae4ebd118d80e03c0dfa2e8c326cfa1e67c1a18a6ba18"
+    }
+  ],
+  "ownedProcessGroupsRemaining": []
+}

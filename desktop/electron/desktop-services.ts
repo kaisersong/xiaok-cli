@@ -95,6 +95,7 @@ import { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approv
 import { DesktopMultiAgentRuntime } from './desktop-multi-agent-runtime.js';
 import { getDesktopDelegationPolicy } from './desktop-delegation-policy.js';
 import { streamDesktopTaskRecovery, createDesktopModelPhysicalScope, admitDesktopModelPhysicalRead, closeDesktopModelPhysicalScope, type DesktopModelPhysicalScope, type DesktopTaskRequestPreparer } from './desktop-task-stream.js';
+import { mapDesktopModelUsageAdmission, type DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import { DesktopMultiAgentWorktrees } from './desktop-multi-agent-worktrees.js';
 import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from './desktop-multi-agent-catalog-bridge.js';
 import { DesktopMcpCatalogRegistration } from './desktop-mcp-catalog-registration.js';
@@ -6023,6 +6024,14 @@ const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
   '不要输出 Markdown 代码块，除非原始任务明确要求 Markdown 正文。',
 ].join('\n');
 
+function reportUsageCaptureFailure(error: unknown): void {
+  try {
+    console.warn('[usage] token capture failed:', error instanceof Error ? error.message : 'usage_capture_failed');
+  } catch {
+    // Diagnostics cannot replace the original usage persistence failure.
+  }
+}
+
 async function streamDesktopToolLoopFinalization(input: {
   modelPhysicalScope?: DesktopModelPhysicalScope;
   prepareRequest?: DesktopTaskRequestPreparer;
@@ -6040,6 +6049,7 @@ async function streamDesktopToolLoopFinalization(input: {
   stepId: string;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
   onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
+  admitUsage?: (invocationId: string) => DesktopModelUsageAdmission;
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const local = !input.modelPhysicalScope;
   const modelPhysicalScope = input.modelPhysicalScope ?? createDesktopModelPhysicalScope();
@@ -6058,6 +6068,8 @@ async function streamDesktopToolLoopFinalization(input: {
       await input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:input.turnId,state:'recovering'});
     },
     onInvocation: (id: string) => { providerInvocationId = id; },
+    onUsage: input.onUsage,
+    admitUsage: input.admitUsage,
     beforeRequest: input.beforeRequest,
     adapter: input.adapter,
     messages: input.apiMessages,
@@ -6070,8 +6082,6 @@ async function streamDesktopToolLoopFinalization(input: {
     try {
     for await (const chunk of (input.projectModel ? input.projectModel.stream : streamDesktopTaskRecovery)(request, modelPhysicalRun)) {
     if (chunk.type === 'usage') {
-      const captured = input.onUsage?.(chunk, providerInvocationId);
-      if (captured) await captured;
       continue;
     }
     throwIfAborted(input.signal);
@@ -6177,6 +6187,7 @@ interface ToolLoopContext {
   strategies: ToolLoopStrategies;
   maxIterations?: number;
   onUsage?: (inputTokens: number, outputTokens: number, usageId?: string) => void | Promise<void>;
+  admitUsage?: (invocationId: string) => DesktopModelUsageAdmission;
   mailbox?: DesktopMailboxPort;
   roomExecution?:{authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined;takePendingImages?:()=>MessageBlock[]};
   onActivity?: (activity: { phase: 'model' | 'thinking' | 'tool'; toolName?: string }) => void;
@@ -6609,6 +6620,14 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
   let toolResultsAwaitingFinalResponse = false;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  const admitUsage = ctx.admitUsage ? (invocationId: string) => mapDesktopModelUsageAdmission(
+    ctx.admitUsage!(invocationId),
+    (incoming, outgoing) => {
+      lastRequestInputTokens = incoming;
+      totalInputTokens += incoming;
+      totalOutputTokens += outgoing;
+    },
+  ) : undefined;
   let { skillInvocation } = ctx;
   let skillNamesDetected: string[] = [];
   let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
@@ -6677,16 +6696,19 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'});
       },
       onInvocation: id => { providerInvocationId = id; },
-    }, modelPhysicalRun)) {
-      if (chunk.type === 'usage') {
+      admitUsage,
+      onUsage: async (chunk, invocationId) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
           lastRequestInputTokens = inputTkns;
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          const captured = ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, providerInvocationId);
+          const captured = ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, invocationId);
           if (captured) await captured;
-        } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
+        } catch (e) { if (!ctx.mailbox) reportUsageCaptureFailure(e); throw e; }
+      },
+    }, modelPhysicalRun)) {
+      if (chunk.type === 'usage') {
         continue;
       }
       throwIfAborted(ctx.signal);
@@ -7090,6 +7112,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       intentId: ctx.intentId,
       stepId: ctx.stepId,
       emitRuntimeEvent: ctx.emitRuntimeEvent,
+      admitUsage,
       onUsage: async (chunk, invocationId) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
@@ -7097,7 +7120,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           await ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, invocationId);
-        } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
+        } catch (e) { if (!ctx.mailbox) reportUsageCaptureFailure(e); throw e; }
       },
     });
     reply += finalized.reply;
@@ -8277,9 +8300,18 @@ export function createDesktopModelRunnerWithRegistry(
       dataRoot,
       taskStartTime,
       maxIterations: maxToolLoopIterations,
+      admitUsage: rootContext ? invocationId => mapDesktopModelUsageAdmission(
+        runnerOptions.multiAgent!.service.captureAdmittedUsage(rootContext, invocationId),
+        (inputTokens, outputTokens) => {
+          const write = emitUsage({ inputTokens, outputTokens });
+          pendingUsageWrites.push(write);
+          return write;
+        },
+      ) : undefined,
       onUsage: async (inputTokens, outputTokens, usageId) => {
-        if (rootContext) await runnerOptions.multiAgent!.service.recordUsage(rootContext, { usageId: usageId!, inputTokens, outputTokens });
-        pendingUsageWrites.push(emitUsage({ inputTokens, outputTokens }));
+        const write = emitUsage({ inputTokens, outputTokens });
+        pendingUsageWrites.push(write);
+        await write;
       },
       strategies: {
         compact: {

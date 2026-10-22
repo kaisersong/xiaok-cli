@@ -12,6 +12,14 @@ import tempfile
 import traceback
 
 
+class TtyCleanupError(RuntimeError):
+    """Keep the original exception objects on Python versions before 3.11 too."""
+    def __init__(self, errors):
+        self.errors = tuple(errors)
+        super().__init__('permission TTY failure and cleanup errors: ' +
+                         ', '.join(type(error).__name__ for error in errors))
+
+
 def record_failure(root: Path, config: Path, tty, state, error: BaseException) -> None:
     # Only this script's synthetic local-SSE fixture is inspected. Never dump
     # config, environment, session messages, credentials, or the complete state.
@@ -60,7 +68,7 @@ def run(project: Path, entry: Path) -> None:
     spec = importlib.util.spec_from_file_location('tty_helpers', Path(__file__).with_name('tmux-e2e.py'))
     helpers = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helpers)
-    root = Path(tempfile.mkdtemp(prefix='xiaok-permission-fallback-'))
+    root = Path(tempfile.mkdtemp(prefix='xiaok-permission-fallback-')).resolve()
     work, config, home = root / 'project', root / 'config', root / 'home'
     work.mkdir(); home.mkdir()
     denied, approved = work / 'denied.txt', work / 'approved.txt'
@@ -91,6 +99,8 @@ def run(project: Path, entry: Path) -> None:
         env_overrides={'XIAOK_DISABLE_GLOBAL_PLUGINS': '1'})
     owned = []
     state = None
+    primary_error = None
+    diagnostic_errors = []
 
     def wait_for(predicate, name, timeout=20):
         screen = tty.wait_for(predicate, timeout=timeout)
@@ -127,30 +137,54 @@ def run(project: Path, entry: Path) -> None:
         assert 'Error:' not in replies['allow_probe'], replies
         (root / 'requests.json').write_text(json.dumps(server.requests, ensure_ascii=False, indent=2))
         tty.send_text('/exit'); tty.send_key('Enter')
-        time.sleep(1)
+        # A UI acknowledgement precedes the real owner drain and durable release.
+        # Use the existing TTY exit-observation budget, not a one-second sample.
+        exit_receipt = tty.wait_for_exit(timeout=10)
         sessions = list((config / 'sessions').glob('sess_*.json'))
         assert len(sessions) == 1
         state = json.loads(sessions[0].read_text())
         assert state['intentDelegation']['ownership']['state'] == 'released'
         (root / 'result.json').write_text(json.dumps({'passed': True, 'entry': str(entry),
             'deniedNotExecuted': not denied.exists(), 'approvedContent': approved.read_text(),
-            'modelRequests': len(server.requests), 'ownershipReleased': True}, indent=2))
+            'modelRequests': len(server.requests), 'ownershipReleased': True,
+            'exitReceipt': exit_receipt}, indent=2))
         print('PASS: timeout -> real local prompt; rejection performs no write; approval writes; next turn and exit work')
     except BaseException as error:
+        primary_error = error
         try: record_failure(root, config, tty, state, error)
-        except Exception as diagnostic_error: print('FAILURE_DIAGNOSTIC_UNAVAILABLE ' + type(diagnostic_error).__name__, flush=True)
+        except BaseException as diagnostic_error:
+            diagnostic_errors.append(diagnostic_error)
+            try: print('FAILURE_DIAGNOSTIC_UNAVAILABLE ' + type(diagnostic_error).__name__, flush=True)
+            except BaseException as output_error: diagnostic_errors.append(output_error)
         raise
     finally:
-        tty.stop(); server.close()
-        if hook_pids.exists(): owned += [int(p) for p in hook_pids.read_text().splitlines()]
+        cleanup_errors = list(diagnostic_errors)
+        for close in (tty.stop, server.close):
+            try: close()
+            except BaseException as error: cleanup_errors.append(error)
+        try:
+            if hook_pids.exists(): owned += [int(p) for p in hook_pids.read_text().splitlines()]
+        except BaseException as error:
+            cleanup_errors.append(error)
         remaining = []
         for pid in owned:
             try: os.kill(pid, 0); remaining.append(pid)
             except ProcessLookupError: pass
-        (root / 'owned-pids.json').write_text(json.dumps({'pids': owned, 'remaining': remaining}))
-        print(f'CLEANUP: owned CLI and hook processes remaining={len(remaining)}; local SSE server closed')
-        print('EVIDENCE', root)
-        assert not remaining, f'owned processes survived: {remaining}'
+            except BaseException as error: cleanup_errors.append(error)
+        try:
+            (root / 'owned-pids.json').write_text(json.dumps({'pids': owned, 'remaining': remaining,
+                'cleanupErrors': [type(error).__name__ for error in cleanup_errors]}))
+        except BaseException as error:
+            cleanup_errors.append(error)
+        for values in ((f'CLEANUP: owned CLI and hook processes remaining={len(remaining)}; cleanup errors={len(cleanup_errors)}',),
+                       ('EVIDENCE', root)):
+            try: print(*values)
+            except BaseException as output_error: cleanup_errors.append(output_error)
+        if remaining: cleanup_errors.append(AssertionError(f'owned processes survived: {remaining}'))
+        if cleanup_errors:
+            errors = ([primary_error] if primary_error is not None else []) + cleanup_errors
+            if len(errors) == 1: raise errors[0]
+            raise TtyCleanupError(errors) from errors[0]
 
 
 if __name__ == '__main__':

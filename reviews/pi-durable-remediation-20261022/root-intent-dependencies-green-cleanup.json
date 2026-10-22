@@ -1,0 +1,33 @@
+{
+  "checkedAt": "2026-10-22T01:25:53.355373+00:00",
+  "runner": {
+    "label": "root-intent-dependencies-green",
+    "cwd": "<worktree>",
+    "argv": [
+      "node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "tests/runtime/verification/intent-publication-dependencies.test.ts",
+      "--maxWorkers=1",
+      "--reporter=verbose",
+      "--reporter=json",
+      "--outputFile=.xiaok/evals/pi-durable/remediation-20261022/root-intent-dependencies-green-results.json"
+    ],
+    "startedAt": "2026-10-22T01:04:07.485985+00:00",
+    "runnerPid": 45609,
+    "pid": 45624,
+    "pgid": 45624,
+    "exitCode": 1,
+    "finishedAt": "2026-10-22T01:18:19.699180+00:00",
+    "reaped": true
+  },
+  "pgidMembersAfterReap": [],
+  "signalsSent": [],
+  "actual": {
+    "numTotalTests": 23,
+    "numPassedTests": 21,
+    "numFailedTests": 1,
+    "numPendingTests": 1
+  },
+  "nextRun": "one approved quiet complete23 sameSHA; no timeout change to the untouched final-clock case"
+}

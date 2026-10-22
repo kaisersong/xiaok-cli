@@ -1,0 +1,20 @@
+{
+  "label": "baseline-activity-emitted",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "npm",
+    "run",
+    "test:sandbox:run",
+    "--",
+    ".test-dist/tests/runtime/conversation-activity/owner-process.test.js",
+    ".test-dist/tests/runtime/conversation-activity/storage-permissions.test.js",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:47:48.897673+00:00",
+  "runnerPid": 94217,
+  "pid": 94234,
+  "pgid": 94234,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:47:54.873143+00:00",
+  "reaped": true
+}

@@ -4,21 +4,34 @@ name: Desktop Cross-Platform Tests
 # Windows-only path regressions (artifact cards, file:// URLs, basename, path
 # escape checks, hardcoded home paths) are caught in CI instead of by users.
 #
-# Scope is intentionally focused: it runs the path-related test files plus the
-# self-contained renderer build. It does NOT run the full desktop suite, which
-# needs the sidecar repos and has unrelated Windows temp-dir teardown flakiness.
+# Scope covers paths, renderer formatter reuse, Room field classification, and
+# the self-contained renderer build. Other suites require sidecar repositories.
 
 on:
   push:
     branches: [master]
     paths:
       - 'desktop/**'
+      - 'src/runtime/conversation-activity/**'
+      - 'src/runtime/verification/**'
+      - 'src/runtime/loop/**'
+      - 'src/runtime/isolated-execution/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tests/support/**'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'src/runtime/conversation-activity/**'
+      - 'src/runtime/verification/**'
+      - 'src/runtime/loop/**'
+      - 'src/runtime/isolated-execution/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tests/support/**'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
@@ -37,7 +50,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.0
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
@@ -69,6 +82,16 @@ jobs:
         if: runner.os == 'macOS'
         run: cd desktop && npm run test -- --run tests/main/activity-owner-attach-retry.test.ts
 
+      - name: Test formatter reuse, Room boundaries and activity retention
+        working-directory: desktop
+        run: >
+          npm test -- --maxWorkers=1
+          tests/renderer/intl-formatter-reuse.test.tsx
+          tests/renderer/collaboration-rooms-page.test.tsx
+          tests/renderer/conversation-activity.test.tsx
+          tests/main/room-field-classification.test.ts
+          tests/main/conversation-activity-store.test.ts
+
       - name: Build renderer
         run: cd desktop && npm run build:renderer
 
@@ -77,6 +100,32 @@ jobs:
 
       - name: Managed Python CLI resolver regression
         run: node node_modules/vitest/vitest.mjs run tests/platform/mcp/python-server.test.ts --config vitest.config.ts
+
+  loop-controller-tests:
+    name: Loop controller fixtures (${{ matrix.os }}, Node ${{ matrix.node }})
+    # Public peer authentication is closed on Windows in controller-ipc.ts.
+    # Covers all eight bounded cases, dependency installation and cleanup.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        node: ['22.22.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Test complete signed Loop controller paths and cleanup
+        working-directory: desktop
+        run: npm test -- --maxWorkers=1 tests/main/loop-verification-execution-controller.test.ts
 
   windows-kimi-packaged-smoke:
     name: Windows packaged Kimi K3 smoke

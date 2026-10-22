@@ -1,0 +1,19 @@
+{
+  "label": "root-blocked-files-retry",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/intent-delegation/verification-host-controller.test.ts",
+    "tests/runtime/verification/intent-publication-dependencies.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:02:00.777885+00:00",
+  "runnerPid": 69440,
+  "pid": 69441,
+  "pgid": 69441,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:25:33.411585+00:00",
+  "reaped": true
+}

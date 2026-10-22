@@ -1,0 +1,41 @@
+
+ RUN  v3.2.6 <remote-validation>
+
+ ❯ tests/runtime/sol-pi/semantic-product-runtime.test.ts (17 tests | 1 failed | 9 skipped) 41688ms
+   ✓ actual Runtime semantic lifecycle: success  6474ms
+   ↓ actual Runtime semantic lifecycle: compound
+   ↓ actual Runtime semantic lifecycle: compound-intent
+   ↓ actual Runtime semantic lifecycle: archived
+   ↓ actual Runtime semantic lifecycle: tool-boundary
+   ↓ actual Runtime semantic lifecycle: named-child
+   ↓ actual Runtime semantic lifecycle: pricing-unavailable
+   ↓ actual Runtime semantic lifecycle: automatic
+   × actual Runtime semantic lifecycle: empty 4576ms
+     → expected 'unknown' to be 'settled' // Object.is equality
+   ✓ actual Runtime semantic lifecycle: truncated  5019ms
+   ✓ actual Runtime semantic lifecycle: missing-terminal  5008ms
+   ✓ actual Runtime semantic lifecycle: late-error  4938ms
+   ✓ actual Runtime semantic lifecycle: tool-response  5240ms
+   ↓ actual Runtime semantic lifecycle: stale
+   ↓ actual Runtime semantic lifecycle: revoke
+   ✓ actual Runtime semantic lifecycle: settlement-failure  4684ms
+   ✓ actual Runtime semantic lifecycle: commit-failure  5749ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/sol-pi/semantic-product-runtime.test.ts > actual Runtime semantic lifecycle: empty
+AssertionError: expected 'unknown' to be 'settled' // Object.is equality
+
+Expected: "settled"
+Received: "unknown"
+
+ ❯ tests/runtime/sol-pi/semantic-product-runtime.test.ts:149:120
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 passed | 9 skipped (17)
+   Start at  03:42:53
+   Duration  42.81s (transform 666ms, setup 17ms, collect 973ms, tests 41.69s, environment 0ms, prepare 28ms)

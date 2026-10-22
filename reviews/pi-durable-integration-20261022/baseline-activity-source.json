@@ -1,0 +1,19 @@
+{
+  "label": "baseline-activity-source",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/conversation-activity/owner-process.test.ts",
+    "tests/runtime/conversation-activity/storage-permissions.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:47:36.456342+00:00",
+  "runnerPid": 93040,
+  "pid": 93054,
+  "pgid": 93054,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:47:43.810362+00:00",
+  "reaped": true
+}

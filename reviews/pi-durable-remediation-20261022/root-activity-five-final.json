@@ -1,0 +1,75 @@
+{
+  "checkedAt": "2026-10-22T01:14:42.367582+00:00",
+  "records": [
+    {
+      "label": "root-activity-five-node24",
+      "runner": {
+        "label": "root-activity-five-node24",
+        "cwd": "<worktree>/desktop",
+        "argv": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--maxWorkers=1",
+          "--reporter=verbose",
+          "--reporter=json",
+          "--outputFile=../.xiaok/evals/pi-durable/remediation-20261022/root-activity-five-node24-results.json",
+          "tests/renderer/intl-formatter-reuse.test.tsx",
+          "tests/renderer/collaboration-rooms-page.test.tsx",
+          "tests/renderer/conversation-activity.test.tsx",
+          "tests/main/room-field-classification.test.ts",
+          "tests/main/conversation-activity-store.test.ts"
+        ],
+        "startedAt": "2026-10-22T01:09:26.617335+00:00",
+        "runnerPid": 60760,
+        "pid": 60768,
+        "pgid": 60768,
+        "exitCode": 0,
+        "finishedAt": "2026-10-22T01:09:36.027992+00:00",
+        "reaped": true
+      },
+      "remainingOwnGroup": [],
+      "signalsSent": [],
+      "actualResults": {
+        "files": 5,
+        "passed": 68,
+        "failed": 0
+      }
+    },
+    {
+      "label": "root-activity-five-node22-22",
+      "runner": {
+        "label": "root-activity-five-node22-22",
+        "cwd": "<worktree>/desktop",
+        "argv": [
+          "<local-user>/.npm/_npx/6d82ddbdd7da268b/node_modules/node/bin/node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--maxWorkers=1",
+          "--reporter=verbose",
+          "--reporter=json",
+          "--outputFile=../.xiaok/evals/pi-durable/remediation-20261022/root-activity-five-node22-22-results.json",
+          "tests/renderer/intl-formatter-reuse.test.tsx",
+          "tests/renderer/collaboration-rooms-page.test.tsx",
+          "tests/renderer/conversation-activity.test.tsx",
+          "tests/main/room-field-classification.test.ts",
+          "tests/main/conversation-activity-store.test.ts"
+        ],
+        "startedAt": "2026-10-22T01:13:36.505481+00:00",
+        "runnerPid": 67430,
+        "pid": 67440,
+        "pgid": 67440,
+        "exitCode": 0,
+        "finishedAt": "2026-10-22T01:13:46.856817+00:00",
+        "reaped": true
+      },
+      "remainingOwnGroup": [],
+      "signalsSent": [],
+      "actualResults": {
+        "files": 5,
+        "passed": 68,
+        "failed": 0
+      }
+    }
+  ]
+}

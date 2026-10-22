@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
@@ -13,13 +13,14 @@ const hash = (file: string) => createHash('sha256').update(readFileSync(file)).d
  * lexical expressions are changed; strings, comments and all IO stay intact. */
 export function preserveOriginalModuleUrls(contents: string, file: string) {
   const syntax = ts.createSourceFile(file, contents, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const spans: Array<{ start: number; end: number }> = [];
+  const spans: Array<{ start: number; end: number; value: string }> = [];
   const visit = (node: ts.Node): void => {
     if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) {
       const parent = node.parent;
-      if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node || parent.name.text !== 'url' || parent.questionDotToken)
+      if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node || !['url', 'dirname'].includes(parent.name.text) || parent.questionDotToken)
         throw Error('unsupported_worker_module_meta');
-      spans.push({ start: parent.getStart(syntax), end: parent.getEnd() });
+      spans.push({ start: parent.getStart(syntax), end: parent.getEnd(),
+        value: parent.name.text === 'url' ? pathToFileURL(file).href : dirname(file) });
     }
     ts.forEachChild(node, visit);
   };
@@ -27,7 +28,7 @@ export function preserveOriginalModuleUrls(contents: string, file: string) {
   const originalUrl = pathToFileURL(file).href;
   let transformed = contents;
   for (const span of spans.sort((a, b) => b.start - a.start)) {
-    transformed = transformed.slice(0, span.start) + JSON.stringify(originalUrl) + transformed.slice(span.end);
+    transformed = transformed.slice(0, span.start) + JSON.stringify(span.value) + transformed.slice(span.end);
   }
   return { contents: transformed, originalUrl, replacements: spans.length };
 }
@@ -56,10 +57,12 @@ function sourceTreeHash(): string {
 
 /** Fresh actual production JS, including every sibling dynamically imported by
  * the fixed Worker. No payload, result, exit or read implementation is replaced. */
-export async function compileProtectionWorkerEntry() {
+export async function compileProtectionWorkerEntry(ownership: { onAcquired?: (root: string) => void } = {}) {
+  const onAcquired = ownership.onAcquired;
   const artifacts = join(projectRoot, '.artifacts');
   mkdirSync(artifacts, { recursive: true });
   const root = mkdtempSync(join(artifacts, 'fresh-protection-worker-'));
+  onAcquired?.(root);
   const source = join(projectRoot, 'src/runtime/task-host/protection-read-worker.ts');
   const sourceSha = hash(source);
   const treeSha = sourceTreeHash();
@@ -121,7 +124,7 @@ export async function compileProtectionWorkerEntry() {
     return { root, output, sourceSha, treeSha, emittedSha: hash(output), audit,
       compilation: { roots, noCheck: false as const, firstReadHashes: compilerAudit.firstReads, readDrift, emittedOutputs } };
   } catch (error) {
-    rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    if (!onAcquired) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
     throw error;
   }
 }

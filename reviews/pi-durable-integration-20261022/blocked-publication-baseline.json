@@ -1,0 +1,20 @@
+{
+  "label": "blocked-publication-baseline",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/verification/intent-publication-dependencies.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "actual signed controller routes full original payload pages and last complete dependency observation through fixed reader$"
+  ],
+  "startedAt": "2026-10-21T19:55:22.422564+00:00",
+  "runnerPid": 32641,
+  "pid": 32673,
+  "pgid": 32673,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:56:38.068924+00:00",
+  "reaped": true
+}

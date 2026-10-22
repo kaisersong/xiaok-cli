@@ -1,0 +1,45 @@
+
+ RUN  v3.2.6 <worktree>
+
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts (23 tests | 1 failed | 22 skipped) 75519ms
+   ↓ actual original Intent dependency observation derives empty first-stage and whole parent inventory from native receipts
+   ↓ late expiration of an earlier dependency cannot be spliced into an otherwise-current parent set
+   ↓ foreign subject and caller-selected inventory cannot redefine original native dependencies
+   ↓ final whole-set check rejects a dependency application entering pending during the last receiver query
+   × actual signed controller routes full original payload pages and last complete dependency observation through fixed reader 75518ms
+     → Test timed out in 75000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ↓ no qualified callback occurs after the final qualified authority clock in the dependency result
+   ↓ final authority clock expire still fences the result without a wrapper callback
+   ↓ final authority clock close still fences the result without a wrapper callback
+   ↓ near-limit original contract retains its whole stage population through actual signed set RPC
+   ↓ whole graph read refuses actual sibling noncanonical drift even for empty dependencies
+   ↓ whole graph read refuses actual sibling subject drift even for empty dependencies
+   ↓ whole graph read refuses actual sibling mandatory drift even for empty dependencies
+   ↓ whole graph read refuses actual sibling registration drift even for empty dependencies
+   ↓ actual invocation-only append retains complete parent graph: valid
+   ↓ actual invocation-only append retains complete parent graph: missing-parent
+   ↓ actual invocation-only append retains complete parent graph: missing-sibling-edge
+   ↓ actual invocation-only append retains complete parent graph: extra-edge
+   ↓ actual invocation-only append retains complete parent graph: parent-noncanonical
+   ↓ completion observation includes its own actual publication and every original dependency without publishing the parent implicitly
+   ↓ completion observation final clock expire rejects the entire self and dependency set
+   ↓ completion observation final clock close rejects the entire self and dependency set
+   ↓ parent completion final set rejects old native-approved child publication references after a same-proof child republishes
+   ↓ the original final dependency set carries actual receiver identity for parent capture
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/verification/intent-publication-dependencies.test.ts > actual signed controller routes full original payload pages and last complete dependency observation through fixed reader
+Error: Test timed out in 75000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/intent-publication-dependencies.test.ts:78:1
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 22 skipped (23)
+   Start at  04:00:07
+   Duration  79.86s (transform 1.78s, setup 37ms, collect 3.69s, tests 75.52s, environment 0ms, prepare 32ms)

@@ -1,0 +1,124 @@
+{
+  "createdAt": "2026-10-22T00:23:23.618432+00:00",
+  "head": "d0e35e73014add369748de77fe2a868a62777f13",
+  "scope": "C8 authorized test-layout split only; no production source change. CLI3 + Desktop2; previous single-file five proofs apply only to previous layout.",
+  "files": [
+    {
+      "path": "tests/package/glob-worker.test.mjs",
+      "sha256": "f5135ffac1ef92b8f2c8447d0de000bfde1b8e8f8258d60bdd1b717572312b06"
+    },
+    {
+      "path": "tests/package/desktop-glob-worker.test.mjs",
+      "sha256": "4f708ca61f67c1b6329bbaea5c384154962df67271138633510646cf71b77dd3"
+    },
+    {
+      "path": "tests/package/support/glob-worker-contract.mjs",
+      "sha256": "95734cfaf4c49d5fd491b3505fcac0828305c67f0dc014fe86b114d13d8a8613"
+    }
+  ],
+  "diff": {
+    "path": "C-split-final.diff",
+    "sha256": "870199cca8aa42882280ba9245e67165cf66aa46bd768bb539772c3026cc7dc8"
+  },
+  "priorC18Manifest": {
+    "path": "C-source-manifest.json",
+    "sha256": "85712d418f3772433832237cde3b6586cb7a19dc7de5d9de65cdfbf040d322d0"
+  },
+  "authorizedPriorC18Drift": [
+    {
+      "path": "tests/package/glob-worker.test.mjs",
+      "previousSHA256": "59f5bc3ee7ef778fb123ce27ed2d28385d6ac9d4a2db4ab077858feda1e6a967",
+      "currentSHA256": "f5135ffac1ef92b8f2c8447d0de000bfde1b8e8f8258d60bdd1b717572312b06"
+    }
+  ],
+  "otherPriorC18FilesUnchanged": 17,
+  "actualArtifacts": [
+    {
+      "path": "src/ai/tools/bounded-glob.ts",
+      "sha256": "099dae1daf6a296b1c140fd7aae523d7ebd4ba5a313568a3963c807248cc3a5f"
+    },
+    {
+      "path": "src/ai/tools/glob-worker.mjs",
+      "sha256": "4828826cea1698e5b7cb6ad8a4cc75f23ba0e9e31e3cf2495962c655c76c0e9c"
+    },
+    {
+      "path": "dist/ai/tools/bounded-glob.js",
+      "sha256": "38f349f769c586bace17b7efcdb93a98493b9079416d1f8b65ce1c9a000ebf69"
+    },
+    {
+      "path": "dist/ai/tools/glob-worker.mjs",
+      "sha256": "4828826cea1698e5b7cb6ad8a4cc75f23ba0e9e31e3cf2495962c655c76c0e9c"
+    },
+    {
+      "path": "desktop/dist/main/src/ai/tools/bounded-glob.js",
+      "sha256": "38f349f769c586bace17b7efcdb93a98493b9079416d1f8b65ce1c9a000ebf69"
+    },
+    {
+      "path": "desktop/dist/main/src/ai/tools/glob-worker.mjs",
+      "sha256": "4828826cea1698e5b7cb6ad8a4cc75f23ba0e9e31e3cf2495962c655c76c0e9c"
+    }
+  ],
+  "freshNewLayoutRuns": [
+    {
+      "metadata": "C-split-emitted-node24.json",
+      "metadataSHA256": "70aaee64664362c063f8b1791e7d5a1df68ea615568309285716e251a5c422f2",
+      "log": "C-split-emitted-node24.log",
+      "logSHA256": "2e3d12e7fd7e1da8ab9540f72b0bdaced619367587c1031ed4a05e57bdd816e4",
+      "counts": {
+        "tests": 5,
+        "pass": 5,
+        "fail": 0,
+        "skipped": 0
+      },
+      "pid": 1498,
+      "pgid": 1498,
+      "reaped": true
+    },
+    {
+      "metadata": "C-split-emitted-node22-22.json",
+      "metadataSHA256": "500e37a381c883724f0367f3726fec176358a1734c7e05a06c2e87be28e19905",
+      "log": "C-split-emitted-node22-22.log",
+      "logSHA256": "8326b1f08ffb081b8c5ffea72c92ba25072c02f55a08430d8e45006bdeb580ad",
+      "counts": {
+        "tests": 5,
+        "pass": 5,
+        "fail": 0,
+        "skipped": 0
+      },
+      "pid": 1557,
+      "pgid": 1557,
+      "reaped": true
+    },
+    {
+      "metadata": "C-split-emitted-electron.json",
+      "metadataSHA256": "41d9922e2688d10cac85bd00aa8696b981a9c58f948ca15058f5d85c3d7f9062",
+      "log": "C-split-emitted-electron.log",
+      "logSHA256": "739ab61afe868b482d33565bf407c74272a45593e895c78bb74e5506b511cdb4",
+      "counts": {
+        "tests": 5,
+        "pass": 5,
+        "fail": 0,
+        "skipped": 0
+      },
+      "pid": 1581,
+      "pgid": 1581,
+      "reaped": true
+    },
+    {
+      "metadata": "C-split-cli-node22-14.json",
+      "metadataSHA256": "00d7cd4030292da7f7942c05f7f6464959a098ef8a8007b5d903e795ef33c53b",
+      "log": "C-split-cli-node22-14.log",
+      "logSHA256": "d19cd234ba0b034ea274e7b7d4b08b7aaaac5bde47d17dc3652e18519aa683c9",
+      "counts": {
+        "tests": 3,
+        "pass": 3,
+        "fail": 0,
+        "skipped": 0
+      },
+      "pid": 1680,
+      "pgid": 1680,
+      "reaped": true
+    }
+  ],
+  "fullRunFreezeBoundary": "A-root-full-freeze-drift.json retains authorized MJS drift; do not claim all 2148 frozen inputs unchanged. The changed file is outside Vitest *.test.ts population."
+}

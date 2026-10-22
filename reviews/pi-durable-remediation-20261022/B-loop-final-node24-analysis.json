@@ -1,0 +1,390 @@
+{
+  "label": "B-loop-final-node24",
+  "runner": {
+    "label": "B-loop-final-node24",
+    "cwd": "<worktree>/desktop",
+    "argv": [
+      "node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "tests/main/loop-verification-execution-controller.test.ts",
+      "--maxWorkers=1",
+      "--reporter=verbose"
+    ],
+    "startedAt": "2026-10-22T01:11:00.019096+00:00",
+    "runnerPid": 63582,
+    "pid": 63591,
+    "pgid": 63591,
+    "exitCode": 0,
+    "finishedAt": "2026-10-22T01:17:34.094900+00:00",
+    "reaped": true
+  },
+  "rawLogSHA256": "1c4b47acd46f3d8c6bad6f7ebafff5679ed8bbba20c7e0fa7d00e88da9c8d801",
+  "sourceInputs": {
+    "desktop/tests/main/loop-verification-execution-controller.test.ts": "83582426fda875e785ddf75b03ebdb2a7a1b528e1c861c5008fa8052912ef4e6",
+    "desktop/electron/loop-business-publication-host.ts": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858"
+  },
+  "completeFiles": 1,
+  "passedCases": 8,
+  "failedCases": 0,
+  "skippedCases": 0,
+  "cases": [
+    {
+      "mode": "terminal",
+      "durationMs": 13561
+    },
+    {
+      "mode": "lost-dispatch",
+      "durationMs": 13336
+    },
+    {
+      "mode": "publication-lost-ack",
+      "durationMs": 14071
+    },
+    {
+      "mode": "full-projection",
+      "durationMs": 46282
+    },
+    {
+      "mode": "desktop-service",
+      "durationMs": 54555
+    },
+    {
+      "mode": "timed-pending",
+      "durationMs": 55714
+    },
+    {
+      "mode": "timed-expired",
+      "durationMs": 29857
+    },
+    {
+      "mode": "output-consumer",
+      "durationMs": 164408
+    }
+  ],
+  "stages": [
+    {
+      "mode": "terminal",
+      "stage": "fixture-ready",
+      "elapsedMs": 2322.7401670000004
+    },
+    {
+      "mode": "terminal",
+      "stage": "root-publication-current",
+      "elapsedMs": 13549.973833
+    },
+    {
+      "mode": "terminal",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 13551.166583
+    },
+    {
+      "mode": "terminal",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 13559.295333
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "fixture-ready",
+      "elapsedMs": 2214.8627080000024
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "root-publication-current",
+      "elapsedMs": 13326.673041
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 13327.870333
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 13335.352333
+    },
+    {
+      "mode": "publication-lost-ack",
+      "stage": "fixture-ready",
+      "elapsedMs": 2183.804874999998
+    },
+    {
+      "mode": "publication-lost-ack",
+      "stage": "root-publication-current",
+      "elapsedMs": 14060.956166999997
+    },
+    {
+      "mode": "publication-lost-ack",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 14062.127583000001
+    },
+    {
+      "mode": "publication-lost-ack",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 14070.647250000002
+    },
+    {
+      "mode": "full-projection",
+      "stage": "fixture-ready",
+      "elapsedMs": 2223.0709999999963
+    },
+    {
+      "mode": "full-projection",
+      "stage": "root-publication-current",
+      "elapsedMs": 13340.603125000001
+    },
+    {
+      "mode": "full-projection",
+      "stage": "stage-publication-ready",
+      "elapsedMs": 21104.020916999994
+    },
+    {
+      "mode": "full-projection",
+      "stage": "business-projected",
+      "elapsedMs": 29365.747542000005
+    },
+    {
+      "mode": "full-projection",
+      "stage": "fresh-view-branch-complete",
+      "elapsedMs": 37614.8825
+    },
+    {
+      "mode": "full-projection",
+      "stage": "dedupe-current-branch-complete",
+      "elapsedMs": 45946.178167
+    },
+    {
+      "mode": "full-projection",
+      "stage": "expired-runner-view-refusals-complete",
+      "elapsedMs": 46163.46416699999
+    },
+    {
+      "mode": "full-projection",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 46272.31312499999
+    },
+    {
+      "mode": "full-projection",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 46281.65837499999
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "fixture-ready",
+      "elapsedMs": 2209.7613339999953
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "root-publication-current",
+      "elapsedMs": 13359.252124999999
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "stage-publication-ready",
+      "elapsedMs": 21108.87874999999
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "business-projected",
+      "elapsedMs": 29347.845291999998
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "desktop-inspection-complete",
+      "elapsedMs": 37604.83783399999
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "fresh-view-branch-complete",
+      "elapsedMs": 45886.360708999986
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "dedupe-current-branch-complete",
+      "elapsedMs": 54202.96041699998
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "expired-runner-view-refusals-complete",
+      "elapsedMs": 54434.999792
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 54544.51487500001
+    },
+    {
+      "mode": "desktop-service",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 54554.30862499999
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "fixture-ready",
+      "elapsedMs": 2215.5278749999998
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "root-publication-current",
+      "elapsedMs": 13463.655958999996
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "stage-publication-ready",
+      "elapsedMs": 22271.683625000005
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "business-projected",
+      "elapsedMs": 30523.213374999992
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "fresh-view-branch-complete",
+      "elapsedMs": 47094.23799999998
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "dedupe-current-branch-complete",
+      "elapsedMs": 55365.82591699998
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "expired-runner-view-refusals-complete",
+      "elapsedMs": 55591.486166999995
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 55702.674084
+    },
+    {
+      "mode": "timed-pending",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 55712.97783399999
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "fixture-ready",
+      "elapsedMs": 2260.377999999997
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "root-publication-current",
+      "elapsedMs": 13384.515167000005
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "stage-publication-ready",
+      "elapsedMs": 21146.868958000006
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "business-projected",
+      "elapsedMs": 29404.390375000017
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "fresh-view-branch-complete",
+      "elapsedMs": 29533.448166999995
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "dedupe-current-branch-complete",
+      "elapsedMs": 29534.795249999996
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "expired-runner-view-refusals-complete",
+      "elapsedMs": 29743.407999999996
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 29847.217333000008
+    },
+    {
+      "mode": "timed-expired",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 29856.893125000002
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "fixture-ready",
+      "elapsedMs": 2208.0410000000265
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "root-publication-current",
+      "elapsedMs": 14050.828792000015
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-stage-publications-ready",
+      "elapsedMs": 30587.040917000006
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-business-projected",
+      "elapsedMs": 43449.32004200001
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-preview-read",
+      "elapsedMs": 56477.969167
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-artifacts-listed",
+      "elapsedMs": 69551.03383400003
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-task-read",
+      "elapsedMs": 82536.82875000002
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-workspace-mutation-refused",
+      "elapsedMs": 95649.41187500002
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-navigation-complete",
+      "elapsedMs": 135720.87112500003
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-late-navigation-refused",
+      "elapsedMs": 163550.26754200002
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "output-expiry-refusals-complete",
+      "elapsedMs": 164397.27
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "scenario-body-complete",
+      "elapsedMs": 164397.86612500003
+    },
+    {
+      "mode": "output-consumer",
+      "stage": "scenario-finally-complete",
+      "elapsedMs": 164407.76479200003
+    }
+  ],
+  "budgetMilliseconds": {
+    "terminal": 30000,
+    "lost-dispatch": 30000,
+    "publication-lost-ack": 30000,
+    "full-projection": 120000,
+    "desktop-service": 120000,
+    "timed-pending": 120000,
+    "timed-expired": 120000,
+    "output-consumer": 300000
+  },
+  "scope": "Actual local Node24.16 full8. Node22.22 actual CI matrix pending. Original failed runs retained. No core optimization claimed.",
+  "pgidMembersAfterReap": [],
+  "earlierIsolationDiagnostic": "B-loop-timeout-isolation-analysis.json"
+}

@@ -1,0 +1,20 @@
+{
+  "label": "post-seal-paired-baseline",
+  "cwd": "<master-baseline>/desktop",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/desktop-post-seal-process.bdd.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "D10/D18 actual OS crash at (marker-committed|snapshot) uses committed marker truth and never replays"
+  ],
+  "startedAt": "2026-10-21T19:51:06.156400+00:00",
+  "runnerPid": 16061,
+  "pid": 16069,
+  "pgid": 16069,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:51:13.558851+00:00",
+  "reaped": true
+}

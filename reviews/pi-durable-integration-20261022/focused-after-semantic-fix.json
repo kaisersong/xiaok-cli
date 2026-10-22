@@ -1,0 +1,32 @@
+{
+  "label": "focused-after-semantic-fix",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/ai/runtime/compaction-completion.test.ts",
+    "tests/ai/runtime/compact-runner.test.ts",
+    "tests/ai/runtime/agent-runtime.test.ts",
+    "tests/ai/runtime/portable-compaction-executor.test.ts",
+    "tests/ai/adapters/claude.test.ts",
+    "tests/ai/adapters/openai-responses.test.ts",
+    "tests/ai/adapters/openai.test.ts",
+    "tests/runtime/sol-pi/provider-disclosure.test.ts",
+    "tests/runtime/sol-pi/semantic-compaction-owner.test.ts",
+    "tests/runtime/sol-pi/semantic-summary-attempt.test.ts",
+    "tests/runtime/sol-pi/semantic-compaction-ledger.test.ts",
+    "tests/runtime/sol-pi/capacity-admission.test.ts",
+    "tests/runtime/sol-pi/deepseek-capacity-profile.test.ts",
+    "tests/runtime/sol-pi/compaction-policy.test.ts",
+    "tests/ai/runtime/session-store-compound-delete.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:47:44.859421+00:00",
+  "runnerPid": 93750,
+  "pid": 93773,
+  "pgid": 93773,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:47:59.500602+00:00",
+  "reaped": true
+}

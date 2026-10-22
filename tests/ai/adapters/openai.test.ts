@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
 // tests/ai/adapters/openai.test.ts
 import { describe, it, expect, vi } from 'vitest';
+import { CompactRunner } from '../../../src/ai/runtime/compact-runner.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import {
   buildOpenAIAdapterInit,
@@ -4388,4 +4389,35 @@ describe('memory-only DeepSeek thinking mode', () => {
       expect(await captureChatCompletionRequest(adapter, [], [], { reasoningMode: 'disabled' })).not.toHaveProperty('thinking');
     },
   );
+});
+
+
+describe('strict Kimi compaction terminal policy through production authorization', () => {
+  it.each(['stop', 'length', 'content_filter', 'tool_calls', null])('requires complete stop rather than %s', async finish_reason => {
+    const adapter = createStrictKimiAdapter();
+    const create = vi.spyOn(adapter.client.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '', content: 'summary' }, finish_reason }] };
+        yield { choices: [], usage: { prompt_tokens: 3, completion_tokens: 7 } };
+      },
+    } as never);
+    const result = new CompactRunner(adapter).run([{ role: 'user', content: [{ type: 'text', text: 'task' }] }]);
+    if (finish_reason === 'stop') await expect(result).resolves.toBe('summary');
+    else await expect(result).rejects.toThrow();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('requireCompleteResponse');
+  });
+  it.each(['late-text', 'second-stop', 'late-error'])('rejects %s after a strict stop', async trailer => {
+    const adapter = createStrictKimiAdapter();
+    const create = vi.spyOn(adapter.client.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '', content: 'summary' }, finish_reason: 'stop' }] };
+        yield { choices: [], usage: { prompt_tokens: 3, completion_tokens: 7 } };
+        if (trailer === 'late-error') throw new Error('late fixture error');
+        yield { choices: [{ delta: trailer === 'late-text' ? { content: 'late' } : {}, finish_reason: trailer === 'second-stop' ? 'stop' : null }] };
+      },
+    } as never);
+    await expect(new CompactRunner(adapter).run([])).rejects.toThrow();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 });

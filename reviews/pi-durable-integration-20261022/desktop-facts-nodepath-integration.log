@@ -1,0 +1,12 @@
+
+ RUN  v3.2.4 <worktree>/desktop
+
+ ✓ tests/main/desktop-post-seal-facts.bdd.test.ts (38 tests) 4066ms
+   ✓ R4 raw facts preserve actual production collector and gate semantics > D14 file-uri matches unmodified ordinary production helpers, not a test classifier  347ms
+   ✓ R4 raw facts preserve actual production collector and gate semantics > D14 result-artifacts matches unmodified ordinary production helpers, not a test classifier  492ms
+   ✓ R4 raw facts preserve actual production collector and gate semantics > D14 project matches unmodified ordinary production helpers, not a test classifier  450ms
+
+ Test Files  1 passed (1)
+      Tests  38 passed (38)
+   Start at  03:54:36
+   Duration  6.24s (transform 2.98s, setup 93ms, collect 1.94s, tests 4.07s, environment 0ms, prepare 27ms)

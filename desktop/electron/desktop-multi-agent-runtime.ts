@@ -123,7 +123,7 @@ export class DesktopMultiAgentRuntime {
         dataRoot:runtime.dataRoot,materials:runtime.materials,materialRegistry:runtime.materialRegistry,skillCatalog:runtime.skillCatalog,maxIterations:runtime.maxIterations,
         emitRuntimeEvent:(event,context)=>this.options.service.recordRuntimeEvent(context,event),
         onToolFinished:(context,fact)=>this.options.service.recordToolFinished(context,fact),
-        onUsage:(inputTokens,outputTokens,usageId,context)=>this.options.service.recordUsage(context,{usageId:usageId??randomUUID(),inputTokens,outputTokens}),
+        admitUsage:(context,invocationId)=>this.options.service.captureAdmittedUsage(context,invocationId),
       },{plan,scope,service:this.options.service,context:input.context,preparation:input.preparation});
       publication=await host.product.prepareMessagePublication({sourceOwner:facts.sourceOwner,recipientOwner:prepared.owner,
         operationId:input.operationId,text:input.message,assertCurrent:()=>{this.options.service.assertObservationChildPreparation(input.preparation);}});
@@ -162,9 +162,7 @@ export class DesktopMultiAgentRuntime {
       // Child output must not masquerade as the parent's task event stream.
       emitRuntimeEvent: (event, context) => this.options.service.recordRuntimeEvent(context, event),
       onToolFinished: (context, fact) => this.options.service.recordToolFinished(context, fact),
-      onUsage: (incoming, outgoing, usageId, context) => this.options.service.recordUsage(context, {
-        usageId: usageId ?? randomUUID(), inputTokens: incoming, outputTokens: outgoing,
-      }),
+      admitUsage: (context, invocationId) => this.options.service.captureAdmittedUsage(context, invocationId),
       releaseResources: allocation?.releaseSessionResources,
     }); } catch (error) { await allocation?.release(); throw error; }
   }

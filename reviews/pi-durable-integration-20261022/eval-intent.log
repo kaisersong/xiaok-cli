@@ -1,0 +1,12 @@
+
+> xiaokcode@1.5.15 eval:intent-delegation
+> node --import tsx scripts/evals/intent-delegation.ts
+
+Intent Behavioral Eval
+
+PASS intent-boundary: 12/12
+PASS intent-planning: 4/4
+PASS dispatch: 3/3
+PASS surface: 7/7
+
+All structured behavioral checks passed (26/26).

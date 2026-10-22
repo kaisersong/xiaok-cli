@@ -1,4 +1,5 @@
 import { createDesktopModelPhysicalScope, closeDesktopModelPhysicalScope, waitDesktopModelPhysicalIdle, assertDesktopModelPhysicalIdle } from './desktop-task-stream.js';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import { consumeDelegatedObservationExecutionPlan, assertDelegatedObservationPaused, suspendDelegatedObservationOwner, resumeDelegatedObservationOwner, type DelegatedObservationExecutionPlan } from '../../src/runtime/sol-pi/delegated-session-owner.js';
 import { bindDesktopDelegatedObservationSession, type DesktopObservationBinding } from './desktop-observation-owner.js';
 import type { DesktopMultiAgentService, DesktopObservationChildPreparation } from './desktop-multi-agent-service.js';
@@ -53,6 +54,7 @@ export interface DesktopManagedAgentSessionOptions {
   skillCatalog: SkillCatalog;
   emitRuntimeEvent(event: Parameters<TaskRunnerInput['emitRuntimeEvent']>[0], context: DesktopAgentExecutionContext): void | Promise<void>;
   onUsage?(inputTokens: number, outputTokens: number, usageId: string | undefined, context: DesktopAgentExecutionContext): void | Promise<void>;
+  admitUsage?(context: DesktopAgentExecutionContext, invocationId: string): DesktopModelUsageAdmission;
   onToolFinished?(context: DesktopAgentExecutionContext, fact: { executionEventId: string; toolName: string; ok: boolean }): void | Promise<void>;
   maxIterations?: number;
   runObservedTurn?<T>(work:(signal:AbortSignal)=>Promise<T>):Promise<T>;
@@ -190,6 +192,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
           materials: this.options.materials, materialRegistry: this.options.materialRegistry,
           skillInvocation: null, skillCatalog: this.options.skillCatalog, maxIterations: this.options.maxIterations,
           mailbox: context.mailbox, onUsage: (incoming, outgoing, usageId) => this.options.onUsage?.(incoming, outgoing, usageId, context),
+          admitUsage: this.options.admitUsage ? invocationId => this.options.admitUsage!(context, invocationId) : undefined,
           onActivity: activity?.onActivity,
           emitRuntimeEvent: async event => {
             if (event.type === 'assistant_delta' || event.type === 'tool_finished' && event.invoked === true) activity?.onActivity({ phase: 'model' });
@@ -257,13 +260,22 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
     return this.disposal;
   }
   private async disposeOwned(): Promise<void> {
-    await this.deactivate();
-    await closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason);
+    const failures: unknown[] = [];
+    try { await this.deactivate(); } catch (error) { failures.push(error); }
+    try { await closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason); }
+    catch (error) { failures.push(error); }
     await this.running?.catch(() => {});
+    if (this.observed) {
+      try { await this.observed.child.execution?.dispose(); } catch (error) { failures.push(error); }
+      try { await this.observed.host.drainTransport(); } catch (error) { failures.push(error); }
+    }
+    // Independent stops must settle before healthy resource release. A rejected
+    // stop retains its original value, including null and undefined.
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, 'desktop_managed_session_shutdown_failed', { cause: failures[0] });
     this.scope?.dispose(); this.scope = undefined;
     if (this.observed) {
-      try { await this.observed.child.execution?.dispose(); await this.observed.host.drainTransport(); }
-      finally { this.observed.child.owner.dispose(); this.observed.initialScope?.dispose(); }
+      this.observed.child.owner.dispose(); this.observed.initialScope?.dispose();
     }
     await this.options.releaseResources?.();
     this.messages = [];

@@ -16,10 +16,10 @@ function isSlice(value: unknown): value is Slice {
 }
 const SOURCE_SHA = Object.freeze({
   before: 'e8e4319e6ef72aa5ffb3323df969ea61ea97e375b4c08fe1993e939d5ee79bdc',
-  post: '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f',
+  post: 'f25ac6d5034918fef0d3207780429bd7773adc1b7e932b0dc3707e4d8c1d5d40',
 });
 function frozenSource(stage: 'before' | 'candidate'): Buffer {
-  const bytes = readFileSync(new URL(`../fixtures/r299-main-${stage}.txt`, import.meta.url));
+  const bytes = readFileSync(new URL(stage === 'before' ? '../fixtures/r299-main-before.txt' : '../fixtures/remediation-20261022-main-reviewed.txt', import.meta.url));
   const expected = stage === 'before' ? SOURCE_SHA.before : SOURCE_SHA.post;
   if (createHash('sha256').update(bytes).digest('hex') !== expected) throw Error('office_python_frozen_Main_snapshot_drift');
   return bytes;

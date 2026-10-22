@@ -1,0 +1,20 @@
+{
+  "label": "blocked-controller-integration",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/intent-delegation/verification-host-controller.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "Intent signed controller actual material and independent recipe: receiver-self$"
+  ],
+  "startedAt": "2026-10-21T20:00:07.172195+00:00",
+  "runnerPid": 61955,
+  "pid": 61962,
+  "pgid": 61962,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:01:11.840424+00:00",
+  "reaped": true
+}

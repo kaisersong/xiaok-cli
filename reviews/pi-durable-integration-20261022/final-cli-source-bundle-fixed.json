@@ -1,0 +1,16 @@
+{
+  "label": "final-cli-source-bundle-fixed",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "--test",
+    "tests/package/cli-source-bundle.test.mjs"
+  ],
+  "startedAt": "2026-10-21T20:03:36.717942+00:00",
+  "runnerPid": 77188,
+  "pid": 77196,
+  "pgid": 77196,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:03:37.269935+00:00",
+  "reaped": true
+}

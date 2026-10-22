@@ -1,0 +1,100 @@
+{
+  "actualSystemInitModel": "GLM-5.3",
+  "actualTools": [],
+  "actualMcpServers": [],
+  "actualToolUseBlocks": 0,
+  "packetBytes": 5833,
+  "packetSHA256": "93f44c529ef04b58efaf77d803d9cf0f0c224fda367f2bbe78a6f7df0b04b213",
+  "sourceDelta": {
+    "path": "desktop/tests/main/owned-workflow-entry-identity.test.ts",
+    "beforeSHA256": "f622a16281805e842d3e7a48b8fec4e191c44b433b65bdfc8f38fb594f96312c",
+    "afterSHA256": "0d47bdc8336b582a6832182352c83ea836ebd206c073ea72cd4c4fbf2d973fc3",
+    "diff": "--- reviewed/desktop/tests/main/owned-workflow-entry-identity.test.ts\n+++ current/desktop/tests/main/owned-workflow-entry-identity.test.ts\n@@ -8,13 +8,13 @@\n \n for (const variant of ['source', 'emitted'] as const) {\n   it(`${variant} factory binds its private server canonical entry and rejects a different existing entry`, async () => {\n-    const fixture = await createOwnedWorkflowNetworkFixture(null);\n     const module = variant === 'source'\n       ? await import('../../electron/kswarm-service.js')\n       : await import('../../dist/main/desktop/electron/kswarm-service.js');\n     const moduleFile = variant === 'source'\n       ? resolve(import.meta.dirname, '../../electron/kswarm-service.ts')\n       : resolve(import.meta.dirname, '../../dist/main/desktop/electron/kswarm-service.js');\n+    const fixture = await createOwnedWorkflowNetworkFixture(null);\n     const prior = { fetch: globalThis.fetch, entry: process.env.KSWARM_SERVER_PATH };\n     const services: Array<ReturnType<typeof module.createKSwarmService>> = [];\n     const spawn = vi.fn(() => { throw Error('fixture_foreign_spawn_denied'); });\n"
+  },
+  "runner": {
+    "label": "remediation-glm-delta",
+    "cwd": "<worktree>",
+    "argv": [
+      "<local-user>/.local/bin/qodercli",
+      "--model",
+      "GLM-5.3",
+      "--thinking",
+      "disabled",
+      "--tools",
+      "",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--setting-sources",
+      "",
+      "--max-model-request-retries",
+      "0",
+      "--no-session-persistence",
+      "--output-format",
+      "stream-json",
+      "--max-output-tokens",
+      "2000",
+      "--input-format",
+      "text",
+      "-p"
+    ],
+    "startedAt": "2026-10-22T00:23:52.007215+00:00",
+    "runnerPid": 14064,
+    "pid": 14065,
+    "pgid": 14065,
+    "exitCode": 0,
+    "finishedAt": "2026-10-22T00:24:04.113039+00:00",
+    "reaped": true
+  },
+  "verdict": "APPROVE",
+  "scope": "only entry test import-before-fixture cleanup delta",
+  "result": {
+    "type": "result",
+    "subtype": "success",
+    "duration_ms": 10007,
+    "duration_api_ms": 9986,
+    "is_error": false,
+    "num_turns": 1,
+    "result": "**APPROVE** (for this narrow delta only).\n\nReasons:\n\n1. **Fix is real and correct.** Previously, a failed dynamic `import()` (e.g., missing `dist/main/...` for the `emitted` variant) would throw after `createOwnedWorkflowNetworkFixture(null)` had allocated a real private server/network fixture, skipping the `finally` and leaking the fixture and its port. Moving both the module import and `moduleFile` resolution above fixture allocation eliminates that leak path.\n\n2. **No assertion is weakened.** All assertions are unchanged; only evaluation order of setup statements changed. The `source`/`emitted` variant semantics and the `moduleFile` hash logging are preserved.\n\n3. **No new leak path introduced.** If the import now throws, nothing has been allocated or mutated yet (fixture, `globalThis.fetch`, `process.env.KSWARM_SERVER_PATH` are all untouched), so no cleanup is required — safe. If fixture creation itself throws, that was already the pre-existing behavior and the fixture's own constructor is responsible for its internal state.\n\n4. **`finally` remains sound.** `module` is guaranteed initialized when the `try` begins (import precedes it), so `module.sealAndDrainKSwarmServiceInstance` in `finally` cannot hit an uninitialized binding. `prior` env/fetch capture still precedes all mutations.\n\n5. **Prior contracts unchanged.** This is a test-file-only ordering change; no production source, security invariants, or prior approvals are affected.\n\nConsistent with the prior APPROVE on the packet; noting per your framing that full suites and the four registered-recipe files remain pending, so this is not an all-green or release-ready claim.",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0,
+    "total_credits": 0.5133209028571428,
+    "usage": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "",
+      "iterations": [],
+      "speed": "standard",
+      "request_id": "747d17c5-2033-4955-85bd-34ca324fd300",
+      "context_usage_ratio": 0.026305555555555554
+    },
+    "modelUsage": {
+      "gmodel": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0,
+        "contextWindow": 0,
+        "maxOutputTokens": 0,
+        "credits": 0.5133209028571428
+      }
+    },
+    "permission_denials": [],
+    "fast_mode_state": "off",
+    "uuid": "76143b2c-46a7-4c26-ab02-f6e1d13e13aa",
+    "session_id": "df6c0ccd-ec1f-4991-831a-ff6dc1d430c7"
+  }
+}

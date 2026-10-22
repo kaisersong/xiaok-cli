@@ -1,5 +1,5 @@
 import { vi, expect } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, constants } from 'node:sqlite';
@@ -9,6 +9,7 @@ import type { DesktopAgentExecutionContext, DesktopMultiAgentService } from '../
 import type { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
 import type { MultiAgentCommandSequencer } from '../../electron/desktop-multi-agent-mailbox.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
+import type { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 import type { StreamChunk, Message } from '../../../src/types.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import * as kbStoreModule from '../../electron/kb-store-sqlite.js';
@@ -16,11 +17,18 @@ import * as kbStoreModule from '../../electron/kb-store-sqlite.js';
 export function barrier<T = void>() { let release!: (value: T) => void; return { wait: new Promise<T>(resolve => { release = resolve; }), release: (value: T) => release(value) }; }
 export const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 export type Cleanup = Array<() => void | Promise<void>>;
+export async function cleanupActivityCase(cleanup: Cleanup): Promise<void> {
+  const errors: unknown[] = [];
+  for (const action of cleanup.splice(0).reverse()) { try { await action(); } catch (error) { errors.push(error); } }
+  try { vi.restoreAllMocks(); } catch (error) { errors.push(error); }
+  try { vi.unstubAllEnvs(); } catch (error) { errors.push(error); }
+  if (errors.length) throw new AggregateError(errors, 'activity_fixture_cleanup_failed');
+}
 type NativeDb = DatabaseSync & { setAuthorizer(callback: ((action: number, table: string | null, column: string | null) => number) | null): void };
 export const nativeAuthorizer = typeof (DatabaseSync.prototype as unknown as NativeDb).setAuthorizer === 'function';
 export type LiveFacts = { frozen?: string; lifetime: AbortController; commands: MultiAgentCommandSequencer;
   root?: { context?: DesktopAgentExecutionContext }; activities: Map<string, unknown> };
-type Internals = { options: { store: DesktopMultiAgentStore }; groups: Map<string, LiveFacts> };
+type Internals = { options: { store: DesktopMultiAgentStore; coordinator: DesktopExecutionCoordinator }; groups: Map<string, LiveFacts> };
 export type ModelCall = { child: boolean; call: number; adapter: OpenAIAdapter; system: string; messages: Message[]; signal?: AbortSignal; options?: StreamOptions };
 export type Program = (call: ModelCall) => AsyncIterable<StreamChunk>;
 
@@ -29,7 +37,28 @@ export type Program = (call: ModelCall) => AsyncIterable<StreamChunk>;
 export async function activityFixture(cleanup: Cleanup) {
   const stackLimit = Error.stackTraceLimit; Error.stackTraceLimit = 40; cleanup.push(() => { Error.stackTraceLimit = stackLimit; });
   const root = mkdtempSync(join(tmpdir(), 'xiaok-activity-bdd-'));
-  cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+  const canonicalRoot = realpathSync(root), created = lstatSync(canonicalRoot);
+  let serviceOwnerMayExist = false, disposalSucceeded = false;
+  let rootReleaseConfirmed: (() => boolean) | undefined;
+  cleanup.push(() => {
+    let remove = !serviceOwnerMayExist, evidenceFailure: { error: unknown } | undefined;
+    if (serviceOwnerMayExist && disposalSucceeded) {
+      try {
+        if (!rootReleaseConfirmed) throw new Error('activity_fixture_root_release_evidence_unavailable');
+        remove = rootReleaseConfirmed();
+      } catch (error) { evidenceFailure = { error }; }
+    }
+    if (remove) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    else {
+      // A failed/unknown physical owner retains its journal until worker exit.
+      // This is forensic retention, never a successful drain or release claim.
+      console.info('XIAOK_ACTIVITY_RETAINED_ROOT ' + JSON.stringify({ version: 1, root: canonicalRoot,
+        workerPid: process.pid, workerPpid: process.ppid, uid: process.getuid?.() ?? null,
+        runToken: process.env.XIAOK_ACTIVITY_FORENSICS_RUN_TOKEN ?? null,
+        stat: { dev: created.dev, ino: created.ino, uid: created.uid, birthtimeMs: created.birthtimeMs } }));
+    }
+    if (evidenceFailure) throw evidenceFailure.error;
+  });
   vi.stubEnv('XIAOK_CONFIG_DIR', join(root, 'config')); vi.stubEnv('XIAOK_DISABLE_GLOBAL_PLUGINS', '1');
   const createKb = kbStoreModule.createKbStoreSqlite;
   vi.spyOn(kbStoreModule, 'createKbStoreSqlite').mockImplementation(() => createKb(join(root, 'knowledge.sqlite')));
@@ -37,14 +66,50 @@ export async function activityFixture(cleanup: Cleanup) {
     getStatus: () => ({ running: false, port: 0, pid: null, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {}, getDesktopMutationToken: () => 'fixture', request: async () => new Response('{}', { status: 503 }),
   } as unknown as KSwarmService;
+  serviceOwnerMayExist = true;
   const services = createDesktopServices({ dataRoot: join(root, 'data'), workspaceRoot: root, knowledgeDbPath: join(root, 'knowledge.sqlite'),
     pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService });
-  cleanup.push(() => services.disposeMultiAgent());
+  let disposal: { raw: Promise<void> } | { error: unknown } | undefined;
+  let assertedDisposalFailure: { error: unknown } | undefined;
+  const dispose = () => {
+    if (!disposal) {
+      try {
+        const raw = services.disposeMultiAgent(); disposal = { raw };
+        void raw.then(() => { disposalSucceeded = true; }, () => {});
+      } catch (error) { disposal = { error }; }
+    }
+    if ('error' in disposal) throw disposal.error;
+    return disposal.raw;
+  };
+  const assertFailedDisposal = async (assertFailure: (error: unknown) => unknown | Promise<unknown>) => {
+    assertedDisposalFailure = undefined;
+    let failure: { error: unknown } | undefined;
+    try { await dispose(); } catch (error) { failure = { error }; }
+    if (!failure) throw new Error('activity_fixture_expected_disposal_failure');
+    await assertFailure(failure.error);
+    assertedDisposalFailure = failure;
+  };
+  cleanup.push(async () => {
+    try { await dispose(); }
+    catch (error) { if (!assertedDisposalFailure || error !== assertedDisposalFailure.error) throw error; }
+  });
   const boundary = services.multiAgent!; await boundary.ready;
   await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
   const service = boundary.service, internals = service as unknown as Internals, store = internals.options.store;
   const db = (store as unknown as { db: NativeDb }).db;
-  cleanup.push(() => db.setAuthorizer(null));
+  const nativeOpenDescriptor = Object.getOwnPropertyDescriptor(db, 'isOpen');
+  const nativeOpenGetter = nativeOpenDescriptor?.get;
+  rootReleaseConfirmed = () => {
+    // This is the exact coordinator reference passed by services to the service.
+    // A later zero count cannot replace evidence that the original DB closed.
+    const active = internals.options.coordinator.snapshot().active, blocked = service.runtimeStatus().blocked;
+    if (!Number.isSafeInteger(active) || active < 0 || typeof blocked !== 'boolean') throw new Error('activity_fixture_root_release_evidence_invalid');
+    if (typeof nativeOpenGetter !== 'function' || nativeOpenDescriptor?.configurable !== false) throw new Error('activity_fixture_native_close_evidence_unavailable');
+    const open: unknown = Reflect.apply(nativeOpenGetter, db, []);
+    if (typeof open !== 'boolean') throw new Error('activity_fixture_native_close_evidence_invalid');
+    return active === 0 && blocked === false && open === false;
+  };
+  if (nativeAuthorizer) cleanup.push(() => db.setAuthorizer(null));
   const contexts: DesktopAgentExecutionContext[] = [];
   const observedGroups = new Map<string, LiveFacts>();
   const capture = (context: DesktopAgentExecutionContext) => {
@@ -79,7 +144,7 @@ export async function activityFixture(cleanup: Cleanup) {
   const live = (context = rootContext()) => internals.groups.get(context.groupId) ?? observedGroups.get(context.groupId)!;
   const access = (threadId = 'activity-thread') => service.createUserAccess({ requestSource: 'user', actorId: 'fixture-user', threadId,
     profileId: boundary.profileId, workspaceId: boundary.workspaceId });
-  return { root, services, service, store, db, contexts, calls, originalStream, start, settled, rootContext, childContext, live, access,
+  return { root, services, service, store, db, coordinator: internals.options.coordinator, dispose, contexts, calls, originalStream, start, settled, rootContext, childContext, live, access, assertFailedDisposal,
     setProgram: (next: Program) => { program = next; } };
 }
 export type ActivityFixture = Awaited<ReturnType<typeof activityFixture>>;

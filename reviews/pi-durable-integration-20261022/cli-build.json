@@ -1,0 +1,16 @@
+{
+  "label": "cli-build",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "build"
+  ],
+  "startedAt": "2026-10-21T19:38:28.758055+00:00",
+  "runnerPid": 22912,
+  "pid": 22943,
+  "pgid": 22943,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:38:36.345749+00:00",
+  "reaped": true
+}

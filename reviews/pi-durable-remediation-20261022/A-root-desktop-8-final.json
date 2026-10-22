@@ -1,0 +1,139 @@
+{
+  "at": "2026-10-22T01:06:33.464099+00:00",
+  "runner": {
+    "label": "A-root-desktop-8-fresh",
+    "cwd": "<worktree>",
+    "argv": [
+      "node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "--maxWorkers=1",
+      "--reporter=verbose",
+      "--reporter=json",
+      "--outputFile=.xiaok/evals/pi-durable/remediation-20261022/A-root-desktop-8-vitest.json",
+      "tests/runtime/sol-pi/desktop-owner-boundary.test.ts",
+      "tests/runtime/verification/native-sqlite-custody.test.ts",
+      "tests/runtime/verification/captured-sqlite-loops.test.ts",
+      "tests/runtime/verification/installed-profile-source-capture.test.ts",
+      "tests/runtime/verification/profile-sqlite-reader.test.ts",
+      "tests/runtime/verification/metadata-session-relation-manifest.test.ts",
+      "tests/runtime/verification/captured-loop-query-layout.test.ts",
+      "tests/runtime/verification/captured-profile-mapper.test.ts"
+    ],
+    "startedAt": "2026-10-22T00:55:47.294695+00:00",
+    "runnerPid": 14366,
+    "pid": 14374,
+    "pgid": 14374,
+    "exitCode": 0,
+    "finishedAt": "2026-10-22T01:05:57.232187+00:00",
+    "reaped": true
+  },
+  "rawLogSha256": "4e1e5605b480200120b0e7493c0e7f817e050ff7abcfd19883d051709fab75b2",
+  "vitestJsonSha256": "dac7310ddb5ae03bc82282f8c65b1d279048f50065b48c808d6a06e01f937828",
+  "perFile": [
+    {
+      "file": "tests/runtime/sol-pi/desktop-owner-boundary.test.ts",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 7,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/captured-loop-query-layout.test.ts",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 5,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/captured-profile-mapper.test.ts",
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 34,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/captured-sqlite-loops.test.ts",
+      "passed": 112,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 112,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/installed-profile-source-capture.test.ts",
+      "passed": 128,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 128,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/metadata-session-relation-manifest.test.ts",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 1,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/native-sqlite-custody.test.ts",
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 22,
+      "status": "passed"
+    },
+    {
+      "file": "tests/runtime/verification/profile-sqlite-reader.test.ts",
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "observedCompletedTestCount": 22,
+      "status": "passed"
+    }
+  ],
+  "summary": {
+    "numTotalTests": 331,
+    "numPassedTests": 331,
+    "numFailedTests": 0,
+    "numPendingTests": 0,
+    "success": true
+  },
+  "verboseTerminalCount": 331,
+  "inputHashesBefore": {
+    "tests/runtime/sol-pi/desktop-owner-boundary.test.ts": "fa3f6f8eaf58a31c1ea5a25e3581f9017960f43eccaacb3a09724b67a2d24519",
+    "tests/runtime/verification/native-sqlite-custody.test.ts": "5afda7118c3ed1c7e423e2fbc5450a310afb6ef1dba26b414a8b3a3fe5fe71c7",
+    "tests/runtime/verification/captured-sqlite-loops.test.ts": "14a35627d0be3296e8ff26c08e97426b176fdd2e705b5b8cfa6b69be4b4edbd6",
+    "tests/runtime/verification/installed-profile-source-capture.test.ts": "49358c352edac8a6410a580089851d73c2ba3b4c7cc2996e88bfed46f798b397",
+    "tests/runtime/verification/profile-sqlite-reader.test.ts": "fcce3adb828db518e745e00adb543f1f10cfcec68caad0a8a52ad24280b629a5",
+    "tests/runtime/verification/metadata-session-relation-manifest.test.ts": "106683202afa779a589e6933510cbf8d2e25ac26f2c59f1a7bca3eca8bf0507d",
+    "tests/runtime/verification/captured-loop-query-layout.test.ts": "ff25c2b707e0907b57992f25a2c5b6794febafe74e04a341218f8fc50aa84f8c",
+    "tests/runtime/verification/captured-profile-mapper.test.ts": "25a72fc43fdec7c318734fc08a7a26d23e1839c7d85139649448a0d55e82ffd6",
+    "desktop/electron/loop-business-publication-host.ts": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858",
+    "desktop/electron/loop-output-service.ts": "497fb772a76e4c509d62a212907fb6edeed28e018a461a129fda7bdca73b9a23",
+    "desktop/electron/loop-store.ts": "09b634b9b2ef0fd0bbd60b3304347707a23c715f417251033b268eac07163604",
+    "desktop/electron/timed-action-store.ts": "b0fe91076e5af4356384efd3f4d03cd24393246251cfc24d5d705791972c1b0c"
+  },
+  "inputHashesAfter": {
+    "tests/runtime/sol-pi/desktop-owner-boundary.test.ts": "fa3f6f8eaf58a31c1ea5a25e3581f9017960f43eccaacb3a09724b67a2d24519",
+    "tests/runtime/verification/native-sqlite-custody.test.ts": "5afda7118c3ed1c7e423e2fbc5450a310afb6ef1dba26b414a8b3a3fe5fe71c7",
+    "tests/runtime/verification/captured-sqlite-loops.test.ts": "14a35627d0be3296e8ff26c08e97426b176fdd2e705b5b8cfa6b69be4b4edbd6",
+    "tests/runtime/verification/installed-profile-source-capture.test.ts": "49358c352edac8a6410a580089851d73c2ba3b4c7cc2996e88bfed46f798b397",
+    "tests/runtime/verification/profile-sqlite-reader.test.ts": "fcce3adb828db518e745e00adb543f1f10cfcec68caad0a8a52ad24280b629a5",
+    "tests/runtime/verification/metadata-session-relation-manifest.test.ts": "106683202afa779a589e6933510cbf8d2e25ac26f2c59f1a7bca3eca8bf0507d",
+    "tests/runtime/verification/captured-loop-query-layout.test.ts": "ff25c2b707e0907b57992f25a2c5b6794febafe74e04a341218f8fc50aa84f8c",
+    "tests/runtime/verification/captured-profile-mapper.test.ts": "25a72fc43fdec7c318734fc08a7a26d23e1839c7d85139649448a0d55e82ffd6",
+    "desktop/electron/loop-business-publication-host.ts": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858",
+    "desktop/electron/loop-output-service.ts": "497fb772a76e4c509d62a212907fb6edeed28e018a461a129fda7bdca73b9a23",
+    "desktop/electron/loop-store.ts": "09b634b9b2ef0fd0bbd60b3304347707a23c715f417251033b268eac07163604",
+    "desktop/electron/timed-action-store.ts": "b0fe91076e5af4356384efd3f4d03cd24393246251cfc24d5d705791972c1b0c"
+  },
+  "inputDrift": [],
+  "finalOwnGroupMembers": [],
+  "signalsSent": false,
+  "partitionRule": "Replace these complete eight file rows in A1134; do not add duplicates."
+}

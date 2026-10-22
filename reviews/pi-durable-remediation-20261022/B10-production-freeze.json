@@ -1,0 +1,10 @@
+{
+  "createdAt": "2026-10-22T00:54:48.370357+00:00",
+  "path": "desktop/electron/loop-business-publication-host.ts",
+  "sha256": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858",
+  "parentProductionFreeze": "root-final-production-freeze.json (7 original source files remain unchanged)",
+  "newProductionFiles": 1,
+  "reason": "B10 approved correctness adapter; not performance optimization",
+  "plan": "reviews/failure-remediation-B.md B10",
+  "codeReviewPending": true
+}

@@ -1,0 +1,14 @@
+
+> xiaokcode@1.5.14 governance:check
+> npm run lint && npm run architecture:check
+
+
+> xiaokcode@1.5.14 lint
+> node scripts/governance/check.mjs lint
+
+[lint] scanned 1189 files; 4 current, 0 new violations
+
+> xiaokcode@1.5.14 architecture:check
+> node scripts/governance/check.mjs architecture
+
+[architecture] scanned 1064 files; 161 current, 0 new violations

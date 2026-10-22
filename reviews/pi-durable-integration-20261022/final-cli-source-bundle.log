@@ -1,0 +1,35 @@
+✔ source bundling rejects a native binary in the dependency closure (15.846958ms)
+✔ source bundling rejects an unexpected installer version (16.77275ms)
+✔ actual prepack entry refuses direct source-tree packing without outputs or input changes (63.966ms)
+✔ actual pack entry refuses missing universal native input (none) before packing (90.199542ms)
+✔ actual pack entry refuses missing universal native input (x64) before packing (94.4485ms)
+✔ actual pack entry refuses missing universal native input (arm64) before packing (108.600667ms)
+✖ merged manifest preserves native source lifecycle and all original helper build gates (3.40775ms)
+✔ original lock devDependencies contains exactly one pinned tar key (1.691666ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 454.851
+
+✖ failing tests:
+
+test at tests/package/cli-source-bundle.test.mjs:117:1
+✖ merged manifest preserves native source lifecycle and all original helper build gates (3.40775ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  '1.5.15' !== '1.5.9'
+
+      at TestContext.<anonymous> (file://<worktree>/tests/package/cli-source-bundle.test.mjs:120:10)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1.5.15',
+    expected: '1.5.9',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -64,6 +64,7 @@ function createMockAdapter(options: {
       }
       if (isCompact) {
         yield { type: 'text', delta: options.compactSummary ?? '## Summary\nCompleted steps 1-5.' };
+        yield { type: 'done' };
         yield { type: 'usage', usage: { inputTokens: 1000, outputTokens: 200 } };
         return;
       }

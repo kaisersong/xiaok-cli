@@ -1,4 +1,6 @@
 import { Worker } from 'node:worker_threads';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export interface GlobSearchInput {
   patterns: string | string[];
@@ -37,7 +39,8 @@ export function createBoundedGlobRunner(options: {
         throw new Error('glob_invalid_input');
       }
       if (activeCount >= maxWorkers) throw new Error('glob_busy');
-      const worker = new Worker(options.workerUrl ?? new URL('./glob-worker.mjs', import.meta.url), {
+      // This is a Node worker beside this module, not a browser asset URL.
+      const worker = new Worker(options.workerUrl ?? pathToFileURL(join(import.meta.dirname, 'glob-worker.mjs')), {
         workerData: { input, limits },
         // V8 heap failure must terminate the search, never Electron's main isolate.
         resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 8, stackSizeMb: 2 },

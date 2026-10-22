@@ -15,8 +15,8 @@ it('a real 60 second host budget survives a 10ms cold provider preparation witho
  let remaining=0;
  // Hold only the real pre-provider seam, then invoke the unmodified production
  // deadline/authorization/stream path. No fake clock or substitute budget math.
- const preparation=vi.spyOn(taskStream,'streamDesktopTaskRecovery').mockImplementation(async function*(input){
-  remaining=input.deadline-Date.now();await delay(10);yield* actual(input);
+ const preparation=vi.spyOn(taskStream,'streamDesktopTaskRecovery').mockImplementation(async function*(input,physicalRun){
+  remaining=input.deadline-Date.now();await delay(10);yield* actual(input,physicalRun);
  });
  const stream=vi.spyOn(OpenAIAdapter.prototype,'stream').mockImplementation(async function*(){yield {type:'text',delta:'A completed response from the real Desktop provider boundary.'};yield {type:'done'};});
  const task=await f.services.createTask({prompt:'Answer this short request.',materials:[],watchdogMs:60_000,context:{threadId:'short-budget'},permissionMode:'auto'});

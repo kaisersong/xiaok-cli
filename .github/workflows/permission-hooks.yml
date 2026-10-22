@@ -35,6 +35,8 @@ on:
       - 'tests/runtime/*hook*.test.ts'
       - 'tests/ai/tools/index.test.ts'
       - 'tests/e2e/permission-hook-fallback.py'
+      - 'tests/e2e/tmux-e2e.py'
+      - 'tests/e2e/test_tmux_exit_wait.py'
       - 'tests/ai/adapters/openai-history-images.test.ts'
       - 'tests/e2e/text-model-resume.py'
       - 'tests/e2e/persistent-command-approval.py'
@@ -75,6 +77,8 @@ on:
       - 'tests/runtime/*hook*.test.ts'
       - 'tests/ai/tools/index.test.ts'
       - 'tests/e2e/permission-hook-fallback.py'
+      - 'tests/e2e/tmux-e2e.py'
+      - 'tests/e2e/test_tmux_exit_wait.py'
       - 'tests/ai/adapters/openai-history-images.test.ts'
       - 'tests/e2e/text-model-resume.py'
       - 'tests/e2e/persistent-command-approval.py'
@@ -137,6 +141,7 @@ jobs:
       - name: Verify local rejection, approval and next turn in a real TTY
         if: runner.os == 'Linux'
         run: |
+          python tests/e2e/test_tmux_exit_wait.py
           python tests/e2e/permission-hook-fallback.py
           python tests/e2e/text-model-resume.py
           python tests/e2e/resume-history-visibility.py

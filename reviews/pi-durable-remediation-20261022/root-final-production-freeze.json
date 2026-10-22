@@ -1,0 +1,35 @@
+{
+  "createdAt": "2026-10-22T00:18:50.653237+00:00",
+  "head": "d0e35e73014add369748de77fe2a868a62777f13",
+  "scope": "all seven current remediation production files; final cross-model review pending",
+  "files": [
+    {
+      "path": "desktop/electron/desktop-services.ts",
+      "sha256": "a943a4967c1a0fe56477fbe9972b3f6a4441fb11f4b30f5f00c46cf3eeeded66"
+    },
+    {
+      "path": "desktop/electron/desktop-task-stream.ts",
+      "sha256": "fee73bfc0268c7b23d773fdf256c0f67a222d977e598fb3c6d4d8c1bd18d62ab"
+    },
+    {
+      "path": "desktop/electron/project-agent-model.ts",
+      "sha256": "5c1a739d742fa5b95dc897930d83535dfd06f923aa1cd22facf032bf86387906"
+    },
+    {
+      "path": "src/ai/tools/bounded-glob.ts",
+      "sha256": "099dae1daf6a296b1c140fd7aae523d7ebd4ba5a313568a3963c807248cc3a5f"
+    },
+    {
+      "path": "src/runtime/conversation-activity/sensitivity.ts",
+      "sha256": "fb1e0cd30b99018f367773f7f72e9a0ce1fe5a7310d578f219042cb49498be82"
+    },
+    {
+      "path": "desktop/renderer/src/components/ConversationActivityPanel.tsx",
+      "sha256": "32d46939d803503da469d40efcf802c92c7f92cf5910c67f021980b880ac3464"
+    },
+    {
+      "path": "desktop/renderer/src/components/collaboration/CollaborationRoomsPage.tsx",
+      "sha256": "e40c0ed3a0edab2b0e0bc08788a6135872933fa18a0087c5c79afc1498e48393"
+    }
+  ]
+}

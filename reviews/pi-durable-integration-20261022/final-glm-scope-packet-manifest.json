@@ -1,0 +1,191 @@
+{
+  "sourceCommit": "d7f9a5a07b8695fc05b1a406c0863eafaac4a421",
+  "comparisonBase": "6770092945a42fb0e45ef0d68d0971bfc01b51a8",
+  "productionFiles": [
+    "desktop/electron/context-manager.ts",
+    "src/ai/adapters/claude.ts",
+    "src/ai/adapters/openai-responses.ts",
+    "src/ai/adapters/openai.ts",
+    "src/ai/runtime/compact-runner.ts",
+    "src/ai/runtime/compaction-response.ts",
+    "src/ai/runtime/model-capabilities.ts",
+    "src/runtime/sol-pi/semantic-compaction-owner.ts"
+  ],
+  "productionCount": 8,
+  "sourceManifest": [
+    {
+      "file": "desktop/electron/context-manager.ts",
+      "sha256": "7cfd48cfd71aa36c09278affe8d3c435f445a500f8541dc89a40cbab5ce0a5f7",
+      "lines": 230,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/adapters/claude.ts",
+      "sha256": "1e080c1f9e9f616831bc4f6b5996d98320e6cde257eb9120f3d64a371614406c",
+      "lines": 324,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/adapters/openai-responses.ts",
+      "sha256": "92dbc809c41c0566f26fb11f9408057c9b98144c49a18d0b6adc51b792904770",
+      "lines": 303,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/adapters/openai.ts",
+      "sha256": "edd139d2a76a0ae8fb75fff7400b5ae9d63d192fdd6737568e2a03b497af731b",
+      "lines": 1245,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/compact-runner.ts",
+      "sha256": "523c5b7762507acf16dd1ae3127880875f11f1a949c83233f28b7a01d9ec5a1e",
+      "lines": 51,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/compaction-response.ts",
+      "sha256": "3de449b53918a06f1a4273f16bbe9417518c28d5e007f084c9c4055c2fe9723b",
+      "lines": 43,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/model-capabilities.ts",
+      "sha256": "f8e8c5023efbe684b743461dfd3748122e763f88cd8ad16ce970af0d0f4f6508",
+      "lines": 201,
+      "mode": "full"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-owner.ts",
+      "sha256": "afab32ff721459c49e9b7ff85be50f9df9ebab5b321b5b02958d04bba7a6d5ea",
+      "lines": 189,
+      "mode": "full"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-summary-attempt.ts",
+      "sha256": "e388ce894adf966a509725fb137667c6c5cf5a4602cee14a1a116491e0bba244",
+      "lines": 179,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/provider-conversation-authorization.ts",
+      "sha256": "6e16f01d6c28f732a271cf7f863a4edcff19cf95fd9de7f3003b2ee8392f4e86",
+      "lines": 295,
+      "mode": "full"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-compaction-ledger.ts",
+      "sha256": "ad6dfd9b3d4c9236a36226ae72ef0c61936982572cee254b14ab6ea35f6745de",
+      "lines": 142,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/session-store/compound-deletion-census.ts",
+      "sha256": "ebecf259c08658621393baeeb77208d589fe6394670f7a64042b6c0f9656b02f",
+      "lines": 79,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/session-store/store.ts",
+      "sha256": "ee9ccb023ff75239627c3acce3a058589c972ab396e764fcade5b93132efc780",
+      "lines": 226,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/session-store/execution-authority.ts",
+      "sha256": "b9ebb369d8a71d19afd72e014dc8746e359c6c1d3e83d1c99141c9032358fa7c",
+      "lines": 146,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/session-store/file-store.ts",
+      "sha256": "ce9799a0b9e9b2db9d15fdb42045b357b44b3e550a230b550df56fbb3965e1f2",
+      "lines": 869,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/session-store/sqlite-store.ts",
+      "sha256": "4fae6a618865adea1d510b2c02b1ab298b0a41d27cbd936de4ebb044e6636a45",
+      "lines": 620,
+      "mode": "full"
+    },
+    {
+      "file": "src/runtime/sol-pi/semantic-snapshot.ts",
+      "sha256": "5ab22e585ccd93c2f856e295b47ab014810e8d380e32c97f32ba347c2f832bd4",
+      "lines": 66,
+      "mode": "full"
+    },
+    {
+      "file": "src/runtime/sol-pi/single-request-https.ts",
+      "sha256": "886e4443805e3ee4e95554c3bfd9af77eed9c0260798457181c6e71087c4eb17",
+      "lines": 124,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/portable-compaction-executor.ts",
+      "sha256": "209bc96a8a89cb6d88bf2c16f823579acd82cfb69ffa1a26d6de796c89c56d50",
+      "lines": 150,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/session.ts",
+      "sha256": "cda523d0ee62bb0a8490d6efc51ab09652a6630b6773612bdfeaa2fc2add7c00",
+      "lines": 270,
+      "mode": "full"
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "sha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "lines": 173,
+      "mode": "full"
+    },
+    {
+      "file": "src/ai/runtime/agent-runtime.ts",
+      "sha256": "4a8318908e0c03ea30ac80225900b504e10952aa8f1fa789dc692a38339a935f",
+      "mode": "excerpt",
+      "lineRanges": [
+        [
+          240,
+          355
+        ]
+      ]
+    },
+    {
+      "file": "desktop/tests/main/compaction-completion.test.ts",
+      "sha256": "89012e796780fe01a52785e6f9f7876f7fdf209f0c009b288eed591bfe3bfc5f",
+      "mode": "test-diff"
+    },
+    {
+      "file": "desktop/tests/main/context-manager.test.ts",
+      "sha256": "078476d63b9094b7d65adc7dbd6ae88fcb9b4cc4749492ffd8b26d91f9c3bbc4",
+      "mode": "test-diff"
+    },
+    {
+      "file": "tests/ai/adapters/openai.test.ts",
+      "sha256": "5ef3e9c03113b39a1402ddb690d2ff4b8bbf3f53a17ca7c1d6abb93069351ade",
+      "mode": "test-diff"
+    },
+    {
+      "file": "tests/ai/runtime/compact-runner.test.ts",
+      "sha256": "9e37b69c030bc9b0708ceb655a0eb03ab63a1cce53adc2a189ee20c5ed1ea070",
+      "mode": "test-diff"
+    },
+    {
+      "file": "tests/ai/runtime/compaction-completion.test.ts",
+      "sha256": "a925a4ad5affb158be3af668aae7f1c9c480747876de5e6711a3a885f719f6e0",
+      "mode": "test-diff"
+    },
+    {
+      "file": "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+      "sha256": "4b5c5a5282b3c5475acc48d341b32b10e27658727c80814a8470f894606c2587",
+      "mode": "test-diff"
+    }
+  ],
+  "packetPath": "<worktree>/.xiaok/evals/pi-durable/integration-20261022/final-glm-scope-packet.txt",
+  "packetBytes": 442594,
+  "packetSha256": "9a0fced68fa6cfb717b1aa997ad116d444bdd14eea0af786bfed3adf17c86931",
+  "testLogHashes": {
+    "remote-semantic-green": "861af39be9b4b7c48f49c3dc95aeee158dd13c0b0514d85ee951ea70365e3557",
+    "final-ci-emitted": "7c9ef486e029646815a174e3421762a39bf6c23f7f118b3a505f332731e35e4a"
+  }
+}

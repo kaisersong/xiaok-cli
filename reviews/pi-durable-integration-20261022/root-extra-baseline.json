@@ -1,0 +1,20 @@
+{
+  "label": "root-extra-baseline",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/commands/chat-finalization-process.test.ts",
+    "tests/runtime/verification/installed-metadata-target-prepare.test.ts",
+    "tests/commands/chat.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:49:23.118541+00:00",
+  "runnerPid": 5592,
+  "pid": 5600,
+  "pgid": 5600,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:50:55.473167+00:00",
+  "reaped": true
+}

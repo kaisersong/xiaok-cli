@@ -1,0 +1,354 @@
+{
+  "baseline": "d0e35e73014add369748de77fe2a868a62777f13",
+  "originalRootTotals": {
+    "total": 13677,
+    "passed": 13337,
+    "failed": 82,
+    "skipped": 258
+  },
+  "originalDesktopTotals": {
+    "passed": 9965,
+    "failed": 225,
+    "skipped": 40
+  },
+  "originalRootFailedFiles": {
+    "tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts": {
+      "originalTotal": 31,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/runtime/conversation-activity/owner-process.test.ts": {
+      "originalTotal": 6,
+      "originalFailed": 4,
+      "suiteOnly": false
+    },
+    "tests/runtime/conversation-activity/storage-permissions.test.ts": {
+      "originalTotal": 12,
+      "originalFailed": 4,
+      "suiteOnly": false
+    },
+    "tests/commands/chat-finalization-process.test.ts": {
+      "originalTotal": 52,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/installed-metadata-target-prepare.test.ts": {
+      "originalTotal": 14,
+      "originalFailed": 8,
+      "suiteOnly": false
+    },
+    "tests/commands/chat.test.ts": {
+      "originalTotal": 41,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/installed-metadata-capacity-integration.test.ts": {
+      "originalTotal": 10,
+      "originalFailed": 3,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/artifact-export-helper.test.ts": {
+      "originalTotal": 40,
+      "originalFailed": 0,
+      "suiteOnly": true
+    },
+    "tests/runtime/isolated-execution/artifact-export.test.ts": {
+      "originalTotal": 7,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/platform/runtime/registry-lifecycle.test.ts": {
+      "originalTotal": 7,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/loop-application-receiver-fence.test.ts": {
+      "originalTotal": 2,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "tests/runtime/loop/published-candidate-controller.test.ts": {
+      "originalTotal": 1,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/runtime/conversation-activity/owner-launcher-exit.test.ts": {
+      "originalTotal": 17,
+      "originalFailed": 9,
+      "suiteOnly": false
+    },
+    "tests/platform/runtime/mcp-owner-fencing.test.ts": {
+      "originalTotal": 4,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/loop-publication-set.test.ts": {
+      "originalTotal": 13,
+      "originalFailed": 11,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/publication-operation.test.ts": {
+      "originalTotal": 30,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/ai/runtime/kimi-builtin-tool-context.test.ts": {
+      "originalTotal": 5,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/application-own-data-adversarial.test.ts": {
+      "originalTotal": 1199,
+      "originalFailed": 16,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/installed-blackbox-command.test.ts": {
+      "originalTotal": 1,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/runtime/sol-pi/desktop-owner-boundary.test.ts": {
+      "originalTotal": 7,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "tests/runtime/verification/intent-publication-dependencies.test.ts": {
+      "originalTotal": 23,
+      "originalFailed": 10,
+      "suiteOnly": false
+    },
+    "tests/runtime/intent-delegation/verification-host-controller.test.ts": {
+      "originalTotal": 16,
+      "originalFailed": 1,
+      "suiteOnly": false
+    }
+  },
+  "originalDesktopFailedFiles": {
+    "desktop/tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts": {
+      "originalTotal": 3,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-host-cancellation-write-failures.bdd.test.ts": {
+      "originalTotal": 26,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts": {
+      "originalTotal": 7,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-services.test.ts": {
+      "originalTotal": 191,
+      "originalFailed": 6,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-multi-agent-service.bdd.test.ts": {
+      "originalTotal": 114,
+      "originalFailed": 18,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-compound-ancestor-followup.test.ts": {
+      "originalTotal": 8,
+      "originalFailed": 8,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-post-seal-process.bdd.test.ts": {
+      "originalTotal": 17,
+      "originalFailed": 3,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-post-seal-facts.bdd.test.ts": {
+      "originalTotal": 38,
+      "originalFailed": 38,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-runner-finalization.test.ts": {
+      "originalTotal": 2,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/artifact-export-package.test.ts": {
+      "originalTotal": 40,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/artifact-export-process.test.ts": {
+      "originalTotal": 31,
+      "originalFailed": 0,
+      "suiteOnly": true
+    },
+    "desktop/tests/main/semantic-product-runtime.test.ts": {
+      "originalTotal": 3,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/room-field-classification.test.ts": {
+      "originalTotal": 19,
+      "originalFailed": 4,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/rejected-bridge-gateway-ownership.test.ts": {
+      "originalTotal": 6,
+      "originalFailed": 6,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/python-preparation-main-lifetime.test.ts": {
+      "originalTotal": 11,
+      "originalFailed": 11,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/loop-verification-execution-controller.test.ts": {
+      "originalTotal": 8,
+      "originalFailed": 5,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-post-seal-io.bdd.test.ts": {
+      "originalTotal": 19,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-multi-agent-approval-wire-budget.bdd.test.ts": {
+      "originalTotal": 1,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts": {
+      "originalTotal": 1,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-post-seal-verifier-policy.bdd.test.ts": {
+      "originalTotal": 6,
+      "originalFailed": 6,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-post-seal-input-errors.bdd.test.ts": {
+      "originalTotal": 7,
+      "originalFailed": 7,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-history-publication-basis.test.ts": {
+      "originalTotal": 3,
+      "originalFailed": 3,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/workflow-stored-restrictions-held.test.ts": {
+      "originalTotal": 4,
+      "originalFailed": 4,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/workflow-stored-restrictions-denials.test.ts": {
+      "originalTotal": 9,
+      "originalFailed": 9,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/workflow-stored-restrictions-effects.test.ts": {
+      "originalTotal": 4,
+      "originalFailed": 4,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/mcp-registration-main-ownership.test.ts": {
+      "originalTotal": 14,
+      "originalFailed": 13,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/goal-attachment-ipc-contract.bdd.test.ts": {
+      "originalTotal": 26,
+      "originalFailed": 24,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/mcp-registration-actual-main.test.ts": {
+      "originalTotal": 6,
+      "originalFailed": 6,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/mcp-registration-promise-admission.test.ts": {
+      "originalTotal": 5,
+      "originalFailed": 5,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/workflow-review-mode.test.ts": {
+      "originalTotal": 3,
+      "originalFailed": 3,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/workflow-stored-restrictions-partial-denial.test.ts": {
+      "originalTotal": 2,
+      "originalFailed": 2,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/desktop-authorization-approval-design-gate.test.ts": {
+      "originalTotal": 1,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/renderer/desktop-settings-voice-pane.test.tsx": {
+      "originalTotal": 2,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/renderer/workspace-execution-drafts.bdd.test.tsx": {
+      "originalTotal": 20,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/loop-assistant-consumption.test.ts": {
+      "originalTotal": 35,
+      "originalFailed": 4,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/e2e-dynamic-workflow-script.test.ts": {
+      "originalTotal": 1,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/kb-integration.test.ts": {
+      "originalTotal": 13,
+      "originalFailed": 13,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/memory-ipc-registry.test.ts": {
+      "originalTotal": 42,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/renderer/chat-shell-canvas-session.test.tsx": {
+      "originalTotal": 14,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/inherited-native-readonly.test.ts": {
+      "originalTotal": 14,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/react-doctor-low-risk-optimization.test.ts": {
+      "originalTotal": 9,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/bundled-mcp-v2-contract.test.ts": {
+      "originalTotal": 4,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/renderer/capability-migration-snapshot.test.ts": {
+      "originalTotal": 7,
+      "originalFailed": 1,
+      "suiteOnly": false
+    },
+    "desktop/tests/main/workflow-read-port-close-reentry.test.ts": {
+      "originalTotal": 0,
+      "originalFailed": 0,
+      "suiteOnly": true
+    },
+    "desktop/tests/main/workflow-read-port-provenance.test.ts": {
+      "originalTotal": 0,
+      "originalFailed": 0,
+      "suiteOnly": true
+    }
+  },
+  "note": "Original failures are immutable observations; a matching passing rerun closes validation, and a source fix requires its own cause/red/green evidence. Full suite reruns remain required."
+}

@@ -1,0 +1,87 @@
+
+ RUN  v3.2.6 <worktree>
+
+ ❯ tests/commands/chat-finalization-process.test.ts (52 tests | 1 failed) 100673ms
+   ✓ signal holds the original session-save writer before the only final ownership release  2164ms
+   ✓ signal holds the original startup-save writer before the only final ownership release  1680ms
+   ✓ signal holds the original startup-failure writer before the only final ownership release  1324ms
+   ✓ signal holds the original write-failure writer before the only final ownership release  1689ms
+   ✓ real TTY sigterm settles the actual Goal confirmation before finalizing ownership  2820ms
+   ✓ real TTY double-interrupt settles the actual Goal confirmation before finalizing ownership  2812ms
+   ✓ real TTY Goal commit keeps the original mutation and session ownership alive through SIGTERM  2887ms
+   ✓ actual early bootstrap resume-goal-failure drains the registered ownership transition without inventing success  2016ms
+   ✓ actual early bootstrap resume-write-failure drains the registered ownership transition without inventing success  1784ms
+   ✓ real native Goal rejection consumed by the terminal remains an exit error without ownership release  2471ms
+   ✓ first login login-provider settles bootstrap through the actual CLI finalizer  1062ms
+   ✓ first login login-secret settles bootstrap through the actual CLI finalizer  1294ms
+   ✓ first login login-probe settles bootstrap through the actual CLI finalizer  1373ms
+   ✓ first login login-save settles bootstrap through the actual CLI finalizer  1172ms
+   ✓ first login login-save-failure settles bootstrap through the actual CLI finalizer  946ms
+   ✓ standalone login baseline preserves original provider terminal outcome and raw cleanup  595ms
+   ✓ standalone login baseline preserves original secret terminal outcome and raw cleanup  500ms
+   ✓ standalone login baseline preserves original default terminal outcome and raw cleanup  569ms
+   ✓ standalone login baseline preserves original normal-secret terminal outcome and raw cleanup  713ms
+   ✓ host login provider settles the original prompt and restores its owned terminal resources  695ms
+   ✓ host login secret settles the original prompt and restores its owned terminal resources  599ms
+   ✓ host login default settles the original prompt and restores its owned terminal resources  550ms
+   ✓ host login interrupt-provider settles the original prompt and restores its owned terminal resources  579ms
+   ✓ host login interrupt-secret settles the original prompt and restores its owned terminal resources  575ms
+   ✓ host login preabort settles the original prompt and restores its owned terminal resources  503ms
+   ✓ host login eof-provider settles the original prompt and restores its owned terminal resources  625ms
+   ✓ real TTY restores both actual transcript wrappers before the original logger closes  2603ms
+   × actual configured hook-sync remains owned until the original hook process drains 1594ms
+     → Error: agent_disposed
+[2026-10-21T19:52:41.320Z] [warn] [chat] chat finalization unconfirmed {"failureMessages":["Error: chat_finalization_unconfirmed","Error: hook_physical_drain_unconfirmed","Error: kill EPERM"]}
+{"name":"AggregateError","message":"hook_physical_drain_unconfirmed","stack":"AggregateError: hook_physical_drain_unconfirmed\n    at Object.construct (/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/cli-finalization-race-tu0msm/entry.mjs:9:96)\n    at <anonymous> (<worktree>/src/runtime/hooks-runner.ts:806:34)\n    at async Promise.allSettled (index 4)\n    at async settle (<worktree>/src/commands/chat.ts:1504:23)\n    at async finalizeOwners (<worktree>/src/commands/chat.ts:1507:5)\n    at async <anonymous> (<worktree>/src/commands/chat.ts:448:7)","errors":[{"name":"Error","message":"kill EPERM","stack":"Error: kill EPERM\n    at process.kill (node:internal/process/per_thread:277:13)\n    at terminate (<worktree>/src/runtime/hooks-runner.ts:506:60)\n    at AbortSignal.abort (<worktree>/src/runtime/hooks-runner.ts:548:77)\n    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)\n    at AbortSignal.dispatchEvent (node:internal/event_target:776:26)\n    at runAbort (node:internal/abort_controller:547:10)\n    at abortSignal (node:internal/abort_controller:518:3)\n    at AbortController.abort (node:internal/abort_controller:566:5)\n    at Object.closeAndDrain (<worktree>/src/runtime/hooks-runner.ts:808:56)\n    at <anonymous> (<worktree>/src/commands/chat.ts:1511:28)"}]}
+{"name":"AggregateError","message":"chat_finalization_unconfirmed","stack":"AggregateError: chat_finalization_unconfirmed\n    at Object.construct (/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/cli-finalization-race-tu0msm/entry.mjs:9:96)\n    at finalizeOwners (<worktree>/src/commands/chat.ts:1530:30)\n    at async <anonymous> (<worktree>/src/commands/chat.ts:448:7)","errors":[{"name":"AggregateError","message":"hook_physical_drain_unconfirmed","stack":"AggregateError: hook_physical_drain_unconfirmed\n    at Object.construct (/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/cli-finalization-race-tu0msm/entry.mjs:9:96)\n    at <anonymous> (<worktree>/src/runtime/hooks-runner.ts:806:34)\n    at async Promise.allSettled (index 4)\n    at async settle (<worktree>/src/commands/chat.ts:1504:23)\n    at async finalizeOwners (<worktree>/src/commands/chat.ts:1507:5)\n    at async <anonymous> (<worktree>/src/commands/chat.ts:448:7)","errors":[{"name":"Error","message":"kill EPERM","stack":"Error: kill EPERM\n    at process.kill (node:internal/process/per_thread:277:13)\n    at terminate (<worktree>/src/runtime/hooks-runner.ts:506:60)\n    at AbortSignal.abort (<worktree>/src/runtime/hooks-runner.ts:548:77)\n    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)\n    at AbortSignal.dispatchEvent (node:internal/event_target:776:26)\n    at runAbort (node:internal/abort_controller:547:10)\n    at abortSignal (node:internal/abort_controller:518:3)\n    at AbortController.abort (node:internal/abort_controller:566:5)\n    at Object.closeAndDrain (<worktree>/src/runtime/hooks-runner.ts:808:56)\n    at <anonymous> (<worktree>/src/commands/chat.ts:1511:28)"}]}]}
+: expected 1 to be 143 // Object.is equality
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1677ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1729ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1605ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1830ms
+   ✓ actual configured hook-async remains owned until the original hook process drains  1913ms
+   ✓ actual CLI observer intent_created drains its whole original read and UI tail before teardown  2557ms
+   ✓ actual CLI observer stage_activated drains its whole original read and UI tail before teardown  2730ms
+   ✓ actual CLI observer step_activated drains its whole original read and UI tail before teardown  2805ms
+   ✓ actual CLI observer breadcrumb_emitted drains its whole original read and UI tail before teardown  2710ms
+   ✓ actual CLI observer receipt_emitted drains its whole original read and UI tail before teardown  2790ms
+   ✓ actual CLI observer salvage_emitted drains its whole original read and UI tail before teardown  2777ms
+   ✓ actual trace commit error consumed by warning still forbids ownership release  1640ms
+   ✓ actual existing native contract keeps configured SessionEnd behind the original dynamic gate  2198ms
+   ✓ actual delayed update-held request and cache tail drain without writing a hint after ingress closes  2692ms
+   ✓ actual delayed update-cache-error request and cache tail drain without writing a hint after ingress closes  2634ms
+   ✓ actual malformed optional update cache remains best effort during finalization  2558ms
+   ✓ actual open update UI still displays its hint and remains best effort if its original UI tail fails  2610ms
+   ✓ actual headers-only registry body remains owned until its original five-second abort settles  7602ms
+   ✓ actual CLI private closing reason survives the original Agent preaborted entry  1654ms
+   ✓ actual CLI shows an independent producer AbortError as failure without a cancelled command signal  2539ms
+   ✓ actual accepted command resumes through the closed model gate as cancellation after SIGTERM  2768ms
+   ✓ real CLI exit retains original ownership through model-physical-next physical population  2760ms
+   ✓ real CLI exit retains original ownership through model-physical-return physical population  2921ms
+   ✓ real CLI exit retains original ownership through model-physical-failure physical population  2776ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/commands/chat-finalization-process.test.ts > actual configured hook-sync remains owned until the original hook process drains
+AssertionError: Error: agent_disposed
+[2026-10-21T19:52:41.320Z] [warn] [chat] chat finalization unconfirmed {"failureMessages":["Error: chat_finalization_unconfirmed","Error: hook_physical_drain_unconfirmed","Error: kill EPERM"]}
+{"name":"AggregateError","message":"hook_physical_drain_unconfirmed","stack":"AggregateError: hook_physical_drain_unconfirmed\n    at Object.construct (/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/cli-finalization-race-tu0msm/entry.mjs:9:96)\n    at <anonymous> (<worktree>/src/runtime/hooks-runner.ts:806:34)\n    at async Promise.allSettled (index 4)\n    at async settle (<worktree>/src/commands/chat.ts:1504:23)\n    at async finalizeOwners (<worktree>/src/commands/chat.ts:1507:5)\n    at async <anonymous> (<worktree>/src/commands/chat.ts:448:7)","errors":[{"name":"Error","message":"kill EPERM","stack":"Error: kill EPERM\n    at process.kill (node:internal/process/per_thread:277:13)\n    at terminate (<worktree>/src/runtime/hooks-runner.ts:506:60)\n    at AbortSignal.abort (<worktree>/src/runtime/hooks-runner.ts:548:77)\n    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)\n    at AbortSignal.dispatchEvent (node:internal/event_target:776:26)\n    at runAbort (node:internal/abort_controller:547:10)\n    at abortSignal (node:internal/abort_controller:518:3)\n    at AbortController.abort (node:internal/abort_controller:566:5)\n    at Object.closeAndDrain (<worktree>/src/runtime/hooks-runner.ts:808:56)\n    at <anonymous> (<worktree>/src/commands/chat.ts:1511:28)"}]}
+{"name":"AggregateError","message":"chat_finalization_unconfirmed","stack":"AggregateError: chat_finalization_unconfirmed\n    at Object.construct (/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/cli-finalization-race-tu0msm/entry.mjs:9:96)\n    at finalizeOwners (<worktree>/src/commands/chat.ts:1530:30)\n    at async <anonymous> (<worktree>/src/commands/chat.ts:448:7)","errors":[{"name":"AggregateError","message":"hook_physical_drain_unconfirmed","stack":"AggregateError: hook_physical_drain_unconfirmed\n    at Object.construct (/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/cli-finalization-race-tu0msm/entry.mjs:9:96)\n    at <anonymous> (<worktree>/src/runtime/hooks-runner.ts:806:34)\n    at async Promise.allSettled (index 4)\n    at async settle (<worktree>/src/commands/chat.ts:1504:23)\n    at async finalizeOwners (<worktree>/src/commands/chat.ts:1507:5)\n    at async <anonymous> (<worktree>/src/commands/chat.ts:448:7)","errors":[{"name":"Error","message":"kill EPERM","stack":"Error: kill EPERM\n    at process.kill (node:internal/process/per_thread:277:13)\n    at terminate (<worktree>/src/runtime/hooks-runner.ts:506:60)\n    at AbortSignal.abort (<worktree>/src/runtime/hooks-runner.ts:548:77)\n    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)\n    at AbortSignal.dispatchEvent (node:internal/event_target:776:26)\n    at runAbort (node:internal/abort_controller:547:10)\n    at abortSignal (node:internal/abort_controller:518:3)\n    at AbortController.abort (node:internal/abort_controller:566:5)\n    at Object.closeAndDrain (<worktree>/src/runtime/hooks-runner.ts:808:56)\n    at <anonymous> (<worktree>/src/commands/chat.ts:1511:28)"}]}]}
+: expected 1 to be 143 // Object.is equality
+
+- Expected
++ Received
+
+- 143
++ 1
+
+ ❯ tests/commands/chat-finalization-process.test.ts:337:356
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 51 passed (52)
+   Start at  03:52:02
+   Duration  100.91s (transform 57ms, setup 28ms, collect 41ms, tests 100.67s, environment 0ms, prepare 35ms)

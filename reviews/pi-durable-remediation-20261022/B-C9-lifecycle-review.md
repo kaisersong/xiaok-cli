@@ -1,0 +1,15 @@
+# B 对 C9 修订设计的独立票
+
+当前结论：APPROVE 修订设计，针对C.md SHA d045abcba00b828ee86da350bf333aadfe06b540d98b09ba82df3c7fd201ec0f。不是实码或全文件结果票。生产7及B新host均不在C9修改范围。
+
+首轮生命周期 BLOCK 保留：原fixture无条件rm root；实际services.disposeMultiAgent在MA dispose拒绝后不执行store.close，并明确未释放owner需要journal直到process exit。仅强身份验收某sticky错误后继续rm会过早删除仍需保留journal；“不强关store”不足以消除此反例。也不能借Vitest global teardown假称worker已退出（实际Desktop3.2.4 teardown在pool.close前）。
+
+本次已逐字读取C9原案及lifecycle修订、实际fixture/AF2b/mailbox、生产dispose与两诊断raw。AF实际body已到end，失败来自dispose且errors叶严格同一SQLite消费Error；mailbox原loop保留同一usage Error及physical子错误并只seal failed。因此加强结构/原对象身份断言，保留blocked/resourcesReleased=false/cleanupPending=true是正确方向。不同于泛化toThrow或吞所有drain失败。
+
+主笔明确将标准npm/rawVitest的故障目录定义为有意forensics保留，并非必须在活worker内删净；据此本修订关闭首轮BLOCK：只有无服务owner或同一实际dispose真正成功才允许原rm；一切未成功（已验收sticky、未知失败、setup归属不明、pending）均retain。错误是否已验收不能改变journal保留门。普通npm明确留目录；本轮owned父仅原runner reaped、完整group/worker不存在、当前run关联、canonical精确mkdtemp root非symlink及uid/dev/ino/birthtime全一致后晚删；任何检查不明保留报告，不通过通配/扫描/任意path删除。主笔对该保留范围的明确授权使nested Vitest/新全局执行器不再必要。
+
+其余批准边界：原dispose返回的Promise只创建一次；只有调用者完整强断言全部成功才将该精确原错误免重复报告；未知错误/未验收/断言失败全部可达。共享cleanup逆序全尝试，再全尝试mock/env恢复，不宣称owner已成功drained。原AF两兄弟body/barrier/child abort/无文件效果均保留，mailbox更强错误身份/usage及provider各一次/零晚text/恰一次failed seal都需实测。nativeAuthorizer原资格及default5/hook10不变。旧task-cancel动作已有best-effort并非本案新保证，报告“全未知错误保留”应准确指新cleanup接收到的错误，不冒称所有旧生产取消异常均被捕获。
+
+实施复核建议：assertion若可返回Promise必须await，异步断言失败不能提前标记expected；可用实际helper负例确认断言失败仍由cleanup报告同一原错误。owned父建议固定每run nonce，普通npm无nonce仍只retain。以上落实既定“完整断言成功才标记/本run精确归属”，不另开产品权限。
+
+原两有效红及首票沿革保留；后续C actualdiff与四共享suite+mailbox全文件Node24/22.22原资格矩阵、root真实回收JSON另审。本票不将诊断过滤27当pass，不把journal保留称已释放。

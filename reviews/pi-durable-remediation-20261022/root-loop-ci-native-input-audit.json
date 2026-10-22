@@ -1,0 +1,68 @@
+{
+  "checkedAt": "2026-10-22T01:33:29.820412+00:00",
+  "scope": "Read-only package/install-input audit for Loop CI --ignore-scripts; not a claim of fresh CI npm ci or nonlocal native execution.",
+  "version": "13.0.3",
+  "gypfile": false,
+  "shipsPrebuilds": true,
+  "installScript": null,
+  "defaultLoader": "lib/index.js uses lib/binding.js getBinding; shipped matching prebuild preferred before build/Debug or Release fallback",
+  "files": [
+    {
+      "path": "node_modules/better-sqlite3/package.json",
+      "bytes": 1838,
+      "sha256": "6c9ea355190dfce3646ad4d2a31c9506de36d884a6461b3655a2a0c4ba3d1695"
+    },
+    {
+      "path": "node_modules/better-sqlite3/lib/index.js",
+      "bytes": 149,
+      "sha256": "0d56e190de8623278641b613433e89c4af2e5c90092c9c6e425f873d7fbc7ccf"
+    },
+    {
+      "path": "node_modules/better-sqlite3/lib/binding.js",
+      "bytes": 2123,
+      "sha256": "4fe0f892facc02af7db0a1770150565d2e944e7da3c6493116d8e2a01a0f9b19"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/darwin-arm64.node",
+      "bytes": 1980736,
+      "sha256": "98e0e8acd01c632fe5615243e1296af0372826f8783b18fc31c506f73c47459c"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/darwin-x64.node",
+      "bytes": 1982880,
+      "sha256": "e6db154afe9d250e242e2ea3d45d273718ab80a0751d08873637553031752d21"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linux-arm64.node",
+      "bytes": 2066328,
+      "sha256": "8ba771f284dfd9430e3ef8e2ffc373ed7cc5a92fc7c4c0c7baf39dd672863485"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linux-x64.node",
+      "bytes": 2226168,
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linuxmusl-arm64.node",
+      "bytes": 2312112,
+      "sha256": "09d5927246024b6d93c079ae1079554cbdd85790792342bf24636987dce7a786"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/linuxmusl-x64.node",
+      "bytes": 2435680,
+      "sha256": "d661495d2dd4a026ccda893dd8ea1e2c245c3a681bd28224064953c8a9cc0a72"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/win32-arm64.node",
+      "bytes": 1903104,
+      "sha256": "a47870d114b98baecaff0baa51cfb93d6280d43f064280adaadefafb6949f1bf"
+    },
+    {
+      "path": "node_modules/better-sqlite3/prebuilds/win32-x64.node",
+      "bytes": 1989632,
+      "sha256": "e21e5efd71fba66578e95b62554d9028064a80dafd7221bf8a8ef155de8d240a"
+    }
+  ],
+  "actualLocalRuntimeEvidence": "C-source-node22-22-final / C-source-node24-final-v2 / C-electron-sqlite-runtime; final GitHub minimum and OS matrix pending",
+  "decision": "No speculative rebuild or CI mutation: version13 ships its N-API bindings in the package itself."
+}

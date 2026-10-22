@@ -116,12 +116,13 @@ interface KnownMultiAgentBodies {
 export type DesktopMultiAgentMutationPort = Pick<DesktopMultiAgentStore,"claimBootOwnership"|"settleBootOwnership"|"reconcileAgentResources"|"registerThread"|"initializeWorkspaceAuthorization"|"compareAndSetWorkspaceAuthorization"|"beginThreadDeletion"|"updateThreadDeletion"|"deleteThreadHistory"|"createGroup"|"putGroup"|"clearActiveGroup"|"putAgent"|"appendEvent"|"createActivityRun"|"putActivityMember"|"confirmActivityRootTerminal"|"markActivityRunUnknown"|"finalizeActivityRun"|"sendMessage"|"rerouteClosedHandoffs"|"drainInput"|"confirmApplied"|"returnClaim"|"putContent"|"deleteUnreferencedContent"|"reservePresentationOrdinal"|"reserveManagedFollowupTurn"|"putOperation"|"commitApprovalRequest"|"finalizeApproval"|"putRootBinding"|"putResource"|"recoverPreviousBoot"|"previousGroups"|"assertResourceOwnerSettled"|"getThread"|"readWorkspaceAuthorization"|"listWorkspaceThreads"|"listWorkspaceGroups"|"activeGroup"|"getGroup"|"requireGroup"|"findThreadOperation"|"threadHasUnreleasedResources"|"threadHasAgentHistory"|"goalChildReadiness"|"listGroups"|"getAgent"|"listAgents"|"allAgents"|"residentAgents"|"agentCounts"|"readEvents"|"getActivityRun"|"getActivityRuns"|"pendingActivityRuns"|"getActivityMembers"|"listMessages"|"hasUnread"|"captureSemanticInputBoundary"|"unreadMessageIds"|"readContent"|"getOperation"|"listApprovalRequests"|"pendingCloseOperations"|"getRootBinding"|"previousRootBindings"|"resources"|"listResources"|"getByteUsage"|"recomputeByteUsage"> & {transaction<T>(action:(port:DesktopMultiAgentMutationPort)=>T):T};
 const KNOWN_MUTATOR_NAMES=new Set<string>(["claimBootOwnership","settleBootOwnership","reconcileAgentResources","transaction","registerThread","initializeWorkspaceAuthorization","compareAndSetWorkspaceAuthorization","beginThreadDeletion","updateThreadDeletion","deleteThreadHistory","createGroup","putGroup","clearActiveGroup","putAgent","appendEvent","createActivityRun","putActivityMember","confirmActivityRootTerminal","markActivityRunUnknown","finalizeActivityRun","sendMessage","rerouteClosedHandoffs","drainInput","confirmApplied","returnClaim","putContent","deleteUnreferencedContent","reservePresentationOrdinal","reserveManagedFollowupTurn","putOperation","commitApprovalRequest","finalizeApproval","putRootBinding","putResource","recoverPreviousBoot"]);
 const KNOWN_PORT_METHODS=["claimBootOwnership","settleBootOwnership","reconcileAgentResources","transaction","registerThread","initializeWorkspaceAuthorization","compareAndSetWorkspaceAuthorization","beginThreadDeletion","updateThreadDeletion","deleteThreadHistory","createGroup","putGroup","clearActiveGroup","putAgent","appendEvent","createActivityRun","putActivityMember","confirmActivityRootTerminal","markActivityRunUnknown","finalizeActivityRun","sendMessage","rerouteClosedHandoffs","drainInput","confirmApplied","returnClaim","putContent","deleteUnreferencedContent","reservePresentationOrdinal","reserveManagedFollowupTurn","putOperation","commitApprovalRequest","finalizeApproval","putRootBinding","putResource","recoverPreviousBoot","previousGroups","assertResourceOwnerSettled","getThread","readWorkspaceAuthorization","listWorkspaceThreads","listWorkspaceGroups","activeGroup","getGroup","requireGroup","findThreadOperation","threadHasUnreleasedResources","threadHasAgentHistory","goalChildReadiness","listGroups","getAgent","listAgents","allAgents","residentAgents","agentCounts","readEvents","getActivityRun","getActivityRuns","pendingActivityRuns","getActivityMembers","listMessages","hasUnread","captureSemanticInputBoundary","unreadMessageIds","readContent","getOperation","listApprovalRequests","pendingCloseOperations","getRootBinding","previousRootBindings","resources","listResources","getByteUsage","recomputeByteUsage"] as const;
-type KnownMultiAgentWriter={fence?:ReturnType<typeof createKnownDirectoryWriterFence>;bodies:KnownMultiAgentBodies};
+type KnownMultiAgentWriter={fence?:ReturnType<typeof createKnownDirectoryWriterFence>;bodies:KnownMultiAgentBodies;integrityFailure?:{error:unknown}};
 const knownMultiAgentWriters=new WeakMap<object,KnownMultiAgentWriter>();
 const knownMultiAgentPorts=new WeakMap<object,{owner:DesktopMultiAgentStore;active:boolean}>();
 function knownMultiAgentWriter(owner:object):KnownMultiAgentWriter {const writer=knownMultiAgentWriters.get(owner);if(!writer)throw Error('known_writer_fence_owner');return writer;}
-function admitKnownMultiAgentWriter(owner:object):KnownMultiAgentWriter {const writer=knownMultiAgentWriter(owner);writer.fence?.assertOpen();return writer;}
-function invokeKnownMultiAgentBody(owner:DesktopMultiAgentStore,name:keyof KnownMultiAgentBodies,args:unknown[]):unknown {return Reflect.apply(knownMultiAgentWriter(owner).bodies[name],undefined,args);}
+function assertKnownMultiAgentIntegrity(writer:KnownMultiAgentWriter):void {if(writer.integrityFailure)throw writer.integrityFailure.error;}
+function admitKnownMultiAgentWriter(owner:object):KnownMultiAgentWriter {const writer=knownMultiAgentWriter(owner);assertKnownMultiAgentIntegrity(writer);writer.fence?.assertOpen();return writer;}
+function invokeKnownMultiAgentBody(owner:DesktopMultiAgentStore,name:keyof KnownMultiAgentBodies,args:unknown[]):unknown {const writer=knownMultiAgentWriter(owner);assertKnownMultiAgentIntegrity(writer);return Reflect.apply(writer.bodies[name],undefined,args);}
 function createKnownMultiAgentPort(owner:DesktopMultiAgentStore):{port:DesktopMultiAgentMutationPort;seal():void} {
   const object:Object=Object.create(null),record={owner,active:true};
   for(const name of KNOWN_PORT_METHODS){Object.defineProperty(object,name,{enumerable:true,value:function(this:object,...args:unknown[]):unknown {const held=knownMultiAgentPorts.get(this);if(this!==object||held!==record||held.owner!==owner||!held.active)throw Error('known_writer_fence_port_owner_expired');if(KNOWN_MUTATOR_NAMES.has(name))return invokeKnownMultiAgentBody(owner,name as keyof KnownMultiAgentBodies,args);return Reflect.apply(Reflect.get(owner,name),owner,args);}});}
@@ -194,7 +195,7 @@ export class DesktopMultiAgentStore {
     });
   },
       transaction: <T>(action:(port:DesktopMultiAgentMutationPort)=>T):T => {
-      const runAction=()=>{const accepted=createKnownMultiAgentPort(this);try{return action(accepted.port);}finally{accepted.seal();}};
+      const runAction=()=>{const accepted=createKnownMultiAgentPort(this);try{const result=action(accepted.port);assertKnownMultiAgentIntegrity(knownMultiAgentWriter(this));return result;}finally{accepted.seal();}};
     if (this.transactionDepth) return runAction();
     this.db.exec('BEGIN IMMEDIATE');
     this.transactionDepth += 1;
@@ -202,6 +203,7 @@ export class DesktopMultiAgentStore {
     try {
       const result = runAction();
       if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('multi-agent transactions must be synchronous');
+      assertKnownMultiAgentIntegrity(knownMultiAgentWriter(this));
       this.db.exec('COMMIT');
       committed = true;
       return result;
@@ -913,6 +915,48 @@ export class DesktopMultiAgentStore {
     const group = this.getGroup(groupId);
     if (!group) throw new Error('unknown multi-agent group');
     return group;
+  }
+
+  /** A corrupt decoded identity must never select the next mutation's SQL key.
+   * Keep the first original error sticky even when a transaction rolls back the
+   * corrupt bytes, so abort/settlement and already admitted ports cannot write. */
+  private failUsageIdentity(error: unknown = Error('desktop_multi_agent_usage_identity_mismatch')): never {
+    const writer = knownMultiAgentWriter(this);
+    writer.integrityFailure ??= { error };
+    throw writer.integrityFailure.error;
+  }
+  hasUsageIdentityFailure(): boolean { return knownMultiAgentWriter(this).integrityFailure !== undefined; }
+
+  readUsageGroupIdentity(groupId: string, expectedThreadId: string): DesktopMultiAgentGroup {
+    assertKnownMultiAgentIntegrity(knownMultiAgentWriter(this));
+    const row = this.db.prepare('SELECT group_id,thread_id,boot_id,historical_only,created_at,byte_usage,data_json FROM groups WHERE group_id=?')
+      .get(groupId) as { group_id: string; thread_id: string; boot_id: string; historical_only: number; created_at: number; byte_usage: number; data_json: string } | undefined;
+    if (!row) return this.failUsageIdentity();
+    let decoded: unknown;
+    try { decoded = JSON.parse(row.data_json); } catch (error) { return this.failUsageIdentity(error); }
+    if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) return this.failUsageIdentity();
+    const group = decoded as DesktopMultiAgentGroup;
+    if (row.group_id !== groupId || row.thread_id !== expectedThreadId || row.boot_id !== this.bootId
+      || group.groupId !== row.group_id || group.threadId !== row.thread_id || group.bootId !== row.boot_id
+      || typeof group.historicalOnly !== 'boolean' || Number(group.historicalOnly) !== row.historical_only
+      || group.createdAt !== row.created_at || !Number.isSafeInteger(row.created_at) || row.created_at < 0
+      || !Number.isSafeInteger(row.byte_usage) || row.byte_usage < 0) return this.failUsageIdentity();
+    return { ...group, byteUsage: row.byte_usage };
+  }
+
+  readUsageIdentity(groupId: string, agentId: string, expectedThreadId: string): { group: DesktopMultiAgentGroup; agent: DesktopAgentSnapshot } {
+    const group = this.readUsageGroupIdentity(groupId, expectedThreadId);
+    const row = this.db.prepare('SELECT group_id,agent_id,parent_id,created_at,data_json FROM agents WHERE group_id=? AND agent_id=?')
+      .get(groupId, agentId) as { group_id: string; agent_id: string; parent_id: string | null; created_at: number; data_json: string } | undefined;
+    if (!row) return this.failUsageIdentity();
+    let decoded: unknown;
+    try { decoded = JSON.parse(row.data_json); } catch (error) { return this.failUsageIdentity(error); }
+    if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) return this.failUsageIdentity();
+    const agent = decoded as DesktopAgentSnapshot;
+    if (row.group_id !== groupId || row.agent_id !== agentId || agent.id !== row.agent_id
+      || agent.parentId !== row.parent_id || !(row.parent_id === null || typeof row.parent_id === 'string' && row.parent_id.length > 0)
+      || agent.createdAt !== row.created_at || !Number.isSafeInteger(row.created_at) || row.created_at < 0) return this.failUsageIdentity();
+    return { group, agent: this.withUnread(groupId, agent) };
   }
   putGroup(group: DesktopMultiAgentGroup, control = false): void {
     const writer=admitKnownMultiAgentWriter(this);

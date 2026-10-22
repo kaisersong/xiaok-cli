@@ -8,6 +8,7 @@ vi.mock('../../../src/runtime/verification/installed-loop-application.js',()=>({
 vi.mock('../../../src/runtime/verification/installed-completion-publication.js',()=>({createInstalledCompletionPublisher:(_owner:unknown,source:string)=>{
  expect(source).toBe('scheduler');if(f.failPublisher)throw Error('offline');f.opened++;return {
  async observe(){f.calls.push('observe');const value=structuredClone(f.observation);f.change?.('observe');return value;},
+ async readCurrentPayload(){f.calls.push('observe');const observation=structuredClone(f.observation);f.change?.('observe');f.calls.push('read');const payload={...structuredClone(f.payload),bytes:Buffer.from(f.payload.bytes)};f.change?.('read');return {observation,payload};},
  async readPayload(){f.calls.push('read');const value={...structuredClone(f.payload),bytes:Buffer.from(f.payload.bytes)};f.change?.('read');return value;},dispose(){f.disposed++;if(f.disposeThrows)throw Error('dispose failed');}};
 }}));
 import {readCurrentLoopPublishedCandidate} from '../../../src/runtime/loop/published-candidate.js';
@@ -75,16 +76,16 @@ it.each(['version','owner','application','artifact','missing-artifact','canonica
  f.payload.payloadHash=hash(f.payload.bytes);
  await expect(readCurrentLoopPublishedCandidate(binding)).rejects.toThrow();expect(f.disposed).toBe(f.opened);
 });
-it.each(['inspect','observe','read'])('checks route immediately after %s await',async point=>{
+it.each(['inspect','observe','read'])('checks route after the endpoint returns a change at %s',async point=>{
  f.change=p=>{if(p===point)f.route={...f.route,authorityId:'replacement'};};
- await expect(readCurrentLoopPublishedCandidate(binding)).rejects.toThrow();expect(f.calls.at(-1)).toBe(point);expect(f.disposed).toBe(f.opened);
+ await expect(readCurrentLoopPublishedCandidate(binding)).rejects.toThrow();expect(f.calls.at(-1)).toBe(point==='observe'?'read':point);expect(f.disposed).toBe(f.opened);
 });
 it.each(['application','publication'])('rejects %s changes during payload read',async kind=>{
  f.change=p=>{if(p==='read'){if(kind==='application')f.application={...f.application,current:{...f.application.current,revision:2}};else f.observation={...f.observation,businessRevision:2};}};
  await expect(readCurrentLoopPublishedCandidate(binding)).rejects.toThrow();expect(f.disposed).toBe(f.opened);
 });
 it('captures caller binding before first await',async()=>{const input=structuredClone(binding);f.change=()=>{(input.body as any).summary='changed';};expect((await readCurrentLoopPublishedCandidate(input)).binding).toEqual(binding);});
-it.each(['inspect','observe','read'])('honors abort after %s with no write or replay',async point=>{const abort=new AbortController();f.change=p=>{if(p===point)abort.abort(Error('cancelled'));};await expect(readCurrentLoopPublishedCandidate(binding,abort.signal)).rejects.toThrow('cancelled');expect(f.calls.at(-1)).toBe(point);expect(f.disposed).toBe(f.opened);});
+it.each(['inspect','observe','read'])('honors abort during %s with no write or replay',async point=>{const abort=new AbortController();f.change=p=>{if(p===point)abort.abort(Error('cancelled'));};await expect(readCurrentLoopPublishedCandidate(binding,abort.signal)).rejects.toThrow('cancelled');expect(f.calls.at(-1)).toBe(point==='observe'?'read':point);expect(f.disposed).toBe(f.opened);});
 it('closes the first client if the second constructor fails',async()=>{f.failPublisher=true;await expect(readCurrentLoopPublishedCandidate(binding)).rejects.toThrow('offline');expect(f.opened).toBe(1);expect(f.disposed).toBe(1);});
 
 it('isolates every returned byte view from the private historical payload',async()=>{const result=await readCurrentLoopPublishedCandidate(binding),original=Buffer.from(result.bytes);result.bytes.fill(0);expect(result.bytes).toEqual(original);expect(hash(result.bytes)).toBe(result.payloadHash);expect(Object.isFrozen(result.application)).toBe(true);expect(Object.isFrozen(result.owner)).toBe(true);});

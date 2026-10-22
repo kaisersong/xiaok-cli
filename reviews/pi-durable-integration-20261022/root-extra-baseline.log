@@ -1,0 +1,220 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts (14 tests | 8 failed) 24475ms
+   ✓ rejects a caller assembly before any metadata prepare action 1ms
+   × archives the entire actual first-group capture with known-session fees and original unknowns; it creates no stage-valid fact 2489ms
+     → installed_metadata_closure_profile
+   × denies copied capture and closure and preserves all pending fees after an actual fsync failure 1569ms
+     → installed_metadata_closure_profile
+   × waits for the real original CHECK acknowledgement before controller close settles and publishes no entry 1727ms
+     → installed_metadata_closure_profile
+   × rejects actual same-inode same-size material drift while the final original CHECK is pending 1475ms
+     → installed_metadata_closure_profile
+   × registers actual pending work before a synchronous native CHECK entry reenters the original prepare owner close 1247ms
+     → installed_metadata_closure_profile
+   × releases only the uncharged admission after an actual physical page-cap refusal so the same current closure can retry 1418ms
+     → installed_metadata_closure_profile
+   × keeps the actual old controller boot available when the original Source brands a valid pending profile, while private prepare stays unavailable 247ms
+     → metadata_source_profile_unknown
+   ✓ rolls back both DDLs and closes the actual owned prepare factory on a same-text unbranded failure instead of disabling the old boot  856ms
+   ✓ brands only the actual original database headroom refusal and rejects copied same-text errors  790ms
+   ✓ keeps the original boot readable on a branded physical headroom shortage and stores the actual unrefunded usage  424ms
+   × retries an actual before-effect close but never closes another file after real close and descriptor-number reuse 1632ms
+     → installed_metadata_closure_profile
+   ✓ keeps the original metadata command dispatcher one-use and transactional after actual boot has already paid its first block  1277ms
+   ✓ rejects a later corrupt account even when an earlier real allowed profile is valid pending  375ms
+ ❯ tests/commands/chat.test.ts (41 tests | 1 failed) 1890ms
+   × chat terminal layout > returns the stable K3 durable-resume error without writing a crash report 3ms
+     → expected -1 to be greater than 229744
+   ✓ chat terminal layout > preflights strict K3 fork before mutation and delegates cross-profile model switching to the runtime 1ms
+   ✓ chat terminal layout > should not use bottom-fixed input cursor positioning sequences 1ms
+   ✓ chat terminal layout > should use compact helpers for submitted input and tool activity output 1ms
+   ✓ chat terminal layout > should let InputReader own the prompt rendering to avoid slash-menu redraw corruption 0ms
+   ✓ chat terminal layout > should not show an input-ready footer before stdin is owned by the next read 0ms
+   ✓ chat terminal layout > keeps busy capture alive across post-turn cleanup until the next loop owns stdin 1ms
+   ✓ chat terminal layout > renders an empty prompt while InputReader owns stdin 0ms
+   ✓ chat terminal layout > should clear the active input line before rendering the submitted bubble 0ms
+   ✓ chat terminal layout > should stop live activity and reset assistant rendering when a turn fails 1ms
+   ✓ chat terminal layout > wires ESC abort controllers through the shared turn runner and records abort by turn id 1ms
+   ✓ chat terminal layout > classifies the current command actual cancellation reason after ESC 1ms
+   ✓ chat terminal layout > should render the status line inside the prompt renderer instead of after assistant output 1ms
+   ✓ chat terminal layout > should source the sticky current-intent summary from orchestration helpers instead of the status bar 1ms
+   ✓ chat terminal layout > should expose an explicit takeover path for stale owned sessions 0ms
+   ✓ chat terminal layout > loads durable sessions before Agent construction without strict writer coordination 1ms
+   ✓ chat terminal layout > should reroute terminal output to the surviving tty stream when one ui stream errors 1ms
+   ✓ chat terminal layout > should pause and then restore live activity around blocking approval prompts 1ms
+   ✓ chat terminal layout > should bootstrap new intent plans into the ledger before the model starts the turn 0ms
+   ✓ chat terminal layout > should ignore completed intents when priming reminders for the next input, while still collecting completion feedback 0ms
+   ✓ chat terminal layout > should suppress compatibility-mode input separators and keep the busy state out of the input prompt row 1ms
+   ✓ chat terminal layout > should attach busy input capture before rendering a busy footer prompt 1ms
+   ✓ chat terminal layout > keeps tool input transcript summaries string-valued for undefined input  1859ms
+   ✓ chat terminal layout > should construct a dedicated tui runtime-state owner instead of keeping timer ownership inside chat.ts 1ms
+   ✓ chat terminal layout > should keep completed-intent feedback disabled by default to avoid footer/input collisions 1ms
+   ✓ chat terminal layout > should always keep a reserved footer status row even when status text is blank 0ms
+   ✓ chat terminal layout > should render submitted input before the intent orchestration block in interactive chat 1ms
+   ✓ chat terminal layout > should route replay writes through the scroll region and broker continuation through the arbiter 0ms
+   ✓ chat terminal layout > should start the interactive streaming phase for every non-empty text chunk before markdown writes 2ms
+   ✓ chat terminal layout > should keep print and json text chunks outside the interactive streaming helper 1ms
+   ✓ chat terminal layout > should keep terminal streaming boundary helpers behind local post-flush wrappers 0ms
+   ✓ chat terminal layout > should keep orchestration and progress transcript writes local and after streaming interruption flush 1ms
+   ✓ chat terminal layout > should route strict, broker, and Goal continuation through the shared runtime turn runner 1ms
+   ✓ chat terminal layout > should keep runtime turn runner and handler adapter out of permission and tool-explorer state 1ms
+   ✓ chat terminal layout > should keep intent turn state pure and outside ledger or terminal rendering ownership 1ms
+   ✓ chat terminal layout > should update intent turn state at runtime event sites while chat.ts owns rendering order 0ms
+   ✓ chat terminal layout > should delegate strict skill adherence loop to the extracted flow without owning terminal rendering 0ms
+   ✓ chat terminal layout > should keep flushStreamingMarkdown synchronous while terminal boundary extraction is local 0ms
+   ✓ chat terminal layout > should invalidate the pending streaming segment when markdown flush throws 1ms
+   ✓ chat terminal layout > describes --auto as low-risk auto approval instead of unconditional execution 0ms
+   ✓ keeps feedback disabled and its dormant EOF path leaves teardown to the final owner 1ms
+ ✓ tests/commands/chat-finalization-process.test.ts (52 tests) 91717ms
+   ✓ signal holds the original session-save writer before the only final ownership release  2869ms
+   ✓ signal holds the original startup-save writer before the only final ownership release  1565ms
+   ✓ signal holds the original startup-failure writer before the only final ownership release  1290ms
+   ✓ signal holds the original write-failure writer before the only final ownership release  1580ms
+   ✓ real TTY sigterm settles the actual Goal confirmation before finalizing ownership  3590ms
+   ✓ real TTY double-interrupt settles the actual Goal confirmation before finalizing ownership  2929ms
+   ✓ real TTY Goal commit keeps the original mutation and session ownership alive through SIGTERM  2794ms
+   ✓ actual early bootstrap resume-goal-failure drains the registered ownership transition without inventing success  2260ms
+   ✓ actual early bootstrap resume-write-failure drains the registered ownership transition without inventing success  1749ms
+   ✓ real native Goal rejection consumed by the terminal remains an exit error without ownership release  2464ms
+   ✓ first login login-provider settles bootstrap through the actual CLI finalizer  783ms
+   ✓ first login login-secret settles bootstrap through the actual CLI finalizer  879ms
+   ✓ first login login-probe settles bootstrap through the actual CLI finalizer  924ms
+   ✓ first login login-save settles bootstrap through the actual CLI finalizer  830ms
+   ✓ first login login-save-failure settles bootstrap through the actual CLI finalizer  956ms
+   ✓ standalone login baseline preserves original provider terminal outcome and raw cleanup  442ms
+   ✓ standalone login baseline preserves original secret terminal outcome and raw cleanup  549ms
+   ✓ standalone login baseline preserves original default terminal outcome and raw cleanup  449ms
+   ✓ standalone login baseline preserves original normal-secret terminal outcome and raw cleanup  481ms
+   ✓ host login provider settles the original prompt and restores its owned terminal resources  492ms
+   ✓ host login secret settles the original prompt and restores its owned terminal resources  536ms
+   ✓ host login default settles the original prompt and restores its owned terminal resources  429ms
+   ✓ host login interrupt-provider settles the original prompt and restores its owned terminal resources  409ms
+   ✓ host login interrupt-secret settles the original prompt and restores its owned terminal resources  400ms
+   ✓ host login preabort settles the original prompt and restores its owned terminal resources  352ms
+   ✓ host login eof-provider settles the original prompt and restores its owned terminal resources  396ms
+   ✓ real TTY restores both actual transcript wrappers before the original logger closes  1972ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1450ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1511ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1427ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1625ms
+   ✓ actual configured hook-sync remains owned until the original hook process drains  1427ms
+   ✓ actual configured hook-async remains owned until the original hook process drains  1418ms
+   ✓ actual CLI observer intent_created drains its whole original read and UI tail before teardown  2354ms
+   ✓ actual CLI observer stage_activated drains its whole original read and UI tail before teardown  2424ms
+   ✓ actual CLI observer step_activated drains its whole original read and UI tail before teardown  2459ms
+   ✓ actual CLI observer breadcrumb_emitted drains its whole original read and UI tail before teardown  2510ms
+   ✓ actual CLI observer receipt_emitted drains its whole original read and UI tail before teardown  2218ms
+   ✓ actual CLI observer salvage_emitted drains its whole original read and UI tail before teardown  2521ms
+   ✓ actual trace commit error consumed by warning still forbids ownership release  1249ms
+   ✓ actual existing native contract keeps configured SessionEnd behind the original dynamic gate  2209ms
+   ✓ actual delayed update-held request and cache tail drain without writing a hint after ingress closes  2067ms
+   ✓ actual delayed update-cache-error request and cache tail drain without writing a hint after ingress closes  2071ms
+   ✓ actual malformed optional update cache remains best effort during finalization  2332ms
+   ✓ actual open update UI still displays its hint and remains best effort if its original UI tail fails  2334ms
+   ✓ actual headers-only registry body remains owned until its original five-second abort settles  7389ms
+   ✓ actual CLI private closing reason survives the original Agent preaborted entry  1514ms
+   ✓ actual CLI shows an independent producer AbortError as failure without a cancelled command signal  2466ms
+   ✓ actual accepted command resumes through the closed model gate as cancellation after SIGTERM  2260ms
+   ✓ real CLI exit retains original ownership through model-physical-next physical population  2521ms
+   ✓ real CLI exit retains original ownership through model-physical-return physical population  2629ms
+   ✓ real CLI exit retains original ownership through model-physical-failure physical population  2962ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/commands/chat.test.ts > chat terminal layout > returns the stable K3 durable-resume error without writing a crash report
+AssertionError: expected -1 to be greater than 229744
+ ❯ tests/commands/chat.test.ts:31:25
+     29|     expect(expectedGuard).toBeGreaterThan(actionCatch);
+     30|     expect(stableOutput).toBeGreaterThan(expectedGuard);
+     31|     expect(crashReport).toBeGreaterThan(stableOutput);
+       |                         ^
+     32|   });
+     33|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > archives the entire actual first-group capture with known-session fees and original unknowns; it creates no stage-valid fact
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:96:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > denies copied capture and closure and preserves all pending fees after an actual fsync failure
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:99:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > waits for the real original CHECK acknowledgement before controller close settles and publishes no entry
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:102:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > rejects actual same-inode same-size material drift while the final original CHECK is pending
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:106:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > registers actual pending work before a synchronous native CHECK entry reenters the original prepare owner close
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:109:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > releases only the uncharged admission after an actual physical page-cap refusal so the same current closure can retry
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:112:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > keeps the actual old controller boot available when the original Source brands a valid pending profile, while private prepare stays unavailable
+Error: metadata_source_profile_unknown
+ ❯ inventorySnapshot src/runtime/verification/installed-metadata-source.ts:45:468
+
+ ❯ sqliteTransaction.<anonymous> src/runtime/verification/installed-metadata-source.ts:33:36
+ ❯ sqliteTransaction node_modules/better-sqlite3/lib/methods/transaction.js:65:24
+ ❯ inventory src/runtime/verification/installed-metadata-source.ts:33:58
+ ❯ readInstalledMetadataSource src/runtime/verification/installed-metadata-source.ts:81:252
+ ❯ Object.initializeController src/runtime/verification/installed-metadata-capacity.ts:12:85
+ ❯ Object.initializeController tests/runtime/verification/installed-metadata-target-prepare.test.ts:56:288
+ ❯ Object.initialize src/runtime/verification/installed-metadata-target-prepare.ts:100:107
+ ❯ Module.startInstalledVerificationController src/runtime/verification/installed-controller.ts:197:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-target-prepare.test.ts > retries an actual before-effect close but never closes another file after real close and descriptor-number reuse
+Error: installed_metadata_closure_profile
+ ❯ collectInstalledMetadataClosure src/runtime/verification/installed-metadata-closure.ts:415:251
+
+ ❯ capturedFixture tests/runtime/verification/installed-metadata-target-prepare.test.ts:91:560
+ ❯ tests/runtime/verification/installed-metadata-target-prepare.test.ts:129:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  9 failed | 98 passed (107)
+   Start at  03:49:23
+   Duration  92.00s (transform 2.27s, setup 86ms, collect 4.48s, tests 118.08s, environment 0ms, prepare 80ms)

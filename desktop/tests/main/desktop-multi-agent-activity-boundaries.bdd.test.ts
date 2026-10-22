@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { constants } from 'node:sqlite';
-import { activityFixture, barrier, nativeAuthorizer, parkedActivityFixture, serviceSite, siblingActivityFixture, spawnChunk, sqliteFault, tick, writeChunk, type Cleanup } from '../fixtures/multi-agent-activity-failure.js';
+import { cleanupActivityCase, activityFixture, barrier, nativeAuthorizer, parkedActivityFixture, serviceSite, siblingActivityFixture, spawnChunk, sqliteFault, tick, writeChunk, type Cleanup } from '../fixtures/multi-agent-activity-failure.js';
 import { DesktopMultiAgentWorktrees } from '../../electron/desktop-multi-agent-worktrees.js';
 import { DesktopMultiAgentTurnMailbox } from '../../electron/desktop-multi-agent-mailbox.js';
 import type { DesktopMultiAgentServiceOptions } from '../../electron/desktop-multi-agent-service.js';
 
 describe.runIf(nativeAuthorizer)('R6 AF actual timers, dispatch boundaries and actor retirement', () => {
   const cleanup: Cleanup = [];
-  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(() => cleanupActivityCase(cleanup));
 
   it.each(['publish', 'checkpoint'] as const)('AF3 existing real %s timer read guard freezes and blocks the pending model next write', async kind => {
     const f = await parkedActivityFixture(cleanup);

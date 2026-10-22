@@ -1,0 +1,18 @@
+{
+  "label": "remaining-baseline-A-3",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/loop/published-candidate-controller.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:02:16.492669+00:00",
+  "runnerPid": 70121,
+  "pid": 70135,
+  "pgid": 70135,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:02:34.192544+00:00",
+  "reaped": true
+}

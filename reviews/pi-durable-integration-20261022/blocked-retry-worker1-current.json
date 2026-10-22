@@ -1,0 +1,9 @@
+{
+  "pid": 69474,
+  "pgid": 69441,
+  "scope": "read-only own worker diagnostic",
+  "returncode": 0,
+  "stdout": "{\"id\":2,\"result\":{\"result\":{\"type\":\"string\",\"value\":\"{\\\"file\\\":\\\"<worktree>/tests/runtime/intent-delegation/verification-host-controller.test.ts\\\",\\\"test\\\":\\\"Intent signed controller actual material and independent recipe: receiver-lost-prepare\\\",\\\"type\\\":\\\"test\\\",\\\"testFile\\\":\\\"<worktree>/tests/runtime/intent-delegation/verification-host-controller.test.ts\\\",\\\"now\\\":100000,\\\"result\\\":{\\\"state\\\":\\\"run\\\",\\\"startTime\\\":1792613027799,\\\"retryCount\\\":0,\\\"repeatCount\\\":0},\\\"timeout\\\":60000}\"}}}\n",
+  "stderr": "",
+  "remainingInspectorListeners": ""
+}

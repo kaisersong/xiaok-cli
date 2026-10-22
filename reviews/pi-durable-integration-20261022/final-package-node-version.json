@@ -1,0 +1,15 @@
+{
+  "label": "final-package-node-version",
+  "cwd": "<worktree>",
+  "argv": [
+    "node",
+    "--version"
+  ],
+  "startedAt": "2026-10-21T20:04:02.823778+00:00",
+  "runnerPid": 78747,
+  "pid": 78755,
+  "pgid": 78755,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T20:04:02.862651+00:00",
+  "reaped": true
+}

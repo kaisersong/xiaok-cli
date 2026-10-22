@@ -1,0 +1,7 @@
+# A B12 实码票
+
+APPROVE（预算与被动日志实码；原红/完整8仍待实际运行）。当前test SHA256 83582426fda875e785ddf75b03ebdb2a7a1b528e1c861c5008fa8052912ef4e6
+
+完整重读当前diff和test，先前批准ctx/双signal/全close/原finally与join不变；新增performance mark仅同步try/catch输出小mode/stage/elapsed标量，不yield/替返回值/改变原await。22处阶段覆盖fixture/rootcurrent/stagepublication/business/view/dedupe/各output操作/最后cleanup。原3simple30000、4consumer120000、output300000与批准案一致；原expect/setTime及其先后顺序未删改。默认hook10、产品SDK/IPC/expiry均无diff。
+
+旧pending!=already_completed、controller_ipc_aborted_unknown和timeout仍未关闭；必须同最终源码Node24+最低22.22完整8原断言实证，不得以预算或日志变化先称green。

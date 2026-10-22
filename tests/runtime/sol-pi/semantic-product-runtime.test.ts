@@ -15,6 +15,7 @@ import { createProductObservationSubagentTool } from '../../../src/runtime/sol-p
 import { createReadTool } from '../../../src/ai/tools/read.js';
 import { mcpTestContext } from '../../support/mcp-cancellation-context.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
+import { holdCompoundDeletionCensus } from '../../../src/ai/runtime/session-store/compound-deletion-census.js';
 import { FileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
 import { parseObservationPolicyFile, createProductObservationOwner } from '../../../src/runtime/sol-pi/product-bootstrap.js';
@@ -25,7 +26,7 @@ vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readI
 import {registerProductIntentNativeFixture} from '../../support/product-intent-native-fixture.js';
 import {createIntentDelegationTools} from '../../../src/ai/tools/intent-delegation.js';
 import {createEmptySessionIntentLedger,SessionIntentDelegationStore} from '../../../src/runtime/intent-delegation/store.js';
-const network=vi.hoisted(()=>({priceChanged:false,bodies:[] as string[],beforeSend:()=>{},summary:'Tools finished; preserve original goal and execution evidence.'}));
+const network=vi.hoisted(()=>({priceChanged:false,bodies:[] as string[],beforeSend:()=>{},finishReason:'stop' as string|null,lateError:false,toolResponse:false,summary:'Tools finished; preserve original goal and execution evidence.'}));
 // Only network I/O is replaced: actual HTTPS capability, SDK, builder, official
 // tokenizer, user policy, runtime boundary, store CAS and live install all run.
 vi.mock('node:https',async()=>{
@@ -42,16 +43,20 @@ vi.mock('node:https',async()=>{
    network.beforeSend();network.bodies.push(body);
    queueMicrotask(()=>{
     const response=new PassThrough() as any;response.statusCode=200;response.headers={'content-type':'text/event-stream'};response.rawHeaders=['content-type','text/event-stream'];
-    onResponse(response);response.end('data: '+JSON.stringify({choices:[{delta:{content:network.summary},finish_reason:'stop'}],usage:{prompt_tokens:100,completion_tokens:10}})+'\n\ndata: [DONE]\n\n');
+    onResponse(response);
+    const delta=network.toolResponse?{content:network.summary,tool_calls:[{index:0,id:'unexpected-summary-tool',type:'function',function:{name:'write',arguments:'{}'}}]}:{content:network.summary};
+    const data='data: '+JSON.stringify({choices:[{delta,finish_reason:network.finishReason}],usage:{prompt_tokens:100,completion_tokens:10}})+'\n\n';
+    if(network.lateError){response.write(data);setImmediate(()=>response.destroy(Error('controlled late summary transport failure')));}
+    else response.end(data+'data: [DONE]\n\n');
    });
   };return request;
  }};
 });
 const cleanups:Array<()=>void|Promise<void>>=[];
-afterEach(async()=>{for(const close of cleanups.splice(0).reverse())await close();vi.unstubAllGlobals();network.bodies=[];network.priceChanged=false;intentRoute.protected=false;intentController.call.mockReset();network.beforeSend=()=>{};network.summary='Tools finished; preserve original goal and execution evidence.';});
+afterEach(async()=>{for(const close of cleanups.splice(0).reverse())await close();vi.unstubAllGlobals();network.bodies=[];network.priceChanged=false;intentRoute.protected=false;intentController.call.mockReset();network.beforeSend=()=>{};network.finishReason='stop';network.lateError=false;network.toolResponse=false;network.summary='Tools finished; preserve original goal and execution evidence.';});
 const environmentRoot=join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1');
 it.skipIf(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(environmentRoot,'manifest.json')))
-.each(['success','compound','compound-intent','archived','tool-boundary','named-child','pricing-unavailable','automatic','empty','stale','revoke','settlement-failure','commit-failure'] as const)('actual Runtime semantic lifecycle: %s',async scenario=>{
+.each(['success','compound','compound-intent','archived','tool-boundary','named-child','pricing-unavailable','automatic','empty','truncated','missing-terminal','late-error','tool-response','stale','revoke','settlement-failure','commit-failure'] as const)('actual Runtime semantic lifecycle: %s',async scenario=>{
  const root=realpathSync(mkdtempSync(join(tmpdir(),'semantic-runtime-')));cleanups.push(()=>rmSync(root,{recursive:true,force:true}));
  const file=join(root,'input.txt');writeFileSync(file,scenario==='archived'?'head '.repeat(1500)+'ARCHIVED_MIDDLE_MUST_USE_REFERENCE'+'tail '.repeat(1500):'allowed source');const expiresAt=Date.now()+240000;
  const policyFile=join(root,'policy.json');writeFileSync(policyFile,JSON.stringify({version:1,environmentId:'deepseek-recipe-0.1.1',model:'deepseek-flash',destination:{provider:'deepseek',url:'https://api.deepseek.com/chat/completions'},localPersistence:true,allowUnclassifiedText:true,allowModelDisclosure:true,allowIncomplete:false,expiresAt,readFileScopes:[{filePath:file,startLine:1}],bashSources:[],...(['compound','compound-intent'].includes(scenario)?{compoundExecution:{version:1,mode:'mechanism-experiment'}}:{}),...(scenario==='named-child'?{ordinaryChildren:{enabled:true,maxDepth:1,maxChildren:1,expiresAt,nativeTools:['read']}}:{}),semanticCompaction:{version:1,mode:scenario==='automatic'?'automatic':'mechanism-experiment',currency:'USD',maxCalls:1,maxCostUnits:50000000,maxOutputTokens:128,expiresAt,pricing:{source:'https://api-docs.deepseek.com/quick_start/pricing',model:'deepseek-flash',inputMissUnitsPerMillion:300000000,inputHitUnitsPerMillion:6000000,outputUnitsPerMillion:1200000000,validUntil:expiresAt}}}));
@@ -86,6 +91,10 @@ it.skipIf(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(
  network.beforeSend=()=>{const disk=JSON.parse(readFileSync(sessionFile,'utf8'));expect(disk.semanticCompaction.reservations).toHaveLength(1);expect(disk.semanticCompaction.reservations[0].status).toBe('dispatched');expect(disk.compactions).toHaveLength(0);};
  if(scenario==='pricing-unavailable')network.priceChanged=true;
  if(scenario==='empty')network.summary='';
+ if(scenario==='truncated')network.finishReason='length';
+ if(scenario==='missing-terminal')network.finishReason=null;
+ if(scenario==='late-error')network.lateError=true;
+ if(scenario==='tool-response'){network.toolResponse=true;network.finishReason='tool_calls';}
  if(scenario==='revoke'){const check=network.beforeSend;network.beforeSend=()=>{check();product.revoke();};}
  if(scenario==='stale'){const check=network.beforeSend;network.beforeSend=()=>{check();session.appendUserText('A correction arrived while the summary was running.');};}
  if(scenario==='settlement-failure'||scenario==='commit-failure'){
@@ -126,7 +135,7 @@ it.skipIf(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(
   expect(network.bodies).toHaveLength(1);return;
  }
  await runtime.run('Continue.',()=>{});
- const status=['success','compound','archived','tool-boundary','named-child'].includes(scenario)?'compacted':scenario==='empty'?'failed':'skipped';
+ const status=['success','compound','archived','tool-boundary','named-child'].includes(scenario)?'compacted':['empty','truncated','missing-terminal','late-error','tool-response'].includes(scenario)?'failed':'skipped';
  expect(outcomes).toMatchObject([{status,attempted:!['automatic','pricing-unavailable'].includes(scenario),economicAdmission:'not-passed'}]);
  if(scenario==='compound-intent'){expect(outcomes).toMatchObject([{status:'skipped',attempted:true,reason:'no_gain'}]);expect(intentController.call.mock.calls.filter(([method])=>method==='publication.observeIntentDependencies')).toHaveLength(2);}
  expect(network.bodies).toHaveLength(['automatic','pricing-unavailable'].includes(scenario)?0:1);if(network.bodies[0])expect(JSON.parse(network.bodies[0]).max_tokens).toBe(128);
@@ -137,11 +146,23 @@ it.skipIf(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(
  expect(requests[0]).toContain('Original exact goal');expect(requests[0]).toContain('Exact correction');expect(requests[0]).toContain('exact result 3');
  if(scenario==='stale')expect(requests[0]).toContain('A correction arrived');
  const durable=(await store.load('semantic-runtime'))!;expect(durable.compactions).toHaveLength(['success','compound','archived','tool-boundary','named-child'].includes(scenario)?1:0);
- if(!['automatic','pricing-unavailable'].includes(scenario))expect(durable.semanticCompaction!.reservations[0].status).toBe('settled');
+ if(!['automatic','pricing-unavailable'].includes(scenario))expect(durable.semanticCompaction!.reservations[0].status).toBe(['truncated','missing-terminal','late-error','tool-response'].includes(scenario)?'unknown':'settled');
  else expect(durable.semanticCompaction).toBeUndefined();
  expect(session.exportSnapshot().compactions).toHaveLength(['success','compound','archived','tool-boundary','named-child'].includes(scenario)?1:0);
  if(scenario==='archived'){
   expect(durable.protectedObservationClosure).toEqual(originalClosure);expect(requests[0]).not.toContain('ARCHIVED_MIDDLE_MUST_USE_REFERENCE');expect(requests[0]).toContain('observation_read id=');
+ }
+ if(['empty','truncated','missing-terminal','late-error','tool-response'].includes(scenario)){
+  expect(outcomes[0]).toMatchObject({status:'failed',reason:'summary_failed'});
+  const charged=structuredClone(durable.semanticCompaction!);
+  expect(charged.reservations).toHaveLength(1);expect(charged.reservations[0].maximumCostUnits).toBeGreaterThan(0);
+  expect(charged.commits).toHaveLength(0);expect(charged.generation).toBe(0);
+  if(scenario==='empty'){const release=holdCompoundDeletionCensus(storeRoot,durable,0);release();}
+  else expect(()=>holdCompoundDeletionCensus(storeRoot,durable,0)).toThrow('session_delete_semantic_unsettled');
+  notified=false;await runtime.run('Continue again.',()=>{});
+  expect(outcomes.at(-1)).toMatchObject({status:'skipped',attempted:false,reason:'summary_budget_exhausted'});
+  expect(network.bodies).toHaveLength(1);expect(requests).toHaveLength(2);
+  expect((await store.load('semantic-runtime'))!.semanticCompaction).toEqual(charged);
  }
  if(scenario==='success'){
   notified=false;await runtime.run('Continue again.',()=>{});

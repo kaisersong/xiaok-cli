@@ -1,0 +1,36 @@
+{
+  "scope": "Actual cleanup script with controlled invalid input only; not business or real reaped-worker qualification. No script deletion or signals; own test root removed by its creator after assertions.",
+  "scriptSha256": "c2fce1f0a879d4ac477a87e32026e94fb5e7f0b08b4d4010477f4cbb8cea24fa",
+  "results": [
+    {
+      "name": "empty-live",
+      "exitCode": 1,
+      "rootExistsAfter": true,
+      "globalErrors": [
+        "runner_or_group_not_reaped"
+      ],
+      "recordErrors": [],
+      "stdoutSha256": "ee3adb1050cf9e8c8771f360a9c916bc0ffbbcf70ff252ca997e57b44c33038a"
+    },
+    {
+      "name": "invalid-time",
+      "exitCode": 1,
+      "rootExistsAfter": true,
+      "globalErrors": [
+        "invalid_runner_timestamps"
+      ],
+      "recordErrors": [],
+      "stdoutSha256": "1a435f13dbd11b7b684e0fedf291d09cda6ea26d0fdca890de7e579bff993e5f"
+    },
+    {
+      "name": "missing-worker",
+      "exitCode": 1,
+      "rootExistsAfter": true,
+      "globalErrors": [],
+      "recordErrors": [
+        "Error: invalid_record_schema"
+      ],
+      "stdoutSha256": "aecfd7be815154d9604f424a81b5baa8de6bf5fc776c256aad78772e7eeb5e95"
+    }
+  ]
+}

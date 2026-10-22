@@ -1,0 +1,110 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/runtime/conversation-activity/owner-launcher-exit.test.ts (17 tests | 9 failed) 84054ms
+   ✓ rejects after the exit grace rather than the 30 second timeout 9ms
+   × attaches to a competing owner during exit grace 12006ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ preserves the original spawn error 3ms
+   × retires outdated generation undefined (2 = built by #23, before the digest change) before validating digest 12003ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × retires outdated generation 1 (2 = built by #23, before the digest change) before validating digest 12004ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × retires outdated generation 2 (2 = built by #23, before the digest change) before validating digest 12003ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × retires outdated generation 2 (2 = built by #23, before the digest change) before validating digest 12005ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ reuses owner when retirement fails or generation is current/future: undefined 2ms
+   × reuses owner when retirement fails or generation is current/future: 3 2ms
+     → activity_owner_config_mismatch
+   × reuses owner when retirement fails or generation is current/future: 4 1ms
+     → activity_owner_config_mismatch
+   ✓ rejects foreign profile without retirement 2ms
+   × concurrent retirement spawns one winner and attaches loser during exit grace 12004ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ keeps config digest validation for generation 3 2ms
+   ✓ keeps config digest validation for generation 4 1ms
+   ✓ reports legacy outcome kept_pending 2ms
+   ✓ reports legacy outcome kept_unknown 1ms
+   × reports legacy outcome retired 12003ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > attaches to a competing owner during exit grace
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/conversation-activity/owner-launcher-exit.test.ts:41:1
+     39|   await rejection;
+     40| });
+     41| it('attaches to a competing owner during exit grace', async () => {
+       | ^
+     42|   const { promise } = launch('exit', 4);
+     43|   await vi.advanceTimersByTimeAsync(200);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > retires outdated generation undefined (2 = built by #23, before the digest change) before validating digest
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > retires outdated generation 1 (2 = built by #23, before the digest change) before validating digest
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > retires outdated generation 2 (2 = built by #23, before the digest change) before validating digest
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > retires outdated generation 2 (2 = built by #23, before the digest change) before validating digest
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/conversation-activity/owner-launcher-exit.test.ts:54:31
+     52|   await rejection;
+     53| });
+     54| it.each([undefined, 1, 2, '2'])('retires outdated generation %s (2 = b…
+       |                               ^
+     55|   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: ro…
+     56|   vi.spyOn(ConversationActivityOwnerClient.prototype, 'request').mockR…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > reuses owner when retirement fails or generation is current/future: 3
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > reuses owner when retirement fails or generation is current/future: 4
+Error: activity_owner_config_mismatch
+ ❯ attach src/runtime/conversation-activity/owner-launcher.ts:47:57
+     45|         return client;
+     46|       }
+     47|       if (status.configDigest !== expectedDigest) throw new Error('act…
+       |                                                         ^
+     48|       if (status.ready === false) throw new Error('activity_owner_init…
+     49|       return client;
+ ❯ Module.ensureConversationActivityOwner src/runtime/conversation-activity/owner-launcher.ts:52:16
+ ❯ tests/runtime/conversation-activity/owner-launcher-exit.test.ts:67:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > concurrent retirement spawns one winner and attaches loser during exit grace
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/conversation-activity/owner-launcher-exit.test.ts:76:1
+     74|   await expect(ensureConversationActivityOwner(config, { retire })).re…
+     75| });
+     76| it('concurrent retirement spawns one winner and attaches loser during …
+       | ^
+     77|   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: ro…
+     78|   let calls = 0, winner = false, effectiveOwners = 0;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  tests/runtime/conversation-activity/owner-launcher-exit.test.ts > reports legacy outcome retired
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/conversation-activity/owner-launcher-exit.test.ts:103:61
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 8 passed (17)
+   Start at  04:02:41
+   Duration  84.34s (transform 79ms, setup 37ms, collect 63ms, tests 84.05s, environment 0ms, prepare 31ms)

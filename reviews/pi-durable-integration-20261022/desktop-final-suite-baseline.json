@@ -1,0 +1,19 @@
+{
+  "label": "desktop-final-suite-baseline",
+  "cwd": "<master-baseline>/desktop",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/workflow-read-port-close-reentry.test.ts",
+    "tests/main/workflow-read-port-provenance.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:57:22.586000+00:00",
+  "runnerPid": 47447,
+  "pid": 47478,
+  "pgid": 47478,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:57:23.431804+00:00",
+  "reaped": true
+}

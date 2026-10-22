@@ -1,0 +1,16 @@
+{
+  "label": "eval-skill-adherence",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "eval:skill-adherence"
+  ],
+  "startedAt": "2026-10-21T19:50:53.186103+00:00",
+  "runnerPid": 15378,
+  "pid": 15414,
+  "pgid": 15414,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:50:53.529660+00:00",
+  "reaped": true
+}

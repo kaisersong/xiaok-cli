@@ -3,32 +3,81 @@ on:
   push:
     branches: [master]
     paths:
-      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/adapters/*.ts'
+      - 'desktop/electron/context-manager.ts'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/electron/desktop-task-stream.ts'
+      - 'desktop/electron/project-agent-model.ts'
+      - 'desktop/electron/desktop-services.ts'
+      - 'desktop/electron/kb-store-sqlite.ts'
+      - 'desktop/electron/loop-store.ts'
+      - 'desktop/tests/main/desktop-task-usage-drain.test.ts'
+      - 'desktop/tests/main/desktop-task-stream-recovery.test.ts'
+      - 'desktop/tests/main/project-agent-model*.test.ts'
+      - 'desktop/tests/main/kb-integration.test.ts'
+      - 'desktop/tests/main/loop-assistant-consumption.test.ts'
+      - 'desktop/tests/main/*compaction*.test.ts'
+      - 'desktop/tests/main/context-manager.test.ts'
       - 'src/ai/runtime/**'
-      - 'tests/ai/adapters/openai.test.ts'
+      - 'src/ai/tools/bounded-glob.ts'
+      - 'src/ai/tools/glob-worker.mjs'
+      - 'scripts/copy-glob-worker.mjs'
+      - 'tests/package/glob-worker.test.mjs'
+      - 'tests/package/desktop-glob-worker.test.mjs'
+      - 'tests/package/support/glob-worker-contract.mjs'
+      - 'tests/ai/adapters/*.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
   pull_request:
     paths:
-      - 'src/ai/adapters/openai.ts'
+      - 'src/ai/adapters/*.ts'
+      - 'desktop/electron/context-manager.ts'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/electron/desktop-task-stream.ts'
+      - 'desktop/electron/project-agent-model.ts'
+      - 'desktop/electron/desktop-services.ts'
+      - 'desktop/electron/kb-store-sqlite.ts'
+      - 'desktop/electron/loop-store.ts'
+      - 'desktop/tests/main/desktop-task-usage-drain.test.ts'
+      - 'desktop/tests/main/desktop-task-stream-recovery.test.ts'
+      - 'desktop/tests/main/project-agent-model*.test.ts'
+      - 'desktop/tests/main/kb-integration.test.ts'
+      - 'desktop/tests/main/loop-assistant-consumption.test.ts'
+      - 'desktop/tests/main/*compaction*.test.ts'
+      - 'desktop/tests/main/context-manager.test.ts'
       - 'src/ai/runtime/**'
-      - 'tests/ai/adapters/openai.test.ts'
+      - 'src/ai/tools/bounded-glob.ts'
+      - 'src/ai/tools/glob-worker.mjs'
+      - 'scripts/copy-glob-worker.mjs'
+      - 'tests/package/glob-worker.test.mjs'
+      - 'tests/package/desktop-glob-worker.test.mjs'
+      - 'tests/package/support/glob-worker-contract.mjs'
+      - 'tests/ai/adapters/*.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      loop_rpc_diagnostic:
+        description: 'Run one Loop RPC diagnostic instead of the recovery matrix'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 jobs:
   recovery:
+    if: github.event_name != 'workflow_dispatch' || !inputs.loop_rpc_diagnostic
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-14]
-        node: ['22.14.0', '24']
+        node: ['22.14.0', '22.22.0', '24']
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,7 +90,79 @@ jobs:
         run: >
           npm run test:sandbox:run --
           .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ai/adapters/claude.test.js
+          .test-dist/tests/ai/adapters/openai-responses.test.js
+          .test-dist/tests/ai/runtime/compaction-completion.test.js
+          .test-dist/tests/ai/runtime/compact-runner.test.js
+          .test-dist/tests/ai/runtime/portable-compaction-executor.test.js
           .test-dist/tests/ai/runtime/model-stream-recovery.test.js
           .test-dist/tests/ai/runtime/abort-error-discrimination.test.js
           .test-dist/tests/ai/runtime/agent-runtime.test.js
           .test-dist/tests/ai/runtime/provider-request-error.test.js
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Test Desktop compaction history and completion boundary
+        working-directory: desktop
+        run: npm test -- tests/main/context-manager.test.ts tests/main/compaction-completion.test.ts
+      - name: Check out pinned Desktop runtime and generator source
+        if: matrix.node != '22.14.0'
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          ref: 16c3ed14c5493a82d000d69d34e4b1c933187433
+          path: .ci-sidecars/kswarm
+      - name: Test Desktop SQLite transactions and physical usage ownership
+        if: matrix.node != '22.14.0'
+        working-directory: desktop
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/.ci-sidecars/kswarm
+        run: >
+          npm test -- --maxWorkers=2
+          tests/main/kb-integration.test.ts
+          tests/main/loop-assistant-consumption.test.ts
+          tests/main/desktop-task-usage-drain.test.ts
+          tests/main/desktop-task-stream-recovery.test.ts
+          tests/main/project-agent-model.test.ts
+          tests/main/project-agent-model-runtime.test.ts
+          tests/main/project-agent-model-main-recovery-refresh.test.ts
+      - name: Build CLI and Desktop main worker assets
+        if: matrix.node != '22.14.0'
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/.ci-sidecars/kswarm
+        run: |
+          npm run build
+          npm run build:main --prefix desktop
+      - name: Test actual emitted workers and missing assets
+        if: matrix.node != '22.14.0'
+        run: node --test tests/package/glob-worker.test.mjs tests/package/desktop-glob-worker.test.mjs
+
+  loop-rpc-diagnostic:
+    name: Loop RPC diagnostic (manual, not qualification)
+    if: github.event_name == 'workflow_dispatch' && inputs.loop_rpc_diagnostic
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Check diagnostic owner cleanup deadlines
+        run: python3 tests/support/test_loop_rpc_diagnostic_owner.py
+      - name: Observe one original output-consumer scenario
+        run: python3 tests/support/loop-rpc-diagnostic.py
+      - name: Preserve original result and diagnostic quality
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-rpc-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .xiaok/evals/loop-rpc-diagnostic/
+          if-no-files-found: error
+          retention-days: 7

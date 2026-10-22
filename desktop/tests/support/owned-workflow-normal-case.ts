@@ -1,4 +1,5 @@
 import {resolve} from 'node:path';
+import {realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createOwnedWorkflowNetworkFixture,type OwnedWorkflowTaskInput} from './owned-workflow-network-fixture.mjs';
 import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
@@ -13,7 +14,9 @@ export async function openOwnedWorkflowNormalCase(options:OwnedWorkflowNormalCas
  const fixture=await createOwnedWorkflowNetworkFixture(null,options);
  const previous={fetch:globalThis.fetch,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS};
  const repositoryRoot=fileURLToPath(new URL('../../../',import.meta.url));
- process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';globalThis.fetch=fixture.forwardedFetch;
+ // Bind the private server's physical entry, matching its real health identity
+ // even when the test worktree reaches the sibling through a symlink.
+ process.env.KSWARM_SERVER_PATH=realpathSync(resolve(repositoryRoot,'..','kswarm','src/server/index.js'));process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';globalThis.fetch=fixture.forwardedFetch;
  const restore=()=>{globalThis.fetch=previous.fetch;for(const [key,value] of [['KSWARM_SERVER_PATH',previous.entry],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins]] as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}};
  let kswarmService:ReturnType<typeof createKSwarmService>;
  try{kswarmService=createKSwarmService({spawnProcess:(()=>{throw Error('fixture_foreign_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_foreign_kill_denied');}});}

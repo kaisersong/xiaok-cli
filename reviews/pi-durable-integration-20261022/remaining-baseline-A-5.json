@@ -1,0 +1,18 @@
+{
+  "label": "remaining-baseline-A-5",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/platform/runtime/mcp-owner-fencing.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:05:58.030687+00:00",
+  "runnerPid": 85366,
+  "pid": 85380,
+  "pgid": 85380,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:06:01.148755+00:00",
+  "reaped": true
+}

@@ -1,0 +1,23 @@
+
+> xiaokcode@1.5.14 test:sandbox:run
+> node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.sandbox.config.mjs --configLoader runner .test-dist/tests/ai/adapters/openai.test.js .test-dist/tests/ai/adapters/claude.test.js .test-dist/tests/ai/adapters/openai-responses.test.js .test-dist/tests/ai/runtime/compaction-completion.test.js .test-dist/tests/ai/runtime/compact-runner.test.js .test-dist/tests/ai/runtime/portable-compaction-executor.test.js .test-dist/tests/ai/runtime/model-stream-recovery.test.js .test-dist/tests/ai/runtime/abort-error-discrimination.test.js .test-dist/tests/ai/runtime/agent-runtime.test.js .test-dist/tests/ai/runtime/provider-request-error.test.js
+
+
+ RUN  v3.2.6 $WORKTREE
+
+ ✓ .test-dist/tests/ai/adapters/openai.test.js (187 tests) 96ms
+ ✓ .test-dist/tests/ai/runtime/agent-runtime.test.js (77 tests) 2158ms
+   ✓ AgentRuntime > resumes a strict Kimi model failure without replaying a completed tool  2013ms
+ ✓ .test-dist/tests/ai/adapters/claude.test.js (14 tests) 9ms
+ ✓ .test-dist/tests/ai/runtime/compaction-completion.test.js (32 tests) 11ms
+ ✓ .test-dist/tests/ai/runtime/portable-compaction-executor.test.js (21 tests) 4ms
+ ✓ .test-dist/tests/ai/adapters/openai-responses.test.js (8 tests) 6ms
+ ✓ .test-dist/tests/ai/runtime/compact-runner.test.js (12 tests) 3ms
+ ✓ .test-dist/tests/ai/runtime/model-stream-recovery.test.js (10 tests) 154ms
+ ✓ .test-dist/tests/ai/runtime/abort-error-discrimination.test.js (11 tests) 2ms
+ ✓ .test-dist/tests/ai/runtime/provider-request-error.test.js (12 tests) 2ms
+
+ Test Files  10 passed (10)
+      Tests  384 passed (384)
+   Start at  17:47:57
+   Duration  3.45s (transform 187ms, setup 19ms, collect 378ms, tests 2.45s, environment 1ms, prepare 196ms)

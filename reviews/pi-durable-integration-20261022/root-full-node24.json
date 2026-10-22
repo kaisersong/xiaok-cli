@@ -1,0 +1,18 @@
+{
+  "label": "root-full-node24",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "test:full",
+    "--",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:39:13.107613+00:00",
+  "runnerPid": 24418,
+  "pid": 24448,
+  "pgid": 24448,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:54:02.710525+00:00",
+  "reaped": true
+}

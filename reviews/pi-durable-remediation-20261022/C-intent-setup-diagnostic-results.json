@@ -1,0 +1,156 @@
+{
+  "sourceSHA256": "142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479",
+  "diagnosticSHA256": "af012285fec7f79c40bf8ea4022cb46a5f4d910e6c0a08610d6e7391769d075a",
+  "runner": {
+    "label": "C-intent-setup-timeout",
+    "cwd": "<worktree>",
+    "argv": [
+      "/usr/local/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "tests/runtime/verification/C-intent-setup-timeout-diagnostic.test.ts",
+      "--maxWorkers=1",
+      "--reporter=verbose"
+    ],
+    "startedAt": "2026-10-22T01:02:41.978663+00:00",
+    "runnerPid": 42383,
+    "pid": 42397,
+    "pgid": 42397,
+    "exitCode": 1,
+    "finishedAt": "2026-10-22T01:03:34.821058+00:00",
+    "reaped": true
+  },
+  "observedTestResult": {
+    "passed": 1,
+    "failed": 1,
+    "hookTimeouts": 0
+  },
+  "firstFailure": "forced8000ms runner timeout plus original controller_ipc_aborted_unknown retained",
+  "secondOriginalCasePassedMs": 37850,
+  "traces": [
+    {
+      "mode": "noncanonical",
+      "stage": "scenario:start",
+      "elapsedMs": 6.434250000000247,
+      "firstJoined": false
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "f:ready",
+      "elapsedMs": 2623.2502919999997,
+      "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/ia-oKzycc"
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "receiver:ready",
+      "elapsedMs": 3097.541459
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "ctx:abort",
+      "elapsedMs": 11649.748042
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "fixture:catch",
+      "elapsedMs": 11650.969042,
+      "aborted": true,
+      "error": "Error: controller_ipc_aborted_unknown"
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "receiver:close:start",
+      "elapsedMs": 11651.034709
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "receiver:close:end",
+      "elapsedMs": 11651.385417000001
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "f:close:start",
+      "elapsedMs": 11651.430959000001
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "f:close:end",
+      "elapsedMs": 11659.86175,
+      "rootExists": false
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "join:start",
+      "elapsedMs": 11663.266083999999
+    },
+    {
+      "mode": "noncanonical",
+      "stage": "joined",
+      "elapsedMs": 11663.505000000001,
+      "failed": true,
+      "aborted": true,
+      "error": "Error: controller_ipc_aborted_unknown"
+    },
+    {
+      "mode": "registration",
+      "stage": "scenario:start",
+      "elapsedMs": 11665.150084,
+      "firstJoined": true
+    },
+    {
+      "mode": "registration",
+      "stage": "f:ready",
+      "elapsedMs": 14252.262458999998,
+      "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/ia-I0CGQL"
+    },
+    {
+      "mode": "registration",
+      "stage": "receiver:ready",
+      "elapsedMs": 14639.328583999999
+    },
+    {
+      "mode": "registration",
+      "stage": "fixture:return",
+      "elapsedMs": 49455.692917
+    },
+    {
+      "mode": "registration",
+      "stage": "receiver:close:start",
+      "elapsedMs": 49468.707417000005
+    },
+    {
+      "mode": "registration",
+      "stage": "receiver:close:end",
+      "elapsedMs": 49469.059292000005
+    },
+    {
+      "mode": "registration",
+      "stage": "f:close:start",
+      "elapsedMs": 49469.092459
+    },
+    {
+      "mode": "registration",
+      "stage": "f:close:end",
+      "elapsedMs": 49510.188542,
+      "rootExists": false
+    },
+    {
+      "mode": "registration",
+      "stage": "join:start",
+      "elapsedMs": 49514.853792
+    },
+    {
+      "mode": "registration",
+      "stage": "joined",
+      "elapsedMs": 49514.93925,
+      "failed": false,
+      "aborted": false,
+      "error": "undefined"
+    }
+  ],
+  "ownedPGIDMembers": [],
+  "temporarySourceDeleted": true,
+  "rootsRemoved": true,
+  "rootTestFilePopulation": 1136,
+  "notFull23Acceptance": true
+}

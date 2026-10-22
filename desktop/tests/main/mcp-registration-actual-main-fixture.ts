@@ -23,10 +23,10 @@ function isSlice(value: unknown): value is Slice {
     && 'appendOrdinary' in value && typeof value.appendOrdinary === 'function'
     && 'disposeLifetimeResources' in value && typeof value.disposeLifetimeResources === 'function';
 }
-const FINAL_MAIN_SHA = '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f';
+const FINAL_MAIN_SHA = 'f25ac6d5034918fef0d3207780429bd7773adc1b7e932b0dc3707e4d8c1d5d40';
 function boundActualMain(): string {
   const actual = readFileSync(new URL('../../electron/main.ts', import.meta.url));
-  const snapshot = readFileSync(new URL('../fixtures/r299-main-candidate.txt', import.meta.url));
+  const snapshot = readFileSync(new URL('../fixtures/remediation-20261022-main-reviewed.txt', import.meta.url));
   if (!actual.equals(snapshot) || createHash('sha256').update(actual).digest('hex') !== FINAL_MAIN_SHA)
     throw Error('r324_actual_Main_source_binding_NOT_READY');
   // The following AST is built from this same actual applied read, never a fallback golden.

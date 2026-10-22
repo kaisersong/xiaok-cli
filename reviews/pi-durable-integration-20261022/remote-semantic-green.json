@@ -1,0 +1,18 @@
+{
+  "label": "semantic-green",
+  "cwd": "<remote-validation>",
+  "argv": [
+    "./node24",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startedAt": "2026-10-21T19:46:54.855687+00:00",
+  "runnerPid": 83126,
+  "pid": 83127,
+  "pgid": 83127,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:48:26.736257+00:00",
+  "reaped": true
+}

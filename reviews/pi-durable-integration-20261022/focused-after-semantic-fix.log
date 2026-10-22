@@ -1,0 +1,40 @@
+
+ RUN  v3.2.6 <worktree>
+
+ ✓ tests/ai/runtime/agent-runtime.test.ts (77 tests) 2199ms
+   ✓ AgentRuntime > resumes a strict Kimi model failure without replaying a completed tool  2022ms
+ ✓ tests/runtime/sol-pi/provider-disclosure.test.ts (32 tests) 1352ms
+   ✓ provider disclosure actual transport binding > real SDK cannot replay a send after async confirmation fails, and cancels its unread response  458ms
+   ✓ provider disclosure actual transport binding > real openai SDK automatic retry re-enters guard and rejects revocation  474ms
+   ✓ provider disclosure actual transport binding > real claude SDK automatic retry re-enters guard and rejects revocation  388ms
+ ✓ tests/runtime/sol-pi/semantic-summary-attempt.test.ts (5 tests) 4298ms
+   ✓ persists a charged dispatched reservation before returning any sending capability  797ms
+   ✓ does not refund unknown attempts or allow stale source history to reserve  837ms
+   ✓ rechecks the host boundary inside the actual reservation commit and keeps admitted costs after boundary changes  910ms
+   ✓ retains the full durable charge after real SIGKILL without reconstructing a sending capability  1505ms
+ ✓ tests/ai/adapters/claude.test.ts (15 tests) 286ms
+ ✓ tests/ai/adapters/openai-responses.test.ts (9 tests) 320ms
+   ✓ OpenAIResponsesAdapter > emits text and usage from a non-streaming responses payload  314ms
+ ✓ tests/ai/runtime/compaction-completion.test.ts (33 tests) 18ms
+ ✓ tests/ai/runtime/portable-compaction-executor.test.ts (25 tests) 10ms
+ ✓ tests/ai/adapters/openai.test.ts (188 tests) 422ms
+ ✓ tests/ai/runtime/compact-runner.test.ts (13 tests) 6ms
+ ✓ tests/runtime/sol-pi/semantic-compaction-ledger.test.ts (11 tests) 5ms
+ ✓ tests/runtime/sol-pi/compaction-policy.test.ts (58 tests) 5ms
+ ✓ tests/runtime/sol-pi/capacity-admission.test.ts (5 tests) 3ms
+ ✓ tests/runtime/sol-pi/deepseek-capacity-profile.test.ts (3 tests | 1 skipped) 2ms
+ ✓ tests/runtime/sol-pi/semantic-compaction-owner.test.ts (2 tests) 2ms
+ ✓ tests/ai/runtime/session-store-compound-delete.test.ts (9 tests) 5196ms
+   ✓ actual FileStore deletion retains unconfirmed compound facts: unknown  354ms
+   ✓ actual FileStore deletion retains unconfirmed compound facts: settled  629ms
+   ✓ keeps the real descendant execution guard through the deletion receipt and rejects an active child first  1128ms
+   ✓ preserves semantic spend facts until their actual terminal state: reserved  467ms
+   ✓ preserves semantic spend facts until their actual terminal state: dispatched  383ms
+   ✓ preserves semantic spend facts until their actual terminal state: unknown  597ms
+   ✓ preserves semantic spend facts until their actual terminal state: settled  829ms
+   ✓ preserves semantic spend facts until their actual terminal state: cancelled_before_dispatch  629ms
+
+ Test Files  15 passed (15)
+      Tests  484 passed | 1 skipped (485)
+   Start at  03:47:45
+   Duration  14.04s (transform 1.12s, setup 198ms, collect 7.39s, tests 14.12s, environment 1ms, prepare 397ms)

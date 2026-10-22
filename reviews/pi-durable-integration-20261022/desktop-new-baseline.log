@@ -1,0 +1,1835 @@
+
+ RUN  v3.2.4 <master-baseline>/desktop
+
+ ❯ tests/main/desktop-post-seal-io.bdd.test.ts (19 tests | 1 failed) 763ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D4/D6 real recoverTask FIFO abort rejects continuation while its raw read Promise stays pending until OS IO settles  326ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 async verifier preserves actual sync guard result for valid.pdf without a new quality policy 11ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 async verifier preserves actual sync guard result for invalid.pdf without a new quality policy 8ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 async verifier preserves actual sync guard result for valid.pptx without a new quality policy 9ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 async verifier preserves actual sync guard result for invalid.pptx without a new quality policy 8ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 async verifier preserves actual sync guard result for missing.pdf without a new quality policy 8ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 async verifier preserves actual sync guard result for answer without a new quality policy 8ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for valid.pdf through all existing local-path siblings 26ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for invalid.pdf through all existing local-path siblings 27ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for tiny.pdf through all existing local-path siblings 28ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for valid.pptx through all existing local-path siblings 24ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for invalid.pptx through all existing local-path siblings 23ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for tiny.pptx through all existing local-path siblings 27ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for late-content.pptx through all existing local-path siblings 27ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 shared async byte rules preserve direct validation result and warnings for missing.pdf through all existing local-path siblings 30ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 original URI priority and unsupported kinds do not gain new file reads; localPaths still has its existing priority 47ms
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 pre-abort cannot become answer fallback or structural fail-open and starts no raw IO 1ms
+   × R4 explicit raw async IO and unchanged guard language > D6 actual CPU Worker exit plus two native FIFO opens keep the tracked physical drain pending after outward failure 116ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-806Mp0/delivery-verifier.mjs
+   ✓ R4 explicit raw async IO and unchanged guard language > D5 native FIFO read at the legacy position zero is ESPIPE fail-open, not evidence for a pending read window 9ms
+Sourcemap for "<worktree>/desktop/node_modules/@electron/asar/lib/asar.js" points to missing source files
+ ❯ tests/main/artifact-export-package.test.ts (40 tests | 1 failed | 1 skipped) 262ms
+   ✓ selects the explicit self-contained schema fixture for darwin-arm64 and copies only three matching files 9ms
+   ✓ selects the explicit self-contained schema fixture for darwin-x64 and copies only three matching files 4ms
+   ✓ selects the explicit self-contained schema fixture for linux-arm64 and copies only three matching files 3ms
+   ✓ selects the explicit self-contained schema fixture for linux-x64 and copies only three matching files 3ms
+   ✓ selects the explicit self-contained schema fixture for win32-arm64 and copies only three matching files 4ms
+   ✓ selects the explicit self-contained schema fixture for win32-x64 and copies only three matching files 3ms
+   ✓ rejects changed binary instead of shipping a stale build 2ms
+   ✓ rejects changed license instead of shipping a stale build 2ms
+   ✓ rejects changed source instead of shipping a stale build 2ms
+   ✓ rejects changed lock instead of shipping a stale build 2ms
+   ✓ rejects a malformed captured manifest: target 2ms
+   ✓ rejects a malformed captured manifest: unknown-field 2ms
+   ✓ rejects a malformed captured manifest: license-hash 2ms
+   ✓ rejects pointer traversal and never reads an alternative generation 2ms
+   ✓ rejects a symlinked build binary 3ms
+   ✓ refuses an occupied destination and preserves it 3ms
+   ✓ rejects a missing build and unsupported architecture 0ms
+   ↓ executes the actual prepared package helper through the Main process owner
+   ✓ rejects an oversized binary before reading its contents 4ms
+   ✓ accepts reordered exact manifest keys and resolves the development generation 3ms
+   ✓ runtime permits post-build signing bytes but still rejects a changed CPU or license 6ms
+   ✓ actual afterPack hook verifies app.asar and installs selected darwin-arm64 21ms
+   ✓ actual afterPack hook verifies app.asar and installs selected linux-x64 9ms
+   ✓ actual afterPack hook verifies app.asar and installs selected win32-arm64 6ms
+   ✓ actual afterPack hook verifies app.asar and installs selected win32-x64 7ms
+   ✓ actual afterPack rejects a stale archived loader before writing helper resources 6ms
+   ✓ actual afterPack rejects unsupported targets before package access 0ms
+   × the single afterPack entry retains both existing gates before the helper gate 2ms
+     → The "path" argument must be of type string. Received undefined
+   ✓ rejects an occupied helper parent containing linux-other 3ms
+   ✓ rejects an occupied helper parent containing .staging-crashed 3ms
+   ✓ rejects a fourth generation entry 2ms
+   ✓ missing build reports the exact target preparation command 0ms
+   ✓ runtime rejects an object file with matching CPU: darwin-arm64 6ms
+   ✓ runtime rejects an object file with matching CPU: linux-x64 6ms
+   ✓ runtime rejects an object file with matching CPU: win32-x64 8ms
+   ✓ publishes a traversable target directory for installations owned by another user 3ms
+   ✓ missing generation reports the target preparation command 2ms
+   ✓ missing binary reports the target preparation command 3ms
+   ✓ missing license reports the target preparation command 2ms
+   ✓ publishes the helper parent traversably even with a restrictive build umask 3ms
+ ❯ tests/main/artifact-export-process.test.ts (31 tests | 31 skipped) 3ms
+   ↓ uses the actual helper and orders durable callbacks before commands for 0 bytes
+   ↓ uses the actual helper and orders durable callbacks before commands for 16777216 bytes
+   ↓ waits for prepare failure and actual cleanup without publishing
+   ↓ waits for created failure and actual cleanup without publishing
+   ↓ waits for staged failure and actual cleanup without publishing
+   ↓ waits for authorizeCommit failure and actual cleanup without publishing
+   ↓ checks the synchronous publication fence immediately before commit
+   ↓ preserves the actual helper failure when the temporary basename is already occupied
+   ↓ drains an accidentally asynchronous fence before settling or returning, while refusing commit
+   ↓ cancellation during prepare does not settle before that actual callback drains
+   ↓ cancellation during created does not settle before that actual callback drains
+   ↓ cancellation during staged does not settle before that actual callback drains
+   ↓ cancellation during authorizeCommit does not settle before that actual callback drains
+   ↓ rejects agent before starting callbacks or the helper
+   ↓ rejects scheduler before starting callbacks or the helper
+   ↓ rejects an already cancelled request before spawning or preparing an intent
+   ↓ propagates a durable settled failure without pretending to remove a committed user file
+   ↓ does not trust a success receipt emitted before any create or commit
+   ↓ retains a real killed helper as unknown and does not delete the observable temporary file
+   ↓ rejects an error code inconsistent with the commands and confirmed stages
+   ↓ rejects malformed ownership tokens before spawning
+   ↓ recovers the real killed child only after its native lock and ownership token are verified
+   ↓ waits on actual live-lock refusal before the original owner performs its own cleanup
+   ↓ rejects agent recovery before any spawn
+   ↓ rejects scheduler recovery before any spawn
+   ↓ rejects a double recovery receipt and still drains the actual child
+   ↓ rejects a wrong-token recovery receipt and still drains the actual child
+   ↓ rejects a exit-failure recovery receipt and still drains the actual child
+   ↓ does not accept an emitted recovery receipt until actual close and honors cancellation
+   ↓ two actual helpers competing for one target publish exactly one complete immutable copy
+   ↓ pins the original bytes before awaiting the first durable callback
+ ❯ tests/main/semantic-product-runtime.test.ts (3 tests | 2 failed | 1 skipped) 6ms
+   ↓ actual Desktop loop boundary sends one bounded SDK summary, commits CAS, and uses exact packed anchors in its next request
+   × actual managed group semantic boundary: stable 4ms
+     → actual product capacity environment required
+   × actual managed group semantic boundary: new-input 0ms
+     → actual product capacity environment required
+ ❯ tests/main/mcp-registration-main-ownership.test.ts (14 tests | 13 failed) 59ms
+   × BIND actual Main equals frozen candidate; Python tail is byte-preserved and actual method/cleanup binding is present 9ms
+     → expected 'import { registerKswarmStatusReadonly…' to be 'import { registerKswarmStatusReadonly…' // Object.is equality
+   × pending registration is owned before producer; late close awaits exact callback once and releases writer independently 1ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × producer-prefix closure sees reservation, prevents bridge activation, and still retires returned callback 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × normal cleanup keeps bridge-stop before MCP dispose; final fallback reawaits the same close 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × historically handled open raw failure stays false with fallback and does not turn into a later close error 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × closing raw failure stays identical on retirement and never starts fallback 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × returned dispose rejection is not rewritten as registration failure and is invoked once 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × failed lifetime registration invokes no producer and releases the already acquired writer 1ms
+     → expected a thrown error to be Error: own lifetime registration failure
+   × closed-before-start denies producer; synchronous ordinary callback throw retains original closing reason 2ms
+     → expected [Function] to throw error including 'mcp_registration_shutdown' but got 'r324_actual_Main_source_binding_NOT_R…'
+   ✓ BEFORE actual old continuation and optional-dispose statement reproduce an unclaimed late callback 43ms
+   × early final fallback covers missing/failed normal cleanup without inventing a replacement callback 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × reentrant dispose observes the already memoized promise rather than invoking the callback twice 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × bridge callback error after raw success cannot erase the returned disposer or masquerade as raw failure 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × diagnostic error does not replace the original closing raw reason on lifetime 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+ ❯ tests/main/room-field-classification.test.ts (19 tests | 4 failed) 601ms
+   × Room field classification contracts > type-level key equality assertions compile 58ms
+     → expected [ …(3) ] to deeply equal []
+   ✓ Room field classification contracts > rejects a desktop contract field added without classification  524ms
+   ✓ Room field classification contracts > covers actual RoomWakeSettled keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomDiscussionSettled keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomWorkspaceChanged keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomWorkspacePermissions keys at runtime 0ms
+   × Room field classification contracts > covers actual RoomWorkspaceInstructions keys at runtime 1ms
+     → expected [ 'candidateHash', …(6) ] to deeply equal [ 'candidateHash', …(12) ]
+   × Room field classification contracts > covers actual RoomWorkspaceClaim keys at runtime 1ms
+     → expected [ 'agentName', …(7) ] to deeply equal [ 'acquireDigest', 'agentName', …(30) ]
+   × Room field classification contracts > covers actual RoomWorkspaceArtifact keys at runtime 1ms
+     → expected [ 'artifactId', 'bindingId', …(12) ] to deeply equal [ 'artifactId', 'bindingId', …(23) ]
+   ✓ Room field classification contracts > covers actual RoomWorkspaceProjectMapping keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomWorkspaceSnapshot keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomWorkspaceFilePreview keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomWorkspaceChangeInput keys at runtime 0ms
+   ✓ Room field classification contracts > covers actual RoomWorkspaceTemplateEntry keys at runtime 0ms
+   ✓ Room field classification contracts > tracks workspace_changed object literals in main 11ms
+   ✓ Room field classification contracts > projects each nested object and drops canary text, paths and unknown fields 0ms
+   ✓ Room field classification contracts > preserves dispatch IDs, status and numeric metadata 0ms
+   ✓ Room field classification contracts > drops preview text and selected paths 1ms
+   ✓ Room field classification contracts > does not invoke nested getters or array serializers 0ms
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts (6 tests | 6 failed) 9ms
+   × G1 actual Main starts gateway then relay/MCP before held raw join; prefix sees pre-registered final fallback 5ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × G2 actual Main logs gateway original E once and retains exact E on group/final failure ACK 1ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × G3 gateway E/log L plus relay S remain ordered original errors; relay throw still skips normal MCP and final fallback retires once 1ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × G4 MCP rejects first while gateway held: actual group and final fallback still join original gateway before completing 1ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × G5 actual stop waits every returned raw after one rejection; pending does not advance dependent closes 1ms
+     → r334_actual_Main_binding_NOT_READY
+   × G6 actual stop sync pre-effect throw can leave a client unsealed: no new dependent release; existing MCP fallback is not qualification 1ms
+     → r334_actual_Main_binding_NOT_READY
+ ❯ tests/main/python-preparation-main-lifetime.test.ts (11 tests | 11 failed) 12ms
+   × P1 real Main reserves the actual gate/lifetime before invoking prepare and retains the same lifecycle Promise until its provided raw settles 6ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P2a a genuine prepare raw rejection after gate closure remains the identical lifecycle reason instead of a successful retirement 1ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P2 real Main owns the actual fallback registration raw and preserves its exact rejection reason on the lifecycle Promise 1ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P3 gate closes while prepare is held: actual lifetime blocks close and no new register/provider starts after settlement 1ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P4 gate closes at the real registration await: no new deferred registration/provider is started 1ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P5 an already-started deferred registration remains in the real raw chain; closing then forbids a new provider 1ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P6 repeated actual Main segment calls register two independent retirements; repeated close waits both and memoizes the coordinator result 0ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P7 synchronous producer-prefix close sees the already-registered actual token/reservation and cannot complete before that raw 0ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P8 actual original default 5000ms cap expiring does not make a held Python raw quiescent or close stores 1ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × P9 a previously closed real gate refuses this Main Python segment before any producer/lifetime allocation 0ms
+     → office_python_Main_source_binding_NOT_READY:post
+   × R306 prepare rejected while open, then close during the real fallback registration await: retain that original prepare reason 0ms
+     → office_python_Main_source_binding_NOT_READY:post
+ ❯ tests/main/mcp-registration-actual-main.test.ts (6 tests | 6 failed) 6ms
+   × A1 actual Main normal lifetime awaits bridge stop before same returned MCP dispose, before later ordinary/final callbacks 3ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × A2 actual Main held late registration blocks real gate drain; close then awaits that same returned dispose without starting a bridge 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × A3 actual callsite owns real writer/final fallback before producer-prefix reentrant close and retains method receiver 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × A4 actual callsite early final fallback survives omitted later normal-cleanup installation 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × A5 actual kswarm lifetime stop rejection does not skip same MCP fallback in real independent step traversal 1ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × A6 actual closing raw failure reaches real lifetime with identical memo reason and no invented disposer 1ms
+     → r324_actual_Main_source_binding_NOT_READY
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'prepared_effect' before its effect
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'prepared_effect' before its effect
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'actual_dispatch' before its effect
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'actual_dispatch' before its effect
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'next_model_turn' before its effect
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'next_model_turn' before its effect
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'queued_admission' before its effect
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'queued_admission' before its effect
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+ ❯ tests/main/workflow-stored-restrictions-held.test.ts (4 tests | 4 failed) 3430ms
+   × actual issued writable policy tightens at 'prepared_effect' before its effect 886ms
+     → expected [] to have a length of 1 but got +0
+   × actual issued writable policy tightens at 'actual_dispatch' before its effect 186ms
+     → expected [] to have a length of 1 but got +0
+   × actual issued writable policy tightens at 'next_model_turn' before its effect 180ms
+     → expected [] to have a length of 1 but got +0
+   × actual issued writable policy tightens at 'queued_admission' before its effect 2177ms
+     → expected +0 to be 1 // Object.is equality
+stderr | tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts > BDD: a real buffered timer already dispatched when cancellation drains its original failure > C21 cancellation consumes an in-flight timer flush failure without losing its already-committed runtime receipt
+[conversation-activity] run reconciliation failed: host_delivery_store_closed
+
+stderr | tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts > BDD: a real buffered timer already dispatched when cancellation drains its original failure > C21 cancellation consumes an in-flight timer flush failure without losing its already-committed runtime receipt
+[goal] task event settlement failed: goal_coordinator_closed
+
+ ❯ tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts (1 test | 1 failed) 3194ms
+   × BDD: a real buffered timer already dispatched when cancellation drains its original failure > C21 cancellation consumes an in-flight timer flush failure without losing its already-committed runtime receipt 3193ms
+     → expected [ …(256) ] to have a length of 255 but got 256
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts (26 tests | 24 failed) 381ms
+   × W2-P2 typed Goal source transport > createGoal admits the canonical request id through the actual semantic IPC parser 314ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 typed Goal source transport > replaceGoal admits the canonical request id through the actual semantic IPC parser 2ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 typed Goal source transport > resumeGoal admits the canonical request id through the actual semantic IPC parser 1ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 typed Goal source transport > createGoal preserves the existing omitted-id caller contract 3ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 typed Goal source transport > replaceGoal preserves the existing omitted-id caller contract 2ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 typed Goal source transport > resumeGoal preserves the existing omitted-id caller contract 1ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 typed Goal source transport > createGoal rejects malformed ids before entering the service 14ms
+     → expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 typed Goal source transport > replaceGoal rejects malformed ids before entering the service 2ms
+     → expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 typed Goal source transport > resumeGoal rejects malformed ids before entering the service 2ms
+     → expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 typed Goal source transport > createGoal never admits a caller-defined source or predecessor 2ms
+     → expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 typed Goal source transport > replaceGoal never admits a caller-defined source or predecessor 2ms
+     → expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 typed Goal source transport > resumeGoal never admits a caller-defined source or predecessor 1ms
+     → expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+   ✓ W2-P2 typed Goal source transport > forwards request/automatic prepared metadata and removes its actual event listener 3ms
+   × W2-P2 packaged Goal source transport > createGoal admits the canonical request id through the actual semantic IPC parser 4ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 packaged Goal source transport > replaceGoal admits the canonical request id through the actual semantic IPC parser 2ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 packaged Goal source transport > resumeGoal admits the canonical request id through the actual semantic IPC parser 1ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 packaged Goal source transport > createGoal preserves the existing omitted-id caller contract 1ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 packaged Goal source transport > replaceGoal preserves the existing omitted-id caller contract 3ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 packaged Goal source transport > resumeGoal preserves the existing omitted-id caller contract 3ms
+     → promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+   × W2-P2 packaged Goal source transport > createGoal rejects malformed ids before entering the service 9ms
+     → expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 packaged Goal source transport > replaceGoal rejects malformed ids before entering the service 2ms
+     → expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 packaged Goal source transport > resumeGoal rejects malformed ids before entering the service 2ms
+     → expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 packaged Goal source transport > createGoal never admits a caller-defined source or predecessor 2ms
+     → expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 packaged Goal source transport > replaceGoal never admits a caller-defined source or predecessor 1ms
+     → expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+   × W2-P2 packaged Goal source transport > resumeGoal never admits a caller-defined source or predecessor 2ms
+     → expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+   ✓ W2-P2 packaged Goal source transport > forwards request/automatic prepared metadata and removes its actual event listener 1ms
+ ✓ tests/main/desktop-multi-agent-approval-wire-budget.bdd.test.ts (1 test) 1409ms
+   ✓ BDD AP6: real store/sender pending metadata fits the existing wire budget > Given nine real default-mode waiters and a formerly legal near-limit snapshot, Then initial reply trims only its old agent page, live approval events stay bounded, and zero pending restores the ordinary page  1409ms
+ ❯ tests/main/desktop-post-seal-input-errors.bdd.test.ts (7 tests | 7 failed) 494ms
+   × R4 fixed verifier input errors remain distinct from malformed transport > D13 locally captured empty-task-id preserves verifier_input_invalid without starting a Worker 86ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-8IGpE7/delivery-verifier.mjs
+   × R4 fixed verifier input errors remain distinct from malformed transport > D13 locally captured wrong-prompt-type preserves verifier_input_invalid without starting a Worker 76ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-oIOCCO/delivery-verifier.mjs
+   × R4 fixed verifier input errors remain distinct from malformed transport > D7 a real fixed CPU Worker rejects malformed input, and the parent fences its unbound fallback request ID as protocol_error 81ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ffaHD9/delivery-verifier.mjs
+   × R4 fixed verifier input errors remain distinct from malformed transport > D7 the parent preserves input_invalid in a controlled, correctly bound fixed error frame 67ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-H4ihk6/delivery-verifier.mjs
+   × R4 fixed verifier input errors remain distinct from malformed transport > D7 malformed invalid-json reply remains verifier_protocol_error, not an input rejection 63ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ZnCHjP/delivery-verifier.mjs
+   × R4 fixed verifier input errors remain distinct from malformed transport > D7 malformed wrong-request reply remains verifier_protocol_error, not an input rejection 57ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-oZPXRF/delivery-verifier.mjs
+   × R4 fixed verifier input errors remain distinct from malformed transport > D7 malformed unknown-key reply remains verifier_protocol_error, not an input rejection 62ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-4QJwNm/delivery-verifier.mjs
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'unknown_category' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'unknown_category' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_kind' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_kind' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_attempt' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_attempt' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_handoff' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_handoff' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_participant' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_participant' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_run' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_run' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_node' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_node' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_root' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_root' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'cancelled' before allocating a provider
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'cancelled' before allocating a provider
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+ ❯ tests/main/workflow-stored-restrictions-denials.test.ts (9 tests | 9 failed) 2476ms
+   × actual fresh restrictions deny 'unknown_category' before allocating a provider 783ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_kind' before allocating a provider 180ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_attempt' before allocating a provider 146ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_handoff' before allocating a provider 255ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_participant' before allocating a provider 237ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_run' before allocating a provider 264ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_node' before allocating a provider 212ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'wrong_root' before allocating a provider 240ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × actual fresh restrictions deny 'cancelled' before allocating a provider 157ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions=null desiredReadonly=false
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions=null desiredReadonly=false
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions={ toolCategories: [ …(2) ] } desiredReadonly=false
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions={ toolCategories: [ …(2) ] } desiredReadonly=false
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions={ Object (toolCategories) } desiredReadonly=true
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions={ Object (toolCategories) } desiredReadonly=true
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions=null desiredReadonly=true
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions=null desiredReadonly=true
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+ ❯ tests/main/workflow-stored-restrictions-effects.test.ts (4 tests | 4 failed) 1225ms
+   × actual issuer/network/main/native effects permissions=null desiredReadonly=false 635ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × actual issuer/network/main/native effects permissions={ toolCategories: [ …(2) ] } desiredReadonly=false 184ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × actual issuer/network/main/native effects permissions={ Object (toolCategories) } desiredReadonly=true 181ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+   × actual issuer/network/main/native effects permissions=null desiredReadonly=true 223ms
+     → KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+ ❯ tests/main/workflow-review-mode.test.ts (3 tests | 3 failed) 133ms
+   × actual workflow 'review' reads reference and preserves its intended 'write' behavior 54ms
+     → kswarm_workflow_read_instance_unknown
+   × actual workflow 'review' reads reference and preserves its intended 'edit' behavior 23ms
+     → kswarm_workflow_read_instance_unknown
+   × actual workflow 'agent_task' reads reference and preserves its intended 'write' behavior 56ms
+     → kswarm_workflow_read_instance_unknown
+stderr | tests/main/workflow-stored-restrictions-partial-denial.test.ts > real existing aggregate partial write denial wins over node permissions null
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-partial-denial.test.ts > real existing aggregate partial write denial wins over node permissions null
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-partial-denial.test.ts > real existing aggregate partial write denial wins over node permissions { toolCategories: [ …(2) ] }
+[kswarm-service] existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+stderr | tests/main/workflow-stored-restrictions-partial-denial.test.ts > real existing aggregate partial write denial wins over node permissions { toolCategories: [ …(2) ] }
+[kswarm-service] failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+
+ ❯ tests/main/workflow-stored-restrictions-partial-denial.test.ts (2 tests | 2 failed) 1008ms
+   × real existing aggregate partial write denial wins over node permissions null 797ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+   × real existing aggregate partial write denial wins over node permissions { toolCategories: [ …(2) ] } 209ms
+     → expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+ ❯ tests/main/desktop-history-publication-basis.test.ts (3 tests | 3 failed) 14ms
+   × actual Desktop full-history publisher retains its exact basis: success 10ms
+     → ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-DuSit8/account-MdEfjO/.cache'
+   × actual Desktop full-history publisher retains its exact basis: host-failure 2ms
+     → ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-DuSit8/account-MdEfjO/.cache'
+   × actual Desktop full-history publisher retains its exact basis: other-writer 1ms
+     → ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-DuSit8/account-MdEfjO/.cache'
+ ❯ tests/main/desktop-post-seal-verifier-policy.bdd.test.ts (6 tests | 6 failed) 444ms
+   × R4 verifier internal policy preserves existing host switches and plan priority > artifactEvidence=true gates only owner artifact IO, not Worker plan facts 88ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-uveqaA/delivery-verifier.mjs
+   × R4 verifier internal policy preserves existing host switches and plan priority > artifactEvidence=false gates only owner artifact IO, not Worker plan facts 78ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-IhmnsL/delivery-verifier.mjs
+   × R4 verifier internal policy preserves existing host switches and plan priority > artifactEvidence=undefined gates only owner artifact IO, not Worker plan facts 66ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-yovUld/delivery-verifier.mjs
+   × R4 verifier internal policy preserves existing host switches and plan priority > incomplete plan with artifactEvidence=true starts no artifact IO after the real Worker 64ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-rr95m6/delivery-verifier.mjs
+   × R4 verifier internal policy preserves existing host switches and plan priority > incomplete plan with artifactEvidence=false starts no artifact IO after the real Worker 72ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-4i3Ke5/delivery-verifier.mjs
+   × R4 verifier internal policy preserves existing host switches and plan priority > incomplete plan with artifactEvidence=undefined starts no artifact IO after the real Worker 74ms
+     → Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-24E76Q/delivery-verifier.mjs
+ ❯ tests/main/mcp-registration-promise-admission.test.ts (5 tests | 5 failed) 5ms
+   × N7 actual Main global-accessor admission invokes getter0 and callback effect0 before ownership/producer 3ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × N7 actual Main global-value admission invokes getter0 and callback effect0 before ownership/producer 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × N7 actual Main species admission invokes getter0 and callback effect0 before ownership/producer 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × N7 actual Main constructor admission invokes getter0 and callback effect0 before ownership/producer 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+   × N7 actual Main then admission invokes getter0 and callback effect0 before ownership/producer 0ms
+     → r324_actual_Main_source_binding_NOT_READY
+ ❯ tests/main/desktop-authorization-approval-design-gate.test.ts (1 test | 1 failed) 3ms
+   × authorization and approval joint design baseline > both complete source documents match the same pending revision and external hash manifest 2ms
+     → ENOENT: no such file or directory, open '<master-baseline>/docs/design/2026-09-07-desktop-authorization-approval-joint-manifest.json'
+ ❯ tests/main/loop-verification-execution-controller.test.ts (8 tests | 5 failed) 148608ms
+   ✓ executes and recovers the original Loop verification through the signed controller: terminal  17066ms
+   ✓ executes and recovers the original Loop verification through the signed controller: lost-dispatch  15987ms
+   ✓ executes and recovers the original Loop verification through the signed controller: publication-lost-ack  17427ms
+   × executes and recovers the original Loop verification through the signed controller: full-projection 30263ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × executes and recovers the original Loop verification through the signed controller: desktop-service 3641ms
+     → application_client_owner_unavailable
+   × executes and recovers the original Loop verification through the signed controller: timed-pending 30239ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × executes and recovers the original Loop verification through the signed controller: timed-expired 3085ms
+     → application_client_owner_unavailable
+   × executes and recovers the original Loop verification through the signed controller: output-consumer 30900ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/artifact-export-process.test.ts [ tests/main/artifact-export-process.test.ts ]
+Error: ENOENT: no such file or directory, open '<master-baseline>/.artifacts/artifact-export-helper/darwin-arm64/current.json'
+ ❯ tests/main/artifact-export-process.test.ts:17:119
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/119]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 118 ⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/main/artifact-export-package.test.ts > the single afterPack entry retains both existing gates before the helper gate
+TypeError: The "path" argument must be of type string. Received undefined
+ ❯ module.exports scripts/verify-packaged-service-contracts.cjs:143:12
+ ❯ afterPack scripts/after-pack.cjs:17:9
+ ❯ tests/main/artifact-export-package.test.ts:231:5
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/119]⎯
+
+ FAIL  tests/main/desktop-authorization-approval-design-gate.test.ts > authorization and approval joint design baseline > both complete source documents match the same pending revision and external hash manifest
+Error: ENOENT: no such file or directory, open '<master-baseline>/docs/design/2026-09-07-desktop-authorization-approval-joint-manifest.json'
+ ❯ tests/main/desktop-authorization-approval-design-gate.test.ts:9:33
+      7|   it('both complete source documents match the same pending revision a…
+      8|     const root = new URL('../../../docs/design/', import.meta.url);
+      9|     const manifest = JSON.parse(readFileSync(new URL('2026-09-07-deskt…
+       |                                 ^
+     10|     expect(manifest).toMatchObject({ revision: 'R5-joint-2', status: '…
+     11|     expect(manifest.documents).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/119]⎯
+
+ FAIL  tests/main/desktop-history-publication-basis.test.ts > actual Desktop full-history publisher retains its exact basis: success
+Error: ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-DuSit8/account-MdEfjO/.cache'
+ ❯ trustedEnvironment ../src/runtime/sol-pi/product-bootstrap.ts:110:39
+    108| function trustedEnvironment(root: string): { environment: DeepSeekReci…
+    109|   const registered = join(homedir(), '.cache', 'xiaok', 'sol-pi', ENVI…
+    110|   if (resolve(root) !== registered || realpathSync(root) !== registere…
+       |                                       ^
+    111|   for (const file of [root, join(root, 'environment.json')]) {
+    112|     const stat = lstatSync(file); if (stat.isSymbolicLink() || stat.ui…
+ ❯ createProductObservationOwner ../src/runtime/sol-pi/product-bootstrap.ts:193:20
+ ❯ createDesktopProductObservationBinding electron/desktop-observation-owner.ts:139:21
+ ❯ tests/main/desktop-history-publication-basis.test.ts:18:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/119]⎯
+
+ FAIL  tests/main/desktop-history-publication-basis.test.ts > actual Desktop full-history publisher retains its exact basis: host-failure
+ FAIL  tests/main/desktop-history-publication-basis.test.ts > actual Desktop full-history publisher retains its exact basis: other-writer
+Error: ENOENT: no such file or directory, lstat '/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-vitest-accounts-DuSit8/account-MdEfjO/.cache'
+ ❯ trustedEnvironment ../src/runtime/sol-pi/product-bootstrap.ts:110:39
+    108| function trustedEnvironment(root: string): { environment: DeepSeekReci…
+    109|   const registered = join(homedir(), '.cache', 'xiaok', 'sol-pi', ENVI…
+    110|   if (resolve(root) !== registered || realpathSync(root) !== registere…
+       |                                       ^
+    111|   for (const file of [root, join(root, 'environment.json')]) {
+    112|     const stat = lstatSync(file); if (stat.isSymbolicLink() || stat.ui…
+ ❯ createProductObservationOwner ../src/runtime/sol-pi/product-bootstrap.ts:193:20
+ ❯ createDesktopProductObservationBinding electron/desktop-observation-owner.ts:139:21
+ ❯ tests/main/desktop-history-publication-basis.test.ts:18:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/119]⎯
+
+ FAIL  tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts > BDD: a real buffered timer already dispatched when cancellation drains its original failure > C21 cancellation consumes an in-flight timer flush failure without losing its already-committed runtime receipt
+AssertionError: expected [ …(256) ] to have a length of 255 but got 256
+
+- Expected
++ Received
+
+- 255
++ 256
+
+ ❯ tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts:42:111
+     40|     await host.startTask(task.taskId); await modelEntered.promise; awa…
+     41|     while (internals.persistedEventDispatchChains.size) await Promise.…
+     42|     expect((await new FileTaskSnapshotStore(join(f.root, 'data', 'task…
+       |                                                                                                               ^
+     43|     const callback = vi.spyOn(DesktopGoalCoordinator.prototype, 'handl…
+     44|     const failure = Object.assign(new Error('timer-owned original inte…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D13 locally captured empty-task-id preserves verifier_input_invalid without starting a Worker
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-8IGpE7/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-8IGpE7/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D13 locally captured wrong-prompt-type preserves verifier_input_invalid without starting a Worker
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-oIOCCO/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-oIOCCO/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D7 a real fixed CPU Worker rejects malformed input, and the parent fences its unbound fallback request ID as protocol_error
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ffaHD9/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ffaHD9/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D7 the parent preserves input_invalid in a controlled, correctly bound fixed error frame
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-H4ihk6/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-H4ihk6/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D7 malformed invalid-json reply remains verifier_protocol_error, not an input rejection
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ZnCHjP/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-ZnCHjP/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D7 malformed wrong-request reply remains verifier_protocol_error, not an input rejection
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-oZPXRF/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-oZPXRF/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-input-errors.bdd.test.ts > R4 fixed verifier input errors remain distinct from malformed transport > D7 malformed unknown-key reply remains verifier_protocol_error, not an input rejection
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-4QJwNm/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-4QJwNm/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-io.bdd.test.ts > R4 explicit raw async IO and unchanged guard language > D6 actual CPU Worker exit plus two native FIFO opens keep the tracked physical drain pending after outward failure
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-806Mp0/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-806Mp0/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-verifier-policy.bdd.test.ts > R4 verifier internal policy preserves existing host switches and plan priority > artifactEvidence=true gates only owner artifact IO, not Worker plan facts
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-uveqaA/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-uveqaA/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-verifier-policy.bdd.test.ts > R4 verifier internal policy preserves existing host switches and plan priority > artifactEvidence=false gates only owner artifact IO, not Worker plan facts
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-IhmnsL/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-IhmnsL/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-verifier-policy.bdd.test.ts > R4 verifier internal policy preserves existing host switches and plan priority > artifactEvidence=undefined gates only owner artifact IO, not Worker plan facts
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-yovUld/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-yovUld/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-verifier-policy.bdd.test.ts > R4 verifier internal policy preserves existing host switches and plan priority > incomplete plan with artifactEvidence=true starts no artifact IO after the real Worker
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-rr95m6/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-rr95m6/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-verifier-policy.bdd.test.ts > R4 verifier internal policy preserves existing host switches and plan priority > incomplete plan with artifactEvidence=false starts no artifact IO after the real Worker
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-4i3Ke5/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-4i3Ke5/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/119]⎯
+
+ FAIL  tests/main/desktop-post-seal-verifier-policy.bdd.test.ts > R4 verifier internal policy preserves existing host switches and plan priority > incomplete plan with artifactEvidence=undefined starts no artifact IO after the real Worker
+Error: Cannot find module 'better-sqlite3'
+Require stack:
+- /private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-24E76Q/delivery-verifier.mjs
+ ❯ ../../../../../../../private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-post-seal-compiled-24E76Q/delivery-verifier.mjs:3556:55
+    3554| // ../src/runtime/verification/storage-budget.ts
+    3555| import { createRequire } from "node:module";
+    3556| var NativeSqliteError = createRequire(import.meta.url)("better-sqlite3…
+       |                                                       ^
+    3557|
+    3558| // ../src/runtime/verification/completion-client.ts
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/119]⎯
+
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > createGoal admits the canonical request id through the actual semantic IPC parser
+AssertionError: promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:78:41
+     76|   it.each(methods)('%s admits the canonical request id through the act…
+     77|     const f = await setup(kind), input = { ...inputFor(method), reques…
+     78|     await expect(f.invoke(method, input)).resolves.toEqual(f.result);
+       |                                         ^
+     79|     expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input);
+     80|   });
+
+Caused by: Error: goal_task_mutation_sender_forbidden
+ ❯ electron/ipc.ts:1156:84
+ ❯ Object.beforeInput electron/goal-task-mutation-typed-ipc.ts:59:31
+ ❯ electron/ipc-runtime.ts:156:36
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:34:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/119]⎯
+
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > replaceGoal admits the canonical request id through the actual semantic IPC parser
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > resumeGoal admits the canonical request id through the actual semantic IPC parser
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > createGoal admits the canonical request id through the actual semantic IPC parser
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > replaceGoal admits the canonical request id through the actual semantic IPC parser
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > resumeGoal admits the canonical request id through the actual semantic IPC parser
+AssertionError: promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:78:41
+     76|   it.each(methods)('%s admits the canonical request id through the act…
+     77|     const f = await setup(kind), input = { ...inputFor(method), reques…
+     78|     await expect(f.invoke(method, input)).resolves.toEqual(f.result);
+       |                                         ^
+     79|     expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input);
+     80|   });
+
+Caused by: Error: goal_task_mutation_sender_forbidden
+ ❯ electron/ipc.ts:1156:84
+ ❯ Object.beforeInput electron/goal-task-mutation-typed-ipc.ts:59:31
+ ❯ electron/ipc-runtime.ts:156:36
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:34:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/119]⎯
+
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > createGoal preserves the existing omitted-id caller contract
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > replaceGoal preserves the existing omitted-id caller contract
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > resumeGoal preserves the existing omitted-id caller contract
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > createGoal preserves the existing omitted-id caller contract
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > replaceGoal preserves the existing omitted-id caller contract
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > resumeGoal preserves the existing omitted-id caller contract
+AssertionError: promise rejected "Error: goal_task_mutation_sender_forbidden" instead of resolving
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:84:41
+     82|   it.each(methods)('%s preserves the existing omitted-id caller contra…
+     83|     const f = await setup(kind), input = inputFor(method);
+     84|     await expect(f.invoke(method, input)).resolves.toEqual(f.result);
+       |                                         ^
+     85|     expect(f.service[method]).toHaveBeenCalledExactlyOnceWith(input);
+     86|   });
+
+Caused by: Error: goal_task_mutation_sender_forbidden
+ ❯ electron/ipc.ts:1156:84
+ ❯ Object.beforeInput electron/goal-task-mutation-typed-ipc.ts:59:31
+ ❯ electron/ipc-runtime.ts:156:36
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:34:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/119]⎯
+
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > createGoal rejects malformed ids before entering the service
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > replaceGoal rejects malformed ids before entering the service
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > resumeGoal rejects malformed ids before entering the service
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > createGoal rejects malformed ids before entering the service
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > replaceGoal rejects malformed ids before entering the service
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > resumeGoal rejects malformed ids before entering the service
+AssertionError: expected [Function] to throw error including 'invalid_goal_request_id' but got 'goal_task_mutation_sender_forbidden'
+
+Expected: "invalid_goal_request_id"
+Received: "goal_task_mutation_sender_forbidden"
+
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:92:7
+     90|     for (const invalid of ['', null, 1, {}, [], ` ${requestId}`, `${re…
+     91|       requestId.replace('-4ee3-', '-5ee3-'), 'x'.repeat(201)]) {
+     92|       await expect(f.invoke(method, { ...inputFor(method), requestId: …
+       |       ^
+     93|       expect(f.service[method]).not.toHaveBeenCalled();
+     94|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/119]⎯
+
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > createGoal never admits a caller-defined source or predecessor
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > replaceGoal never admits a caller-defined source or predecessor
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 typed Goal source transport > resumeGoal never admits a caller-defined source or predecessor
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > createGoal never admits a caller-defined source or predecessor
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > replaceGoal never admits a caller-defined source or predecessor
+ FAIL  tests/main/goal-attachment-ipc-contract.bdd.test.ts > W2-P2 packaged Goal source transport > resumeGoal never admits a caller-defined source or predecessor
+AssertionError: expected [Function] to throw error including 'invalid_goal_field:attachmentSource' but got 'goal_task_mutation_sender_forbidden'
+
+Expected: "invalid_goal_field:attachmentSource"
+Received: "goal_task_mutation_sender_forbidden"
+
+ ❯ tests/main/goal-attachment-ipc-contract.bdd.test.ts:100:7
+     98|     const f = await setup(kind);
+     99|     for (const field of ['attachmentSource', 'kind', 'predecessorTaskI…
+    100|       await expect(f.invoke(method, { ...inputFor(method), [field]: 'a…
+       |       ^
+    101|       expect(f.service[method]).not.toHaveBeenCalled();
+    102|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/119]⎯
+
+ FAIL  tests/main/loop-verification-execution-controller.test.ts > executes and recovers the original Loop verification through the signed controller: full-projection
+ FAIL  tests/main/loop-verification-execution-controller.test.ts > executes and recovers the original Loop verification through the signed controller: timed-pending
+ FAIL  tests/main/loop-verification-execution-controller.test.ts > executes and recovers the original Loop verification through the signed controller: output-consumer
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/main/loop-verification-execution-controller.test.ts:46:155
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/119]⎯
+
+ FAIL  tests/main/loop-verification-execution-controller.test.ts > executes and recovers the original Loop verification through the signed controller: desktop-service
+ FAIL  tests/main/loop-verification-execution-controller.test.ts > executes and recovers the original Loop verification through the signed controller: timed-expired
+Error: application_client_owner_unavailable
+ ❯ createInstalledLoopApplicationClient ../src/runtime/verification/installed-loop-application.ts:41:83
+     39|   const binding = parseLoopApplicationBinding(raw), requested = loopHo…
+     40|   const route = readInstalledCurrentOwner(requested);
+     41|   if (route.kind !== 'migrated' && route.kind !== 'protected-unregiste…
+       |                                                                                   ^
+     42|   const { owner, authorityId } = route;
+     43|   const original = json(route), client = createInstalledVerificationCl…
+ ❯ application electron/loop-native-workflow.ts:127:22
+ ❯ run electron/loop-native-workflow.ts:155:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/119]⎯
+
+ FAIL  tests/main/mcp-registration-actual-main.test.ts > A1 actual Main normal lifetime awaits bridge stop before same returned MCP dispose, before later ordinary/final callbacks
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/mcp-registration-actual-main.test.ts:7:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/119]⎯
+
+ FAIL  tests/main/mcp-registration-actual-main.test.ts > A2 actual Main held late registration blocks real gate drain; close then awaits that same returned dispose without starting a bridge
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/mcp-registration-actual-main.test.ts:34:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/119]⎯
+
+ FAIL  tests/main/mcp-registration-actual-main.test.ts > A3 actual callsite owns real writer/final fallback before producer-prefix reentrant close and retains method receiver
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/mcp-registration-actual-main.test.ts:50:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/119]⎯
+
+ FAIL  tests/main/mcp-registration-actual-main.test.ts > A4 actual callsite early final fallback survives omitted later normal-cleanup installation
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/mcp-registration-actual-main.test.ts:67:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/119]⎯
+
+ FAIL  tests/main/mcp-registration-actual-main.test.ts > A5 actual kswarm lifetime stop rejection does not skip same MCP fallback in real independent step traversal
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/mcp-registration-actual-main.test.ts:79:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/119]⎯
+
+ FAIL  tests/main/mcp-registration-actual-main.test.ts > A6 actual closing raw failure reaches real lifetime with identical memo reason and no invented disposer
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/mcp-registration-actual-main.test.ts:93:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > BIND actual Main equals frozen candidate; Python tail is byte-preserved and actual method/cleanup binding is present
+AssertionError: expected 'import { registerKswarmStatusReadonly…' to be 'import { registerKswarmStatusReadonly…' // Object.is equality
+
+- Expected
++ Received
+
+@@ -66,10 +66,11 @@
+    removeWindowsWindowMenu,
+    restoreExistingWindow,
+  } from './window-lifecycle.js';
+  import { setupMenuBar, destroyMenuBar } from './menubar.js';
+  import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
++ import { createOnceNotice } from './activity-owner-startup.js';
+  import { resolveKSwarmServiceLogRoot, type KSwarmService } from './kswarm-service.js';
+  import {
+    deployBundledPluginFiles,
+    resolveBundledPluginsDir,
+    prepareBundledPluginPythonRuntime,
+@@ -836,21 +837,28 @@
+      getManagedPythonCommand: () => managedPythonCommand,
+    });
+    desktopIngressOwners.push(services.goalShutdown.ingress);
+    desktopDurableStores.push(services.goalShutdown.durable);
+    if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
++   const activityOwnerNoticeOnce = createOnceNotice(text => {
++     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
++   });
+    kswarmStartPromise = startDesktopKSwarmService(desktopShutdownGate, kswarmService,
+      process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
++     error => {
++       const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
++       console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
++       activityOwnerNoticeOnce(code);
++     },
+    ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
++   registerLifetimeDisposerStep('local-memory', async () => { getDesktopMemoryStore(dataRoot).close?.(); });
+    registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
+    const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
+-     if (event.type === 'project_activity' && typeof event.projectId === 'string') void services.conversationActivity?.projectChanged(event.projectId);
++     if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
+    });
+    registerLifetimeDisposerStep('activity-project-events', async () => stopActivityProjectEvents());
+-   const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => {
+-     void services.conversationActivity?.projectConnectionChanged(status).catch(error => console.warn('[conversation-activity] source connection failed:', error instanceof Error ? error.message : 'connection_failed'));
+-   });
++   const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => services.conversationActivity?.projectConnectionChanged(status));
+    registerLifetimeDisposerStep('activity-project-connection', async () => stopActivityProjectConnection());
+    let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
+    const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
+    const mobileBonjourAdvertiser = createMobileBonjourAdvertiser();
+    const mobileMessages: MobileChatMessage[] = [];
+
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:55:19
+     53| it('BIND actual Main equals frozen candidate; Python tail is byte-pres…
+     54|   const current = readFileSync(new URL('../../electron/main.ts', impor…
+     55|   expect(current).toBe(post);
+       |                   ^
+     56|   const marker = '// Python discovery, venv creation and dependency ch…
+     57|   expect(post.slice(post.indexOf(marker))).toBe(before.slice(before.in…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > pending registration is owned before producer; late close awaits exact callback once and releases writer independently
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:66:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > producer-prefix closure sees reservation, prevents bridge activation, and still retires returned callback
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:78:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > normal cleanup keeps bridge-stop before MCP dispose; final fallback reawaits the same close
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:82:54
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > historically handled open raw failure stays false with fallback and does not turn into a later close error
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:89:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > closing raw failure stays identical on retirement and never starts fallback
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:94:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > returned dispose rejection is not rewritten as registration failure and is invoked once
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:100:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > failed lifetime registration invokes no producer and releases the already acquired writer
+AssertionError: expected a thrown error to be Error: own lifetime registration failure
+
+- Expected
++ Received
+
+  Error {
+-   "message": "own lifetime registration failure",
++   "message": "r324_actual_Main_source_binding_NOT_READY",
+  }
+
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:107:42
+    105| it('failed lifetime registration invokes no producer and releases the …
+    106|   const f = fixture(), error = Error('own lifetime registration failur…
+    107|   expect(() => candidate()(f.callbacks)).toThrow(error); expect(f.fact…
+       |                                          ^
+    108| });
+    109| it('closed-before-start denies producer; synchronous ordinary callback…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > closed-before-start denies producer; synchronous ordinary callback throw retains original closing reason
+AssertionError: expected [Function] to throw error including 'mcp_registration_shutdown' but got 'r324_actual_Main_source_binding_NOT_R…'
+
+Expected: "mcp_registration_shutdown"
+Received: "r324_actual_Main_source_binding_NOT_READY"
+
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:110:74
+    108| });
+    109| it('closed-before-start denies producer; synchronous ordinary callback…
+    110|   const f = fixture(); f.close(); expect(() => candidate()(f.callbacks…
+       |                                                                          ^
+    111|   const g = fixture(), error = Error('own synchronous callback failure…
+    112|   const owner = candidate()(g.callbacks); const closed = Promise.allSe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > early final fallback covers missing/failed normal cleanup without inventing a replacement callback
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:136:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > reentrant dispose observes the already memoized promise rather than invoking the callback twice
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:142:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > bridge callback error after raw success cannot erase the returned disposer or masquerade as raw failure
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:148:67
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/119]⎯
+
+ FAIL  tests/main/mcp-registration-main-ownership.test.ts > diagnostic error does not replace the original closing raw reason on lifetime
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ candidate tests/main/mcp-registration-main-ownership.test.ts:31:10
+ ❯ tests/main/mcp-registration-main-ownership.test.ts:155:91
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/119]⎯
+
+ FAIL  tests/main/mcp-registration-promise-admission.test.ts > N7 actual Main global-accessor admission invokes getter0 and callback effect0 before ownership/producer
+ FAIL  tests/main/mcp-registration-promise-admission.test.ts > N7 actual Main global-value admission invokes getter0 and callback effect0 before ownership/producer
+ FAIL  tests/main/mcp-registration-promise-admission.test.ts > N7 actual Main species admission invokes getter0 and callback effect0 before ownership/producer
+ FAIL  tests/main/mcp-registration-promise-admission.test.ts > N7 actual Main constructor admission invokes getter0 and callback effect0 before ownership/producer
+ FAIL  tests/main/mcp-registration-promise-admission.test.ts > N7 actual Main then admission invokes getter0 and callback effect0 before ownership/producer
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMcpRegistrationFunction tests/main/mcp-registration-actual-main-fixture.ts:59:54
+ ❯ tests/main/mcp-registration-promise-admission.test.ts:8:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P1 real Main reserves the actual gate/lifetime before invoking prepare and retains the same lifecycle Promise until its provided raw settles
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:7:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P2a a genuine prepare raw rejection after gate closure remains the identical lifecycle reason instead of a successful retirement
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:24:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P2 real Main owns the actual fallback registration raw and preserves its exact rejection reason on the lifecycle Promise
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:37:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[50/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P3 gate closes while prepare is held: actual lifetime blocks close and no new register/provider starts after settlement
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:53:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[51/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P4 gate closes at the real registration await: no new deferred registration/provider is started
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:64:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[52/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P5 an already-started deferred registration remains in the real raw chain; closing then forbids a new provider
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:74:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[53/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P6 repeated actual Main segment calls register two independent retirements; repeated close waits both and memoizes the coordinator result
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:89:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[54/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P7 synchronous producer-prefix close sees the already-registered actual token/reservation and cannot complete before that raw
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:103:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[55/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P8 actual original default 5000ms cap expiring does not make a held Python raw quiescent or close stores
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:114:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[56/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > P9 a previously closed real gate refuses this Main Python segment before any producer/lifetime allocation
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:131:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[57/119]⎯
+
+ FAIL  tests/main/python-preparation-main-lifetime.test.ts > R306 prepare rejected while open, then close during the real fallback registration await: retain that original prepare reason
+Error: office_python_Main_source_binding_NOT_READY:post
+ ❯ currentBinding tests/main/python-preparation-main-fixture.ts:32:39
+     30|   // Compare full bytes as well as the pinned hash; do not normalize, …
+     31|   // comments, select an AST subset or fall back to a candidate snapsh…
+     32|   if (!actual.equals(snapshot)) throw Error(`office_python_Main_source…
+       |                                       ^
+     33|   return { actual, snapshot, sha256: createHash('sha256').update(actua…
+     34| }
+ ❯ mainSource tests/main/python-preparation-main-fixture.ts:46:10
+ ❯ pythonFixture tests/main/python-preparation-main-fixture.ts:114:26
+ ❯ withPythonFixture tests/main/python-preparation-main-fixture.ts:151:13
+ ❯ tests/main/python-preparation-main-lifetime.test.ts:138:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[58/119]⎯
+
+ FAIL  tests/main/rejected-bridge-gateway-ownership.test.ts > G1 actual Main starts gateway then relay/MCP before held raw join; prefix sees pre-registered final fallback
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts:36:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[59/119]⎯
+
+ FAIL  tests/main/rejected-bridge-gateway-ownership.test.ts > G2 actual Main logs gateway original E once and retains exact E on group/final failure ACK
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts:54:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[60/119]⎯
+
+ FAIL  tests/main/rejected-bridge-gateway-ownership.test.ts > G3 gateway E/log L plus relay S remain ordered original errors; relay throw still skips normal MCP and final fallback retires once
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts:66:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[61/119]⎯
+
+ FAIL  tests/main/rejected-bridge-gateway-ownership.test.ts > G4 MCP rejects first while gateway held: actual group and final fallback still join original gateway before completing
+Error: r324_actual_Main_source_binding_NOT_READY
+ ❯ boundActualMain tests/main/mcp-registration-actual-main-fixture.ts:31:11
+     29|   const snapshot = readFileSync(new URL('../fixtures/r299-main-candida…
+     30|   if (!actual.equals(snapshot) || createHash('sha256').update(actual).…
+     31|     throw Error('r324_actual_Main_source_binding_NOT_READY');
+       |           ^
+     32|   // The following AST is built from this same actual applied read, ne…
+     33|   return actual.toString('utf8');
+ ❯ actualMainRegistrationFixture tests/main/mcp-registration-actual-main-fixture.ts:166:62
+ ❯ withActualMainRegistration tests/main/mcp-registration-actual-main-fixture.ts:255:19
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts:85:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[62/119]⎯
+
+ FAIL  tests/main/rejected-bridge-gateway-ownership.test.ts > G5 actual stop waits every returned raw after one rejection; pending does not advance dependent closes
+Error: r334_actual_Main_binding_NOT_READY
+ ❯ actualStopProbe tests/main/rejected-bridge-gateway-ownership.test.ts:19:163
+
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts:100:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[63/119]⎯
+
+ FAIL  tests/main/rejected-bridge-gateway-ownership.test.ts > G6 actual stop sync pre-effect throw can leave a client unsealed: no new dependent release; existing MCP fallback is not qualification
+Error: r334_actual_Main_binding_NOT_READY
+ ❯ actualStopProbe tests/main/rejected-bridge-gateway-ownership.test.ts:19:163
+
+ ❯ tests/main/rejected-bridge-gateway-ownership.test.ts:118:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[64/119]⎯
+
+ FAIL  tests/main/room-field-classification.test.ts > Room field classification contracts > type-level key equality assertions compile
+AssertionError: expected [ …(3) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Type 'false' does not satisfy the constraint 'true'.",
++   "Type 'false' does not satisfy the constraint 'true'.",
++   "Type 'false' does not satisfy the constraint 'true'.",
++ ]
+
+ ❯ tests/main/room-field-classification.test.ts:58:115
+     56| describe('Room field classification contracts', () => {
+     57|   it('type-level key equality assertions compile', () => {
+     58|     expect(program.getSemanticDiagnostics(source).map(d => ts.flattenD…
+       |                                                                                                                   ^
+     59|   });
+     60|   it('rejects a desktop contract field added without classification', …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[65/119]⎯
+
+ FAIL  tests/main/room-field-classification.test.ts > Room field classification contracts > covers actual RoomWorkspaceInstructions keys at runtime
+AssertionError: expected [ 'candidateHash', …(6) ] to deeply equal [ 'candidateHash', …(12) ]
+
+- Expected
++ Received
+
+  [
+    "candidateHash",
+    "candidateText",
+-   "description",
+-   "directoryNotes",
+-   "publishedAt",
+-   "publishedBy",
+    "publishedText",
+    "revision",
+-   "roomId",
+-   "snapshotDigest",
+    "sourceChanged",
+    "sourceHash",
+    "sourceRelativePath",
+  ]
+
+ ❯ tests/main/room-field-classification.test.ts:89:39
+     87|   ] as const)('covers actual %s keys at runtime', (name, table) => {
+     88|     const alias = source.statements.find(n => ts.isTypeAliasDeclaratio…
+     89|     expect(Object.keys(table).sort()).toEqual(checker.getTypeAtLocatio…
+       |                                       ^
+     90|   });
+     91|   it('tracks workspace_changed object literals in main', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[66/119]⎯
+
+ FAIL  tests/main/room-field-classification.test.ts > Room field classification contracts > covers actual RoomWorkspaceClaim keys at runtime
+AssertionError: expected [ 'agentName', …(7) ] to deeply equal [ 'acquireDigest', 'agentName', …(30) ]
+
+- Expected
++ Received
+
+  [
+-   "acquireDigest",
+    "agentName",
+    "authorizationState",
+-   "bindingId",
+    "claimId",
+-   "contextScope",
+-   "createdAt",
+    "executionState",
+    "executorInstanceId",
+-   "generation",
+-   "hostIncarnation",
+-   "hostPrincipal",
+-   "instructionsDigest",
+    "instructionsRevision",
+-   "lastHeartbeatAt",
+-   "logicalAgentId",
+-   "mappingRevision",
+-   "membershipRevision",
+-   "originHostId",
+-   "parentClaimId",
+    "projectId",
+-   "projectMappingRevision",
+-   "protocolVersion",
+-   "roomId",
+-   "roomSequence",
+    "runId",
+-   "taskId",
+-   "taskName",
+-   "terminationEvidence",
+-   "updatedAt",
+-   "workspaceId",
+-   "workspaceRevision",
+  ]
+
+ ❯ tests/main/room-field-classification.test.ts:89:39
+     87|   ] as const)('covers actual %s keys at runtime', (name, table) => {
+     88|     const alias = source.statements.find(n => ts.isTypeAliasDeclaratio…
+     89|     expect(Object.keys(table).sort()).toEqual(checker.getTypeAtLocatio…
+       |                                       ^
+     90|   });
+     91|   it('tracks workspace_changed object literals in main', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[67/119]⎯
+
+ FAIL  tests/main/room-field-classification.test.ts > Room field classification contracts > covers actual RoomWorkspaceArtifact keys at runtime
+AssertionError: expected [ 'artifactId', 'bindingId', …(12) ] to deeply equal [ 'artifactId', 'bindingId', …(23) ]
+
+- Expected
++ Received
+
+  [
+    "artifactId",
+    "bindingId",
+-   "commitTicketId",
+-   "confirmationTicketId",
+    "contentHash",
+-   "contextScope",
+    "generation",
+-   "handoff",
+-   "observedAt",
+-   "originHostId",
+    "producerAgentId",
+-   "producerClaimId",
+    "producerDisplayName",
+    "producerRunId",
+    "producerType",
+    "projectId",
+    "relativePath",
+-   "roomId",
+    "size",
+-   "sourceSequence",
+    "state",
+    "synchronization",
+    "versionId",
+-   "workspaceId",
+-   "workspaceRevision",
+  ]
+
+ ❯ tests/main/room-field-classification.test.ts:89:39
+     87|   ] as const)('covers actual %s keys at runtime', (name, table) => {
+     88|     const alias = source.statements.find(n => ts.isTypeAliasDeclaratio…
+     89|     expect(Object.keys(table).sort()).toEqual(checker.getTypeAtLocatio…
+       |                                       ^
+     90|   });
+     91|   it('tracks workspace_changed object literals in main', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[68/119]⎯
+
+ FAIL  tests/main/semantic-product-runtime.test.ts > actual managed group semantic boundary: stable
+Error: actual product capacity environment required
+ ❯ tests/main/semantic-product-runtime.test.ts:74:115
+     72|
+     73| it.each(['stable','new-input'] as const)('actual managed group semanti…
+     74|  if(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(j…
+       |                                                                                                                   ^
+     75|  const {DesktopMultiAgentStore}=await import('../../electron/desktop-m…
+     76|  const {DesktopExecutionCoordinator}=await import('../../electron/desk…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[69/119]⎯
+
+ FAIL  tests/main/semantic-product-runtime.test.ts > actual managed group semantic boundary: new-input
+Error: actual product capacity environment required
+ ❯ tests/main/semantic-product-runtime.test.ts:74:115
+     72|
+     73| it.each(['stable','new-input'] as const)('actual managed group semanti…
+     74|  if(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(j…
+       |                                                                                                                   ^
+     75|  const {DesktopMultiAgentStore}=await import('../../electron/desktop-m…
+     76|  const {DesktopExecutionCoordinator}=await import('../../electron/desk…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[70/119]⎯
+
+ FAIL  tests/main/workflow-review-mode.test.ts > actual workflow 'review' reads reference and preserves its intended 'write' behavior
+Error: kswarm_workflow_read_instance_unknown
+ ❯ assertWorkflowReadService electron/kswarm-service.ts:712:92
+
+ ❯ getKSwarmWorkflowReadPort electron/kswarm-service.ts:717:14
+ ❯ Object.runKSwarmWorkflowNode electron/desktop-services.ts:2583:77
+ ❯ tests/main/workflow-review-mode.test.ts:13:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[71/119]⎯
+
+ FAIL  tests/main/workflow-review-mode.test.ts > actual workflow 'review' reads reference and preserves its intended 'edit' behavior
+ FAIL  tests/main/workflow-review-mode.test.ts > actual workflow 'agent_task' reads reference and preserves its intended 'write' behavior
+Error: kswarm_workflow_read_instance_unknown
+ ❯ assertWorkflowReadService electron/kswarm-service.ts:712:92
+
+ ❯ getKSwarmWorkflowReadPort electron/kswarm-service.ts:717:14
+ ❯ Object.runKSwarmWorkflowNode electron/desktop-services.ts:2583:77
+ ❯ tests/main/workflow-review-mode.test.ts:13:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[72/119]⎯
+
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'unknown_category' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_kind' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_attempt' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_handoff' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_participant' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_run' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_node' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'wrong_root' before allocating a provider
+ FAIL  tests/main/workflow-stored-restrictions-denials.test.ts > actual fresh restrictions deny 'cancelled' before allocating a provider
+AssertionError: expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+
+Expected: "workflow_stored_restrictions_denied"
+Received: "KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189"
+
+ ❯ tests/main/workflow-stored-restrictions-denials.test.ts:34:2
+     32|   expect(response.ok).toBe(true);expect((await response.json()).workfl…
+     33|  }
+     34|  await expect(desktop.runKSwarmWorkflowNode({handoff,targetParticipant…
+       |  ^
+     35|  expect(calls).toBe(0);expect(readFileSync(file,'utf8')).toBe('ORIGINA…
+     36|  console.log(JSON.stringify({reason,actualHTTP:true,actualIssuer:true,…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[73/119]⎯
+
+ FAIL  tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions=null desiredReadonly=false
+ FAIL  tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions={ toolCategories: [ …(2) ] } desiredReadonly=false
+ FAIL  tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions={ Object (toolCategories) } desiredReadonly=true
+ FAIL  tests/main/workflow-stored-restrictions-effects.test.ts > actual issuer/network/main/native effects permissions=null desiredReadonly=true
+KSwarmUnavailableError: KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189
+ ❯ request electron/kswarm-service.ts:1493:13
+    1491|
+    1492|     if (!running) {
+    1493|       throw new KSwarmUnavailableError(lastError || 'KSwarm service fa…
+       |             ^
+    1494|     }
+    1495|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[74/119]⎯
+
+ FAIL  tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'prepared_effect' before its effect
+ FAIL  tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'actual_dispatch' before its effect
+ FAIL  tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'next_model_turn' before its effect
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/main/workflow-stored-restrictions-held.test.ts:52:35
+     50|  }
+     51|  const result=await outcome;expect(readFileSync(file,'utf8')).toBe('OR…
+     52|  expect(fixture.durableMutations).toHaveLength(1);
+       |                                   ^
+     53|  if(stage==='queued_admission')expect(calls).toBe(0);else expect(calls…
+     54|  expect(result.ok).toBe(false);if(!result.ok)expect(String(result.erro…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[75/119]⎯
+
+ FAIL  tests/main/workflow-stored-restrictions-held.test.ts > actual issued writable policy tightens at 'queued_admission' before its effect
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/main/workflow-stored-restrictions-held.test.ts:49:42
+     47|  if(stage==='queued_admission'){
+     48|   const until=Date.now()+2000;while(coordinator.snapshot().waiting===0…
+     49|   expect(coordinator.snapshot().waiting).toBe(1);await fixture.tighten…
+       |                                          ^
+     50|  }
+     51|  const result=await outcome;expect(readFileSync(file,'utf8')).toBe('OR…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[76/119]⎯
+
+ FAIL  tests/main/workflow-stored-restrictions-partial-denial.test.ts > real existing aggregate partial write denial wins over node permissions null
+ FAIL  tests/main/workflow-stored-restrictions-partial-denial.test.ts > real existing aggregate partial write denial wins over node permissions { toolCategories: [ …(2) ] }
+AssertionError: expected [Function] to throw error including 'workflow_stored_restrictions_denied' but got 'KSwarm service unavailable: failed to…'
+
+Expected: "workflow_stored_restrictions_denied"
+Received: "KSwarm service unavailable: failed to kill stale kswarm service on port 4400: existing kswarm service on port 4400 is not the bundled service; reason=entry_path_mismatch; expectedEntryPath=<local-user>/projects/.worktrees/pi-durable-optimization-20261021/kswarm/src/server/index.js; actualEntryPath=<local-user>/projects/kswarm/src/server/index.js; expectedSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189; actualSourceHash=ba0829d54cfbbe9e87e47ad2362b7c860247969380ead088e179697f18cf9189"
+
+ ❯ tests/main/workflow-stored-restrictions-partial-denial.test.ts:23:2
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[77/119]⎯
+
+
+ Test Files  22 failed | 1 passed (23)
+      Tests  118 failed | 78 passed | 33 skipped (229)
+   Start at  03:51:24
+   Duration  151.72s (transform 4.50s, setup 880ms, collect 11.75s, tests 164.55s, environment 2ms, prepare 684ms)

@@ -1,0 +1,10 @@
+
+ RUN  v3.2.4 <worktree>/desktop
+
+Sourcemap for "<worktree>/desktop/node_modules/@electron/asar/lib/asar.js" points to missing source files
+ ✓ tests/main/artifact-export-package.test.ts (40 tests | 1 skipped) 333ms
+
+ Test Files  1 passed (1)
+      Tests  39 passed | 1 skipped (40)
+   Start at  04:05:09
+   Duration  1.20s (transform 108ms, setup 138ms, collect 535ms, tests 333ms, environment 0ms, prepare 33ms)

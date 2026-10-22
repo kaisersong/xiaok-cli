@@ -4,7 +4,8 @@ import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../src/ai/models.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
-import { streamDesktopTaskRecovery } from './desktop-task-stream.js';
+import { captureDesktopTaskUsage, streamDesktopTaskRecovery } from './desktop-task-stream.js';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import type { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
@@ -78,9 +79,20 @@ export async function createProjectAgentModel(options: {
         input.onInvocation?.(invocationId);
         const chunks: StreamChunk[] = [];
         let providerFailed = false;
+        let usageConsumerFailed = false;
+        let usageAdmissionFailed = false;
+        let usageAdmission: DesktopModelUsageAdmission | undefined;
         let providerError: unknown;
-        const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
+        let iterator: AsyncIterator<StreamChunk> | undefined;
         try {
+          if (input.admitUsage) {
+            try {
+              if (!physicalRun) throw Error('desktop_usage_physical_claim_required');
+              physicalRun.assertCurrent();
+              usageAdmission = input.admitUsage(prepared.invocationId);
+            } catch (error) { usageAdmissionFailed = true; throw error; }
+          }
+          iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
           for (;;) {
             let next: IteratorResult<StreamChunk>;
@@ -91,17 +103,33 @@ export async function createProjectAgentModel(options: {
             if (next.done) break;
             const chunk = next.value;
             // Usage belongs to this actual request even when its visible result fails.
-            if (chunk.type === 'usage') { yield chunk; continue; }
+            if (chunk.type === 'usage') {
+              const consumer = usageAdmission
+                ? (value: Extract<StreamChunk, { type: 'usage' }>) => usageAdmission!.commit(value.usage?.inputTokens ?? 0, value.usage?.outputTokens ?? 0)
+                : input.onUsage;
+              try { await captureDesktopTaskUsage(consumer, chunk, prepared.invocationId, physicalRun); }
+              catch (error) { usageConsumerFailed = true; throw error; }
+              yield chunk; continue;
+            }
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
         } catch (error) { providerFailed = true; providerError = error; }
         finally {
           let observedReturn = false;
-          try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
+          try { const raw = iterator?.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
           catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }
+          finally {
+            try { usageAdmission?.revoke(); }
+            catch (error) {
+              physicalRun?.noteReturnFailure(error);
+              closingFailure = { error: closingFailure ? new AggregateError([closingFailure.error, error], 'project_provider_return_and_usage_revoke_failed', { cause: closingFailure.error }) : error };
+              if (providerFailed) closingBusiness = { error: providerError };
+            }
+          }
         }
         if (closingFailure) return;
+        if (usageConsumerFailed || usageAdmissionFailed) throw providerError;
         input.options?.signal?.throwIfAborted();
         if (!providerFailed && (!chunks.some(chunk => chunk.type === 'done') || !chunks.some(chunk => chunk.type === 'tool_use' || (chunk.type === 'text' && chunk.delta.trim())))) {
           providerFailed = true;

@@ -10,10 +10,18 @@ import tempfile
 import time
 
 
+class TtyCleanupError(RuntimeError):
+    """Preserve the original body and every cleanup exception object."""
+    def __init__(self, errors):
+        self.errors = tuple(errors)
+        super().__init__('TTY body and cleanup failures: ' +
+                         ', '.join(type(error).__name__ for error in errors))
+
+
 def run(entry: Path, scope: str, kind: str):
     spec = importlib.util.spec_from_file_location('helpers', Path(__file__).with_name('tmux-e2e.py'))
     helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
-    root = Path(tempfile.mkdtemp(prefix=f'xiaok-exact-{scope}-{kind}-'))
+    root = Path(tempfile.mkdtemp(prefix=f'xiaok-exact-{scope}-{kind}-')).resolve()
     work, config, home = root / 'project', root / 'config', root / 'home'
     work.mkdir(); home.mkdir()
     log = work / 'build.log' if kind == 'redirect' else root / 'temporary-build.log'
@@ -34,6 +42,13 @@ def run(entry: Path, scope: str, kind: str):
     tty = IsolatedTmux('exact', work, config, home, entry, helpers.resolve_tmux_binary(),
         auto_mode=False, env_overrides={'XIAOK_DISABLE_GLOBAL_PLUGINS': '1'})
     owned = []
+    primary_error = None
+    exit_receipts = []
+
+    def observe_exit():
+        receipt = tty.wait_for_exit(timeout=10)
+        exit_receipts.append(receipt)
+        (root / 'exit-receipts.json').write_text(json.dumps(exit_receipts, indent=2))
 
     def wait_for(predicate, name):
         screen = tty.wait_for(predicate, timeout=20); (root / f'{name}.txt').write_text(screen)
@@ -53,7 +68,7 @@ def run(entry: Path, scope: str, kind: str):
         tty.send_text(f'Run exact approval probe {index}'); tty.send_key('Enter')
 
     def exit_session():
-        tty.send_text('/exit'); tty.send_key('Enter'); time.sleep(1)
+        tty.send_text('/exit'); tty.send_key('Enter'); observe_exit()
         session = next((config / 'sessions').glob('sess_*.json'))
         saved = json.loads(session.read_text())
         assert saved['intentDelegation']['ownership']['state'] == 'released'
@@ -94,22 +109,46 @@ def run(entry: Path, scope: str, kind: str):
         assert len(rules) == 1 and rules[0].startswith('bash(@exact:')
         assert command not in json.dumps(rules), 'raw script persisted in approval settings'
         exit_session()
-        (root / 'result.json').write_text(json.dumps({'passed': True, 'entry': str(entry), 'scope': scope, 'kind': kind,
+        (root / 'result.json').write_text(json.dumps({'passed': True, 'exitReceipts': exit_receipts, 'entry': str(entry), 'scope': scope, 'kind': kind,
             'sameProcessAndResumeReused': True, 'changedPayloadDenied': True, 'prompts': 2,
             'executions': 3, 'scriptNotStoredInSettings': True}, indent=2))
         print(f'PASS: {scope}/{kind}; one approval -> same process -> resume; changed payload still prompts')
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
-        tty.stop(); server.close(); remaining = list(owned); deadline = time.monotonic() + 5
+        cleanup_errors = []
+        for close in (tty.stop, server.close):
+            try: close()
+            except BaseException as error: cleanup_errors.append(error)
+        remaining = list(owned)
+        deadline = time.monotonic() + 5
         while remaining and time.monotonic() < deadline:
             alive = []
+            probe_failed = False
             for pid in remaining:
                 try: os.kill(pid, 0); alive.append(pid)
                 except ProcessLookupError: pass
+                except BaseException as error:
+                    cleanup_errors.append(error)
+                    alive.append(pid)
+                    probe_failed = True
             remaining = alive
+            if probe_failed: break  # Unknown is failure; do not repeat/erase its original exception.
             if remaining: time.sleep(0.05)
-        (root / 'owned-pids.json').write_text(json.dumps({'pids': owned, 'remaining': remaining}))
-        print(f'CLEANUP: owned CLI processes remaining={len(remaining)}; local SSE closed')
-        print('EVIDENCE', root); assert not remaining
+        try:
+            (root / 'owned-pids.json').write_text(json.dumps({'pids': owned, 'remaining': remaining,
+                'cleanupErrors': [type(error).__name__ for error in cleanup_errors]}))
+        except BaseException as error: cleanup_errors.append(error)
+        for values in ((f'CLEANUP: owned CLI processes remaining={len(remaining)}; cleanup errors={len(cleanup_errors)}',),
+                       ('EVIDENCE', root)):
+            try: print(*values)
+            except BaseException as error: cleanup_errors.append(error)
+        if remaining: cleanup_errors.append(AssertionError(f'owned processes survived or unknown: {remaining}'))
+        if cleanup_errors:
+            errors = ([primary_error] if primary_error is not None else []) + cleanup_errors
+            if len(errors) == 1: raise errors[0]
+            raise TtyCleanupError(errors) from errors[0]
 
 
 if __name__ == '__main__':

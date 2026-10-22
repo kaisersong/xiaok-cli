@@ -184,14 +184,20 @@ describe('MCP cancellation R1: real ToolRegistry boundaries', () => {
 });
 
 describe('MCP cancellation R1: generic builder and CUA production multi-step wrapper', () => {
-  it('M8 passes only per-call signal through the actual generic builder and does not retain the previous caller', async () => {
+  it('M8 passes each per-call signal and execution context through the actual generic builder without retaining the previous caller', async () => {
     const callTool = vi.fn(async (_name: string, _input: Record<string, unknown>, _options?: unknown) => 'ok');
     const schema = { name: 'probe', description: 'fixture', inputSchema: { type: 'object' as const } };
     const tools = buildMcpRuntimeTools({ name: 'cancel', command: 'fixture' }, { listTools: async () => [schema], callTool, dispose() {} }, [schema]);
     const a = new AbortController(); const b = new AbortController();
-    await tools[0]!.execute({}, mcpTestContext(a.signal, { taskId: 'private-task' }));
-    a.abort(new Error('old turn')); await tools[0]!.execute({}, mcpTestContext(b.signal));
-    expect(callTool.mock.calls).toEqual([['probe', {}, { signal: a.signal }], ['probe', {}, { signal: b.signal }]]);
+    const first = mcpTestContext(a.signal, { taskId: 'private-task' });
+    const second = mcpTestContext(b.signal);
+    await tools[0]!.execute({}, first);
+    a.abort(new Error('old turn')); await tools[0]!.execute({}, second);
+    expect(callTool.mock.calls).toEqual([
+      ['probe', {}, { signal: a.signal, executionContext: first }],
+      ['probe', {}, { signal: b.signal, executionContext: second }],
+    ]);
+    expect(callTool.mock.calls[1]![2]).not.toHaveProperty('executionContext.taskId', first.taskId);
   });
 
   it.each(['list_windows', 'click', 'capture_after_lookup', 'capture_after_result'] as const)('M5 stops at the actual CUA %s barrier with no later backend action', async (stage) => {

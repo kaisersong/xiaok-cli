@@ -356,14 +356,14 @@ class TmuxHarness:
         self.extra_args = extra_args or []
         self.env_overrides = env_overrides or {}
 
-    def tmux(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def tmux(self, *args: str, check: bool = True, timeout: float = 10) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [self.tmux_bin, *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=10,
+            timeout=timeout,
         )
         if check and result.returncode != 0:
             raise RuntimeError(f"tmux {' '.join(args)} failed: {result.stderr.strip()}")
@@ -410,6 +410,35 @@ class TmuxHarness:
 
     def stop(self) -> None:
         self.tmux("kill-session", "-t", self.session, check=False)
+
+    def wait_for_exit(self, timeout: float = 10) -> dict:
+        """Observe a POSIX pane-command exit; never stop it to produce success."""
+        if timeout <= 0:
+            raise ValueError("pane exit timeout must be positive")
+        started = time.monotonic()
+        deadline = started + timeout
+        last = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"pane did not exit within {timeout}s: {last}")
+            query = self.tmux("display-message", "-p", "-t", self.session,
+                              "#{pane_dead}\t#{pane_dead_status}\t#{pane_dead_signal}",
+                              timeout=min(10, remaining))
+            fields = query.stdout.rstrip("\r\n").split("\t")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"pane exit observation exceeded {timeout}s")
+            if len(fields) != 3 or fields[0] not in ("0", "1"):
+                raise RuntimeError(f"unknown pane exit receipt: {fields!r}")
+            last = {"paneDead": fields[0], "exitCode": fields[1], "signal": fields[2]}
+            if fields[0] == "1":
+                if fields[1] != "0" or fields[2]:
+                    raise RuntimeError(f"pane did not exit successfully: {last}")
+                return {**last, "actualExitKnown": True,
+                        "elapsedSeconds": time.monotonic() - started}
+            if fields[1] or fields[2]:
+                raise RuntimeError(f"inconsistent live pane receipt: {last}")
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
 
     def capture(self, ansi: bool = False) -> str:
         flag = "-ep" if ansi else "-p"

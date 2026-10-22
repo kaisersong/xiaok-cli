@@ -1,0 +1,28 @@
+{
+  "label": "desktop-final-baseline",
+  "cwd": "<master-baseline>/desktop",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/main/bundled-mcp-v2-contract.test.ts",
+    "tests/main/e2e-dynamic-workflow-script.test.ts",
+    "tests/main/inherited-native-readonly.test.ts",
+    "tests/main/kb-integration.test.ts",
+    "tests/main/loop-assistant-consumption.test.ts",
+    "tests/main/memory-ipc-registry.test.ts",
+    "tests/main/react-doctor-low-risk-optimization.test.ts",
+    "tests/renderer/capability-migration-snapshot.test.ts",
+    "tests/renderer/chat-shell-canvas-session.test.tsx",
+    "tests/renderer/desktop-settings-voice-pane.test.tsx",
+    "tests/renderer/workspace-execution-drafts.bdd.test.tsx",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T19:56:09.298036+00:00",
+  "runnerPid": 38055,
+  "pid": 38059,
+  "pgid": 38059,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:56:52.288057+00:00",
+  "reaped": true
+}

@@ -1,0 +1,7 @@
+# Intent setup取消诊断
+
+达到预期：1 failed / 1 passed，exit1/reaped，默认hook未超时；这不是完整23验收。首项强制8s，真实timer在11649.748ms派发（同步CPU期间延迟，不能称8s已即时回收）；当时已获得f/receiver但fixture未返回，真实controller IPC收到ctx取消并报controller_ipc_aborted_unknown。receiver于11651.385ms关闭，f root于11659.862ms删除，同一scenario于11663.505ms被join。
+
+第二原registration分支11665.150ms开始，先断言firstJoined=true且首root已删除；保留40s与完整原断言，37850ms通过。其receiver/f也关闭并删除root，最终samepromise join为成功。原sourceSHA142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479未变。
+
+原log中的强制runner timeout和原IPC错误均保留，未吞错误。PID/PGID42397已reaped，ps核组0；精确副本与归档字节一致后已删除，未发送任何信号、未改生产/内部期限/原人口/资格/默认hook。完整trace及恢复后root测试文件人口见同名JSON。

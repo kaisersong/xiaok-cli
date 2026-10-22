@@ -1,0 +1,8 @@
+{
+  "pid": 38686,
+  "pgid": 29590,
+  "scope": "read-only own worker diagnostic; inspector close requested",
+  "returncode": 0,
+  "stdout": "{\"id\":2,\"result\":{\"result\":{\"type\":\"string\",\"value\":\"{\\\"file\\\":\\\"<worktree>/tests/runtime/verification/publication-operation.test.ts\\\",\\\"test\\\":\\\"actual verification to receiver publication: public-client-near-limit\\\",\\\"type\\\":\\\"test\\\",\\\"testFile\\\":\\\"<worktree>/tests/runtime/verification/publication-operation.test.ts\\\"}\"}}}\n",
+  "stderr": ""
+}

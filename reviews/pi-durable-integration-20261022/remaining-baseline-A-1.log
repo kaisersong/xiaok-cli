@@ -1,0 +1,67 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/runtime/isolated-execution/artifact-export.test.ts (7 tests | 1 failed) 1112ms
+   ✓ extracts exact regular bytes from actual tar, rejecting links, additional members and truncated trailers 78ms
+   × accepts actual bounded PAX Unicode names while preserving the exact requested file binding 23ms
+     → artifact_tar_path
+   ✓ persists immutable exports with shared reservations and restores only through an actual read authorization  341ms
+   ✓ repeats the real deletion directory barrier after a previous rmdir followed by fsync failure 296ms
+   ✓ rolls back the actual blob reservation when durable export intent insertion fails 192ms
+   ✓ rejects an outer budget transaction before starting even the archive read 77ms
+   ✓ rejects a budget from another real connection before opening the export directory and leaves borrowed DB open on close 104ms
+ ❯ tests/runtime/verification/installed-metadata-capacity-integration.test.ts (10 tests | 3 failed) 71139ms
+   ✓ uses the original shared ledger for an atomic controller DB and rollback batch, with exact intent replay  2281ms
+   ✓ rolls back original shared allocations when metadata intent commit fails and applies only the actual connection cap  2461ms
+   ✓ initializes the actual installed shared owner idempotently and recovers an old writer preparation without refund  4192ms
+   × reserves actual intent and ledger growth before applying the cap at a physical block boundary 19077ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × handles actual confirmed cap growth with no uncharged space: usable 21027ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ handles actual confirmed cap growth with no uncharged space: legacy-charged  6677ms
+   × handles actual confirmed cap growth with no uncharged space: failed-growth 13256ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ inspects and consumes the original fixed metadata command inside the same real SQLite transaction as its writes  1304ms
+   ✓ cold initial metadata allocation precedes public readiness through the same original startup: confirmed  555ms
+   ✓ cold initial metadata allocation precedes public readiness through the same original startup: intent-failure  308ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/isolated-execution/artifact-export.test.ts > accepts actual bounded PAX Unicode names while preserving the exact requested file binding
+Error: artifact_tar_path
+ ❯ extractSingleArtifact src/runtime/isolated-execution/artifact-export.ts:42:81
+     40|   const prefix=text(header.subarray(345,500)),name=text(header.subarra…
+     41|   const resolved=extended?.get('path')??(prefix?prefix+'/'+name:name);
+     42|   if(resolved!==expected||resolved.includes('/')||resolved.includes('\…
+       |                                                                                 ^
+     43|   result=Buffer.from(input.subarray(start,end));extended=undefined;off…
+     44|  }
+ ❯ tests/runtime/isolated-execution/artifact-export.test.ts:16:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-capacity-integration.test.ts > reserves actual intent and ledger growth before applying the cap at a physical block boundary
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/installed-metadata-capacity-integration.test.ts:58:1
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  tests/runtime/verification/installed-metadata-capacity-integration.test.ts > handles actual confirmed cap growth with no uncharged space: usable
+ FAIL  tests/runtime/verification/installed-metadata-capacity-integration.test.ts > handles actual confirmed cap growth with no uncharged space: failed-growth
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/installed-metadata-capacity-integration.test.ts:63:61
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 13 passed (17)
+   Start at  04:00:08
+   Duration  75.52s (transform 2.14s, setup 59ms, collect 8.29s, tests 72.25s, environment 0ms, prepare 59ms)

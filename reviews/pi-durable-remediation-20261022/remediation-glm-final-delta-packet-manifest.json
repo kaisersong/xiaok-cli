@@ -1,0 +1,248 @@
+{
+  "createdAt": "2026-10-22T01:23:49.451954+00:00",
+  "head": "d0e35e73014add369748de77fe2a868a62777f13",
+  "inputBytes": 532839,
+  "inputSha256": "a934cd15c4446cdb66c8e86d38600f3df831a8deb10033687d9435730b90f43f",
+  "parts": [
+    {
+      "path": "REVIEW REQUEST",
+      "bytes": 3080,
+      "sha256": "b69f2b7063669b230ceb8a6507cefa88cc15e8c556d07f47446d60e82013e62b"
+    },
+    {
+      "path": "EARLIER PRODUCTION REVIEW HASH BINDING",
+      "bytes": 1512,
+      "sha256": "e2159d04a3967e0c2f61a8e674d3713a0eaece3318c5a2543e3cb7c74737fd0f"
+    },
+    {
+      "path": "desktop/electron/loop-business-publication-host.ts",
+      "bytes": 24507,
+      "sha256": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858"
+    },
+    {
+      "path": "desktop/electron/loop-output-service.ts",
+      "bytes": 9213,
+      "sha256": "497fb772a76e4c509d62a212907fb6edeed28e018a461a129fda7bdca73b9a23"
+    },
+    {
+      "path": "desktop/electron/loop-published-artifacts.ts",
+      "bytes": 6333,
+      "sha256": "27fef6574208a8755c365d9fce160bfc83c10359731828143ff3e21a9ccbe403"
+    },
+    {
+      "path": "src/runtime/loop/published-candidate.ts",
+      "bytes": 6027,
+      "sha256": "e6552719c62c6c8fc2df2414d7f48702a4acd8aa29263fcedabcb94a6d2f8766"
+    },
+    {
+      "path": "src/runtime/verification/published-artifact-reader.ts",
+      "bytes": 17521,
+      "sha256": "78c01dcea4af2bf9e9dff7754dbe96150b2bcb8c216ba9223cf54f7171cd60ab"
+    },
+    {
+      "path": "src/runtime/verification/application-value-data.ts",
+      "bytes": 11846,
+      "sha256": "49eaed24e3d15c995206c46b47d5b13696ced40acb3d50081d79f44d2080c578"
+    },
+    {
+      "path": "src/ai/runtime/model-stream-physical-owner.ts",
+      "bytes": 3933,
+      "sha256": "9c03bdae8849ac56d1f6b804e32a15fda7da88915f981ee66e9581b4088edc0e"
+    },
+    {
+      "path": "desktop/tests/main/loop-business-projection.test.ts",
+      "bytes": 22958,
+      "sha256": "0f72efa36a0170922f2c975aa39fa4b30476c854a6fe818a75a7c75ab425db0c"
+    },
+    {
+      "path": "desktop/tests/main/loop-verification-execution-controller.test.ts",
+      "bytes": 29201,
+      "sha256": "83582426fda875e785ddf75b03ebdb2a7a1b528e1c861c5008fa8052912ef4e6"
+    },
+    {
+      "path": "tests/runtime/verification/intent-publication-dependencies.test.ts",
+      "bytes": 29499,
+      "sha256": "142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479"
+    },
+    {
+      "path": "desktop/tests/fixtures/multi-agent-activity-failure.ts",
+      "bytes": 16114,
+      "sha256": "eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+      "bytes": 11682,
+      "sha256": "ad15fa223558ceee110690569f2a8665be7c4b21e6ad67c106e2d78bd3ec2298"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+      "bytes": 15274,
+      "sha256": "5eb0ed6ea194a4d652e8e62ce9a3b972ed5d98e99811365688d4a9c93eaba379"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+      "bytes": 12284,
+      "sha256": "dcbaf379ca9076fb1280fe1ffe757b0d0f3efd52c461ee9279929422704918e8"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+      "bytes": 13171,
+      "sha256": "3dbc0bb0dca2a6e09cf8657f159bd45de25a82299b2ff5c6da9181e107d13783"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+      "bytes": 13406,
+      "sha256": "51bbf026869b171cddf9127d51943601aaaaa629a00977b8888e9bd7967bb4d4"
+    },
+    {
+      "path": "desktop/tests/main/conversation-activity-store.test.ts",
+      "bytes": 11294,
+      "sha256": "5b9fee823b0815763dd4646229a0b33f60b7d1d4e67410dc51d375810a5796ef"
+    },
+    {
+      "path": "desktop/tests/main/desktop-post-seal-process.bdd.test.ts",
+      "bytes": 24321,
+      "sha256": "b33037542acc9db7c8066eae03a0f9eb52f933b9adb389cbcdfadf84f47fcd49"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-post-seal-owner.ts",
+      "bytes": 14528,
+      "sha256": "6e85a9171ccdbd68ed52b5c39082b56b8d6d54f51e58cbc6c75fa308866715fb"
+    },
+    {
+      "path": ".github/workflows/desktop-cross-platform.yml",
+      "bytes": 10503,
+      "sha256": "4a72aa6b53a7a212ad1659f1a16d822e81d472d60cbb00c22a59a4dec2e131c6"
+    },
+    {
+      "path": ".github/workflows/model-recovery.yml",
+      "bytes": 5453,
+      "sha256": "33736f8d982a7d5d1636dc79f2da78f61931db191e314113f7ce4bfff9769e78"
+    },
+    {
+      "path": ".github/workflows/glob-search.yml",
+      "bytes": 1640,
+      "sha256": "71d01c4b19a07abd067c7aa57fdb48b1a308bbddf22d9798a2969aff5539f1ff"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-post-seal-passive-trace.ts",
+      "bytes": 8686,
+      "sha256": "14b4f65dedfc8440e87600fa7701d6337a8fda256f722f2e69fa6a60ef7a2703"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-post-seal-verifier-contract.ts",
+      "bytes": 4258,
+      "sha256": "6f3acd7020ecccd704ee598ef721dad531124ce5c93709e26ca6f5df5c1f235f"
+    },
+    {
+      "path": "CURRENT TRACKED DELTA FOR THIS SCOPE",
+      "bytes": 108817,
+      "sha256": "38320c6c8aa0ccf42c8fd2260028832396fb39849babd84b006b2c4786216bc5"
+    },
+    {
+      "path": "desktop/electron/desktop-services.ts actual disposal excerpt",
+      "bytes": 3505,
+      "sha256": "9c36137d163d7aec1c735f5d8af067a81300ef07785214544886f037fbaee455"
+    },
+    {
+      "path": "desktop/electron/desktop-multi-agent-service.ts actual disposal excerpt",
+      "bytes": 5901,
+      "sha256": "5aa84d3819e1bafe0b76db45acf870919f6fb627a6b91d587f66e798a98f2777"
+    },
+    {
+      "path": "completion-composition actual L40-85",
+      "bytes": 6496,
+      "sha256": "2baffa1c59943fb8e3d9f19ba129355447643d7e13681ef71ce13d5c824ea323"
+    },
+    {
+      "path": "reviews/failure-remediation-root.md",
+      "bytes": 19067,
+      "sha256": "a070d1c9f721533ca5e8c31fdd0e634d88ef6dcf2d5c5b0557b1ec9c7d2980dd"
+    },
+    {
+      "path": "reviews/pi-durable-remediation-results-20261022.md",
+      "bytes": 5155,
+      "sha256": "f61a529e654e1bec53906dfacad0fedf474e7f56d85533ddf3978e6ec42d9af3"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B10-results.md",
+      "bytes": 2750,
+      "sha256": "4a71483525c628c64eac4ed30fa2d13c5f884985a93e949c83de42e6f078dc6e"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B10-host-ast-audit.json",
+      "bytes": 3485,
+      "sha256": "7b940008a63c22560a0ff9903b7f64abbbf29592d658f5c26d9d003ac78780f1"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B-D6-results.md",
+      "bytes": 2281,
+      "sha256": "f4a85cf61d00c99c72ec6f169c4636840ecb3e37bee1651d995582e8d80fc6d5"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B-D6-writer-analysis.json",
+      "bytes": 13016,
+      "sha256": "49e84bb5ba19a34e4fe4533b847cafae6999be568f45fc4ec6ce28900c76df13"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B-loop-final-review.md",
+      "bytes": 1991,
+      "sha256": "6637e435cccf50c3391585eb7f1936ded44392b55b9c7c43380f3f5ece8c18c2"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B-loop-final-node24-analysis.json",
+      "bytes": 9884,
+      "sha256": "32902029b7fdd54c6ad88b27f7a3762d3a09b16466fc8280a8e32712caaea89c"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B12-source-audit.json",
+      "bytes": 1396,
+      "sha256": "4907ebd30d53358036e76050b597f3419e1290a481ed55aa578878e2830c93a1"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-intent-static-audit.json",
+      "bytes": 614,
+      "sha256": "4186cca9fe8f76b02d7b9e6e80c90b85bb08f3aad6f763182e23a0934a39bb4b"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-intent-setup-diagnostic-results.md",
+      "bytes": 1056,
+      "sha256": "624c7b4181a645dd17ba8bf91b3bb66672397bba77049ff4b8d82433ef3e8115"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/A-intent-quiet-rerun-design-review.md",
+      "bytes": 880,
+      "sha256": "591b2b45298ace9943231e8f7e8d161d0dd4ea132a648059769bf5bfb880c003"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/root-activity-storm-static-audit.json",
+      "bytes": 322,
+      "sha256": "5674a513749debfea15603bceb9530944ba5cb08d9a5b71ede4010a02eabab53"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C9-root-gate-increment-plan.md",
+      "bytes": 5669,
+      "sha256": "ca0d060c762612af8eb94ff3c80419c69183299f434382e8d0d1992f4e8c91f2"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C9-final-code-manifest.json",
+      "bytes": 1172,
+      "sha256": "ee80666a5e1e4dc5dc1e563f025cdf14a6977c94d8e7ef406585101fe4af8fdc"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-clean-activity-forensics.mjs",
+      "bytes": 3962,
+      "sha256": "c2fce1f0a879d4ac477a87e32026e94fb5e7f0b08b4d4010477f4cbb8cea24fa"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-run.py",
+      "bytes": 1377,
+      "sha256": "92fde27442a9f88facb77eac6a3682372a330404b2807299b60b4ee9cf5d4774"
+    },
+    {
+      "path": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/A-C9-parent-negative-summary.json",
+      "bytes": 1157,
+      "sha256": "5e3fedaa85c2392b5671418dd0fb52265be0e025d78af4c9f450c4166eadc357"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "label": "remaining-baseline-A-1",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/verification/installed-metadata-capacity-integration.test.ts",
+    "tests/runtime/isolated-execution/artifact-export.test.ts",
+    "--maxWorkers=2"
+  ],
+  "startedAt": "2026-10-21T20:00:08.791123+00:00",
+  "runnerPid": 62163,
+  "pid": 62176,
+  "pgid": 62176,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:01:24.639392+00:00",
+  "reaped": true
+}

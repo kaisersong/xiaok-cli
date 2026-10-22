@@ -1,0 +1,16 @@
+✔ source bundling rejects a native binary in the dependency closure (28.337208ms)
+✔ source bundling rejects an unexpected installer version (5.927333ms)
+✔ actual prepack entry refuses direct source-tree packing without outputs or input changes (89.669167ms)
+✔ actual pack entry refuses missing universal native input (none) before packing (88.701958ms)
+✔ actual pack entry refuses missing universal native input (x64) before packing (96.934708ms)
+✔ actual pack entry refuses missing universal native input (arm64) before packing (108.431917ms)
+✔ merged manifest preserves native source lifecycle and all original helper build gates (3.084958ms)
+✔ original lock devDependencies contains exactly one pinned tar key (1.590667ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 477.328083

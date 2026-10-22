@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
@@ -18,10 +17,16 @@ export interface VerifierContract {
     signal: AbortSignal; deadline: number; trackPending(raw: Promise<unknown>): void;
   }): Promise<unknown> };
 }
-export async function compileVerifierEntry(file: 'delivery-verifier-worker.ts' | 'delivery-verifier.ts') {
+export async function compileVerifierEntry(file: 'delivery-verifier-worker.ts' | 'delivery-verifier.ts', ownership: { onAcquired?: (root: string) => void } = {}) {
+  const onAcquired = ownership.onAcquired;
   const source = join(taskHostDirectory, file);
   expect(existsSync(source), `missing production fixed entry ${file}; downstream protocol assertions not yet executed`).toBe(true);
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-compiled-'));
+  // Bundled production modules retain createRequire(import.meta.url). Keep the
+  // owned output under the repository so native dependencies resolve normally.
+  const artifactRoot = fileURLToPath(new URL('../../../.artifacts/', import.meta.url));
+  mkdirSync(artifactRoot, { recursive: true });
+  const root = mkdtempSync(join(artifactRoot, 'post-seal-compiled-'));
+  onAcquired?.(root);
   const output = join(root, file.replace('.ts', '.mjs'));
   const result = await build({ entryPoints: [source], outfile: output, bundle: true, platform: 'node', format: 'esm', metafile: true });
   return { root, output, metafile: result.metafile! };

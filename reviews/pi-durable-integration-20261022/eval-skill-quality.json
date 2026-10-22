@@ -1,0 +1,16 @@
+{
+  "label": "eval-skill-quality",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "eval:skill-quality"
+  ],
+  "startedAt": "2026-10-21T19:50:53.195875+00:00",
+  "runnerPid": 15379,
+  "pid": 15416,
+  "pgid": 15416,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:50:53.491537+00:00",
+  "reaped": true
+}

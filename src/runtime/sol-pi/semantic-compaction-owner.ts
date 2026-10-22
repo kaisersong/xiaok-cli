@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Message, ModelAdapter, ToolDefinition } from '../../types.js';
 import type { AgentSessionState, CompactionRecord } from '../../ai/runtime/session.js';
+import { CompactionResponseError } from '../../ai/runtime/compaction-response.js';
 import { CompactRunner } from '../../ai/runtime/compact-runner.js';
 import { executePortableCompaction } from '../../ai/runtime/portable-compaction-executor.js';
 import { decideCompactionCandidate } from './compaction-policy.js';
@@ -151,7 +152,8 @@ export function createSemanticCompactionOwner(options:{
        summary=await lease!.trackInFlight(withSemanticSummaryProviderScope(attempt,()=>runner.run([...messages],{...streamOptions,
         providerDisclosure:preparedSummary.providerDisclosure,semanticSummaryAttempt:attempt})));
       }catch(error){
-       if(!input.signal.aborted)await settle('unknown');
+       // A drained, complete empty response has settled transport facts but no usable summary.
+       if(!input.signal.aborted)await settle(error instanceof CompactionResponseError && error.reason==='empty'?'settled':'unknown');
        throw error;
       }
       await settle('settled');return summary;

@@ -1,0 +1,20 @@
+{
+  "label": "semantic-red",
+  "cwd": "<remote-validation>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/sol-pi/semantic-product-runtime.test.ts",
+    "--maxWorkers=1",
+    "--testNamePattern",
+    "actual Runtime semantic lifecycle: (empty|success|truncated|missing-terminal|late-error|tool-response|settlement-failure|commit-failure)$"
+  ],
+  "startedAt": "2026-10-21T19:42:53.108029+00:00",
+  "runnerPid": 40470,
+  "pid": 40473,
+  "pgid": 40473,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T19:43:36.264337+00:00",
+  "reaped": true
+}

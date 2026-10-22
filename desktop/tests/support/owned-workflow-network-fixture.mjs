@@ -1,6 +1,5 @@
-import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
-const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
+const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||resolve(import.meta.dirname,'../../..');
 const siblingRoot=resolve(repositoryRoot,'..');
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,mkdirSync,realpathSync} from 'node:fs';
@@ -119,7 +118,7 @@ try{
   await once(recipient,'open');
  }
  async function startOwnedServer(){
- child=spawn(process.execPath,['--import',fileURLToPath(new URL('./owned-workflow-child-account-preload.mjs',import.meta.url)),'src/server/index.js'],{cwd:resolve(siblingRoot,'kswarm'),env:{...process.env,XIAOK_WORKFLOW_FIXTURE_HOME:root,KSWARM_DATA_ROOT:data,KSWARM_PORT:String(port),BROKER_URL:brokerBase,KSWARM_DESKTOP_MUTATION_TOKEN:'temporary-test-token',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},stdio:['ignore','pipe','pipe']});
+ child=spawn(process.execPath,['--import',resolve(import.meta.dirname,'owned-workflow-child-account-preload.mjs'),'src/server/index.js'],{cwd:resolve(siblingRoot,'kswarm'),env:{...process.env,XIAOK_WORKFLOW_FIXTURE_HOME:root,KSWARM_DATA_ROOT:data,KSWARM_PORT:String(port),BROKER_URL:brokerBase,KSWARM_DESKTOP_MUTATION_TOKEN:'temporary-test-token',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},stdio:['ignore','pipe','pipe']});
  childClosed=new Promise(resolve=>child.once('close',resolve));
  // Own child is unconditionally stopped before existing 8s recovery/worker timer.
  let logs='';child.stdout.on('data',bytes=>{logs+=bytes.toString();});child.stderr.on('data',bytes=>{logs+=bytes.toString();});

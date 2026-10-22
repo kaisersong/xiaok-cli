@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, realpathSync, mkdirSync, symlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ vi.mock('../../../src/runtime/conversation-activity/owner-runtime.js', () => ({
   activityOwnerConfigDigest: (config: ActivityOwnerConfig) => JSON.stringify(config),
 }));
 let root: string;
-beforeEach(() => { vi.useFakeTimers(); root = mkdtempSync(join(tmpdir(), 'owner-exit-')); });
+beforeEach(() => { vi.useFakeTimers(); root = realpathSync(mkdtempSync(join(tmpdir(), 'owner-exit-'))); });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); rmSync(root, { recursive: true, force: true }); });
 function launch(event: 'exit' | 'error' = 'exit', successAt?: number) {
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
@@ -107,4 +107,29 @@ it.each(['kept_pending', 'kept_unknown', 'retired'] as const)('reports legacy ou
   const client = await ensureConversationActivityOwner(config, { retire: async () => outcome, onLegacyOwner, spawn: fakeSpawn as unknown as typeof spawn });
   expect(fakeSpawn).toHaveBeenCalledTimes(outcome === 'retired' ? 1 : 0);
   expect(onLegacyOwner.mock.calls).toEqual(outcome === 'kept_unknown' ? [] : [[outcome === 'retired' ? 'replaced' : 'reused_pending']]); client.dispose();
+});
+
+// Only the ancestor is linked: the dedicated activity tree itself stays private.
+it.skipIf(process.platform === 'win32')('normalizes a linked ancestor before digest validation and native owner spawn', async () => {
+  const realHome = join(root, 'physical-home');
+  const linkedHome = join(root, 'linked-home');
+  mkdirSync(realHome); symlinkSync(realHome, linkedHome);
+  const dataRoot = join(linkedHome, 'conversation-activity', 'profile');
+  const canonicalRoot = join(realHome, 'conversation-activity', 'profile');
+  const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: linkedHome } };
+  const normalized = { ...config, dataRoot: canonicalRoot };
+  vi.spyOn(ConversationActivityOwnerClient.prototype, 'request')
+    .mockRejectedValueOnce(new Error('not_ready'))
+    .mockResolvedValue({ profileId: 'fake', generation: ACTIVITY_OWNER_GENERATION, configDigest: activityOwnerConfigDigest(normalized), ready: true } as any);
+  const fakeSpawn = vi.fn((_executable: string, args: readonly string[]) => {
+    expect(args[1]).toBe(join(canonicalRoot, 'activity-owner.config.json'));
+    expect(JSON.parse(readFileSync(args[1]!, 'utf8'))).toEqual(normalized);
+    return Object.assign(new EventEmitter(), { unref: vi.fn() });
+  });
+  const retire = vi.fn(async () => 'retired' as const);
+  const client = await ensureConversationActivityOwner(config, { retire, spawn: fakeSpawn as unknown as typeof spawn });
+  try {
+    expect(fakeSpawn).toHaveBeenCalledOnce(); expect(retire).not.toHaveBeenCalled();
+    expect(realpathSync(dataRoot)).toBe(canonicalRoot);
+  } finally { client.dispose(); }
 });

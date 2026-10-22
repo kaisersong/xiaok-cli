@@ -1,0 +1,49 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/runtime/verification/loop-publication-set.test.ts (13 tests | 5 failed | 2 skipped) 187839ms
+   × checks original Loop publications together at one authority clock: current 19145ms
+     → Test timed out in 18000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × checks original Loop publications together at one authority clock: expired 20990ms
+     → Test timed out in 18000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × checks original Loop publications together at one authority clock: different-run 18559ms
+     → Test timed out in 18000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × checks original Loop publications together at one authority clock: duplicate 19552ms
+     → Test timed out in 18000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ↓ checks original Loop publications together at one authority clock: not-published
+   ↓ checks original Loop publications together at one authority clock: transition
+   × checks original Loop publications together at one authority clock: guard-write 18529ms
+     → Test timed out in 18000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ checks original Loop publications together at one authority clock: nonoverlap  15279ms
+   ✓ checks original Loop publications together at one authority clock: guard-ddl  15164ms
+   ✓ checks original Loop publications together at one authority clock: late-transition  16027ms
+   ✓ checks original Loop publications together at one authority clock: closed  15501ms
+   ✓ checks original Loop publications together at one authority clock: abort  15461ms
+   ✓ checks original Loop publications together at one authority clock: wrong-peer  13632ms
+ ✓ tests/runtime/verification/publication-operation.test.ts (30 tests | 29 skipped) 282794ms
+   ✓ actual verification to receiver publication: public-client-near-limit  282793ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/verification/loop-publication-set.test.ts > checks original Loop publications together at one authority clock: current
+ FAIL  tests/runtime/verification/loop-publication-set.test.ts > checks original Loop publications together at one authority clock: expired
+ FAIL  tests/runtime/verification/loop-publication-set.test.ts > checks original Loop publications together at one authority clock: different-run
+ FAIL  tests/runtime/verification/loop-publication-set.test.ts > checks original Loop publications together at one authority clock: duplicate
+ FAIL  tests/runtime/verification/loop-publication-set.test.ts > checks original Loop publications together at one authority clock: guard-write
+Error: Test timed out in 18000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/verification/loop-publication-set.test.ts:34:194
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  5 failed | 7 passed | 31 skipped (43)
+   Start at  04:07:23
+   Duration  285.98s (transform 1.99s, setup 64ms, collect 5.71s, tests 470.63s, environment 0ms, prepare 73ms)

@@ -1,0 +1,90 @@
+{
+  "normalization": "local workspace prefixes replaced with $WORKTREE/$PROJECTS; trailing whitespace and extra EOF blank lines removed; test output and counts unchanged",
+  "logs": [
+    {
+      "file": "completion-red-v2.log",
+      "rawSha256": "249c0481b8b3a377d9e7affa7ab0f1327248ddfdf6525d65019b4c18602751f1",
+      "archivedSha256": "bb6db27777eef0edc4bf764cc40b1f24143707eba04d58de6f819a65df523c79"
+    },
+    {
+      "file": "review-findings-red.log",
+      "rawSha256": "3aec97389eac01009b49fcaf5cde1ac5ba15e1b812f05830d922a39f05668aca",
+      "archivedSha256": "2a620cbe513192cd0af5c7f03ad3aa48ffe3df67a116285058074fb772bd23d5"
+    },
+    {
+      "file": "desktop-responses-red.log",
+      "rawSha256": "b6a01501248bab4e59b9faa1346b0be066e896dd59295ad330f6b98bb71b8ae4",
+      "archivedSha256": "b3ec34dfd0058acde2c8ab24f8726a72a2786a895db5b1ff2f813dd637d903bc"
+    },
+    {
+      "file": "root-final-node22.log",
+      "rawSha256": "1d0c7f742944debdee93e18af6f96cfeb526dc8b5a12ba326d1e516beb3ef7b6",
+      "archivedSha256": "66bcfe08446c59cd248ed2349ca38105246af8cd9e03ede1990d1cb17f7daf53"
+    },
+    {
+      "file": "root-final-node24.log",
+      "rawSha256": "76c449f2a2c78048a14c0b349718449db6e5175e46bb0c733abc098cc0214e5d",
+      "archivedSha256": "bf690cb790c14bbe522d3a8fb5d29d119bfbe596f1547bf642efbe01513b1271"
+    },
+    {
+      "file": "desktop-final-node22.log",
+      "rawSha256": "92ffd2186e0fab52b3c4d9c59d899aea94c9dc53429641a10933a343e55bf2e1",
+      "archivedSha256": "20078dbac36c00933309efcf54d0f800301afc181867b15da34a4ae9f973ac16"
+    },
+    {
+      "file": "desktop-final-node24.log",
+      "rawSha256": "72b1f5c9b9713f63bdd68a88259a8ab929a0396b5bcb2cb378202b75c95de75d",
+      "archivedSha256": "5a2fd3271b2543ec5011e0a5edd98f4034c6cd69e885fa5e63ab52cb21e436b9"
+    },
+    {
+      "file": "ci-command-local.log",
+      "rawSha256": "fd722452d2e9b7acf24734f8ffbc8328fe09ce8098fbca846a5c81ed8ea93ac3",
+      "archivedSha256": "dab21e4f9d415343041b1ecbe7940c5c66981edd7de5a1d4f13061f80e4a8931"
+    },
+    {
+      "file": "cli-build.log",
+      "rawSha256": "c94cfaa17e2fec2a61c4b145ed9628ea97d064a95ccda1115c1b05e7c8da87a7",
+      "archivedSha256": "c8603c70b195828eac6a552fd5fc75c8e806edfa9fff6eb002bc34ae8eadba57"
+    },
+    {
+      "file": "desktop-main-build.log",
+      "rawSha256": "203ae5e5f2aa56163fd29d384e07aeb76cd04a1e2d1865d4c87a135f83be387a",
+      "archivedSha256": "542a46190a45176d97e1f91d77349b2063bfecafe1f799c4deefc3fd69a2d9cf"
+    },
+    {
+      "file": "desktop-typecheck.log",
+      "rawSha256": "65e0eb8a67877b74aab1dc47f7c13800b5a012a8e050fcf25009c9a941bf6020",
+      "archivedSha256": "65e0eb8a67877b74aab1dc47f7c13800b5a012a8e050fcf25009c9a941bf6020"
+    },
+    {
+      "file": "test-compile-final.log",
+      "rawSha256": "d539eb058737123f4c7e3f60bb5be5637480f9a7db4807e605c2dd8e4546b09e",
+      "archivedSha256": "d11a1da98a26bd3c2b544174f776e0f1059e5141c17f657165e5353bdf62697f"
+    },
+    {
+      "file": "governance.log",
+      "rawSha256": "dbd85cb882ee0c7a53c3a654f746e1944574ce0700f613a2dd2ace56c83e7440",
+      "archivedSha256": "dbd85cb882ee0c7a53c3a654f746e1944574ce0700f613a2dd2ace56c83e7440"
+    },
+    {
+      "file": "architecture-changed.log",
+      "rawSha256": "7089e3960772ebb5a57ca4b86807aa352ca05b6308912e9bb70a83dc32acf7ea",
+      "archivedSha256": "7089e3960772ebb5a57ca4b86807aa352ca05b6308912e9bb70a83dc32acf7ea"
+    },
+    {
+      "file": "hygiene-final.log",
+      "rawSha256": "e402562976fa295a339bc09a02f17a9a0b165ab57eff675c375301a01445710e",
+      "archivedSha256": "91e9eb0938bdf80bf7aad1fc4aa34df2f8bc3d6f03086e3131d25e8c53978e6e"
+    },
+    {
+      "file": "p3-audit.log",
+      "rawSha256": "c73e1ea1b7db00940f5a5f9d18c78d4a8c733d3e5ed5c8c3828150e73e04c2b1",
+      "archivedSha256": "c73e1ea1b7db00940f5a5f9d18c78d4a8c733d3e5ed5c8c3828150e73e04c2b1"
+    },
+    {
+      "file": "p0-inventory.json",
+      "rawSha256": "a6f1e3feb4afa6e32f5ec2168824cb2753e876506faa846e60a8de18ded24093",
+      "archivedSha256": "a6f1e3feb4afa6e32f5ec2168824cb2753e876506faa846e60a8de18ded24093"
+    }
+  ]
+}

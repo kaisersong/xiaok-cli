@@ -1,0 +1,13 @@
+# A C9 root删除门增量新设计票
+
+APPROVE（修订设计范围；先红/实码/完整运行另验）。保留round1 BLOCK与旧A/B不充分gate批准沿革。
+
+已完整重读第二轮：同一原dispose fulfilled+actual同引用active0+blockedfalse之外，必须原db own descriptor捕获的isOpen native getter以同db receiver明确返回false；未知/缺失/异常保留root并报错。不主动close、不信store.isClosed或事后coordinator状态为关闭receipt。实际Node24.16与最低22.22原db own不可配置getter、prototype缺失、同getter open true→closefalse均已独立原日志A-C9-isOpen-own-getter-*.log验证（只API证据，非业务资格）。
+
+两原真实ordinary ticket参数轨迹release-before与after-cleanup保留：同原disposePromise严格同一且fulfill、blockedfalse、原db opentrue/SELECT1；before轨迹释放后active0但db仍open，after轨迹active1，均必须不触exactroot rm保护叶并保留journal，父原worker/PGID0后晚收。先在旧删除门真实红再修helper，不复制生产gate或模拟closed成功。
+
+notcompleted snapshot移dispose前保留原断言，避免CodexDB正常dispose后非法recover；其它physical原错误identity/runtimeblocked/resourcesReleasedfalse/cleanupPendingtrue均不删。正常成功fixture要有真实closed receipt才rm；生产/原deadline/资格0变。最终两版五whole新日志和父实际回收证据仍需另审。
+
+方案哈希：
+- C9-root-gate-increment-plan.md ca0d060c762612af8eb94ff3c80419c69183299f434382e8d0d1992f4e8c91f2
+- reviews/failure-remediation-C.md b5b03b939cdaae1a8475b4079f0316bf696695ba8a858dd9a19ee6bcf9b3f4ec

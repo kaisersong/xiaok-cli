@@ -1,0 +1,21 @@
+{
+  "label": "remaining-baseline-A-6",
+  "cwd": "<master-baseline>",
+  "argv": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/runtime/verification/loop-publication-set.test.ts",
+    "tests/runtime/verification/publication-operation.test.ts",
+    "--maxWorkers=2",
+    "--testNamePattern",
+    "^(checks original Loop publications together at one authority clock: (current|expired|different-run|duplicate|guard-write|nonoverlap|guard-ddl|late-transition|closed|abort|wrong-peer)|actual verification to receiver publication: public-client-near-limit)$"
+  ],
+  "startedAt": "2026-10-21T20:07:23.374845+00:00",
+  "runnerPid": 91492,
+  "pid": 91501,
+  "pgid": 91501,
+  "exitCode": 1,
+  "finishedAt": "2026-10-21T20:12:09.719876+00:00",
+  "reaped": true
+}

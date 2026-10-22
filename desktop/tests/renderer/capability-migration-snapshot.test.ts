@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { FULL_PRELOAD_KEYS } from '../../electron/preload-api';
+import { FULL_PRELOAD_KEYS, INVOKE_CHANNEL_BY_KEY } from '../../electron/preload-api';
 
 const frozenKeys = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'fixtures', 'preload-integration-frozen-keys.json'), 'utf8')) as {main: string[]; closure: string[]};
 
@@ -55,10 +55,22 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     expect(frozenKeys.main).toHaveLength(295);
     expect(frozenKeys.closure).toHaveLength(307);
     const union = [...new Set([...frozenKeys.main, ...frozenKeys.closure])].sort();
-    expect(keys).toEqual(union);
-    expect([...FULL_PRELOAD_KEYS].sort()).toEqual(union);
+    // Separately reviewed semantic activity API; the Stage 5.5 frozen input stays unchanged.
+    const activityInvokes = {
+      getConversationActivities: 'desktop:activity:list', getConversationActivityUnread: 'desktop:activity:unread',
+      markConversationActivitiesRead: 'desktop:activity:read', getWorkActivity: 'desktop:activity:work',
+      getMcpTaskInputs: 'desktop:activity:mcpInputs', answerMcpTaskInput: 'desktop:activity:mcpAnswer',
+      cancelMcpWork: 'desktop:activity:mcpCancel', updateWorkReporting: 'desktop:activity:reporting', stopWorkWatch: 'desktop:activity:stop',
+    };
+    for (const [key, channel] of Object.entries(activityInvokes)) expect(INVOKE_CHANNEL_BY_KEY[key]).toBe(channel);
+    const extensions = [...Object.keys(activityInvokes), 'subscribeConversationActivityOverview', 'subscribeConversationActivities'];
+    expect(extensions).toHaveLength(11);
+    expect(extensions.some(key => union.includes(key))).toBe(false);
+    const complete = [...union, ...extensions].sort();
+    expect(keys).toEqual(complete);
+    expect([...FULL_PRELOAD_KEYS].sort()).toEqual(complete);
     expect(new Set(FULL_PRELOAD_KEYS).size).toBe(FULL_PRELOAD_KEYS.length);
-    expect(keys.length).toMatchInlineSnapshot(`310`);
+    expect(union.length).toMatchInlineSnapshot(`310`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

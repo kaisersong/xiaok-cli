@@ -1,0 +1,28 @@
+
+ RUN  v3.2.6 <master-baseline>
+
+ ❯ tests/runtime/loop/published-candidate-controller.test.ts (1 test | 1 failed) 12563ms
+   × reads the original receiver Loop payload then rejects the same historical commit after proof expiry 12562ms
+     → Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/loop/published-candidate-controller.test.ts > reads the original receiver Loop payload then rejects the same historical commit after proof expiry
+Error: Test timed out in 12000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/loop/published-candidate-controller.test.ts:33:1
+     31| // Actual verification/receiver/controller/installed-client pipeline; …
+     32| // identity and native approval are explicit fixture leaves, not OS ev…
+     33| it('reads the original receiver Loop payload then rejects the same his…
+       | ^
+     34|  const f=await verifiedOperationFixture('loop-application'),identity=f…
+     35|  const store=new VerificationReceiverStore({root:join(f.root,'receiver…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  04:02:16
+   Duration  17.37s (transform 1.86s, setup 30ms, collect 3.12s, tests 12.56s, environment 0ms, prepare 24ms)

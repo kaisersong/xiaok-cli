@@ -1,0 +1,51 @@
+
+ RUN  v3.2.6 <worktree>
+
+ ❯ tests/runtime/intent-delegation/verification-host-controller.test.ts (16 tests | 1 failed | 15 skipped) 60381ms
+   ↓ Intent signed controller actual material and independent recipe: normal
+   ↓ Intent signed controller actual material and independent recipe: lost-dispatch
+   ↓ Intent signed controller actual material and independent recipe: lost-prepare
+   ↓ Intent signed controller actual material and independent recipe: lost-stage
+   ↓ Intent signed controller actual material and independent recipe: receiver
+   ↓ Intent signed controller actual material and independent recipe: receiver-lost-prepare
+   ↓ Intent signed controller actual material and independent recipe: receiver-lost-ack
+   ↓ Intent signed controller actual material and independent recipe: receiver-sqlite
+   × Intent signed controller actual material and independent recipe: receiver-self 60381ms
+     → Test timed out in 60000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+     → controller_ipc_aborted_unknown
+   ↓ Intent signed controller actual material and independent recipe: receiver-route-switch
+   ↓ Intent signed controller actual material and independent recipe: receiver-project
+   ↓ Intent signed controller actual material and independent recipe: receiver-project-sqlite
+   ↓ Intent signed controller actual material and independent recipe: receiver-project-parent
+   ↓ Intent signed controller actual material and independent recipe: receiver-project-parent-sqlite
+   ↓ Intent signed controller actual material and independent recipe: receiver-project-parent-recovery-route
+   ↓ Intent signed controller actual material and independent recipe: receiver-project-parent-retry-route
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/runtime/intent-delegation/verification-host-controller.test.ts > Intent signed controller actual material and independent recipe: receiver-self
+Error: Test timed out in 60000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/runtime/intent-delegation/verification-host-controller.test.ts:138:15
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/runtime/intent-delegation/verification-host-controller.test.ts > Intent signed controller actual material and independent recipe: receiver-self
+Error: controller_ipc_aborted_unknown
+ ❯ AbortSignal.abort src/runtime/verification/controller-ipc.ts:95:32
+     93|       if (error) reject(error); else resolve(result!);
+     94|     };
+     95|     const abort = () => finish(Error('controller_ipc_aborted_unknown')…
+       |                                ^
+     96|     const timer = setTimeout(() => finish(Error('controller_ipc_timeou…
+     97|     socket.on('error', error => finish(error)); socket.on('close', () …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 skipped (16)
+   Start at  04:00:07
+   Duration  64.33s (transform 1.79s, setup 50ms, collect 3.71s, tests 60.38s, environment 0ms, prepare 24ms)

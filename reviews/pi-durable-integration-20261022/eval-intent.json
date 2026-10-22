@@ -1,0 +1,16 @@
+{
+  "label": "eval-intent",
+  "cwd": "<worktree>",
+  "argv": [
+    "npm",
+    "run",
+    "eval:intent-delegation"
+  ],
+  "startedAt": "2026-10-21T19:50:53.180709+00:00",
+  "runnerPid": 15376,
+  "pid": 15413,
+  "pgid": 15413,
+  "exitCode": 0,
+  "finishedAt": "2026-10-21T19:50:53.596710+00:00",
+  "reaped": true
+}

@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-22T01:08:45.880768+00:00",
+  "action": "SIGTERM exact verified owned PID11525 only; no group signal or foreign PID",
+  "before": {
+    "at": "2026-10-22T01:08:38.756677+00:00",
+    "group": 68288,
+    "expectedUid": 502,
+    "observations": [
+      "11525     1 68288   502 Thu Oct 22 08:54:53 2026     /usr/local/bin/node -e setInterval(()=>{},1000)"
+    ],
+    "action": "No signal yet; verify exact group/start/UID from owned run."
+  },
+  "postPidObservation": "",
+  "remainingGroup68288": []
+}

@@ -84,7 +84,22 @@ describe('complete16 Memory domain through real registration and preload', () =>
   it('registers exactly complete16 at round4 and preserves old28 single metadata', () => {
     expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === 4).map(row => row.channel).sort()).toEqual(cases.map(([name]) => `desktop:${name}`).sort());
     for (const [name, , riskTags] of cases) expect(IPC_SCHEMA_REGISTRY.get(`desktop:${name}`)).toMatchObject({ sourceFile: 'desktop/electron/ipc.ts', riskTags, payloadMode: ['memoryListLayer', 'memoryDeleteEntry', 'memoryCompact'].includes(name) ? 'tuple' : 'single' });
-    for (const [round, count] of [[1, 8], [2, 2], [3, 18]]) expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === round)).toHaveLength(count);
+    const rows = [...IPC_SCHEMA_REGISTRY.values()];
+    for (const [round, count] of [[1, 8], [2, 2]]) expect(rows.filter(row => Number(row.rolloutRound) === round)).toHaveLength(count);
+    const artifactChannels = [
+      'getArtifactWorkspaceSnapshot', 'closeArtifactWorkspace', 'readArtifactWorkspaceVersionPreview', 'exportArtifactWorkspaceVersion',
+      'createArtifactPlaceholder', 'submitArtifactGeneration', 'cancelArtifactGeneration', 'retryArtifactGeneration', 'preferArtifactVersion',
+      'removeArtifactWorkspaceNode', 'updateArtifactWorkspaceLayout', 'saveArtifactWorkspaceViewport', 'createArtifactWorkspaceCollection',
+      'createArtifactWorkspaceNote', 'updateArtifactWorkspaceNote', 'createArtifactWorkspaceRelation', 'setArtifactCollectionMembership', 'recordArtifactWorkspaceEvent',
+    ].map(name => `desktop:artifactWorkspace:${name}`).sort();
+    expect(artifactChannels).toHaveLength(18);
+    expect(rows.filter(row => Number(row.rolloutRound) === 3 && row.sourceFile === 'desktop/electron/ipc.ts').map(row => row.channel).sort()).toEqual(artifactChannels);
+    const activityChannels = ['list', 'work', 'mcpInputs', 'mcpAnswer', 'mcpCancel', 'unread', 'read', 'subscribe', 'unsubscribe', 'overview', 'reporting', 'stop'].map(name => `desktop:activity:${name}`).sort();
+    const activity = rows.filter(row => row.sourceFile === 'conversation-activity-ipc.ts');
+    expect(activity.map(row => row.channel).sort()).toEqual(activityChannels);
+    for (const row of activity) expect(row).toMatchObject({ rolloutRound: 3, riskTags: ['internal-mutation'] });
+    expect(rows.filter(row => Number(row.rolloutRound) === 3).map(row => row.channel).sort()).toEqual([...artifactChannels, ...activityChannels].sort());
+    expect(new Set(rows.map(row => row.channel)).size).toBe(rows.length);
   });
   it.each(cases)('has a complete typed output schema for %s', name => {
     const entry = IPC_SCHEMA_REGISTRY.get(`desktop:${name}`); expect(entry).toBeDefined();

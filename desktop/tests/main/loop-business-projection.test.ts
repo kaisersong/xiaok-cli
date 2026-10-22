@@ -5,18 +5,18 @@ import {tmpdir} from 'node:os';
 import {validateEveningReflection} from '../../electron/assistant-llm.js';
 import type {TaskSnapshot} from '../../../src/runtime/task-host/types.js';
 import {DatabaseSync} from 'node:sqlite';
-const wire=vi.hoisted(()=>({routes:new Map<string,any>(),applications:new Map<string,any>(),publications:new Map<string,any>(),current:undefined as any,change:undefined as undefined|(()=>void),reads:0}));
+const wire=vi.hoisted(()=>({routes:new Map<string,any>(),applications:new Map<string,any>(),publications:new Map<string,any>(),current:undefined as any,change:undefined as undefined|(()=>void),reads:0,payloadGetter:undefined as undefined|(()=>void),payloadGetterReads:0}));
 vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:(o:any)=>wire.routes.get(o.ownerId)}));
 vi.mock('../../../src/runtime/verification/installed-loop-application.js',()=>({createInstalledLoopApplicationClient:(b:any)=>({async inspect(){return {state:'active',current:wire.applications.get(b.candidateId),pendingTransitionId:null,pendingTarget:null};},dispose(){}})}));
 vi.mock('../../../src/runtime/verification/installed-completion-publication.js',()=>({createInstalledCompletionPublisher:(o:any)=>({async prepareRequest(){wire.current=wire.publications.get(o.ownerId);return wire.current.challenge;},async approve(){return wire.current.observation;},dispose(){}})}));
-vi.mock('../../../src/runtime/loop/published-candidate.js',async original=>({...await original<typeof import('../../../src/runtime/loop/published-candidate.js')>(),readCurrentLoopPublishedCandidate:async(b:any)=>{wire.reads++;const p=[...wire.publications.values()].find(p=>p.binding.candidateId===b.candidateId);return {...p.observation,binding:b,application:wire.applications.get(b.candidateId),payloadHash:'a'.repeat(64),bytes:Buffer.from('verified-fixture')};}}));
+vi.mock('../../../src/runtime/loop/published-candidate.js',async original=>({...await original<typeof import('../../../src/runtime/loop/published-candidate.js')>(),readCurrentLoopPublishedCandidate:async(b:any)=>{wire.reads++;const p=[...wire.publications.values()].find(p=>p.binding.candidateId===b.candidateId);if(wire.payloadGetter)return Object.freeze({binding:b,application:wire.applications.get(b.candidateId),owner:p.observation.owner,businessRevision:p.observation.businessRevision,operationId:p.observation.operationId,fullTupleHash:p.observation.fullTupleHash,payloadHash:'a'.repeat(64),get bytes(){wire.payloadGetterReads++;wire.payloadGetter?.();return Buffer.from('verified-fixture');}});return {...p.observation,binding:b,application:wire.applications.get(b.candidateId),payloadHash:'a'.repeat(64),bytes:Buffer.from('verified-fixture')};}}));
 vi.mock('../../../src/runtime/loop/published-set.js',async original=>({...await original<typeof import('../../../src/runtime/loop/published-set.js')>(),readCurrentLoopPublicationSet:async(bs:any[])=>{wire.change?.();return {clock:{domainId:'clock',qualificationEpoch:1,lowerBound:1000,upperBound:1001,evidenceHash:'a'.repeat(64)},publications:bs.map(b=>{const p=[...wire.publications.values()].find(p=>p.binding.candidateId===b.candidateId);const {owner,businessRevision,operationId,fullTupleHash}=p.observation;return {owner,businessRevision,operationId,fullTupleHash,application:wire.applications.get(b.candidateId)};})};}}));
 import {loopPublicationFixture,readyLoopNative} from '../support/loop-publication-fixture.js';
 import {createLoopPublicationWorkflow} from '../../electron/loop-publication-workflow.js';
 import {createLoopBusinessPublicationHost} from '../../electron/loop-business-publication-host.js';
 import {loopHostSubjectOwner} from '../../../src/runtime/verification/loop-host-subject.js';
 import {LoopStore} from '../../electron/loop-store.js';
-beforeEach(()=>{wire.routes.clear();wire.applications.clear();wire.publications.clear();wire.change=undefined;wire.reads=0;});
+beforeEach(()=>{wire.routes.clear();wire.applications.clear();wire.publications.clear();wire.change=undefined;wire.reads=0;wire.payloadGetter=undefined;wire.payloadGetterReads=0;});
 async function publishAll(store:LoopStore,candidates:ReturnType<LoopStore['listLoopPublicationCandidates']>){const workflow=createLoopPublicationWorkflow({store,assertAdmission(){},now:()=>40});
  try{for(const c of candidates){const native=readyLoopNative({store,candidate:c}),owner={profileId:'profile',...loopHostSubjectOwner(c.binding.subject)},route={kind:'protected-unregistered',authorityId:'authority',owner},application={binding:c.binding,bindingHash:c.bindingHash,revision:1};
   const challenge={challengeId:'challenge-'+c.candidateId,owner,fullTupleHash:'a'.repeat(64),deadline:{domainId:'clock',qualificationEpoch:1,notBefore:1000,validUntil:2000}},observation={owner,status:'committed',operationId:'operation-'+c.candidateId,fullTupleHash:'a'.repeat(64),businessRevision:1,currentVerification:'valid'};
@@ -88,3 +88,37 @@ it('never treats a cached or forged protected success as a current completion ob
  expect(()=>f.store.recoverLoopPublicationCandidates({runId:f.candidate.runId,requestSource:'user'})).toThrow();
  }finally{db.close();await host.close();f.close();}});
 it('fresh inspection reads all actual publications without writing a historical projection',async()=>{const f=await fixture(),host=createLoopBusinessPublicationHost({store:f.store,assertAdmission(){},now:()=>50});try{const state=await host.inspect({runId:f.candidate.runId,requestSource:'scheduler'});expect(state.businessState).toBe('success');expect(state.observation.publications).toHaveLength(2);expect(f.store.getLoopRun(f.candidate.runId)?.status).toBe('running');expect(f.store.getLoopBusinessProjection(f.candidate.runId)).toBeUndefined();}finally{await host.close();f.close();}});
+
+// The fixed reader leaf reproduces its actual immutable wrapper + independent
+// bytes getter. This tests the real host boundary, not signed controller I/O.
+it.each(['snapshot','abort-during-getter','route-during-getter','getter-error','post-read-route','source'] as const)('captures a six-field user-template content snapshot at the actual host boundary: %s',async mode=>{
+ const root=mkdtempSync(join(tmpdir(),'loop-output-payload-')),store=new LoopStore(join(root,'loop.sqlite')),loopId='template-payload';
+ let host:ReturnType<typeof createLoopBusinessPublicationHost>|undefined;
+ try{
+  store.createUserLoopTemplate({loopId,kind:'task_completion',title:'Original',prompt:'Original task',now:1});
+  store.saveLoopPublicationConfiguration({loopId,expectedRevision:null,requestSource:'user',now:2,configuration:{version:1,contract:{kind:'user-template'},verificationDefinitions:{run:definition,stages:{execute:definition,verify:definition}}}});
+  const began=store.beginLoopRun(loopId,{kind:'manual'},3,1000,{requestSource:'user'});if(began.status!=='started')throw Error('fixture');
+  const producer=store.openLoopPublicationProducer(began.run),execute=store.startLoopStage(began.run.id,loopId,'execute',4,{taskId:'payload-task'}),snapshot:TaskSnapshot={taskId:'payload-task',sessionId:'original-session',status:'completed',prompt:'Original task',materials:[],events:[],createdAt:4,updatedAt:8};
+  producer.recordTemplateExecution({executeStageId:execute.id,taskSnapshot:snapshot,summary:'Original execution',evidenceIds:[],artifacts:[],now:9});
+  const verify=store.startLoopStage(began.run.id,loopId,'verify',10,{taskId:'payload-task'});producer.recordTemplateTerminal({executeStageId:execute.id,verifyStageId:verify.id,summary:'Original verification',evidenceIds:[],artifacts:[],now:11});
+  const candidates=store.recoverLoopPublicationCandidates({runId:began.run.id,requestSource:'user'});await publishAll(store,candidates);
+  host=createLoopBusinessPublicationHost({store,assertAdmission(){},now:()=>100,taskPort:{async recoverTask(){return snapshot;}}});await host.project({runId:began.run.id,requestSource:'user'});
+  const rootCandidate=candidates.find(c=>c.stageId===null)!,owner=loopHostSubjectOwner(rootCandidate.binding.subject),expected=wire.publications.get(owner.ownerId).observation,abort=new AbortController(),reason={original:'getter failure'};
+  wire.payloadGetter=()=>{if(mode==='abort-during-getter')abort.abort(Error('payload_read_cancelled'));if(mode==='route-during-getter')wire.routes.set(owner.ownerId,{kind:'ordinary'});if(mode==='getter-error')throw reason;};
+  const request={runId:began.run.id,requestSource:'user' as const,signal:abort.signal};
+  if(mode==='source'){await expect(host.readUserTemplateOutput({...request,requestSource:'scheduler'})).rejects.toThrow('loop_output_source');expect(wire.payloadGetterReads).toBe(0);return;}
+  const work=host.readUserTemplateOutput(request);
+  if(mode==='abort-during-getter'||mode==='route-during-getter'||mode==='getter-error'){
+   // Do not let a failed assertion's formatter itself evaluate the returned getter.
+   const outcome=await work.then(()=>({failed:false,error:undefined}),(error:unknown)=>({failed:true,error}));
+   expect(outcome.failed).toBe(true);if(mode==='getter-error')expect(outcome.error).toBe(reason);else expect(outcome.error).toBeInstanceOf(Error);expect(wire.payloadGetterReads).toBe(1);return;
+  }
+  const output=await work;
+  if(mode==='post-read-route'){wire.routes.set(owner.ownerId,{kind:'ordinary'});expect(output.assertCurrent).toThrow();return;}
+  expect(Reflect.ownKeys(output.payload).sort()).toEqual(['owner','businessRevision','operationId','fullTupleHash','payloadHash','bytes'].sort());
+  const descriptors=Object.getOwnPropertyDescriptors(output.payload);expect(Object.values(descriptors).every(d=>'value'in d)).toBe(true);expect(Object.isFrozen(output.payload)).toBe(true);expect(wire.payloadGetterReads).toBe(1);
+  expect(output.payload).toMatchObject({owner:expected.owner,businessRevision:expected.businessRevision,operationId:expected.operationId,fullTupleHash:expected.fullTupleHash,payloadHash:'a'.repeat(64)});
+  const bytes=output.payload.bytes;expect(output.payload.bytes).toBe(bytes);expect(bytes.toString()).toBe('verified-fixture');bytes.fill(0);
+  const next=await host.readUserTemplateOutput(request);expect(next.payload.bytes.toString()).toBe('verified-fixture');expect(next.payload.bytes).not.toBe(bytes);expect(wire.payloadGetterReads).toBe(2);
+ }finally{await host?.close();store.close();rmSync(root,{recursive:true,force:true});}
+});
