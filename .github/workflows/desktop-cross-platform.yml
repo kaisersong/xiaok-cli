@@ -58,6 +58,9 @@ jobs:
           tests/main/file-ipc-schema.test.ts
           tests/main/ipc-handler-test-injection.test.ts
           tests/main/shutdown-aware-ipc-main.test.ts
+          tests/main/activity-owner-attach-retry.test.ts
+          tests/main/conversation-activity-ipc.test.ts
+          tests/main/artifact-export-package.test.ts
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
