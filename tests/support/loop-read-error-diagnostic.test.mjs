@@ -9,6 +9,18 @@ import {createRecorder,EVENT_PREFIX,HEALTH_PREFIX,verifyTranscript} from '../../
 import {parseDiagnosticMode,instrumentSource,restoreSource,TARGETS,applyExactTransforms} from '../../desktop/tests/fixtures/loop-read-error-diagnostic-loader.mjs';
 
 const repo=resolve(fileURLToPath(new URL('../..',import.meta.url)));
+const HOOK_PENDING_TOKEN='HOOK_AFTER_ALL_PENDING';
+const HOOK_PENDING_MARKER=`${HOOK_PENDING_TOKEN} true`;
+const ANSI_NUMERIC_SGR=/\x1b\[[0-9;]+m/g;
+function hasUniqueHookPendingMarker(output){
+ let count=0;
+ for(const line of output.split('\n')){
+  const normalized=line.replace(ANSI_NUMERIC_SGR,'');
+  if(normalized===HOOK_PENDING_MARKER){count++;continue;}
+  if(normalized===HOOK_PENDING_TOKEN||normalized.includes(`${HOOK_PENDING_TOKEN} `))return false;
+ }
+ return count===1;
+}
 function fixture(write){
  const lines=[];
  const recorder=createRecorder({pid:123,nonce:'a'.repeat(32),moduleIdSha256:'b'.repeat(64),now:()=>12.5,writeLine:write??(line=>lines.push(line))});
@@ -88,6 +100,25 @@ test('receipt cannot hide missing lines, changed bytes, or capacity overflow',()
  const over=fixture();for(let i=0;i<300;i++)over.recorder.consumerCatch(Error('loop_output_changed'));over.recorder.health();
  assert.ok(over.health().dropped>0);assert.equal(verifyTranscript(over.lines.join('\n')+'\n').complete,false);
 });
+test('hook pending marker accepts one whole line with only numeric SGR decoration',()=>{
+ assert.equal(hasUniqueHookPendingMarker(`${HOOK_PENDING_MARKER}\n`),true);
+ assert.equal(hasUniqueHookPendingMarker(`\x1b[22m\x1b[39mHOOK_AFTER_ALL_PENDING \x1b[33mtrue\x1b[39m\n`),true);
+ assert.equal(hasUniqueHookPendingMarker(`\x1b[1;33m${HOOK_PENDING_MARKER}\x1b[0;39m\n`),true);
+ for(const output of [
+  'HOOK_AFTER_ALL_PENDING false\n',
+  `${HOOK_PENDING_MARKER}\n${HOOK_PENDING_MARKER}\n`,
+  `${HOOK_PENDING_MARKER}\nHOOK_AFTER_ALL_PENDING false\n`,
+  `HOOK_AFTER_ALL_PENDING\n${HOOK_PENDING_MARKER}\n`,
+  `prefix HOOK_AFTER_ALL_PENDING false\n${HOOK_PENDING_MARKER}\n`,
+  `HOOK_AFTER_ALL_PENDING true suffix\n${HOOK_PENDING_MARKER}\n`,
+  `prefix ${HOOK_PENDING_MARKER}\n`,
+  `${HOOK_PENDING_MARKER} suffix\n`,
+  `\x1b[2J${HOOK_PENDING_MARKER}\n`,
+  `\x1b]0;title\x07${HOOK_PENDING_MARKER}\n`,
+  `\x1b[m${HOOK_PENDING_MARKER}\n`,
+  `\x1b[38:5:1m${HOOK_PENDING_MARKER}\n`,
+ ])assert.equal(hasUniqueHookPendingMarker(output),false);
+});
 test('actual Vitest finished-hook timeout reaches afterAll with original promise still pending',async(t)=>{
  const base=join(repo,'.xiaok/evals/pi-durable/remediation-20261022');mkdirSync(base,{recursive:true});
  const root=realpathSync(mkdtempSync(join(base,'loop-read-hook-fixture-'))),s=lstatSync(root);
@@ -103,7 +134,7 @@ test('actual Vitest finished-hook timeout reaches afterAll with original promise
  const result=await runOwnedChild({argv:[process.execPath,...argv],cwd:root,env,logPath:join(root,'hook.log'),metadataPath:join(root,'child.json'),signal:t.signal});
  console.log('LOOP_DIAGNOSTIC_HARNESS_CHILD',JSON.stringify({root,pid:result.pid,pgid:result.pgid,parentPid:process.pid,reaped:result.reaped,residual:result.groupResidual.length}));
  const output=readFileSync(join(root,'hook.log'),'utf8');
- assert.equal(result.code,1);assert.equal(result.signal,null);assert.match(output,/Hook timed out/);assert.match(output,/HOOK_AFTER_ALL_PENDING true/);
+ assert.equal(result.code,1);assert.equal(result.signal,null);assert.match(output,/Hook timed out/);assert.equal(hasUniqueHookPendingMarker(output),true);
  const observed=verifyTranscript(output);
  assert.equal(observed.complete,false);assert.equal(observed.receipt.activeReaderCount,1);
  assert.ok(observed.problems.includes('unsettled_readers'));
