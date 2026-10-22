@@ -1,3 +1,4 @@
+import {captureQualifiedServiceCallbacks,awaitQualifiedServiceCallbackObservations,sealQualifiedServiceCallbacks,beginQualifiedGroupCallbackStop,finishQualifiedServiceCallbacks,proveQualifiedPreparedCallbackFailure,restoreQualifiedServiceCallbackObservers,type QualifiedServiceCallbacks,type QualifiedCallbackCall} from '../fixtures/qualified-group-callback-closure.js';
 import nativeProcess from 'node:process';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {types as qualifiedUtilTypes} from 'node:util';
@@ -64,15 +65,16 @@ afterAll(()=>{
 
 // File-private test lifecycle; this candidate is not applied or execution-approved.
 type QualifiedOutcome={ok:true;value:unknown}|{ok:false;error:unknown};
-type QualifiedSlot={label:string;kind:'stop'|'owner'|'source'|'material'|'rescue'|'leaf'|'native';receiver:any;method:Function;args:unknown[];called:boolean;rawWritten:boolean;raw?:unknown;outcome?:QualifiedOutcome;reaction?:Promise<void>;workers:any[]};
-type QualifiedRecord={ctx:TestContext;nonce:string;refs:unknown[];registrations:unknown[];sequence:number;seal?:number;closing:boolean;late:boolean;errors:unknown[];assertions:unknown[];expectedFailures:Set<unknown>;slots:QualifiedSlot[];closingSlots?:readonly QualifiedSlot[];pending:Set<object>;roots:any[];natives:any[];services:any[];coordinators:any[];sessions:any[];operations:any[];hostMaterials:any[];workers:any[];opaque:boolean;callbackClosed:boolean;leavesClosed:boolean;accountReleased:boolean;account:any;lease?:{release():void};workP?:Promise<void>;workOutcome?:QualifiedOutcome;scenarioP?:Promise<void>;hookFailure?:{error:unknown};abort?:()=>void;abortInstalled:boolean;closeStarted:boolean};
-type QualifiedOrigin={record:QualifiedRecord;slot?:QualifiedSlot};
+type QualifiedSlot={label:string;kind:'stop'|'owner'|'callback'|'source'|'material'|'rescue'|'leaf'|'native';receiver:any;method:Function;args:unknown[];called:boolean;rawWritten:boolean;raw?:unknown;outcome?:QualifiedOutcome;reaction?:Promise<void>;workers:any[];errorIndex?:number};
+type QualifiedRecord={ctx:TestContext;nonce:string;refs:unknown[];registrations:unknown[];sequence:number;seal?:number;closing:boolean;late:boolean;errors:unknown[];acceptedErrorIndices:Set<number>;callbacks:QualifiedCallbackOwner[];assertions:unknown[];expectedFailures:Set<unknown>;slots:QualifiedSlot[];closingSlots?:readonly QualifiedSlot[];pending:Set<object>;roots:any[];natives:any[];services:any[];coordinators:any[];sessions:any[];operations:any[];hostMaterials:any[];workers:any[];opaque:boolean;callbackClosed:boolean;leavesClosed:boolean;accountReleased:boolean;account:any;lease?:{release():void};workP?:Promise<void>;workOutcome?:QualifiedOutcome;scenarioP?:Promise<void>;hookFailure?:{error:unknown};abort?:()=>void;abortInstalled:boolean;closeStarted:boolean};
+type QualifiedOrigin={record:QualifiedRecord;slot?:QualifiedSlot;callbackCall?:QualifiedCallbackCall};
 const qualifiedAnchor=Symbol('qualified-complex-fixture-strong-registry');
 const qualifiedRecords:QualifiedRecord[]=[];
 Object.defineProperty(nativeProcess,qualifiedAnchor,{value:qualifiedRecords,enumerable:false,configurable:false,writable:false});
 if(Object.getOwnPropertyDescriptor(nativeProcess,qualifiedAnchor)?.value!==qualifiedRecords)throw Error('qualified_fixture_registry_unanchored');
 const qualifiedALS=new AsyncLocalStorage<QualifiedOrigin>();
 const qHasOwn=Object.hasOwn,qOwnDescriptor=Object.getOwnPropertyDescriptor,qNativeApply=Reflect.apply,qIsProxy=qualifiedUtilTypes.isProxy,qIsNativeError=qualifiedUtilTypes.isNativeError;
+const qGenerationMapGet=Map.prototype.get,qGenerationMapSizeGetter=qOwnDescriptor(Map.prototype,'size')?.get;
 const qDOMNameGetter=qOwnDescriptor(DOMException.prototype,'name')?.get;
 function qknownAbort(error:unknown):boolean{
  try{
@@ -109,8 +111,8 @@ function qcall(r:QualifiedRecord,slot:QualifiedSlot){
   // The ALS close context belongs only to this already-bound actual owner slot.
   // Internal Workers fill its existing observation collection, never add owners.
   const raw=qualifiedALS.run({record:r,slot},()=>Reflect.apply(slot.method,slot.receiver,slot.args));slot.raw=qhold(r,raw);slot.rawWritten=true;
-  slot.reaction=qhold(r,Promise.resolve(raw).then(value=>{slot.outcome=qhold(r,{ok:true,value});},error=>{slot.outcome=qhold(r,{ok:false,error});qerror(r,error);}));
- }catch(error){slot.outcome=qhold(r,{ok:false,error});qerror(r,error);}
+  slot.reaction=qhold(r,Promise.resolve(raw).then(value=>{slot.outcome=qhold(r,{ok:true,value});},error=>{slot.outcome=qhold(r,{ok:false,error});slot.errorIndex=r.errors.length;qerror(r,error);}));
+ }catch(error){slot.outcome=qhold(r,{ok:false,error});slot.errorIndex=r.errors.length;qerror(r,error);}
 }
 function qroot(r:QualifiedRecord,prefix:string):string{
  const root=qregister(r,'root-presence',{raw:undefined as string|undefined,identity:undefined as any,written:false});r.roots.push(root);
@@ -131,9 +133,61 @@ function qprobeNative(native:any):boolean{
  if(!open||open.get!==native.get||open.set!==undefined||open.configurable!==false||typeof native.get!=='function')throw Error('qualified_fixture_native_getter_changed');
  const state=qNativeApply(native.get,native.db,[]);if(state!==true&&state!==false)throw Error('qualified_fixture_native_state_unknown');return state;
 }
-function qservice<T extends {dispose():unknown;runtimeStatus():{blocked:boolean}}>(r:QualifiedRecord,value:T,coordinator:DesktopExecutionCoordinator):T{
- qregister(r,'service',value);qregister(r,'coordinator',coordinator);r.services.push(value);r.coordinators.push(coordinator);qslot(r,'service.dispose','owner',value,value.dispose);return value;
+type QualifiedCallbackOwner={service:object;cap?:QualifiedServiceCallbacks;expectedSpec:Error|(()=>Error|undefined)|undefined;dispose:QualifiedSlot;stops:QualifiedSlot[];receipt?:{callbacksTerminal:true;nativeHealthy:false;originalServiceError:unknown};expected?:Error;observationFailed?:boolean};
+function qservice<T extends {dispose():unknown;runtimeStatus():{blocked:boolean}}>(r:QualifiedRecord,value:T,coordinator:DesktopExecutionCoordinator,store?:DesktopMultiAgentStore,expectedSpec?:Error|(()=>Error|undefined),observeCallbacks=false):T{
+ qregister(r,'service',value);qregister(r,'coordinator',coordinator);r.services.push(value);r.coordinators.push(coordinator);const dispose=qslot(r,'service.dispose','owner',value,value.dispose);
+ if(expectedSpec!==undefined||observeCallbacks){
+  if(!store)throw Error('qualified_group_store_binding_missing');
+  const owner=qregister(r,'group-callback-owner',{service:value,expectedSpec,dispose,stops:[]} as QualifiedCallbackOwner);r.callbacks.push(owner);
+  owner.cap=captureQualifiedServiceCallbacks(value,store,{
+   retain:(_label,held)=>qhold(r,held),isClosing:()=>r.closing,
+   invokeOriginal:(call,invoke)=>{const origin=qualifiedALS.getStore();call.originRecord=origin?.record;call.originSlot=origin?.slot;call.preClosing=!r.closing;call.parentCall=origin?.callbackCall;return qualifiedALS.run({record:r,slot:origin?.record===r?origin.slot:undefined,callbackCall:call},invoke);},
+   allowedCloseOrigin:(receiver,call)=>{
+    if(call.originRecord!==r||typeof call.preClosing!=='boolean')return false;
+    const ownSlot=call.originSlot as QualifiedSlot|undefined;
+    if(call.name==='dispose')return receiver===value&&((call.preClosing&&ownSlot===undefined)||(ownSlot===owner.dispose&&ownSlot.called&&ownSlot.outcome===undefined));
+    if(call.name!=='closeManagedSession')return false;
+    if(call.preClosing&&ownSlot===undefined&&call.parentCall===undefined)return receiver===value;
+    const parent=call.parentCall;
+    if(receiver===value&&parent?.name==='dispose'&&parent.receiver===value&&parent.originRecord===r&&parent.args.length===0&&parent.outcome===undefined&&owner.cap?.methods.some(method=>method.key==='dispose'&&method.calls.includes(parent))){
+     return (parent.preClosing===true&&parent.originSlot===undefined)||(parent.originSlot===owner.dispose&&owner.dispose.called&&owner.dispose.outcome===undefined);
+    }
+    return owner.stops.some(stop=>stop===ownSlot&&stop.receiver===receiver&&stop.called&&stop.outcome===undefined);
+   },
+   onGroup:group=>{owner.stops.push(qslot(r,'group.core.dispose','callback',group.core.core,()=>beginQualifiedGroupCallbackStop(group)));},
+   preparedCalls:factory=>qpreparedRoles(r).find(role=>role.factory===factory)?.calls??[],
+   onPreparedFactory:(call,groupId,agentId)=>qpreparedFactory(r,call,groupId,agentId),
+   onPreparedSession:(call,session,groupId,agentId)=>qpreparedSession(r,call,session,groupId,agentId),
+   onError:error=>{r.late=true;r.callbackClosed=false;qerror(r,error);},
+  });
+  // The existing disposal slot now holds the exact transparent installed method.
+  // This updates that already-registered owner rather than adding a late owner.
+  dispose.method=value.dispose;
+  qslot(r,'group-callback-observers.restore','leaf',undefined,()=>restoreQualifiedServiceCallbackObservers(owner.cap!));
+ }
+ return value;
 }
+function qsealCallbackOwners(r:QualifiedRecord,service?:object){
+ for(const owner of r.callbacks)if(service===undefined||owner.service===service)try{if(!owner.cap)throw Error('qualified_group_partial_observer_install');sealQualifiedServiceCallbacks(owner.cap);}catch(error){qerror(r,error);}
+}
+async function qcallbackTerminalReceipts(r:QualifiedRecord){
+ for(const owner of r.callbacks){
+  if(owner.dispose.outcome?.ok!==false)continue;
+  try{
+   const expected=typeof owner.expectedSpec==='function'?owner.expectedSpec():owner.expectedSpec;
+   if(!expected||!owner.cap)throw Error('qualified_group_expected_source_missing');
+   owner.expected=expected;
+   owner.receipt=await finishQualifiedServiceCallbacks(owner.cap,expected,owner.dispose.outcome.error);
+   if(owner.dispose.errorIndex===undefined||r.errors[owner.dispose.errorIndex]!==owner.dispose.outcome.error)throw Error('qualified_group_dispose_occurrence_missing');
+   r.acceptedErrorIndices.add(owner.dispose.errorIndex);
+  }catch(error){qerror(r,error);}
+ }
+ for(const owner of r.callbacks)try{if(!owner.cap)throw Error('qualified_group_partial_observation');await awaitQualifiedServiceCallbackObservations(owner.cap);}catch(error){owner.observationFailed=true;qerror(r,error);}
+ const prepared=qpreparedAcceptedErrorIndices(r,(role,call,error)=>r.callbacks.some(owner=>Boolean(owner.receipt&&owner.cap&&owner.expected&&proveQualifiedPreparedCallbackFailure(owner.cap,role.factory,call,error,owner.expected))));
+ for(const index of prepared)r.acceptedErrorIndices.add(index);
+ for(const role of qpreparedRoles(r))role.terminal=true;
+}
+
 function qhost<T extends InProcessTaskRuntimeHost>(r:QualifiedRecord,value:T):T{
  qregister(r,'host',value);qslot(r,'host.stopAccepting','stop',value,value.stopAccepting,['app_shutdown']);qslot(r,'host.abortAllActive','stop',value,value.abortAllActive,['app_shutdown']);qslot(r,'host.drain','owner',value,value.drain);qslot(r,'host.sourceClose','source',value,value.closeSourceWriterForMigration);
  const options=qOwnDescriptor(value,'options'),material=options&&qHasOwn(options,'value')?qOwnDescriptor(options.value,'materialRegistry'):undefined;
@@ -150,6 +204,121 @@ function qraw<T>(r:QualifiedRecord,label:string,invoke:()=>Promise<T>):Promise<T
  const operation=qregister(r,label+':operation',{label,raw:undefined as Promise<T>|undefined,outcome:undefined as QualifiedOutcome|undefined,reaction:undefined as Promise<void>|undefined});r.operations.push(operation);
  const raw=invoke();operation.raw=qhold(r,raw);operation.reaction=qhold(r,raw.then(value=>{operation.outcome=qhold(r,{ok:true,value});},error=>{operation.outcome=qhold(r,{ok:false,error});}));return raw;
 }
+// E-only integration fragment. Uses the existing fixture's qhold/qregister/
+// qslot/qerror/qknownAbort; the ordinary qsession implementation is unchanged.
+type QPreparedOutcome={ok:true;value:unknown}|{ok:false;error:unknown};
+type QPreparedFactoryCall={receiver:unknown;args:unknown[];rawWritten:boolean;raw?:unknown;outcome?:QPreparedOutcome;reaction?:Promise<void>};
+type QPreparedMethodName='run'|'dispose'|'suspend'|'deactivate';
+type QPreparedMethod={name:QPreparedMethodName;session:object;original:Function;before:PropertyDescriptor|undefined;installed:Function;restored:boolean};
+type QPreparedCall={role:QPreparedRole;method:QPreparedMethod;name:QPreparedMethodName;session:object;factoryCall:QPreparedFactoryCall;groupId:string;agentId:string;receiver:unknown;args:unknown[];rawWritten:boolean;raw?:unknown;outcome?:QPreparedOutcome;reaction?:Promise<void>;parentCall?:QualifiedCallbackCall};
+type QPreparedErrorEntry={index:number;error:unknown;role:QPreparedRole;call:QPreparedCall};
+type QPreparedRole={factory:QPreparedFactoryCall;factoryReceiver:unknown;factoryArgs:unknown[];groupId:string;agentId:string;session?:object;methods:QPreparedMethod[];calls:QPreparedCall[];errors:QPreparedErrorEntry[];observerErrors:unknown[];restoreAttempted:boolean;restored:boolean;terminal:boolean};
+const qPreparedRegistry=new WeakMap<QualifiedRecord,QPreparedRole[]>();
+const qPreparedOwn=Object.getOwnPropertyDescriptor,qPreparedDefine=Object.defineProperty,qPreparedDelete=Reflect.deleteProperty;
+const qPreparedPrototype=Object.getPrototypeOf,qPreparedApply=Reflect.apply,qPreparedThen=Promise.prototype.then;
+const qPreparedIsPromise=qualifiedUtilTypes.isPromise,qPreparedIsProxy=qualifiedUtilTypes.isProxy;
+function qPreparedNeed(ok:unknown,code:string):asserts ok {if(!ok)throw Error('qualified_prepared_session:'+code);}
+function qpreparedRoles(r:QualifiedRecord):readonly QPreparedRole[]{return qPreparedRegistry.get(r)??[];}
+function qPreparedObserverError(r:QualifiedRecord,role:QPreparedRole,error:unknown){
+ r.late=true;r.callbackClosed=false;role.observerErrors.push(qhold(r,error));qerror(r,error);
+}
+function qPreparedOriginalError(r:QualifiedRecord,role:QPreparedRole,call:QPreparedCall,error:unknown){
+ // Keep the original array value and separately bind this exact occurrence.
+ // Acceptance is computed before the existing assertions are unshifted.
+ const entry=qhold(r,{index:r.errors.length,error,role,call});role.errors.push(entry);qerror(r,error);
+}
+function qPreparedMethodValue(session:object,key:string):Function|undefined{
+ const seen=new Set<object>();let owner:object|null=session;
+ for(let depth=0;owner!==null&&depth<16;depth++){
+  qPreparedNeed(!qPreparedIsProxy(owner)&&!seen.has(owner),'method_owner');seen.add(owner);
+  const d=qPreparedOwn(owner,key);
+  if(d!==undefined){qPreparedNeed(Object.hasOwn(d,'value')&&typeof d.value==='function','method_data:'+key);return d.value;}
+  owner=qPreparedPrototype(owner);
+ }
+ qPreparedNeed(owner===null,'method_prototype_bound');return undefined;
+}
+function qPreparedSameDescriptor(actual:PropertyDescriptor|undefined,expected:PropertyDescriptor|undefined):boolean{
+ if(actual===undefined||expected===undefined)return actual===expected;
+ return Object.hasOwn(actual,'value')===Object.hasOwn(expected,'value')&&actual.value===expected.value&&actual.get===expected.get&&actual.set===expected.set&&actual.writable===expected.writable&&actual.enumerable===expected.enumerable&&actual.configurable===expected.configurable;
+}
+function qPreparedRestore(r:QualifiedRecord,role:QPreparedRole){
+ qPreparedNeed(!role.restoreAttempted,'restore_called_once');role.restoreAttempted=true;const failures:unknown[]=[];
+ for(const method of [...role.methods].reverse()){
+  try{
+   const expected={value:method.installed,writable:true,configurable:true,enumerable:method.before?.enumerable??false};
+   qPreparedNeed(qPreparedSameDescriptor(qPreparedOwn(method.session,method.name),expected),'restore_descriptor_conflict');
+   if(method.before===undefined)qPreparedNeed(qPreparedDelete(method.session,method.name),'restore_delete');
+   else qPreparedDefine(method.session,method.name,method.before);
+   qPreparedNeed(qPreparedSameDescriptor(qPreparedOwn(method.session,method.name),method.before),'restore_readback');method.restored=true;
+  }catch(error){failures.push(qhold(r,error));}
+ }
+ role.restored=failures.length===0&&role.methods.every(method=>method.restored);
+ if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_prepared_restoration_failed',{cause:failures[0]});
+}
+function qpreparedFactory(r:QualifiedRecord,factory:QPreparedFactoryCall,groupId:string,agentId:string){
+ qPreparedNeed(!r.closing,'factory_registered_before_close');
+ let roles=qPreparedRegistry.get(r);
+ if(roles===undefined){roles=qhold(r,[] as QPreparedRole[]);qPreparedRegistry.set(r,roles);}
+ qPreparedNeed(!roles.some(role=>role.factory===factory),'unique_factory_call');
+ const role=qregister(r,'prepared-factory-role',{factory,factoryReceiver:factory.receiver,factoryArgs:factory.args,groupId,agentId,methods:[],calls:[],errors:[],observerErrors:[],restoreAttempted:false,restored:false,terminal:false} as QPreparedRole);
+ roles.push(role);
+ // One restoration action exists before the original factory can call a stop.
+ // Fulfilment only fills this role; it never adds a late owner/leaf slot.
+ qslot(r,'prepared-session-methods.restore','leaf',undefined,()=>qPreparedRestore(r,role));
+}
+function qpreparedSession(r:QualifiedRecord,factory:QPreparedFactoryCall,session:object,groupId:string,agentId:string){
+ const role=qpreparedRoles(r).find(role=>role.factory===factory);
+ qPreparedNeed(role&&role.session===undefined&&role.groupId===groupId&&role.agentId===agentId,'same_factory_role');
+ qPreparedNeed(factory.receiver===role.factoryReceiver&&factory.args===role.factoryArgs&&factory.rawWritten&&qPreparedIsPromise(factory.raw),'original_factory_promise');
+ qPreparedNeed(factory.outcome?.ok===true,'original_factory_fulfilled');
+ const prepared=factory.outcome.value;
+ qPreparedNeed(prepared!==null&&typeof prepared==='object'&&!qPreparedIsProxy(prepared),'original_prepared_value');
+ const descriptor=qPreparedOwn(prepared,'session');
+ qPreparedNeed(descriptor&&Object.hasOwn(descriptor,'value')&&descriptor.value===session&&!qPreparedIsProxy(session),'original_prepared_session');
+ role.session=qhold(r,session);
+ for(const name of ['run','dispose','suspend','deactivate'] as const){
+  const original=qPreparedMethodValue(session,name);
+  if(original===undefined){qPreparedNeed(name!=='run'&&name!=='dispose','required_session_method');continue;}
+  const before=qPreparedOwn(session,name);qPreparedNeed(before===undefined||(Object.hasOwn(before,'value')&&before.configurable===true),'replaceable_original_method');
+  let method:QPreparedMethod;
+  const installed=function(this:unknown,...args:unknown[]){
+   const call=qhold(r,{role,method,name,session,factoryCall:factory,groupId,agentId,receiver:this,args,rawWritten:false,parentCall:qualifiedALS.getStore()?.callbackCall} as QPreparedCall);role.calls.push(call);
+   if(this!==session||role.restoreAttempted||role.terminal||(r.closing&&name==='run'))qPreparedObserverError(r,role,Error('qualified_prepared_call_origin_or_late_run'));
+   let raw:unknown;
+   try{raw=qPreparedApply(original,this,args);call.raw=qhold(r,raw);call.rawWritten=true;}
+   catch(error){call.outcome=qhold(r,{ok:false,error});if(name==='run'){if(!qknownAbort(error))r.assertions.push(error);}else qPreparedOriginalError(r,role,call,error);throw error;}
+   if(qPreparedIsPromise(raw)){
+    try{call.reaction=qhold(r,qPreparedApply(qPreparedThen,raw,[(value:unknown)=>{
+     try{call.outcome=qhold(r,{ok:true,value});}catch(error){qPreparedObserverError(r,role,error);}
+    },(error:unknown)=>{
+     try{call.outcome=qhold(r,{ok:false,error});if(name==='run'){if(!qknownAbort(error))r.assertions.push(error);}else qPreparedOriginalError(r,role,call,error);}
+     catch(observerError){qPreparedObserverError(r,role,observerError);}
+    }]) as Promise<void>);}
+    catch(error){qPreparedObserverError(r,role,error);}
+   }else{
+    call.outcome=qhold(r,{ok:true,value:raw});
+    if(name!=='deactivate'||raw!==undefined)qPreparedObserverError(r,role,Error('qualified_prepared_non_native_method_promise'));
+   }
+   return raw;
+  };
+  method=qhold(r,{name,session,original,before,installed,restored:false});role.methods.push(method);
+  qPreparedDefine(session,name,{value:installed,configurable:true,writable:true,enumerable:before?.enumerable??false});
+  qPreparedNeed(qPreparedOwn(session,name)?.value===installed,'installed_method_readback');
+ }
+}
+function qpreparedAcceptedErrorIndices(r:QualifiedRecord,prove:(role:QPreparedRole,call:QPreparedCall,error:unknown)=>boolean):ReadonlySet<number>{
+ const accepted=new Set<number>();
+ // The caller must invoke this BEFORE r.errors.unshift(...assertions), and
+ // only after the full independently checked group callback terminal receipt.
+ for(const role of qpreparedRoles(r))for(const entry of role.errors){
+  const {call}=entry;
+  qPreparedNeed(entry.role===role&&call.role===role&&role.calls.includes(call)&&Number.isSafeInteger(entry.index)&&entry.index>=0&&entry.index<r.errors.length&&Object.hasOwn(r.errors,String(entry.index))&&r.errors[entry.index]===entry.error,'same_error_occurrence');
+  qPreparedNeed(call.outcome?.ok===false&&call.outcome.error===entry.error,'same_original_call_failure');
+  if(!role.observerErrors.length&&prove(role,call,entry.error))accepted.add(entry.index);
+ }
+ return accepted;
+}
+
 function qsession<T extends {run:Function}>(r:QualifiedRecord,session:T):T{
  qregister(r,'session',session);const observed=qregister(r,'session-observations',{session,calls:[] as any[],disposeSeen:false});r.sessions.push(observed);
  for(const name of ['run','dispose','suspend'] as const){const method=(session as any)[name];if(typeof method!=='function')continue;
@@ -175,6 +344,45 @@ function qobserveWorker(worker:any,knownProductionEntry:boolean){
   else slot.workers.push(actual);
  }else qregister(r,'actual-worker',actual);
 }
+async function qgenerationCallbacks(r:QualifiedRecord,service:DesktopMultiAgentService):Promise<void>{
+ const failures:unknown[]=[];
+ const data=(receiver:unknown,key:string,optional=false):unknown=>{
+  if(receiver===null||typeof receiver!=='object'||qIsProxy(receiver))throw Error('qualified_generation_data_receiver');const d=qOwnDescriptor(receiver,key);
+  if(d===undefined&&optional)return undefined;if(!d||!qHasOwn(d,'value'))throw Error('qualified_generation_data_slot:'+key);return d.value;
+ };
+ const empty=(value:unknown):boolean=>value!==null&&typeof value==='object'&&!qIsProxy(value)&&Array.isArray(value)&&data(value,'length')===0;
+ const matching=r.callbacks.filter(owner=>owner.service===service);
+ if(matching.length!==1||!matching[0].cap)throw Error('qualified_generation_exact_callback_owner_missing');
+ for(const owner of matching){
+  const cap=owner.cap;if(!cap){failures.push(Error('qualified_generation_partial_callback_owner'));continue;}
+  try{await awaitQualifiedServiceCallbackObservations(cap);}catch(error){failures.push(error);}
+  try{if(cap.service!==service||cap.bindings.length!==1||cap.bindings[0].service!==cap||data(cap.bindings[0].group,'core')!==cap.bindings[0].core.core)throw Error('qualified_generation_exact_core_binding_missing');}catch(error){failures.push(error);}
+  for(const group of cap.bindings){const core=group.core;
+   await core.coreReaction;if(core.coreOutcome?.ok===false)failures.push(core.coreOutcome.error);else if(!core.coreOutcome)failures.push(Error('qualified_generation_core_stop_missing'));
+   try{if(data(core.core,'records')!==core.originalRecords||typeof qGenerationMapSizeGetter!=='function'||qNativeApply(qGenerationMapSizeGetter,core.originalRecords,[])!==core.rows.length)throw Error('qualified_generation_core_population_changed');}catch(error){failures.push(error);}
+   for(const row of core.rows){if(row.id==='main')continue;await row.reaction;
+    if(row.cleanupOutcome?.ok===false)failures.push(row.cleanupOutcome.error);else if(!row.cleanupOutcome)failures.push(Error('qualified_generation_core_cleanup_missing'));
+    try{
+     const saved=data(row.record,'cleanupFailures',true);
+     if(saved!==undefined){
+      if(saved===null||typeof saved!=='object'||qIsProxy(saved)||!Array.isArray(saved))throw Error('qualified_generation_cleanup_failure_inventory');
+      const count=data(saved,'length');if(!Number.isSafeInteger(count)||Number(count)<0)throw Error('qualified_generation_cleanup_failure_length');
+      for(let index=0;index<Number(count);index++)failures.push(data(saved,String(index)));
+     }
+     if(qNativeApply(qGenerationMapGet,core.originalRecords,[row.id])!==row.record||data(row.record,'cleanup')!==row.cleanup||data(row.record,'cleanupSettled')!==true||data(row.record,'resourcesReleased')!==true||data(row.record,'execution',true)!==undefined||data(row.record,'controller',true)!==undefined||!empty(data(row.record,'queue')))throw Error('qualified_generation_core_callbacks_or_native_unknown');
+     const errors=data(row.record,'cleanupFailures',true);if(errors!==undefined&&!empty(errors))throw Error('qualified_generation_core_cleanup_failures');
+    }catch(error){failures.push(error);}
+   }
+  }
+  for(const role of qpreparedRoles(r)){if(!cap.factoryCalls.some(factory=>factory===role.factory))continue;
+   if(role.factory.outcome?.ok===false)failures.push(role.factory.outcome.error);else if(!role.factory.outcome)failures.push(Error('qualified_generation_factory_pending'));
+   for(const error of role.observerErrors)failures.push(error);
+   if(role.session&&!role.calls.some(call=>call.name==='dispose'))failures.push(Error('qualified_generation_prepared_dispose_missing'));
+   for(const call of role.calls){await call.reaction;if(!call.outcome)failures.push(Error('qualified_generation_prepared_call_pending'));else if(call.name!=='run'&&call.outcome.ok===false)failures.push(call.outcome.error);}
+  }
+ }
+ if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_generation_callback_proof_failed',{cause:failures[0]});
+}
 async function qcloseGeneration(r:QualifiedRecord,store:DesktopMultiAgentStore,service:DesktopMultiAgentService,host:InProcessTaskRuntimeHost){
  const dispose=r.slots.find(s=>s.kind==='owner'&&s.receiver===service&&s.method===service.dispose);
  const drain=r.slots.find(s=>s.kind==='owner'&&s.receiver===host&&s.method===host.drain);
@@ -182,11 +390,15 @@ async function qcloseGeneration(r:QualifiedRecord,store:DesktopMultiAgentStore,s
  const source=r.slots.find(s=>s.kind==='source'&&s.receiver===host),material=r.hostMaterials.find(item=>item.host===host)?.close;
  const native=r.natives.find(n=>n.value===store);
  if(!dispose||!drain||stops.length!==2||!source||!material||!native?.probeValid)throw Error('qualified_fixture_generation_inventory_unknown');
+ qsealCallbackOwners(r,service);
+ const callbackStops=r.callbacks.filter(owner=>owner.service===service).flatMap(owner=>owner.stops);
  const failures:unknown[]=[];
- const phases:QualifiedSlot[][]=[[...stops,dispose,drain],[source],[material]];
+ const phases:QualifiedSlot[][]=[[...stops,dispose,drain,...callbackStops],[source],[material]];
  for(const phase of phases){
   for(const slot of phase)qcall(r,slot);
   for(const slot of phase){await slot.reaction;if(slot.outcome?.ok!==true)failures.push(slot.outcome&&slot.outcome.ok===false?slot.outcome.error:Error('qualified_fixture_generation_close_unknown'));}
+  if(phase===phases[0])try{await qgenerationCallbacks(r,service);}catch(error){failures.push(error);}
+  if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_fixture_generation_phase_unknown',{cause:failures[0]});
  }
  if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'qualified_fixture_generation_close_failed',{cause:failures[0]});
  for(const coordinator of r.coordinators){const snapshot=coordinator.snapshot();if(snapshot.active!==0||snapshot.waiting!==0)throw Error('qualified_fixture_generation_not_idle');}
@@ -196,19 +408,28 @@ async function qcloseGeneration(r:QualifiedRecord,store:DesktopMultiAgentStore,s
  if(qprobeNative(native)!==false)throw Error('qualified_fixture_generation_native_open');native.closed=true;
 }
 function qbeginClose(r:QualifiedRecord){
- if(r.closeStarted)return;r.closeStarted=true;r.closing=true;r.seal=r.sequence;r.closingSlots=Object.freeze(r.slots.slice());
- for(const kind of ['rescue','stop','owner'] as const)for(const slot of r.closingSlots)if(slot.kind===kind)qcall(r,slot);
+ if(r.closeStarted)return;r.closeStarted=true;qsealCallbackOwners(r);r.closing=true;r.seal=r.sequence;r.closingSlots=Object.freeze(r.slots.slice());
+ for(const kind of ['rescue','stop','owner','callback'] as const)for(const slot of r.closingSlots)if(slot.kind===kind)qcall(r,slot);
 }
 async function qfinish(r:QualifiedRecord){
  qbeginClose(r);const population=r.closingSlots!;
- for(const slot of population)if(slot.kind==='stop'||slot.kind==='owner'||slot.kind==='rescue')await slot.reaction;
- for(const kind of ['source','material'] as const){for(const slot of population)if(slot.kind===kind)qcall(r,slot);for(const slot of population)if(slot.kind===kind)await slot.reaction;}
+ for(const slot of population)if(slot.kind==='stop'||slot.kind==='owner'||slot.kind==='rescue'||slot.kind==='callback')await slot.reaction;
+ await qcallbackTerminalReceipts(r);
+ for(const operation of r.operations)await operation.reaction;
+ const preparedBeforeSource=qpreparedRoles(r).every(role=>role.factory.outcome?.ok===true&&!role.observerErrors.length&&(!role.session||(role.calls.some(call=>call.name==='dispose')&&role.calls.every(call=>Boolean(call.outcome)&&(call.outcome?.ok===true||call.name==='run'||role.errors.some(entry=>entry.call===call&&r.acceptedErrorIndices.has(entry.index)))))));
+ const beforeSource=Boolean(r.workOutcome)&&r.callbacks.every(owner=>Boolean(owner.cap)&&owner.cap!.errors.length===0&&!owner.observationFailed)&&population.filter(s=>['stop','owner','rescue','callback'].includes(s.kind)).every(s=>s.called&&(s.outcome?.ok===true||r.callbacks.some(owner=>owner.dispose===s&&owner.receipt?.callbacksTerminal===true)))&&r.sessions.every(session=>session.disposeSeen&&session.calls.every((call:any)=>Boolean(call.outcome)&&(call.name==='run'||call.outcome.ok===true)))&&preparedBeforeSource&&r.operations.every(operation=>Boolean(operation.outcome))&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(worker=>worker.exited);
+ if(beforeSource)for(const kind of ['source','material'] as const){
+  for(const slot of population)if(slot.kind===kind)qcall(r,slot);for(const slot of population)if(slot.kind===kind)await slot.reaction;
+  if(population.some(slot=>slot.kind===kind&&(!slot.called||slot.outcome?.ok!==true)))break;
+ }
  // Never infer child callback closure from a rejected dispose/status/UI receipt.
  const ownerHealthy=population.filter(s=>['stop','owner','source','material','rescue'].includes(s.kind)).every(s=>s.called&&s.outcome?.ok===true);
  for(const operation of r.operations)await operation.reaction;
  const operationsSettled=r.operations.every(operation=>Boolean(operation.outcome));
  const sessionHealthy=r.sessions.every(s=>s.disposeSeen&&s.calls.every((c:any)=>Boolean(c.outcome)&&(c.name==='run'||c.outcome.ok===true)));
- r.callbackClosed=Boolean(r.workOutcome)&&ownerHealthy&&sessionHealthy&&operationsSettled&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(w=>w.exited);
+ const preparedHealthy=qpreparedRoles(r).every(role=>role.factory.outcome?.ok===true&&!role.observerErrors.length&&(!role.session||(role.calls.some(call=>call.name==='dispose')&&role.calls.every(call=>Boolean(call.outcome)&&(call.outcome?.ok===true||call.name==='run'||role.errors.some(entry=>entry.call===call&&r.acceptedErrorIndices.has(entry.index)))))));
+ const callbackOwnersHealthy=r.callbacks.every(owner=>Boolean(owner.cap)&&owner.cap!.errors.length===0&&!owner.observationFailed)&&population.filter(s=>['stop','owner','source','material','rescue','callback'].includes(s.kind)).every(s=>s.called&&(s.outcome?.ok===true||r.callbacks.some(owner=>owner.dispose===s&&owner.receipt?.callbacksTerminal===true)));
+ r.callbackClosed=Boolean(r.workOutcome)&&callbackOwnersHealthy&&sessionHealthy&&preparedHealthy&&operationsSettled&&!r.pending.size&&!r.late&&r.sequence===r.seal&&r.workers.every(w=>w.exited);
  if(r.callbackClosed){
   for(const slot of [...population].reverse())if(slot.kind==='leaf')qcall(r,slot);
   for(const slot of population)if(slot.kind==='leaf')await slot.reaction;
@@ -221,7 +442,7 @@ async function qfinish(r:QualifiedRecord){
  for(const native of r.natives)try{if(!native.probeValid)throw Error('qualified_fixture_native_probe_unknown_before_close');qprobeNative(native);}catch(error){qerror(r,error);nativeAllowed=false;}
  if(nativeAllowed){for(const slot of population)if(slot.kind==='native')qcall(r,slot);for(const slot of population)if(slot.kind==='native')await slot.reaction;
   for(const n of r.natives)try{if(!n.closeSlot||!n.closeSlot.called||!n.closeSlot.rawWritten||n.closeSlot.outcome?.ok!==true||n.closeSlot.receiver!==n.value||typeof n.get!=='function'||qprobeNative(n)!==false)throw Error('qualified_fixture_native_close_unknown');n.closed=true;}catch(error){qerror(r,error);}}
- const assertions=r.assertions.filter(error=>!r.expectedFailures.has(error));r.errors.unshift(...assertions);
+ const assertions=r.assertions.filter(error=>!r.expectedFailures.has(error));r.errors.unshift(...assertions);r.acceptedErrorIndices=new Set([...r.acceptedErrorIndices].map(index=>index+assertions.length));
  if(!r.callbackClosed)qerror(r,Error('qualified_fixture_callback_close_unknown'));
  // No approved seam exposes product-internal betterSQLite receivers. Every root
  // stays strongly held for parent-only exact cleanup after actual worker exit.
@@ -232,7 +453,7 @@ async function qfinish(r:QualifiedRecord){
  }catch(error){qerror(r,error);}
 }
 function runCase(ctx:TestContext,work:(r:QualifiedRecord)=>Promise<void>):Promise<void>{
- const r:QualifiedRecord={ctx,nonce:randomBytes(16).toString('hex'),refs:[],registrations:[],sequence:0,closing:false,late:false,errors:[],assertions:[],expectedFailures:new Set(),slots:[],pending:new Set(),roots:[],natives:[],services:[],coordinators:[],sessions:[],operations:[],hostMaterials:[],workers:[],opaque:false,callbackClosed:false,leavesClosed:false,accountReleased:false,account:undefined,abortInstalled:false,closeStarted:false};qualifiedRecords.push(r);qhold(r,ctx);qhold(r,work);
+ const r:QualifiedRecord={ctx,nonce:randomBytes(16).toString('hex'),refs:[],registrations:[],sequence:0,closing:false,late:false,errors:[],acceptedErrorIndices:new Set(),callbacks:[],assertions:[],expectedFailures:new Set(),slots:[],pending:new Set(),roots:[],natives:[],services:[],coordinators:[],sessions:[],operations:[],hostMaterials:[],workers:[],opaque:false,callbackClosed:false,leavesClosed:false,accountReleased:false,account:undefined,abortInstalled:false,closeStarted:false};qualifiedRecords.push(r);qhold(r,ctx);qhold(r,work);
  const scenario=(async()=>{
   await Promise.resolve();let failure:{error:unknown}|undefined;
   try{
@@ -245,7 +466,7 @@ function runCase(ctx:TestContext,work:(r:QualifiedRecord)=>Promise<void>):Promis
    try{const value=await raw;r.workOutcome=qhold(r,{ok:true,value});}catch(error){r.workOutcome=qhold(r,{ok:false,error});throw error;}
   }catch(error){failure=qhold(r,{error});}
   finally{try{await qfinish(r);}catch(error){qerror(r,error);}}
-  const errors=[...(failure?[failure.error]:[]),...r.errors];if(errors.length===1)throw errors[0];if(errors.length)throw new AggregateError(errors,'qualified_fixture_body_and_cleanup_failed',{cause:errors[0]});
+  const errors=[...(failure?[failure.error]:[]),...r.errors.filter((_error,index)=>!r.acceptedErrorIndices.has(index))];if(errors.length===1)throw errors[0];if(errors.length)throw new AggregateError(errors,'qualified_fixture_body_and_cleanup_failed',{cause:errors[0]});
  })();r.scenarioP=qhold(r,scenario);const finished=()=>scenario;qhold(r,finished);
  try{ctx.onTestFinished(finished);}catch(error){r.hookFailure=qhold(r,{error});}return scenario;
 }
@@ -256,7 +477,7 @@ Object.defineProperty(nativeProcess,qualifiedCompiledAnchor,{value:nativeWorker,
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('P2 actual managed ancestor followup', () => {
-  async function setup(__q:QualifiedRecord,createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { expectedDisposeError?:Error|(()=>Error|undefined); isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
+  async function setup(__q:QualifiedRecord,createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { observeCallbacks?:boolean; expectedDisposeError?:Error|(()=>Error|undefined); isolatedConfigRoot?: boolean; multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number; prepareObservationSession?: DesktopMultiAgentServiceOptions['prepareObservationSession']; prepareObservationMessage?: DesktopMultiAgentServiceOptions['prepareObservationMessage']; prepareObservationFollowup?:DesktopMultiAgentServiceOptions['prepareObservationFollowup'] } = {}) {
     const root = qroot(__q,'xiaok-multi-agent-service-');
     if(policy.isolatedConfigRoot){const previous=process.env.XIAOK_CONFIG_DIR;qaction(__q,'old-cleanup-line-66','leaf',()=>{if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;});process.env.XIAOK_CONFIG_DIR=root;}
     void 0 /* typed actual-resource close slot registered at acquisition */;
@@ -266,7 +487,7 @@ describe('P2 actual managed ancestor followup', () => {
     const service = qservice(__q,qconstruct(__q,'multi-agent-service',()=>new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
       const session = await qraw(__q,'ordinary-session-factory',()=>createSession(input));
       return qsession(__q,session);
-    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 })),coordinator);
+    }, prepareObservationSession: policy.prepareObservationSession, prepareObservationMessage: policy.prepareObservationMessage, prepareObservationFollowup:policy.prepareObservationFollowup, closeGraceMs: 10 })),coordinator,store,policy.expectedDisposeError,policy.observeCallbacks);
     void 0 /* typed actual-resource close slot registered at acquisition */;
     service.registerThread({ threadId: 't1', profileId: 'p1', workspaceId: 'w1', cwd: root });
     let deliveryAuthority!: DesktopHostDeliveryAuthority;

@@ -170,7 +170,12 @@ async function actualLoopControllerScenario(mode:typeof scenarios[number],testSi
         expect(await outputs.readTaskResult({loopId,requestSource:'user'})).toMatchObject({ok:true,content:'Original verified summary',taskId:'output-task',origin:'verified_publication'});mark('output-task-read');
         await expect(outputs.openOutputDirectory({loopId,requestSource:'user'})).rejects.toThrow('loop_output_file_changed');expect(openPath).not.toHaveBeenCalled();mark('output-workspace-mutation-refused');
         writeFileSync(join(f.root,'result'),'result');expect(await outputs.openOutputDirectory({loopId,requestSource:'user'})).toMatchObject({ok:true,origin:'workspace_navigation'});expect(openPath).toHaveBeenCalledTimes(1);mark('output-navigation-complete');
-        openPath.mockImplementation(async()=>{f.setTime(10000);return '';});await expect(outputs.openOutputDirectory({loopId,requestSource:'user'})).rejects.toThrow();expect(openPath).toHaveBeenCalledTimes(2);mark('output-late-navigation-refused');
+        openPath.mockImplementation(async()=>{f.setTime(10000);return '';});
+        const lateNavigation=outputs.openOutputDirectory({loopId,requestSource:'user'});
+        let lateNavigationFailure:{error:unknown}|undefined;
+        try{await lateNavigation;}catch(error){lateNavigationFailure={error};}
+        if(lateNavigationFailure&&openPath.mock.calls.length<2)throw lateNavigationFailure.error;
+        await expect(lateNavigation).rejects.toThrow();expect(openPath).toHaveBeenCalledTimes(2);mark('output-late-navigation-refused');
         f.setTime(10000);await expect(outputs.listPublishedArtifacts({loopId,requestSource:'user',page:{offset:0,identity:null}})).rejects.toThrow();for(const method of ['readOutputPreview','readTaskResult','openOutputDirectory'] as const)await expect(outputs[method]({loopId,requestSource:'user'})).rejects.toThrow();expect(openPath).toHaveBeenCalledTimes(2);expect(dispatches).toBe(3);expect(receiver.approvals).toBe(3);mark('output-expiry-refusals-complete');
       }catch(error){outputFailure={error};throw error;}finally{await closeLoopResources([closeOutputs,closeEvidence,closeBusiness,closeStageHost,closeStageWorkflow],outputFailure);}
       mark('scenario-body-complete');return;
