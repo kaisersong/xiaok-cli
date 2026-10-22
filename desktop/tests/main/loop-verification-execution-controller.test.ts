@@ -252,9 +252,9 @@ function runActualLoopControllerScenario(mode:typeof scenarios[number],ctx:TestC
   });
   return scenario;
 }
-// These are bounded test-runner budgets, not product/SDK expiry changes. The
-// full consumer chains retain every fresh read. Their measured/published
-// population sets one fixed 120s/300s bound; single-chain bounds stay unchanged.
+// Fixed CI execution windows retain every original fresh read and assertion.
+// Single/full/output chains use 45s/180s/450s runner bounds. Product/SDK expiry
+// and the independent 10s finished hook stay unchanged; no performance claim.
 for(const mode of scenarios)
   it.for([mode])('executes and recovers the original Loop verification through the signed controller: %s',
-    {timeout:mode==='terminal'||mode==='lost-dispatch'||mode==='publication-lost-ack'?30000:mode==='output-consumer'?300000:120000},runActualLoopControllerScenario);
+    {timeout:mode==='terminal'||mode==='lost-dispatch'||mode==='publication-lost-ack'?45000:mode==='output-consumer'?450000:180000},runActualLoopControllerScenario);

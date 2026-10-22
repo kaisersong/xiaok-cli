@@ -90,7 +90,7 @@ jobs:
     # Public peer authentication is closed on Windows in controller-ipc.ts.
     # Covers all eight bounded cases, dependency installation and cleanup.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:

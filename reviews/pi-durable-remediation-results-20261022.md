@@ -1,5 +1,7 @@
 # PR #74 全量失败修复与验证
 
+随后6ae真实Windows24出现原knowledge target重开用例默认5秒runner红（8923ms、原七文件92P1F）；[单用例执行窗口修订](pi-durable-windows-reopen-validation-20261022.md)仅Windows5→15秒，原body/其它预算保留，本机两版原七文件各93/93，新Windows仍待验。[唯一manual诊断](pi-durable-loop-manual-results-20261022.md)已在6ae执行并复现原300秒runner红；取证质量完整，原业务exit1保留，不再重跑。下列较早“未dispatch/未执行”等描述为当时历史，不能覆盖该结果。
+
 最新已完成的489fe实际CI及后续手动诊断实现见[独立增量](pi-durable-loop-ci-rpc-validation-20261022.md)：32项成功、2项Loop失败、1原有跳过；Linux同shell六入口、两版Windows原93及Windows106+68均实际成功。Loop两绿两红，仍未关闭。下面c7及新HEAD待验描述按当时历史保留，不能覆盖该增量的实际终态；后续完整HEAD状态以PR说明为准。
 
 后续实际CI暴露KSwarm源码装配、Windows活动测试预算、Windows runtime fixture遗留SQLite句柄及Loop间歇超时。前两项历史80源增量见[CI修复记录](pi-durable-ci-remediation-20261022.md)；Windows完整owner关闭、原错误保留和81源绑定见[生命周期修复](pi-durable-windows-runtime-cleanup-20261022.md)及[实际证据](pi-durable-windows-runtime-evidence-20261022.json)。c7的真实Windows24恢复作业已成功，原七文件93/93且全部原native句柄关闭；Windows22.22作业在安装依赖时被原15分钟job上限取消，未运行这93项。
