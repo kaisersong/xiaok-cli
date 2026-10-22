@@ -4,7 +4,7 @@ import { createSessionExecutionAuthority, createSessionExecutionContext } from '
 import { createCompoundSessionJournal } from '../../../src/runtime/sol-pi/compound-session-journal.js';
 import { createCompoundExecutionCoordinator } from '../../../src/runtime/sol-pi/compound-execution-coordinator.js';
 import { createReadTool } from '../../../src/ai/tools/read.js';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterAll } from 'vitest';
 import { createPlatformRegistryFactory } from '../../../src/platform/runtime/registry-factory.js';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { applySandboxToTools } from '../../../src/platform/sandbox/tool-wrappers.js';
@@ -15,6 +15,20 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBackgroundRunner } from '../../../src/platform/agents/background-runner.js';
+
+// Ordinary source discovery remembers physical directory identities for this
+// file's profile account. Keep completed POSIX fixture roots alive until the
+// suite ends so later cases cannot receive one of their recycled inodes.
+const completedPosixRegistryRoots: string[] = [];
+afterAll(() => {
+  const failures: unknown[] = [];
+  for (const root of completedPosixRegistryRoots) {
+    try { rmSync(root, { recursive: true, force: true }); }
+    catch (error) { failures.push(error); }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length) throw new AggregateError(failures, 'registry_fixture_root_cleanup_failed', { cause: failures[0] });
+});
 
 const mockState = vi.hoisted(() => ({
   tools: [
@@ -494,7 +508,8 @@ describe('registry-factory multi-agent surface', () => {
       finishPrompt('done');
       rejectBackground(failure);
       await factory.dispose();
-      rmSync(rootDir, { recursive: true, force: true });
+      if (process.platform === 'win32') rmSync(rootDir, { recursive: true, force: true });
+      else completedPosixRegistryRoots.push(rootDir);
     }
   });
 
@@ -624,7 +639,7 @@ it.each([false, true])('CLI waits for the original factory physical writer befor
     expect(compoundAborted).toBe(true);await expect(work).rejects.toBeInstanceOf(DOMException);
   }finally{
     releaseBackground();await factory.dispose();await runner.waitForDisposedResources().catch(()=>{});
-    await compound.dispose().catch(()=>{});await work.catch(()=>{});registry.dispose();authority.dispose();rmSync(rootDir,{recursive:true,force:true});
+    await compound.dispose().catch(()=>{});await work.catch(()=>{});registry.dispose();authority.dispose();completedPosixRegistryRoots.push(rootDir);
   }
 },20000);
 
