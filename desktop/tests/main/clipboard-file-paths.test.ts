@@ -19,7 +19,12 @@ describe('native clipboard paths', () => {
   it('decodes Finder XML once and ignores ordinary clipboard prose', () => {
     expect(readClipboardPathCandidates(source({ NSFilenamesPboardType: '<array><string>/tmp/a&amp;lt;.txt</string></array>', text: 'normal text' }))).toEqual(['/tmp/a&lt;.txt']);
   });
-  it('reads file URLs and quoted paths without requiring availableFormats', () => {
-    expect(readClipboardPathCandidates(source({ text: '"/tmp/a b.txt"\nfile:///tmp/c%20d.txt' }))).toEqual(['/tmp/a b.txt', '/tmp/c d.txt']);
+  it('reads explicit native file URL formats', () => {
+    expect(readClipboardPathCandidates(source({ 'text/uri-list': 'file:///tmp/a%20b.txt' }))).toEqual(['/tmp/a b.txt']);
+    expect(readClipboardPathCandidates(source({ 'public.file-url': 'file:///tmp/c.txt' }))).toEqual(['/tmp/c.txt']);
   });
+  it.each(['/tmp/课程资料', '"/tmp/a b.txt"', 'file:///tmp/c.txt', 'C:\\Users\\tester\\brief.txt', '/tmp/one\n/tmp/two'])(
+    'does not interpret plain clipboard text as copied files: %s', text => {
+      expect(readClipboardPathCandidates(source({ text }))).toEqual([]);
+    });
 });
