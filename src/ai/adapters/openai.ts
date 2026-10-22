@@ -680,6 +680,8 @@ export class OpenAIAdapter implements ModelAdapter {
         attempt += 1;
       } finally {
         clearTimeout(timer);
+        // Every attempt owns its transport, including successful completion.
+        controller.abort();
       }
     }
     } finally { if (disclosure !== undefined) disposeProviderDisclosureContext(disclosure); }
@@ -991,129 +993,202 @@ export class OpenAIAdapter implements ModelAdapter {
       : undefined;
 
     const streamIterator = stream[Symbol.asyncIterator]();
-    while (true) {
-      const iteration = await runProviderOperation(
-        strictKimiK3,
-        () => streamIterator.next(),
-      );
-      if (iteration.done) {
-        break;
-      }
-      const chunk = iteration.value;
-      if (extractBufferedUsage && attemptState) {
-        const usage = extractBufferedUsage(
-          chunk as unknown as Record<string, unknown>,
-          this.onUsageDiagnostic,
+    try {
+      while (true) {
+        const iteration = await runProviderOperation(
+          strictKimiK3,
+          () => streamIterator.next(),
         );
-        if (usage) {
-          attemptState.latestProviderUsage = usage;
+        if (iteration.done) {
+          break;
         }
-      } else if (chunk.usage) {
-        // Generic baseline keeps inline usage emission.
-        usageReceived = true;
-        yield {
-          type: 'usage',
-          usage: {
-            inputTokens: chunk.usage.prompt_tokens ?? 0,
-            outputTokens: chunk.usage.completion_tokens ?? 0,
-          },
-        };
-        throwIfCallerAborted(options?.signal);
-      }
-
-      if (attemptState && emittedDone) {
-        continue;
-      }
-
-      const choice = chunk.choices[0];
-      if (!choice) continue;
-      const delta = choice.delta;
-      if (!delta) continue;
-      if (
-        strictKimiK3
-        && Object.prototype.hasOwnProperty.call(delta, 'reasoning_content')
-        && typeof (delta as Record<string, unknown>).reasoning_content === 'string'
-      ) {
-        officialReasoningSeen = true;
-      }
-
-      if (this.harnessContext.profile.serializeReasoning) {
-        const observation = observeReasoningDialect(
-          this.reasoningDialectState,
-          delta as Record<string, unknown>,
-        );
-        if (observation.conflict) {
-          console.warn('reasoningDialectConflict', observation.conflict);
+        const chunk = iteration.value;
+        if (extractBufferedUsage && attemptState) {
+          const usage = extractBufferedUsage(
+            chunk as unknown as Record<string, unknown>,
+            this.onUsageDiagnostic,
+          );
+          if (usage) {
+            attemptState.latestProviderUsage = usage;
+          }
+        } else if (chunk.usage) {
+          // Generic baseline keeps inline usage emission.
+          usageReceived = true;
+          yield {
+            type: 'usage',
+            usage: {
+              inputTokens: chunk.usage.prompt_tokens ?? 0,
+              outputTokens: chunk.usage.completion_tokens ?? 0,
+            },
+          };
+          throwIfCallerAborted(options?.signal);
         }
-      }
 
-      for (const reasoning of extractReasoningDeltas(
-        delta as Record<string, unknown>,
-        strictKimiK3,
-      )) {
-        if (reasoning.type !== 'thinking') {
+        if (attemptState && emittedDone) {
           continue;
         }
-        streamTextChars += reasoning.delta.length;
-        if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
-          await streamIterator.return?.();
-          throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
-        }
-        yield reasoning;
-      }
 
-      if (delta.content) {
-        for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
-          if (segment.type === 'thinking') {
+        const choice = chunk.choices[0];
+        if (!choice) continue;
+        const delta = choice.delta;
+        if (!delta) continue;
+        if (
+          strictKimiK3
+          && Object.prototype.hasOwnProperty.call(delta, 'reasoning_content')
+          && typeof (delta as Record<string, unknown>).reasoning_content === 'string'
+        ) {
+          officialReasoningSeen = true;
+        }
+
+        if (this.harnessContext.profile.serializeReasoning) {
+          const observation = observeReasoningDialect(
+            this.reasoningDialectState,
+            delta as Record<string, unknown>,
+          );
+          if (observation.conflict) {
+            console.warn('reasoningDialectConflict', observation.conflict);
+          }
+        }
+
+        for (const reasoning of extractReasoningDeltas(
+          delta as Record<string, unknown>,
+          strictKimiK3,
+        )) {
+          if (reasoning.type !== 'thinking') {
+            continue;
+          }
+          streamTextChars += reasoning.delta.length;
+          if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+            await streamIterator.return?.();
+            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+          }
+          yield reasoning;
+        }
+
+        if (delta.content) {
+          for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
+            if (segment.type === 'thinking') {
+              streamTextChars += segment.delta.length;
+              if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                await streamIterator.return?.();
+                throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+              }
+              if (!strictKimiK3) {
+                yield segment;
+              }
+              continue;
+            }
             streamTextChars += segment.delta.length;
             if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
               await streamIterator.return?.();
               throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
             }
-            if (!strictKimiK3) {
-              yield segment;
+            outputChars += segment.delta.length;
+            if (attemptState) {
+              attemptState.outputChars = outputChars;
             }
+            yield segment;
+          }
+        }
+
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const current = toolBuffers.get(tc.index) ?? { id: '', name: '', argsBuffer: '' };
+            if (tc.id) current.id = tc.id;
+            if (tc.function?.name) current.name = tc.function.name;
+            if (tc.function?.arguments) {
+              if (
+                current.argsBuffer.length + tc.function.arguments.length
+                > MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS
+              ) {
+                await streamIterator.return?.();
+                throw openAIStreamLimitError('OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED');
+              }
+              current.argsBuffer += tc.function.arguments;
+            }
+            toolBuffers.set(tc.index, current);
+          }
+        }
+
+        if (choice?.finish_reason) {
+          if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
+            await streamIterator.return?.();
+            throw new Error('memory_output_incomplete');
+          }
+          if (strictKimiK3 && !officialReasoningSeen) {
+            throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+          }
+          for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
+            if (segment.type === 'thinking') {
+              streamTextChars += segment.delta.length;
+              if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                await streamIterator.return?.();
+                throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+              }
+              if (!strictKimiK3) {
+                yield segment;
+              }
+              continue;
+            }
+            streamTextChars += segment.delta.length;
+            if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+              await streamIterator.return?.();
+              throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+            }
+            outputChars += segment.delta.length;
+            if (attemptState) {
+              attemptState.outputChars = outputChars;
+            }
+            yield segment;
+          }
+
+          for (const toolCall of drainBufferedToolCalls(toolBuffers, strictKimiK3)) {
+            yield toolCall;
+          }
+
+          if (attemptState) {
+            emittedDone = true;
             continue;
           }
-          streamTextChars += segment.delta.length;
-          if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
-            await streamIterator.return?.();
-            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+
+          // If the API didn't return usage, estimate locally
+          if (!usageReceived) {
+            yield {
+              type: 'usage',
+              usage: estimateStreamUsage(messages, systemPrompt, outputChars),
+            };
+            throwIfCallerAborted(options?.signal);
           }
-          outputChars += segment.delta.length;
+
+          emittedDone = true;
+          yield { type: 'done' };
+          return;
+        }
+      }
+
+      if (!emittedDone) {
+        if (strictKimiK3) {
+          if (toolBuffers.size === 0) {
+            throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+          }
+          if (!officialReasoningSeen) {
+            throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+          }
+          for (const toolCall of drainBufferedToolCalls(toolBuffers, true)) {
+            yield toolCall;
+          }
           if (attemptState) {
-            attemptState.outputChars = outputChars;
+            return;
           }
-          yield segment;
-        }
-      }
-
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const current = toolBuffers.get(tc.index) ?? { id: '', name: '', argsBuffer: '' };
-          if (tc.id) current.id = tc.id;
-          if (tc.function?.name) current.name = tc.function.name;
-          if (tc.function?.arguments) {
-            if (
-              current.argsBuffer.length + tc.function.arguments.length
-              > MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS
-            ) {
-              await streamIterator.return?.();
-              throw openAIStreamLimitError('OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED');
-            }
-            current.argsBuffer += tc.function.arguments;
+          if (!usageReceived) {
+            yield {
+              type: 'usage',
+              usage: estimateStreamUsage(messages, systemPrompt, outputChars),
+            };
+            throwIfCallerAborted(options?.signal);
           }
-          toolBuffers.set(tc.index, current);
-        }
-      }
-
-      if (choice?.finish_reason) {
-        if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
-          await streamIterator.return?.();
-          throw new Error('memory_output_incomplete');
-        }
-        if (strictKimiK3 && !officialReasoningSeen) {
-          throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+          yield { type: 'done' };
+          return;
         }
         for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
           if (segment.type === 'thinking') {
@@ -1122,9 +1197,7 @@ export class OpenAIAdapter implements ModelAdapter {
               await streamIterator.return?.();
               throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
             }
-            if (!strictKimiK3) {
-              yield segment;
-            }
+            yield segment;
             continue;
           }
           streamTextChars += segment.delta.length;
@@ -1139,16 +1212,6 @@ export class OpenAIAdapter implements ModelAdapter {
           yield segment;
         }
 
-        for (const toolCall of drainBufferedToolCalls(toolBuffers, strictKimiK3)) {
-          yield toolCall;
-        }
-
-        if (attemptState) {
-          emittedDone = true;
-          continue;
-        }
-
-        // If the API didn't return usage, estimate locally
         if (!usageReceived) {
           yield {
             type: 'usage',
@@ -1157,71 +1220,18 @@ export class OpenAIAdapter implements ModelAdapter {
           throwIfCallerAborted(options?.signal);
         }
 
-        emittedDone = true;
-        yield { type: 'done' };
-        return;
+        // EOF is not a provider terminal boundary. In particular, never dispatch
+        // buffered tools from a response the provider did not finish committing.
+        throw Object.assign(new Error('OpenAI stream ended before finish_reason'), {
+          code: 'ERR_STREAM_PREMATURE_CLOSE',
+        });
       }
-    }
-
-    if (!emittedDone) {
-      if (strictKimiK3) {
-        if (toolBuffers.size === 0) {
-          throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
-        }
-        if (!officialReasoningSeen) {
-          throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
-        }
-        for (const toolCall of drainBufferedToolCalls(toolBuffers, true)) {
-          yield toolCall;
-        }
-        if (attemptState) {
-          return;
-        }
-        if (!usageReceived) {
-          yield {
-            type: 'usage',
-            usage: estimateStreamUsage(messages, systemPrompt, outputChars),
-          };
-          throwIfCallerAborted(options?.signal);
-        }
-        yield { type: 'done' };
-        return;
-      }
-      for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
-        if (segment.type === 'thinking') {
-          streamTextChars += segment.delta.length;
-          if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
-            await streamIterator.return?.();
-            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
-          }
-          yield segment;
-          continue;
-        }
-        streamTextChars += segment.delta.length;
-        if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
-          await streamIterator.return?.();
-          throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
-        }
-        outputChars += segment.delta.length;
-        if (attemptState) {
-          attemptState.outputChars = outputChars;
-        }
-        yield segment;
-      }
-
-      if (!usageReceived) {
-        yield {
-          type: 'usage',
-          usage: estimateStreamUsage(messages, systemPrompt, outputChars),
-        };
-        throwIfCallerAborted(options?.signal);
-      }
-
-      // EOF is not a provider terminal boundary. In particular, never dispatch
-      // buffered tools from a response the provider did not finish committing.
-      throw Object.assign(new Error('OpenAI stream ended before finish_reason'), {
-        code: 'ERR_STREAM_PREMATURE_CLOSE',
-      });
+    } finally {
+      // finish_reason is a semantic boundary, not HTTP EOF. A suspended SDK
+      // iterator retains the Response, request body and abort listener.
+      stream.controller?.abort();
+      try { await streamIterator.return?.(); }
+      catch { /* Cleanup must not replace the provider/consumer outcome. */ }
     }
   }
 }

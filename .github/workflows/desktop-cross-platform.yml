@@ -13,10 +13,14 @@ on:
     branches: [master]
     paths:
       - 'desktop/**'
+      - 'src/ai/runtime/**'
+      - 'src/ai/adapters/**'
       - '.github/workflows/desktop-cross-platform.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'src/ai/runtime/**'
+      - 'src/ai/adapters/**'
       - '.github/workflows/desktop-cross-platform.yml'
   workflow_dispatch: {}
 
@@ -58,6 +62,13 @@ jobs:
           tests/main/file-ipc-schema.test.ts
           tests/main/ipc-handler-test-injection.test.ts
           tests/main/shutdown-aware-ipc-main.test.ts
+          tests/main/desktop-text-repetition.test.ts
+          tests/main/desktop-task-stream-recovery.test.ts
+          tests/main/desktop-provider-stream-lifecycle.test.ts
+          tests/main/desktop-startup-task-recovery.test.ts
+          tests/main/project-stream-reconnect-regression.test.ts
+          tests/renderer/chat-helpers-error-sanitization.test.ts
+          tests/renderer/chat-shell-draft-prompt.test.tsx
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
