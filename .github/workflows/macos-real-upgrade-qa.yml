@@ -39,6 +39,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Check QA syntax and pure identity controls
+        run: |
+          node --check scripts/qa/macos-real-upgrade.mjs
+          node scripts/qa/macos-real-upgrade.mjs --self-test
       - name: Upgrade the signed old app using its unchanged production updater
         run: node scripts/qa/macos-real-upgrade.mjs
         env:

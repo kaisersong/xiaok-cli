@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { createReadStream, closeSync, existsSync, lstatSync, mkdirSync, openSync,
+import { constants, createReadStream, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync,
+  chmodSync, mkdtempSync, rmSync,
   readFileSync, readdirSync, readlinkSync, realpathSync, writeFileSync, appendFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir, arch, platform } from 'node:os';
+import { homedir, arch, platform, tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
@@ -26,8 +27,8 @@ const qaHome = homedir();
 const owned = new Map();
 const children = new Set();
 let root, evidence, app, appExecutable, oldChild, oldIdentity, monitorPromise;
-let monitorStopped = false, monitorError, latestProcesses = [], installedRequest = false;
-let primary, resultFacts = {}, commandId = 0, cleaning = false, shipItSHA256;
+let monitorStopped = false, monitorError, latestGuiApplications = [], installedRequest = false;
+let primary, resultFacts = {}, commandId = 0, cleaning = false, shipItSHA256, qaSourceBinding;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 const inside = (parent, value) => { const r = relative(parent, value); return r === '' || (!isAbsolute(r) && r !== '..' && !r.startsWith(`..${sep}`)); };
 function remaining() { if (!cleaning) assert(performance.now() < DEADLINE, 'qa_wall_budget_exhausted'); }
@@ -189,8 +190,7 @@ function profileInventory() {
   }
   roots.forEach(walk); return entries;
 }
-async function sample() {
-  const rows = await processes(); latestProcesses = rows;
+async function observeOwnedProcesses(rows) {
   for (const row of rows) {
     if (row.uid !== qaUid || row.pid === process.pid) continue;
     const inApp = inside(app, row.executable), descendant = owned.has(row.ppid);
@@ -206,8 +206,124 @@ async function sample() {
   }
   const wrong = rows.filter(p => p.uid === qaUid && basename(p.executable) === 'xiaok' && p.executable.includes('.app/') && p.executable !== appExecutable);
   assert(wrong.length === 0, 'wrong_path_or_multiple_app');
-  assert(rows.filter(p => p.uid === qaUid && p.executable === appExecutable).length <= 1, 'multiple_same_path_apps');
 }
+async function sample() {
+  const before = await processes(); await observeOwnedProcesses(before);
+  const applications = await registeredApplications();
+  const after = await processes(); await observeOwnedProcesses(after);
+  latestGuiApplications = selectGuiApplications(applications, before, after, { uid: qaUid, bundle: app, executable: appExecutable });
+  event('gui-identity-crosschecked', { applications: latestGuiApplications });
+}
+const QA_PATHS = Object.freeze(['.github/workflows/macos-real-upgrade-qa.yml', 'scripts/qa/macos-real-upgrade.mjs']);
+const gitBlobOID = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+function assertQaCommit(actual, github, workflow) {
+  assert(/^[0-9a-f]{40}$/.test(actual) && actual === github && actual === workflow, 'qa_checkout_workflow_sha_mismatch');
+}
+function parseGitTree(text) {
+  assert(text.endsWith('\0'), 'git_tree_shape');
+  const entries = new Map();
+  for (const line of text.slice(0, -1).split('\0')) {
+    const match = /^([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40})\t(.+)$/.exec(line);
+    assert(match && !entries.has(match[4]), 'git_tree_shape');
+    entries.set(match[4], { mode: match[1], type: match[2], oid: match[3] });
+  }
+  return entries;
+}
+function compareQaTrees(product, qa) {
+  const changed = [];
+  for (const path of [...new Set([...product.keys(), ...qa.keys()])].sort()) {
+    const before = product.get(path), after = qa.get(path);
+    if (QA_PATHS.includes(path)) {
+      for (const entry of [before, after]) assert(entry?.mode === '100644' && entry.type === 'blob', 'qa_regular_blob_required');
+      if (before.oid !== after.oid) changed.push(path);
+    } else assert.deepEqual(after, before, `non_qa_tree_changed:${path}`);
+  }
+  assert.deepEqual(changed, QA_PATHS, 'exact_two_qa_modifications_required');
+  return { changed, nonQaEntries: [...qa].filter(([path]) => !QA_PATHS.includes(path)).sort(([a], [b]) => a.localeCompare(b)) };
+}
+function checkedQaFile(file, expected) {
+  const signature = stat => ['dev', 'ino', 'uid', 'nlink', 'mode', 'size', 'mtimeNs', 'ctimeNs'].map(k => String(stat[k])).join(':');
+  const before = lstatSync(file, { bigint: true });
+  assert(before.isFile() && !before.isSymbolicLink() && (before.mode & 0o7777n) === 0o644n && Number(before.uid) === qaUid && realpathSync(file) === file, 'qa_checkout_regular_mode');
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    assert.equal(signature(fstatSync(fd, { bigint: true })), signature(before), 'qa_checkout_identity_changed');
+    const bytes = readFileSync(fd), oid = gitBlobOID(bytes);
+    assert.equal(signature(fstatSync(fd, { bigint: true })), signature(before), 'qa_checkout_identity_changed');
+    assert.equal(signature(lstatSync(file, { bigint: true })), signature(before), 'qa_checkout_identity_changed');
+    assert.equal(realpathSync(file), file, 'qa_checkout_identity_changed');
+    assert.equal(oid, expected.oid, 'qa_checkout_blob_mismatch');
+    return { file, blobOID: oid, sha256: createHash('sha256').update(bytes).digest('hex'), stableIdentity: signature(before), mode: '100644' };
+  } finally { closeSync(fd); }
+}
+async function bindQaSource() {
+  const git = async args => (await command('/usr/bin/git', args)).out.trimEnd();
+  const qaSHA = await git(['rev-parse', 'HEAD']); assertQaCommit(qaSHA, process.env.GITHUB_SHA, process.env.GITHUB_WORKFLOW_SHA);
+  const checkout = realpathSync(await git(['rev-parse', '--show-toplevel']));
+  assert(fileURLToPath(import.meta.url) === join(checkout, QA_PATHS[1]), 'qa_executed_script_not_checkout');
+  const origin = await git(['remote', 'get-url', 'origin']);
+  assert(['https://github.com/kaisersong/xiaok-cli', 'https://github.com/kaisersong/xiaok-cli.git'].includes(origin), 'qa_origin_not_fixed_repo');
+  assert(/^[0-9a-f]{40}$/.test(NEW.sha), 'full_new_sha_required');
+  await git(['fetch', '--no-tags', '--depth=1', 'origin', NEW.sha]);
+  assert.equal(await git(['cat-file', '-t', NEW.sha]), 'commit', 'product_commit_required');
+  // Keep the NUL terminator: trimming the raw tree would destroy the parser boundary.
+  const productRaw = (await command('/usr/bin/git', ['ls-tree', '-r', '-z', '--full-tree', NEW.sha])).out;
+  const qaRaw = (await command('/usr/bin/git', ['ls-tree', '-r', '-z', '--full-tree', qaSHA])).out;
+  const product = parseGitTree(productRaw), qa = parseGitTree(qaRaw), bridge = compareQaTrees(product, qa);
+  const files = QA_PATHS.map(path => checkedQaFile(join(checkout, path), qa.get(path)));
+  assert.equal(await git(['rev-parse', 'HEAD']), qaSHA, 'qa_head_changed');
+  const proof = { qaSHA, githubSHA: process.env.GITHUB_SHA, workflowSHA: process.env.GITHUB_WORKFLOW_SHA, productSHA: NEW.sha,
+    origin, changedPaths: bridge.changed, actualCheckoutFiles: files, nonQaTreeSHA256: createHash('sha256').update(JSON.stringify(bridge.nonQaEntries)).digest('hex'),
+    productTreeOutputSHA256: createHash('sha256').update(productRaw).digest('hex'), qaTreeOutputSHA256: createHash('sha256').update(qaRaw).digest('hex'),
+    claim: 'All non-QA path/mode/type/blob tuples equal; actual checked-out QA bytes equal the QA-head blobs. Not whole-tree equality or upgrade qualification.' };
+  save('qa-source-binding.json', proof); return proof;
+}
+function parseApplications(text) {
+  const rows = JSON.parse(text); assert(Array.isArray(rows), 'gui_snapshot_shape');
+  for (const row of rows) {
+    assert(row && Number.isSafeInteger(row.pid) && row.pid > 0 && typeof row.terminated === 'boolean' &&
+      ['bundleIdentifier', 'bundleURL', 'executableURL'].every(k => row[k] === null || typeof row[k] === 'string'), 'gui_snapshot_shape');
+  }
+  return rows;
+}
+function selectGuiApplications(applications, before, after, expected) {
+  const matched = [], seen = new Set();
+  for (const application of applications) {
+    if (application.terminated) continue;
+    if (application.bundleIdentifier !== APP_ID && application.bundleURL !== expected.bundle && application.executableURL !== expected.executable) continue;
+    const first = before.find(p => p.pid === application.pid), current = after.find(p => p.pid === application.pid);
+    if (!first || !current) continue; // Stale/start/exit race: not a positive ready or duplicate identity.
+    assert(first.uid === current.uid && first.birth === current.birth && first.executable === current.executable, 'gui_ps_identity_changed');
+    assert(current.uid === expected.uid && current.executable === expected.executable && application.bundleIdentifier === APP_ID &&
+      application.bundleURL === expected.bundle && application.executableURL === expected.executable, 'gui_application_identity');
+    assert(!seen.has(current.pid), 'duplicate_application_registration'); seen.add(current.pid);
+    matched.push({ ...current, application });
+  }
+  assert(matched.length <= 1, 'multiple_same_path_apps');
+  return matched;
+}
+async function registeredApplications() {
+  const source = `ObjC.import('AppKit');
+function nullable(value) { if (value === null || value === undefined) return null; const text = ObjC.unwrap(value); return typeof text === 'string' ? text : null; }
+const apps = $.NSWorkspace.sharedWorkspace.runningApplications, rows = [];
+for (let i = 0; i < apps.count; i++) {
+  const app = apps.objectAtIndex(i), bundle = app.bundleURL, executable = app.executableURL;
+  rows.push({ pid: Number(app.processIdentifier), terminated: Boolean(app.isTerminated), bundleIdentifier: nullable(app.bundleIdentifier),
+    bundleURL: bundle ? nullable(bundle.path) : null, executableURL: executable ? nullable(executable.path) : null });
+}
+JSON.stringify(rows);`;
+  const observed = await command('/usr/bin/osascript', ['-l', 'JavaScript', '-e', source], { quiet: true, timeout: 5000 });
+  const rows = parseApplications(observed.out);
+  event('running-applications-observed', { commandId: observed.id, applications: rows }); return rows;
+}
+function relaunchedGui(applications, previous, runnerPID) {
+  const rows = applications.filter(p => p.pid !== previous.pid);
+  assert(rows.length <= 1, 'multiple_relaunched_apps');
+  const row = rows[0];
+  if (row) assert(row.ppid !== runnerPID && row.birth !== previous.birth, 'not_os_owned_new_launch');
+  return row;
+}
+
 async function monitor() {
   while (!monitorStopped) { try { await sample(); } catch (e) { monitorError = e; break; } await delay(250); }
 }
@@ -289,12 +405,12 @@ function externalApplications() {
 }
 async function main() {
   validInputs();
-  assert(process.env.GITHUB_SHA === NEW.sha, 'workflow_source_not_published_new_sha');
   assert(platform() === 'darwin' && arch() === 'arm64' && qaUid !== 0, 'arm64_nonroot_mac_required');
   assert(process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted' && process.env.RUNNER_OS === 'macOS' && process.env.RUNNER_ARCH === 'ARM64', 'disposable_hosted_mac_required');
   const temp = realpathSync(process.env.RUNNER_TEMP); assert(lstatSync(temp).isDirectory() && lstatSync(temp).uid === qaUid, 'runner_temp_owner');
   root = join(temp, 'xiaok-real-upgrade-qa'); mkdirSync(root, { mode: 0o700 }); evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
-  save('inputs.json', { old: OLD, new: NEW, qaCodeSHA: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, root, home: qaHome, uid: qaUid });
+  qaSourceBinding = await bindQaSource();
+  save('inputs.json', { old: OLD, new: NEW, qaCodeSHA: qaSourceBinding.qaSHA, qaSourceBinding, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, root, home: qaHome, uid: qaUid });
   assert((await command('/usr/bin/uname', ['-m'])).out.trim() === 'arm64', 'actual_host_architecture');
   await command('/bin/launchctl', ['print', `gui/${qaUid}`], { quiet: true });
   assert(Number((await command('/usr/bin/stat', ['-f', '%u', '/dev/console'])).out.trim()) === qaUid, 'runner_gui_session_required');
@@ -325,7 +441,7 @@ async function main() {
   finally { closeSync(out); closeSync(err); }
   oldChild.qaClosed = false; oldChild.once('close', () => { oldChild.qaClosed = true; }); oldChild.once('error', e => { monitorError = e; }); oldChild.once('exit', (code, signal) => event('direct-old-app-exit', { pid: oldChild.pid, code, signal, waitedReapedByNode: true }));
   monitorPromise = monitor();
-  oldIdentity = await waitFor(async () => { await sample(); return owned.get(oldChild.pid); }, 30_000, 'old_app_identity_missing');
+  oldIdentity = await waitFor(async () => { await sample(); return latestGuiApplications.find(p => p.pid === oldChild.pid); }, 30_000, 'old_app_identity_missing');
   const oldCDP = await waitFor(() => cdp(port, oldIdentity.pid), 120_000, 'runner_gui_old_window_unavailable');
   let downloaded;
   try {
@@ -343,7 +459,7 @@ async function main() {
     catch (e) { if (e.message !== 'cdp_closed') throw e; event('install-ipc-disconnected-during-quit', {}); }
   } finally { oldCDP.close(); }
   await waitFor(async () => oldChild.qaClosed && oldChild.exitCode === 0, 120_000, 'old_app_did_not_exit');
-  const restarted = await waitFor(async () => { await sample(); const rows = latestProcesses.filter(p => p.uid === qaUid && p.executable === appExecutable && p.pid !== oldIdentity.pid); assert(rows.length <= 1, 'multiple_relaunched_apps'); return rows[0]; }, 180_000, 'nsworkspace_did_not_relaunch_same_path');
+  const restarted = await waitFor(async () => { await sample(); return relaunchedGui(latestGuiApplications, oldIdentity, process.pid); }, 180_000, 'nsworkspace_did_not_relaunch_same_path');
   assert(restarted.ppid !== process.pid && restarted.birth !== oldIdentity.birth, 'not_os_owned_new_launch'); event('os-owned-relaunch-observed', { ...restarted, directlySpawnedByRunner: false, reapClaim: false });
   assert([...owned.values()].some(p => p.shipIt), 'shipit_identity_not_observed');
   const newCDP = await waitFor(() => cdp(port, restarted.pid), 120_000, 'relaunched_app_production_default_cdp_unavailable');
@@ -365,14 +481,94 @@ async function main() {
   assert.deepEqual(afterOld.metadata, beforeOld.metadata, 'old_release_drift'); assert.deepEqual(afterNew.metadata, beforeNew.metadata, 'new_release_drift');
   resultFacts = { downloaded, current, oldIdentity, restarted, actualSamePathReplacement: true, treeMatchesPublishedNewZIP: true, productionFeedUnchanged: true, oneInstallRequest: true };
 }
+if (process.argv.length === 3 && process.argv[2] === '--self-test') {
+  await pureControls();
+} else {
+assert(process.argv.length === 2, 'qa_arguments');
 try { await main(); if (monitorError) throw monitorError; } catch (e) { primary = { message: e.message, stack: e.stack }; }
 finally {
   if (evidence) {
     try { await cleanup(); } catch (e) { primary ??= { message: e.message, stack: e.stack }; event('cleanup-failed', { message: e.message }); }
-    save('RESULT.json', { status: primary ? 'FAIL' : 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE', failure: primary ?? null, old: OLD, new: NEW, facts: resultFacts,
+    save('RESULT.json', { status: primary ? 'FAIL' : 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE', failure: primary ?? null, old: OLD, new: NEW, qaSourceBinding: qaSourceBinding ?? null, facts: resultFacts,
       elapsedSeconds: (performance.now() - START) / 1000, noProductBuildOrCopyReplacement: true, noFeedOverride: true, noModelSDKCUAGoalTask: true,
       profileDisposition: 'Retained until hosted disposable VM destruction; artifacts contain evidence only, not app binaries or caches.',
       notClaimed: ['Windows', 'Goal14', 'CUA3', 'held native qualification', 'signing or publication', 'reap of launchd-owned processes'] });
   }
 }
 if (primary) { console.error(primary.message); process.exitCode = 1; }
+}
+
+async function pureControls() {
+  let passed = 0;
+  const check = (name, action) => { action(); passed++; console.log(`PASS ${name}`); };
+  const path = '/qa/installed/xiaok.app', exe = `${path}/Contents/MacOS/xiaok`, uid = 501;
+  const old = { pid: 10, uid, birth: 'old-birth', executable: exe }, child = { ...old, pid: 11, birth: 'child-birth' };
+  const registration = { pid: 10, bundleIdentifier: APP_ID, bundleURL: path, executableURL: exe, terminated: false };
+  const choose = (apps, before = [old, child], after = before) => selectGuiApplications(apps, before, after, { uid, bundle: path, executable: exe });
+  await (async () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'xiaok-qa-owned-pure-'));
+    const saved = { root, evidence, app, appExecutable, oldChild, owned: new Map(owned) };
+    try {
+      root = temporary; evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
+      app = join(root, 'installed', 'xiaok.app'); appExecutable = join(app, 'Contents', 'MacOS', 'xiaok');
+      oldChild = { pid: old.pid }; owned.clear();
+      const rows = [{ ...old, uid: qaUid, executable: appExecutable, ppid: process.pid, pgid: old.pid },
+        { ...child, uid: qaUid, executable: appExecutable, ppid: old.pid, pgid: child.pid }];
+      await observeOwnedProcesses(rows);
+      assert.deepEqual([...owned.keys()], [old.pid, child.pid]);
+      assert.equal(owned.get(old.pid).directChild, true); assert.equal(owned.get(child.pid).directChild, false);
+      assert.equal(owned.get(child.pid).executable, appExecutable); assert.equal(owned.get(child.pid).ppid, old.pid);
+      const applications = [{ ...registration, bundleURL: app, executableURL: appExecutable }];
+      assert.deepEqual(selectGuiApplications(applications, rows, rows, { uid: qaUid, bundle: app, executable: appExecutable }).map(p => p.pid), [old.pid]);
+    } finally {
+      ({ root, evidence, app, appExecutable, oldChild } = saved);
+      owned.clear(); for (const [pid, record] of saved.owned) owned.set(pid, record);
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  })();
+  passed++; console.log('PASS same-executable child remains in actual owned cleanup while only old GUI is selected');
+  check('two live target GUI registrations reject', () => assert.throws(() => choose([registration, { ...registration, pid: 11 }]), /multiple_same_path_apps/));
+  check('terminated registration never counts as ready or duplicate', () => assert.deepEqual(choose([registration, { ...registration, pid: 11, terminated: true }]).map(p => p.pid), [10]));
+  check('missing current ps identity yields no match', () => assert.deepEqual(choose([registration], [old], []), []));
+  for (const [field, value] of [['bundleIdentifier', 'wrong.bundle'], ['bundleURL', '/other/xiaok.app'], ['executableURL', '/other/xiaok.app/Contents/MacOS/xiaok']]) {
+    check(`live contradictory registration ${field} rejects`, () => assert.throws(() => choose([{ ...registration, [field]: value }]), /gui_application_identity/));
+  }
+  check('live wrong UID rejects', () => assert.throws(() => choose([registration], [{ ...old, uid: 502 }], [{ ...old, uid: 502 }]), /gui_application_identity/));
+  check('live ps birth contradiction rejects', () => assert.throws(() => choose([registration], [old], [{ ...old, birth: 'reused' }]), /gui_ps_identity_changed/));
+  check('live ps executable contradiction rejects', () => assert.throws(() => choose([registration], [old], [{ ...old, executable: '/other' }]), /gui_ps_identity_changed/));
+  check('relaunch selection excludes old PID and requires fresh birth/non-runner parent', () => {
+    const newer = { ...child, ppid: 1 }, gui = choose([{ ...registration, pid: 11 }], [newer]);
+    assert.equal(relaunchedGui([old], old, 99), undefined); assert.equal(relaunchedGui(gui, old, 99).pid, 11);
+    assert.throws(() => relaunchedGui([{ ...newer, ppid: 99 }], old, 99), /not_os_owned_new_launch/);
+    assert.throws(() => relaunchedGui([{ ...newer, birth: old.birth }], old, 99), /not_os_owned_new_launch/);
+  });
+  check('bad observer data cannot be interpreted as an empty successful observation', () => {
+    assert.throws(() => parseApplications('not-json')); assert.throws(() => parseApplications('{}'));
+    assert.throws(() => parseApplications(JSON.stringify([{ ...registration, terminated: 'false' }])));
+  });
+  const one = '1'.repeat(40), two = '2'.repeat(40), three = '3'.repeat(40);
+  const entry = oid => ({ mode: '100644', type: 'blob', oid });
+  const product = new Map([...QA_PATHS.map(p => [p, entry(one)]), ['src/main.ts', entry(three)]]);
+  const qa = new Map([...QA_PATHS.map(p => [p, entry(two)]), ['src/main.ts', entry(three)]]);
+  check('independent QA/product commits with exactly two QA modifications pass', () => { assertQaCommit(one, one, one); assert.deepEqual(compareQaTrees(product, qa).changed, QA_PATHS); });
+  check('checkout or workflow SHA mismatch rejects', () => { assert.throws(() => assertQaCommit(one, two, one)); assert.throws(() => assertQaCommit(one, one, two)); });
+  check('third-file blob/mode changes or additions reject', () => {
+    for (const [path, changed] of [['src/main.ts', entry(one)], ['src/main.ts', { ...entry(three), mode: '100755' }], ['new.txt', entry(three)]]) {
+      const next = new Map(qa); next.set(path, changed); assert.throws(() => compareQaTrees(product, next), /non_qa_tree_changed/);
+    }
+  });
+  check('QA symlink/type or missing entries reject', () => {
+    const next = new Map(qa); next.set(QA_PATHS[0], { ...entry(two), mode: '120000' }); assert.throws(() => compareQaTrees(product, next), /qa_regular_blob_required/);
+    next.delete(QA_PATHS[0]); assert.throws(() => compareQaTrees(product, next), /qa_regular_blob_required/);
+  });
+  check('Git tree malformed/duplicate entries reject', () => { assert.throws(() => parseGitTree('bad')); assert.throws(() => parseGitTree(`100644 blob ${one}\ta\0` .repeat(2))); });
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), 'xiaok-qa-pure-'));
+  try {
+    const file = join(directory, 'qa.mjs'), bytes = Buffer.from('// frozen QA\n'); writeFileSync(file, bytes, { mode: 0o644 }); chmodSync(file, 0o644);
+    const expected = entry(gitBlobOID(bytes));
+    check('actual regular checkout bytes match the QA-head blob', () => assert.equal(checkedQaFile(file, expected).blobOID, expected.oid));
+    check('changed actual checkout bytes reject despite unchanged tree', () => { writeFileSync(file, '// modified\n'); assert.throws(() => checkedQaFile(file, expected), /qa_checkout_blob_mismatch/); });
+    check('actual executable mode is not an approved 100644 QA file', () => { writeFileSync(file, bytes); chmodSync(file, 0o755); assert.throws(() => checkedQaFile(file, expected), /qa_checkout_regular_mode/); });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+  console.log(JSON.stringify({ status: 'PASS_PURE_QA_CONTROLS_ONLY', passed, AppKitOrAppExecuted: false }));
+}
