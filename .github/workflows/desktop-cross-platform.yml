@@ -65,6 +65,7 @@ jobs:
           tests/main/desktop-text-repetition.test.ts
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/desktop-provider-stream-lifecycle.test.ts
+          tests/main/desktop-startup-task-recovery.test.ts
           tests/main/project-stream-reconnect-regression.test.ts
           tests/renderer/chat-helpers-error-sanitization.test.ts
           tests/renderer/chat-shell-draft-prompt.test.tsx
