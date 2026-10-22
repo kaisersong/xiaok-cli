@@ -1,5 +1,7 @@
 # PR #74 全量失败修复与验证
 
+后续实际CI暴露KSwarm源码装配、Windows活动测试预算及macOS Loop超时；前两项增量与新源码80项绑定见[CI修复记录](pi-durable-ci-remediation-20261022.md)。下列全量本机记录按eade的79项冻结保留，不能代替新HEAD真实CI；macOS Loop仍在诊断。
+
 本轮承接用户“解决失败问题”，不把此前基线失败当成结案。PR #73 已于 2026-10-21 合并；本分支已集成主干 `6770092945a42fb0e45ef0d68d0971bfc01b51a8`。本轮起点为 `d0e35e73014add369748de77fe2a868a62777f13`。原始失败记录保留在 [集成记录](pi-durable-integration-results-20261022.md) 和 [不可变失败清单](failure-remediation-ledger.json)。
 
 本机可运行回归已完成：CLI1136文件为13456通过、0失败、225原skip；Desktop本机824完整文件为10159通过、0失败、8原skip。下面分别保留原始红、修复后完整文件替换及未验资格人口；四个远端文件和最终HEAD跨平台CI仍待验，不宣称全部资格通过或release-ready。最终完整提交及CI状态写入PR说明；本记录按源码SHA绑定验证，不将旧HEAD的CI当新HEAD证据。

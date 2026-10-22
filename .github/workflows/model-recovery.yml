@@ -96,9 +96,18 @@ jobs:
       - name: Test Desktop compaction history and completion boundary
         working-directory: desktop
         run: npm test -- tests/main/context-manager.test.ts tests/main/compaction-completion.test.ts
+      - name: Check out pinned Desktop runtime and generator source
+        if: matrix.node != '22.14.0'
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          ref: 16c3ed14c5493a82d000d69d34e4b1c933187433
+          path: .ci-sidecars/kswarm
       - name: Test Desktop SQLite transactions and physical usage ownership
         if: matrix.node != '22.14.0'
         working-directory: desktop
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/.ci-sidecars/kswarm
         run: >
           npm test -- --maxWorkers=2
           tests/main/kb-integration.test.ts
@@ -108,13 +117,6 @@ jobs:
           tests/main/project-agent-model.test.ts
           tests/main/project-agent-model-runtime.test.ts
           tests/main/project-agent-model-main-recovery-refresh.test.ts
-      - name: Check out pinned Desktop generator source
-        if: matrix.node != '22.14.0'
-        uses: actions/checkout@v4
-        with:
-          repository: kaisersong/kswarm
-          ref: 16c3ed14c5493a82d000d69d34e4b1c933187433
-          path: .ci-sidecars/kswarm
       - name: Build CLI and Desktop main worker assets
         if: matrix.node != '22.14.0'
         env:

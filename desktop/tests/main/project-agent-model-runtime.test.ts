@@ -35,7 +35,8 @@ describe('project selected model through real Desktop runtime and HTTP provider'
   try {
     // Native import: new Function('...import(specifier)') has no dynamic import callback inside the vitest VM.
     const nativeImport=((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier:string)=>Promise<any>;
-    const {createAgentStore}=await nativeImport(pathToFileURL(resolve(process.cwd(),'../../kswarm/src/core/agent-store.js')).href);
+    const kswarmSourceRoot=process.env.KSWARM_SOURCE_ROOT?resolve(process.env.KSWARM_SOURCE_ROOT):resolve(process.cwd(),'../../kswarm');
+    const {createAgentStore}=await nativeImport(pathToFileURL(join(kswarmSourceRoot,'src','core','agent-store.js')).href);
     const filePath=join(root,'agents.json');const first=createAgentStore({filePath});
     const created=first.create({name:'Vision worker',runtimeType:'xiaok',runtimeSource:'desktop-agent-runtime',desktopModelId:'vision'});
     expect(created.ok).toBe(true);expect(createAgentStore({filePath}).get(created.agent.id).desktopModelId).toBe('vision');

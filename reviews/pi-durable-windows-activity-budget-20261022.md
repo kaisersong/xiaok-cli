@@ -1,0 +1,13 @@
+# Windows activity storm：仅校准一次平台runner预算
+
+真实红是 eade543a3e4a0a9e7d1558beb9162744824eac27 的GitHub Windows-2022/Node22.22，run39707436644、job119590666265。原五完整文件68项=67pass/1fail；store原16项总62052ms，唯一storm单case实际61049ms，错误为Test timed out in15000ms。原raw ci-desktop-windows.log SHA256 b295b6a3925ed2b918738ee99c3f41a012091457905f4268b2cd3c0704bd3a31保留，61049不能误写成store全文件62052，也不把旧15s红覆盖成通过。
+
+当前test源5b9fee823b0815763dd4646229a0b33f60b7d1d4e67410dc51d375810a5796ef：body完全同步，真实10000次ingest、10001 completed、真实close/reopen/replay及五expect，业务now固定1000，无await/elapsed断言或15s产品deadline。生产每次ingest仍执行原事务/SQL/COMMIT/sidecar安全检查；原busy_timeout5000等SQL与锁保护不改。没有profile，不能把Windows较慢归因于磁盘/杀毒/资源竞争，也不能据此提性能改动。
+
+实际Desktop Vitest/@vitest/runner3.2.4 withTimeout有两条同名timeout路径：timer触发，以及fn/thenable resolve后发现实际耗时>=预算。同步body无法被普通JS timer在中段抢占；该61s现象与完整同步工作回到runner后被耗时检查拒绝相容。现raw不包含分支/完成标记或独立断言计数，故仅作为完整真实工作负载的已观测耗时依据，**不称Windows原五断言已通过，更不把原case记pass**。原task无background async需要新的context/join。
+
+最小方案只改原storm case第三参数：Windows为120000ms、其它平台保留15000ms。120s约为已观察61.049s的1.97倍，是一次固定、有限、明确Windows平台余量；不是p95/总体统计上界，不承诺所有机器都会过。不得75→90→120逐次猜加；本次120s若仍红保留并定位，不自动再提高。其余15个store case预算、全部五expect原文、10000+1人口、逻辑钟、真实数据库/重开、生产与SQL期限、原五完整file68人口、资格和CI命令/并发/其它OS均不改；不加yield、不批处理、不缓存、不优化生产、不更新baseline。
+
+执行门：A/B/root独立方案审→保留上述有效旧CI红→唯一平台ternary最小测试补丁；独立反向还原第三参数后整test字节必须等于原5b9fee，同时核原body五expect/固定now与全部原人口/预算。实际diff再经A/B与GLM5.3审。可本机Node24/最低22.22执行原五完整68以查回归，并明确该实跑只是非Windows15s路径，不能称实际Win120分支已验证。真正Windows验收必须是新完整HEAD的原GitHub Windows五文件68实际green；若仍红不以本机结果替代。最终源绑定按该原manifest内test一个新增变动更新，旧eade分区/CI失败继续保留，新结果替换相关分区不重复累计。
+
+取证C-windows-activity-diagnosis.json记录原raw行、源/runner哈希与事实。本案没有运行测试、CPU实验或修改生产/测试源；先等方案审共识。
