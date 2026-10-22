@@ -8,6 +8,13 @@ import type { NamedMcpServerConfig } from './types.js';
 const execFileAsync = promisify(execFile);
 const MCP_V2_IMPORT_CHECK = 'from mcp.server.mcpserver import MCPServer';
 
+/** Keep implicit imports out of the signed runtime, including child interpreters. */
+export function buildManagedPythonChildEnv(baseEnv: Record<string, string>): Record<string, string>;
+export function buildManagedPythonChildEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+export function buildManagedPythonChildEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...baseEnv, PYTHONDONTWRITEBYTECODE: '1' };
+}
+
 export interface ResolveBuiltinSlideRendererConfigOptions {
   platform?: NodeJS.Platform;
   homeDir?: string;
@@ -17,7 +24,10 @@ export interface ResolveBuiltinSlideRendererConfigOptions {
 
 async function canImportMcpV2(pythonCommand: string): Promise<boolean> {
   try {
-    await execFileAsync(pythonCommand, ['-c', MCP_V2_IMPORT_CHECK], { timeout: 15_000 });
+    await execFileAsync(pythonCommand, ['-B', '-c', MCP_V2_IMPORT_CHECK], {
+      timeout: 15_000,
+      env: buildManagedPythonChildEnv(process.env),
+    });
     return true;
   } catch {
     return false;
@@ -51,10 +61,11 @@ export async function resolveBuiltinSlideRendererConfig(
   return {
     ...server,
     command: managedPython,
-    env: {
+    args: ['-B', ...(server.args ?? [])],
+    env: buildManagedPythonChildEnv({
       ...server.env,
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
-    },
+    }),
   };
 }

@@ -19,6 +19,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tests/support/**'
+      - 'src/platform/mcp/python-server.ts'
+      - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
   pull_request:
     paths:
@@ -30,6 +32,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tests/support/**'
+      - 'src/platform/mcp/python-server.ts'
+      - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
   workflow_dispatch: {}
 
@@ -90,6 +94,12 @@ jobs:
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
+
+      - name: Managed Python runtime regression
+        run: cd desktop && npm run test -- --run tests/main/python-runtime.test.ts tests/main/deploy-bundled-plugins.test.ts
+
+      - name: Managed Python CLI resolver regression
+        run: node node_modules/vitest/vitest.mjs run tests/platform/mcp/python-server.test.ts --config vitest.config.ts
 
   loop-controller-tests:
     name: Loop controller fixtures (${{ matrix.os }}, Node ${{ matrix.node }})

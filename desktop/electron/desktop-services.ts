@@ -404,7 +404,7 @@ export function getDesktopMemoryBackend(dataRoot: string): 'layered' | 'fallback
   getDesktopMemoryStore(dataRoot);
   return _desktopMemoryStoreBackend;
 }
-import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
+import { resolvePythonServerLaunch } from './python-runtime.js';
 import { buildManagedXiaokAgentPayload, buildManagedXiaokAgentSemanticPayload } from './managed-xiaok-agent.js';
 import { ArtifactWorkspaceStore } from './artifact-workspace-store.js';
 import { ArtifactWorkspaceFileManager } from './artifact-workspace-files.js';
@@ -1538,8 +1538,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               });
               continue;
             }
-            const command = isPythonServer
-              ? normalizePythonServerCommand(launch.command, process.platform, managedPythonCommand)
+            const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
+            const pythonLaunch = isPythonServer ? resolvePythonServerLaunch({
+              command: launch.command,
+              args: launch.args,
+              env: baseEnv,
+              platform: process.platform,
+              preferredPython: managedPythonCommand,
+            }) : undefined;
+            const command = pythonLaunch
+              ? pythonLaunch.command
               : isNodeServer
                 ? (process.env.XIAOK_NODE_CMD || process.execPath)
                 : launch.command;
@@ -1547,9 +1555,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             // Design v58 §6.1: no Xiaok-owned daemon launch. The official
             // `cua-driver mcp` proxy is the only owner of app-daemon reuse and
             // auto-relaunch, so a second `open -n` owner is removed here.
-            const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
-            const runtimeEnv = isPythonServer
-              ? buildPythonServerEnv(baseEnv)
+            const runtimeEnv = pythonLaunch
+              ? pythonLaunch.env
               : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
                 ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
                 : isCuaServer && process.platform === 'win32'
@@ -1558,7 +1565,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             const connection = await createMcpClientConnection(server.name, {
               type: 'stdio',
               command,
-              args: launch.args,
+              args: pythonLaunch?.args ?? launch.args,
               env: runtimeEnv,
               timeout: server.timeout,
               protocol: server.protocol,
