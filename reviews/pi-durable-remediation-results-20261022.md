@@ -1,5 +1,7 @@
 # PR #74 全量失败修复与验证
 
+最新已完成的489fe实际CI及后续手动诊断实现见[独立增量](pi-durable-loop-ci-rpc-validation-20261022.md)：32项成功、2项Loop失败、1原有跳过；Linux同shell六入口、两版Windows原93及Windows106+68均实际成功。Loop两绿两红，仍未关闭。下面c7及新HEAD待验描述按当时历史保留，不能覆盖该增量的实际终态；后续完整HEAD状态以PR说明为准。
+
 后续实际CI暴露KSwarm源码装配、Windows活动测试预算、Windows runtime fixture遗留SQLite句柄及Loop间歇超时。前两项历史80源增量见[CI修复记录](pi-durable-ci-remediation-20261022.md)；Windows完整owner关闭、原错误保留和81源绑定见[生命周期修复](pi-durable-windows-runtime-cleanup-20261022.md)及[实际证据](pi-durable-windows-runtime-evidence-20261022.json)。c7的真实Windows24恢复作业已成功，原七文件93/93且全部原native句柄关闭；Windows22.22作业在安装依赖时被原15分钟job上限取消，未运行这93项。
 
 最新增量修复[TTY退出观察](pi-durable-permission-hook-exit-wait-20261022.md)及[四个相邻入口](pi-durable-permission-sibling-exit-wait-20261022.md)：用同一pane的真实正常退出回执替换固定1秒采样，保留全部业务断言、范围和命令变体，并完整保留业务及清理原错误。11项守门回归、真实permission场景在Node24/22.14通过；新增四入口在两版各完整8变体、15份stop前正常退出回执。和未修改yolo的已有成功组成六入口本机Node24成功union，并非同一shell六连跑。不同模型gpt-5.6-sol已实际审查初始四域及新增四域并APPROVE。外层[CI预算修订](pi-durable-ci-job-budget-20261022.md)只给安装和完整测试有界执行机会；原用例、产品和hook期限不变。新HEAD真实CI仍待验。

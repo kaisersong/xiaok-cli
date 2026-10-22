@@ -1,0 +1,41 @@
+{
+  "originalTestSHA256": "83582426fda875e785ddf75b03ebdb2a7a1b528e1c861c5008fa8052912ef4e6",
+  "transforms": [
+    {
+      "original": "async function actualLoopControllerScenario(mode:typeof scenarios[number],testSignal:AbortSignal){",
+      "instrumented": "__OBSERVER__async function actualLoopControllerScenario(mode:typeof scenarios[number],testSignal:AbortSignal){"
+    },
+    {
+      "original": "  const started=performance.now();",
+      "instrumented": "  const started=performance.now();\n  const __aTrace=__aCreateTrace(mode,testSignal);__aTraces.set(mode,__aTrace);"
+    },
+    {
+      "original": "{mode,stage,elapsedMs:performance.now()-started}",
+      "instrumented": "{mode,stage,elapsedMs:performance.now()-started,...__aTrace.stage(stage)}"
+    },
+    {
+      "original": "const f = await verifiedOperationFixture();closes.unshift(()=>f.close());",
+      "instrumented": "const f = await verifiedOperationFixture();__aTrace.root(f.root);closes.unshift(()=>f.close(true));"
+    },
+    {
+      "original": "    async invoke(method, payload: any, peer, serverSignal) {",
+      "instrumented": "    invoke: __aTrace.wrap('server',async function invoke(method, payload: any, peer, serverSignal) {"
+    },
+    {
+      "original": "      return result;\n    } });",
+      "instrumented": "      return result;\n    }) });"
+    },
+    {
+      "original": "roundTrip: (bytes, callerSignal) => {",
+      "instrumented": "roundTrip: __aTrace.wrap('client',(bytes, callerSignal) => {"
+    },
+    {
+      "original": "  }, roundTripSync: unused });",
+      "instrumented": "  }), roundTripSync: unused });"
+    },
+    {
+      "original": "  const scenario=actualLoopControllerScenario(mode,ctx.signal);",
+      "instrumented": "  const scenario=actualLoopControllerScenario(mode,ctx.signal);\n  __aFinishTrace(mode,scenario);"
+    }
+  ]
+}

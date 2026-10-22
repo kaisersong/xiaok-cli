@@ -1,0 +1,167 @@
+import {realpathSync as __aRealpath,lstatSync as __aLstat,Stats as __aStats} from 'node:fs';
+import {types as __aUtilTypes} from 'node:util';
+// Inert source template. No product import and no user object is serialized.
+const __loopDiagnosticNonce=__NONCE_JSON__;
+const __aAllowed:readonly string[]=__METHODS_JSON__;
+const __aApply=Reflect.apply,__aDescriptor=Object.getOwnPropertyDescriptor,__aOwn=Object.hasOwn;
+const __aOwnKeys=Reflect.ownKeys,__aDefine=Object.defineProperty,__aPrototype=Object.getPrototypeOf;
+const __aIsProxy=__aUtilTypes.isProxy,__aIsPromise=__aUtilTypes.isPromise;
+const __aArray=Array.isArray,__aFinite=Number.isFinite,__aString=String;
+const __aParse=JSON.parse,__aStringify=JSON.stringify;
+const __aWeakMap=WeakMap,__aWeakGet=WeakMap.prototype.get,__aWeakSet=WeakMap.prototype.set;
+const __aCpuUsage=process.cpuUsage.bind(process),__aResourceUsage=process.resourceUsage.bind(process);
+const __aNow=performance.now.bind(performance),__aThen=Promise.prototype.then;
+const __aConsole=console.info.bind(console),__aIsBuffer=Buffer.isBuffer;
+const __aDecoder=new TextDecoder('utf-8',{fatal:true}),__aDecode=TextDecoder.prototype.decode;
+const __aLength=__aDescriptor(__aPrototype(Uint8Array.prototype),'length')!.get!;
+const __aAdd=EventTarget.prototype.addEventListener,__aRemove=EventTarget.prototype.removeEventListener;
+const __aAborted=__aDescriptor(AbortSignal.prototype,'aborted')!.get!;
+const __aReason=__aDescriptor(AbortSignal.prototype,'reason')!.get!;
+const __aIsDirectory=__aStats.prototype.isDirectory,__aIsSymlink=__aStats.prototype.isSymbolicLink;
+function __aPut(array:any[],index:number,value:unknown){
+ __aDefine(array,__aString(index),{__proto__:null,value,enumerable:true,writable:true,configurable:true} as PropertyDescriptor);
+}
+function __aAppend(array:any[],value:unknown){__aPut(array,array.length,value);}
+function __aField(object:object,key:PropertyKey,value:unknown){
+ __aDefine(object,key,{__proto__:null,value,enumerable:true,writable:true,configurable:true} as PropertyDescriptor);
+}
+function __aCopyOwn(target:object,source:object){
+ if(__aIsProxy(source))throw Error('diagnostic_internal_proxy');
+ const keys=__aOwnKeys(source);
+ for(let i=0;i<keys.length;i++){
+  const key=keys[i]!,d=__aDescriptor(source,key);
+  if(typeof key!=='string'||!d||!__aOwn(d,'value'))throw Error('diagnostic_internal_shape');
+  if(d.enumerable)__aField(target,key,d.value);
+ }
+}
+// JSON.stringify(object) would consult a poisoned inherited toJSON. Only its
+// captured primitive-string encoder is used; every container is read own-data.
+function __aJson(value:unknown,depth=0):string{
+ if(depth>16)throw Error('diagnostic_internal_depth');
+ if(value===null)return 'null';
+ if(typeof value==='string'||typeof value==='boolean')return __aStringify(value);
+ if(typeof value==='number'){if(!__aFinite(value))throw Error('diagnostic_internal_number');return __aStringify(value);}
+ if(typeof value!=='object'||__aIsProxy(value))throw Error('diagnostic_internal_type');
+ if(__aArray(value)){
+  const length=__aDescriptor(value,'length')!.value;let text='[';
+  for(let i=0;i<length;i++){
+   const d=__aDescriptor(value,__aString(i));
+   if(!d||!__aOwn(d,'value'))throw Error('diagnostic_internal_hole');
+   if(i)text+=',';text+=__aJson(d.value,depth+1);
+  }
+  return text+']';
+ }
+ const keys=__aOwnKeys(value);let text='{',count=0;
+ for(let i=0;i<keys.length;i++){
+  const key=keys[i]!,d=__aDescriptor(value,key);
+  if(typeof key!=='string'||!d||!__aOwn(d,'value'))throw Error('diagnostic_internal_shape');
+  if(!d.enumerable)continue;
+  if(count++)text+=',';text+=__aStringify(key)+':'+__aJson(d.value,depth+1);
+ }
+ return text+'}';
+}
+const __aTraceEntries:any[]=[];
+const __aTraces={__proto__:null,
+ get(mode:string){for(let i=0;i<__aTraceEntries.length;i++)if(__aTraceEntries[i].mode===mode)return __aTraceEntries[i].trace;},
+ set(mode:string,trace:unknown){__aAppend(__aTraceEntries,{__proto__:null,mode,trace});},
+};
+function __aCreateTrace(mode:string,ctxSignal:AbortSignal){
+ let observerErrors=0,truncated=false,invalid=false,ended=false,seq=0,identity=0,activeListeners=0;
+ const events:any[]=[],roots:any[]=[],pending:any[]=[],stops:any[]=[],ids=new __aWeakMap<object,number>();
+ const safe=(fn:()=>void)=>{try{fn();}catch{observerErrors++;invalid=true;}};
+ const stamp=()=>{const cpu=__aCpuUsage(),usage=__aResourceUsage();return {__proto__:null,wallMs:__aNow(),userCpuUs:cpu.user,systemCpuUs:cpu.system,maxRssKiB:usage.maxRSS};};
+ const id=(value:unknown)=>{
+  if((typeof value==='object'&&value!==null)||typeof value==='function'){
+   let n=__aApply(__aWeakGet,ids,[value]);
+   if(n===undefined){n=++identity;__aApply(__aWeakSet,ids,[value,n]);}
+   return {__proto__:null,type:typeof value,id:n};
+  }
+  return {__proto__:null,type:typeof value,id:null};
+ };
+ const reason=(value:unknown)=>{
+  const result:any=id(value);
+  if(!__aIsProxy(value)&&((typeof value==='object'&&value!==null)||typeof value==='function')){
+   const d=__aDescriptor(value,'message');
+   if(d&&__aOwn(d,'value')&&typeof d.value==='string'){
+    const safeCodes=['loop_publication_read_timeout','controller_ipc_aborted_unknown','controller_ipc_timeout_unknown','controller_ipc_closed_unknown','application_registration_changed'];
+    for(let i=0;i<safeCodes.length;i++)if(d.value===safeCodes[i]){__aField(result,'code',safeCodes[i]);break;}
+   }
+  }
+  return result;
+ };
+ const emit=(event:object)=>{
+  if(ended){invalid=true;return;}
+  if(events.length>=4096){truncated=true;invalid=true;return;}
+  const entry={__proto__:null};__aCopyOwn(entry,event);__aCopyOwn(entry,stamp());__aAppend(events,entry);
+ };
+ const observeAbort=(signal:AbortSignal|undefined,side:string,n:number,label:string)=>{
+  if(!signal)return ()=>{};
+  if(__aIsProxy(signal))throw Error('diagnostic_signal_proxy');
+  let detached=false;const index=stops.length;
+  const listener=()=>safe(()=>emit({__proto__:null,event:'abort',side,seq:n,label,reason:reason(__aApply(__aReason,signal,[]))}));
+  const remove=()=>{if(detached)return;__aApply(__aRemove,signal,['abort',listener]);detached=true;activeListeners--;__aPut(stops,index,undefined);};
+  __aApply(__aAdd,signal,['abort',listener,{__proto__:null,once:true}]);
+  __aAppend(stops,remove);activeListeners++;
+  if(__aApply(__aAborted,signal,[]))listener();
+  return remove;
+ };
+ safe(()=>observeAbort(ctxSignal,'scenario',0,'ctx'));
+ const allowed=(value:unknown)=>{if(typeof value!=='string')return false;for(let i=0;i<__aAllowed.length;i++)if(value===__aAllowed[i])return true;return false;};
+ const methodFor=(side:string,args:any[])=>{
+  if(side==='server')return allowed(args[0])?args[0]:'unknownMethod';
+  try{
+   if(__aIsProxy(args[0])||!__aIsBuffer(args[0])||__aApply(__aLength,args[0],[])>1048576)return 'unknownMethod';
+   const parsed=__aParse(__aApply(__aDecode,__aDecoder,[args[0]]));
+   const d=parsed&&typeof parsed==='object'?__aDescriptor(parsed,'method'):undefined;
+   return d&&__aOwn(d,'value')&&allowed(d.value)?d.value:'unknownMethod';
+  }catch{return 'unknownMethod';}
+ };
+ const trace={__proto__:null,
+  stage(stage:string){let value:any={__proto__:null};safe(()=>{if(stage.length>160)throw Error('diagnostic_stage_limit');value=stamp();emit({__proto__:null,event:'stage',stage});});return value;},
+  root(root:string){safe(()=>{
+   const canonical=__aRealpath(root),value=__aLstat(canonical);
+   if(canonical!==root||__aApply(__aIsSymlink,value,[])||!__aApply(__aIsDirectory,value,[]))throw Error('diagnostic_root_identity');
+   __aAppend(roots,{__proto__:null,canonicalRoot:canonical,uid:value.uid,dev:value.dev,ino:value.ino,birthtimeMs:value.birthtimeMs,workerPID:process.pid,workerPPID:process.ppid,runNonce:__loopDiagnosticNonce});
+  });},
+  wrap<T extends Function>(side:'client'|'server',original:T):T{return function(this:unknown,...args:any[]){
+   let n=0,method='unknownMethod';const removes:any[]=[];
+   safe(()=>{
+    n=++seq;__aPut(pending,n,undefined);method=methodFor(side,args);if(method==='unknownMethod')invalid=true;
+    let opposite=0,sameSide=0,link:number|null=null;
+    for(let i=1;i<pending.length;i++){const prior=pending[i];if(prior&&prior.method===method){if(prior.side===side)sameSide++;else{opposite++;link=i;}}}
+    __aPut(pending,n,{__proto__:null,side,method});
+    const ambiguous=opposite>1||sameSide>0;if(ambiguous)invalid=true;
+    emit({__proto__:null,event:'begin',side,seq:n,method,link:!ambiguous&&opposite===1?link:null,ambiguous});
+    __aAppend(removes,observeAbort(side==='server'?args[3]:args[1],side,n,side==='server'?'server':'caller'));
+    __aAppend(removes,observeAbort(ctxSignal,side,n,'ctx'));
+   });
+   const settle=(event:string,value:unknown)=>safe(()=>{
+    for(let i=0;i<removes.length;i++)removes[i]();
+    if(n>0)__aPut(pending,n,undefined);
+    emit({__proto__:null,event,side,seq:n,method,result:event==='fulfill'?id(value):reason(value)});
+   });
+   let result:unknown;try{result=__aApply(original,this,args);}catch(error){settle('throw',error);throw error;}
+   safe(()=>{
+    if(!__aIsPromise(result)){invalid=true;emit({__proto__:null,event:'unobservable-result',side,seq:n,method});for(let i=0;i<removes.length;i++)removes[i]();if(n>0)__aPut(pending,n,undefined);return;}
+    __aApply(__aThen,result,[(value:unknown)=>{settle('fulfill',value);return undefined;},(error:unknown)=>{settle('reject',error);return undefined;}]);
+   });
+   return result;
+  } as unknown as T;},
+  finish(event:string,value:unknown){safe(()=>{
+   for(let i=0;i<stops.length;i++)if(stops[i])stops[i]();
+   let pendingCount=0;for(let i=1;i<pending.length;i++)if(pending[i])pendingCount++;
+   if(pendingCount)invalid=true;
+   emit({__proto__:null,event:'scenario-'+event,result:event==='fulfill'?id(value):reason(value)});
+   const record={__proto__:null,schemaVersion:1,mode,workerPID:process.pid,workerPPID:process.ppid,runNonce:__loopDiagnosticNonce,rssUnit:'KiB',events,roots,pendingCount,listenerCount:activeListeners,observerErrors,truncated,invalid};
+   ended=true;__aConsole('LOOP_RPC_DIAGNOSTIC',__aJson(record));
+  });},
+ };
+ return trace;
+}
+function __aFinishTrace(mode:string,scenario:Promise<unknown>){
+ try{
+  const trace=__aTraces.get(mode);if(!trace)return;
+  __aApply(__aThen,scenario,[(value:unknown)=>{try{trace.finish('fulfill',value);}catch{}return undefined;},(error:unknown)=>{try{trace.finish('reject',error);}catch{}return undefined;}]);
+ }catch{/* Missing evidence is unknown, never a replacement business result. */}
+}
+

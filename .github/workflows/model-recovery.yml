@@ -59,11 +59,18 @@ on:
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      loop_rpc_diagnostic:
+        description: 'Run one Loop RPC diagnostic instead of the recovery matrix'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 jobs:
   recovery:
+    if: github.event_name != 'workflow_dispatch' || !inputs.loop_rpc_diagnostic
     strategy:
       fail-fast: false
       matrix:
@@ -127,3 +134,35 @@ jobs:
       - name: Test actual emitted workers and missing assets
         if: matrix.node != '22.14.0'
         run: node --test tests/package/glob-worker.test.mjs tests/package/desktop-glob-worker.test.mjs
+
+  loop-rpc-diagnostic:
+    name: Loop RPC diagnostic (manual, not qualification)
+    if: github.event_name == 'workflow_dispatch' && inputs.loop_rpc_diagnostic
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Check diagnostic owner cleanup deadlines
+        run: python3 tests/support/test_loop_rpc_diagnostic_owner.py
+      - name: Observe one original output-consumer scenario
+        run: python3 tests/support/loop-rpc-diagnostic.py
+      - name: Preserve original result and diagnostic quality
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-rpc-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .xiaok/evals/loop-rpc-diagnostic/
+          if-no-files-found: error
+          retention-days: 7
