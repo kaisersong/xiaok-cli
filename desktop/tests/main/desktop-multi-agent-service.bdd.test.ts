@@ -2234,7 +2234,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       expect(cancellations).toHaveLength(1);
       if (cancelFirst) expect(cancellations[0].preview).toContain('followup_cancelled');
       else expect(cancellations[0].preview).toBe('agent_interrupted');
-    } finally { release.resolve(); vi.restoreAllMocks(); }
+    } finally { release.resolve(); }
   }));
 
   it('A37 Given interrupt has revoked a child turn, When it tries another side effect, Then its stale scoped actor is rejected immediately', (ctx)=>runCase(ctx,async(__q)=>{
