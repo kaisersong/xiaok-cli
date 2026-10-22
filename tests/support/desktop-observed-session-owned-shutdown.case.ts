@@ -91,6 +91,7 @@ it('a genuinely prepared observed session attempts independent stops after its o
   let originalDispose:Promise<void>|undefined,bodyFailure:{error:unknown}|undefined,bodyAccepted=false;
   let acceptedOriginalPhysical:{error:unknown}|undefined;
   let acceptedServiceStopFailure:{error:unknown}|undefined;
+  let originalJournalFailure:Error|undefined;
   let host:any,service:any,store:any,base:any,bridge:any,runtime:any;
   const presence=keep('setup-presence',{pid:process.pid,ppid:process.ppid} as Record<string,unknown>);
   const fixtureErrors=keep('fixture-errors',[] as unknown[]);
@@ -111,10 +112,10 @@ it('a genuinely prepared observed session attempts independent stops after its o
    let operationFailure:{error:unknown}|undefined;const receiptErrors:unknown[]=[];
    try{phaseJournal?.record(code,'entered');}catch(error){receiptErrors.push(error);recordError('finally-phase-enter',error);}
    try{await keep('original-finally-stop-result',action());}catch(error){operationFailure=keep('finally-operation-error',{error});recordError('finally-operation',error);
-    if(code==='finally_service_stop'&&bodyAccepted&&acceptedOriginalPhysical&&prepared){
+    if(code==='finally_service_stop'&&bodyAccepted&&acceptedOriginalPhysical&&prepared&&originalJournalFailure!==undefined){
      try{
       const snapshot=keep('service-stop-suspend-snapshot',probe.snapshot(prepared.session));
-      if(isKnownOwnedSessionServiceStopFailure(code,bodyAccepted,acceptedOriginalPhysical,error,snapshot.suspendFailures,F))acceptedServiceStopFailure=keep('accepted-service-stop-failure',{error});
+      if(isKnownOwnedSessionServiceStopFailure(code,bodyAccepted,acceptedOriginalPhysical,error,snapshot.suspendFailures,originalJournalFailure))acceptedServiceStopFailure=keep('accepted-service-stop-failure',{error});
      }catch(observationError){receiptErrors.push(observationError);recordError('finally-suspend-observation',observationError);}
     }
    }
@@ -138,7 +139,7 @@ it('a genuinely prepared observed session attempts independent stops after its o
    identity=keep('root-identity',{root,nonce,fixtureNonce,pid:process.pid,ppid:process.ppid,uid:stat.uid,dev:stat.dev,ino:stat.ino,birthtimeMs:stat.birthtimeMs});
    writeFileSync(join(root,'identity.json'),JSON.stringify(identity,null,2)+'\n');identityWritten=true;
    phaseJournal=createOwnedSessionShutdownJournal({file:join(root,'phase-v1.jsonl'),runNonce:nonce,fixtureNonce,pid:process.pid,ppid:process.ppid,keep});
-   const F=keep('original-journal-failure',Error('OWNED_ORIGINAL_JOURNAL_FAILURE'));
+   const F=keep('original-journal-failure',Error('OWNED_ORIGINAL_JOURNAL_FAILURE'));originalJournalFailure=F;
    journal=holdGate('journal');journalEntered=holdGate('journal-entered');rootResponse=holdGate('root-response');preparedEntered=holdGate('prepared-entered');
    stopOnAbort=keep('abort-listener',()=>{
     for(const value of [journal,rootResponse,preparedEntered,journalEntered]){try{value?.resolve();}catch(error){cleanupError('abort-gate-release',error);}}
