@@ -1,0 +1,13 @@
+# A Desktop 分区脚本修后静态票
+
+APPROVE（当前汇总脚本静态代码；未启动runner/未运行最终汇总，不预判未资格remote）。SHA256 1e5a0fb4074760416ba6bc07cee6b7f829ed70dfe7aa1de395746a7174ebcb57
+
+实际重读新增delta。base显式拒绝空人口、未知filestatus、failedfile却0 failedassertions，suite/collection/afterAll无法被0case默认为skip。C9forensics核same label meta ownedPID/PGID、reaped/global/group/signal/onlyExactRoots、原raw固定前缀完整记录Counter与cleanup对应逐identity、至少2真实guard外lease根、nonce/workerPPID/stat与deleted；空集/误拷别次已清理JSON不能充当本次证明。首轮两BLOCK已消除，沿革保留。
+
+wholefile替换精确排重、Loop8仅加一次；base原4红保留、remote4/128仍pending不算localskip，八prod/currenttesthash与drift/cache覆盖限制明确。原host新6case是否已在823收集以原raw+wholefile替换为准，不手算再加6。Node22.22 C9资格skip与signedLoop最低版CI待跑都不冒称绿。
+
+只读审本脚本；实际生成/原始人口与最终源/平台资格需B按结果复核。当前未见必改项。
+
+## 归档序列化增量
+
+实际核新script f13a1da9a7bf37ac77f946730afe8587f87c81c123ab7027555248192012f012：仅末次写JSON/MD时publication_text替换REPO/home，残留/Users/拒绝；原输入/哈希校验/人口计算不变。out绑定当前generatorSHA256。该增量静态 APPROVE，不执行runner或最终汇总。

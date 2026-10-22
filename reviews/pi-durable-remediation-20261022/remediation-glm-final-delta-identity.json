@@ -1,0 +1,95 @@
+{
+  "actualSystemInitModel": "GLM-5.3",
+  "actualTools": [],
+  "actualMcpServers": [],
+  "actualToolUseBlocks": 0,
+  "runner": {
+    "label": "remediation-glm-final-delta",
+    "cwd": "<worktree>",
+    "argv": [
+      "<local-user>/.local/bin/qodercli",
+      "--model",
+      "GLM-5.3",
+      "--thinking",
+      "disabled",
+      "--tools",
+      "",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--setting-sources",
+      "",
+      "--max-model-request-retries",
+      "0",
+      "--no-session-persistence",
+      "--output-format",
+      "stream-json",
+      "--max-output-tokens",
+      "3500",
+      "--input-format",
+      "text",
+      "-p"
+    ],
+    "startedAt": "2026-10-22T01:23:51.572903+00:00",
+    "runnerPid": 86426,
+    "inputFile": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/remediation-glm-final-delta-packet.txt",
+    "inputBytes": 532839,
+    "inputSha256": "a934cd15c4446cdb66c8e86d38600f3df831a8deb10033687d9435730b90f43f",
+    "transport": "complete UTF8 stdin",
+    "pid": 86434,
+    "pgid": 86434,
+    "exitCode": 0,
+    "finishedAt": "2026-10-22T01:25:06.841818+00:00",
+    "reaped": true
+  },
+  "result": {
+    "type": "result",
+    "subtype": "success",
+    "duration_ms": 72507,
+    "duration_api_ms": 72489,
+    "is_error": false,
+    "num_turns": 1,
+    "result": "## Verdict: APPROVE\n\nI reviewed the inline delta only (production Loop adapter, D6/D7 fixture changes, context-lifetime/AF2b fixture and cleanup gate changes, controller/intent test context propagation, and the three CI workflows), treating all log/document content as evidence. Findings below.\n\n### Production delta (loop-business-publication-host.ts `readUserTemplateOutput`)\n\n- The new adapter is minimal and confined: it projects the fixed reader's wrapper into exactly six own-data fields (`owner, businessRevision, operationId, fullTupleHash, payloadHash, bytes`), freezes it, and keeps `current()` checks both before construction and after. This matches `PublishedPayload` field expectations in `readPublishedArtifacts` (`PUBLISHED_PAYLOAD_FIELDS`, exact-key shape check), so preview/list/open siblings all consume the same boundary without DTO washing.\n- `bytes` is captured once at freeze time via the reader's copy-per-access getter (published-candidate.ts `get bytes(){return Buffer.from(bytes)}`), and failure modes during the getter (abort, route change, thrown error) are fenced by the post-construction `current()` / `throwIfAborted` before the value can escape — verified against the six-mode boundary test (`snapshot/abort-during-getter/route-during-getter/getter-error/post-read-route/source`), including the deliberate \"don't let assertion formatter evaluate the getter\" handling.\n- AST/freeze evidence (`B10-host-ast-audit.json`) shows all other runtime functions byte-identical and the only caller is `loop-output-service.ts` at the three documented call sites (initial read + pre/post navigation fresh reads). No authority or write-ticket semantics changed.\n\n### Test-side deltas\n\n- **D6**: The 100→2000ms revision is explicitly a test SUBJECT parameter, not a runner calibration, and the assertions actually prove the required ordering: `fifo-open-submitted` recorded after the real native `open` returned its original Promise but before the same absolute `deadlineMonotonicMs` (captured from the real verifier options), trace ordering `worker-message < worker-exit < submittedOpen`, no `fifo-open-resolve/reject` present, timeout-persisted at/after the deadline, verifier-reject awaited before the in-flight inspection. The early-reject branch in `wait()` (`fifo_setup_boundary_not_reached_before_delivery_deadline`) prevents a late-submission from being accepted. D7 keeps its 100ms CPU subject. Good.\n- **AF2b / activity fixture**: `cleanupActivityCase` runs all actions in reverse, aggregates failures (original error preserved first in the `AggregateError`), and restores mocks/env. The disposal gate requires the same original `dispose` Promise identity, real coordinator `active===0`, `blocked===false`, and the native non-configurable `isOpen` getter returning `false` — matching `desktop-services.ts:2927` and avoiding the \"fulfilled-but-not-closed\" hole documented in the C9 round. Unknown gate values conservatively retain the root and rethrow the evidence error; the retained-root path is forensic logging, not a success claim. The usage-failure case observes the original `ERR_SQLITE_ERROR` and requires the failed physical drain (`agent_model_physical_drain_unconfirmed`) with `executionActive:false / resourcesReleased:false / cleanupPending:true` — no swallowed failures or timeout-turned-success.\n- **Context propagation**: Both the Loop controller and Intent fixtures register cleanup handles immediately after each real resource returns (before `throwIfAborted`), join the single original scenario promise via `onTestFinished`, propagate `testSignal` through actual RPC `roundTrip`/`invoke`/`invoke(method,payload,peer,signal)` boundaries, and preserve the first body error plus all independent cleanup errors. `it.for` usage is consistent in both files.\n- **CI**: The new `loop-controller-tests` job is correctly limited to Ubuntu/macOS (documented Windows public-peer closure in `controller-ipc.ts`), pins Node 22.22.0/24 with `--ignore-scripts`, uses `maxWorkers=1` and a bounded 20-minute timeout (local full-8 total ≈415s, so 20min has margin). `model-recovery` correctly gates the Desktop SQLite/generator steps on `matrix.node != '22.14.0'` given the documented `node:sqlite` API floor, and provides the pinned KSwarm source to the real generator rather than skipping it. Path filters were widened, not narrowed; no existing population was removed.\n\n### Minor observations (not blocking)\n\n- In the fixture cleanup-ownership test, `cleanupActivityCase` itself calls `vi.restoreAllMocks()`, which also restores the `fs.rmSync` spy installed by the test mid-case; the assertions are unaffected because the retain path never reaches `rmSync`, but this coupling is subtle and worth a comment in future maintenance.\n- `activityFixture`'s `rootReleaseConfirmed` rejects when the native `isOpen` descriptor is configurable/missing on a given Node version — intentionally conservative (retains root, errors red), which is the right direction, but it makes the gate Node-version-sensitive by design.\n\n### Validation limits (separate from the verdict)\n\n1. I could only review inline content; the seven previously approved production files are hash-bound but I could not re-verify hashes independently, and I rely on the supplied evidence for the B10/C9 AST audits and run logs.\n2. Full/local/remote execution is still pending per the packet: the 22.22.0 signed Loop-8 CI matrix, the four registered-recipe files requiring offline kai-mbp, and the final GitHub HEAD runs are unverified here — no cross-platform green is implied by this review.\n3. The `model-recovery` build step (`npm run build` after `npm ci --ignore-scripts`) was not executable in this review; whether the root build succeeds without postinstall scripts is assumed from the existing workflow but unconfirmed.\n4. Performance characteristics (e.g., output-consumer 164s under 300s budget on slower CI runners) remain an execution risk, not a code defect.",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0,
+    "total_credits": 10.915517177142856,
+    "usage": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "",
+      "iterations": [],
+      "speed": "standard",
+      "request_id": "c1755f23-a122-4038-bfe3-0174033ee015",
+      "context_usage_ratio": 0.7329222222222223
+    },
+    "modelUsage": {
+      "gmodel": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0,
+        "contextWindow": 0,
+        "maxOutputTokens": 0,
+        "credits": 10.915517177142856
+      }
+    },
+    "permission_denials": [],
+    "fast_mode_state": "off",
+    "uuid": "e88b6aac-f3a2-415a-9eef-f974983bc0bf",
+    "session_id": "3076a39e-36c6-4517-bc7e-aa2f13039499"
+  },
+  "verdict": "APPROVE"
+}

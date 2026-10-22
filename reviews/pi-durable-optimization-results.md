@@ -1,5 +1,7 @@
 # pi durable v3 本批实施与验收记录
 
+后续PR #73主干集成及完整回归失败修复见[2026-10-22修复记录](pi-durable-remediation-results-20261022.md)。本文保留初批范围与当时验证事实；后续不同模型审查、补跑和未完成项以新记录为准。
+
 本批修复压缩摘要的完成边界：截断、过滤、缺终态、工具响应以及迟到异常不再被安装为成功摘要。CLI 使用原确定性 fallback，并先发 `compact_failed`；legacy Desktop 不完整响应拒绝且保留历史。普通聊天不启用新策略。
 
 基线为已合并 master `dc221f9bac84d939b8fb543d4795396693fdc9b8`，独立分支 `feat/pi-durable-optimization-20261021`。不合入 U/C 未合并工作树。父设计与多方评审见 [mydocs PR #8](https://github.com/kaisersong/mydocs/pull/8)；本批冻结补充见 [implementation](pi-durable-optimization-implementation.md)，SHA256 `3d883cdd658bfbfdadac4bea28dc4e0d80e253ae121d8a38ff7f9fc74f3a33f8`。

@@ -187,9 +187,21 @@ describe('BDD: actual Desktop provider loop and durable mailbox', () => {
 
   it('A12 Given async usage persistence fails, When the actual model loop receives usage, Then it awaits the sink and cannot seal successful delivery', async () => {
     const { context, onSeal } = setup();
-    const failure = Promise.reject(new Error('usage persistence failed')); void failure.catch(() => {});
-    const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() { yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 2 } }; yield { type: 'text', delta: 'must not succeed' }; } };
-    await expect(runDesktopToolLoop({ ...context, adapter, onUsage: () => failure })).rejects.toThrow('usage persistence failed');
+    const usageError = new Error('usage persistence failed'), failure = Promise.reject(usageError); void failure.catch(() => {});
+    let providerCalls = 0, reachedText = false;
+    const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() { providerCalls++; yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 2 } }; reachedText = true; yield { type: 'text', delta: 'must not succeed' }; } };
+    const onUsage = vi.fn(() => failure);
+    let rejected: unknown;
+    try { await runDesktopToolLoop({ ...context, adapter, onUsage }); } catch (error) { rejected = error; }
+    expect(rejected).toBeInstanceOf(AggregateError);
+    const combined = rejected as AggregateError;
+    expect(combined.message).toBe('desktop_local_business_and_model_cleanup_failed');
+    expect(combined.cause).toBe(usageError); expect(combined.errors).toHaveLength(2); expect(combined.errors[0]).toBe(usageError);
+    expect(combined.errors[1]).toBeInstanceOf(AggregateError);
+    const physical = combined.errors[1] as AggregateError;
+    expect(physical.message).toBe('agent_model_physical_drain_unconfirmed');
+    expect(physical.errors).toHaveLength(1); expect(physical.errors[0]).toBe(usageError);
+    expect(onUsage).toHaveBeenCalledTimes(1); expect(providerCalls).toBe(1); expect(reachedText).toBe(false);
     expect(onSeal).toHaveBeenCalledExactlyOnceWith('failed');
   });
 });

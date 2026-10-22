@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Archive, ArrowRight, Clock3, MoreHorizontal, Trash2, MessageSquare, Plus, Users, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -102,7 +102,15 @@ export function CollaborationRoomsPage() {
   const activeRooms = sortedRooms.filter(room => room.status === 'active');
   const archivedRooms = sortedRooms.filter(room => room.status === 'archived' || room.status === 'archiving');
   const visibleRooms = category === 'active' ? activeRooms : archivedRooms;
-  const formatTime = new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false});
+  // Numeric local dates depend on the system offset at each displayed instant,
+  // including historical DST. Check all categories without constructing Intl.
+  const localTimeFingerprint = sortedRooms.map(room => {
+    const timestamp = activity(room);
+    return timestamp ? `${timestamp}/${new Date(timestamp).getTimezoneOffset()}` : '';
+  }).join('|');
+  const formatTime = useMemo(() => localTimeFingerprint
+    ? new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})
+    : null, [locale, localTimeFingerprint]);
   const handleRoomMenuKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {setMenuRoomId(null); deleteTrigger.current?.focus();}
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -192,7 +200,7 @@ export function CollaborationRoomsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2 px-5 pb-4">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--c-bg-deep)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">
                     <Clock3 size={12} /> {t.collaborationRoomLastActive}
-                    {timestamp ? <time dateTime={timestamp} title={new Date(timestamp).toLocaleString(locale)}>{formatTime.format(new Date(timestamp))}</time> : t.collaborationRoomTimeUnknown}
+                    {timestamp ? <time dateTime={timestamp} title={new Date(timestamp).toLocaleString(locale)}>{formatTime!.format(new Date(timestamp))}</time> : t.collaborationRoomTimeUnknown}
                   </span>
                   {room.status === 'archiving' && <span className="text-xs text-[var(--c-text-secondary)]">{t.collaborationRoomArchiving}</span>}
                   <div className="relative" ref={menuRoomId === room.roomId ? menuRef : undefined}>

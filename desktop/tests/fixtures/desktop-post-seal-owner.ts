@@ -1,4 +1,5 @@
 import { types as nativeTypes } from 'node:util';
+import type { DatabaseSync } from 'node:sqlite';
 // The test account home is isolated; native UID/PID and production facts remain real.
 // Real owner process. The runner is controlled, but host/core/seal, SQLite,
 // checkpoint/journal and the actual native CPU Worker are not substituted.
@@ -32,7 +33,18 @@ const workerOutput = join(root, 'delivery-verifier-worker.mjs');
 markD10('worker-build-before');
 await build({ entryPoints: [fileURLToPath(workerSource)], outfile: workerOutput, bundle: true, platform: 'node', format: 'esm' });
 markD10('worker-build-after');
-const trace = mode === 'fifo' ? createPassiveTrace() : undefined;
+// D6 needs a real FIFO read after the CPU-only Worker exits. D7 retains its
+// original 100ms pathological-CPU subject; D6 uses the harness normal budget.
+const watchdogMs = mode === 'cpu' ? 100 : 2000;
+let verifierDeadlineMonotonicMs: number | undefined;
+const fifoTrace = mode === 'fifo' ? createPassiveTrace() : undefined;
+const trace = fifoTrace ? { snapshot: () => fifoTrace.snapshot(), record(stage: string, fields: Record<string,string|number|boolean|null> = {}) {
+  fifoTrace.record(stage, fields);
+  if (['fifo-open-submitted','fifo-delivery-timeout-persisted','verifier-reject','fifo-open-resolve','fifo-close-call','fifo-close-resolve'].includes(stage)) {
+    out({ stage, taskId, groupId: f.groupId, childId: f.childId, ownerMonotonicMs: performance.now(),
+      deadlineMonotonicMs: verifierDeadlineMonotonicMs, watchdogMs, trace: fifoTrace.snapshot() });
+  }
+} } : undefined;
 const nativeProtectionUrlGetter = Object.getOwnPropertyDescriptor(URL.prototype, 'href')?.get;
 function protectionWorkerUrl(filename: unknown): string | undefined {
   try {
@@ -85,7 +97,7 @@ if (trace) {
   // Importing the class does not instantiate or prewarm a native Worker.
   const { DeliveryVerifier } = await import('../../../src/runtime/task-host/delivery-verifier.js');
   restoreVerifier = installPassiveMethodObserver(DeliveryVerifier.prototype, 'verify', trace, 'verifier',
-    args => passiveVerifierOptionFields(args[1]));
+    args => {const fields=passiveVerifierOptionFields(args[1]);if(typeof fields.deadlineMonotonicMs==='number')verifierDeadlineMonotonicMs=fields.deadlineMonotonicMs;return fields;});
 }
 // SIGKILL remains the test's existing cleanup boundary. Restore only our own
 // process-local observers if an unrelated normal exit does occur.
@@ -110,7 +122,7 @@ const f = await createPostSealHarness({ root, passiveTrace: trace, readOrdinal: 
       if (mode === 'host-committed' && snapshot.status === 'completed') { out({ stage: mode, taskId, groupId: f.groupId, childId: f.childId }); stop(); }
     }
   }(directory) : undefined,
-  watchdogMs: mode === 'cpu' || mode === 'fifo' ? 100 : 2000,
+  watchdogMs,
   prompt: mode === 'cpu' ? 'create' + ' '.repeat(65529) + 'x' : mode === 'fifo' ? '生成 PDF 文件' : 'Hello',
   emit: mode === 'fifo' ? input => input.emitRuntimeEvent({ type: 'artifact_recorded', sessionId: input.sessionId,
     turnId: 'turn', intentId: 'intent', stageId: 'stage', artifactId: 'pdf', kind: 'file', label: 'PDF', path: pathToFileURL(join(root, 'pending.pdf')).href })
@@ -138,15 +150,28 @@ const f = await createPostSealHarness({ root, passiveTrace: trace, readOrdinal: 
     if (report.delivery.revision !== 1) {
       trace?.record('report-persist-call', { revision: report.delivery.revision });
       const raw = persist();
-      if (trace) observePassiveSettlement(raw, () => trace.record('report-persist-return', { revision: report.delivery.revision }),
+      if (trace) observePassiveSettlement(raw, () => {trace.record('report-persist-return', { revision: report.delivery.revision });
+        if(report.delivery.guardFailure?.code==='delivery_timeout')trace.record('fifo-delivery-timeout-persisted',{revision:report.delivery.revision});},
         () => trace.record('report-persist-reject', { revision: report.delivery.revision }), trace);
       return raw;
     }
     if (mode === 'marker-transaction') {
-      const put = f.store.putRootBinding.bind(f.store);
-      f.store.putRootBinding = (binding, control) => {
-        put(binding, control);
-        if ('delivery' in binding) { out({ stage: 'marker-transaction', taskId, groupId: f.groupId, childId: f.childId }); stop(); }
+      // Production writes through its authenticated mutation port, so an
+      // instance-method override cannot observe this transaction. Hold the
+      // actual native COMMIT after its UPDATE, without substituting the port.
+      const db = (f.store as unknown as { db: DatabaseSync }).db;
+      const exec = db.exec.bind(db);
+      db.exec = sql => {
+        if (sql.trim().toUpperCase() === 'COMMIT' && db.isTransaction) {
+          const row = db.prepare('SELECT data_json FROM root_turns WHERE source_task_id=?').get(taskId) as { data_json: string } | undefined;
+          const binding = row && JSON.parse(row.data_json);
+          if (binding?.sourceTaskId === taskId && binding.groupId === f.groupId && binding.delivery?.revision === report.delivery.revision) {
+            out({ stage: 'marker-transaction', taskId, groupId: f.groupId, childId: f.childId, transactionOpen: db.isTransaction,
+              stagedDeliveryRevision: binding.delivery.revision });
+            stop();
+          }
+        }
+        return exec(sql);
       };
     }
     trace?.record('report-persist-call', { revision: report.delivery.revision });
@@ -168,7 +193,7 @@ process.stdin.on('data', text => {
     delivery: hostDelivery(snapshot), inFlight: f.host.inFlightTaskIds().includes(taskId),
     rootStatus: f.store.getAgent(f.groupId, `root_${f.groupId}`)?.status,
     childStatus: f.store.getAgent(f.groupId, f.childId)?.status,
-    ...(trace ? { trace: trace.snapshot(), watchdogMs: 100 } : {}) });
+    ...(trace ? { trace: trace.snapshot(), watchdogMs } : {}) });
     });
   }
 });
@@ -192,8 +217,8 @@ if (mode === 'snapshot' || mode.startsWith('goal-snapshot')) { await f.readEnter
 else {
   await f.host.drain();
   trace?.record('host-drain-resolved');
-  out({ stage: 'host-drained', taskId, status: (await f.host.inspectTask(taskId))?.status, delivery: hostDelivery(await f.host.inspectTask(taskId)),
-    ...(trace ? { trace: trace.snapshot(), watchdogMs: 100 } : {}) });
+  out({ stage: 'host-drained', taskId, inFlight: f.host.inFlightTaskIds().includes(taskId), status: (await f.host.inspectTask(taskId))?.status, delivery: hostDelivery(await f.host.inspectTask(taskId)),
+    ...(trace ? { trace: trace.snapshot(), watchdogMs } : {}) });
 }
 // Explicit OS crash is the boundary; never disguise this as graceful cleanup.
 setInterval(() => {}, 1000);

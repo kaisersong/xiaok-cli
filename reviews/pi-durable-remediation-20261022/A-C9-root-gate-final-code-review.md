@@ -1,0 +1,15 @@
+# A C9 删除门最终实码票
+
+APPROVE（当前6测试/fixture代码；五whole两Node与实际晚清理尚待结果）。已逐hash核C9-final-code-manifest.json，fixture eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0，factory ad15fa223558ceee110690569f2a8665be7c4b21e6ad67c106e2d78bd3ec2298；另4源保持前票hash。
+
+实际完整diff：root删除只允许无owner，或同原dispose fulfilled且实际同coordinator active安全非负整数0、blocked明确false、真实db own不可配置native isOpen getter同db返回false。读门缺失/抛错/坏值先retain记录后以原错报红；已知active>0/blocked/open保留不声称released。无强关store、重试dispose、默认关闭/清sticky。正常closed receipt才恢复原rm。
+
+原AF notcompleted断言移到dispose前保留，physical同原usage错误身份/runtimeblocked/resourcesReleasedfalse/cleanupPendingtrue仍检查。cache原Promise/await断言成功后同对象免重复、unknown全Aggregate/allrestore与mailbox双层身份未放宽。原native资格/预算/生产均无变。
+
+已实际读C-root-gate-red.log/json：正常exit1/reaped，2新case真实fail、16名称过滤skip；两case均先通过same原dispose fulfill/blockedfalse/open DB/SELECT1与release前后active人口，失败为exactroot保护rm叶抛sentinel，未真实删除活journal。这是有效先红，不是全factory人口结果；两个保护根父晚清理实证另存。修后两参数的源正文保留before/after路径，finally原ticket release+所有mocks恢复，root仍交父待worker退出晚收。
+
+本票没有冒称本人重跑或最终whole5绿；须C提交最终同源24/22.22、逐原人口/skip、所有retainedroot实在原worker/PGID0且stat一致后晚删证据，旧首轮130/1红和两轮BLOCK继续保留。
+
+## B partialsetup阻断后的修订实码票
+
+B指出两新负例的activityFixture/acquireLease/stat等在try外导致setup异常未进入finally，阻断有效；本席此前批准漏检此测试资源边界，旧ad15票保留沿革不能覆盖新源。实际重读新factory a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966：fixture创建/lease获取/stat/canonical/spy与所有断言均入同try；可选ticket，finally独立尝试release、全cleanup、restore、syncESM，清理失败Aggregate保留原body首因，原两参数/所有前置与不删journal谓词不变。fixture eeafb与其它4hash不变。当前修后代码 APPROVE，运行/晚清理仍另验。

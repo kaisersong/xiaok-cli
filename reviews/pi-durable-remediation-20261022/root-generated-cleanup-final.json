@@ -1,0 +1,10 @@
+{
+  "completedAt": "2026-10-22T01:40:52.233990+00:00",
+  "restoredTrackedCount": 232,
+  "removedExactGeneratedCount": 28,
+  "planSha256": "9c643734c552b89ae231268a5be3caff81185dadfcd508354c5442013474d255",
+  "sourceReviewedFilesUnchanged": 79,
+  "onlyExactManifestPaths": true,
+  "untrackedDistRemaining": [],
+  "trackedDistOrBuildInfoDiff": []
+}

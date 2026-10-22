@@ -20,7 +20,7 @@ describe('chat terminal layout', () => {
       expectedGuard,
     );
     const crashReport = source.indexOf(
-      "await import('../utils/crash-reporter.js')",
+      'await handleFatalError(error);',
       actionCatch,
     );
 
@@ -28,7 +28,9 @@ describe('chat terminal layout', () => {
     expect(actionCatch).toBeGreaterThan(-1);
     expect(expectedGuard).toBeGreaterThan(actionCatch);
     expect(stableOutput).toBeGreaterThan(expectedGuard);
-    expect(crashReport).toBeGreaterThan(stableOutput);
+    const stableExit = source.indexOf('process.exit(1);', stableOutput);
+    expect(stableExit).toBeGreaterThan(stableOutput);
+    expect(crashReport).toBeGreaterThan(stableExit);
   });
 
   it('preflights strict K3 fork before mutation and delegates cross-profile model switching to the runtime', () => {

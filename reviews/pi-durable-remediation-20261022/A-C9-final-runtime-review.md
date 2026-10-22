@@ -1,0 +1,9 @@
+# A C9 最终运行证据独立审
+
+APPROVE（C9实际交付范围；没有宣称两版相同资格或全Desktop绿）。独立读原始五whole日志/runner/父forensics，当前6source逐hash符合finalmanifest，非A重复运行。
+
+Node24五file133/133通过；最低Node22.22五file17通过/116原nativeAuthorizer资格跳过=133，2pass/3skip文件。各133个verbose真实终态与summary一致，两新guard外ordinary-lease负例和cleanup错误回归均执行；未把116skip称通过。
+
+两runner均exit0/reaped。Node24实际11、Node22.22实际2 retainedroot原raw固定记录与cleanupJSON逐对象集合完全一致，nonce/workerPPID/ownedPID/PGID一致；所有stat验证对象等于创建记录、实际deleted且路径已无，globalErrors/原group成员空/脚本signal0。当前原两PGID再查均0。两个Node runtime资格分别保留，普通npm故障forensics留存边界不改。
+
+旧firstwhole130pass1fail、旧rm保护两case红、所有设计/实码有效BLOCK继续留档；此票关闭C9 scoped阻断，不替代quiet根23、remoterecipe或平台CI。

@@ -57,17 +57,58 @@ describe('registry lifecycle ownership', () => {
 
   it('does not start a tool whose permission check settled after registry disposal', async () => {
     let allow!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const execute = tool('write');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { enter(); await waiting; return 'allow'; },
     } as any }, [execute]);
     const result = registry.executeTool('write', {});
+    await entered;
     registry.dispose();
     allow();
     expect(await result).toContain('tool authorization changed');
     expect(execute.execute).not.toHaveBeenCalled();
   });
+
+  it.each(['execute', 'prepare', 'detailed'] as const)(
+    'fences all %s permission windows across dispose, removal, and same-name replacement', async entry => {
+      for (const mutation of ['dispose', 'remove', 'replace'] as const) {
+        let enter!: () => void;
+        let release!: () => void;
+        const entered = new Promise<void>(resolve => { enter = resolve; });
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const original = tool('mcp__fence__probe', 'original');
+        const replacement = tool(original.definition.name, 'replacement');
+        const registry = new ToolRegistry({ permissionManager: {
+          getMode: () => 'auto', getRevision: () => 1,
+          check: async () => { enter(); await held; return 'allow'; },
+        } as any }, [original]);
+        const pending = entry === 'execute' ? registry.executeTool(original.definition.name, {})
+          : entry === 'prepare' ? registry.prepareToolInvocation(original.definition.name, {})
+          : registry.prepareToolInvocationDetailed(original.definition.name, {});
+        try {
+          // The workflow checkpoint can yield before permission.check. Mutate
+          // only after the real production authorization window has opened.
+          await entered;
+          if (mutation === 'dispose') registry.dispose();
+          else if (mutation === 'remove') registry.unregisterTool(original.definition.name);
+          else registry.registerTool(replacement);
+          release();
+          const result = await pending;
+          if (typeof result === 'string') expect(result).toContain('tool authorization changed');
+          else expect(result).toMatchObject({ kind: 'not_started', reason: 'invalidated', message: expect.stringContaining('tool authorization changed') });
+          expect(original.execute).not.toHaveBeenCalled();
+          expect(replacement.execute).not.toHaveBeenCalled();
+        } finally {
+          release();
+          await pending;
+          registry.dispose();
+        }
+      }
+    },
+  );
 
   it('restores main capabilities after repeated production factory children and destroys main on exit', async () => {
     const capabilities = new CapabilityRegistry();
@@ -133,12 +174,15 @@ describe('registry lifecycle ownership', () => {
 
   it('does not invoke an MCP tool removed during its asynchronous permission check', async () => {
     let allow!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const removed = tool('mcp__one__removed');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { enter(); await waiting; return 'allow'; },
     } as any }, [removed]);
     const result = registry.executeTool(removed.definition.name, {});
+    await entered;
     registry.unregisterTool(removed.definition.name);
     allow();
     expect(await result).toContain('tool authorization changed');

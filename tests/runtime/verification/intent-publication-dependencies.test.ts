@@ -1,5 +1,5 @@
 import '../../support/installed-controller-fixture.js';
-import {it,expect,vi} from 'vitest';
+import {it,expect,vi,type TestContext} from 'vitest';
 const installed=vi.hoisted(()=>({factory:undefined as any,route:undefined as any}));
 vi.mock('../../../src/runtime/verification/controller-client.js',async original=>({...await original<typeof import('../../../src/runtime/verification/controller-client.js')>(),createInstalledVerificationClient:()=>installed.factory()}));
 vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:(owner:any)=>installed.route(owner)}));
@@ -17,33 +17,51 @@ import {createApplicationBindingAuthority} from '../../../src/runtime/verificati
 import {applicationBindingReviewBytes} from '../../../src/runtime/verification/application-binding-review.js';
 import {canonicalVerificationJson as json,hashVerificationTuple} from '../../../src/runtime/verification/protocol.js';
 const hash=(v:string|Buffer)=>createHash('sha256').update(v).digest('hex'),signal=()=>new AbortController().signal;
-async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOperationFixture>[1]={},large=false){
- const f=await verifiedOperationFixture('dispatch',large?{...options,controllerMetadataMinimumBytes:96*1024**2}:options),raw=structuredClone(intentApplicationCandidate()),recipe={kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes' as const}]},definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe}]};
+async function closeIntentFixtureResources(closes:readonly (()=>unknown)[],bodyFailure?:{error:unknown}):Promise<void>{
+ const failures:unknown[]=[];for(const close of closes){try{await close();}catch(error){failures.push(error);}}
+ if(failures.length)throw new AggregateError([...(bodyFailure?[bodyFailure.error]:[]),...failures],'intent_fixture_cleanup_failed');
+}
+async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOperationFixture>[1]={},large=false,testSignal?:AbortSignal){
+ const closes:(()=>unknown)[]=[],check=()=>testSignal?.throwIfAborted(),requestSignal=()=>testSignal??signal();
+ let closing:Promise<void>|undefined,profile:InspectorSession|undefined;
+ const close=()=>closing??=closeIntentFixtureResources(closes);
+ const post=(method:string)=>new Promise<any>((resolve,reject)=>profile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));
+ try{
+ check();const f=await verifiedOperationFixture('dispatch',large?{...options,controllerMetadataMinimumBytes:96*1024**2}:options);closes.unshift(()=>f.close());check();
+ const completion=(method:Parameters<typeof f.composition.public.invoke>[0],payload:unknown)=>testSignal===undefined?f.composition.public.invoke(method,payload,f.peer):f.composition.public.invoke(method,payload,f.peer,testSignal);
+ const raw=structuredClone(intentApplicationCandidate()),recipe={kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes' as const}]},definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe}]};
  raw.contract.verification=definition;for(const stage of raw.contract.stages)stage.verification=definition;
  if(large){const sample=structuredClone(raw.contract.stages[0]);raw.contract.stages=[];for(let i=0;;i++){const stage={...structuredClone(sample),stageId:`s${i}`,order:i,label:'stage',deliverable:'result',templateId:'template',dependsOnStageIds:[],steps:[{...sample.steps[0],stepId:`p${i}`,key:'main',order:0,skillName:null,dependsOn:[]}]};raw.contract.stages.push(stage);if(Buffer.byteLength(json(raw.contract))>61000){raw.contract.stages.pop();break;}}}
- const contract=raw.contract,subjects=[...contract.stages.map((s:any)=>({...raw.subject,stageId:s.stageId})),{...raw.subject,stageId:null}],owners:any[]=[];
- for(const subject of subjects){const prepared:any=await f.composition.public.invoke('completion.prepare-owner',{enrollment:{...intentHostSubjectOwner(subject),intentContract:{subject,contract},invocations:[]},registration:goalVerificationRegistration(definition)},f.peer);const actual:any=await f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.peer);owners.push(actual.owner);if(large)await new Promise<void>(resolve=>setImmediate(resolve));}
- const receiver=await loopPublicationReceiver(f,{afterQuery}),bindings:any[]=[];
- const profile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?new InspectorSession():undefined;
- const post=(method:string)=>new Promise<any>((resolve,reject)=>profile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));
- if(profile){profile.connect();await post('Profiler.enable');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
+ check();const contract=raw.contract,subjects=[...contract.stages.map((s:any)=>({...raw.subject,stageId:s.stageId})),{...raw.subject,stageId:null}],owners:any[]=[];
+ for(const subject of subjects){check();const prepared:any=await completion('completion.prepare-owner',{enrollment:{...intentHostSubjectOwner(subject),intentContract:{subject,contract},invocations:[]},registration:goalVerificationRegistration(definition)});check();const actual:any=await completion('completion.authorize-owner',{challengeId:prepared.challengeId});check();owners.push(actual.owner);if(large){await new Promise<void>(resolve=>setImmediate(resolve));check();}}
+ const receiver=await loopPublicationReceiver(f,{afterQuery});closes.unshift(()=>receiver.close());check();const bindings:any[]=[];
+ profile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?new InspectorSession():undefined;
+ if(profile){profile.connect();await post('Profiler.enable');check();await post('Profiler.start');check();console.info('population-profile-start native-subjects='+subjects.length);}
  const started=Date.now();
- try{
-  for(let i=0;i<contract.stages.length;i++){
-   const stage=contract.stages[i],subject=subjects[i],binding=createIntentApplicationBinding({...raw,subject,candidateId:`candidate-${i}`,body:{kind:'intent-stage',stageId:stage.stageId,summary:'actual result',executionReports:[],artifacts:[]}});bindings.push(binding);
-   const phase=(name:string)=>{if(large)console.info('population-stage-phase '+i+' '+name+' elapsedMs='+(Date.now()-started));};phase('application');
-   const application=createApplicationBindingAuthority({database:f.database,authorityId:'authority',completion:f.composition,clock:f.clock,assertCurrent(){},resolvePrincipal:p=>({...p,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555',source:'macos-local-generateduid' as const}),async approve(review){return {uid:f.peer.uid,auditSessionId:f.peer.auditSessionId,reviewHash:hash(applicationBindingReviewBytes(review))};}});
-   try{const prepared=application.prepare({requestSource:'user',binding},f.peer);await application.authorize({requestSource:'user',challengeId:prepared.challengeId},f.peer,signal());}finally{application.close();}
-   phase('invocation');const invocation={sessionIdentity:contract.sessionId,compoundOperationId:`stage-${i}`,validationInvocationId:`verification-${i}`};
-   const add:any=await f.composition.public.invoke('completion.prepare-owner',{enrollment:{...intentHostSubjectOwner(subject),invocations:[invocation]},registration:goalVerificationRegistration(definition)},f.peer);await f.composition.public.invoke('completion.authorize-owner',{challengeId:add.challengeId},f.peer);
-   phase('materials-prepare');const selected=await f.material.prepare({purpose:'isolated-command',invocation,materials:[{path:'/workspace/a',byteLimit:1}],exactCommand:{argv:['/bin/true'],cwdRelative:'.'},expiresAt:105000},f.peer,signal());phase('materials-authorize');const grant=await f.material.authorize(selected.challengeId,f.peer,signal());phase('materials-stage');const staged=await f.material.stage({grantHandle:grant,invocation},f.peer,signal());
-   phase('verification-prepare');const operation=await f.operations.prepare({mountPlanHandle:staged.mountPlanHandle,obligationId:'original',expectedAttemptEpoch:0,requestSource:'agent'},f.peer,signal());phase('verification-dispatch');await f.operations.dispatch({operationHandle:operation.operationHandle},f.peer,signal());
-   phase('publication');const pub=receiver.publication.prepare({...intentHostSubjectOwner(subject),requestSource:'user'},f.peer);await receiver.publication.approve({challengeId:pub.challengeId},f.peer,signal());
-   if(large&&!profile){console.info('population-actual-publication '+(i+1)+'/'+contract.stages.length+' elapsedMs='+(Date.now()-started));await new Promise<void>(resolve=>setImmediate(resolve));}
-   if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population.cpuprofile',JSON.stringify(result.profile));profile.disconnect();throw Error('explicit_profile_stopped_after_three_actual_publications');}}
-  }
- }catch(error){if(profile){try{const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));profile.disconnect();}catch{/* Preserve the original entry failure if the profiler was already stopped. */}}await receiver.close();await f.close();throw error;}
- return {f,receiver,subjects,owners,bindings,contract,async close(){await receiver.close();await f.close();}};
+ for(let i=0;i<contract.stages.length;i++){
+  check();const stage=contract.stages[i],subject=subjects[i],binding=createIntentApplicationBinding({...raw,subject,candidateId:`candidate-${i}`,body:{kind:'intent-stage',stageId:stage.stageId,summary:'actual result',executionReports:[],artifacts:[]}});bindings.push(binding);
+  const phase=(name:string)=>{if(large)console.info('population-stage-phase '+i+' '+name+' elapsedMs='+(Date.now()-started));};phase('application');
+  const application=createApplicationBindingAuthority({database:f.database,authorityId:'authority',completion:f.composition,clock:f.clock,assertCurrent(){},resolvePrincipal:p=>({...p,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555',source:'macos-local-generateduid' as const}),async approve(review){return {uid:f.peer.uid,auditSessionId:f.peer.auditSessionId,reviewHash:hash(applicationBindingReviewBytes(review))};}});
+  let applicationFailure:{error:unknown}|undefined;
+  try{check();const prepared=application.prepare({requestSource:'user',binding},f.peer);check();await application.authorize({requestSource:'user',challengeId:prepared.challengeId},f.peer,requestSignal());check();}catch(error){applicationFailure={error};throw error;}finally{await closeIntentFixtureResources([()=>application.close()],applicationFailure);}
+  check();phase('invocation');const invocation={sessionIdentity:contract.sessionId,compoundOperationId:`stage-${i}`,validationInvocationId:`verification-${i}`};
+  const add:any=await completion('completion.prepare-owner',{enrollment:{...intentHostSubjectOwner(subject),invocations:[invocation]},registration:goalVerificationRegistration(definition)});check();await completion('completion.authorize-owner',{challengeId:add.challengeId});check();
+  phase('materials-prepare');const selected=await f.material.prepare({purpose:'isolated-command',invocation,materials:[{path:'/workspace/a',byteLimit:1}],exactCommand:{argv:['/bin/true'],cwdRelative:'.'},expiresAt:105000},f.peer,requestSignal());check();phase('materials-authorize');const grant=await f.material.authorize(selected.challengeId,f.peer,requestSignal());check();phase('materials-stage');const staged=await f.material.stage({grantHandle:grant,invocation},f.peer,requestSignal());check();
+  phase('verification-prepare');const operation=await f.operations.prepare({mountPlanHandle:staged.mountPlanHandle,obligationId:'original',expectedAttemptEpoch:0,requestSource:'agent'},f.peer,requestSignal());check();phase('verification-dispatch');await f.operations.dispatch({operationHandle:operation.operationHandle},f.peer,requestSignal());check();
+  phase('publication');const pub=receiver.publication.prepare({...intentHostSubjectOwner(subject),requestSource:'user'},f.peer);check();await receiver.publication.approve({challengeId:pub.challengeId},f.peer,requestSignal());check();
+  if(large&&!profile){console.info('population-actual-publication '+(i+1)+'/'+contract.stages.length+' elapsedMs='+(Date.now()-started));await new Promise<void>(resolve=>setImmediate(resolve));check();}
+  if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population.cpuprofile',JSON.stringify(result.profile));profile.disconnect();throw Error('explicit_profile_stopped_after_three_actual_publications');}}
+ }
+ return {f,receiver,subjects,owners,bindings,contract,close};
+ }catch(error){
+  if(profile){try{const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));profile.disconnect();}catch{/* Preserve the original entry failure if the profiler was already stopped. */}}
+  try{await close();}catch(cleanupError){throw new AggregateError([error,cleanupError],'intent_fixture_setup_cleanup_failed',{cause:error});}throw error;
+ }
+}
+function runJoinedIntentCase(ctx:TestContext,action:(testSignal:AbortSignal)=>Promise<void>){
+ const scenario=action(ctx.signal),settled=scenario.then(()=>({failed:false,error:undefined}),(error:unknown)=>({failed:true,error}));
+ ctx.onTestFinished(async()=>{const outcome=await settled;if(ctx.signal.aborted&&outcome.failed&&outcome.error!==ctx.signal.reason)throw outcome.error;});
+ return scenario;
 }
 it('actual original Intent dependency observation derives empty first-stage and whole parent inventory from native receipts',async()=>{
  const f=await fixture();try{
@@ -108,28 +126,28 @@ it.runIf(process.env.SOLPI_INTENT_POPULATION === '1')('near-limit original contr
  try{expect(Buffer.byteLength(json(f.contract))).toBeGreaterThan(60000);expect(f.contract.stages.length).toBeGreaterThan(80);const result:any=await client.publicationTransport.call('publication.observeIntentDependencies',{subject:f.subjects.at(-1)});expect(result.publications.map((v:any)=>v.owner)).toEqual(f.owners.slice(0,-1));expect(responseBytes).toBeLessThan(1024**2);console.info(JSON.stringify({contractBytes:Buffer.byteLength(json(f.contract)),stageCount:f.contract.stages.length,responseBytes}));}finally{console.info('population-final-set-ms '+(Date.now()-finalStarted));if(finalProfile){const result=await finalPost('Profiler.stop');writeFileSync('/tmp/solpi-intent-final-set.cpuprofile',JSON.stringify(result.profile));finalProfile.disconnect();}client.dispose();await server.close();await f.close();}
 },3600000);
 for(const row of ['noncanonical','subject','mandatory','registration'] as const)
- it.each([row])('whole graph read refuses actual sibling %s drift even for empty dependencies',async mode=>{
- const f=await fixture();try{
+ it.for([row])('whole graph read refuses actual sibling %s drift even for empty dependencies',{timeout:40000},(mode,ctx)=>runJoinedIntentCase(ctx,async testSignal=>{
+ const f=await fixture(undefined,{},false,testSignal);let bodyFailure:{error:unknown}|undefined;try{testSignal.throwIfAborted();
   const key=json(f.owners[1]),row=f.f.database.prepare('SELECT logical_owner_key,contract_json FROM owner_enrollment_intent_contracts WHERE owner_key=?').get(key) as {logical_owner_key:string;contract_json:string};
   if(mode==='mandatory')f.f.database.prepare('DELETE FROM mandatory_observation_checks WHERE owner_key=?').run(key);
   else if(mode==='registration')f.f.database.prepare('UPDATE verification_owners SET migration_epoch=migration_epoch+1 WHERE owner_key=?').run(key);
   else {const value=JSON.parse(row.contract_json);if(mode==='subject')value.subject.stageId=f.subjects[0].stageId;const encoded=mode==='noncanonical'?JSON.stringify(value,null,1):json(value);f.f.database.prepare('UPDATE owner_enrollment_intent_contracts SET contract_json=? WHERE owner_key=?').run(encoded,key);f.f.database.prepare('UPDATE owner_enrollment_intents SET intent_contract_json=? WHERE logical_owner_key=?').run(encoded,row.logical_owner_key);}
-  await expect(f.receiver.publication.observeIntentDependencies({subject:f.subjects[0]},f.f.peer,signal())).rejects.toThrow();
- }finally{await f.close();}
-},row==="noncanonical"?40000:row==="subject"?40000:row==="mandatory"?40000:30000);
+  await expect(f.receiver.publication.observeIntentDependencies({subject:f.subjects[0]},f.f.peer,testSignal)).rejects.toThrow();testSignal.throwIfAborted();
+ }catch(error){bodyFailure={error};throw error;}finally{await closeIntentFixtureResources([()=>f.close()],bodyFailure);}
+}));
 for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const)
- it.each([row])('actual invocation-only append retains complete parent graph: %s',async mode=>{
- const f=await fixture();try{
+ it.for([row])('actual invocation-only append retains complete parent graph: %s',{timeout:40000},(mode,ctx)=>runJoinedIntentCase(ctx,async testSignal=>{
+ const f=await fixture(undefined,{},false,testSignal);let bodyFailure:{error:unknown}|undefined;try{testSignal.throwIfAborted();
   const parent=json(f.owners.at(-1)),sibling=json(f.owners[1]);
   if(mode==='missing-parent')f.f.database.prepare('DELETE FROM owner_enrollment_intent_contracts WHERE owner_key=?').run(parent);
   if(mode==='missing-sibling-edge')f.f.database.prepare('DELETE FROM verification_owner_dependencies WHERE parent_key=? AND child_key=?').run(parent,sibling);
   if(mode==='extra-edge')f.f.database.prepare('INSERT INTO verification_owner_dependencies(parent_key,child_key) VALUES (?,?)').run(json(f.owners[0]),sibling);
   if(mode==='parent-noncanonical'){const row=f.f.database.prepare('SELECT logical_owner_key,contract_json FROM owner_enrollment_intent_contracts WHERE owner_key=?').get(parent) as any,body=JSON.stringify(JSON.parse(row.contract_json),null,1);f.f.database.prepare('UPDATE owner_enrollment_intent_contracts SET contract_json=? WHERE owner_key=?').run(body,parent);f.f.database.prepare('UPDATE owner_enrollment_intents SET intent_contract_json=? WHERE logical_owner_key=?').run(body,row.logical_owner_key);}
   const invocation={sessionIdentity:f.contract.sessionId,compoundOperationId:'real-extra',validationInvocationId:'real-extra-validation'},proposal={enrollment:{...intentHostSubjectOwner(f.subjects[0]),invocations:[invocation]},registration:goalVerificationRegistration(f.contract.stages[0].verification)};
-  const work=async()=>{const prepared:any=await f.f.composition.public.invoke('completion.prepare-owner',proposal,f.f.peer);return f.f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.f.peer);};
-  if(mode==='valid'){await work();expect(f.f.composition.privateHost.enrollment.resolveOwnerKey(f.f.peer,invocation)).toBe(json(f.owners[0]));}else await expect(work()).rejects.toThrow();
- }finally{await f.close();}
-},row==="valid"?40000:row==="missing-parent"?40000:30000);
+  const work=async()=>{testSignal.throwIfAborted();const prepared:any=await f.f.composition.public.invoke('completion.prepare-owner',proposal,f.f.peer,testSignal);testSignal.throwIfAborted();const result=await f.f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.f.peer,testSignal);testSignal.throwIfAborted();return result;};
+  if(mode==='valid'){await work();expect(f.f.composition.privateHost.enrollment.resolveOwnerKey(f.f.peer,invocation)).toBe(json(f.owners[0]));}else await expect(work()).rejects.toThrow();testSignal.throwIfAborted();
+ }catch(error){bodyFailure={error};throw error;}finally{await closeIntentFixtureResources([()=>f.close()],bodyFailure);}
+}));
 
 it('completion observation includes its own actual publication and every original dependency without publishing the parent implicitly',async()=>{
  const f=await fixture();try{

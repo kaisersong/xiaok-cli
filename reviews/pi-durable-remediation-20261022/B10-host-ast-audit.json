@@ -1,0 +1,92 @@
+{
+  "file": "desktop/electron/loop-business-publication-host.ts",
+  "oldSHA256": "dc0c0870e2a5462e641ef7090fcb4071a808002d16c5c6bc53a60a6132dfe533",
+  "newSHA256": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858",
+  "originalHostStatementCount": 13,
+  "newHostStatementCount": 13,
+  "runtimeImportsByteEqual": true,
+  "moduleStatementsExceptTypeImportsAndHostByteEqual": true,
+  "hostStatementsExceptReadUserTemplateOutputByteEqual": true,
+  "otherNamedRuntimeFunctionsByteEqual": true,
+  "otherFunctions": [
+    {
+      "name": "completionNotCurrent",
+      "sha256": "f25525c48c786de513e2edc653f3f16d7006828d1e0bdb677f3716ef846232be"
+    },
+    {
+      "name": "isLoopCompletionNotCurrent",
+      "sha256": "142e2697bac6009d7babaa9cfcd0159a626334da892b9c0f739e193765a6930b"
+    },
+    {
+      "name": "completionCandidateRead",
+      "sha256": "987ba1028c34f0d38c78ad06ce1c1a7758d96397af4811a13c44bdcb3cf7c02d"
+    },
+    {
+      "name": "captureCompletionRequest",
+      "sha256": "e21604731e3ee94ac4fe0d24267b974caee1073acc9c06d44c36c7e1fc54ffaa"
+    },
+    {
+      "name": "consumeLoopCompletedRun",
+      "sha256": "adc6cf609ce3fd00bd33a860f34eab9730ecaae7c74b66121f9f6540a0a0c66e"
+    },
+    {
+      "name": "consumeAssistantPromotionWrite",
+      "sha256": "562b8e7ec5c0b5695da122b9ec1268345e91a45f335193c7c66a79aec045ab8a"
+    },
+    {
+      "name": "consumeLoopBusinessProjection",
+      "sha256": "4dbb368d59fbd01d4dbd119d2a19da1489e329b83250753238a8fc46ac204ba6"
+    },
+    {
+      "name": "admit",
+      "sha256": "d582f9327afb1f0afde95211fe92f1f117f3d89a63d1f1b3e0c73aa599fa889f"
+    },
+    {
+      "name": "project",
+      "sha256": "cec2f0aacaaea216d6a6a0f8dbce35e6c8cdc10bdcdc8c02ed27a67d2bdd3111"
+    },
+    {
+      "name": "current",
+      "sha256": "413e012275b6bcd74498d6833687e396d31007f04d1b92ce2257eeef747c82ef"
+    },
+    {
+      "name": "act",
+      "sha256": "64bc102db0ec80a58182f03a6ec3a92afbcf07f60df11bbc24e81b77f560892e"
+    },
+    {
+      "name": "track",
+      "sha256": "40cda0205c512fe1313a27e404231d7c0f8bf9f989eadadd19ea93b06bd05385"
+    },
+    {
+      "name": "prepareCompletedRun",
+      "sha256": "cde91164be2f0ff5e07d76610516469108f8956740077cc43177be8b4d461e2f"
+    },
+    {
+      "name": "promotionAction",
+      "sha256": "39a143186f8aefe39d8dd669103900aa4eb090aa83679855b7b64839914a1fa6"
+    },
+    {
+      "name": "readAssistantOutput",
+      "sha256": "638923ee7a2d1f83d90cfaf5f33180cbac22e0606a9518bbfd0d3f6c4bf18bb5"
+    }
+  ],
+  "changedRuntimeFunction": "readUserTemplateOutput (inside unchanged host outer assembly; other host body statements byte-identical)",
+  "consumer": {
+    "path": "desktop/electron/loop-output-service.ts",
+    "sha256": "497fb772a76e4c509d62a212907fb6edeed28e018a461a129fda7bdca73b9a23",
+    "callLines": [
+      43,
+      62,
+      65
+    ],
+    "operations": "initial preview/list/task/open read, independent navigation pre-check and post-check fresh reads"
+  },
+  "freshDesktopWholeFiles": [
+    "tests/main/loop-business-projection.test.ts",
+    "tests/main/loop-business-projection-independent.test.ts",
+    "tests/main/loop-output-consumers.test.ts",
+    "tests/main/loop-published-artifacts.test.ts",
+    "tests/main/loop-verification-execution-controller.test.ts"
+  ],
+  "coverageLimit": "Four siblings65/65 under new host; actual signed8 pending. Full823 spans source change, not claimed final-freeze execution. Root8 runtime import closure fresh replacement owned by A/root."
+}

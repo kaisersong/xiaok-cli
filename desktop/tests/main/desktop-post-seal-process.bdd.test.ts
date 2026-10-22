@@ -89,7 +89,7 @@ interface RecoveryReceipt extends PersistedTaskEvent { authority: object }
 interface RecoveryGoalContract { handleRecoveredHostTerminal(input: RecoveryReceipt): Promise<void> }
 interface RecoveryServiceContract { assertDeliveryRecovery(input: unknown): void }
 
-interface OwnerEvent { stage: string; taskId: string; groupId: string; childId: string; elapsed?: number; status?: string; delivery?: unknown; inFlight?: boolean; trace?: PassiveTraceSnapshot; watchdogMs?: number; d10Trace?: PassiveTraceSnapshot }
+interface OwnerEvent { stage: string; taskId: string; groupId: string; childId: string; elapsed?: number; status?: string; delivery?: unknown; inFlight?: boolean; trace?: PassiveTraceSnapshot; watchdogMs?: number; ownerMonotonicMs?: number; deadlineMonotonicMs?: number; d10Trace?: PassiveTraceSnapshot }
 describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
   const nativeRestores = new Set<() => void>();
@@ -126,6 +126,9 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
       const check = () => {
         const found = events.find(event => event.stage === stage);
         if (found) { listeners.delete(check); resolve(found); }
+        else if (stage === 'fifo-open-submitted' && events.some(event => event.stage === 'fifo-delivery-timeout-persisted')) {
+          listeners.delete(check); reject(new Error('fifo_setup_boundary_not_reached_before_delivery_deadline'));
+        }
         else if (stage !== 'sealed' && events.some(event => event.stage === 'host-drained')) {
           listeners.delete(check); reject(new Error(`production host drained without required ${stage} boundary`));
         }
@@ -179,8 +182,19 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
     const f = await start('fifo');
     let inspectWriteMonotonicMs: number | undefined;
     try {
+      const submitted = await f.wait('fifo-open-submitted');
+      expect(submitted.watchdogMs).toBe(2000);
+      expect(submitted.ownerMonotonicMs).toBeTypeOf('number');expect(submitted.deadlineMonotonicMs).toBeTypeOf('number');
+      expect(submitted.ownerMonotonicMs!).toBeLessThan(submitted.deadlineMonotonicMs!);
+      const entries=submitted.trace!.entries,submittedOpen=entries.find(e=>e.stage==='fifo-open-submitted')!,message=entries.find(e=>e.stage==='worker-message')!,exit=entries.find(e=>e.stage==='worker-exit')!;
+      expect(message.sequence).toBeLessThan(exit.sequence);expect(exit.sequence).toBeLessThan(submittedOpen.sequence);
+      expect(entries.some(e=>e.stage==='fifo-open-resolve'||e.stage==='fifo-open-reject')).toBe(false);
       const heartbeat = await f.wait('heartbeat'); expect(heartbeat.elapsed).toBeLessThan(200);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      const expired=await f.wait('fifo-delivery-timeout-persisted');
+      expect(expired.ownerMonotonicMs!).toBeGreaterThanOrEqual(submitted.deadlineMonotonicMs!);
+      // The outward verifier grace has also ended. Only actual pending IO can
+      // retain ownership now; the writer remains absent in this original case.
+      await f.wait('verifier-reject');
       inspectWriteMonotonicMs = performance.now();
       f.child.stdin!.write('inspect\n');
       expect(await f.wait('inspection')).toMatchObject({ inFlight: true });
@@ -202,6 +216,7 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
   it.each(['before-marker', 'marker-transaction', 'marker-committed', 'snapshot'])('D10/D18 actual OS crash at %s uses committed marker truth and never replays', async mode => {
     const f = await start(mode);
     if (mode !== 'before-marker') await f.wait(mode);
+    if (mode === 'marker-transaction') expect(f.events.find(event => event.stage === mode)).toMatchObject({ transactionOpen: true, stagedDeliveryRevision: 1 });
     expect(f.events.filter(event => event.stage === 'native-worker-start')).toHaveLength(0);
     // The old owner intentionally holds a synchronous write transaction in
     // one case. Inspect its committed truth read-only; a production store

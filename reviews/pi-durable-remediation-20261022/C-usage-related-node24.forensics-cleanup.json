@@ -1,0 +1,35 @@
+{
+  "metaPath": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-node24.json",
+  "ownedPid": 72479,
+  "ownedPgid": 72479,
+  "reaped": true,
+  "globalErrors": [],
+  "groupMembers": [],
+  "records": [
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-G3kHTF",
+        "workerPid": 76210,
+        "workerPpid": 72479,
+        "uid": 502,
+        "runToken": "4378e1b8f93d417598ed166fe83c1e5e",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49288746,
+          "uid": 502,
+          "birthtimeMs": 1792631863799.8313
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49288746,
+        "uid": 502,
+        "birthtimeMs": 1792631863799.8313
+      }
+    }
+  ],
+  "onlyExactRoots": true,
+  "signalsSent": []
+}

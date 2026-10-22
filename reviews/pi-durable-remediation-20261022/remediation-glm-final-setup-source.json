@@ -1,0 +1,8 @@
+{
+  "inputSha256": "4fb9e81be2cfe1fcde092d465b2cea2ef88fb124f4ec377ec783b4818f585a55",
+  "inputBytes": 15968,
+  "source": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+  "sourceSha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966",
+  "priorPacketSha256": "a934cd15c4446cdb66c8e86d38600f3df831a8deb10033687d9435730b90f43f",
+  "scope": "only setup try/finally ownership guard; no production change"
+}

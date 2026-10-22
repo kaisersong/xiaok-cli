@@ -1,0 +1,505 @@
+{
+  "expectedResult": "1pass16 filtered skip, diagnostic not original17 acceptance",
+  "writerPID": 59163,
+  "ownerPID": 59045,
+  "writerExitCode": 0,
+  "writerOutput": "writer-paired\nwriter-closed\n",
+  "physicalOrderVerified": [
+    "fifo-open-submitted",
+    "fifo-delivery-timeout-persisted",
+    "verifier-reject",
+    "fifo-open-resolve",
+    "fifo-close-call",
+    "fifo-close-resolve",
+    "host-drain-resolved"
+  ],
+  "orderedEvents": [
+    {
+      "token": 1,
+      "stage": "fifo-open-submitted",
+      "sequence": 45,
+      "monotonicMs": 674.300125
+    },
+    {
+      "revision": 2,
+      "stage": "fifo-delivery-timeout-persisted",
+      "sequence": 49,
+      "monotonicMs": 2577.002417
+    },
+    {
+      "token": 1,
+      "stage": "verifier-reject",
+      "sequence": 50,
+      "monotonicMs": 3078.215875
+    },
+    {
+      "token": 1,
+      "stage": "fifo-open-resolve",
+      "sequence": 55,
+      "monotonicMs": 3109.133209
+    },
+    {
+      "token": 1,
+      "stage": "fifo-close-call",
+      "sequence": 56,
+      "monotonicMs": 3109.374625
+    },
+    {
+      "token": 1,
+      "stage": "fifo-close-resolve",
+      "sequence": 57,
+      "monotonicMs": 3109.472542
+    },
+    {
+      "stage": "host-drain-resolved",
+      "sequence": 64,
+      "monotonicMs": 3146.95625
+    }
+  ],
+  "finalOwner": {
+    "stage": "host-drained",
+    "taskId": "task_c56dcbe1-5c54-4bc1-bc96-70948cd43475",
+    "inFlight": false,
+    "status": "failed",
+    "delivery": {
+      "version": 1,
+      "revision": 3,
+      "status": "failed",
+      "stage": "settle",
+      "verification": "failed",
+      "hostSettlement": "committed",
+      "readerCleanup": "settled",
+      "storeCleanup": "settled",
+      "startedAt": 1792631313744,
+      "deadlineAt": 1792631315744,
+      "decisionAt": 1792631315746,
+      "guardFailure": {
+        "code": "delivery_timeout",
+        "stage": "verify",
+        "needsExplicitFollowup": true
+      },
+      "hostTerminalStatus": "failed",
+      "finishedAt": 1792631316285
+    },
+    "trace": {
+      "entries": [
+        {
+          "token": 1,
+          "stage": "snapshot-recover-call",
+          "sequence": 1,
+          "monotonicMs": 472.720667
+        },
+        {
+          "token": 1,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 2,
+          "monotonicMs": 475.519709
+        },
+        {
+          "token": 2,
+          "stage": "snapshot-recover-call",
+          "sequence": 3,
+          "monotonicMs": 502.245375
+        },
+        {
+          "token": 2,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 4,
+          "monotonicMs": 504.799334
+        },
+        {
+          "token": 3,
+          "stage": "snapshot-recover-call",
+          "sequence": 5,
+          "monotonicMs": 533.046375
+        },
+        {
+          "token": 3,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 6,
+          "monotonicMs": 536.468375
+        },
+        {
+          "token": 4,
+          "stage": "snapshot-recover-call",
+          "sequence": 7,
+          "monotonicMs": 536.808584
+        },
+        {
+          "token": 5,
+          "stage": "snapshot-recover-call",
+          "sequence": 8,
+          "monotonicMs": 536.927209
+        },
+        {
+          "token": 4,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 9,
+          "monotonicMs": 542.399375
+        },
+        {
+          "token": 5,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 10,
+          "monotonicMs": 542.41775
+        },
+        {
+          "token": 6,
+          "stage": "snapshot-recover-call",
+          "sequence": 11,
+          "monotonicMs": 542.508042
+        },
+        {
+          "token": 6,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 12,
+          "monotonicMs": 545.078959
+        },
+        {
+          "stage": "runner-enter",
+          "sequence": 13,
+          "monotonicMs": 573.627792
+        },
+        {
+          "stage": "runner-runRoot-before",
+          "sequence": 14,
+          "monotonicMs": 573.63075
+        },
+        {
+          "stage": "runner-action-enter",
+          "sequence": 15,
+          "monotonicMs": 575.7935
+        },
+        {
+          "stage": "runner-spawn-before",
+          "sequence": 16,
+          "monotonicMs": 575.794875
+        },
+        {
+          "stage": "runner-spawn-after",
+          "sequence": 17,
+          "monotonicMs": 580.631459
+        },
+        {
+          "stage": "runner-child-enter-before",
+          "sequence": 18,
+          "monotonicMs": 580.6325
+        },
+        {
+          "stage": "runner-child-run-enter",
+          "sequence": 19,
+          "monotonicMs": 582.988709
+        },
+        {
+          "stage": "runner-child-enter-after",
+          "sequence": 20,
+          "monotonicMs": 582.9905
+        },
+        {
+          "stage": "runner-body-before",
+          "sequence": 21,
+          "monotonicMs": 582.99075
+        },
+        {
+          "token": 7,
+          "stage": "snapshot-recover-call",
+          "sequence": 22,
+          "monotonicMs": 583.315084
+        },
+        {
+          "token": 7,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 23,
+          "monotonicMs": 587.464042
+        },
+        {
+          "stage": "runner-body-after",
+          "sequence": 24,
+          "monotonicMs": 620.116042
+        },
+        {
+          "stage": "runner-runRoot-after",
+          "sequence": 25,
+          "monotonicMs": 622.53175
+        },
+        {
+          "stage": "runner-rootSealed-before",
+          "sequence": 26,
+          "monotonicMs": 622.532542
+        },
+        {
+          "stage": "runner-tail-before",
+          "sequence": 27,
+          "monotonicMs": 622.533084
+        },
+        {
+          "stage": "sealed",
+          "sequence": 28,
+          "monotonicMs": 622.553167
+        },
+        {
+          "stage": "runner-tail-after",
+          "sequence": 29,
+          "monotonicMs": 622.5995
+        },
+        {
+          "revision": 1,
+          "deliveryStage": "flush",
+          "verification": "pending",
+          "startedAt": 1792631313744,
+          "deadlineAt": 1792631315744,
+          "guardCode": null,
+          "stage": "delivery-report-enter",
+          "sequence": 30,
+          "monotonicMs": 622.834084
+        },
+        {
+          "revision": 1,
+          "stage": "report-persist-call",
+          "sequence": 31,
+          "monotonicMs": 622.838125
+        },
+        {
+          "revision": 1,
+          "stage": "report-persist-return",
+          "sequence": 32,
+          "monotonicMs": 624.031334
+        },
+        {
+          "token": 8,
+          "stage": "snapshot-recover-call",
+          "sequence": 33,
+          "monotonicMs": 624.440917
+        },
+        {
+          "token": 8,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 34,
+          "monotonicMs": 627.6615
+        },
+        {
+          "token": 9,
+          "stage": "snapshot-recover-call",
+          "sequence": 35,
+          "monotonicMs": 627.690292
+        },
+        {
+          "token": 9,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 36,
+          "monotonicMs": 630.081084
+        },
+        {
+          "optionsObserved": true,
+          "deadlineMonotonicMs": 2573.424042,
+          "signalAborted": false,
+          "token": 1,
+          "stage": "verifier-call",
+          "sequence": 37,
+          "monotonicMs": 630.173875
+        },
+        {
+          "stage": "worker-constructor-start",
+          "sequence": 38,
+          "monotonicMs": 630.7325
+        },
+        {
+          "threadId": 2,
+          "stage": "worker-constructor-return",
+          "sequence": 39,
+          "monotonicMs": 630.929209
+        },
+        {
+          "threadId": 2,
+          "stage": "worker-online",
+          "sequence": 40,
+          "monotonicMs": 642.319084
+        },
+        {
+          "threadId": 2,
+          "stage": "worker-message",
+          "sequence": 41,
+          "monotonicMs": 669.173167
+        },
+        {
+          "code": 0,
+          "stage": "worker-exit",
+          "sequence": 42,
+          "monotonicMs": 669.907084
+        },
+        {
+          "stage": "heartbeat",
+          "sequence": 43,
+          "monotonicMs": 674.19625
+        },
+        {
+          "token": 1,
+          "stage": "fifo-open-call",
+          "sequence": 44,
+          "monotonicMs": 674.291
+        },
+        {
+          "token": 1,
+          "stage": "fifo-open-submitted",
+          "sequence": 45,
+          "monotonicMs": 674.300125
+        },
+        {
+          "revision": 2,
+          "deliveryStage": "verify",
+          "verification": "failed",
+          "startedAt": 1792631313744,
+          "deadlineAt": 1792631315744,
+          "guardCode": "delivery_timeout",
+          "stage": "delivery-report-enter",
+          "sequence": 46,
+          "monotonicMs": 2575.593625
+        },
+        {
+          "revision": 2,
+          "stage": "report-persist-call",
+          "sequence": 47,
+          "monotonicMs": 2575.59675
+        },
+        {
+          "revision": 2,
+          "stage": "report-persist-return",
+          "sequence": 48,
+          "monotonicMs": 2577.00125
+        },
+        {
+          "revision": 2,
+          "stage": "fifo-delivery-timeout-persisted",
+          "sequence": 49,
+          "monotonicMs": 2577.002417
+        },
+        {
+          "token": 1,
+          "stage": "verifier-reject",
+          "sequence": 50,
+          "monotonicMs": 3078.215875
+        },
+        {
+          "stage": "inspect-request-received",
+          "sequence": 51,
+          "monotonicMs": 3078.591834
+        },
+        {
+          "token": 10,
+          "stage": "snapshot-recover-call",
+          "sequence": 52,
+          "monotonicMs": 3078.613917
+        },
+        {
+          "token": 10,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 53,
+          "monotonicMs": 3081.871
+        },
+        {
+          "stage": "inspection",
+          "sequence": 54,
+          "monotonicMs": 3081.904709
+        },
+        {
+          "token": 1,
+          "stage": "fifo-open-resolve",
+          "sequence": 55,
+          "monotonicMs": 3109.133209
+        },
+        {
+          "token": 1,
+          "stage": "fifo-close-call",
+          "sequence": 56,
+          "monotonicMs": 3109.374625
+        },
+        {
+          "token": 1,
+          "stage": "fifo-close-resolve",
+          "sequence": 57,
+          "monotonicMs": 3109.472542
+        },
+        {
+          "token": 11,
+          "stage": "snapshot-recover-call",
+          "sequence": 58,
+          "monotonicMs": 3109.769584
+        },
+        {
+          "token": 11,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 59,
+          "monotonicMs": 3113.866917
+        },
+        {
+          "revision": 3,
+          "deliveryStage": "settle",
+          "verification": "failed",
+          "startedAt": 1792631313744,
+          "deadlineAt": 1792631315744,
+          "guardCode": "delivery_timeout",
+          "stage": "delivery-report-enter",
+          "sequence": 60,
+          "monotonicMs": 3145.602709
+        },
+        {
+          "revision": 3,
+          "stage": "report-persist-call",
+          "sequence": 61,
+          "monotonicMs": 3145.605417
+        },
+        {
+          "revision": 3,
+          "stage": "report-persist-return",
+          "sequence": 62,
+          "monotonicMs": 3146.691375
+        },
+        {
+          "revision": 3,
+          "stage": "fifo-delivery-timeout-persisted",
+          "sequence": 63,
+          "monotonicMs": 3146.692792
+        },
+        {
+          "stage": "host-drain-resolved",
+          "sequence": 64,
+          "monotonicMs": 3146.95625
+        },
+        {
+          "token": 12,
+          "stage": "snapshot-recover-call",
+          "sequence": 65,
+          "monotonicMs": 3146.9655
+        },
+        {
+          "token": 12,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 66,
+          "monotonicMs": 3150.053125
+        },
+        {
+          "token": 13,
+          "stage": "snapshot-recover-call",
+          "sequence": 67,
+          "monotonicMs": 3150.063459
+        },
+        {
+          "token": 13,
+          "stage": "snapshot-recover-resolve",
+          "sequence": 68,
+          "monotonicMs": 3152.64
+        }
+      ],
+      "overflow": 0,
+      "observerErrors": 0
+    },
+    "watchdogMs": 2000
+  },
+  "diagnosticSourceSHA256": "316f6cdbae749441a7a1f51eab365107d4450f3a11ce05d5858f2455d16a6883",
+  "temporarySourceRemoved": true,
+  "targetedGroupsEmpty": [],
+  "full823Active": "B-desktop-full-v1 pgid87794",
+  "signalsSentByAudit": [],
+  "rawLogSHA256": "578af2571abc6f86d6914d491a84274ad3a089741d5471e186cb275fd3ab981b",
+  "parserCorrection": "Use first timeout-persisted boundary; final revision3 repeats same stage after late close. Initial derived audit incorrectly used last-per-stage and failed; raw/source unchanged."
+}

@@ -6,6 +6,9 @@
   "author": "xiaok",
   "type": "module",
   "main": "dist/main/desktop/electron/main.js",
+  "engines": {
+    "node": ">=22.22.0"
+  },
   "scripts": {
     "build:icon": "node ../scripts/desktop-icon.mjs",
     "build": "npm run build:main && npm run build:renderer",

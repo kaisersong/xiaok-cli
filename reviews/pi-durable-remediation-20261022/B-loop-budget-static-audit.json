@@ -1,0 +1,9 @@
+{
+  "file": "desktop/tests/main/loop-verification-execution-controller.test.ts",
+  "sourceSHA256": "d48b71aef0e0a497242ece35aee15565374727ba32c8e685a1ff0f591ef72257",
+  "originalSourceSHA256": "ca61e7a74edc16e6680b4ac941e9a2ea04795c417e08ebeb63692de4afcf9bf7",
+  "assertionExpectCalls": 59,
+  "expectCallBytesIdentical": true,
+  "logicalSetTimeCallsBytesIdentical": true,
+  "note": "Static AST audit of exact original expect(...) arguments and f.setTime(...) calls; does not replace execution or prove every behavior invariant."
+}

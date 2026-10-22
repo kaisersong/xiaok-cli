@@ -1,0 +1,58 @@
+{
+  "metaPath": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-final-node22-22.json",
+  "ownedPid": 94068,
+  "ownedPgid": 94068,
+  "reaped": true,
+  "globalErrors": [],
+  "groupMembers": [],
+  "records": [
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-CJSAxa",
+        "workerPid": 94184,
+        "workerPpid": 94068,
+        "uid": 502,
+        "runToken": "a83a681b5986425caf71fc123a7e6584",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49309855,
+          "uid": 502,
+          "birthtimeMs": 1792632382673.7888
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49309855,
+        "uid": 502,
+        "birthtimeMs": 1792632382673.7888
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-SacTJv",
+        "workerPid": 94184,
+        "workerPpid": 94068,
+        "uid": 502,
+        "runToken": "a83a681b5986425caf71fc123a7e6584",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49309920,
+          "uid": 502,
+          "birthtimeMs": 1792632382710.188
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49309920,
+        "uid": 502,
+        "birthtimeMs": 1792632382710.188
+      }
+    }
+  ],
+  "onlyExactRoots": true,
+  "signalsSent": []
+}

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -174,7 +174,7 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
   beforeEach(() => {
     const baseDir = join(tmpdir(), 'xwk-e2e');
     mkdirSync(baseDir, { recursive: true });
-    tempRoot = mkdtempSync(join(baseDir, 'run-'));
+    tempRoot = realpathSync(mkdtempSync(join(baseDir, 'run-')));
     tempHome = join(tempRoot, 'home');
     tempWorkFolder = join(tempRoot, 'workspace');
     mkdirSync(tempHome, { recursive: true });
@@ -419,7 +419,7 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
           status: string;
           artifactRef?: { path?: string; relativePath?: string; type?: string; mimeType?: string };
         }>;
-        tasks: Array<{ status: string; result?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null }>;
+        tasks: Array<{ status: string; result?: { artifacts?: Array<{ path?: string; label?: string; type?: string; url?: string; size?: number }> } | null }>;
       }>(`${kswarmUrl}/projects/${created.project.id}`);
       expect(['delivered', 'closed']).not.toContain(detail.project.status);
       const candidate = detail.deliverables.find(
@@ -431,10 +431,18 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
       });
       expect(detail.project.deliverable ?? null).toBeNull();
       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
+      console.info('C_WORKFLOW_ARTIFACT_PATHS', JSON.stringify({ workspace: tempWorkFolder, paths: detail.tasks[0].result?.artifacts?.map(artifact => artifact.path) }));
       expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path)).toEqual([
-        'artifacts/workflow-report.html',
-        'artifacts/workflow-report.pdf',
+        join(tempWorkFolder, 'artifacts', 'workflow-report.html'),
+        join(tempWorkFolder, 'artifacts', 'workflow-report.pdf'),
       ]);
+      for (const artifact of detail.tasks[0].result!.artifacts!) {
+        expect(statSync(artifact.path!).isFile()).toBe(true);
+        expect(artifact.size).toBe(statSync(artifact.path!).size);
+        expect(artifact.url).toBe(`/projects/${created.project.id}/artifacts/${artifact.path!.endsWith('.html') ? 'workflow-report.html' : 'workflow-report.pdf'}`);
+      }
+      expect(readFileSync(join(tempWorkFolder, 'artifacts', 'workflow-report.html'), 'utf8')).toContain('三路并行复核已通过。');
+      expect(readFileSync(join(tempWorkFolder, 'artifacts', 'workflow-report.pdf'), 'utf8')).toContain('%PDF-1.4');
     } catch (error) {
       let brokerReplay = '';
       try {

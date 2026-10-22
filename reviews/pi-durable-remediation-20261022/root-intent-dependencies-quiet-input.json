@@ -1,0 +1,30 @@
+{
+  "test": "tests/runtime/verification/intent-publication-dependencies.test.ts",
+  "sha256": "142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479",
+  "startedAt": "2026-10-22T01:26:49.916691+00:00",
+  "population": 23,
+  "workerCount": 1,
+  "instrumentation": "none; verbose+JSON only",
+  "quietMeaning": "All other owned test/build runners have reaped, groups0; A/B/C instructed no CPU tests/builds. Normal unrelated user/system processes remain; causation/stability not inferred from a quiet pass.",
+  "previousOwnedGroups": [
+    45624,
+    83833,
+    86942,
+    89551,
+    94068
+  ],
+  "previousGroupMembers": [],
+  "originalOptInPreserved": true,
+  "sourceInputs": {
+    "desktop/electron/desktop-services.ts": "a943a4967c1a0fe56477fbe9972b3f6a4441fb11f4b30f5f00c46cf3eeeded66",
+    "desktop/electron/desktop-task-stream.ts": "fee73bfc0268c7b23d773fdf256c0f67a222d977e598fb3c6d4d8c1bd18d62ab",
+    "desktop/electron/project-agent-model.ts": "5c1a739d742fa5b95dc897930d83535dfd06f923aa1cd22facf032bf86387906",
+    "src/ai/tools/bounded-glob.ts": "099dae1daf6a296b1c140fd7aae523d7ebd4ba5a313568a3963c807248cc3a5f",
+    "src/runtime/conversation-activity/sensitivity.ts": "fb1e0cd30b99018f367773f7f72e9a0ce1fe5a7310d578f219042cb49498be82",
+    "desktop/renderer/src/components/ConversationActivityPanel.tsx": "32d46939d803503da469d40efcf802c92c7f92cf5910c67f021980b880ac3464",
+    "desktop/renderer/src/components/collaboration/CollaborationRoomsPage.tsx": "e40c0ed3a0edab2b0e0bc08788a6135872933fa18a0087c5c79afc1498e48393",
+    "desktop/electron/loop-business-publication-host.ts": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858"
+  },
+  "approvedPlan": "A-intent-quiet-rerun-design-review.md",
+  "untouchedFinalClockBudgetMs": 40000
+}

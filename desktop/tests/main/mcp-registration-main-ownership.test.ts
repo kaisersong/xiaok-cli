@@ -16,8 +16,8 @@ type Callbacks = {
 };
 type Start = (callbacks: Callbacks) => Owner;
 function frozen(stage: 'before' | 'candidate'): string {
-  const bytes = readFileSync(new URL(stage === 'candidate' ? '../fixtures/r299-main-candidate.txt' : '../fixtures/r324-main-before.txt', import.meta.url));
-  const expected = stage === 'before' ? '8a98dde3a2167d32e2044b591603e4ceb2a7cad659b21ffaa90c4d22a1d563d0' : '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f';
+  const bytes = readFileSync(new URL(stage === 'candidate' ? '../fixtures/remediation-20261022-main-reviewed.txt' : '../fixtures/r324-main-before.txt', import.meta.url));
+  const expected = stage === 'before' ? '8a98dde3a2167d32e2044b591603e4ceb2a7cad659b21ffaa90c4d22a1d563d0' : 'f25ac6d5034918fef0d3207780429bd7773adc1b7e932b0dc3707e4d8c1d5d40';
   expect(createHash('sha256').update(bytes).digest('hex')).toBe(expected);
   return bytes.toString('utf8');
 }
@@ -60,6 +60,38 @@ it('BIND actual Main equals frozen candidate; Python tail is byte-preserved and 
   expect(post).toContain('await mcpRegistrationOwner.dispose();');
   expect(post).not.toContain('await mcpDispose?.();');
 });
+it('reviewed Main evolution preserves the original promise, registration, bridge and Python ownership source exactly', () => {
+  const oldBytes = readFileSync(new URL('../fixtures/r299-main-candidate.txt', import.meta.url));
+  expect(createHash('sha256').update(oldBytes).digest('hex')).toBe('9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f');
+  const previous = oldBytes.toString('utf8'), reviewed = frozen('candidate');
+  const unique = <T>(values: readonly T[], name: string): T => {
+    expect(values, name).toHaveLength(1);
+    return values[0]!;
+  };
+  const ownership = (source: string): string[] => {
+    const tree = ast(source);
+    const topFunction = (name: string) => unique(tree.statements.filter((node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === name), name);
+    const initial = topFunction('createInitialWindowResources');
+    expect(initial.body).toBeDefined();
+    const variable = (name: string, statements: readonly ts.Statement[]) => unique(statements.filter((node): node is ts.VariableStatement =>
+      ts.isVariableStatement(node) && node.declarationList.declarations.some(value => value.name.getText(tree) === name)), name).getText(tree);
+    const tail = '// Python discovery, venv creation and dependency checks are intentionally';
+    expect(source.indexOf(tail)).toBeGreaterThan(-1);
+    return [
+      ...['startOwnedMcpRegistration', 'assertMcpRegistrationPromiseAmbient', 'registerLifetimeDisposerStep']
+        .map(name => topFunction(name).getText(tree)),
+      ...['McpNativePromise', 'mcpPromiseGlobal', 'mcpPromiseOwnDescriptor', 'mcpPromisePrototype', 'mcpPromiseInitialThen', 'mcpPreProducerWitness', 'desktopShutdownCoordinator']
+        .map(name => variable(name, tree.statements)),
+      ...['runtimeBridgeClients', 'runtimeBridgeStarted', 'runtimeBridgeStartEpoch', 'runtimeBridgeFallbackTimer', 'runtimeBridgeStopping', 'stopRuntimeBridge', 'mcpRegistrationOwner', 'mcpRegistrationPromise']
+        .map(name => variable(name, initial.body!.statements)),
+      source.slice(source.indexOf(tail)),
+    ];
+  };
+  // This supplements, never replaces, the full actual==reviewed bytes/hash gate.
+  expect(ownership(reviewed)).toEqual(ownership(previous));
+});
+
 it('pending registration is owned before producer; late close awaits exact callback once and releases writer independently', async () => {
   const f = fixture(); let prefix: unknown;
   f.callbacks.register = () => { prefix = { ...f.facts(), final: f.final.length }; return f.raw.promise; };

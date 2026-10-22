@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
@@ -36,6 +36,7 @@ function WorkSummary({ summary, label }: { summary: string; label: string }) {
 export function ConversationActivityPanel({ threadId }: { threadId: string }) {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
+  const relativeTime = useMemo(() => new Intl.RelativeTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { numeric: 'auto' }), [locale]);
   const [works, setWorks] = useState<WorkView[]>([]);
   const [error, setError] = useState<false | 'generic' | 'owner'>(false);
   const [reports, setReports] = useState<ConversationActivity[]>([]);
@@ -104,11 +105,10 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
   const time = (value: number | null) => value === null ? labels.noProgress : new Date(value).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US');
   const ago = (value: number) => {
     const seconds = Math.max(0, Math.round((Date.now() - value) / 1000));
-    const rtf = new Intl.RelativeTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { numeric: 'auto' });
-    if (seconds < 60) return rtf.format(0, 'second');
-    if (seconds < 3600) return rtf.format(-Math.floor(seconds / 60), 'minute');
-    if (seconds < 86400) return rtf.format(-Math.floor(seconds / 3600), 'hour');
-    return rtf.format(-Math.floor(seconds / 86400), 'day');
+    if (seconds < 60) return relativeTime.format(0, 'second');
+    if (seconds < 3600) return relativeTime.format(-Math.floor(seconds / 60), 'minute');
+    if (seconds < 86400) return relativeTime.format(-Math.floor(seconds / 3600), 'hour');
+    return relativeTime.format(-Math.floor(seconds / 86400), 'day');
   };
   return (
     <section aria-label={labels.title} className="w-full overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)]" data-testid="conversation-activity">

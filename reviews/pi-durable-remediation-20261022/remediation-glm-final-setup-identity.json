@@ -1,0 +1,95 @@
+{
+  "actualSystemInitModel": "GLM-5.3",
+  "actualTools": [],
+  "actualMcpServers": [],
+  "actualToolUseBlocks": 0,
+  "runner": {
+    "label": "remediation-glm-final-setup",
+    "cwd": "<worktree>",
+    "argv": [
+      "<local-user>/.local/bin/qodercli",
+      "--model",
+      "GLM-5.3",
+      "--thinking",
+      "disabled",
+      "--tools",
+      "",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--setting-sources",
+      "",
+      "--max-model-request-retries",
+      "0",
+      "--no-session-persistence",
+      "--output-format",
+      "stream-json",
+      "--max-output-tokens",
+      "3500",
+      "--input-format",
+      "text",
+      "-p"
+    ],
+    "startedAt": "2026-10-22T01:25:32.129013+00:00",
+    "runnerPid": 89804,
+    "inputFile": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/remediation-glm-final-setup-packet.txt",
+    "inputBytes": 15968,
+    "inputSha256": "4fb9e81be2cfe1fcde092d465b2cea2ef88fb124f4ec377ec783b4818f585a55",
+    "transport": "complete UTF8 stdin",
+    "pid": 89821,
+    "pgid": 89821,
+    "exitCode": 0,
+    "finishedAt": "2026-10-22T01:26:15.749076+00:00",
+    "reaped": true
+  },
+  "result": {
+    "type": "result",
+    "subtype": "success",
+    "duration_ms": 41362,
+    "duration_api_ms": 41343,
+    "is_error": false,
+    "num_turns": 1,
+    "result": "APPROVE\n\n**Delta assessment (static review only; pass/fail not inferred):**\n\n1. **Setup coverage** — moving `activityFixture`, `acquireLease`, and the `lstatSync`/`realpathSync`/`rmSync` capture inside `try` closes the prior gap: any partial-fixture or lease-acquisition failure now still reaches the full cleanup path in `finally`. `ticket` as `ExecutionLease | undefined` with `ticket?.release()` is the correct optional-release shape, and `import type` avoids a runtime import.\n\n2. **No masking of the original failure** — the `catch` rethrows the body error unchanged. The `finally` only replaces it when cleanup itself fails, and in that case the AggregateError places `bodyFailure.error` first in `errors` and repeats it as `cause`, so the original failure (including vitest assertion diffs) is structurally preserved and recoverable. When cleanup succeeds, the original error propagates untouched.\n\n3. **No cleanup-step short-circuit** — each step (`release`, `cleanupActivityCase`, `restoreAllMocks`, `syncBuiltinESMExports`) is individually guarded, so a failure in an early step cannot skip later ones (the old nested `finally` could skip `syncBuiltinESMExports` only if `restoreAllMocks` threw, but an exception in `ticket.release()` previously aborted everything after it — including cleanup itself). Strictly improved.\n\n4. **Ordering preserved** — cleanup still runs before mock restoration, matching the old sequence, and the double `cleanupActivityCase` is safe because the action array is drained (verified by the sibling test's `toHaveLength(0)` assertion).\n\n5. **Double-release note (non-blocking)** — on the `releaseBeforeCleanup = true` branch, `finally` releases an already-released ticket, same as the pre-delta unconditional `ticket.release()`. Unlike before, a throw there is now captured into the aggregate instead of masking the body result, so this is a net improvement, not a regression. Only a concern if `ExecutionLease.release` is non-idempotent, which would have failed the prior packet's immutable review identically.\n\n6. **No production/config/fixture changes** in this delta; second test and the R6/AF describe blocks are untouched; the `fs` spy/forensics logging contract and `removalAttempts`/`existsSync(f.root)` assertions are invariant under the refactor.\n\n**Execution limits:** review confined to the supplied delta and full current file contents as given; no tools, no repository access, no execution of the suite, no inference that tests pass, and no evaluation beyond this test-file-only scope (production, fixture, and config were out of scope per the stated constraint).",
+    "stop_reason": "end_turn",
+    "total_cost_usd": 0,
+    "total_credits": 1.12032268,
+    "usage": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "",
+      "iterations": [],
+      "speed": "standard",
+      "request_id": "a479b8b0-1e2d-4379-8a9e-734e5febff8f",
+      "context_usage_ratio": 0.040405555555555556
+    },
+    "modelUsage": {
+      "gmodel": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0,
+        "contextWindow": 0,
+        "maxOutputTokens": 0,
+        "credits": 1.12032268
+      }
+    },
+    "permission_denials": [],
+    "fast_mode_state": "off",
+    "uuid": "d1e383c2-4b8a-4969-b95e-0a3431b60133",
+    "session_id": "fed63d93-bc3c-4c3b-b1c1-1fc708f0ba6c"
+  },
+  "verdict": "APPROVE"
+}

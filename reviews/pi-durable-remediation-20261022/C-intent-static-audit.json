@@ -1,0 +1,16 @@
+{
+  "path": "tests/runtime/verification/intent-publication-dependencies.test.ts",
+  "sha256": "142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479",
+  "originalExpectRootedCallCount": 84,
+  "currentExpectRootedCallCount": 84,
+  "expectEquivalentAfterOnlySignalLeafNormalization": true,
+  "sqlLiteralMultisetIdentical": true,
+  "originalSQLLiteralCount": 15,
+  "currentSQLLiteralCount": 15,
+  "parseDiagnostics": [],
+  "transpileDiagnostics": [],
+  "other14SourceTextUnchanged": true,
+  "groupRowArraysUnchanged": true,
+  "changedGroupBudgetDefinitions": 2,
+  "expiryPropertyMultisetIdentical": true
+}

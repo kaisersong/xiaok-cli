@@ -105,6 +105,9 @@ export function createPassiveOpenObserver<T extends (...args: any[]) => any>(
     let raw: unknown;
     try { raw = Reflect.apply(originalOpen, this, args); }
     catch (error) { record(trace, 'fifo-open-sync-throw', { token }); throw error; }
+    // Submission is after the real native call returned its original Promise.
+    // It is neither the call-before trace nor a claim that kernel open settled.
+    record(trace, 'fifo-open-submitted', { token });
     observeSettlement(raw, handle => {
       record(trace, 'fifo-open-resolve', { token });
       if (!handle || typeof handle !== 'object') { record(trace, 'fifo-close-observer-unavailable', { token }); return; }

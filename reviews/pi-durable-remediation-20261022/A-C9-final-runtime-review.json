@@ -1,0 +1,68 @@
+{
+  "decision": "APPROVE",
+  "scope": "Independently read original C two complete5 runs and actual late cleanup evidence; not rerun by A",
+  "sourceHashes": [
+    {
+      "path": "desktop/tests/fixtures/multi-agent-activity-failure.ts",
+      "sha256": "eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+      "sha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+      "sha256": "5eb0ed6ea194a4d652e8e62ce9a3b972ed5d98e99811365688d4a9c93eaba379"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+      "sha256": "dcbaf379ca9076fb1280fe1ffe757b0d0f3efd52c461ee9279929422704918e8"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+      "sha256": "3dbc0bb0dca2a6e09cf8657f159bd45de25a82299b2ff5c6da9181e107d13783"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+      "sha256": "51bbf026869b171cddf9127d51943601aaaaa629a00977b8888e9bd7967bb4d4"
+    }
+  ],
+  "runs": [
+    {
+      "label": "C-usage-related-final-node24",
+      "counts": {
+        "passed": 133,
+        "failed": 0,
+        "skipped": 0
+      },
+      "fileCount": 5,
+      "runnerReaped": true,
+      "runnerExitCode": 0,
+      "rawSHA256": "8938435917dc834663cf3c2fd6aec1ddb63c4c7f084ca0f9f03c20bf72282fd8",
+      "retainedRecords": 11,
+      "sameRawRecordSetVerified": true,
+      "exactLateDeletedRoots": 11,
+      "currentOwnGroupMembers": 0,
+      "sourceManifestSHA256": "cc85fdf3edeee757b0adab19d819d3fe8494047e066968b35f087147a54e2858",
+      "forensicJSONSHA256": "4dbcb1aec97a8d8d48a840b443661acc70c4ee7ea7a3593d763fef4dac7d2f62"
+    },
+    {
+      "label": "C-usage-related-final-node22-22",
+      "counts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 116
+      },
+      "fileCount": 5,
+      "runnerReaped": true,
+      "runnerExitCode": 0,
+      "rawSHA256": "f1b59ef298e8b8ec23d1fc52836882433b8aae989a6e5b0c1a3d648913a386c0",
+      "retainedRecords": 2,
+      "sameRawRecordSetVerified": true,
+      "exactLateDeletedRoots": 2,
+      "currentOwnGroupMembers": 0,
+      "sourceManifestSHA256": "cc85fdf3edeee757b0adab19d819d3fe8494047e066968b35f087147a54e2858",
+      "forensicJSONSHA256": "ceef749bf9edfd99446a2db3faa612875a2e01d497ff0052c1722fe6191fa4c4"
+    }
+  ]
+}

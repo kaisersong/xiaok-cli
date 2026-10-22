@@ -1,0 +1,27 @@
+{
+  "scope": "Direct generated publication artifacts; archive must preserve these three files without overwriting. Root owns the final global artifact-manifest update.",
+  "generatorInputEvidence": "ignored local raw log/JSON bound inside generated JSON by SHA256",
+  "files": [
+    {
+      "file": "B-desktop-final-partition.py",
+      "sha256": "f13a1da9a7bf37ac77f946730afe8587f87c81c123ab7027555248192012f012",
+      "bytes": 14515
+    },
+    {
+      "file": "B-desktop-final-partition.json",
+      "sha256": "97ba5a07e4225e612af2c735aa3715a7f6edf52e03ce0043adb2c7c0504740d2",
+      "bytes": 240634
+    },
+    {
+      "file": "B-desktop-final-partition.md",
+      "sha256": "cf5a71221e0da8a7ce62ec8276053e87e171f057f8a703cd46b2404fb9bb3ae2",
+      "bytes": 2300
+    }
+  ],
+  "countsUnchanged": {
+    "passed": 10159,
+    "failed": 0,
+    "skipped": 8
+  },
+  "userPathsInGeneratedOutputs": false
+}

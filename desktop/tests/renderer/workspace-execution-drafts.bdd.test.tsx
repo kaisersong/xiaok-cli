@@ -9,10 +9,14 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 import type { DesktopGoalMutationResult, DesktopGoalProjection, GoalAttachmentRequest } from '../../electron/preload-api';
 import type { TaskSnapshot } from '../../../src/runtime/task-host/types';
+import { MODEL_CONFIG_RESULT_SCHEMA } from '../../shared/model-provider-ipc-contract';
 
 const fixtures = vi.hoisted(() => ({ createTask: vi.fn(), createTaskWithFiles: vi.fn(), getThread: vi.fn(), recoverTask: vi.fn(), updateThreadTaskId: vi.fn(), subscribeTask: vi.fn(), files: [] as Array<{ filePath: string; name: string }> }));
 vi.mock('../../renderer/src/api', () => ({ api: {
     getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })),
+  getModelConfig: vi.fn(async () => MODEL_CONFIG_RESULT_SCHEMA.parse({ configPath: '/owned/config.json', defaultProvider: 'fixture', defaultModelId: 'fixture-model',
+    providers: [{ id: 'fixture', label: 'Fixture', type: 'custom', protocol: 'openai_legacy', apiKeyConfigured: true }],
+    models: [{ id: 'fixture-model', provider: 'fixture', model: 'fixture-model', label: 'Fixture model', isDefault: true }], providerProfiles: [] })),
   createTask: fixtures.createTask, createTaskWithFiles: fixtures.createTaskWithFiles, getThread: fixtures.getThread,
   recoverTask: fixtures.recoverTask,
   updateThreadTitle: vi.fn(async () => {}), updateThreadTaskId: fixtures.updateThreadTaskId, subscribeTask: fixtures.subscribeTask, listSkills: vi.fn(async () => []),

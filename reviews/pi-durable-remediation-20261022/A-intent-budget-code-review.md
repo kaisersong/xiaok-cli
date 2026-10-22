@@ -1,0 +1,7 @@
+# A Intent 修订实际代码独立票
+
+APPROVE（test-only代码范围，不预判完整23/短timeout结果）。SHA256: 142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479
+
+完整读取相对HEAD实际diff与原source生命周期。真实第四testSignal贯穿原completion调用与application/material/operations/publication，原await后和同步阶段均检查；f/receiver返回先unshift真实close再check；application自己的body首因+独立close错误保留，整setup catch全尝试receiver/f，正常close复用同promise；scenario只执行一次，onTestFinished join其原settled。没有改生产、SQL/expiry/资格、原主张或99stage opt-in。四个原30→同组原40，其余五个40不改，另外14未传signal预算不动。
+
+实际读取84原expect的迁移结构及SQL保留；C AST工具数据可作静态辅助，不视为A运行。setup短timeout、资源回收/下一case隔离与完整23结果仍须真实日志，若默认hook10s失败必须保留红，不据本票加时或略case。当前未见代码必改项。

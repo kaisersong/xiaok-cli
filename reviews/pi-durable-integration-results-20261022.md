@@ -1,5 +1,7 @@
 # PR73 集成验证结果（2026-10-22）
 
+这是首轮集成的原始失败记录，保留当时结果与方法。用户随后要求解决失败，修复、明确修订的测试装配预算及最终完整文件分区见[后续修复记录](pi-durable-remediation-results-20261022.md)；不以本文的基线失败作为结案。
+
 本次先将已合并 PR #73 的 master `3b4061489a612337fdb2fc1eb92e96c1d4fbe9a1` 合入 PR #74 分支，再合入测试期间新增的 CI/打包测试修复，冻结最新主干 `6770092945a42fb0e45ef0d68d0971bfc01b51a8`。后者仅4个workflow/测试文件，root source测试人口及产品代码不变，基线对照始终固定3b406148，不把可变origin/master当冻结对象。保留 master 的请求预览、provider disclosure、capacity admission、semantic budget 和 durable CAS，以及 PR74 的摘要完成边界。没有更新存量治理 baseline、弱化断言、放宽测试资格或提高测试内部超时。此文接续历史 `pi-durable-optimization-results.md`；历史旧基线的能力盘点不能作为当前 master 的现状。
 
 ## 集成修改

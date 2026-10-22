@@ -1,0 +1,12 @@
+{
+  "bodyByteEqual": true,
+  "originalExpectCalls": 5,
+  "otherSourceByteEqual": true,
+  "originalPopulationAndAllPredicatesPreserved": true,
+  "budget": {
+    "before": "implicit5000",
+    "after": 15000
+  },
+  "sourceSHA256": "5b9fee823b0815763dd4646229a0b33f60b7d1d4e67410dc51d375810a5796ef",
+  "parseDiagnostics": 0
+}

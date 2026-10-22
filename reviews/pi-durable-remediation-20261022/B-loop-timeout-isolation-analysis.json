@@ -1,0 +1,580 @@
+{
+  "diagnosticSourceArchived": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/B-loop-timeout-diagnostic-source.ts.txt",
+  "diagnosticSourceSHA256": "8dedd2f11c37ac520ee485bacbdebae8672e5b04f79825cdfa382443d7613c8c",
+  "temporarySourceRemoved": true,
+  "remainingOwnGroups": [],
+  "signalsSent": [],
+  "events": [
+    {
+      "mode": "terminal",
+      "stage": "scenario:start",
+      "elapsedMs": 5.683207999999922,
+      "firstJoined": false
+    },
+    {
+      "mode": "terminal",
+      "stage": "fixture:ready",
+      "elapsedMs": 2401.0106250000003,
+      "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/ia-F4d8oD"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2550.833542,
+      "method": "completion.prepare-owner-request"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2561.320583,
+      "method": "completion.authorize-owner"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2606.4370830000003,
+      "method": "completion.recover-owner-request"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2619.6645000000003,
+      "method": "application.prepareRequest"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2674.2665,
+      "method": "application.authorize"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2767.1652500000005,
+      "method": "application.recoverRequest"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2855.957083,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2885.7187500000005,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2914.6321250000005,
+      "method": "completion.prepare-owner-request"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2921.3523330000003,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2947.076708,
+      "method": "completion.authorize-owner"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2990.087167,
+      "method": "completion.recover-owner-request"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 2991.817667,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3070.7915,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3099.6094580000004,
+      "method": "verification.inspectObligation"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3138.594375,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3173.6517500000004,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3210.840917,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3242.0850830000004,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3277.5754170000005,
+      "method": "materials.prepareRequest"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3354.551333,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3386.3552080000004,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3421.030708,
+      "method": "materials.authorize"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3454.333833,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3487.2219580000005,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3520.0943330000005,
+      "method": "materials.stage"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3738.829,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "terminal",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 3777.040625,
+      "method": "verification.prepareRequest"
+    },
+    {
+      "mode": "terminal",
+      "stage": "ctx:aborted",
+      "elapsedMs": 4300.0905
+    },
+    {
+      "mode": "terminal",
+      "stage": "finally:close:start",
+      "elapsedMs": 4306.047875
+    },
+    {
+      "mode": "terminal",
+      "stage": "server:close:start",
+      "elapsedMs": 4307.1822919999995
+    },
+    {
+      "mode": "terminal",
+      "stage": "server:close:end",
+      "elapsedMs": 4307.403208
+    },
+    {
+      "mode": "terminal",
+      "stage": "fixture:close:start",
+      "elapsedMs": 4307.609791999999
+    },
+    {
+      "mode": "terminal",
+      "stage": "fixture:close:end",
+      "elapsedMs": 4368.474333,
+      "rootExists": false
+    },
+    {
+      "mode": "terminal",
+      "stage": "date:restore",
+      "elapsedMs": 4368.6158749999995
+    },
+    {
+      "mode": "terminal",
+      "stage": "profile:restore",
+      "elapsedMs": 4368.652749999999
+    },
+    {
+      "mode": "terminal",
+      "stage": "marker:restore",
+      "elapsedMs": 4368.678207999999
+    },
+    {
+      "mode": "terminal",
+      "stage": "finally:close:end",
+      "elapsedMs": 4368.695707999999
+    },
+    {
+      "mode": "terminal",
+      "stage": "finished:join:start",
+      "elapsedMs": 4369.670042,
+      "aborted": true
+    },
+    {
+      "mode": "terminal",
+      "stage": "finished:joined",
+      "elapsedMs": 4369.712792,
+      "aborted": true,
+      "failed": true,
+      "error": "Error: controller_ipc_aborted_unknown"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "scenario:start",
+      "elapsedMs": 4370.356292,
+      "firstJoined": true
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "fixture:ready",
+      "elapsedMs": 6713.740292,
+      "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/ia-FL2K0t"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 6855.969625,
+      "method": "completion.prepare-owner-request"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 6865.763083,
+      "method": "completion.authorize-owner"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 6906.2774580000005,
+      "method": "completion.recover-owner-request"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 6921.4625,
+      "method": "application.prepareRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 6974.132250000001,
+      "method": "application.authorize"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7060.3177080000005,
+      "method": "application.recoverRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7147.4638749999995,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7175.415832999999,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7199.1794580000005,
+      "method": "completion.prepare-owner-request"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7205.3415,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7232.415541999999,
+      "method": "completion.authorize-owner"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7278.299958,
+      "method": "completion.recover-owner-request"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7279.939708,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7359.379832999999,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7397.894333,
+      "method": "verification.inspectObligation"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7443.717166999999,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7469.167167,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7505.494124999999,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7536.913291999999,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7569.935167,
+      "method": "materials.prepareRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7640.381667,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7673.038208,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7706.541166999999,
+      "method": "materials.authorize"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7739.151333,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7769.675958,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 7802.826375000001,
+      "method": "materials.stage"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 8033.810458,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 8071.948582999999,
+      "method": "verification.prepareRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 8597.608167,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 8662.8445,
+      "method": "verification.dispatch"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 9925.741958,
+      "method": "verification.recoverRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 10045.270708,
+      "method": "materials.lookupRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 10215.236375,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 10352.331208,
+      "method": "publication.prepareRequest"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 10828.040625,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 10980.596207999999,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 11128.131041999999,
+      "method": "publication.approve"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 15144.318167,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 15276.541208,
+      "method": "publication.observeOwner"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 16084.1265,
+      "method": "publication.readOwnerPayload"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 17496.243875,
+      "method": "application.inspect"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "rpc:dispatch",
+      "elapsedMs": 17638.132125,
+      "method": "publication.observeOwner"
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "finally:close:start",
+      "elapsedMs": 18445.060583000002
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "server:close:start",
+      "elapsedMs": 18445.509000000002
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "server:close:end",
+      "elapsedMs": 18448.3875
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "fixture:close:start",
+      "elapsedMs": 18448.556875000002
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "fixture:close:end",
+      "elapsedMs": 18455.627500000002,
+      "rootExists": false
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "date:restore",
+      "elapsedMs": 18455.718542000002
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "profile:restore",
+      "elapsedMs": 18455.7495
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "marker:restore",
+      "elapsedMs": 18455.768708000003
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "finally:close:end",
+      "elapsedMs": 18455.784917
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "finished:join:start",
+      "elapsedMs": 18456.063292000003,
+      "aborted": false
+    },
+    {
+      "mode": "lost-dispatch",
+      "stage": "finished:joined",
+      "elapsedMs": 18456.08925,
+      "aborted": false,
+      "failed": false
+    }
+  ],
+  "isolationOrderVerified": true,
+  "expectedResult": "1 forced timeout failure + 1 original next simple pass, not full8 acceptance",
+  "rawLogSHA256": "c67fee222fb48010b68dfe7036be86bb07e817d3c3feb725081d8fdadb822370"
+}

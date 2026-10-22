@@ -2,12 +2,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { activityFixture, barrier, nativeAuthorizer, rootRequest, serviceSite, spawnChunk, sqliteFault, tick, writeChunk, type Cleanup } from '../fixtures/multi-agent-activity-failure.js';
+import { cleanupActivityCase, activityFixture, barrier, nativeAuthorizer, rootRequest, serviceSite, spawnChunk, sqliteFault, tick, writeChunk, type Cleanup } from '../fixtures/multi-agent-activity-failure.js';
 import type { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
 
 describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission callers', () => {
   const cleanup: Cleanup = [];
-  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(() => cleanupActivityCase(cleanup));
 
   async function siblings(rootFinishes: boolean, onBusyCall?: () => void) {
     const f = await activityFixture(cleanup), rootEntered = barrier(), busyEntered = barrier(), rootRelease = barrier(), busyRelease = barrier();

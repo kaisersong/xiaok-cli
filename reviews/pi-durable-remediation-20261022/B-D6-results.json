@@ -1,0 +1,100 @@
+{
+  "sourceSHA256": {
+    "desktop/tests/fixtures/desktop-post-seal-passive-trace.ts": "14b4f65dedfc8440e87600fa7701d6337a8fda256f722f2e69fa6a60ef7a2703",
+    "desktop/tests/fixtures/desktop-post-seal-owner.ts": "6e85a9171ccdbd68ed52b5c39082b56b8d6d54f51e58cbc6c75fa308866715fb",
+    "desktop/tests/main/desktop-post-seal-process.bdd.test.ts": "b33037542acc9db7c8066eae03a0f9eb52f933b9adb389cbcdfadf84f47fcd49"
+  },
+  "family": {
+    "runner": {
+      "label": "B-D6-family-green",
+      "cwd": "<worktree>/desktop",
+      "argv": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "tests/main/desktop-post-seal-process.bdd.test.ts",
+        "tests/main/desktop-post-seal-worker.bdd.test.ts",
+        "tests/main/desktop-post-seal-io.bdd.test.ts",
+        "--maxWorkers=1",
+        "--reporter=verbose"
+      ],
+      "startedAt": "2026-10-22T01:07:24.484455+00:00",
+      "runnerPid": 55373,
+      "pid": 55390,
+      "pgid": 55390,
+      "exitCode": 0,
+      "finishedAt": "2026-10-22T01:08:20.635897+00:00",
+      "reaped": true
+    },
+    "completeFiles": 3,
+    "passed": 69,
+    "population": {
+      "process": 17,
+      "worker": 33,
+      "io": 19
+    },
+    "logSHA256": "1f43617a1197453b8360d4784d385694e5c88d634bbb7e1d8b2ab4a9df5237b2"
+  },
+  "diagnostic": {
+    "runner": {
+      "label": "B-D6-late-writer",
+      "cwd": "<worktree>/desktop",
+      "argv": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "tests/main/B-D6-late-writer-diagnostic.test.ts",
+        "--maxWorkers=1",
+        "--reporter=verbose",
+        "--testNamePattern",
+        "D6 actual file"
+      ],
+      "startedAt": "2026-10-22T01:08:31.227948+00:00",
+      "runnerPid": 58969,
+      "pid": 58977,
+      "pgid": 58977,
+      "exitCode": 0,
+      "finishedAt": "2026-10-22T01:08:36.458363+00:00",
+      "reaped": true
+    },
+    "passed": 1,
+    "filtered": 16,
+    "notCountedAsOriginalPopulation": true,
+    "sourceArchiveSHA256": "316f6cdbae749441a7a1f51eab365107d4450f3a11ce05d5858f2455d16a6883",
+    "temporarySourceRemoved": true,
+    "analysis": "B-D6-writer-analysis.json"
+  },
+  "relatedMinimum": {
+    "runner": {
+      "label": "B-host-related-node22-22",
+      "cwd": "<worktree>/desktop",
+      "argv": [
+        "<local-user>/.npm/_npx/6d82ddbdd7da268b/node_modules/node/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "tests/main/loop-business-projection.test.ts",
+        "tests/main/loop-business-projection-independent.test.ts",
+        "tests/main/loop-output-consumers.test.ts",
+        "tests/main/loop-published-artifacts.test.ts",
+        "--maxWorkers=1",
+        "--reporter=verbose"
+      ],
+      "startedAt": "2026-10-22T01:10:37.289988+00:00",
+      "runnerPid": 62891,
+      "pid": 62902,
+      "pgid": 62902,
+      "exitCode": 0,
+      "finishedAt": "2026-10-22T01:10:51.118528+00:00",
+      "reaped": true
+    },
+    "wholeFiles": 4,
+    "passed": 65,
+    "hostSHA256": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858"
+  },
+  "targetedGroupsEmpty": [],
+  "remainingActiveOwnRuns": [
+    "B-desktop-full-v1",
+    "B-loop-final-node24"
+  ],
+  "sourceNote": "D6 subject100->2000 explicitly approved; D7 100/default5 unchanged. No production change."
+}

@@ -1,0 +1,366 @@
+{
+  "checkedAt": "2026-10-22T01:27:09.990032+00:00",
+  "ownedRuns": 47,
+  "allReaped": true,
+  "remainingOwnPIDorPGID": [],
+  "signalsSent": [
+    {
+      "pid": 71704,
+      "pgid": 71704,
+      "signal": "SIGTERM",
+      "owner": "C-forensics-negative-probe self-created idle child only",
+      "reaped": true
+    }
+  ],
+  "runs": [
+    {
+      "label": "C-dynamic-contract-diagnostic",
+      "pid": 45754,
+      "pgid": 45754,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-electron-sqlite-runtime",
+      "pid": 63333,
+      "pgid": 63333,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-glob-emitted-electron",
+      "pid": 66687,
+      "pgid": 66687,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-glob-emitted-node22-22",
+      "pid": 66663,
+      "pgid": 66663,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-glob-emitted-node24",
+      "pid": 66398,
+      "pgid": 66398,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-glob-source-node22-22",
+      "pid": 66732,
+      "pgid": 66732,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-glob-source-node22",
+      "pid": 47918,
+      "pgid": 47918,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-glob-source-node24",
+      "pid": 47715,
+      "pgid": 47715,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-hygiene",
+      "pid": 27586,
+      "pgid": 27586,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-intl-red-valid",
+      "pid": 37011,
+      "pgid": 37011,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-intl-red",
+      "pid": 36488,
+      "pgid": 36488,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-loop-collector-counts",
+      "pid": 48743,
+      "pgid": 48743,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-loop-fullprojection-diagnostic",
+      "pid": 31481,
+      "pgid": 31481,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-loop-txn-control",
+      "pid": 42088,
+      "pgid": 42088,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-loop-txn-variant",
+      "pid": 43990,
+      "pgid": 43990,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-node22-22-binary",
+      "pid": 60272,
+      "pgid": 60272,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-node22-binary",
+      "pid": 47496,
+      "pgid": 47496,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-node22-sqlite-probe",
+      "pid": 56912,
+      "pgid": 56912,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-node22-transaction-api",
+      "pid": 59120,
+      "pgid": 59120,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-node24-transaction-api",
+      "pid": 59161,
+      "pgid": 59161,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-owned13-red",
+      "pid": 33837,
+      "pgid": 33837,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-owned14-green-v1",
+      "pid": 41405,
+      "pgid": 41405,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-owned14-green-v2",
+      "pid": 44516,
+      "pgid": 44516,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-owned14-green-v3",
+      "pid": 46329,
+      "pgid": 46329,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-source-node22-22-final",
+      "pid": 61548,
+      "pgid": 61548,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-source-node22-final",
+      "pid": 57734,
+      "pgid": 57734,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-source-node24-final-v2",
+      "pid": 59345,
+      "pgid": 59345,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-source-node24-final",
+      "pid": 54282,
+      "pgid": 54282,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-split-cli-node22-14",
+      "pid": 1680,
+      "pgid": 1680,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-split-emitted-electron",
+      "pid": 1581,
+      "pgid": 1581,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-split-emitted-node22-22",
+      "pid": 1557,
+      "pgid": 1557,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-split-emitted-node24",
+      "pid": 1498,
+      "pgid": 1498,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-stored-green-node22-22",
+      "pid": 87939,
+      "pgid": 87939,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-stored-green-node24",
+      "pid": 85287,
+      "pgid": 85287,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-stored-red-with-negative",
+      "pid": 83467,
+      "pgid": 83467,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-stored-red",
+      "pid": 76329,
+      "pgid": 76329,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-timezone-red",
+      "pid": 51875,
+      "pgid": 51875,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-ui-node22-final",
+      "pid": 53398,
+      "pgid": 53398,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-ui-node22",
+      "pid": 48406,
+      "pgid": 48406,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-intent-setup-timeout",
+      "pid": 42397,
+      "pgid": 42397,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-usage-contract-diagnostic",
+      "pid": 53776,
+      "pgid": 53776,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-forensics-negative-probe",
+      "pid": 71703,
+      "pgid": 71703,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-usage-related-node24",
+      "pid": 72479,
+      "pgid": 72479,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C-root-gate-red",
+      "pid": 84641,
+      "pgid": 84641,
+      "exitCode": 1,
+      "reaped": true
+    },
+    {
+      "label": "C9-runtime-contract",
+      "pid": 92159,
+      "pgid": 92159,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-usage-related-final-node24",
+      "pid": 89551,
+      "pgid": 89551,
+      "exitCode": 0,
+      "reaped": true
+    },
+    {
+      "label": "C-usage-related-final-node22-22",
+      "pid": 94068,
+      "pgid": 94068,
+      "exitCode": 0,
+      "reaped": true
+    }
+  ],
+  "additionalOwnedChildren": [
+    {
+      "pid": 71704,
+      "pgid": 71704,
+      "reaped": true,
+      "exitSignal": "SIGTERM"
+    },
+    {
+      "pid": 92163,
+      "pgid": 92159,
+      "reaped": true,
+      "owner": "C9-runtime-contract execFileSync native API probe"
+    },
+    {
+      "pid": 92173,
+      "pgid": 92159,
+      "reaped": true,
+      "owner": "C9-runtime-contract execFileSync native API probe"
+    }
+  ]
+}

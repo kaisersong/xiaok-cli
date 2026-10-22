@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { constants } from 'node:sqlite';
-import { invokeRecord, nativeAuthorizer, parkedActivityFixture, rootRequest, serviceSite, siblingActivityFixture, sqliteFault, tick, type Cleanup, type ActivityFixture } from '../fixtures/multi-agent-activity-failure.js';
+import { cleanupActivityCase, invokeRecord, nativeAuthorizer, parkedActivityFixture, rootRequest, serviceSite, siblingActivityFixture, sqliteFault, tick, type Cleanup, type ActivityFixture } from '../fixtures/multi-agent-activity-failure.js';
 import type { DesktopAgentExecutionContext } from '../../electron/desktop-multi-agent-service.js';
 
 const recordMethods = ['recordActivity', 'recordRunStarted', 'recordToolFinished', 'recordRuntimeEvent', 'recordUsage'] as const;
@@ -22,7 +22,7 @@ async function caught(action: () => unknown) { try { return { value: await actio
 
 describe.runIf(nativeAuthorizer)('R6 AF real service trusted IO and ordinary refusals', () => {
   const cleanup: Cleanup = [];
-  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(() => cleanupActivityCase(cleanup));
 
   it.each(['spawn', 'send', 'interrupt', 'followup', 'wait', 'list', 'close'].flatMap(method => ['groups', 'thread_bindings'].map(table => ({ method, table }))))('AF6 $method shared $table read failure freezes only the trusted running group', async ({ method, table }) => {
     const f = await parkedActivityFixture(cleanup);

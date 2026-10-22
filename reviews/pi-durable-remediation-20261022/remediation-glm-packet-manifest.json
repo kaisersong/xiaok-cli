@@ -1,0 +1,193 @@
+{
+  "createdAt": "2026-10-22T00:21:56.715933+00:00",
+  "head": "d0e35e73014add369748de77fe2a868a62777f13",
+  "inputBytes": 606406,
+  "inputSha256": "183806132875397b47db1b00a4a3ef05da67558af2ad2ce46321e1f3dce689da",
+  "parts": [
+    {
+      "path": "REVIEW REQUEST",
+      "bytes": 1822,
+      "sha256": "b49aaa7cf2dc8aa1204384c5a41850961bc298b79d48adbf3792dda4e51f071f"
+    },
+    {
+      "path": "ALL TRACKED REMEDIATION DIFF",
+      "bytes": 197994,
+      "sha256": "7ee20733c3d3551782d1e414c185f750b9127b7c1f913d381b2316039cf1e74c"
+    },
+    {
+      "path": "desktop/tests/fixtures/remediation-20261022-main-reviewed.txt",
+      "bytes": 107337,
+      "sha256": "f25ac6d5034918fef0d3207780429bd7773adc1b7e932b0dc3707e4d8c1d5d40"
+    },
+    {
+      "path": "desktop/tests/main/desktop-task-usage-drain.test.ts",
+      "bytes": 13547,
+      "sha256": "7da3e28e865fa35ba64e78cf7067768407f9e8fc0606fe5e60e2deacdb31188a"
+    },
+    {
+      "path": "desktop/tests/main/goal-source-main-authority-fixture.ts",
+      "bytes": 2991,
+      "sha256": "95b9e6723bfe1d3d86314d34e865b22eeaab61a90ab381debd6ab1aa4c138250"
+    },
+    {
+      "path": "desktop/tests/main/owned-workflow-entry-identity.test.ts",
+      "bytes": 3933,
+      "sha256": "f622a16281805e842d3e7a48b8fec4e191c44b433b65bdfc8f38fb594f96312c"
+    },
+    {
+      "path": "desktop/tests/main/workflow-review-registered-service-fixture.ts",
+      "bytes": 3620,
+      "sha256": "f5b102aa3fd82f85bcfda74006962aac6d6d0be000ad772684da836deedf4d8c"
+    },
+    {
+      "path": "desktop/tests/renderer/intl-formatter-reuse.test.tsx",
+      "bytes": 4772,
+      "sha256": "954fb64b0eeb0dac666b77ecfceee39e7aa0d997d1799c1509a61f3de4b84b29"
+    },
+    {
+      "path": "tests/package/desktop-glob-worker.test.mjs",
+      "bytes": 210,
+      "sha256": "4f708ca61f67c1b6329bbaea5c384154962df67271138633510646cf71b77dd3"
+    },
+    {
+      "path": "tests/package/support/glob-worker-contract.mjs",
+      "bytes": 3024,
+      "sha256": "95734cfaf4c49d5fd491b3505fcac0828305c67f0dc014fe86b114d13d8a8613"
+    },
+    {
+      "path": "desktop/electron/desktop-task-stream.ts",
+      "bytes": 9547,
+      "sha256": "fee73bfc0268c7b23d773fdf256c0f67a222d977e598fb3c6d4d8c1bd18d62ab"
+    },
+    {
+      "path": "desktop/electron/project-agent-model.ts",
+      "bytes": 8852,
+      "sha256": "5c1a739d742fa5b95dc897930d83535dfd06f923aa1cd22facf032bf86387906"
+    },
+    {
+      "path": "src/ai/runtime/model-stream-physical-owner.ts",
+      "bytes": 3933,
+      "sha256": "9c03bdae8849ac56d1f6b804e32a15fda7da88915f981ee66e9581b4088edc0e"
+    },
+    {
+      "path": "src/ai/runtime/model-stream-recovery.ts",
+      "bytes": 6409,
+      "sha256": "53bf3f698e1769c71685ad6fb2ed0040d2a462b4173b0b4e8be2d6391a3ec52a"
+    },
+    {
+      "path": "src/ai/runtime/provider-conversation-authorization.ts",
+      "bytes": 9697,
+      "sha256": "6e16f01d6c28f732a271cf7f863a4edcff19cf95fd9de7f3003b2ee8392f4e86"
+    },
+    {
+      "path": "src/ai/tools/bounded-glob.ts",
+      "bytes": 4313,
+      "sha256": "099dae1daf6a296b1c140fd7aae523d7ebd4ba5a313568a3963c807248cc3a5f"
+    },
+    {
+      "path": "src/runtime/conversation-activity/sensitivity.ts",
+      "bytes": 17269,
+      "sha256": "fb1e0cd30b99018f367773f7f72e9a0ce1fe5a7310d578f219042cb49498be82"
+    },
+    {
+      "path": "desktop/shared/room-workspace-contract.ts",
+      "bytes": 6894,
+      "sha256": "a21c5f69b774dc4e307b284e4866453e3c5314d8fe2169c4958af65c9b314b10"
+    },
+    {
+      "path": "desktop/renderer/src/components/ConversationActivityPanel.tsx",
+      "bytes": 11909,
+      "sha256": "32d46939d803503da469d40efcf802c92c7f92cf5910c67f021980b880ac3464"
+    },
+    {
+      "path": "desktop/renderer/src/components/collaboration/CollaborationRoomsPage.tsx",
+      "bytes": 22393,
+      "sha256": "e40c0ed3a0edab2b0e0bc08788a6135872933fa18a0087c5c79afc1498e48393"
+    },
+    {
+      "path": "tests/package/glob-worker.test.mjs",
+      "bytes": 1046,
+      "sha256": "f5135ffac1ef92b8f2c8447d0de000bfde1b8e8f8258d60bdd1b717572312b06"
+    },
+    {
+      "path": "desktop/electron/desktop-services.ts actual L6000-6180",
+      "bytes": 8727,
+      "sha256": "d911074685be84af2d237fcc6e5e694f8f61fbdfcbcf65a10813a83f37b99cba"
+    },
+    {
+      "path": "desktop/electron/desktop-services.ts actual L6300-6735",
+      "bytes": 23024,
+      "sha256": "606c1bd1892846ada5560ca37e5f8444d3c24842ac29c52cf96627145e02363f"
+    },
+    {
+      "path": "desktop/electron/desktop-services.ts actual L7030-7140",
+      "bytes": 5558,
+      "sha256": "ebe64cd32d1ce63f9757c7877bb7f2468be4ccfda2abf96074ff6692b24c0098"
+    },
+    {
+      "path": "desktop/electron/desktop-services.ts actual L7990-8405",
+      "bytes": 28715,
+      "sha256": "46a213c9b2055f194f7df7959806529d44cdd4674993c0e9a3043ffb7350c2b2"
+    },
+    {
+      "path": "reviews/failure-remediation-A-ipc-workflow.md",
+      "bytes": 5081,
+      "sha256": "60595764b9b7ae4fcf0c92ee43d9c6d7080f11ac6236ca2ae5b2d94c0fc279b8"
+    },
+    {
+      "path": "reviews/failure-remediation-A-main.md",
+      "bytes": 3645,
+      "sha256": "1c047619ac19395e24a7140b568e625b9c31d339ff7438199c16de149c07c3ce"
+    },
+    {
+      "path": "reviews/failure-remediation-A-room.md",
+      "bytes": 5139,
+      "sha256": "da34698f79dc7fa9c56074d4bad38282239168ac85b1459305644e136ec42583"
+    },
+    {
+      "path": "reviews/failure-remediation-A.md",
+      "bytes": 5975,
+      "sha256": "12fe6b28004044407c57adbc4a386787286097a85905f737031b4b14ee596185"
+    },
+    {
+      "path": "reviews/failure-remediation-B.md",
+      "bytes": 18674,
+      "sha256": "7fd20698d7eea90ed393e58734044ccd946966e027480c1671c8c09aa0d484cb"
+    },
+    {
+      "path": "reviews/failure-remediation-C.md",
+      "bytes": 16415,
+      "sha256": "58a9737083269544f22ba797ee217fa0b7ae7d36c29ddc492a5936e8829a0d88"
+    },
+    {
+      "path": "reviews/failure-remediation-root.md",
+      "bytes": 6761,
+      "sha256": "d737fc009d7646d112698346198ed88932ba149cdeae8b3c6b42bd5baf8e0464"
+    },
+    {
+      "path": "../intent-broker/src/room/workspace-service.js actual L230-390",
+      "bytes": 16853,
+      "sha256": "575b53e2c317dfb6a7773a2603f0b0e4c74251ea6b307aac9929ac0cb7256d90"
+    },
+    {
+      "path": "desktop/electron/room-workspace-service.ts actual L245-385",
+      "bytes": 13887,
+      "sha256": "2b894b26a79e4f5869342fa4668636b02a2056d627efcefbf90c4c1b9bb4773f"
+    },
+    {
+      "path": ".xiaok/evals/pi-durable/remediation-20261022/root-final-static.log",
+      "bytes": 1610,
+      "sha256": "d6ddb5e8fa31427e1a9b571ad7954def80b88fafc2cb5bbfbc59bb3ebf00cd28"
+    },
+    {
+      "path": ".xiaok/evals/pi-durable/remediation-20261022/root-final-production-freeze.json",
+      "bytes": 1341,
+      "sha256": "f442ae687efca9ea37b8c71d977b9ed936cee762f88f80ed4f2e0606bd3c699f"
+    },
+    {
+      "path": ".xiaok/evals/pi-durable/remediation-20261022/root-ci-formatter-room-node22.log",
+      "bytes": 1157,
+      "sha256": "7843294b322340d8dbb3a78540844cb9854fb063cb7e4a4123a042b5c2878064"
+    }
+  ]
+}

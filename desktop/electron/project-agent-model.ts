@@ -4,7 +4,7 @@ import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../src/ai/models.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
-import { streamDesktopTaskRecovery } from './desktop-task-stream.js';
+import { captureDesktopTaskUsage, streamDesktopTaskRecovery } from './desktop-task-stream.js';
 import type { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
@@ -78,6 +78,7 @@ export async function createProjectAgentModel(options: {
         input.onInvocation?.(invocationId);
         const chunks: StreamChunk[] = [];
         let providerFailed = false;
+        let usageConsumerFailed = false;
         let providerError: unknown;
         const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
         try {
@@ -91,7 +92,11 @@ export async function createProjectAgentModel(options: {
             if (next.done) break;
             const chunk = next.value;
             // Usage belongs to this actual request even when its visible result fails.
-            if (chunk.type === 'usage') { yield chunk; continue; }
+            if (chunk.type === 'usage') {
+              try { await captureDesktopTaskUsage(input.onUsage, chunk, prepared.invocationId, physicalRun); }
+              catch (error) { usageConsumerFailed = true; throw error; }
+              yield chunk; continue;
+            }
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
@@ -102,6 +107,7 @@ export async function createProjectAgentModel(options: {
           catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }
         }
         if (closingFailure) return;
+        if (usageConsumerFailed) throw providerError;
         input.options?.signal?.throwIfAborted();
         if (!providerFailed && (!chunks.some(chunk => chunk.type === 'done') || !chunks.some(chunk => chunk.type === 'tool_use' || (chunk.type === 'text' && chunk.delta.trim())))) {
           providerFailed = true;

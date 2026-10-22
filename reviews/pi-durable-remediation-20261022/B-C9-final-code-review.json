@@ -1,0 +1,54 @@
+{
+  "verdict": "APPROVE",
+  "scope": "C9 final six-source actual code review",
+  "files": [
+    {
+      "path": "desktop/tests/fixtures/multi-agent-activity-failure.ts",
+      "sha256": "eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+      "sha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+      "sha256": "5eb0ed6ea194a4d652e8e62ce9a3b972ed5d98e99811365688d4a9c93eaba379"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+      "sha256": "dcbaf379ca9076fb1280fe1ffe757b0d0f3efd52c461ee9279929422704918e8"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+      "sha256": "3dbc0bb0dca2a6e09cf8657f159bd45de25a82299b2ff5c6da9181e107d13783"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+      "sha256": "51bbf026869b171cddf9127d51943601aaaaa629a00977b8888e9bd7967bb4d4"
+    }
+  ],
+  "diffSHA256": "e393121da779ca74f47b19568653819a67f0369876a2f0c6be5eb2f1c709c068",
+  "closedFindings": [
+    "B-C9-CODE-1: fulfilled-but-blocked deletion",
+    "B-C9-PLAN-2: release-before-cleanup cannot backfill prior store close",
+    "B-C9-CODE-2: try now covers all setup; optional ticket, all cleanup attempts, original body + cleanup error aggregation"
+  ],
+  "requiredChanges": [],
+  "redEvidence": {
+    "label": "C-root-gate-red",
+    "failed": 2,
+    "filtered": 16,
+    "scope": "Two real lease timing cases reach exact-root protected rm after every precondition; parent cleaned exact roots only after group/worker exit and stat/nonce checks."
+  },
+  "productionChanges": 0,
+  "priorVerdict": "BLOCK",
+  "previousRequiredChanges": [
+    {
+      "id": "B-C9-CODE-2",
+      "location": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts:120-125",
+      "trajectory": "activityFixture(actions), acquireLease and lstat/realpath allocate or touch owned resources before entering try; this describe has no afterEach. Any setup rejection bypasses registered cleanup/restoration and forensic root publication.",
+      "minimumFix": "Cover all setup from activityFixture onward with try/finally, optional original ticket release and cleanupActivityCase(actions) even after partial setup; keep all existing predicates and gate."
+    }
+  ],
+  "wholeFileTestsClaimed": false
+}

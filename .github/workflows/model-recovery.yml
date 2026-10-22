@@ -5,9 +5,27 @@ on:
     paths:
       - 'src/ai/adapters/*.ts'
       - 'desktop/electron/context-manager.ts'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/electron/desktop-task-stream.ts'
+      - 'desktop/electron/project-agent-model.ts'
+      - 'desktop/electron/desktop-services.ts'
+      - 'desktop/electron/kb-store-sqlite.ts'
+      - 'desktop/electron/loop-store.ts'
+      - 'desktop/tests/main/desktop-task-usage-drain.test.ts'
+      - 'desktop/tests/main/desktop-task-stream-recovery.test.ts'
+      - 'desktop/tests/main/project-agent-model*.test.ts'
+      - 'desktop/tests/main/kb-integration.test.ts'
+      - 'desktop/tests/main/loop-assistant-consumption.test.ts'
       - 'desktop/tests/main/*compaction*.test.ts'
       - 'desktop/tests/main/context-manager.test.ts'
       - 'src/ai/runtime/**'
+      - 'src/ai/tools/bounded-glob.ts'
+      - 'src/ai/tools/glob-worker.mjs'
+      - 'scripts/copy-glob-worker.mjs'
+      - 'tests/package/glob-worker.test.mjs'
+      - 'tests/package/desktop-glob-worker.test.mjs'
+      - 'tests/package/support/glob-worker-contract.mjs'
       - 'tests/ai/adapters/*.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
@@ -16,9 +34,27 @@ on:
     paths:
       - 'src/ai/adapters/*.ts'
       - 'desktop/electron/context-manager.ts'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/electron/desktop-task-stream.ts'
+      - 'desktop/electron/project-agent-model.ts'
+      - 'desktop/electron/desktop-services.ts'
+      - 'desktop/electron/kb-store-sqlite.ts'
+      - 'desktop/electron/loop-store.ts'
+      - 'desktop/tests/main/desktop-task-usage-drain.test.ts'
+      - 'desktop/tests/main/desktop-task-stream-recovery.test.ts'
+      - 'desktop/tests/main/project-agent-model*.test.ts'
+      - 'desktop/tests/main/kb-integration.test.ts'
+      - 'desktop/tests/main/loop-assistant-consumption.test.ts'
       - 'desktop/tests/main/*compaction*.test.ts'
       - 'desktop/tests/main/context-manager.test.ts'
       - 'src/ai/runtime/**'
+      - 'src/ai/tools/bounded-glob.ts'
+      - 'src/ai/tools/glob-worker.mjs'
+      - 'scripts/copy-glob-worker.mjs'
+      - 'tests/package/glob-worker.test.mjs'
+      - 'tests/package/desktop-glob-worker.test.mjs'
+      - 'tests/package/support/glob-worker-contract.mjs'
       - 'tests/ai/adapters/*.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
@@ -32,7 +68,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-14]
-        node: ['22.14.0', '24']
+        node: ['22.14.0', '22.22.0', '24']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -60,3 +96,32 @@ jobs:
       - name: Test Desktop compaction history and completion boundary
         working-directory: desktop
         run: npm test -- tests/main/context-manager.test.ts tests/main/compaction-completion.test.ts
+      - name: Test Desktop SQLite transactions and physical usage ownership
+        if: matrix.node != '22.14.0'
+        working-directory: desktop
+        run: >
+          npm test -- --maxWorkers=2
+          tests/main/kb-integration.test.ts
+          tests/main/loop-assistant-consumption.test.ts
+          tests/main/desktop-task-usage-drain.test.ts
+          tests/main/desktop-task-stream-recovery.test.ts
+          tests/main/project-agent-model.test.ts
+          tests/main/project-agent-model-runtime.test.ts
+          tests/main/project-agent-model-main-recovery-refresh.test.ts
+      - name: Check out pinned Desktop generator source
+        if: matrix.node != '22.14.0'
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          ref: 16c3ed14c5493a82d000d69d34e4b1c933187433
+          path: .ci-sidecars/kswarm
+      - name: Build CLI and Desktop main worker assets
+        if: matrix.node != '22.14.0'
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/.ci-sidecars/kswarm
+        run: |
+          npm run build
+          npm run build:main --prefix desktop
+      - name: Test actual emitted workers and missing assets
+        if: matrix.node != '22.14.0'
+        run: node --test tests/package/glob-worker.test.mjs tests/package/desktop-glob-worker.test.mjs

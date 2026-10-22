@@ -1,0 +1,29 @@
+{
+  "args": [
+    "<local-user>/.local/bin/qodercli",
+    "--model",
+    "GLM-5.3",
+    "--thinking",
+    "disabled",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--setting-sources",
+    "",
+    "--max-model-request-retries",
+    "0",
+    "--no-session-persistence",
+    "--output-format",
+    "stream-json",
+    "--max-output-tokens",
+    "3500",
+    "--input-format",
+    "text",
+    "-p"
+  ],
+  "transport": "entire UTF8 packet on inherited stdin; no attachment",
+  "inputBytes": 606406,
+  "inputSha256": "183806132875397b47db1b00a4a3ef05da67558af2ad2ce46321e1f3dce689da"
+}

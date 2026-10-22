@@ -173,6 +173,47 @@ it('refreshes actual current time zone after a system TZ change on the next rend
     expect(card.querySelector('time')?.textContent).toBe(new Intl.DateTimeFormat('zh', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}).format(new Date('2026-01-02T12:00:00Z')));
   } finally { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; }
 });
+it('refreshes historical offsets even when the two system zones have the same current offset', async () => {
+  const before = process.env.TZ;
+  const timestamp = '1988-07-01T12:00:00Z';
+  const options = {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false} as const;
+  try {
+    process.env.TZ = 'Asia/Tokyo';
+    const currentOffset = new Date().getTimezoneOffset();
+    vi.mocked(desktop.listCollaborationRooms).mockResolvedValue({ok: true, rooms: [{...rooms[0], title: 'Historical room', lastActivityAt: timestamp}]});
+    mount();
+    const card = (await screen.findByText('Historical room')).closest('article')!;
+    const prior = new Intl.DateTimeFormat('zh', options).format(new Date(timestamp));
+    expect(card.querySelector('time')?.textContent).toBe(prior);
+    process.env.TZ = 'Asia/Seoul';
+    expect(new Date().getTimezoneOffset()).toBe(currentOffset);
+    const expected = new Intl.DateTimeFormat('zh', options).format(new Date(timestamp));
+    expect(expected).not.toBe(prior);
+    fireEvent.click(screen.getByRole('tab', {name: /已归档/}));
+    fireEvent.click(screen.getByRole('tab', {name: /活跃/}));
+    expect(screen.getByText('Historical room').closest('article')!.querySelector('time')?.textContent).toBe(expected);
+  } finally { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; }
+});
+it('refreshes the zone when new dates replace the old dates with identical offset values', async () => {
+  const before = process.env.TZ;
+  const oldTimestamp = '2026-01-02T12:00:00Z', timestamp = '2026-07-02T12:00:00Z';
+  const options = {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false} as const;
+  try {
+    process.env.TZ = 'Europe/London';
+    const offset = new Date(oldTimestamp).getTimezoneOffset();
+    vi.mocked(desktop.listCollaborationRooms).mockResolvedValue({ok: true, rooms: [{...rooms[0], title: 'Changing date', lastActivityAt: oldTimestamp}]});
+    mount(); await screen.findByText('Changing date');
+    const stale = new Intl.DateTimeFormat('zh', options).format(new Date(timestamp));
+    process.env.TZ = 'UTC';
+    expect(new Date(timestamp).getTimezoneOffset()).toBe(offset);
+    const expected = new Intl.DateTimeFormat('zh', options).format(new Date(timestamp));
+    expect(expected).not.toBe(stale);
+    vi.mocked(desktop.listCollaborationRooms).mockResolvedValue({ok: true, rooms: [{...rooms[0], title: 'Changing date', lastActivityAt: timestamp}]});
+    fireEvent.focus(window);
+    await waitFor(() => expect(screen.getByText('Changing date').closest('article')!.querySelector('time')?.dateTime).toBe(timestamp));
+    expect(screen.getByText('Changing date').closest('article')!.querySelector('time')?.textContent).toBe(expected);
+  } finally { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; }
+});
 it('keeps menu keyboard wrap, disabled filtering and Escape trigger focus through semantic controls', async () => {
   mount(); const card = (await screen.findByText('Newer active')).closest('article')!;
   const trigger = within(card).getByRole('button', {name: '更多操作'});

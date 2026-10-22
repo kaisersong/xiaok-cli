@@ -1,0 +1,16 @@
+# A D6 最小实码独立票
+
+APPROVE（当前测试装配实码；whole17与晚writer诊断仍待实跑）。
+
+完整读3文件当前diff；先前已审的marker真实COMMIT边界与原断言保留，本轮D6仅subject100→2000，D7仍100/default runner5s/production0。真实原open返回Promise后记录submitted，保留原Promise和settlement，不以online代替；实际worker message→exit→submitted顺序、submitted早于原绝对deadline且未settle都有新增断言。达到原持久timeout与原verifier outward rejection后再做原inFlight和unknown/cleanupPending、heartbeat、start1/exit1，保证不是短grace撑住假持有。无writer仍保留在原主case。所有trace数值来自当前实际watchdog。
+
+未看到必改项。该结果不证明kernel配对或迟到handle close；必须完成晚writer正交诊断与whole17，若5s/2000仍失败保留红，不扩预算或skip。
+
+文件SHA256：
+- desktop/tests/fixtures/desktop-post-seal-owner.ts 6e85a9171ccdbd68ed52b5c39082b56b8d6d54f51e58cbc6c75fa308866715fb
+- desktop/tests/fixtures/desktop-post-seal-passive-trace.ts 14b4f65dedfc8440e87600fa7701d6337a8fda256f722f2e69fa6a60ef7a2703
+- desktop/tests/main/desktop-post-seal-process.bdd.test.ts 5bb1c815e00476064670fc4d53d77c97ddd0c34af6dcd94870decbe6c6e38390
+
+## 修订票：局部遮蔽缺陷
+
+首票漏看 const open 遮蔽同块后续 open(f.root) helper，C独立BLOCK有效，旧5bb票不能代表可运行通过。已实际重读最小修订：只将trace entry局部名改submittedOpen及其sequence引用，真实observer helper调用不再被遮蔽。当前process SHA256 b33037542acc9db7c8066eae03a0f9eb52f933b9adb389cbcdfadf84f47fcd49，owner6e85/trace14b4未变。修后代码范围 APPROVE；whole17与writer诊断仍待真实结果，保留首票漏检/有效BLOCK沿革。

@@ -1,0 +1,410 @@
+{
+  "createdAt": "2026-10-22T01:29:13.162101+00:00",
+  "scope": "Current remediation source/config/test inputs. Final commit tree must match these hashes; reports are separate, generated dist/build-info excluded.",
+  "files": [
+    {
+      "path": ".github/workflows/desktop-cross-platform.yml",
+      "bytes": 10503,
+      "sha256": "4a72aa6b53a7a212ad1659f1a16d822e81d472d60cbb00c22a59a4dec2e131c6"
+    },
+    {
+      "path": ".github/workflows/glob-search.yml",
+      "bytes": 1640,
+      "sha256": "71d01c4b19a07abd067c7aa57fdb48b1a308bbddf22d9798a2969aff5539f1ff"
+    },
+    {
+      "path": ".github/workflows/model-recovery.yml",
+      "bytes": 5453,
+      "sha256": "33736f8d982a7d5d1636dc79f2da78f61931db191e314113f7ce4bfff9769e78"
+    },
+    {
+      "path": "desktop/README.md",
+      "bytes": 8655,
+      "sha256": "636dd05cb733f4c3826f44827fbe671eaa57f48b669d36d47507064808ba585c"
+    },
+    {
+      "path": "desktop/electron/desktop-services.ts",
+      "bytes": 432980,
+      "sha256": "a943a4967c1a0fe56477fbe9972b3f6a4441fb11f4b30f5f00c46cf3eeeded66"
+    },
+    {
+      "path": "desktop/electron/desktop-task-stream.ts",
+      "bytes": 9547,
+      "sha256": "fee73bfc0268c7b23d773fdf256c0f67a222d977e598fb3c6d4d8c1bd18d62ab"
+    },
+    {
+      "path": "desktop/electron/loop-business-publication-host.ts",
+      "bytes": 24507,
+      "sha256": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858"
+    },
+    {
+      "path": "desktop/electron/project-agent-model.ts",
+      "bytes": 8852,
+      "sha256": "5c1a739d742fa5b95dc897930d83535dfd06f923aa1cd22facf032bf86387906"
+    },
+    {
+      "path": "desktop/package-lock.json",
+      "bytes": 544012,
+      "sha256": "5aec81963769675e383201e4e9a4bfeb3f9889890a079f10a0da491a962cddae"
+    },
+    {
+      "path": "desktop/package.json",
+      "bytes": 4931,
+      "sha256": "b393a9fcbe424f5a2fd8875c00a28a802ba9494f5ce9287679b1d0350afe438d"
+    },
+    {
+      "path": "desktop/renderer/src/components/ConversationActivityPanel.tsx",
+      "bytes": 11909,
+      "sha256": "32d46939d803503da469d40efcf802c92c7f92cf5910c67f021980b880ac3464"
+    },
+    {
+      "path": "desktop/renderer/src/components/collaboration/CollaborationRoomsPage.tsx",
+      "bytes": 22393,
+      "sha256": "e40c0ed3a0edab2b0e0bc08788a6135872933fa18a0087c5c79afc1498e48393"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-post-seal-owner.ts",
+      "bytes": 14528,
+      "sha256": "6e85a9171ccdbd68ed52b5c39082b56b8d6d54f51e58cbc6c75fa308866715fb"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-post-seal-passive-trace.ts",
+      "bytes": 8686,
+      "sha256": "14b4f65dedfc8440e87600fa7701d6337a8fda256f722f2e69fa6a60ef7a2703"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-post-seal-verifier-contract.ts",
+      "bytes": 4258,
+      "sha256": "6f3acd7020ecccd704ee598ef721dad531124ce5c93709e26ca6f5df5c1f235f"
+    },
+    {
+      "path": "desktop/tests/fixtures/desktop-protection-worker-entry.ts",
+      "bytes": 8684,
+      "sha256": "aa6d871ee9f98662a90c8f9c9012eb8cfbab5f4f93fa07d4158b952e036683b2"
+    },
+    {
+      "path": "desktop/tests/fixtures/multi-agent-activity-failure.ts",
+      "bytes": 16114,
+      "sha256": "eeafb32ce6b94c50a1d1593002f08a0828a4121f8abc5e3bfa7bae05c92499b0"
+    },
+    {
+      "path": "desktop/tests/fixtures/remediation-20261022-main-reviewed.txt",
+      "bytes": 107337,
+      "sha256": "f25ac6d5034918fef0d3207780429bd7773adc1b7e932b0dc3707e4d8c1d5d40"
+    },
+    {
+      "path": "desktop/tests/main/bundled-mcp-v2-contract.test.ts",
+      "bytes": 6109,
+      "sha256": "1208ea44474f9cc1ebb054d1220f954a6a0c3ff9c8377ebb9777167c23f10d90"
+    },
+    {
+      "path": "desktop/tests/main/conversation-activity-store.test.ts",
+      "bytes": 11294,
+      "sha256": "5b9fee823b0815763dd4646229a0b33f60b7d1d4e67410dc51d375810a5796ef"
+    },
+    {
+      "path": "desktop/tests/main/desktop-host-cancellation-buffered-timer-boundary.bdd.test.ts",
+      "bytes": 5453,
+      "sha256": "a60bc0553f34baf80ff1b21e2c0e7551cea21ceab3381ed6a1d5550c10ab7fff"
+    },
+    {
+      "path": "desktop/tests/main/desktop-host-cancellation-owner-boundary.bdd.test.ts",
+      "bytes": 20170,
+      "sha256": "8837c7b2005f0c786edb22cfcc805f9e2f1bdb85844d39db6913603b29e188a4"
+    },
+    {
+      "path": "desktop/tests/main/desktop-host-cancellation-watchdog-lease-order.bdd.test.ts",
+      "bytes": 10577,
+      "sha256": "115bebb84ac6d9842aad3b23e34857bcceb8b5c7bfdbaa760f25557ac4b59bea"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-admission.bdd.test.ts",
+      "bytes": 13171,
+      "sha256": "3dbc0bb0dca2a6e09cf8657f159bd45de25a82299b2ff5c6da9181e107d13783"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-boundaries.bdd.test.ts",
+      "bytes": 12284,
+      "sha256": "dcbaf379ca9076fb1280fe1ffe757b0d0f3efd52c461ee9279929422704918e8"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-factory.bdd.test.ts",
+      "bytes": 12321,
+      "sha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-activity-service.bdd.test.ts",
+      "bytes": 15274,
+      "sha256": "5eb0ed6ea194a4d652e8e62ce9a3b972ed5d98e99811365688d4a9c93eaba379"
+    },
+    {
+      "path": "desktop/tests/main/desktop-multi-agent-mailbox.bdd.test.ts",
+      "bytes": 13406,
+      "sha256": "51bbf026869b171cddf9127d51943601aaaaa629a00977b8888e9bd7967bb4d4"
+    },
+    {
+      "path": "desktop/tests/main/desktop-post-seal-process.bdd.test.ts",
+      "bytes": 24321,
+      "sha256": "b33037542acc9db7c8066eae03a0f9eb52f933b9adb389cbcdfadf84f47fcd49"
+    },
+    {
+      "path": "desktop/tests/main/desktop-protection-worker-compiled-entry.test.ts",
+      "bytes": 3891,
+      "sha256": "5f21091e40ff949030cd0376d17256b1abdfdb88f47a54d071cf899f1d26e948"
+    },
+    {
+      "path": "desktop/tests/main/desktop-task-usage-drain.test.ts",
+      "bytes": 13547,
+      "sha256": "7da3e28e865fa35ba64e78cf7067768407f9e8fc0606fe5e60e2deacdb31188a"
+    },
+    {
+      "path": "desktop/tests/main/e2e-dynamic-workflow-script.test.ts",
+      "bytes": 19997,
+      "sha256": "53393609c47a7d69d3eab0ba489806d7a2bb491a94b7eae8734eb4a33032bb6a"
+    },
+    {
+      "path": "desktop/tests/main/goal-attachment-ipc-contract.bdd.test.ts",
+      "bytes": 9427,
+      "sha256": "a180a8ee3a26584bcda3e2532beb74930fc3e25c28924673031c4c9c7d2529b1"
+    },
+    {
+      "path": "desktop/tests/main/goal-source-main-authority-fixture.ts",
+      "bytes": 2991,
+      "sha256": "95b9e6723bfe1d3d86314d34e865b22eeaab61a90ab381debd6ab1aa4c138250"
+    },
+    {
+      "path": "desktop/tests/main/kb-integration.test.ts",
+      "bytes": 13346,
+      "sha256": "5544bca1f70e3590d5a77b90ee457e737b322870f9b942fb26b43bf213f84e26"
+    },
+    {
+      "path": "desktop/tests/main/loop-assistant-consumption.test.ts",
+      "bytes": 35813,
+      "sha256": "6a4e352d0327641a2cef08e965ff572e4f1077a698e2439335045ca987ad7156"
+    },
+    {
+      "path": "desktop/tests/main/loop-business-projection.test.ts",
+      "bytes": 22958,
+      "sha256": "0f72efa36a0170922f2c975aa39fa4b30476c854a6fe818a75a7c75ab425db0c"
+    },
+    {
+      "path": "desktop/tests/main/loop-verification-execution-controller.test.ts",
+      "bytes": 29201,
+      "sha256": "83582426fda875e785ddf75b03ebdb2a7a1b528e1c861c5008fa8052912ef4e6"
+    },
+    {
+      "path": "desktop/tests/main/mcp-registration-actual-main-fixture.ts",
+      "bytes": 20786,
+      "sha256": "90da1344566ac953695f5949ac222eebc05111fb3a7cd5b461ed32b01e8b58fd"
+    },
+    {
+      "path": "desktop/tests/main/mcp-registration-main-ownership.test.ts",
+      "bytes": 15266,
+      "sha256": "078ee97e103446120d58a763d72d4b1201247eb78e75dac9edb5ae398209ca63"
+    },
+    {
+      "path": "desktop/tests/main/memory-ipc-registry.test.ts",
+      "bytes": 19340,
+      "sha256": "f0fd2e0336178a7d28955b1295e8a77370a6951b651b060f44857f7cc34c7528"
+    },
+    {
+      "path": "desktop/tests/main/owned-workflow-entry-identity.test.ts",
+      "bytes": 3933,
+      "sha256": "0d47bdc8336b582a6832182352c83ea836ebd206c073ea72cd4c4fbf2d973fc3"
+    },
+    {
+      "path": "desktop/tests/main/python-preparation-main-fixture.ts",
+      "bytes": 12553,
+      "sha256": "64df0a1b8a1d14430ca0e8906b6dbd783e7127b81b2fc95cfffb557a2e8c3bf1"
+    },
+    {
+      "path": "desktop/tests/main/rejected-bridge-gateway-ownership.test.ts",
+      "bytes": 11440,
+      "sha256": "e074cd0c4579f8444940a873340ab8b6da04c62bcabbcddc2bae507cecbcbafe"
+    },
+    {
+      "path": "desktop/tests/main/room-field-classification.test.ts",
+      "bytes": 14447,
+      "sha256": "670243ef829b17184df8bff613596e5ef18ba2cb43cf5c3205440c4615e50a8e"
+    },
+    {
+      "path": "desktop/tests/main/workflow-read-port-close-reentry.test.ts",
+      "bytes": 3496,
+      "sha256": "0bb9873bcfef303bac4c7a2a79ea253958001d8c9e9d208025bc9edcab70ce57"
+    },
+    {
+      "path": "desktop/tests/main/workflow-read-port-provenance.test.ts",
+      "bytes": 2876,
+      "sha256": "7a6c2a336517ee0f5fc32315da8b6de86d07f1c97d86f1a1cd4637e59a1608d2"
+    },
+    {
+      "path": "desktop/tests/main/workflow-review-mode.test.ts",
+      "bytes": 6457,
+      "sha256": "be166bf5487d9743a0b29e687fe70ea81c48f85430f3bfc1e3f243a72d97ab39"
+    },
+    {
+      "path": "desktop/tests/main/workflow-review-registered-service-fixture.ts",
+      "bytes": 3620,
+      "sha256": "f5b102aa3fd82f85bcfda74006962aac6d6d0be000ad772684da836deedf4d8c"
+    },
+    {
+      "path": "desktop/tests/main/workflow-stored-restrictions-denials.test.ts",
+      "bytes": 9166,
+      "sha256": "b0f1375cf90a964c0386a12ff6e2247e706f40ca1e2a9a79ce257205d016fef7"
+    },
+    {
+      "path": "desktop/tests/main/workflow-stored-restrictions-effects.test.ts",
+      "bytes": 4650,
+      "sha256": "add36e28f1383596e82996a00e3ccb3b1cdbc22b61d2d8a476d1a7e1fffbe057"
+    },
+    {
+      "path": "desktop/tests/main/workflow-stored-restrictions-held.test.ts",
+      "bytes": 6598,
+      "sha256": "cf00a2366ef7f237b2d3375dd6b5aa6f121cecf76b573d60c77cda2aafb0cd3a"
+    },
+    {
+      "path": "desktop/tests/main/workflow-stored-restrictions-partial-denial.test.ts",
+      "bytes": 4067,
+      "sha256": "e2451afb54b30f037f1ae4c4205dd4a49069f90e8ec4e5ef51ad7ea197186eac"
+    },
+    {
+      "path": "desktop/tests/renderer/capability-migration-snapshot.test.ts",
+      "bytes": 4396,
+      "sha256": "7f851c9b6187dfc065611287f64abbfc4a8afec0724221ddfdb78602194742a4"
+    },
+    {
+      "path": "desktop/tests/renderer/chat-shell-canvas-session.test.tsx",
+      "bytes": 20381,
+      "sha256": "02fc0b6a683e1588f74cf0e3d332521e9f9bf9871ec91374cf8e69d290f5d98b"
+    },
+    {
+      "path": "desktop/tests/renderer/collaboration-rooms-page.test.tsx",
+      "bytes": 21086,
+      "sha256": "4a035adfb019006d73be04df13b05bdd3c4cc02ad03fc1cd57bf9b0e50e93d39"
+    },
+    {
+      "path": "desktop/tests/renderer/desktop-settings-voice-pane.test.tsx",
+      "bytes": 9836,
+      "sha256": "9ffb7bdd7d329d4784ff65ce12db48e951cf8bf5c9a23232337d16fc8ad439f0"
+    },
+    {
+      "path": "desktop/tests/renderer/intl-formatter-reuse.test.tsx",
+      "bytes": 4772,
+      "sha256": "954fb64b0eeb0dac666b77ecfceee39e7aa0d997d1799c1509a61f3de4b84b29"
+    },
+    {
+      "path": "desktop/tests/renderer/workspace-execution-drafts.bdd.test.tsx",
+      "bytes": 21482,
+      "sha256": "d9676ff82aed549ed06ac90825b7e75608d65f54a2c1a1571993d44fe650334c"
+    },
+    {
+      "path": "desktop/tests/support/owned-workflow-network-fixture.mjs",
+      "bytes": 17102,
+      "sha256": "99899c5bdea140cc61ec863c1f605fda06ca1485bf0305dc5caa227c663bdef4"
+    },
+    {
+      "path": "desktop/tests/support/owned-workflow-normal-case.ts",
+      "bytes": 2951,
+      "sha256": "717c561e3c89f59fe66b08c7374de1cd5064440bfb4f470f3cac624b7d994ff6"
+    },
+    {
+      "path": "src/ai/tools/bounded-glob.ts",
+      "bytes": 4313,
+      "sha256": "099dae1daf6a296b1c140fd7aae523d7ebd4ba5a313568a3963c807248cc3a5f"
+    },
+    {
+      "path": "src/runtime/conversation-activity/sensitivity.ts",
+      "bytes": 17269,
+      "sha256": "fb1e0cd30b99018f367773f7f72e9a0ce1fe5a7310d578f219042cb49498be82"
+    },
+    {
+      "path": "tests/ai/runtime/kimi-builtin-tool-context.test.ts",
+      "bytes": 3931,
+      "sha256": "151a61387184cfc4d1806fd04e7ffc3f2f7350db99d6f371c9c6191e1479324c"
+    },
+    {
+      "path": "tests/ai/tools/mcp-per-call-cancellation.bdd.test.ts",
+      "bytes": 20903,
+      "sha256": "f44711359e2d20e0b3f2c1618f5653e4b98b49f3ae3302e3edc70b0c287e6a5b"
+    },
+    {
+      "path": "tests/commands/chat.test.ts",
+      "bytes": 40903,
+      "sha256": "f866f09bad16d1357861e7de0fdfbeadf9562c80d4331245a3d927aa3e188ded"
+    },
+    {
+      "path": "tests/package/desktop-glob-worker.test.mjs",
+      "bytes": 210,
+      "sha256": "4f708ca61f67c1b6329bbaea5c384154962df67271138633510646cf71b77dd3"
+    },
+    {
+      "path": "tests/package/glob-worker.test.mjs",
+      "bytes": 1046,
+      "sha256": "f5135ffac1ef92b8f2c8447d0de000bfde1b8e8f8258d60bdd1b717572312b06"
+    },
+    {
+      "path": "tests/package/support/glob-worker-contract.mjs",
+      "bytes": 3024,
+      "sha256": "95734cfaf4c49d5fd491b3505fcac0828305c67f0dc014fe86b114d13d8a8613"
+    },
+    {
+      "path": "tests/platform/runtime/mcp-owner-fencing.test.ts",
+      "bytes": 5555,
+      "sha256": "3fb61715d52f115ffdfacbf3859595f3f4a6db3e0e026fd46b1b0b10db2f66be"
+    },
+    {
+      "path": "tests/platform/runtime/registry-lifecycle.test.ts",
+      "bytes": 12164,
+      "sha256": "99e62f240d40244d1c0078a780e42d412847aee67f8cbcb78806f40759a2549a"
+    },
+    {
+      "path": "tests/runtime/conversation-activity/owner-launcher-exit.test.ts",
+      "bytes": 10478,
+      "sha256": "8af668154980b6b0ca5df346dd253cd37b4cef9a37d4c252763197ca901c392b"
+    },
+    {
+      "path": "tests/runtime/conversation-activity/owner-process.test.ts",
+      "bytes": 12535,
+      "sha256": "b9240fd47b87fc6e6419cbfa751e73d26261a9699b825939c7bd8523d77ac982"
+    },
+    {
+      "path": "tests/runtime/conversation-activity/storage-permissions.test.ts",
+      "bytes": 12121,
+      "sha256": "f41cd0b08413a99ed6f2f8b586bf2bc796cb785053c2bcb3b7751cc05faaabf6"
+    },
+    {
+      "path": "tests/runtime/isolated-execution/artifact-export.test.ts",
+      "bytes": 12059,
+      "sha256": "57c72ef2b84bf9153204fa82907b6bd31683c79a6daa0151b152e3d1188253c7"
+    },
+    {
+      "path": "tests/runtime/sol-pi/desktop-owner-boundary.test.ts",
+      "bytes": 1636,
+      "sha256": "fa3f6f8eaf58a31c1ea5a25e3581f9017960f43eccaacb3a09724b67a2d24519"
+    },
+    {
+      "path": "tests/runtime/verification/application-own-data-adversarial.test.ts",
+      "bytes": 8076,
+      "sha256": "1277756a5087560ea20863b4bfdad757c97475b63356c32ff96d3f132f07b4f1"
+    },
+    {
+      "path": "tests/runtime/verification/installed-metadata-target-prepare.test.ts",
+      "bytes": 44516,
+      "sha256": "5e6db3041515a27b1e95a6e33fcd65978373b2f5b6aa13de71ef8bec72b5c131"
+    },
+    {
+      "path": "tests/runtime/verification/intent-publication-dependencies.test.ts",
+      "bytes": 29499,
+      "sha256": "142106c194b5ef8e21d58636f2daaa28aed52d718709a727234f3e3098723479"
+    }
+  ],
+  "sevenProductionUnchangedFromActualGLMFirstReview": true,
+  "newLoopHostSha256": "79650281fa17e0e1f4094c8cdf38c5247aede8f2fbdc982af645f6bb885a3858",
+  "finalFactorySha256": "a10a9d3afeaf5babca461ae9a6a3ffc25483146304292680cd3e946499e60966",
+  "differentModelReviewInputs": [
+    "remediation-glm-identity.json",
+    "remediation-glm-delta-identity.json",
+    "remediation-glm-final-delta-identity.json",
+    "remediation-glm-final-setup-identity.json"
+  ]
+}

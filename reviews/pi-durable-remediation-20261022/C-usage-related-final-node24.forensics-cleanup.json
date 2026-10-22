@@ -1,0 +1,265 @@
+{
+  "metaPath": "<worktree>/.xiaok/evals/pi-durable/remediation-20261022/C-usage-related-final-node24.json",
+  "ownedPid": 89551,
+  "ownedPgid": 89551,
+  "reaped": true,
+  "globalErrors": [],
+  "groupMembers": [],
+  "records": [
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-KxPEpB",
+        "workerPid": 89554,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49296232,
+          "uid": 502,
+          "birthtimeMs": 1792632332172.721
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49296232,
+        "uid": 502,
+        "birthtimeMs": 1792632332172.721
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-68QW7w",
+        "workerPid": 89554,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49297069,
+          "uid": 502,
+          "birthtimeMs": 1792632333617.1821
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49297069,
+        "uid": 502,
+        "birthtimeMs": 1792632333617.1821
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-4dTkI5",
+        "workerPid": 89554,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49297134,
+          "uid": 502,
+          "birthtimeMs": 1792632333637.6194
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49297134,
+        "uid": 502,
+        "birthtimeMs": 1792632333637.6194
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-Jvs3A4",
+        "workerPid": 90394,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49299543,
+          "uid": 502,
+          "birthtimeMs": 1792632337783.2502
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49299543,
+        "uid": 502,
+        "birthtimeMs": 1792632337783.2502
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-CQLAg9",
+        "workerPid": 90394,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49299975,
+          "uid": 502,
+          "birthtimeMs": 1792632339216.2454
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49299975,
+        "uid": 502,
+        "birthtimeMs": 1792632339216.2454
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-38tgWj",
+        "workerPid": 90394,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49300408,
+          "uid": 502,
+          "birthtimeMs": 1792632340589.5718
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49300408,
+        "uid": 502,
+        "birthtimeMs": 1792632340589.5718
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-5Oe7Vj",
+        "workerPid": 90394,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49300834,
+          "uid": 502,
+          "birthtimeMs": 1792632341702.772
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49300834,
+        "uid": 502,
+        "birthtimeMs": 1792632341702.772
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-w42bZd",
+        "workerPid": 90394,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49301333,
+          "uid": 502,
+          "birthtimeMs": 1792632342781.6504
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49301333,
+        "uid": 502,
+        "birthtimeMs": 1792632342781.6504
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-kGUB9P",
+        "workerPid": 92171,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49307457,
+          "uid": 502,
+          "birthtimeMs": 1792632363604.6418
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49307457,
+        "uid": 502,
+        "birthtimeMs": 1792632363604.6418
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-TDrIa6",
+        "workerPid": 92171,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49307605,
+          "uid": 502,
+          "birthtimeMs": 1792632363883.078
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49307605,
+        "uid": 502,
+        "birthtimeMs": 1792632363883.078
+      }
+    },
+    {
+      "record": {
+        "version": 1,
+        "root": "/private/var/folders/qk/0759gskn77v_x22b9xqbk_f00000gp/T/xiaok-activity-bdd-NlXwKU",
+        "workerPid": 92171,
+        "workerPpid": 89551,
+        "uid": 502,
+        "runToken": "bb561fa2e6be46a39abccd3f19bd0d3f",
+        "stat": {
+          "dev": 16777232,
+          "ino": 49307746,
+          "uid": 502,
+          "birthtimeMs": 1792632364149.3677
+        }
+      },
+      "deleted": true,
+      "verifiedStat": {
+        "dev": 16777232,
+        "ino": 49307746,
+        "uid": 502,
+        "birthtimeMs": 1792632364149.3677
+      }
+    }
+  ],
+  "onlyExactRoots": true,
+  "signalsSent": []
+}

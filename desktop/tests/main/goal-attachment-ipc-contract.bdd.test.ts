@@ -3,7 +3,14 @@ import Module, { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it, vi } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DesktopShutdownGate, ShutdownAwareIpcMain, type IpcHandlerListener } from '../../electron/shutdown-aware-ipc-main.js';
+import { resetIpcSchemaRegistryForTests } from '../../electron/ipc-runtime.js';
+import { actualGoalSourceMainAuthority } from './goal-source-main-authority-fixture.js';
+import { projection } from '../support/goal-get-fixture.js';
+import { GOAL_TASK_MUTATION_OUTPUT } from '../../shared/goal-task-mutation-ipc-contract.js';
+beforeEach(resetIpcSchemaRegistryForTests);
 import { createPreloadApi, type FullDesktopApi } from '../../electron/preload-api.js';
 
 vi.mock('electron', () => ({
@@ -24,14 +31,19 @@ const inputFor = (method: Method) => method === 'resumeGoal'
   ? { threadId: 'thread', turnLimit: 4 }
   : { threadId: 'thread', objective: 'answer', expectedEvidenceKinds: ['answer'], turnLimit: 4 };
 
-async function setup(kind: 'typed' | 'packaged') {
-  const handlers = new Map<string, (event: unknown, input: unknown) => unknown>();
+async function setup(kind: 'typed' | 'packaged', finer = true) {
+  const handlers = new Map<string, IpcHandlerListener>();
+  const frame = { url: pathToFileURL(resolve('dist/renderer/index.html')).href };
+  let destroyed = false;
+  const sender = { id: 1, mainFrame: frame, isDestroyed: () => destroyed, send: (channel: string, payload: unknown) => emitter.emit(channel, {}, payload) };
+  const recorder = { mainFrame: frame, isDestroyed: () => false };
+  let event: unknown = { sender, senderFrame: frame };
   const emitter = new EventEmitter();
   const ipc = {
     invoke: vi.fn((channel: string, input: unknown) => Promise.resolve().then(() => {
       const handler = handlers.get(channel);
       if (!handler) throw new Error(`missing fixture handler: ${channel}`);
-      return handler({}, input);
+      return Reflect.apply(handler, undefined, [event, input]);
     })),
     on: (channel: string, listener: (...args: unknown[]) => void) => { emitter.on(channel, listener); },
     off: (channel: string, listener: (...args: unknown[]) => void) => { emitter.off(channel, listener); },
@@ -52,7 +64,8 @@ async function setup(kind: 'typed' | 'packaged') {
     goalRef: { goalId: 'goal', revision: 1 },
     executionScope: { kind: 'goal_turn', origin: 'user', threadId: 'thread', goalId: 'goal', epoch: 1, goalTurnId: 'turn' },
     attachmentSource: { kind: 'request', requestId } };
-  const result = { goal: { state: { goalId: 'goal', revision: 1 } }, preparedTask: prepared };
+  const result = { goal: projection(), preparedTask: prepared };
+  expect(GOAL_TASK_MUTATION_OUTPUT.safeParse(result).success).toBe(true);
   // This fixture measures the real IPC parser and both preload implementations.
   // Actual coordinator/SQLite source derivation is covered by P1/P4, not this stub.
   const service = {
@@ -63,13 +76,20 @@ async function setup(kind: 'typed' | 'packaged') {
     subscribeGoalTaskPrepared: (handler: (payload: unknown) => void) => { publish = handler; return () => {}; },
   };
   let publish!: (payload: unknown) => void;
-  const window = { isDestroyed: () => false, once: vi.fn(), webContents: { id: 1,
-    send: (channel: string, payload: unknown) => emitter.emit(channel, {}, payload) } };
-  await registerDesktopIpc({ handle: (channel: string, handler: (event: unknown, input: unknown) => unknown) => {
-    handlers.set(channel, handler);
-  } } as never, window as never, service as never);
+  const window = { isDestroyed: () => false, once: vi.fn(), webContents: sender };
+  const authority = actualGoalSourceMainAuthority(window, recorder, service);
+  const gate = new DesktopShutdownGate();
+  const ownedIpc = new ShutdownAwareIpcMain({ handle: (channel, handler) => { handlers.set(channel, handler); } }, gate, authority.authorize);
+  await registerDesktopIpc(ownedIpc as never, window as never, service as never,
+    finer ? { multiAgentAuthorize: authority.finer as never } : {});
+  const invoke = (method: Method, input: unknown) => (api![method] as (value: unknown) => Promise<unknown>)(input);
   return { api: api!, service, result, prepared, publish: (payload: unknown) => publish(payload), emitter,
-    invoke: (method: Method, input: unknown) => (api![method] as (value: unknown) => Promise<unknown>)(input) };
+    invoke, sender, frame, recorder, authority, gate, destroy: () => { destroyed = true; },
+    invokeAs: async (method: Method, input: unknown, other: unknown) => {
+      const previous = event; event = other;
+      try { return await invoke(method, input); } finally { event = previous; }
+    } };
+
 }
 
 describe.each(['typed', 'packaged'] as const)('W2-P2 %s Goal source transport', kind => {
@@ -100,6 +120,25 @@ describe.each(['typed', 'packaged'] as const)('W2-P2 %s Goal source transport', 
       await expect(f.invoke(method, { ...inputFor(method), [field]: 'automatic' })).rejects.toThrow(`invalid_goal_field:${field}`);
       expect(f.service[method]).not.toHaveBeenCalled();
     }
+  });
+
+  it.each(methods)('%s denies unowned senders before payload access or service calls', async method => {
+    const f = await setup(kind), missing = await setup(kind, false); let reads = 0;
+    const payload = Object.defineProperty({}, 'threadId', { enumerable: true, get() { reads++; return 'thread'; } });
+    for (const event of [
+      { sender: { ...f.sender }, senderFrame: f.frame },
+      { sender: f.sender, senderFrame: { ...f.frame } },
+    ]) await expect(f.invokeAs(method, payload, event)).rejects.toThrow('desktop_user_sender_forbidden');
+    await expect(f.invokeAs(method, payload, { sender: f.recorder, senderFrame: f.frame })).rejects.toThrow('goal_task_mutation_sender_forbidden');
+    await expect(missing.invoke(method, payload)).rejects.toThrow('goal_task_mutation_sender_forbidden');
+    const url = f.frame.url; f.frame.url = 'https://untrusted.invalid/';
+    await expect(f.invoke(method, payload)).rejects.toThrow('desktop_user_sender_forbidden'); f.frame.url = url;
+    f.authority.setMain({ isDestroyed: () => false, webContents: {} });
+    await expect(f.invoke(method, payload)).rejects.toThrow('desktop_user_sender_forbidden');
+    f.authority.setMain({ isDestroyed: () => false, webContents: f.sender }); f.destroy();
+    await expect(f.invoke(method, payload)).rejects.toThrow('desktop_user_sender_forbidden');
+    expect(reads).toBe(0); expect(f.service[method]).not.toHaveBeenCalled(); expect(missing.service[method]).not.toHaveBeenCalled();
+    expect(f.gate.outstanding).toBe(0); expect(missing.gate.outstanding).toBe(0);
   });
 
   it('forwards request/automatic prepared metadata and removes its actual event listener', async () => {
