@@ -208,15 +208,29 @@ def main():
     save(root, 'DEPENDENCIES-PASS2.json', second)
     if first != second:
         raise RuntimeError('postinstall_fresh_namespace_passes_disagree')
-    native = [row for row in second if row['kind'] == 'file' and row['path'].endswith('/better_sqlite3.node')]
-    if len(native) != 1:
-        raise RuntimeError('rebuilt_native_identity_ambiguous')
     node = shutil.which('node')
-    runtime = json.loads(subprocess.check_output([node, '-p',
-        'JSON.stringify({version:process.version,versions:process.versions,platform:process.platform,arch:process.arch,cpu:require("node:os").cpus().map(c=>({model:c.model,speed:c.speed}))})'], timeout=10))
+    probe = "(() => {\n  const fs = require('node:fs'), path = require('node:path'), Module = require('node:module');\n  let deniedNativeLoads = 0;\n  Module._extensions['.node'] = () => { deniedNativeLoads++; throw Error('native_addon_load_forbidden_in_metadata_probe'); };\n  const packageJSON = fs.realpathSync(require.resolve('better-sqlite3/package.json'));\n  const packageRoot = path.dirname(packageJSON);\n  if (JSON.parse(fs.readFileSync(packageJSON, 'utf8')).version !== '13.0.3') throw Error('unexpected_sqlite_package');\n  const resolverPath = path.join(packageRoot, 'lib', 'binding.js');\n  const resolver = require(resolverPath).getPrebuildPath;\n  if (typeof resolver !== 'function') throw Error('package_prebuild_resolver_missing');\n  const selected = resolver();\n  if (typeof selected !== 'string') throw Error('package_prebuild_candidate_missing');\n  const candidatePath = fs.realpathSync(selected);\n  const addonLoaded = Object.keys(require.cache).some(name => name.endsWith('.node'));\n  const databaseModuleLoaded = Object.prototype.hasOwnProperty.call(require.cache, path.join(packageRoot, 'lib', 'database.js'));\n  if (deniedNativeLoads || addonLoaded || databaseModuleLoaded) throw Error('metadata_probe_loaded_native_or_database');\n  return JSON.stringify({version:process.version, versions:process.versions, platform:process.platform, arch:process.arch,\n    cpu:require('node:os').cpus().map(c=>({model:c.model,speed:c.speed})),\n    sqliteResolution:{kind:'PACKAGE_LOADER_RESOLVED_CANDIDATE_ONLY', packageRoot, resolverPath, candidatePath,\n      deniedNativeLoads, nativeAddonLoadedByProbe:false, databaseModuleLoadedByProbe:false, databaseOpenedByProbe:false}});\n})()"
+    probe_env = {k: v for k, v in os.environ.items() if not k.startswith(
+        ('SOLPI_', 'SOL_PI_', 'VITEST_', 'DYLD_', 'LD_', 'DOCKER_')) and k not in
+        ('NODE_OPTIONS', 'NODE_PATH', 'XIAOK_RUN_DOCKER_DEV_TESTS')}
+    runtime = json.loads(subprocess.check_output([node, '-p', probe], timeout=10, env=probe_env))
+    selection = runtime.pop('sqliteResolution')
+    package = (Path.cwd() / 'node_modules' / 'better-sqlite3').resolve()
+    candidate = Path(selection['candidatePath'])
+    if (selection['kind'] != 'PACKAGE_LOADER_RESOLVED_CANDIDATE_ONLY' or
+            selection['packageRoot'] != str(package) or
+            selection['resolverPath'] != str(package / 'lib' / 'binding.js') or
+            selection['deniedNativeLoads'] != 0 or selection['nativeAddonLoadedByProbe'] is not False or
+            selection['databaseModuleLoadedByProbe'] is not False or selection['databaseOpenedByProbe'] is not False or
+            candidate.resolve() != candidate or candidate.parent != package / 'prebuilds'):
+        raise RuntimeError('package_loader_candidate_identity_invalid')
+    native = [row for row in second if row['kind'] == 'file' and row['path'] == str(candidate)]
+    if len(native) != 1:
+        raise RuntimeError('package_loader_candidate_not_unique_in_full_inventory')
     versions = {name: json.loads(Path('node_modules', name, 'package.json').read_text())['version']
                 for name in ('vitest', 'vite', 'better-sqlite3', 'tsx')}
-    save(root, 'RUNTIME.json', {'node': runtime, 'dependencies': versions, 'native': native})
+    save(root, 'RUNTIME.json', {'node': runtime, 'dependencies': versions, 'native': native,
+         'nativeSelection': selection, 'nativeQualification': False})
     save(root, 'INPUT-FREEZE.json', {'source': source, 'dependencies': second, 'executables': executables(),
                                    'eventIdentitySHA256': sha(root / 'EVENT-IDENTITY.json')})
 
