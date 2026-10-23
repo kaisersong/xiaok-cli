@@ -1,0 +1,58 @@
+name: Desktop startup and room recovery
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'desktop/**'
+      - 'src/runtime/task-host/**'
+      - 'tests/runtime/task-host/**'
+      - 'package*.json'
+      - '.github/workflows/desktop-startup-room-recovery.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'src/runtime/task-host/**'
+      - 'tests/runtime/task-host/**'
+      - 'package*.json'
+      - '.github/workflows/desktop-startup-room-recovery.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    name: Startup and room (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: cd desktop && npm ci --ignore-scripts
+      - run: npm run test:sandbox:build
+      - name: Real host recovery ordering and durable receipts
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/runtime/task-host/task-recovery-race.test.js
+          .test-dist/tests/runtime/task-host/task-runtime-host.test.js
+      - name: Startup ownership, execution admission and room IPC
+        run: >
+          cd desktop && npm run test -- --run
+          tests/main/desktop-startup-task-recovery.test.ts
+          tests/main/collaboration-room-risk-profile.test.ts
+          tests/main/collaboration-room-ipc-registry.test.ts
+          tests/main/collaboration-room-service.test.ts
+          tests/main/kswarm-project-agent-ipc-registry.test.ts
+          tests/main/kswarm-proxy-ipc-registry.test.ts
