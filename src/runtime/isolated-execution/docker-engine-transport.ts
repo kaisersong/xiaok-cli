@@ -150,7 +150,7 @@ export class DockerEngineTransport {
     const result = await this.call('POST', '/containers/' + this.id(id) + '/wait?condition=not-running', undefined, false, timeoutMs, options.signal);
     if (!result || !Number.isSafeInteger(result.StatusCode)) throw Error('docker_engine_wait_unknown'); return result;
   }
-  async inspect(id: string): Promise<{ Id: string; State: { Running: boolean; Pid: number; ExitCode: number; Status: string }; HostConfig: Record<string, unknown>; Config: Record<string, unknown>; Image: string }> {
+  async inspect(id: string): Promise<{ Id: string; State: { Running: boolean; Pid: number; ExitCode: number; Status: string }; HostConfig: Record<string, unknown>; Config: Record<string, unknown>; Image: string; NetworkSettings?: unknown }> {
     const result = await this.call('GET', '/containers/' + this.id(id) + '/json');
     if (!result || result.Id !== id || !result.State || typeof result.State.Running !== 'boolean' || !Number.isSafeInteger(result.State.Pid)) throw Error('docker_engine_inspect_unknown'); return result;
   }
