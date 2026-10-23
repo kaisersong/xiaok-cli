@@ -11,7 +11,15 @@ const linux=process.platform==='linux';
 // Node's "pipe" endpoints need not be Unix FIFOs. The inspected inner shell
 // receives a real anonymous pipeline, with stderr duplicated to its write end.
 // pipefail propagates the inspected child's status instead of cat's success.
-function check(call:string,args:string[]=[]){return spawnSync('/bin/bash',['-o','pipefail','-c','script=$1; shift; /bin/sh -c "$script" netdevice-control "$@" </dev/null 2>&1 | cat','fifo-control',NETDEVICE_CHECK_FUNCTIONS+'\n'+call,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']});}
+// Construct only the standard descriptors this fixture promises. Actual CI
+// showed additional inherited pipes of unknown origin; production rejects those.
+// The socket control preserves fd3 only until the existing dup-to-stdout step.
+function fixtureFds(keepSocket=false){return `for fixture_path in /proc/$$/fd/*; do
+ fixture_fd=\${fixture_path##*/}
+ case "$fixture_fd" in 0|1|2${keepSocket?'|3':''}) ;; ''|*[!0-9]*) exit 93 ;; *) eval "exec $fixture_fd>&-" || exit 94 ;; esac
+done
+`;}
+function check(call:string,args:string[]=[]){return spawnSync('/bin/bash',['-o','pipefail','-c',fixtureFds()+'script=$1; shift; /bin/sh -c "$script" netdevice-control "$@" </dev/null 2>&1 | cat','fifo-control',NETDEVICE_CHECK_FUNCTIONS+'\n'+call,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']});}
 const proc='renamed_loop\nrenamed_link';
 const rows='N renamed_loop 1 772 0x9\nN renamed_link 2 1 0x0\nC control_attribute regular';
 it.runIf(linux)('accepts renamed administratively disabled netdevices and structural management entries, without an IPC claim',()=>{
@@ -63,7 +71,7 @@ it.runIf(linux)('rejects an actual connected INET socket inherited as stdout wit
   await once(socket,'connect');
   // fd2 is the real pipeline write end; only fd1 is the inherited data socket.
   // Close the temporary fd3 after dup, so another rejected FD cannot mask fd1.
-  const result=spawnSync('/bin/bash',['-o','pipefail','-c','/bin/sh -c "$1" netdevice-control </dev/null 2>&1 1>&3 3>&- | cat','socket-fd-control',NETDEVICE_CHECK_FUNCTIONS+'\nnetdevice_inherited_fds_valid'],{stdio:['ignore','pipe','pipe',socket]});
+  const result=spawnSync('/bin/bash',['-o','pipefail','-c',fixtureFds(true)+'/bin/sh -c "$1" netdevice-control </dev/null 2>&1 1>&3 3>&- | cat','socket-fd-control',NETDEVICE_CHECK_FUNCTIONS+'\nnetdevice_inherited_fds_valid'],{stdio:['ignore','pipe','pipe',socket]});
   expect(result.error).toBeUndefined();expect(result.status).toBe(1);
  }catch(error){errors.push(error);}finally{
   closing=true;
