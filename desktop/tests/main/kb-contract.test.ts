@@ -38,7 +38,7 @@ describe('KB Contract — KbStore', () => {
       name: 'Research',
       embeddingModelId: 'bge-small-zh-v1.5',
       embeddingDim: 512,
-    });
+    }, 'user');
     expect(col).toMatchObject({
       name: 'Research',
       embeddingModelId: 'bge-small-zh-v1.5',
@@ -51,23 +51,23 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('lists collections', () => {
-    store.createCollection({ name: 'A', embeddingModelId: 'm', embeddingDim: 384 });
-    store.createCollection({ name: 'B', embeddingModelId: 'm', embeddingDim: 384 });
+    store.createCollection({ name: 'A', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
+    store.createCollection({ name: 'B', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const list = store.listCollections();
     expect(list).toHaveLength(2);
   });
 
   it('deletes collection and cascades to sources and chunks', () => {
-    const col = store.createCollection({ name: 'ToDelete', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'ToDelete', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'test' }, 'user');
-    store.insertChunks(src.id, [{ idx: 0, text: 'hello', charStart: 0, charEnd: 5 }]);
-    store.deleteCollection(col.id);
+    store.insertChunks(src.id, [{ idx: 0, text: 'hello', charStart: 0, charEnd: 5 }], 'user');
+    store.deleteCollection(col.id, 'user');
     expect(store.getCollection(col.id)).toBeUndefined();
     expect(store.getSource(src.id)).toBeUndefined();
   });
 
   it('adds a source to a collection', () => {
-    const col = store.createCollection({ name: 'C', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'C', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'Report.pdf' }, 'user');
     expect(src).toMatchObject({
       collectionId: col.id,
@@ -78,7 +78,7 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('enforces parse-result ownership and state transitions in the store', () => {
-    const col = store.createCollection({ name: 'Authority', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'Authority', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const userSource = store.addSource({ collectionId: col.id, kind: 'file', title: 'user.doc' }, 'user');
     const agentSource = store.addSource({ collectionId: col.id, kind: 'file', title: 'agent.doc' }, 'agent');
 
@@ -110,7 +110,7 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('rejects missing mutation authority and agent-created terminal source states', () => {
-    const col = store.createCollection({ name: 'Default deny', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'Default deny', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     expect(() => store.addSource({
       collectionId: col.id,
       kind: 'file',
@@ -126,7 +126,7 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('allows scheduler recovery only for pending sources', () => {
-    const col = store.createCollection({ name: 'Recovery', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'Recovery', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const legacyPending = store.addSource({ collectionId: col.id, kind: 'file', title: 'pending.doc' }, 'user');
     const recovered = store.updateSourceParseResult(legacyPending.id, {
       parseStatus: 'failed',
@@ -141,7 +141,7 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('persists meeting source metadata and parsed status', () => {
-    const col = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({
       collectionId: col.id,
       kind: 'meeting',
@@ -174,18 +174,18 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('inserts chunks for a source', () => {
-    const col = store.createCollection({ name: 'D', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'D', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' }, 'user');
     const chunks = store.insertChunks(src.id, [
       { idx: 0, text: 'chunk one', charStart: 0, charEnd: 9 },
       { idx: 1, text: 'chunk two', charStart: 9, charEnd: 18 },
-    ]);
+    ], 'user');
     expect(chunks).toHaveLength(2);
     expect(chunks[0]).toMatchObject({ idx: 0, text: 'chunk one', embeddingStatus: 'pending' });
   });
 
   it('persists meeting chunk timestamps in metadata', () => {
-    const col = store.createCollection({ name: 'Timed Chunks', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'Timed Chunks', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'meeting', title: 'Timed Meeting' }, 'user');
     const chunks = store.insertChunks(src.id, [
       {
@@ -195,56 +195,56 @@ describe('KB Contract — KbStore', () => {
         charEnd: 35,
         metadata: { startTime: 0, endTime: 2.5, transcribeStatus: 'ok' },
       },
-    ]);
+    ], 'user');
 
     expect(chunks[0].metadata).toEqual({ startTime: 0, endTime: 2.5, transcribeStatus: 'ok' });
     expect(store.listChunks(src.id)[0].metadata).toEqual({ startTime: 0, endTime: 2.5, transcribeStatus: 'ok' });
   });
 
   it('marks chunk as embedded', () => {
-    const col = store.createCollection({ name: 'E', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'E', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'x' }, 'user');
-    const chunks = store.insertChunks(src.id, [{ idx: 0, text: 'x', charStart: 0, charEnd: 1 }]);
-    store.markChunkEmbedded(chunks[0].id);
+    const chunks = store.insertChunks(src.id, [{ idx: 0, text: 'x', charStart: 0, charEnd: 1 }], 'user');
+    store.markChunkEmbedded(chunks[0].id, 'user');
     const updated = store.listChunks(src.id);
     expect(updated[0].embeddingStatus).toBe('embedded');
   });
 
   it('marks chunk as failed', () => {
-    const col = store.createCollection({ name: 'F', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'F', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'x' }, 'user');
-    const chunks = store.insertChunks(src.id, [{ idx: 0, text: 'x', charStart: 0, charEnd: 1 }]);
-    store.markChunkFailed(chunks[0].id, 'onnx crash');
+    const chunks = store.insertChunks(src.id, [{ idx: 0, text: 'x', charStart: 0, charEnd: 1 }], 'user');
+    store.markChunkFailed(chunks[0].id, 'onnx crash', 'user');
     const updated = store.listChunks(src.id);
     expect(updated[0].embeddingStatus).toBe('failed');
     expect(updated[0].embeddingError).toBe('onnx crash');
   });
 
   it('returns embedding progress for a source', () => {
-    const col = store.createCollection({ name: 'G', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'G', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'multi' }, 'user');
     store.insertChunks(src.id, [
       { idx: 0, text: 'a', charStart: 0, charEnd: 1 },
       { idx: 1, text: 'b', charStart: 1, charEnd: 2 },
       { idx: 2, text: 'c', charStart: 2, charEnd: 3 },
-    ]);
+    ], 'user');
     const chunks = store.listChunks(src.id);
-    store.markChunkEmbedded(chunks[0].id);
-    store.markChunkFailed(chunks[1].id, 'err');
+    store.markChunkEmbedded(chunks[0].id, 'user');
+    store.markChunkFailed(chunks[1].id, 'err', 'user');
     const progress = store.getSourceEmbeddingProgress(src.id);
     expect(progress).toEqual({ embedded: 1, total: 3, failed: 1 });
   });
 
   it('retrySource resets parse status', () => {
-    const col = store.createCollection({ name: 'H', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'H', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'bad.pdf' }, 'user');
     // Simulate failed state would be set by ingest worker — here we just verify retry resets
-    const retried = store.retrySource(src.id);
+    const retried = store.retrySource(src.id, 'user');
     expect(retried).toMatchObject({ parseStatus: 'pending', parseAttempts: 0 });
   });
 
   it('getCollectionState returns aggregated progress', () => {
-    const col = store.createCollection({ name: 'I', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'I', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     store.addSource({ collectionId: col.id, kind: 'paste', title: 'one' }, 'user');
     store.addSource({ collectionId: col.id, kind: 'url', title: 'two' }, 'user');
     const state = store.getCollectionState(col.id);
@@ -253,13 +253,13 @@ describe('KB Contract — KbStore', () => {
   });
 
   it('getSourceWithContent supports offset/limit pagination', () => {
-    const col = store.createCollection({ name: 'J', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'J', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'long' }, 'user');
     // Insert chunks manually (ingest pipeline would do this in production)
     store.insertChunks(src.id, [
       { idx: 0, text: 'a'.repeat(50), charStart: 0, charEnd: 50 },
       { idx: 1, text: 'b'.repeat(50), charStart: 50, charEnd: 100 },
-    ]);
+    ], 'user');
     const result = store.getSourceWithContent(src.id, 0, 50);
     expect(result).toBeDefined();
     expect(result!.text).toHaveLength(50);
@@ -429,12 +429,12 @@ describe('KB Integration — addSource sets parsed status', () => {
   });
 
   it('source with chunks should be marked as parsed after insert', () => {
-    const col = store.createCollection({ name: 'Test', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'Test', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' }, 'user');
     expect(src.parseStatus).toBe('pending');
     store.insertChunks(src.id, [
       { idx: 0, text: '测试内容', charStart: 0, charEnd: 4 },
-    ]);
+    ], 'user');
     // Simulate the fix: after chunking, update parse_status
     (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed' WHERE id = ?").run(src.id);
     const updated = store.getSource(src.id);
@@ -468,12 +468,12 @@ describe('KB Integration — Chinese search with jieba', () => {
       return;
     }
 
-    const col = store.createCollection({ name: 'CN', embeddingModelId: 'm', embeddingDim: 384 });
+    const col = store.createCollection({ name: 'CN', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' }, 'user');
     store.insertChunks(src.id, [
       { idx: 0, text: 'AI 原生组织架构是一种全新的组织设计理念', charStart: 0, charEnd: 20 },
       { idx: 1, text: '传统的企业管理方式已经不适应数字化转型需求', charStart: 20, charEnd: 40 },
-    ]);
+    ], 'user');
     (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed' WHERE id = ?").run(src.id);
 
     // Simulate search with jieba segmentation
@@ -506,7 +506,7 @@ describe('KB Integration — default collection auto-created', () => {
         description: '默认知识库集合',
         embeddingModelId: 'bge-small-zh-v1.5',
         embeddingDim: 512,
-      });
+      }, 'user');
     }
     expect(store.listCollections()).toHaveLength(1);
     expect(store.listCollections()[0].name).toBe('我的知识库');

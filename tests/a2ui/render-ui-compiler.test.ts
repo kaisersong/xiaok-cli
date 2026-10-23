@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { A2UI_MIME_TYPE, SAFE_A2UI_CATALOG_ID, compileRenderUiToA2ui } from '../../src/a2ui/index.js';
+import { A2UI_MIME_TYPE, SAFE_A2UI_CATALOG_ID, compileRenderUiToA2ui, type A2UIMessage } from '../../src/a2ui/index.js';
 
 describe('A2UI dashboard compiler', () => {
   it('compiles read-only DSL into a safe catalog surface with least-data model', () => {
@@ -35,7 +35,7 @@ describe('A2UI dashboard compiler', () => {
       },
     });
 
-    const updateComponents = compiled.messages[1]?.updateComponents;
+    const updateComponents = (compiled.messages[1] as Extract<A2UIMessage, { updateComponents: unknown }> | undefined)?.updateComponents;
     expect(updateComponents?.components.map((component) => component.component)).toEqual([
       'Column',
       'Text',
@@ -55,7 +55,7 @@ describe('A2UI dashboard compiler', () => {
       rows: { path: 'tables.c3.rows' },
     });
 
-    const dataModel = compiled.messages[2]?.updateDataModel?.value as Record<string, unknown>;
+    const dataModel = (compiled.messages[2] as Extract<A2UIMessage, { updateDataModel: unknown }> | undefined)?.updateDataModel?.value as Record<string, unknown>;
     expect(JSON.stringify(dataModel)).not.toContain('must not be copied');
     expect(dataModel).toEqual({
       metrics: {

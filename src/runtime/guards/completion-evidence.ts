@@ -1,3 +1,5 @@
+import {observeInstalledCompletionSync,type InstalledCompletionObservation} from '../verification/installed-completion-observation.js';
+import {completionConsumerOwner} from '../verification/completion-consumer-owner.js';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { resolveStructuralKind, validateArtifactStructure } from '../../quality/artifact-structure.js';
@@ -28,6 +30,8 @@ export interface CompletionEvidenceRecord {
 }
 
 export type EvidenceValidationFailure =
+  | 'verification_unavailable'
+  | 'verification_required'
   | 'evidence_missing'
   | 'evidence_kind_mismatch'
   | 'validation_failed';
@@ -74,6 +78,11 @@ export function* completionEvidenceFlow(input: {
     return { ok: true };
   }
 
+  const verification=yield {kind:'current-completion',owner:completionConsumerOwner({ownerKind:input.ownerKind,ownerId:input.ownerId})};
+  const observed=verification as InstalledCompletionObservation;
+  if(observed.kind==='unavailable')return fail('verification_unavailable','Current protected verification is unavailable.');
+  if(observed.kind==='protected')return observed.state.currentVerification==='valid'?{ok:true}:fail('verification_required','Protected obligations require current verification.');
+  if(observed.kind!=='ordinary')return fail('verification_unavailable','Current protected verification is unavailable.');
   const expectation = input.expectation;
   if (!expectation) {
     return fail('evidence_missing', 'Completed status requires an explicit or inferred completion expectation.');
@@ -357,9 +366,9 @@ function fail(failureKind: EvidenceValidationFailure, message: string): Evidence
 }
 
 export type CompletionEvidenceInput = Parameters<typeof completionEvidenceFlow>[0];
-export type EvidenceEffect = { kind: 'exists' | 'realpath' | 'lstat'; path: string }
+export type EvidenceEffect = {kind:'current-completion';owner:ReturnType<typeof completionConsumerOwner>} | { kind: 'exists' | 'realpath' | 'lstat'; path: string }
   | { kind: 'structure'; path: string; structuralKind: 'pdf' | 'pptx' };
-export type EvidenceEffectResult = boolean | string | { isSymbolicLink(): boolean } | ReturnType<typeof validateArtifactStructure>;
+export type EvidenceEffectResult = InstalledCompletionObservation | boolean | string | { isSymbolicLink(): boolean } | ReturnType<typeof validateArtifactStructure>;
 type EvidenceFlow = Generator<EvidenceEffect, EvidenceValidationResult, EvidenceEffectResult>;
 
 /** One rule flow, with distinct synchronous and asynchronous effect interpreters. */
@@ -371,6 +380,7 @@ export function validateCompletionEvidence(input: CompletionEvidenceInput): Evid
     try {
       const effect = step.value;
       switch (effect.kind) {
+        case 'current-completion': value = observeInstalledCompletionSync(effect.owner); break;
         case 'exists': value = existsSync(effect.path); break;
         case 'realpath': value = realpathSync.native(effect.path); break;
         case 'lstat': value = lstatSync(effect.path); break;

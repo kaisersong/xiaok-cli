@@ -1,3 +1,4 @@
+import type { MobileSnapshot } from '../../electron/mobile-gateway.js';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ describe('mobile gateway', () => {
         approvals: [],
         loops: [],
         artifacts: [],
-      }),
+      } as unknown as MobileSnapshot),
     });
     openGateways.push(gateway);
 
@@ -144,7 +145,7 @@ describe('mobile gateway', () => {
         approvals: [],
         loops: [],
         artifacts: [],
-      }),
+      } as unknown as MobileSnapshot),
     });
     openGateways.push(gateway);
 

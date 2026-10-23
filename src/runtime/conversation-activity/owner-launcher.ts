@@ -1,7 +1,7 @@
 import { chmodPrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import './owner-entry.js';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { writeFileSync, renameSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,9 +21,12 @@ export function buildActivityOwnerEnv(parent: NodeJS.ProcessEnv, platform = proc
   return Object.fromEntries(Object.entries(parent).filter(([name, value]) => value !== undefined && (allowed.has(name) || name.startsWith('LC_') || name.startsWith('XIAOK_') && !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name)))) as Record<string, string>;
 }
 
+/** The actual sole call site supplies command, argv and SpawnOptions and consumes only ChildProcess. */
+export type ActivityOwnerSpawner = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+
 /** Native callers attach instead of competing for a writer. An outdated owner
  * may be retired after identity checks; RPC mutations are never retried. */
-export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: typeof spawn; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; retire?: typeof retireOutdatedOwner } = {}): Promise<ConversationActivityOwnerClient> {
+export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: ActivityOwnerSpawner; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; retire?: typeof retireOutdatedOwner } = {}): Promise<ConversationActivityOwnerClient> {
   const address = activityOwnerAddress(config.dataRoot);
   const normalized = { ...config, dataRoot: address.dataRoot };
   const expectedDigest = activityOwnerConfigDigest(normalized);
@@ -52,9 +55,9 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
   const temporary = `${configFile}.${randomUUID()}.tmp`;
   writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 }); chmodPrivateActivityFile(temporary); renameSync(temporary, configFile);
   const logFile = openSync(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log), 'a', 0o600);
-  chmodPrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
   let child: ReturnType<typeof spawn>;
   try {
+    chmodPrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
     child = (options.spawn ?? spawn)(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {
       detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env: { ...buildActivityOwnerEnv(process.env), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
     });

@@ -88,7 +88,7 @@ export interface TimedActionRunRecord {
 
 export interface LoopTimedActionDecision {
   loopRunId: string;
-  loopStatus: 'success' | 'failed' | 'blocked';
+  loopStatus: 'success' | 'failed' | 'blocked' | 'publication_pending';
   nextActionKind?: string;
   nextActionSummary?: string;
   [key: string]: unknown;
@@ -112,6 +112,8 @@ export interface ClaimedTimedAction {
 }
 
 export interface TimedActionExecutorResult {
+  /** Actual Loop execution remains pending; never a policy skip. */
+  awaitingLoopRunId?: string;
   runtimeTaskId?: string;
   decision?: Record<string, unknown>;
   skip?: Exclude<ExecutorRecoveryDecision, { action: 'execute' }>;

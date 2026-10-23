@@ -15,6 +15,7 @@ const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask,
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
+    getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })),
     createTask: mockCreateTask,
     createTaskWithFiles: mockCreateTaskWithFiles,
     getThread: mockGetThread,

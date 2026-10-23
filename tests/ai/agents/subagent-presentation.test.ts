@@ -10,7 +10,7 @@ function fixture(stream?: ModelAdapter['stream']) {
     { definition: { name: 'broken', description: 'Failure', inputSchema: { type: 'object' } }, permission: 'safe', execute: async () => 'Error: unavailable' },
   ]);
   let requests = 0;
-  const adapter: ModelAdapter = { async *stream(...args) {
+  const adapter: ModelAdapter = { getModelName: () => '', async *stream(...args) {
     if (stream) { yield* stream(...args); return; }
     if (requests++ === 0) {
       yield { type: 'text', delta: '准备开始检查。' };

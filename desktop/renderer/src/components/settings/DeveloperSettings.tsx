@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../../lib/loop-management-errors';
+import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../../lib/loop-run-observation';
+import {LoopPublicationPanel} from '../loops/LoopPublicationPanel';
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ChevronLeft, Copy, RefreshCw } from 'lucide-react'
 import { getDesktopApi, type DesktopSettingsKey } from '../../shared/desktop'
@@ -177,7 +180,14 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     }
   }, [accessToken, t.requestFailed])
 
+  const loopLoadGeneration=useRef(0);
+  useEffect(()=>()=>{loopLoadGeneration.current++;},[]);
+  const observationLabel=(run:LoopRunView)=>loopObservationLabel(run,{pending:ds.loopDiagnosticsPublicationPending,verified:at=>ds.loopDiagnosticsVerifiedAt(new Date(at).toLocaleString()),status:getRunStatusLabel});
   const loadLoopDiagnostics = useCallback(async (silent = false) => {
+    const generation=++loopLoadGeneration.current;
+    setLoopRuns(invalidateLoopObservations);
+    setLoopRunResults(previous=>Object.fromEntries(Object.entries(previous).filter(([,result])=>result?.status!=='success'&&result?.status!=='already_completed')));
+
     if (!silent) setLoopDiagnosticsLoading(true)
     setLoopDiagnosticsError('')
     try {
@@ -185,19 +195,25 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
       const details = await Promise.all(definitions.map(async (loop) => {
         const [runs, anomalies] = await Promise.all([
           api.getLoopRuns(loop.id),
-          api.getEvidenceAnomalies(loop.id).catch(() => [] as EvidenceAnomalyView[]),
+          api.getEvidenceAnomalies(loop.id).catch(error => {
+            if (loopManagementFailureKind(error) === 'unavailable') throw error;
+            return [] as EvidenceAnomalyView[];
+          }),
         ])
         return { loop, runs, anomalies }
       }))
+      if(generation!==loopLoadGeneration.current)return;
       setLoopDefinitions(definitions)
       setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])))
       setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])))
     } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : ds.loopDiagnosticsLoadError)
+      if(generation!==loopLoadGeneration.current)return;
+      setLoopRuns(invalidateLoopObservations);
+      setLoopDiagnosticsError(loopManagementErrorMessage(error, t, ds.loopDiagnosticsLoadError))
     } finally {
-      if (!silent) setLoopDiagnosticsLoading(false)
+      if (generation===loopLoadGeneration.current) setLoopDiagnosticsLoading(false)
     }
-  }, [ds.loopDiagnosticsLoadError])
+  }, [ds.loopDiagnosticsLoadError, t.loopOperationResultUnknown, t.loopProjectionUnavailable, t.loopInputInvalid])
 
   useEffect(() => {
     void loadLoopDiagnostics()
@@ -265,7 +281,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
       setLoopRunResults(prev => ({ ...prev, [loopId]: result }))
       await loadLoopDiagnostics(true)
     } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : ds.loopDiagnosticsRunFailed)
+      setLoopDiagnosticsError(loopManagementErrorMessage(error, t, ds.loopDiagnosticsRunFailed))
     } finally {
       setRunningLoopId(null)
     }
@@ -277,7 +293,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     anomalies: EvidenceAnomalyView[],
   ) => {
     try {
-      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies })
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies, observationLabel,labels:ds.loopDiagnosticsCopyLabels })
       await navigator.clipboard.writeText(summary)
       showToast(ds.loopDiagnosticsCopied, 'success')
     } catch {
@@ -472,7 +488,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
 	                  ? ds.loopDiagnosticsRunning
 	                  : isAlreadyRunning
 	                    ? ds.loopDiagnosticsAlreadyRunning
-	                    : ds.loopDiagnosticsRunNow
+	                    : (runResult?.status==='publication_pending'||loopNeedsRevalidation(latestRun))?ds.loopDiagnosticsPublicationPending:ds.loopDiagnosticsRunNow
 
 	                return (
 	                  <div
@@ -494,12 +510,13 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
 	                      </span>
 	                    </div>
 
+	                    <LoopPublicationPanel loopId={loop.id} runs={runs} />
 	                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
 	                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
 	                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLastRun}</div>
 	                        <div className="mt-1 text-[var(--c-text-primary)]">
 	                          {latestRun
-	                            ? `${getRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+	                            ? `${observationLabel(latestRun)} · ${formatLoopRunTime(latestRun)}`
 	                            : ds.loopDiagnosticsNoRuns}
 	                        </div>
 	                      </div>

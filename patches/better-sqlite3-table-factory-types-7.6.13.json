@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "target": "node_modules/@types/better-sqlite3/index.d.ts",
+  "typesVersion": "7.6.13",
+  "runtimeVersion": "13.0.3",
+  "preSHA256": "c2a6a737189ced24ffe0634e9239b087e4c26378d0490f95141b9b9b042b746c",
+  "postSHA256": "8413bb67e4f57a5a9b41af969d018982db63e245f5cedd87f18394c6db6bad69",
+  "lockIntegrities": {
+    "node_modules/@types/better-sqlite3": "sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==",
+    "node_modules/better-sqlite3": "sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ=="
+  },
+  "runtimeSourceGuards": [
+    {
+      "file": "node_modules/better-sqlite3/lib/methods/table.js",
+      "SHA256": "2356885ca1ef37d20f2daeed2b82b9dd6e61481e851194174a16d32efa3ae2f0"
+    },
+    {
+      "file": "node_modules/better-sqlite3/src/util/custom-table.cpp",
+      "SHA256": "c7fd730eb22ea79cc434295d729a4bb9f994921b0e4b1fd0f4a624fae8bb4efd"
+    }
+  ],
+  "edits": [
+    {
+      "before": "    interface Database {\n",
+      "after": "    interface VirtualTableFactoryContext {\n        module: string;\n        database: string;\n        table: string;\n    }\n\n    type VirtualTableFactory = (\n        this: VirtualTableFactoryContext,\n        ...args: string[]\n    ) => VirtualTableOptions;\n\n    interface Database {\n"
+    },
+    {
+      "before": "        table(name: string, options: VirtualTableOptions): this;",
+      "after": "        table(name: string, options: VirtualTableOptions): this;\n        table(name: string, factory: VirtualTableFactory): this;"
+    },
+    {
+      "before": "    type Database = BetterSqlite3.Database;",
+      "after": "    type Database = BetterSqlite3.Database;\n    type VirtualTableFactoryContext = BetterSqlite3.VirtualTableFactoryContext;\n    type VirtualTableFactory = BetterSqlite3.VirtualTableFactory;"
+    }
+  ]
+}

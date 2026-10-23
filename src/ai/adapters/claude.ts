@@ -1,3 +1,5 @@
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
@@ -124,6 +126,13 @@ export class ClaudeAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+    if (disclosure !== undefined) {
+      assertProviderDisclosureActive(disclosure);
+      const disclosureSignal = getProviderDisclosureSignal(disclosure);
+      options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
+    }
+    try {
     let attempt = 0;
     while (true) {
       options?.signal?.throwIfAborted();
@@ -140,6 +149,7 @@ export class ClaudeAdapter implements ModelAdapter {
         }
         return;
       } catch (error) {
+        if (disclosure !== undefined) assertProviderDisclosureActive(disclosure);
         clearTimeout(timer);
         // 一旦本次尝试已产出 chunk（消费端已实时落地/上屏），重试会重复输出，必须放弃重试
         if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
@@ -152,6 +162,7 @@ export class ClaudeAdapter implements ModelAdapter {
         clearTimeout(timer);
       }
     }
+    } finally { if (disclosure !== undefined) disposeProviderDisclosureContext(disclosure); }
   }
 
   private async *streamOnce(
@@ -221,7 +232,10 @@ export class ClaudeAdapter implements ModelAdapter {
       cache_control: (t as CachedToolDefinition).cache_control,
     }));
 
-    const client = await this.getClient();
+    const sharedClient = await this.getClient();
+    const client = options?.providerDisclosure
+      ? sharedClient.withOptions({ fetch: createProviderDisclosureFetch(options.providerDisclosure, globalThis.fetch.bind(globalThis)) })
+      : sharedClient;
     const stream = client.messages.stream({
       model: this.model,
       max_tokens: options?.maxOutputTokens ?? CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,

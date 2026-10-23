@@ -29,7 +29,7 @@ describe('production subagent with real git worktrees', () => {
           sessionId: 'real-worktree', runtimeAgentId: identity.id, cwd: root, signal,
           worktreeManager: manager, buildSystemPrompt: async (cwd) => { worktree = cwd; return 'fixture'; },
           createRegistry: () => new ToolRegistry({}, [{permission:'safe',definition:{name:'held_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},execute:async () => {entered = true; await running; return 'done';}}]),
-          adapter: () => ({ async *stream() { yield {type:'tool_use' as const,id:'held',name:'held_tool',input:{}}; yield { type: 'done' as const }; } }),
+          adapter: () => ({ getModelName: () => '', async *stream() { yield {type:'tool_use' as const,id:'held',name:'held_tool',input:{}}; yield { type: 'done' as const }; } }),
         }),
       });
       await vi.waitFor(() => expect(entered).toBe(true));

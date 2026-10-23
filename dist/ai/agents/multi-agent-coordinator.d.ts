@@ -198,6 +198,9 @@ export declare class MultiAgentCoordinator {
         target: string;
     }): Promise<MultiAgentCloseResult>;
     dispose(): Promise<void>;
+    /** Host resource owner only. The bounded UI dispose acknowledgement is not
+     * physical cleanup; callers retiring durable authorities await these facts. */
+    waitForDisposedResources(): Promise<void>;
     private schedule;
     private processQueue;
     private withInboxContext;

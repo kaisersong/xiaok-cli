@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, createReadStream, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -1342,3 +1343,192 @@ expect.extend({
     }
   },
 });
+
+// Same ordinary pre-existing TaskSnapshot materialization seam as saveArtifactSnapshot above.
+// This does not run a model/task generator or issue controller/native completion evidence.
+describe('artifact workspace ordinary actual-byte scale', () => {
+  it('materializes, reopens and exports an actual 100MiB single file and rejects the next byte', async () => {
+    await withWorkspaceScale(async f => {
+      const path = join(f.workspaceRoot, 'actual-100m.md');
+      workspaceScaleWrite(path, MAX_SINGLE_FILE_BYTES, 0x61);
+      const expected = await workspaceScaleDigest(path);
+      expect(expected.bytes).toBe(104_857_600);
+      await saveArtifactSnapshot(f.state.snapshots, { taskId: 'scale-file', artifactId: 'actual-file', kind: 'markdown', mimeType: 'text/markdown', filePath: path }, f.now);
+      const result = await f.state.service.materializeArtifact({ ...f.identity, sourceTaskId: 'scale-file', artifactId: 'actual-file', expectedStructureRevision: 0, requestSource: 'user' });
+      expect(result.version).toMatchObject({ storageKind: 'single_file', byteSize: MAX_SINGLE_FILE_BYTES, checksum: expected.sha256, status: 'ready' });
+      expect(f.state.files.verifyManagedArtifact(result.version)).toBe(true);
+      expect(await workspaceScaleDigest(f.state.files.resolveManagedRef(result.version.fileRef))).toEqual(expected);
+      await f.reopen();
+      const restored = f.state.store.getVersion(result.version.id);
+      if (!restored) throw Error('scale_version_missing_after_reopen');
+      expect(restored).toEqual(result.version);
+      expect(f.state.files.verifyManagedArtifact(restored)).toBe(true);
+      const exported = join(f.root, 'exports', 'actual-100m.md');
+      const receipt = await f.state.service.exportArtifactWorkspaceVersion({ ...f.identity, versionId: restored.id, destinationPath: exported });
+      expect(receipt.destinationPath).toBe(exported);
+      expect(await workspaceScaleDigest(exported)).toEqual(expected);
+      expect(await workspaceScaleDigest(path)).toEqual(expected);
+      const before = await f.state.service.getArtifactWorkspaceSnapshot({ ...f.identity, viewKey: 'scale' });
+      const stagingBefore = readdirSync(join(f.managedRoot, 'staging')).sort();
+      appendFileSync(path, 'x');
+      expect(statSync(path).size).toBe(MAX_SINGLE_FILE_BYTES + 1);
+      await expect(f.state.service.materializeArtifact({ ...f.identity, sourceTaskId: 'scale-file', artifactId: 'actual-file', expectedStructureRevision: before.workspace.structureRevision, requestSource: 'user' }))
+        .rejects.toMatchObject({ code: 'artifact_too_large' });
+      const after = await f.state.service.getArtifactWorkspaceSnapshot({ ...f.identity, viewKey: 'scale' });
+      expect(after.versions).toEqual(before.versions);
+      expect(after.workspace.structureRevision).toBe(before.workspace.structureRevision);
+      expect(readdirSync(join(f.managedRoot, 'staging')).sort()).toEqual(stagingBefore);
+    });
+  }, 180_000);
+
+  it('materializes, reopens and exports an actual 512MiB sealed package and rejects the next byte', async () => {
+    await withWorkspaceScale(async f => {
+      const source = join(f.workspaceRoot, 'actual-512m');
+      mkdirSync(join(source, 'assets'), { recursive: true });
+      const entry = '<!doctype html><html><body>Actual scale package</body></html>\n';
+      writeFileSync(join(source, 'index.html'), entry);
+      const expected: Array<{ path: string; size: number; sha256: string }> = [];
+      let remaining = MAX_PACKAGE_TOTAL_BYTES - Buffer.byteLength(entry);
+      for (let i = 0; remaining > 0; i++) {
+        const relativePath = `assets/part-${String(i).padStart(2, '0')}.txt`;
+        const size = Math.min(64 * 1024 ** 2, remaining);
+        expect(size).toBeLessThanOrEqual(MAX_SINGLE_FILE_BYTES);
+        workspaceScaleWrite(join(source, relativePath), size, 0x61 + i);
+        const digest = await workspaceScaleDigest(join(source, relativePath));
+        expect(digest.bytes).toBe(size);
+        expected.push({ path: relativePath, size, sha256: digest.sha256 });
+        remaining -= size;
+      }
+      const entryDigest = await workspaceScaleDigest(join(source, 'index.html'));
+      expected.push({ path: 'index.html', size: entryDigest.bytes, sha256: entryDigest.sha256 });
+      expected.sort((a, b) => a.path.localeCompare(b.path));
+      expect(expected).toHaveLength(9);
+      expect(expected.length).toBeLessThanOrEqual(MAX_PACKAGE_FILE_COUNT);
+      expect(expected.every(file => file.size <= MAX_SINGLE_FILE_BYTES)).toBe(true);
+      expect(expected.reduce((sum, file) => sum + file.size, 0)).toBe(536_870_912);
+      await saveArtifactSnapshot(f.state.snapshots, { taskId: 'scale-package', artifactId: 'actual-package', kind: 'html', mimeType: 'text/html', filePath: source }, f.now);
+      const result = await f.state.service.materializeArtifact({ ...f.identity, sourceTaskId: 'scale-package', artifactId: 'actual-package', expectedStructureRevision: 0, requestSource: 'user' });
+      expect(result.version).toMatchObject({ storageKind: 'sealed_package', byteSize: MAX_PACKAGE_TOTAL_BYTES, entryRef: 'index.html', packageManifestRef: '.xiaok-manifest.json', status: 'ready' });
+      expect(f.state.files.verifyManagedArtifact(result.version)).toBe(true);
+      const managed = f.state.files.resolveManagedRef(result.version.fileRef);
+      const manifest = readFileSync(join(managed, '.xiaok-manifest.json'));
+      expect(JSON.parse(manifest.toString('utf8'))).toEqual({ schemaVersion: 1, files: expected });
+      expect(createHash('sha256').update(manifest).digest('hex')).toBe(result.version.checksum);
+      await f.reopen();
+      const restored = f.state.store.getVersion(result.version.id);
+      if (!restored) throw Error('scale_package_missing_after_reopen');
+      expect(restored).toEqual(result.version);
+      expect(f.state.files.verifyManagedArtifact(restored)).toBe(true);
+      const preview = await f.state.service.readArtifactWorkspaceVersionPreview({ ...f.identity, versionId: restored.id });
+      expect(preview).toMatchObject({ contentKind: 'package_manifest', content: { entryRef: 'index.html', files: expected } });
+      const exported = join(f.root, 'exports', 'actual-512m');
+      const receipt = await f.state.service.exportArtifactWorkspaceVersion({ ...f.identity, versionId: restored.id, destinationPath: exported });
+      expect(receipt.destinationPath).toBe(exported);
+      let exportedBytes = 0;
+      for (const file of expected) {
+        const original = await workspaceScaleDigest(join(source, file.path));
+        const copy = await workspaceScaleDigest(join(exported, file.path));
+        expect(original).toEqual({ bytes: file.size, sha256: file.sha256 });
+        expect(copy).toEqual(original);
+        exportedBytes += copy.bytes;
+      }
+      expect(exportedBytes).toBe(MAX_PACKAGE_TOTAL_BYTES);
+      expect(readFileSync(join(exported, '.xiaok-manifest.json'))).toEqual(manifest);
+      const before = await f.state.service.getArtifactWorkspaceSnapshot({ ...f.identity, viewKey: 'scale' });
+      const stagingBefore = readdirSync(join(f.managedRoot, 'staging')).sort();
+      appendFileSync(join(source, 'assets', 'part-07.txt'), 'x');
+      expect(expected.reduce((sum, file) => sum + statSync(join(source, file.path)).size, 0)).toBe(MAX_PACKAGE_TOTAL_BYTES + 1);
+      await expect(f.state.service.materializeArtifact({ ...f.identity, sourceTaskId: 'scale-package', artifactId: 'actual-package', expectedStructureRevision: before.workspace.structureRevision, requestSource: 'user' }))
+        .rejects.toMatchObject({ code: 'artifact_too_large' });
+      const after = await f.state.service.getArtifactWorkspaceSnapshot({ ...f.identity, viewKey: 'scale' });
+      expect(after.versions).toEqual(before.versions);
+      expect(after.workspace.structureRevision).toBe(before.workspace.structureRevision);
+      expect(readdirSync(join(f.managedRoot, 'staging')).sort()).toEqual(stagingBefore);
+    });
+  }, 360_000);
+});
+
+function workspaceScaleWrite(path: string, bytes: number, fill: number): void {
+  const fd = openSync(path, 'wx'), block = Buffer.alloc(1024 ** 2, fill);
+  try {
+    let remaining = bytes;
+    while (remaining > 0) {
+      const count = writeSync(fd, block, 0, Math.min(block.length, remaining));
+      if (count <= 0) throw Error('workspace_scale_short_write');
+      remaining -= count;
+    }
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+}
+async function workspaceScaleDigest(path: string): Promise<{ bytes: number; sha256: string }> {
+  const hash = createHash('sha256'); let bytes = 0;
+  for await (const block of createReadStream(path, { highWaterMark: 1024 ** 2 })) {
+    if (!Buffer.isBuffer(block)) throw Error('workspace_scale_stream_type');
+    bytes += block.length; hash.update(block);
+  }
+  expect(statSync(path).size).toBe(bytes);
+  return { bytes, sha256: hash.digest('hex') };
+}
+async function createWorkspaceScaleFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'workspace-actual-scale-'));
+  const workspaceRoot = join(root, 'workspace'), managedRoot = join(root, 'managed');
+  const now = Date.UTC(2026, 6, 13, 0, 0, 0);
+  const identity = { conversationId: 'ordinary-scale', workspaceRootId: workspaceRoot };
+  const services: ArtifactWorkspaceService[] = [], managers: ArtifactWorkspaceFileManager[] = [], snapshots: FileTaskSnapshotStore[] = [];
+  const databases = new Map<ArtifactWorkspaceStore, boolean>();
+  function openState() {
+    const store = new ArtifactWorkspaceStore({ dbPath: join(root, 'workspace.sqlite'), now: () => now }); databases.set(store, false);
+    const files = new ArtifactWorkspaceFileManager({ managedRoot }); managers.push(files);
+    const snapshotStore = new FileTaskSnapshotStore(join(root, 'tasks')); snapshots.push(snapshotStore);
+    const service = new ArtifactWorkspaceService({
+      store, snapshotStore, fileManager: files, workspaceRoot, now: () => now,
+      featureFlags: { artifactWorkspaceRevisionUi: true, artifactSpatialWorkspace: true },
+      taskHost: {
+        async prepareTask() { throw Error('scale_generation_not_requested'); },
+        async startTask() { throw Error('scale_generation_not_requested'); },
+        async cancelTask() { throw Error('scale_generation_not_requested'); },
+        async recoverTask(taskId) {
+          const snapshot = await snapshotStore.recoverTask(taskId);
+          if (!snapshot) throw Error('scale_task_missing');
+          return { snapshot };
+        },
+      },
+    });
+    services.push(service);
+    return { store, files, snapshots: snapshotStore, service };
+  }
+  async function closeResources() {
+    const errors: unknown[] = [];
+    for (const service of services) { try { await service.sealAndDrainInstanceMutations(); } catch (error) { errors.push(error); } }
+    for (const manager of managers) { try { await manager.sealAndDrainInstanceMutations(); } catch (error) { errors.push(error); } }
+    for (const snapshot of snapshots) { try { await snapshot.closeAndDrain(); } catch (error) { errors.push(error); } }
+    // Do not close databases or remove bytes while any writer/drain is unconfirmed.
+    if (errors.length) throw new AggregateError(errors, `workspace_scale_drain_unknown; ownedRoot=${root}`, { cause: errors[0] });
+    for (const [store, closed] of databases) {
+      if (closed) continue;
+      try { store.close(); databases.set(store, true); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, `workspace_scale_database_close_unknown; ownedRoot=${root}`, { cause: errors[0] });
+  }
+  try {
+    mkdirSync(workspaceRoot, { recursive: true });
+    let current = openState();
+    return {
+      root, workspaceRoot, managedRoot, now, identity,
+      get state() { return current; },
+      async reopen() { await closeResources(); current = openState(); },
+      async dispose() { await closeResources(); rmSync(root, { recursive: true }); },
+    };
+  } catch (primary) {
+    try { await closeResources(); rmSync(root, { recursive: true }); }
+    catch (cleanup) { throw new AggregateError([primary, cleanup], `workspace_scale_initialization_failed; ownedRoot=${root}`, { cause: primary }); }
+    throw primary;
+  }
+}
+async function withWorkspaceScale(run: (fixture: Awaited<ReturnType<typeof createWorkspaceScaleFixture>>) => Promise<void>): Promise<void> {
+  const fixture = await createWorkspaceScaleFixture();
+  const errors: unknown[] = [];
+  try { await run(fixture); } catch (error) { errors.push(error); }
+  try { await fixture.dispose(); } catch (error) { errors.push(error); }
+  if (errors.length) throw new AggregateError(errors, `workspace_scale_failed; ownedRoot=${fixture.root}`, { cause: errors[0] });
+}

@@ -1,0 +1,248 @@
+import { freezeCapturedData, parseCapturedSourceJson } from './captured-source-json.js';
+import { mergeProtectedObservationClosures } from '../../ai/runtime/protected-observation-closure.js';
+/** Historical typed declarations only. No current identity/ownership inference. */
+export function declareCapturedGroupsRow(row) {
+    const references = [], unmapped = [], observationDeclarations = [];
+    function object(value, path) { if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        unmapped.push(path);
+        return;
+    } return value; }
+    function ref(value, namespace, path) { if (value === undefined || value === null)
+        return; if (typeof value !== 'string' || !value) {
+        unmapped.push(path);
+        return;
+    } references.push({ namespace, id: value, path }); }
+    function fields(value, path, spec) { for (const [key, namespace] of Object.entries(spec))
+        ref(value[key], namespace, path + '.' + key); }
+    function known(value, path, keys) { for (const key of Object.keys(value))
+        if (!keys.includes(key))
+            unmapped.push(path + '.' + key); }
+    function plain(value, path, keys) { const v = object(value, path); if (v)
+        known(v, path, keys); }
+    function guard(value, path) { plain(value, path, ['code', 'stage', 'needsExplicitFollowup']); }
+    function delivery(value, path) { const v = object(value, path); if (!v)
+        return; known(v, path, ['version', 'revision', 'status', 'stage', 'verification', 'hostSettlement', 'readerCleanup', 'storeCleanup', 'startedAt', 'deadlineAt', 'decisionAt', 'finishedAt', 'hostTerminalStatus', 'guardFailure']); if (v.guardFailure !== undefined)
+        guard(v.guardFailure, path + '.guardFailure'); }
+    function agent(value, path) { const v = object(value, path); if (!v)
+        return; fields(v, path, { id: 'agent', parentId: 'agent', turnId: 'agent-turn', sourceTaskId: 'task', resultContentId: 'content' }); known(v, path, ['id', 'parentId', 'taskName', 'canonicalName', 'depth', 'status', 'turn', 'turnId', 'createdAt', 'executionActive', 'sessionResident', 'runtimeResident', 'resourcesReleased', 'cleanupPending', 'resumable', 'stopState', 'closeReason', 'activationState', 'unreadMessages', 'phase', 'currentTool', 'startedAt', 'endedAt', 'lastActivityAt', 'activityRevision', 'error', 'cleanupError', 'lastResult', 'resultContentId', 'bodyUnavailable', 'sourceTaskId', 'hostDeliveryStatus', 'guardFailure', 'hostDeliveryCleanupPending', 'usage', 'presentationOrdinal', 'taskSummary', 'resultSummary', 'toolsCompleted', 'toolsFailed', 'toolCounts', 'otherToolCount', 'toolStatisticsComplete']); if (v.guardFailure !== undefined)
+        guard(v.guardFailure, path + '.guardFailure'); if (v.usage !== undefined)
+        plain(v.usage, path + '.usage', ['inputTokens', 'outputTokens']); if (v.toolCounts !== undefined) {
+        const counts = object(v.toolCounts, path + '.toolCounts');
+        if (counts)
+            for (const [key, count] of Object.entries(counts))
+                if (typeof count !== 'number' || !Number.isFinite(count))
+                    unmapped.push(path + '.toolCounts.' + key);
+    } }
+    function message(value, path) { const v = object(value, path); if (!v)
+        return; fields(v, path, { messageId: 'message', groupId: 'group', receiverId: 'agent', originalReceiverId: 'agent', contentId: 'content', claimId: 'message-claim', turnId: 'agent-turn' }); const sender = object(v.sender, path + '.sender'); if (sender) {
+        if (sender.kind === 'agent')
+            fields(sender, path + '.sender', { agentId: 'agent' });
+        else if (sender.kind === 'user')
+            fields(sender, path + '.sender', { actorId: 'user-actor' });
+        else
+            unmapped.push(path + '.sender.kind');
+        known(sender, path + '.sender', sender.kind === 'agent' ? ['kind', 'agentId'] : ['kind', 'actorId']);
+    } known(v, path, ['messageId', 'groupId', 'sender', 'receiverId', 'originalReceiverId', 'kind', 'preview', 'contentId', 'truncated', 'deliveryState', 'claimId', 'turnId', 'createdAt', 'bodyUnavailable']); }
+    function source(value, path) { const v = object(value, path); if (!v)
+        return; fields(v, path, { sourceTaskId: 'task', groupId: 'group', threadId: 'thread', rootTurnId: 'root-turn', preparationId: 'preparation', bootId: 'boot' }); known(v, path, ['sourceTaskId', 'groupId', 'threadId', 'rootTurnId', 'rootEpoch', 'preparationId', 'bootId', 'phase', 'status', 'delivery']); if (v.delivery !== undefined)
+        delivery(v.delivery, path + '.delivery'); }
+    function control(value, path, commandFields = []) { const v = object(value, path); if (!v)
+        return; fields(v, path, { operationId: 'operation', targetAgentId: 'agent', messageId: 'message', groupId: 'group', actorId: 'user-actor', resourceId: 'resource', bootId: 'boot' }); known(v, path, ['operationId', 'targetAgentId', 'messageId', 'groupId', 'actorId', 'resourceId', 'bootId', 'expectedTurn', 'state', 'resourcesReleased', 'cleanupPending', 'outcome', 'error', 'phase', 'cancellationError', 'displayNames', ...commandFields]); if (v.displayNames !== undefined) {
+        const labels = object(v.displayNames, path + '.displayNames');
+        if (labels) {
+            known(labels, path + '.displayNames', ['zh', 'en']);
+            if (typeof labels.zh !== 'string' || typeof labels.en !== 'string')
+                unmapped.push(path + '.displayNames');
+        }
+    } }
+    function approval(value, path) { const v = object(value, path); if (!v)
+        return; fields(v, path, { approvalId: 'tool-approval', bootId: 'boot', profileId: 'profile', workspaceId: 'workspace', threadId: 'thread', groupId: 'group', agentId: 'agent', sourceTaskId: 'task', turnId: 'agent-turn', ownerId: 'tool-approval-owner', slotId: 'tool-slot', capabilityId: 'tool-capability', invocationNonce: 'tool-invocation' }); known(v, path, ['approvalId', 'bootId', 'profileId', 'workspaceId', 'threadId', 'groupId', 'agentId', 'sourceTaskId', 'turnId', 'ownerId', 'slotId', 'capabilityId', 'invocationNonce', 'turn', 'canonicalName', 'toolName', 'cwd', 'revision', 'permissionRevision', 'inputSha256', 'inputByteLength', 'issuedAt', 'minDeadlineAt', 'status', 'persistenceState', 'reason']); }
+    function closure(value, path) { mergeProtectedObservationClosures(undefined, value); const v = object(value, path); if (!v || !Array.isArray(v.observations))
+        return; v.observations.forEach((item, index) => { const r = object(item, path + '.observations[' + index + ']'); if (r) {
+        observationDeclarations.push({ path: path + '.observations[' + index + ']', reference: r });
+        fields(r, path + '.observations[' + index + ']', { authorityId: 'observation-authority', profileId: 'profile', sourceSessionId: 'session', ownerAgentId: 'observation-owner-agent', scopeId: 'observation-scope', observationId: 'observation', policyId: 'observation-policy' });
+    } }); }
+    function operation(value, path) {
+        const v = object(value, path);
+        if (!v)
+            return;
+        fields(v, path, { groupId: 'group', operationId: 'operation' });
+        const result = object(v.result, path + '.result');
+        if (result) {
+            if (['spawn', 'send', 'followup', 'interrupt', 'close', 'reset', 'resolve_resource', 'approval_decision'].includes(String(v.command)))
+                control(result, path + '.result', v.command === 'spawn' ? ['preparation'] : v.command === 'resolve_resource' ? ['action'] : []);
+            else if (v.command === 'child_result') {
+                fields(result, path + '.result', { contentId: 'content' });
+                known(result, path + '.result', ['contentId', 'state', 'status', 'bodyUnavailable']);
+            }
+            else if (v.command === 'observation_reference') {
+                fields(result, path + '.result', { targetTaskId: 'task', canonicalTaskId: 'task' });
+                known(result, path + '.result', ['targetTaskId', 'canonicalTaskId', 'closureDigest', 'state']);
+            }
+            else if (v.command === 'approval_request') {
+                approval(result.approval, path + '.result.approval');
+                known(result, path + '.result', ['approval']);
+            }
+            else if (v.command === 'published_message' || v.command === 'published_message_unavailable') {
+                fields(result, path + '.result', { messageId: 'message' });
+                if (result.facts !== undefined) {
+                    const f = object(result.facts, path + '.result.facts');
+                    if (f) {
+                        fields(f, path + '.result.facts', { sourceSessionId: 'session', recipientSessionId: 'session' });
+                        closure(f.closure, path + '.result.facts.closure');
+                        known(f, path + '.result.facts', ['version', 'sourceSessionId', 'recipientSessionId', 'historyDigest', 'closure']);
+                    }
+                }
+                known(result, path + '.result', ['messageId', 'messageSeq', 'facts', 'status', 'bodyUnavailable']);
+            }
+            else if (['run_started', 'tool_finished', 'usage'].includes(String(v.command)))
+                known(result, path + '.result', ['state']);
+            else
+                unmapped.push(path + '.command');
+        }
+        if (v.managedTurnReservation !== undefined) {
+            const r = object(v.managedTurnReservation, path + '.managedTurnReservation');
+            if (r) {
+                fields(r, path + '.managedTurnReservation', { agentId: 'agent', previousTurnId: 'agent-turn', nextTurnId: 'agent-turn' });
+                known(r, path + '.managedTurnReservation', ['agentId', 'previousTurnId', 'nextTurnId', 'expectedTurn', 'rootEpoch', 'messageHash', 'closureHash']);
+            }
+        }
+        for (const [key, spec] of Object.entries({ presentationReservation: { agentId: 'agent' }, followupInput: { targetId: 'agent' } })) {
+            if (v[key] !== undefined) {
+                const r = object(v[key], path + '.' + key);
+                if (r) {
+                    fields(r, path + '.' + key, spec);
+                    known(r, path + '.' + key, key === 'followupInput' ? ['targetId', 'message'] : ['agentId', 'ordinal']);
+                }
+            }
+        }
+        if (v.followupAcceptedResult !== undefined)
+            control(v.followupAcceptedResult, path + '.followupAcceptedResult');
+        for (const key of ['fixedAckBytes', 'followupAckBytes'])
+            if (v[key] !== undefined) {
+                if (typeof v[key] !== 'string')
+                    unmapped.push(path + '.' + key);
+                else
+                    control(parseCapturedSourceJson(v[key]), path + '.' + key);
+            }
+        known(v, path, ['groupId', 'operationId', 'requestHash', 'command', 'applyState', 'result', 'managedTurnReservation', 'followupInput', 'followupAcceptedResult', 'followupAckBytes', 'presentationReservation', 'fixedAckBytes']);
+    }
+    const sql = { group_id: 'group', thread_id: 'thread', profile_id: 'profile', workspace_id: 'workspace', boot_id: 'boot', active_group_id: 'group', source_task_id: 'task', preparation_id: 'preparation', resource_id: 'resource', agent_id: 'agent', content_id: 'content', message_id: 'message', operation_id: 'operation', event_id: 'event' };
+    for (const [key, namespace] of Object.entries(sql)) {
+        const cell = row.cells[key];
+        if (cell?.type === 'text')
+            ref(cell.value, namespace, key);
+    }
+    const required = { thread_bindings: ['thread_id', 'profile_id', 'workspace_id'], boot_owners: ['boot_id'], groups: ['group_id', 'thread_id', 'boot_id'], agents: ['group_id', 'agent_id'], events: ['group_id', 'event_id', 'agent_id'], messages: ['message_id', 'group_id', 'receiver_id'], contents: ['content_id', 'group_id', 'agent_id'], operations: ['group_id', 'operation_id'], root_turns: ['source_task_id', 'group_id', 'preparation_id', 'boot_id'], managed_resources: ['resource_id', 'group_id', 'agent_id'], workspace_execution_authorizations: ['profile_id', 'workspace_id'] };
+    for (const key of required[row.table] ?? []) {
+        const cell = row.cells[key];
+        if (cell?.type !== 'text' || !cell.value)
+            unmapped.push(key);
+    }
+    const body = row.json.data_json, path = 'data_json';
+    if (row.table === 'agents')
+        agent(body, path);
+    else if (row.table === 'messages')
+        message(body, path);
+    else if (row.table === 'operations')
+        operation(body, path);
+    else if (row.table === 'root_turns')
+        source(body, path);
+    else if (row.table === 'events') {
+        const v = object(body, path);
+        if (v) {
+            fields(v, path, { groupId: 'group', eventId: 'event', agentId: 'agent', turnId: 'agent-turn' });
+            const payload = object(v.payload, path + '.payload');
+            if (payload) {
+                const p = path + '.payload';
+                switch (v.kind) {
+                    case 'status':
+                    case 'cleanup':
+                        agent(payload.agent, p + '.agent');
+                        known(payload, p, ['agent']);
+                        break;
+                    case 'message_sent':
+                        message(payload.message, p + '.message');
+                        known(payload, p, ['message', 'rerouted']);
+                        break;
+                    case 'message_consumed':
+                        fields(payload, p, { messageId: 'message' });
+                        known(payload, p, ['messageId', 'deliveryState']);
+                        break;
+                    case 'result':
+                        fields(payload, p, { contentId: 'content' });
+                        known(payload, p, ['contentId', 'preview', 'truncated', 'bodyUnavailable']);
+                        break;
+                    case 'artifact':
+                        fields(payload, p, { artifactId: 'artifact', sourceTaskId: 'task' });
+                        known(payload, p, ['artifactId', 'sourceTaskId', 'label', 'kind', 'path', 'mimeType', 'creator']);
+                        break;
+                    case 'tool_finished':
+                        fields(payload, p, { executionEventId: 'agent-tool-execution-event' });
+                        agent(payload.agent, p + '.agent');
+                        known(payload, p, ['executionEventId', 'toolName', 'ok', 'agent']);
+                        break;
+                    case 'delivery':
+                        source(payload.source, p + '.source');
+                        delivery(payload.delivery, p + '.delivery');
+                        known(payload, p, ['source', 'delivery']);
+                        break;
+                    case 'approval':
+                        approval(payload, p);
+                        break;
+                    case 'output':
+                        known(payload, p, ['text']);
+                        break;
+                    case 'usage':
+                        known(payload, p, ['usageId', 'inputTokens', 'outputTokens', 'total']);
+                        if (payload.total !== undefined)
+                            plain(payload.total, p + '.total', ['inputTokens', 'outputTokens']);
+                        break;
+                    default: unmapped.push(path + '.kind');
+                }
+            }
+            known(v, path, ['schemaVersion', 'channel', 'groupId', 'seq', 'eventId', 'agentId', 'turnId', 'kind', 'timestamp', 'payload']);
+        }
+    }
+    else if (body !== undefined) {
+        const v = object(body, path);
+        if (v) {
+            if (row.table === 'groups') {
+                fields(v, path, { groupId: 'group', threadId: 'thread', bootId: 'boot' });
+                known(v, path, ['groupId', 'threadId', 'bootId', 'historicalOnly', 'createdAt', 'lastSeq', 'currentRootEpoch', 'nextRootEpoch', 'mutationBlockedReason', 'permissionRevision']);
+            }
+            else if (row.table === 'contents') {
+                fields(v, path, { contentId: 'content', groupId: 'group', agentId: 'agent' });
+                known(v, path, ['contentId', 'groupId', 'agentId', 'utf8Text', 'byteLength', 'sha256', 'truncated', 'bodyUnavailable', 'status']);
+            }
+            else if (row.table === 'managed_resources') {
+                fields(v, path, { resourceId: 'resource', groupId: 'group', agentId: 'agent', ownerBootId: 'boot', allocationToken: 'worktree-allocation' });
+                known(v, path, ['resourceId', 'groupId', 'agentId', 'ownerBootId', 'kind', 'canonicalPath', 'allocationToken', 'repositoryRoot', 'cleanupPolicy', 'cleanupEligibility', 'state', 'lastError']);
+            }
+            else
+                unmapped.push(path);
+        }
+    }
+    if (row.json.delete_json !== undefined) {
+        const v = object(row.json.delete_json, 'delete_json');
+        if (v) {
+            fields(v, 'delete_json', { operationId: 'operation', actorId: 'user-actor', bootId: 'boot' });
+            control(v.result, 'delete_json.result');
+            known(v, 'delete_json', ['operationId', 'requestHash', 'actorId', 'bootId', 'expectedRevision', 'startedAt', 'result']);
+        }
+    }
+    if (row.json.last_receipt_json !== undefined) {
+        const v = object(row.json.last_receipt_json, 'last_receipt_json');
+        if (v) {
+            const receipt = object(v.receipt, 'last_receipt_json.receipt');
+            if (receipt)
+                fields(receipt, 'last_receipt_json.receipt', { operationId: 'operation' });
+        }
+    }
+    if (row.table === 'workspace_execution_authorizations') {
+        const actor = row.cells.actor_id;
+        if (actor?.type === 'text')
+            ref(actor.value, 'user-actor', 'actor_id');
+    }
+    return freezeCapturedData({ references, unmapped, observationDeclarations });
+}

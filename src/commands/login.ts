@@ -39,6 +39,13 @@ export interface LoginOptions {
   baseUrl?: string;
 }
 
+/** Optional owning host control, never a CLI credential or authorization. */
+export interface LoginCancellation {
+  signal: AbortSignal;
+  onInterrupt?(): void;
+  trackWrite?(original: Promise<void>): void;
+}
+
 export type LoginCommandResult =
   | { status: 'saved'; providerId: string }
   | { status: 'cancelled' };
@@ -57,18 +64,38 @@ const KEY_PORTAL_HINTS: Record<string, string> = {
 
 class LoginCancelledError extends Error {}
 
-function prompt(question: string): Promise<string> {
-  if (typeof process.stdin.setRawMode === 'function') return readRawPrompt(question, false);
+function prompt(question: string, cancellation?: LoginCancellation): Promise<string> {
+  cancellation?.signal.throwIfAborted();
+  if (typeof process.stdin.setRawMode === 'function') return readRawPrompt(question, false, cancellation);
+  if (process.stdin.readableEnded) return Promise.reject(new LoginCancelledError());
   return new Promise((resolve, reject) => {
-    const rl = readline.createInterface({input:process.stdin,output:process.stdout,terminal:false});
-    const cancel = () => {rl.close(); reject(new LoginCancelledError());};
-    rl.once('SIGINT', cancel);
-    rl.once('close', () => reject(new LoginCancelledError()));
-    rl.question(question, answer => {
-      resolve(answer.trim());
-      rl.removeListener('SIGINT', cancel);
-      rl.close();
-    });
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+    let settled = false;
+    const finish = (answer?: string, error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      cancellation?.signal.removeEventListener('abort', abort);
+      rl.removeListener('SIGINT', interrupt);
+      rl.removeListener('close', close);
+      try { rl.close(); }
+      catch (cleanupError) { reject(error === undefined ? cleanupError : new AggregateError([error, cleanupError], 'login_prompt_cleanup_failed')); return; }
+      if (error !== undefined) reject(error); else resolve(answer!.trim());
+    };
+    const abort = () => finish(undefined, cancellation!.signal.reason);
+    const close = () => finish(undefined, new LoginCancelledError());
+    const interrupt = () => {
+      try {
+        cancellation?.onInterrupt?.();
+        finish(undefined, cancellation?.signal.aborted ? cancellation.signal.reason : new LoginCancelledError());
+      } catch (error) { finish(undefined, error); }
+    };
+    rl.once('SIGINT', interrupt);
+    rl.once('close', close);
+    cancellation?.signal.addEventListener('abort', abort, { once: true });
+    if (cancellation?.signal.aborted) { abort(); return; }
+    if (process.stdin.readableEnded) { close(); return; }
+    try { rl.question(question, answer => finish(answer)); }
+    catch (error) { finish(undefined, error); }
   });
 }
 
@@ -97,60 +124,101 @@ export function consumeSecretInputChunk(value: string, chunk: Buffer): SecretInp
 }
 
 /** Hidden input: raw-mode char capture so the key is never echoed. */
-function promptSecret(question: string): Promise<string> {
-  return readRawPrompt(question, true);
+function promptSecret(question: string, cancellation?: LoginCancellation): Promise<string> {
+  return readRawPrompt(question, true, cancellation);
 }
 
-function readRawPrompt(question: string, hidden: boolean): Promise<string> {
+function readRawPrompt(question: string, hidden: boolean, cancellation?: LoginCancellation): Promise<string> {
+  cancellation?.signal.throwIfAborted();
+  const stdin = process.stdin;
+  if (typeof stdin.setRawMode !== 'function') return prompt(question, cancellation);
+  if (stdin.readableEnded) return Promise.reject(new LoginCancelledError());
   return new Promise((resolve, reject) => {
-    const stdin = process.stdin;
-    if (typeof stdin.setRawMode !== 'function') {
-      // non-TTY (piped stdin): fall back to a plain line read
-      prompt(question).then(resolve, reject);
-      return;
-    }
-    process.stdout.write(question);
     let value = '';
-    const wasRaw = stdin.isRaw;
+    const wasRaw = Boolean(stdin.isRaw);
     let finished = false;
-    const finish = (cancelled: boolean) => {
+    const finish = (error?: unknown) => {
       if (finished) return;
       finished = true;
+      const answer = error === undefined ? value.trim() : '';
+      value = '';
       stdin.removeListener('data', onData);
       stdin.removeListener('end', onEnd);
-      pauseInputForHandoff();
-      if (wasRaw) stdin.setRawMode(true);
-      process.stdout.write('\n');
-      if (cancelled) reject(new LoginCancelledError());
-      else resolve(value.trim());
-    };
-    const onEnd = () => finish(true);
-    stdin.setRawMode(true);
-    stdin.resume();
-    const onData = (ch: Buffer) => {
-      for (const character of ch.toString('utf8')) {
-        const previous=value;
-        const result = consumeSecretInputChunk(value, Buffer.from(character));
-        value = result.value;
-        if (result.action === 'submit') {finish(false); return;}
-        if (result.action === 'abort') {finish(true); return;}
-        if (!hidden) {
-          if (value.length < previous.length) process.stdout.write('\b \b');
-          else if (value.length > previous.length) process.stdout.write(character);
-        }
+      cancellation?.signal.removeEventListener('abort', onAbort);
+      const errors: unknown[] = error === undefined ? [] : [error];
+      try { pauseInputForHandoff(); }
+      catch (cleanupError) { errors.push(cleanupError); }
+      // An enclosing Windows session retains raw mode between prompts. An
+      // external raw owner must also keep its exact prior mode on cancellation.
+      if (wasRaw) {
+        try { stdin.setRawMode(true); }
+        catch (cleanupError) { errors.push(cleanupError); }
       }
+      try { process.stdout.write('\n'); }
+      catch (cleanupError) { errors.push(cleanupError); }
+      if (errors.length === 1) reject(errors[0]);
+      else if (errors.length) reject(new AggregateError(errors, 'login_prompt_cleanup_failed'));
+      else resolve(answer);
+    };
+    const onAbort = () => finish(cancellation!.signal.reason);
+    const onEnd = () => finish(cancellation?.signal.aborted ? cancellation.signal.reason : new LoginCancelledError());
+    const interrupt = () => {
+      try {
+        cancellation?.onInterrupt?.();
+        finish(cancellation?.signal.aborted ? cancellation.signal.reason : new LoginCancelledError());
+      } catch (error) { finish(error); }
+    };
+    const onData = (chunk: Buffer) => {
+      try {
+        for (const character of chunk.toString('utf8')) {
+          if (finished) return;
+          const previous = value;
+          const result = consumeSecretInputChunk(value, Buffer.from(character));
+          value = result.value;
+          if (result.action === 'submit') { finish(); return; }
+          if (result.action === 'abort') {
+            if (character === '\u0003') interrupt(); else onEnd();
+            return;
+          }
+          if (!hidden) {
+            if (value.length < previous.length) process.stdout.write('\b \b');
+            else if (value.length > previous.length) process.stdout.write(character);
+          }
+        }
+      } catch (error) { finish(error); }
     };
     stdin.on('data', onData);
     stdin.once('end', onEnd);
-    if (stdin.readableEnded) finish(true);
+    cancellation?.signal.addEventListener('abort', onAbort, { once: true });
+    if (cancellation?.signal.aborted) { onAbort(); return; }
+    if (stdin.readableEnded) { onEnd(); return; }
+    try {
+      process.stdout.write(question);
+      stdin.setRawMode(true);
+      stdin.resume();
+    } catch (error) { finish(error); }
   });
 }
 
-export async function runLoginCommand(options: LoginOptions): Promise<LoginCommandResult> {
+export async function runLoginCommand(options: LoginOptions, cancellation?: LoginCancellation): Promise<LoginCommandResult> {
+  const current = () => cancellation?.signal.throwIfAborted();
+  current();
   const config = await loadConfig();
+  current();
   const profiles = listProviderProfiles();
   const interactive = Boolean(process.stdin.isTTY);
   const releaseRawInput = retainRawInputModeForSession();
+  const persist = async () => {
+    current();
+    const original = saveConfig(config);
+    try { cancellation?.trackWrite?.(original); }
+    catch (trackingError) {
+      const [result] = await Promise.allSettled([original]);
+      throw new AggregateError([trackingError, ...(result.status === 'rejected' ? [result.reason] : [])], 'login_write_tracking_failed');
+    }
+    await original;
+    current();
+  };
 
   try {
     // 1. provider selection
@@ -170,7 +238,8 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       profiles.forEach((item, index) => {
         writeLine(`  ${index + 1}. ${item.label} (${item.id})`);
       });
-      const answer = await prompt('输入编号或 provider id：');
+      const answer = await prompt('输入编号或 provider id：', cancellation);
+      current();
       const index = Number(answer) - 1;
       const selected = Number.isInteger(index) && index >= 0 && index < profiles.length
         ? profiles[index]
@@ -188,7 +257,8 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
     if (!planId && interactive && plans.length > 0) {
       writeLine('选择 Key 所属服务（普通 API 与 Coding Plan 的 Key/额度可能不通用）：');
       plans.forEach((plan,index) => writeLine(`  ${index+1}. ${plan.label} (${plan.id})`));
-      const answer = await prompt('输入编号或服务 id：');
+      const answer = await prompt('输入编号或服务 id：', cancellation);
+      current();
       planId = plans[Number(answer)-1]?.id ?? answer.toLowerCase();
     }
     const plan = plans.find(item => item.id === planId);
@@ -224,7 +294,8 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       }
     }
     if (!apiKey) {
-      apiKey = await promptSecret(`输入 ${chosen.label} API key（${envCandidates.length > 0 ? '回车复用环境变量中的 key' : '输入时不可见'}）：`);
+      apiKey = await promptSecret(`输入 ${chosen.label} API key（${envCandidates.length > 0 ? '回车复用环境变量中的 key' : '输入时不可见'}）：`, cancellation);
+      current();
       if (!apiKey && envCandidates.length > 0) {
         apiKey = envCandidates[0].apiKey;
       }
@@ -235,9 +306,11 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
     }
 
     // 4. optional live verification (explicit opt-out only skips network)
+    current();
     if (!options.skipVerify) {
       writeLine('正在验证 key（只读模型列表请求，不消耗生成 token）…');
       const probe = await probeApiKey(chosen.protocol, baseUrl, apiKey);
+      current();
       if (probe.status === 'valid') {
         writeLine('验证通过。');
       } else if (probe.status === 'network_error') {
@@ -258,15 +331,16 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       ...(existing?.headers ? { headers: existing.headers } : {}),
       apiKey,
     };
-    await saveConfig(config);
+    await persist();
     writeLine(`已保存 ${chosen.label} API key 到 ${chosen.id} provider。`);
 
     // 6. default model switch — non-interactive default is no (safe);
     //    interactive runs ask.
     const setDefault = options.setDefault
       ?? (interactive
-        ? (await prompt(`切换默认模型到 ${defaultModel.label}？(y/N)：`)).toLowerCase() === 'y'
+        ? (await prompt(`切换默认模型到 ${defaultModel.label}？(y/N)：`, cancellation)).toLowerCase() === 'y'
         : false);
+    current();
     if (setDefault) {
       config.models = config.models ?? {};
       const modelId = defaultModel.modelId;
@@ -283,7 +357,7 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       }
       config.defaultProvider = chosen.id;
       config.defaultModelId = modelId;
-      await saveConfig(config);
+      await persist();
       writeLine(`默认模型已切换为 [${chosen.id}] ${defaultModel.label}。`);
     }
 

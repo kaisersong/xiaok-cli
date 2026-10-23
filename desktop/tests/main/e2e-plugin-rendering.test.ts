@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 
 import {
   createMcpClientConnection,
@@ -27,9 +26,17 @@ const SLIDE_FIXTURE = join(
   SLIDE_PLUGIN_SRC,
   'mcp-servers', 'slide-renderer', 'tests', 'fixtures', 'valid-brief.json',
 );
-const MANAGED_PYTHON = process.platform === 'win32'
-  ? join(homedir(), '.xiaok', 'runtime', 'python-env', 'Scripts', 'python.exe')
-  : join(homedir(), '.xiaok', 'runtime', 'python-env', 'bin', 'python3');
+// Global setup resolves the installed runtime before worker account isolation.
+const installedRuntime = inject('installedSlidePythonRuntime') as {
+  python: string;
+  marker: string;
+} | undefined;
+if (!installedRuntime || typeof installedRuntime.python !== 'string' || !installedRuntime.python
+  || typeof installedRuntime.marker !== 'string' || !installedRuntime.marker) {
+  throw new Error('installed slide Python runtime fixture required');
+}
+const MANAGED_PYTHON = installedRuntime.python;
+const MANAGED_PYTHON_MARKER = installedRuntime.marker;
 
 function parseJsonText<T>(payload: string): T {
   return JSON.parse(payload) as T;
@@ -136,7 +143,7 @@ describe('e2e: plugin rendering', () => {
     const runtimeReady = await ensureSlideRendererPythonReady({
       venvPython: MANAGED_PYTHON,
       wheelsDir: join(SLIDE_PLUGIN_SRC, 'bundled-wheels'),
-      markerPath: join(homedir(), '.xiaok', 'runtime', 'python-env', '.deps-installed'),
+      markerPath: MANAGED_PYTHON_MARKER,
     });
     expect(runtimeReady.ready).toBe(true);
 

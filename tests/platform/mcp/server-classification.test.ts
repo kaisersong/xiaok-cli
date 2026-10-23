@@ -8,7 +8,9 @@ import {
 } from '../../../src/platform/mcp/server-classification.js';
 import type { NamedMcpServerConfig } from '../../../src/platform/mcp/types.js';
 
-function pluginCua(overrides: Partial<NamedMcpServerConfig> = {}): NamedMcpServerConfig {
+type StdioNamed = Extract<NamedMcpServerConfig, { type: 'stdio' }>;
+
+function pluginCua(overrides: Partial<StdioNamed> = {}): NamedMcpServerConfig {
   return {
     name: 'cua-driver',
     type: 'stdio',

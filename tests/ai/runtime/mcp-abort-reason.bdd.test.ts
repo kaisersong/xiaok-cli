@@ -16,18 +16,17 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
       registry, session: new AgentSessionState(), controller: new AgentRunController(), systemPrompt: 'fixture' });
     try {
       const error = await runtime.run('fixture', event => events.push(event.type), controller.signal).catch(error => error);
-      expect(error).toMatchObject({ name: 'AbortError' });
-      if (reason.name === 'AbortError') expect(error).toBe(reason); else expect(error.cause).toBe(reason);
+      expect(error).toBe(reason);
       expect(calls).toBe(0); expect(events).toEqual([]);
     } finally { registry.dispose(); }
   });
 
-  it('preserves cancellation during real Registry post-hook settlement before successful tool history', async () => {
+  it('rejects the real Registry post-hook resolve / CLI await microtask gap before successful tool history', async () => {
     const entered = barrier(); let release!: (warnings: string[]) => void;
     const postHook = new Promise<string[]>(resolve => { release = resolve; });
     const controller = new AbortController(); const reason = new Error('between actual registry and CLI');
     const events: string[] = []; let modelCalls = 0; const session = new AgentSessionState();
-    const registry = new ToolRegistry({ autoMode: true, hooksRunner: {
+    const registry = new ToolRegistry({ autoMode: true, hookInputMode: 'direct-callback', hooksRunner: {
       runHooks: async () => ({ ok: true }), runPreHooks: async () => ({ ok: true }),
       runPostHooks: () => { entered.release(); return postHook; },
     } }, [{ permission: 'safe', definition: { name: 'probe', description: 'fixture', inputSchema: { type: 'object' } }, execute: async () => 'LATE_SUCCESS' }]);
@@ -37,15 +36,22 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     const outcome = runtime.run('fixture', event => events.push(event.type), controller.signal).catch(error => error);
     try {
       await entered.wait;
-      release([]); // Enqueues the inner Registry continuation; its outer guard still runs.
-      queueMicrotask(() => controller.abort(reason)); // Cancellation is observed by the real Registry outer guard.
+      release([]); // Enqueues the real Registry continuation, which checks then resolves.
+      queueMicrotask(() => controller.abort(reason)); // Wins before its caller resumes.
       const error = await outcome;
-      expect.soft(error).toMatchObject({ name: 'AbortError' }); expect.soft(error.cause).toBe(reason);
+      expect.soft(error).toBe(reason);
       expect.soft(events).not.toContain('tool_finished'); expect.soft(events.filter(type => type === 'run_aborted')).toHaveLength(1);
       expect(events).not.toContain('run_failed'); expect(modelCalls).toBe(1);
       expect(session.getMessages().flatMap(message => message.content).filter(block => block.type === 'tool_result'))
         .toEqual([{ type: 'tool_result', tool_use_id: 'actual-call', content: '[user-cancelled]', is_error: true }]);
-    } finally { release([]); await outcome; registry.dispose(); }
+    } finally {
+      release([]); await outcome;
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      // Additional cleanup evidence must not replace the original body/abort error.
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it.each(['run_started', 'assistant_text'])('emits run_aborted once when the %s listener cancels synchronously', async stage => {
@@ -56,7 +62,7 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     } } as ModelAdapter, registry, session: new AgentSessionState(), controller: new AgentRunController(), systemPrompt: 'fixture' });
     try {
       const error = await runtime.run('fixture', event => { events.push(event.type); if (event.type === stage) controller.abort(reason); }, controller.signal).catch(error => error);
-      expect.soft(error).toMatchObject({ name: 'AbortError', cause: reason });
+      expect.soft(error).toBe(reason);
       expect(events.filter(type => type === 'run_aborted')).toHaveLength(1); expect(events).not.toContain('run_failed');
     } finally { registry.dispose(); }
   });
@@ -78,7 +84,7 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     } } as ModelAdapter, registry, session, controller: new AgentRunController(), systemPrompt: 'fixture', maxIterations: 2 });
     try {
       const error = await runtime.run('fixture', event => events.push(event.type), controller.signal).catch(error => error);
-      expect(error).toMatchObject({ name: 'AbortError', cause: reason }); expect(events.filter(type => type === 'tool_finished')).toHaveLength(withPriorSuccess ? 1 : 0);
+      expect(error).toBe(reason); expect(events.filter(type => type === 'tool_finished')).toHaveLength(withPriorSuccess ? 1 : 0);
       expect(events.filter(type => type === 'run_aborted')).toHaveLength(1); expect(calls).toBe(1);
       expect(session.getMessages().flatMap(message => message.content).filter(block => block.type === 'tool_result'))
         .toEqual([
@@ -114,8 +120,7 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     try {
       await entered.wait; controller.abort(reason); held.release();
       const ending = await outcome;
-      expect(ending).toMatchObject({ error: { name: 'AbortError' } });
-      if (!(reason instanceof Error && reason.name === 'AbortError')) expect((ending as { error: Error }).error.cause).toBe(reason);
+      expect((ending as { error: unknown }).error).toBe(reason);
       expect(events.filter(type => type === 'run_aborted')).toHaveLength(1); expect(events).not.toContain('run_failed');
       expect(modelRequests).toBe(1);
       const blocks = session.getMessages().flatMap(message => message.content);

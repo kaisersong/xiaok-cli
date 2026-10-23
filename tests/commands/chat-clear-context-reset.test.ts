@@ -9,7 +9,8 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from 'commander';
-import type { Message, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
+import type { Message, StreamChunk, ToolDefinition } from '../../src/types.js';
+import type { CapabilityAwareAdapter } from '../../src/ai/runtime/model-capabilities.js';
 import { Console } from 'node:console';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
@@ -22,7 +23,13 @@ vi.mock('../../src/ui/model-selector.js', () => ({
   selectModel: vi.fn(async () => null),
 }));
 
-function createEchoAdapter(): ModelAdapter {
+function requireResizeListener(listener: unknown): asserts listener is () => void {
+  if (typeof listener !== 'function') {
+    throw new TypeError('chat_resize_listener_not_callable');
+  }
+}
+
+function createEchoAdapter(): CapabilityAwareAdapter {
   return {
     getModelName() {
       return 'echo-test-model';
@@ -211,6 +218,7 @@ describe('chat /clear context reset', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
+          requireResizeListener(listener);
           process.stdout.removeListener('resize', listener);
         }
       }

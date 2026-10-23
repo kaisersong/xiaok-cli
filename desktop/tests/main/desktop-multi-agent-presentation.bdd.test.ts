@@ -1,3 +1,4 @@
+import type {DatabaseSync} from 'node:sqlite';
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,11 +32,11 @@ describe('BDD: SubAgent presentation uses actual Desktop tool settlement', () =>
     const catalog = new DesktopToolCatalogBridge({ registry: broad, workspaceId: 'workspace' }); cleanup.push(() => { catalog.dispose(); broad.dispose(); }); catalog.authorizeRoot();
     const finished = vi.spyOn(service, 'recordToolFinished');
     if (outcome === 'sqlite') {
-      const append = store.appendEvent.bind(store);
-      vi.spyOn(store, 'appendEvent').mockImplementation((groupId, event, ...rest) => {
-        if (event.kind === 'tool_finished') throw new Error('SQLITE_FULL: tool receipt');
-        return append(groupId, event, ...rest);
-      });
+      const db=(store as unknown as {db:DatabaseSync}).db;
+      db.exec(`CREATE TEMP TRIGGER deny_tool_receipt BEFORE INSERT ON events
+        WHEN json_extract(NEW.data_json,'$.kind')='tool_finished'
+        BEGIN SELECT RAISE(ABORT,'SQLITE_FULL: tool receipt'); END`);
+      cleanup.push(()=>db.exec('DROP TRIGGER IF EXISTS temp.deny_tool_receipt'));
     }
     let call = 0, secondTurn = false, groupId = '', childId = '';
     let releaseCancel!: () => void; const cancelGate = new Promise<void>(resolve => { releaseCancel = resolve; }); cleanup.push(() => releaseCancel());

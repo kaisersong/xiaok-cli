@@ -1,0 +1,14 @@
+import os from 'node:os';
+import {syncBuiltinESMExports} from 'node:module';
+import {realpathSync,statSync} from 'node:fs';
+import {basename,dirname} from 'node:path';
+const fixtureRoot=process.env.XIAOK_WORKFLOW_FIXTURE_HOME;
+if(!fixtureRoot)throw Error('owned_workflow_fixture_home_required');
+const canonical=realpathSync(fixtureRoot);
+if(canonical!==fixtureRoot||dirname(canonical)!==realpathSync(os.tmpdir())||!basename(canonical).startsWith('workflow-real-get-'))throw Error('owned_workflow_fixture_home_not_owned_canonical_temp');
+const stat=statSync(canonical);
+if(!stat.isDirectory()||stat.uid!==os.userInfo().uid)throw Error('owned_workflow_fixture_home_owner_mismatch');
+const originalUserInfo=os.userInfo;
+os.userInfo=options=>{const info=Reflect.apply(originalUserInfo,os,[options]);return {...info,homedir:Buffer.isBuffer(info.homedir)?Buffer.from(canonical):canonical};};
+os.homedir=()=>canonical;
+syncBuiltinESMExports();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSystemOneAdapter } from '../src/ai/models.js';
 import { probeApiKey } from '../src/ai/providers/key-probe.js';
-import type { Config } from '../src/types.js';
+import type { ConfigV2Input } from '../src/types.js';
 
 /**
  * 对真实 TypeSafe System One 端点（api.typesafe.ai）的联机验收。
@@ -14,7 +14,7 @@ import type { Config } from '../src/types.js';
  */
 const liveKey = process.env.XIAOK_TYPESAFE_API_KEY ?? process.env.TYPESAFE_API_KEY ?? '';
 
-function liveConfig(): Config {
+function liveConfig(): ConfigV2Input {
   return {
     schemaVersion: 2,
     defaultProvider: 'anthropic',

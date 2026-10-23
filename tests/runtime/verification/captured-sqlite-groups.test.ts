@@ -1,0 +1,196 @@
+import{afterAll,afterEach,beforeAll,expect,it,vi}from'vitest';
+import{execFileSync}from'node:child_process';
+import{mkdtempSync,realpathSync,statSync,rmSync,writeFileSync,mkdirSync,existsSync}from'node:fs';import{tmpdir}from'node:os';import{join,resolve,basename,dirname}from'node:path';
+const discovery=vi.hoisted(()=>({home:'',route:'ordinary',failSync:false,flipRoute:false}));
+vi.mock('node:os',async load=>{const actual=await load<typeof import('node:os')>();return {...actual,userInfo:()=>({...actual.userInfo(),homedir:discovery.home})};});
+vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,fsyncSync:(fd:number)=>{if(actual.fstatSync(fd).isDirectory()){if(discovery.failSync)throw Error('registry_fsync_fixture');if(discovery.flipRoute)discovery.route='protected';}return actual.fsyncSync(fd);}};});
+vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:()=>({kind:'ordinary'})}));
+vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>({...await load<typeof import('../../../src/runtime/verification/migration-markers.js')>(),readInstalledCurrentProfile:()=>({kind:discovery.route})}));
+import{DesktopMultiAgentStore}from'../../../desktop/electron/desktop-multi-agent-store.js';
+import{startProfileSourceCapture,readProfileSourceCapture,openProfileSqliteReader,closeProfileSqliteReader,iterateProfileSqliteReaderRows}from'../../../src/runtime/verification/profile-source-capture.js';
+const root=realpathSync(mkdtempSync(join(tmpdir(),'captured-sqlite-groups-'))),directoryHelper=join(root,'directory'),sqliteHelper=join(root,'sqlite');let serial=0;const closes:Array<()=>unknown>=[];
+afterEach(async()=>{for(const close of closes.splice(0).reverse())await close();});afterAll(()=>rmSync(root,{recursive:true,force:true}));
+beforeAll(()=>{discovery.home=join(root,'account');mkdirSync(discovery.home);const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
+function fixture(){const path=join(root,`groups-${serial++}.sqlite`),store=new DesktopMultiAgentStore(path,{bootId:'original-boot',now:()=>10});try{store.initializeWorkspaceAuthorization({profileId:'original-profile',workspaceId:'original-workspace'});store.registerThread({threadId:'original-thread',profileId:'original-profile',workspaceId:'original-workspace',cwd:root});const group=store.createGroup('original-thread');store.claimBootOwnership();store.putAgent(group.groupId,{id:'original-child',parentId:`root_${group.groupId}`,taskName:'child',canonicalName:'/root/child',depth:1,status:'pending',turn:0,sourceTaskId:'original-task'});const content=store.putContent(group.groupId,'original-child','Original durable result');store.sendMessage(group.groupId,{sender:{kind:'agent',agentId:`root_${group.groupId}`},receiverId:'original-child',kind:'message',text:'Original captured message',contentId:content.contentId});store.putRootBinding({sourceTaskId:'original-root-task',groupId:group.groupId,threadId:'original-thread',rootTurnId:'original-root-turn',rootEpoch:1,preparationId:'original-preparation',bootId:'original-boot',phase:'settled',status:'completed'});store.putResource({resourceId:'original-resource',groupId:group.groupId,agentId:'original-child',ownerBootId:'original-boot',kind:'worktree',canonicalPath:root,allocationToken:'original-allocation',cleanupPolicy:'keep',cleanupEligibility:'manual',state:'retained_by_policy'});store.putOperation({groupId:group.groupId,operationId:'original-open-command',requestHash:'original-hash',command:'original_extension',applyState:'unknown',result:{literal:'Original retained extension',sourceTaskId:'must-not-infer'}});return{path,groupId:group.groupId};}finally{store.close();}}
+async function captured(path:string){const d=statSync(dirname(path),{bigint:true}),s=statSync(path,{bigint:true}),owner=await startProfileSourceCapture({uid:process.getuid!(),directoryHelper,sqliteHelper,sources:[{sourceId:'original-groups',kind:'sqlite-db',snapshotFormat:'multi-agent-groups-sqlite-v1',directory:{canonicalPath:dirname(path),device:String(d.dev),inode:String(d.ino)},database:{basename:basename(path),device:String(s.dev),inode:String(s.ino)}}],signal:new AbortController().signal});closes.push(()=>owner.close());return{owner,token:await owner.capture()};}
+it('captures the original Groups producer through its dedicated native format',async()=>{const{path}=fixture(),{owner,token}=await captured(path);expect(readProfileSourceCapture(owner,token).sources).toHaveLength(1);const reader=openProfileSqliteReader(owner,token,'original-groups');closeProfileSqliteReader(reader);await owner.checkCurrent();});
+it('reads the original user_version from the same opaque parser and caches only the fixed statement',async()=>{const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups'),api=await import('../../../src/runtime/verification/profile-source-capture.js'),{default:Sqlite}=await import('better-sqlite3');const read=(api as unknown as{readProfileSqliteReaderUserVersion:(reader:object)=>number}).readProfileSqliteReaderUserVersion;expect(typeof read).toBe('function');const original=Sqlite.prototype.prepare,connections=new Set<object>();let prepares=0;const spy=vi.spyOn(Sqlite.prototype,'prepare').mockImplementation(function(this:object,...args:Parameters<typeof original>){connections.add(this);prepares++;return original.apply(this,args);});try{for(let i=0;i<100;i++)expect(read(reader)).toBe(4);expect(prepares).toBe(1);expect(connections.size).toBe(1);expect(()=>read({...reader})).toThrow();}finally{spy.mockRestore();closeProfileSqliteReader(reader);}expect(()=>read(reader)).toThrow();});
+
+it('reads every original Groups table and denies another source family projection',async()=>{const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');const{METADATA_SESSION_QUERIES}=await import('../../../src/runtime/verification/metadata-session-query-manifest.js');try{const names=Object.keys(METADATA_SESSION_QUERIES).filter(id=>id.startsWith('groups:')&&!id.includes('-v1-'));expect(names).toHaveLength(13);const counts:Record<string,number>={};for(const id of names)counts[id]=[...iterateProfileSqliteReaderRows(reader,id as keyof typeof METADATA_SESSION_QUERIES)].length;expect(counts['groups:agents']).toBe(2);expect(counts['groups:messages']).toBe(1);expect(counts['groups:thread_bindings']).toBe(1);expect(()=>[...iterateProfileSqliteReaderRows(reader,'loop:loop_definitions')]).toThrow('source_sqlite_query');}finally{closeProfileSqliteReader(reader);}});
+
+async function legacyFixture(columns:number){const{DatabaseSync}=await import('node:sqlite'),original=DatabaseSync.prototype.exec,statements:string[]=[];const spy=vi.spyOn(DatabaseSync.prototype,'exec').mockImplementation(function(this:InstanceType<typeof DatabaseSync>,sql:string){statements.push(sql);return original.call(this,sql);});try{fixture();}finally{spy.mockRestore();}const base=statements.find(sql=>sql.includes('CREATE TABLE IF NOT EXISTS thread_bindings'));expect(base).toBeTruthy();const path=join(root,`groups-legacy-${serial++}.sqlite`),db=new DatabaseSync(path);try{db.exec(base!);const alters=statements.filter(sql=>sql.startsWith('ALTER TABLE thread_bindings ADD COLUMN'));for(const sql of alters.slice(0,columns))db.exec(sql);db.exec('PRAGMA user_version=1');}finally{db.close();}return path;}
+it('captures exact original v1 schema branches before normal producer migration',async()=>{const{DatabaseSync}=await import('node:sqlite'),api=await import('../../../src/runtime/verification/profile-source-capture.js');const schemas:unknown[]=[];for(let columns=0;columns<3;columns++){const path=await legacyFixture(columns),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{expect(api.readProfileSqliteReaderUserVersion(reader)).toBe(1);schemas.push({version:1,columns,schema:api.readProfileSqliteReaderSchema(reader)});}finally{closeProfileSqliteReader(reader);await owner.close();}const migrated=new DesktopMultiAgentStore(path);migrated.close();const db=new DatabaseSync(path);try{expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(4);}finally{db.close();}}const current=fixture(),db=new DatabaseSync(current.path);try{schemas.push({version:4,schema:db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()});}finally{db.close();}writeFileSync(join(root,'original-schema-variants.json'),JSON.stringify(schemas,null,2));});
+
+it('validates original schema variants and rejects additional persistent schema',async()=>{const modulePath='../../../src/runtime/verification/groups-source-schema.js';const api=await import(modulePath),native=await import('../../../src/runtime/verification/profile-source-capture.js');for(const path of[fixture().path,await legacyFixture(0),await legacyFixture(1),await legacyFixture(2)]){const{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{expect(api.readCapturedGroupsSchema(native.readProfileSqliteReaderSchema(reader),native.readProfileSqliteReaderUserVersion(reader)).tables.length).toBe(native.readProfileSqliteReaderUserVersion(reader)===4?13:native.readProfileSqliteReaderUserVersion(reader)!==1?11:10);const schema=native.readProfileSqliteReaderSchema(reader);expect(()=>api.readCapturedGroupsSchema([...schema,{type:'table',name:'unknown',tbl_name:'unknown',sql:'CREATE TABLE unknown(id TEXT)'}],native.readProfileSqliteReaderUserVersion(reader))).toThrow();}finally{closeProfileSqliteReader(reader);await owner.close();}}});
+
+it('checks original indexed JSON rows without changing their historical values',async()=>{const modulePath='../../../src/runtime/verification/captured-sqlite-groups-row.js',api=await import(modulePath),{METADATA_SESSION_QUERIES}=await import('../../../src/runtime/verification/metadata-session-query-manifest.js');const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{let checked=0;for(const id of Object.keys(METADATA_SESSION_QUERIES).filter(id=>id.startsWith('groups:')&&!id.includes('-v1-'))){for(const row of iterateProfileSqliteReaderRows(reader,id as keyof typeof METADATA_SESSION_QUERIES)){const result=api.readCapturedGroupsRow(id.slice(7),row);expect(result.cells).toBe(row.record);if(row.record.data_json){checked++;expect(()=>api.readCapturedGroupsRow(id.slice(7),{...row,record:{...row.record,logical_bytes:{type:'integer',value:'0'}}})).toThrow();}}}expect(checked).toBeGreaterThan(3);}finally{closeProfileSqliteReader(reader);}});
+
+it.each(['index','duplicate-json','content-hash'] as const)('rejects original durable row corruption: %s',async(kind)=>{const{path}=fixture(),{DatabaseSync}=await import('node:sqlite'),{encodeMultiAgentRow}=await import('../../../desktop/electron/desktop-multi-agent-store.js'),db=new DatabaseSync(path);try{if(kind==='index')db.exec('UPDATE agents SET created_at=created_at+0.5');else if(kind==='duplicate-json')db.exec(`UPDATE operations SET data_json='{"groupId":"one","groupId":"two"}'`);else{const found=db.prepare('SELECT content_id,data_json FROM contents').get()!;const value=JSON.parse(String(found.data_json));value.sha256='0'.repeat(64);const raw=encodeMultiAgentRow(value);db.prepare('UPDATE contents SET data_json=?,logical_bytes=? WHERE content_id=?').run(raw,Buffer.byteLength(raw),found.content_id!);}}finally{db.close();}const{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups'),api=await import('../../../src/runtime/verification/captured-sqlite-groups-row.js'),query=kind==='index'?'groups:agents':kind==='duplicate-json'?'groups:operations':'groups:contents';try{expect(()=>{for(const row of iterateProfileSqliteReaderRows(reader,query))api.readCapturedGroupsRow(query.slice(7),row);}).toThrow();}finally{closeProfileSqliteReader(reader);}});
+
+it('rejects a stored authorization outside the original scalar parser contract',async()=>{const{path}=fixture(),{DatabaseSync}=await import('node:sqlite'),db=new DatabaseSync(path);try{expect(Number(db.prepare('SELECT COUNT(*) n FROM workspace_execution_authorizations').get()!.n)).toBe(1);db.exec('UPDATE workspace_execution_authorizations SET updated_at=-1');}finally{db.close();}const{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups'),api=await import('../../../src/runtime/verification/captured-sqlite-groups-row.js');try{expect(()=>{for(const row of iterateProfileSqliteReaderRows(reader,'groups:workspace_execution_authorizations'))api.readCapturedGroupsRow('workspace_execution_authorizations',row);}).toThrow();}finally{closeProfileSqliteReader(reader);}});
+
+it('declares actual typed identities and retains unknown command mappings explicitly',async()=>{const modulePath='../../../src/runtime/verification/captured-sqlite-groups-references.js',api=await import(modulePath),rows=await import('../../../src/runtime/verification/captured-sqlite-groups-row.js'),{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{for(const query of['groups:agents','groups:root_turns','groups:operations','groups:thread_bindings'] as const){for(const raw of iterateProfileSqliteReaderRows(reader,query)){const declaration=api.declareCapturedGroupsRow(rows.readCapturedGroupsRow(query.slice(7),raw));if(query==='groups:agents'&&raw.record.agent_id?.type==='text'&&raw.record.agent_id.value==='original-child')expect(declaration.references).toContainEqual({namespace:'task',id:'original-task',path:'data_json.sourceTaskId'});if(query==='groups:root_turns')expect(declaration.references).toContainEqual({namespace:'task',id:'original-root-task',path:'data_json.sourceTaskId'});if(query==='groups:operations'){expect(declaration.unmapped).toContain('data_json.command');expect(declaration.references.some((r:{id:string})=>r.id==='must-not-infer')).toBe(false);}if(query==='groups:thread_bindings')expect(declaration.references.some((r:{namespace:string})=>r.namespace==='session')).toBe(false);}}}finally{closeProfileSqliteReader(reader);}});
+
+it('streams the complete original Groups population and closes its parser on early return',async()=>{const modulePath='../../../src/runtime/verification/captured-sqlite-groups.js',api=await import(modulePath),{path}=fixture(),{owner,token}=await captured(path);const iterator=api.iterateCapturedSQLiteGroupsSources(owner,token);expect(iterator.next().value.kind).toBe('source-start');iterator.return();const reader=openProfileSqliteReader(owner,token,'original-groups');closeProfileSqliteReader(reader);const events=[...api.iterateCapturedSQLiteGroupsSources(owner,token)];expect(events.filter((event:{kind:string})=>event.kind==='table-end')).toHaveLength(13);expect(events.at(-1)).toMatchObject({kind:'complete',version:1});expect(events.some((event:{kind:string;unmapped?:string[]})=>event.kind==='row'&&event.unmapped?.includes('data_json.command'))).toBe(true);await owner.checkCurrent();});
+
+it('retains original fractional business clocks in INTEGER-affinity columns',async()=>{const path=join(root,`fraction-${serial++}.sqlite`),store=new DesktopMultiAgentStore(path,{now:()=>12.5});try{store.registerThread({threadId:'fraction-thread',profileId:'fraction-profile',workspaceId:'fraction-workspace',cwd:root});store.createGroup('fraction-thread');}finally{store.close();}const{owner,token}=await captured(path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');const events=[...iterateCapturedSQLiteGroupsSources(owner,token)];expect(events.at(-1)?.kind).toBe('complete');expect(events.filter(event=>event.kind==='row'&&event.cells.created_at?.type==='real')).toHaveLength(2);});
+it('finishes all three original v1 source populations without synthesizing v2 tables',async()=>{const{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');for(let columns=0;columns<3;columns++){const path=await legacyFixture(columns),{owner,token}=await captured(path);const events=[...iterateCapturedSQLiteGroupsSources(owner,token)];expect(events.filter(event=>event.kind==='table-end')).toHaveLength(10);expect(events.at(-1)?.kind).toBe('complete');await owner.close();}});
+it('does not finish a source whose original byte accounting was changed',async()=>{const{path}=fixture(),{DatabaseSync}=await import('node:sqlite'),db=new DatabaseSync(path);try{db.exec('UPDATE groups SET byte_usage=byte_usage+1');}finally{db.close();}const{owner,token}=await captured(path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');const seen:string[]=[];expect(()=>{for(const event of iterateCapturedSQLiteGroupsSources(owner,token))seen.push(event.kind);}).toThrow('captured_groups_group_accounting');expect(seen).not.toContain('complete');const reader=openProfileSqliteReader(owner,token,'original-groups');closeProfileSqliteReader(reader);});
+it('does not finish after actual capture owner closes between rows',async()=>{const{path}=fixture(),{owner,token}=await captured(path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js'),iterator=iterateCapturedSQLiteGroupsSources(owner,token);expect(iterator.next().value?.kind).toBe('source-start');await owner.close();expect(()=>iterator.next()).toThrow();});
+async function publishedUnavailable(reroute:boolean){const f=fixture(),{DesktopMultiAgentService}=await import('../../../desktop/electron/desktop-multi-agent-service.js');const store=new DesktopMultiAgentStore(f.path,{bootId:'original-boot',now:()=>20});try{const sender=`root_${f.groupId}`,content=store.putContent(f.groupId,sender,'FINAL_CONTENT_NOT_PERSISTED',true,{status:'failed'}),message=store.sendMessage(f.groupId,{sender:{kind:'agent',agentId:sender},receiverId:'original-child',kind:'error',text:'FINAL_CONTENT_NOT_PERSISTED',contentId:content.contentId,bodyUnavailable:true},true);const digest=Object.getOwnPropertyDescriptor(DesktopMultiAgentService.prototype,'publishedMessageDigest')!.value as (message:unknown)=>string;store.putOperation({groupId:f.groupId,operationId:`published_message:${message.messageId}`,command:'published_message_unavailable',requestHash:digest(message),applyState:'applied',result:{messageId:message.messageId,messageSeq:store.getGroup(f.groupId)!.lastSeq,status:'failed',bodyUnavailable:true}},true);if(reroute){store.putAgent(f.groupId,{...store.getAgent(f.groupId,'original-child')!,status:'closed'});store.rerouteClosedHandoffs(f.groupId,'original-child');}return{...f,messageId:message.messageId};}finally{store.close();}}
+it.each([false,true])('checks original Store unavailable publication and actual reroute=%s using the original service digest',async(reroute)=>{const f=await publishedUnavailable(reroute),{owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js'),events=[...iterateCapturedSQLiteGroupsSources(owner,token)];expect(events.at(-1)?.kind).toBe('complete');const row=events.find(event=>event.kind==='row'&&event.table==='messages'&&event.cells.message_id?.type==='text'&&event.cells.message_id.value===f.messageId);expect(row?.kind).toBe('row');if(row?.kind==='row'&&reroute)expect(row.references).toContainEqual({namespace:'agent',id:'original-child',path:'data_json.originalReceiverId'});});
+it('rejects changed current message bytes against the original immutable publication event',async()=>{const f=await publishedUnavailable(true),{DatabaseSync}=await import('node:sqlite'),{encodeMultiAgentRow}=await import('../../../desktop/electron/desktop-multi-agent-store.js'),db=new DatabaseSync(f.path);try{const row=db.prepare('SELECT data_json FROM messages WHERE message_id=?').get(f.messageId)!;const value=JSON.parse(String(row.data_json));value.preview='FINAL_CONTENT_NOT_PERSISTEx';const raw=encodeMultiAgentRow(value);expect(Buffer.byteLength(raw)).toBe(Buffer.byteLength(String(row.data_json)));db.prepare('UPDATE messages SET data_json=? WHERE message_id=?').run(raw,f.messageId);}finally{db.close();}const{owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');expect(()=>[...iterateCapturedSQLiteGroupsSources(owner,token)]).toThrow('captured_groups_anchor_message');});
+it('keeps a real original 16 MiB open-command body and completes without aggregating the source',async()=>{const f=fixture(),store=new DesktopMultiAgentStore(f.path,{bootId:'original-boot'}),body='x'.repeat(16*1024*1024);try{store.putOperation({groupId:f.groupId,operationId:'large-original-operation',requestHash:'original-large-hash',command:'original_large_extension',applyState:'unknown',result:{literal:body}});}finally{store.close();}const{owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');let found=false,complete=false;for(const event of iterateCapturedSQLiteGroupsSources(owner,token)){if(event.kind==='row'&&event.table==='operations'&&event.cells.operation_id?.type==='text'&&event.cells.operation_id.value==='large-original-operation'){expect(event.unmapped).toContain('data_json.command');expect((event.parsed.data_json as {result:{literal:string}}).result.literal.length).toBe(body.length);found=true;}if(event.kind==='complete')complete=true;}expect(found&&complete).toBe(true);},30000);
+it('retains older groups and their rows after the original active-group pointer advances',async()=>{const f=fixture(),store=new DesktopMultiAgentStore(f.path,{bootId:'original-boot',now:()=>30});try{store.putGroup({...store.getGroup(f.groupId)!,historicalOnly:true});store.clearActiveGroup('original-thread',f.groupId);store.createGroup('original-thread');}finally{store.close();}const{owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js'),events=[...iterateCapturedSQLiteGroupsSources(owner,token)];expect(events.filter(event=>event.kind==='row'&&event.table==='groups')).toHaveLength(2);expect(events.filter(event=>event.kind==='row'&&event.table==='messages')).toHaveLength(1);expect(events.at(-1)?.kind).toBe('complete');});
+it('retains original historical missing boot ownership as a soft declaration',async()=>{const f=fixture(),{DatabaseSync}=await import('node:sqlite'),db=new DatabaseSync(f.path);try{db.exec('DELETE FROM boot_owners');}finally{db.close();}const{owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js'),events=[...iterateCapturedSQLiteGroupsSources(owner,token)];expect(events.at(-1)?.kind).toBe('complete');expect(events.some(event=>event.kind==='row'&&event.references.some(ref=>ref.namespace==='boot'&&ref.id==='original-boot'))).toBe(true);});
+
+it.each(['usage','resolve_resource','spawn'] as const)('retains known original %s journal fields without allowing them on unrelated commands',async kind=>{
+ const f=fixture(),store=new DesktopMultiAgentStore(f.path,{bootId:'original-boot'});
+ try{
+  if(kind==='usage')store.appendEvent(f.groupId,{kind:'usage',agentId:'original-child',turnId:'original-turn',payload:{usageId:'original-usage',inputTokens:2,outputTokens:3,total:{inputTokens:2,outputTokens:3}}});
+  else store.putOperation({groupId:f.groupId,operationId:'known-shape',requestHash:'known-shape-hash',command:kind,applyState:kind==='spawn'?'prepared':'applied',result:kind==='spawn'?{operationId:'known-shape',state:'unknown',preparation:'observation',bootId:'original-boot'}:{operationId:'known-shape',state:'cleanup_pending',resourceId:'original-resource',action:'keep',actorId:'original-user'}});
+  store.putOperation({groupId:f.groupId,operationId:'unrelated-shape',requestHash:'unrelated-hash',command:'send',applyState:'applied',result:{state:'completed',usageId:'foreign',action:'keep',preparation:'observation'}});
+ }finally{store.close();}
+ const{owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');let checked=false;
+ for(const event of iterateCapturedSQLiteGroupsSources(owner,token))if(event.kind==='row'){
+  const body=event.parsed.data_json as Record<string,unknown>|undefined;
+  if((kind==='usage'&&event.table==='events'&&body?.kind==='usage')||(event.table==='operations'&&body?.operationId==='known-shape')){expect(event.unmapped).toEqual([]);checked=true;}
+  if(event.table==='operations'&&body?.operationId==='unrelated-shape')expect(event.unmapped).toEqual(['data_json.result.action','data_json.result.preparation','data_json.result.usageId']);
+ }
+ expect(checked).toBe(true);
+});
+
+it('discovers the actual Groups database before schema and deduplicates its reopened physical source',async()=>{
+ const{readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js'),f=fixture(),first=readOrdinaryProfileSources();
+ expect(first).toBeDefined();const source=first!.sources.find(s=>s.database?.basename===basename(f.path));expect(source).toMatchObject({kind:'sqlite-db',snapshotFormat:'multi-agent-groups-sqlite-v1',directory:{canonicalPath:dirname(f.path)},database:{device:String(statSync(f.path,{bigint:true}).dev),inode:String(statSync(f.path,{bigint:true}).ino)}});
+ const store=new DesktopMultiAgentStore(f.path);store.close();expect(readOrdinaryProfileSources()!.generation).toBe(first!.generation);
+ const{owner,token}=await captured(f.path);expect(readProfileSourceCapture(owner,token).sources).toHaveLength(1);
+});
+it.each(['protected','unavailable'])('rejects the %s route before creating the Groups directory',route=>{
+ const path=join(root,'denied-'+route,'groups.sqlite');discovery.route=route;
+ try{expect(()=>new DesktopMultiAgentStore(path)).toThrow('ordinary_source_route');expect(existsSync(dirname(path))).toBe(false);}finally{discovery.route='ordinary';}
+});
+it.each(['failure','reentry'])('closes the actual Groups connection before schema on registry %s',async mode=>{
+ const{DatabaseSync}=await import('node:sqlite'),path=join(root,'registration-'+mode,'groups.sqlite'),close=vi.spyOn(DatabaseSync.prototype,'close');discovery.failSync=mode==='failure';discovery.flipRoute=mode==='reentry';
+ try{expect(()=>new DesktopMultiAgentStore(path)).toThrow(mode==='failure'?'registry_fsync_fixture':'ordinary_source_route');expect(close).toHaveBeenCalledTimes(1);}finally{discovery.failSync=false;discovery.flipRoute=false;discovery.route='ordinary';close.mockRestore();}
+ expect(existsSync(path)).toBe(true);const db=new DatabaseSync(path);try{expect(db.prepare('SELECT name FROM sqlite_master').all()).toEqual([]);}finally{db.close();}
+});
+
+it.each(['ordinary','protected','unavailable'])('keeps the Windows initial Groups route %s explicit without pretending POSIX inventory is complete',async route=>{
+ const original=process.platform,path=join(root,'windows-'+route,'groups.sqlite'),{readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js'),before=readOrdinaryProfileSources();discovery.route=route;
+ Object.defineProperty(process,'platform',{value:'win32'});
+ try{if(route==='ordinary'){const store=new DesktopMultiAgentStore(path);store.close();expect(existsSync(path)).toBe(true);}else{expect(()=>new DesktopMultiAgentStore(path)).toThrow('ordinary_source_route');expect(existsSync(dirname(path))).toBe(false);}}finally{Object.defineProperty(process,'platform',{value:original});discovery.route='ordinary';}
+ expect(readOrdinaryProfileSources()).toEqual(before);
+});
+
+
+it.each([2,3])('finishes the independent original v%s population through native capture, all eleven tables and the full mapper',async version=>{
+ const{path}=fixture(),{DatabaseSync}=await import('node:sqlite');
+ const legacyDb=new DatabaseSync(path);try{legacyDb.exec('DROP TABLE activity_members;DROP TABLE activity_runs;PRAGMA user_version='+version);}finally{legacyDb.close();}
+ const{owner,token}=await captured(path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js'),{iterateCapturedProfileDeclarations}=await import('../../../src/runtime/verification/captured-profile-mapper.js');
+ const events=[...iterateCapturedSQLiteGroupsSources(owner,token)];
+ expect(events[0]).toMatchObject({kind:'source-start',userVersion:version});
+ const tables=['agents','boot_owners','contents','events','groups','managed_resources','messages','operations','root_turns','thread_bindings','workspace_execution_authorizations'];
+ expect(events.filter(event=>event.kind==='table-start').map(event=>event.kind==='table-start'?event.table:undefined)).toEqual(tables);
+ expect(events.filter(event=>event.kind==='table-end')).toHaveLength(11);
+ expect(events.at(-1)).toMatchObject({kind:'complete',sources:[{sourceId:'original-groups'}]});
+ const mapped=[];for await(const event of iterateCapturedProfileDeclarations(owner,token))mapped.push(event);
+ expect(mapped[0]).toMatchObject({kind:'capture-start',sources:[{sourceId:'original-groups',family:'groups'}]});
+ expect(mapped.at(-1)).toMatchObject({kind:'complete',enumerationComplete:true,sources:[{sourceId:'original-groups',family:'groups'}]});
+ await owner.checkCurrent();
+});
+
+it('keeps v2 and v3 schema recognition closed over every original table and index byte',async()=>{
+ const{path}=fixture(),{DatabaseSync}=await import('node:sqlite'),{readCapturedGroupsSchema}=await import('../../../src/runtime/verification/groups-source-schema.js');
+ const db=new DatabaseSync(path);let currentSchema:ReturnType<typeof import('../../../src/runtime/verification/profile-source-capture.js').readProfileSqliteReaderSchema>,legacySchema:typeof currentSchema;
+ try{currentSchema=db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all() as unknown as typeof currentSchema;db.exec('DROP TABLE activity_members;DROP TABLE activity_runs');legacySchema=db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all() as unknown as typeof legacySchema;}finally{db.close();}
+ expect(currentSchema.some(row=>row.type==='index')).toBe(true);
+ for(const version of[2,3,4]){
+  const schema=version===4?currentSchema:legacySchema;
+  expect(readCapturedGroupsSchema(schema,version)).toMatchObject({version,threadQuery:'groups:thread_bindings'});
+  for(let i=0;i<schema.length;i++){
+   expect(()=>readCapturedGroupsSchema(schema.filter((_,index)=>index!==i),version),`v${version} missing ${schema[i].name}`).toThrow('captured_groups_schema');
+   for(const field of['type','name','tbl_name','sql'] as const){
+    const changed=schema.map((row,index)=>index===i?{...row,[field]:String(row[field])+' altered'}:row);
+    expect(()=>readCapturedGroupsSchema(changed,version),`v${version} changed ${schema[i].name}.${field}`).toThrow('captured_groups_schema');
+   }
+  }
+  expect(()=>readCapturedGroupsSchema([...schema,{type:'table',name:'extra',tbl_name:'extra',sql:'CREATE TABLE extra(id TEXT)'}],version)).toThrow('captured_groups_schema');
+ }
+ for(const version of[0,5,100])expect(()=>readCapturedGroupsSchema(currentSchema,version)).toThrow('captured_groups_schema');
+});
+
+
+// Supplemental v4 controls: append to the original Groups whole; reuse all original fixtures.
+import type {CapturedGroupsStreamEvent} from '../../../src/runtime/verification/captured-sqlite-groups.js';
+function activityFixture(){
+ const f=fixture(),store=new DesktopMultiAgentStore(f.path,{bootId:'original-boot',now:()=>20});
+ try{
+  store.registerThread({threadId:'activity-other-thread',profileId:'original-profile',workspaceId:'original-workspace',cwd:root});
+  const other=store.createGroup('activity-other-thread');
+  store.createActivityRun({runId:'fresh-only',groupId:f.groupId,kind:'root',originId:'opaque-fresh-origin'});
+  store.createActivityRun({runId:'terminal-run',groupId:f.groupId,kind:'root',originId:'opaque-root-origin',rootTaskId:'external-root-task'});
+  store.putActivityMember({memberId:'shared-member',runId:'terminal-run',groupId:f.groupId,agentId:'external-agent',operationId:'external-operation',turnId:'external-turn',state:'settled',physicalSettled:true,outcome:'completed'});
+  store.confirmActivityRootTerminal('terminal-run',{taskId:'external-root-task',sessionId:'external-session',eventIndex:3,outcome:'completed'});
+  expect(store.finalizeActivityRun('terminal-run')?.state).toBe('completed');
+  store.createActivityRun({runId:'second-run',groupId:f.groupId,kind:'user_followup',originId:'opaque-operation-origin'});
+  store.putActivityMember({memberId:'shared-member',runId:'second-run',groupId:f.groupId,agentId:'another-external-agent',operationId:'another-external-operation',state:'accepted',physicalSettled:false});
+  const future={runId:'future-run',groupId:f.groupId,kind:'user_followup' as const,originId:'opaque-future-origin',futureLink:{sessionId:'must-not-infer'}};
+  store.createActivityRun(future);
+  return{...f,otherGroupId:other.groupId};
+ }finally{store.close();}
+}
+function activityRows(events:CapturedGroupsStreamEvent[]){return events.filter((event):event is Extract<CapturedGroupsStreamEvent,{kind:'row'}>=>event.kind==='row');}
+it('captures every real v4 activity row, composite member identity and original event without inventing state or ownership',async()=>{
+ const {iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');
+ const empty=fixture(),emptyCapture=await captured(empty.path);
+ try{
+  const events=[...iterateCapturedSQLiteGroupsSources(emptyCapture.owner,emptyCapture.token)];
+  expect(events[0]).toMatchObject({kind:'source-start',userVersion:4});
+  for(const table of ['activity_runs','activity_members'])expect(events).toContainEqual({kind:'table-end',sourceId:'original-groups',table,count:'0'});
+  expect(events.at(-1)?.kind).toBe('complete');
+ }finally{await emptyCapture.owner.close();}
+ const f=activityFixture(),capture=await captured(f.path);
+ try{
+  const events=[...iterateCapturedSQLiteGroupsSources(capture.owner,capture.token)],rows=activityRows(events);
+  expect(events.at(-1)?.kind).toBe('complete');
+  const runs=rows.filter(row=>row.table==='activity_runs'),members=rows.filter(row=>row.table==='activity_members');
+  expect(runs).toHaveLength(4);expect(members).toHaveLength(2);
+  const fresh=runs.find(row=>(row.parsed.data_json as {runId:string}).runId==='fresh-only')!;
+  expect(fresh.parsed.data_json).toMatchObject({runId:'fresh-only',state:'accepted'});
+  expect(fresh.unmapped).toContain('data_json.originId');
+  const terminal=runs.find(row=>(row.parsed.data_json as {runId:string}).runId==='terminal-run')!;
+  expect(terminal.parsed.data_json).toMatchObject({state:'completed',rootTerminal:{taskId:'external-root-task',sessionId:'external-session',eventIndex:3,outcome:'completed'}});
+  expect(terminal.references).toContainEqual({namespace:'session',id:'external-session',path:'data_json.rootTerminal.sessionId'});
+  const memberIds=new Set(members.flatMap(row=>row.references.filter(ref=>ref.namespace==='agent-activity-member').map(ref=>ref.id)));
+  expect([...memberIds].sort()).toEqual([JSON.stringify(['second-run','shared-member']),JSON.stringify(['terminal-run','shared-member'])].sort());
+  expect(memberIds.has('shared-member')).toBe(false);
+  const future=runs.find(row=>(row.parsed.data_json as {runId:string}).runId==='future-run')!;
+  expect(future.parsed.data_json).toMatchObject({futureLink:{sessionId:'must-not-infer'}});
+  expect(future.unmapped).toContain('data_json.futureLink');
+  expect(future.references.some(ref=>ref.id==='must-not-infer')).toBe(false);
+  expect(rows.some(row=>row.table==='events'&&row.references.some(ref=>ref.namespace==='agent-activity-run'&&ref.path==='data_json.payload.run.runId'))).toBe(true);
+  await capture.owner.checkCurrent();
+ }finally{await capture.owner.close();}
+});
+it.each(['identity','bytes','member-group','version','extra-index','missing-table'] as const)('v4 activity capture rejects original-source %s corruption before complete',async mode=>{
+ const f=activityFixture(),{DatabaseSync}=await import('node:sqlite'),{encodeMultiAgentRow}=await import('../../../src/runtime/multi-agent/row-codec.js'),db=new DatabaseSync(f.path);
+ try{
+  if(mode==='identity')db.prepare("UPDATE activity_runs SET run_id='forged-key' WHERE run_id='fresh-only'").run();
+  if(mode==='bytes')db.prepare("UPDATE activity_runs SET logical_bytes=logical_bytes+1 WHERE run_id='fresh-only'").run();
+  if(mode==='member-group'){
+   const row=db.prepare("SELECT data_json FROM activity_members WHERE run_id='terminal-run' AND member_id='shared-member'").get()!;
+   const value={...JSON.parse(String(row.data_json)),groupId:f.otherGroupId},raw=encodeMultiAgentRow(value);
+   db.prepare("UPDATE activity_members SET group_id=?,data_json=?,logical_bytes=? WHERE run_id='terminal-run' AND member_id='shared-member'").run(f.otherGroupId,raw,Buffer.byteLength(raw));
+  }
+  if(mode==='version')db.exec('PRAGMA user_version=5');
+  if(mode==='extra-index')db.exec('CREATE INDEX extra_activity_fixture ON activity_runs(group_id)');
+  if(mode==='missing-table')db.exec('DROP TABLE activity_members');
+ }finally{db.close();}
+ const {owner,token}=await captured(f.path),{iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');
+ const events:CapturedGroupsStreamEvent[]=[];
+ try{
+  expect(()=>{for(const event of iterateCapturedSQLiteGroupsSources(owner,token))events.push(event);}).toThrow(mode==='member-group'?'captured_groups_activity_group':/captured_groups/);
+  expect(events.some(event=>event.kind==='complete')).toBe(false);
+ }finally{await owner.close();}
+});

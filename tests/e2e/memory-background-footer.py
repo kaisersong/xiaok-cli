@@ -14,13 +14,14 @@ import time
 def run(entry):
     spec = importlib.util.spec_from_file_location('helpers', Path(__file__).with_name('tmux-e2e.py'))
     h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
-    # The general harness discards stderr. Share the real TTY here, as the CLI
-    # user does, otherwise the exact footer corruption would be hidden.
+    # The general harness records stderr separately. Share the real TTY here,
+    # otherwise the exact footer corruption would be hidden.
     original_launch = h.build_cli_launch_command
-    def launch_with_stderr(*args, **kwargs):
-        command = original_launch(*args, **kwargs)
-        assert command.endswith('2>/dev/null'), 'this TTY fixture requires POSIX launch'
-        return command.removesuffix('2>/dev/null') + '2>&1'
+    def launch_with_stderr(project_dir, config_dir, *args, **kwargs):
+        command = original_launch(project_dir, config_dir, *args, **kwargs)
+        stderr_suffix = f"2>{h.shell_quote_posix(str(config_dir / 'cli-stderr.log'))}"
+        assert os.name != 'nt' and command.endswith(stderr_suffix), 'this TTY fixture requires POSIX launch'
+        return command.removesuffix(stderr_suffix) + '2>&1'
     h.build_cli_launch_command = launch_with_stderr
     root = Path(tempfile.mkdtemp(prefix='xiaok-memory-footer-'))
     work, home, config = root / 'project', root / 'home', root / 'config'

@@ -1,3 +1,5 @@
+import { recorderWindowErrorMessage } from '../lib/recorder-window-error';
+import { knowledgeErrorMessage } from '../lib/knowledge-error';
 import { useState, useEffect, useCallback, useRef, type DragEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Download, RotateCcw, Trash2, FileText, Globe, ClipboardPaste, Search, BookOpen, Link, Mic, ChevronRight, Settings2, Minimize2, Maximize2, Pause, Play, LoaderCircle, X, Pencil, Check } from 'lucide-react';
@@ -388,6 +390,11 @@ export function KnowledgePage() {
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [knowledgeError, setKnowledgeError] = useState('');
+  const [collectionsError, setCollectionsError] = useState('');
+  const [sourcesError, setSourcesError] = useState('');
+  const [searchError, setSearchError] = useState('');
+  const knowledgeFailureMessage = useCallback((error: unknown, reading = false) => knowledgeErrorMessage(error, { projectionUnavailable: t.knowledge.projectionUnavailable, operationUnknown: t.knowledge.operationUnknown, inputInvalid: t.knowledge.inputInvalid }, reading), [t]);
   const [showAddSource, setShowAddSource] = useState(false);
   const [addMode, setAddMode] = useState<'paste' | 'url'>('paste');
   const [pasteText, setPasteText] = useState('');
@@ -402,10 +409,16 @@ export function KnowledgePage() {
   const [showMeetingImport, setShowMeetingImport] = useState(false);
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false);
   const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingAudioFilePath, setMeetingAudioFilePath] = useState('');
+  const [meetingAudioFilePath, setMeetingAudioFilePathState] = useState('');
+  const meetingAudioFilePathRef = useRef('');
+  const setMeetingAudioFilePath = useCallback((value: string) => { meetingAudioFilePathRef.current = value; setMeetingAudioFilePathState(value); }, []);
   const [meetingTranscript, setMeetingTranscript] = useState('');
-  const [meetingSummaryDraft, setMeetingSummaryDraft] = useState('');
-  const [meetingDraftTranscript, setMeetingDraftTranscript] = useState('');
+  const [meetingSummaryDraft, setMeetingSummaryDraftState] = useState('');
+  const meetingSummaryDraftRef = useRef('');
+  const setMeetingSummaryDraft = useCallback((value: string) => { meetingSummaryDraftRef.current = value; setMeetingSummaryDraftState(value); }, []);
+  const [meetingDraftTranscript, setMeetingDraftTranscriptState] = useState('');
+  const meetingDraftTranscriptRef = useRef('');
+  const setMeetingDraftTranscript = useCallback((value: string) => { meetingDraftTranscriptRef.current = value; setMeetingDraftTranscriptState(value); }, []);
   const [meetingSaving, setMeetingSaving] = useState(false);
   const [meetingRecording, setMeetingRecording] = useState(false);
   const [meetingRecordingPaused, setMeetingRecordingPaused] = useState(false);
@@ -427,7 +440,12 @@ export function KnowledgePage() {
   ));
   const [meetingTranscriberLanguage, setMeetingTranscriberLanguage] = useState<MeetingTranscriberLanguage>(readStoredMeetingTranscriberLanguage);
   const [meetingRecordingScenario, setMeetingRecordingScenario] = useState<MeetingRecordingScenario>('meeting');
-  const [meetingMessage, setMeetingMessage] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const [meetingNotice, setMeetingMessage] = useState<{ kind: 'error' | 'success'; text?: string; render?: (labels: typeof t) => string } | null>(null);
+  const [meetingLiveFailure, setMeetingLiveFailure] = useState('');
+  const meetingMessage = meetingNotice?.kind === 'error'
+    ? { kind: meetingNotice.kind, text: meetingNotice.render ? meetingNotice.render(t) : meetingNotice.text ?? '' }
+    : meetingLiveFailure ? { kind: 'error' as const, text: t.knowledge.meetingLiveTranscriptionFailed(meetingLiveFailure) }
+    : meetingNotice ? { kind: meetingNotice.kind, text: meetingNotice.render ? meetingNotice.render(t) : meetingNotice.text ?? '' } : null;
   const [sourceContent, setSourceContent] = useState<KbSourceContent | null>(null);
   const [sourceContentLoading, setSourceContentLoading] = useState(false);
   const [sourceContentError, setSourceContentError] = useState('');
@@ -439,8 +457,55 @@ export function KnowledgePage() {
   const meetingPreviewSegmentsRef = useRef<MeetingPreviewSegment[]>([]);
   const meetingRecordingRef = useRef<ActiveMeetingRecording | null>(null);
   const meetingRecorderInitializedRef = useRef(false);
+  const [meetingWindowError, setMeetingWindowError] = useState('');
+  const recorderModeGeneration = useRef(0);
+  const recorderSavedSubmission = useRef<{ collectionId: string; title: string; audioFilePath: string; transcript: string; notified: boolean } | null>(null);
 
   const desktop = getDesktopApi();
+
+  type MeetingUiOwner = { active: boolean; epoch: number; busy: Map<string, symbol> };
+  type MeetingUiAction = { owner: MeetingUiOwner; epoch: number; slot: string; id: symbol };
+  const meetingUiOwner = useRef<MeetingUiOwner | null>(null);
+  // Audio belongs to this mounted consumer, not its current collection route.
+  const meetingRecordingOwner = useRef<MeetingUiOwner | null>(null);
+  const meetingFinalizingRef = useRef<ActiveMeetingRecording | null>(null);
+  const meetingActiveScopes = useRef(new WeakMap<ActiveMeetingRecording, { owner: MeetingUiOwner; epoch: number }>());
+  const meetingImportDraftRef = useRef({ collectionId, title: meetingTitle, audioFilePath: meetingAudioFilePath, transcript: meetingTranscript });
+  meetingImportDraftRef.current = { collectionId, title: meetingTitle, audioFilePath: meetingAudioFilePath, transcript: meetingTranscript };
+  const beginMeetingAction = (slot: string): MeetingUiAction | null => {
+    const owner = slot === 'start' || slot === 'stop' ? meetingRecordingOwner.current : meetingUiOwner.current;
+    if (!owner?.active || owner.busy.has(slot)) return null;
+    const id = Symbol(slot); owner.busy.set(slot, id);
+    return { owner, epoch: owner.epoch, slot, id };
+  };
+  const currentMeetingAction = (action: MeetingUiAction) => action.owner.active && (meetingUiOwner.current === action.owner || meetingRecordingOwner.current === action.owner) && action.owner.epoch === action.epoch;
+  const endMeetingAction = (action: MeetingUiAction) => { if (action.owner.busy.get(action.slot) === action.id) action.owner.busy.delete(action.slot); };
+  const currentMeetingActive = (active: ActiveMeetingRecording) => {
+    const scope = meetingActiveScopes.current.get(active), owner = meetingRecordingOwner.current;
+    return !!scope && !!owner?.active && scope.owner === owner && scope.epoch === owner.epoch
+      && (meetingRecordingRef.current === active || meetingFinalizingRef.current === active);
+  };
+  const observeMeetingLiveCancel = (sessionId: string) => {
+    // Cleanup has no new cancel button/ACK UI. Always observe both rejection paths;
+    // never turn a retired session's failure into a new recording's status.
+    try { void desktop?.meetingCancelLiveTranscription?.({ sessionId }).then(result => {
+      if (result.ok === false) console.warn('meeting_live_cancel_failed');
+    }).catch(() => { console.warn('meeting_live_cancel_failed'); }); }
+    catch { console.warn('meeting_live_cancel_failed'); }
+  };
+  useEffect(() => {
+    const owner: MeetingUiOwner = { active: true, epoch: 0, busy: new Map() }; meetingUiOwner.current = owner;
+    // Picker/import-save callbacks retire with the route; audio is not discarded.
+    return () => { owner.active = false; ++owner.epoch; owner.busy.clear(); };
+  }, [desktop, collectionId, isMeetingRecorderWindow]);
+  useEffect(() => {
+    const owner: MeetingUiOwner = { active: true, epoch: 0, busy: new Map() }; meetingRecordingOwner.current = owner;
+    return () => {
+      owner.active = false; ++owner.epoch; owner.busy.clear(); meetingFinalizingRef.current = null;
+      const active = meetingRecordingRef.current;
+      if (active) { if (active.liveTranscriptionSessionId) observeMeetingLiveCancel(active.liveTranscriptionSessionId); stopActiveMeetingRecording(active); meetingRecordingRef.current = null; }
+    };
+  }, [desktop]);
 
   const createDefaultRecordingTitle = () => (
     t.knowledge.meetingRecordingDefaultTitle(formatMeetingRecordingTimestamp())
@@ -521,7 +586,7 @@ export function KnowledgePage() {
     active.previewPromise = (async () => {
       try {
         const result = await desktop.meetingTranscribePreview(request) as { ok?: boolean; text?: string; segments?: unknown };
-        if (result?.ok === false) return;
+        if (!currentMeetingActive(active) || result?.ok === false) return;
         const segments = offsetMeetingPreviewSegments(normalizeMeetingPreviewSegments(result), offsetSeconds);
         if (segments.length === 0) return;
         active.previewChunkCursor = startChunkIndex + chunks.length;
@@ -676,8 +741,9 @@ export function KnowledgePage() {
     try {
       const result = await desktop.kbListCollections();
       setCollections(result as KbCollection[]);
-    } catch { /* ignore */ }
-  }, [desktop]);
+      setCollectionsError('');
+    } catch (error) { setCollectionsError(knowledgeFailureMessage(error, true)); }
+  }, [desktop, knowledgeFailureMessage]);
 
   const loadMeetingAsrConfig = useCallback(async () => {
     if (!desktop?.meetingGetAsrConfig) return;
@@ -706,8 +772,9 @@ export function KnowledgePage() {
     try {
       const result = await desktop.kbListSources(cid);
       setSources(result as KbSource[]);
-    } catch { /* ignore */ }
-  }, [desktop]);
+      setSourcesError('');
+    } catch (error) { setSourcesError(knowledgeFailureMessage(error, true)); }
+  }, [desktop, knowledgeFailureMessage]);
 
   useEffect(() => {
     setLoading(true);
@@ -721,8 +788,8 @@ export function KnowledgePage() {
   useEffect(() => {
     if (!desktop?.onMeetingLiveTranscriptionUpdate) return;
     return desktop.onMeetingLiveTranscriptionUpdate((input) => {
-      const active = meetingRecordingRef.current;
-      if (!active?.liveTranscriptionSessionId || input.sessionId !== active.liveTranscriptionSessionId) return;
+      const active = meetingRecordingRef.current ?? meetingFinalizingRef.current;
+      if (!active || !currentMeetingActive(active) || !active.liveTranscriptionSessionId || input.sessionId !== active.liveTranscriptionSessionId) return;
       upsertMeetingLivePreviewSegment({
         sentenceId: input.sentenceId,
         start: input.start,
@@ -757,7 +824,7 @@ export function KnowledgePage() {
   useEffect(() => () => {
     if (meetingRecordingRef.current) {
       const sessionId = meetingRecordingRef.current.liveTranscriptionSessionId;
-      if (sessionId) void desktop?.meetingCancelLiveTranscription?.({ sessionId });
+      if (sessionId) observeMeetingLiveCancel(sessionId);
       stopActiveMeetingRecording(meetingRecordingRef.current);
       meetingRecordingRef.current = null;
     }
@@ -765,6 +832,7 @@ export function KnowledgePage() {
 
   const handleCreateCollection = async () => {
     if (!desktop?.kbCreateCollection || !newCollectionName.trim()) return;
+    setKnowledgeError('');
     try {
       const col = await desktop.kbCreateCollection({
         name: newCollectionName.trim(),
@@ -775,21 +843,23 @@ export function KnowledgePage() {
       setShowCreateDialog(false);
       await loadCollections();
       navigate(`/knowledge/${col.id}`);
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleDeleteCollection = async (id: string) => {
     if (!desktop?.kbDeleteCollection) return;
     if (!confirm(t.knowledge.deleteCollectionConfirm)) return;
+    setKnowledgeError('');
     try {
       await desktop.kbDeleteCollection(id);
       if (collectionId === id) navigate('/knowledge');
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleAddPasteSource = async () => {
     if (!desktop?.kbAddSource || !collectionId || !pasteText.trim()) return;
+    setKnowledgeError('');
     try {
       await desktop.kbAddSource({
         collectionId,
@@ -802,11 +872,12 @@ export function KnowledgePage() {
       setShowAddSource(false);
       await loadSources(collectionId);
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleAddUrlSource = async () => {
     if (!desktop?.kbAddSource || !collectionId || !urlInput.trim()) return;
+    setKnowledgeError('');
     try {
       await desktop.kbAddSource({
         collectionId,
@@ -819,16 +890,17 @@ export function KnowledgePage() {
       setShowAddSource(false);
       await loadSources(collectionId);
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleDeleteSource = async (id: string) => {
     if (!desktop?.kbDeleteSource || !collectionId) return;
+    setKnowledgeError('');
     try {
       await desktop.kbDeleteSource(id);
       await loadSources(collectionId);
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleOpenSource = async (source: KbSource) => {
@@ -836,6 +908,7 @@ export function KnowledgePage() {
     setSourceContent(null);
     setSourceContentError('');
     setSourceContentLoading(true);
+    setKnowledgeError('');
     try {
       const result = await desktop.kbGetSourceContent({
         sourceId: source.id,
@@ -848,7 +921,7 @@ export function KnowledgePage() {
       }
       setSourceContent(result);
     } catch (error) {
-      setSourceContentError(t.knowledge.sourceOpenFailed(error instanceof Error ? error.message : 'unknown'));
+      setSourceContentError(knowledgeFailureMessage(error, true));
     } finally {
       setSourceContentLoading(false);
     }
@@ -856,6 +929,7 @@ export function KnowledgePage() {
 
   const handlePickFiles = async () => {
     if (!desktop?.kbPickFiles || !desktop?.kbAddSource || !collectionId) return;
+    setKnowledgeError('');
     try {
       const filePaths = await desktop.kbPickFiles();
       for (const fp of filePaths) {
@@ -872,13 +946,15 @@ export function KnowledgePage() {
         await loadSources(collectionId);
         await loadCollections();
       }
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const cleanupMeetingRecording = () => {
+    const owner = meetingUiOwner.current; if (owner) { ++owner.epoch; owner.busy.clear(); }
+    meetingFinalizingRef.current = null;
     if (meetingRecordingRef.current) {
       const sessionId = meetingRecordingRef.current.liveTranscriptionSessionId;
-      if (sessionId) void desktop?.meetingCancelLiveTranscription?.({ sessionId });
+      if (sessionId) observeMeetingLiveCancel(sessionId);
       stopActiveMeetingRecording(meetingRecordingRef.current);
       meetingRecordingRef.current = null;
     }
@@ -889,6 +965,7 @@ export function KnowledgePage() {
 
   const handleOpenMeetingImport = () => {
     cleanupMeetingRecording();
+    setMeetingLiveFailure('');
     updateMeetingTitle(selectedCollection?.name ?? '');
     setMeetingAudioFilePath('');
     setMeetingTranscript('');
@@ -932,23 +1009,40 @@ export function KnowledgePage() {
     setMeetingRecordingSaving(false);
     setMeetingProcessing(false);
     setMeetingElapsedMs(0);
+    ++recorderModeGeneration.current;
     setMeetingRecorderView('workbench');
     setShowMeetingRecorder(true);
   };
 
-  const handleOpenMeetingRecorder = async () => {
-    if (!collectionId || !desktop?.meetingOpenRecorderWindow) return;
+  const runRecorderOperation = async (operation: () => Promise<{ ok: boolean; error?: string }> | undefined, saved = false): Promise<boolean> => {
     try {
-      const result = await desktop.meetingOpenRecorderWindow({ collectionId }) as { ok?: boolean; error?: string };
-      if (result?.ok === false) {
-        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed(result.error ?? 'unknown') });
-      }
+      const result = await operation();
+      if (result?.ok === true) return true;
+      setMeetingWindowError(saved ? t.knowledge.meetingRecorderSavedFollowupFailed : recorderWindowErrorMessage(result?.error, t.knowledge));
     } catch {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('window_open_failed') });
+      setMeetingWindowError(saved ? t.knowledge.meetingRecorderSavedFollowupFailed : t.knowledge.meetingRecorderOperationUnknown);
     }
+    return false;
   };
 
-  const handleCloseMeetingRecorder = () => {
+  const handleOpenMeetingRecorder = async () => {
+    if (!collectionId) return;
+    setMeetingWindowError('');
+    await runRecorderOperation(() => desktop?.meetingOpenRecorderWindow?.({ collectionId }));
+  };
+
+  const handleRecorderMode = async (mode: 'compact' | 'workbench') => {
+    const generation = ++recorderModeGeneration.current;
+    setMeetingWindowError('');
+    const success = await runRecorderOperation(() => desktop?.meetingSetRecorderWindowMode?.({ mode }));
+    if (success && generation === recorderModeGeneration.current) setMeetingRecorderView(mode);
+  };
+
+  const handleCloseMeetingRecorder = async () => {
+    if (isMeetingRecorderWindow) {
+      setMeetingWindowError('');
+      if (!await runRecorderOperation(() => desktop?.meetingCloseRecorderWindow?.())) return;
+    }
     cleanupMeetingRecording();
     replaceMeetingPreviewSegments([]);
     setMeetingSummaryDraft('');
@@ -957,48 +1051,53 @@ export function KnowledgePage() {
     setMeetingRecordingSaving(false);
     setMeetingProcessing(false);
     setShowMeetingRecorder(false);
-    if (isMeetingRecorderWindow) {
-      void desktop?.meetingSetRecorderSessionState?.({ state: 'idle' });
-      void desktop?.meetingCloseRecorderWindow?.();
-    }
   };
 
   useEffect(() => {
-    if (!isMeetingRecorderWindow || meetingRecorderInitializedRef.current) return;
-    meetingRecorderInitializedRef.current = true;
-    initializeMeetingRecorder();
-    void desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
-    void desktop?.meetingSetRecorderSessionState?.({ state: 'idle' });
+    if (!isMeetingRecorderWindow) return;
+    if (!meetingRecorderInitializedRef.current) {
+      meetingRecorderInitializedRef.current = true;
+      const carryingRecording = !!(meetingRecordingRef.current || meetingFinalizingRef.current
+        || meetingRecordingOwner.current?.busy.has('start') || meetingSummaryDraftRef.current.trim());
+      if (!carryingRecording) {
+        initializeMeetingRecorder();
+        void runRecorderOperation(() => desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' }));
+        void runRecorderOperation(() => desktop?.meetingSetRecorderSessionState?.({ state: 'idle' }));
+      }
+    }
     const unsubscribeClose = desktop?.onMeetingRecorderCloseRequested?.(() => {
       setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecorderCloseBlocked });
     });
-    return () => {
-      unsubscribeClose?.();
-      cleanupMeetingRecording();
-    };
-    // The recorder route is immutable for the lifetime of its BrowserWindow.
+    return () => { unsubscribeClose?.(); };
+    // Mode/collection navigation preserves audio; mounted-consumer cleanup owns it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMeetingRecorderWindow]);
 
   const handlePickMeetingAudio = async () => {
     if (!desktop?.meetingPickAudioFile) return;
+    const action = beginMeetingAction('pick'); if (!action) return;
     try {
       const filePath = await desktop.meetingPickAudioFile();
-      if (filePath) setMeetingAudioFilePath(filePath);
+      if (currentMeetingAction(action) && filePath) setMeetingAudioFilePath(filePath);
     } catch {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingPickFailed });
-    }
+      if (currentMeetingAction(action)) setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingPickFailed });
+    } finally { endMeetingAction(action); }
   };
 
   const handleStartMeetingRecording = async () => {
-    if (!desktop?.meetingSaveRecordedAudio) return;
+    setMeetingWindowError('');
+    if (!desktop?.meetingSaveRecordedAudio || meetingRecordingOwner.current?.busy.has('start')) return;
     const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordUnavailable });
+      setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingRecordUnavailable });
       return;
     }
 
     cleanupMeetingRecording();
+    const action = beginMeetingAction('start'); if (!action) return;
+    let pendingStream: MediaStream | null = null, pendingContext: AudioContext | null = null, pendingSession: string | null = null;
+    let published = false;
+    setMeetingLiveFailure('');
     replaceMeetingPreviewSegments([]);
     setMeetingSummaryDraft('');
     setMeetingDraftTranscript('');
@@ -1009,12 +1108,15 @@ export function KnowledgePage() {
     try {
       if (desktop.meetingRequestMicrophonePermission) {
         const permission = await desktop.meetingRequestMicrophonePermission() as { status?: string };
+        if (!currentMeetingAction(action)) return;
         if (permission.status === 'denied' || permission.status === 'restricted') {
-          setMeetingMessage({ kind: 'error', text: t.knowledge.meetingPermissionDenied });
+          setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingPermissionDenied });
           return;
         }
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      pendingStream = stream;
+      if (!currentMeetingAction(action)) return;
       const liveEngine = meetingTranscriberEngineRef.current === 'aliyun-asr'
         || meetingTranscriberEngineRef.current === 'volcengine-asr'
         ? meetingTranscriberEngineRef.current
@@ -1022,6 +1124,7 @@ export function KnowledgePage() {
       const audioContext = new AudioContextCtor(
         meetingTranscriberEngineRef.current === 'volcengine-asr' ? { sampleRate: 16_000 } : undefined,
       );
+      pendingContext = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -1039,22 +1142,23 @@ export function KnowledgePage() {
             ...(language ? { language } : {}),
           });
           if (result.ok && result.sessionId) {
-            liveTranscriptionSessionId = result.sessionId;
+            liveTranscriptionSessionId = result.sessionId; pendingSession = result.sessionId;
           } else {
-            liveTranscriptionError = result.error ?? `${liveEngine}_live_failed`;
+            liveTranscriptionError = (result.ok === false ? result.error : undefined) ?? `${liveEngine}_live_failed`;
           }
         } catch (error) {
           liveTranscriptionError = error instanceof Error ? error.message : `${liveEngine}_live_failed`;
         }
       }
 
+      if (!currentMeetingAction(action)) return;
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.15;
       const audioLevelData = new Float32Array(analyser.fftSize);
       gain.gain.value = 0;
       processor.onaudioprocess = event => {
         const active = meetingRecordingRef.current;
-        if (!active || active.paused) return;
+        if (!active || !currentMeetingActive(active) || active.paused) return;
         const input = new Float32Array(event.inputBuffer.getChannelData(0));
         chunks.push(input);
         active.capturedSamples += input.length;
@@ -1065,15 +1169,15 @@ export function KnowledgePage() {
             sessionId,
             pcmBase64: encodeFloat32ChunkToPcmBase64(input),
           }).then(result => {
-            if (result.ok || meetingRecordingRef.current !== active || active.liveTranscriptionSessionId !== sessionId) return;
+            if (result.ok || !currentMeetingActive(active) || active.liveTranscriptionSessionId !== sessionId) return;
             active.liveTranscriptionSessionId = null;
-            void desktop.meetingCancelLiveTranscription?.({ sessionId });
-            setMeetingMessage({ kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed(result.error ?? 'aliyun_live_failed') });
+            observeMeetingLiveCancel(sessionId);
+            setMeetingLiveFailure(result.error ?? 'meeting_live_failed');
           }).catch(() => {
-            if (meetingRecordingRef.current !== active || active.liveTranscriptionSessionId !== sessionId) return;
+            if (!currentMeetingActive(active) || active.liveTranscriptionSessionId !== sessionId) return;
             active.liveTranscriptionSessionId = null;
-            void desktop.meetingCancelLiveTranscription?.({ sessionId });
-            setMeetingMessage({ kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed('aliyun_live_failed') });
+            observeMeetingLiveCancel(sessionId);
+            setMeetingLiveFailure('meeting_live_failed');
           });
         }
       };
@@ -1100,22 +1204,30 @@ export function KnowledgePage() {
         source,
         stream,
       };
+      published = true;
+      meetingActiveScopes.current.set(meetingRecordingRef.current, { owner: action.owner, epoch: action.epoch });
       startMeetingAudioLevelSampling(meetingRecordingRef.current);
       scheduleMeetingPreviewTranscription(meetingRecordingRef.current);
       setMeetingRecording(true);
       setMeetingRecordingPaused(false);
       setMeetingElapsedMs(0);
       if (isMeetingRecorderWindow) {
+        ++recorderModeGeneration.current;
         setMeetingRecorderView('workbench');
-        void desktop.meetingSetRecorderSessionState?.({ state: 'recording' });
-        void desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+        void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'recording' }));
+        void runRecorderOperation(() => desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' }));
       }
-      setMeetingMessage(liveTranscriptionError
-        ? { kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed(liveTranscriptionError) }
-        : { kind: 'success', text: t.knowledge.meetingRecording });
+      if (liveTranscriptionError) setMeetingLiveFailure(liveTranscriptionError);
+      setMeetingMessage({ kind: 'success', render: labels => labels.knowledge.meetingRecording });
     } catch {
-      cleanupMeetingRecording();
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('microphone_unavailable') });
+      if (currentMeetingAction(action)) { cleanupMeetingRecording(); setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingRecordFailed('microphone_unavailable') }); }
+    } finally {
+      endMeetingAction(action);
+      if (!published) {
+        if (pendingSession) observeMeetingLiveCancel(pendingSession);
+        pendingStream?.getTracks().forEach(track => track.stop());
+        if (pendingContext) { try { void pendingContext.close().catch(() => { console.warn('meeting_audio_cleanup_failed'); }); } catch { console.warn('meeting_audio_cleanup_failed'); } }
+      }
     }
   };
 
@@ -1149,8 +1261,11 @@ export function KnowledgePage() {
   };
 
   const handleStopMeetingRecording = async (options: { draftRecording?: boolean } = {}) => {
+    setMeetingWindowError('');
     if (!desktop?.meetingSaveRecordedAudio || !meetingRecordingRef.current) return;
+    const action = beginMeetingAction('stop'); if (!action) return;
     const active = meetingRecordingRef.current;
+    meetingFinalizingRef.current = active;
     let summaryReady = false;
     meetingRecordingRef.current = null;
     setMeetingRecording(false);
@@ -1159,28 +1274,33 @@ export function KnowledgePage() {
     setMeetingRecordingSaving(true);
     setMeetingMessage(null);
     if (isMeetingRecorderWindow) {
+      ++recorderModeGeneration.current;
       setMeetingRecorderView('workbench');
-      void desktop.meetingSetRecorderSessionState?.({ state: 'processing' });
-      void desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+      void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'processing' }));
+      void runRecorderOperation(() => desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' }));
     }
     stopActiveMeetingRecording(active);
 
     try {
       if (active.liveTranscriptionSessionId && desktop.meetingFinishLiveTranscription) {
         const sessionId = active.liveTranscriptionSessionId;
+        const finished = await desktop.meetingFinishLiveTranscription({ sessionId }).catch(() => ({ ok: false, error: 'meeting_live_failed' }));
+        if (!currentMeetingAction(action)) return;
         active.liveTranscriptionSessionId = null;
-        await desktop.meetingFinishLiveTranscription({ sessionId }).catch(() => ({ ok: false }));
+        if (finished.ok === false) setMeetingLiveFailure(finished.error ?? 'meeting_live_failed');
       }
       await flushMeetingPreviewTranscription(active);
+      if (!currentMeetingAction(action)) return;
       const title = readMeetingRecordingTitle();
       const wavBase64 = encodeFloat32ChunksToWavBase64(active.chunks, active.audioContext.sampleRate);
       const result = await desktop.meetingSaveRecordedAudio({ title, wavBase64 }) as { ok?: boolean; filePath?: string; error?: string };
+      if (!currentMeetingAction(action)) return;
       if (result?.ok === false || !result?.filePath) {
-        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed(result?.error ?? 'unknown') });
+        setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingRecordFailed(result?.error ?? 'unknown') });
         return;
       }
       setMeetingAudioFilePath(result.filePath);
-      setMeetingMessage({ kind: 'success', text: t.knowledge.meetingRecordedAudioSaved });
+      setMeetingMessage({ kind: 'success', render: labels => labels.knowledge.meetingRecordedAudioSaved });
       if (options.draftRecording && desktop.meetingDraftRecording) {
         const liveSegments = meetingTranscriberEngineRef.current === 'volcengine-asr'
           ? meetingPreviewSegmentsRef.current.flatMap(segment => {
@@ -1191,11 +1311,11 @@ export function KnowledgePage() {
           : [];
         const liveTranscript = liveSegments.map(segment => segment.text).join('\n').trim();
         if (meetingTranscriberEngineRef.current === 'volcengine-asr' && !liveTranscript) {
-          setMeetingMessage({ kind: 'error', text: t.knowledge.meetingProcessError('empty_transcription') });
+          setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingProcessError('empty_transcription') });
           return;
         }
         setMeetingProcessing(true);
-        setMeetingMessage({ kind: 'success', text: t.knowledge.meetingTranscribing });
+        setMeetingMessage({ kind: 'success', render: labels => labels.knowledge.meetingTranscribing });
         const draftResult = await desktop.meetingDraftRecording({
           title,
           audioFilePath: result.filePath,
@@ -1217,8 +1337,9 @@ export function KnowledgePage() {
           segments?: unknown;
           summaryMarkdown?: string;
         };
+        if (!currentMeetingAction(action)) return;
         if (draftResult?.ok === false) {
-          setMeetingMessage({ kind: 'error', text: t.knowledge.meetingProcessError(draftResult.reason ?? draftResult.error ?? 'unknown') });
+          setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingProcessError(draftResult.reason ?? draftResult.error ?? 'unknown') });
           return;
         }
         const draftTranscript = typeof draftResult.transcript === 'string' ? draftResult.transcript : '';
@@ -1229,30 +1350,37 @@ export function KnowledgePage() {
           ? draftResult.suggestedTitle.trim()
           : title;
         updateMeetingTitle(finalTitle);
-        setMeetingMessage({ kind: 'success', text: t.knowledge.meetingDraftReady });
+        setMeetingMessage({ kind: 'success', render: labels => labels.knowledge.meetingDraftReady });
         summaryReady = true;
         if (isMeetingRecorderWindow) {
+          ++recorderModeGeneration.current;
           setMeetingRecorderView('summary');
-          void desktop.meetingSetRecorderSessionState?.({ state: 'summary' });
-          void desktop.meetingSetRecorderWindowMode?.({ mode: 'summary' });
-          void desktop.meetingNotifyRecorderSummaryReady?.({ title: finalTitle });
+          void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'summary' }));
+          void runRecorderOperation(() => desktop.meetingSetRecorderWindowMode?.({ mode: 'summary' }));
+          void runRecorderOperation(() => desktop.meetingNotifyRecorderSummaryReady?.({ title: finalTitle }));
         }
       }
     } catch {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('unknown') });
+      if (currentMeetingAction(action)) setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingRecordFailed('unknown') });
     } finally {
+      if (currentMeetingAction(action)) {
       setMeetingRecordingSaving(false);
       setMeetingProcessing(false);
       if (isMeetingRecorderWindow && !summaryReady) {
-        void desktop.meetingSetRecorderSessionState?.({ state: 'idle' });
+        void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'idle' }));
       }
+      }
+      if (meetingFinalizingRef.current === active) meetingFinalizingRef.current = null;
+      endMeetingAction(action);
     }
   };
 
   const handleSaveMeetingTranscript = async () => {
     if (!desktop?.meetingSaveTranscript || !collectionId || !meetingAudioFilePath || !meetingTranscript.trim()) return;
+    const action = beginMeetingAction('save'); if (!action) return;
     setMeetingSaving(true);
     setMeetingMessage(null);
+    const submitted = { ...meetingImportDraftRef.current };
     const title = meetingTitleRef.current.trim() || selectedCollection?.name || t.knowledge.meetingDefaultTitle;
     try {
       const result = await desktop.meetingSaveTranscript({
@@ -1261,44 +1389,70 @@ export function KnowledgePage() {
         audioFilePath: meetingAudioFilePath,
         transcript: meetingTranscript.trim(),
       }) as { ok?: boolean; error?: string };
+      if (!currentMeetingAction(action)) return;
       if (result?.ok === false) {
-        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError(result.error ?? 'unknown') });
+        setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingImportError(result.error ?? 'unknown') });
         return;
       }
+      const latest = meetingImportDraftRef.current;
+      if (latest.collectionId !== submitted.collectionId || latest.title !== submitted.title || latest.audioFilePath !== submitted.audioFilePath || latest.transcript !== submitted.transcript) { setMeetingMessage({kind:'error',render:labels=>labels.knowledge.meetingRecorderNewDraftUnsaved}); return; }
       setMeetingTranscript('');
       setMeetingAudioFilePath('');
       setShowMeetingImport(false);
+      if (!currentMeetingAction(action)) return;
       await loadSources(collectionId);
+      if (!currentMeetingAction(action)) return;
       await loadCollections();
     } catch {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError('unknown') });
+      if (currentMeetingAction(action)) setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingImportError('unknown') });
     } finally {
-      setMeetingSaving(false);
+      endMeetingAction(action);
+      if (currentMeetingAction(action)) setMeetingSaving(false);
     }
   };
 
+  const readRecorderSubmission = () => {
+    const summary = meetingSummaryDraftRef.current.trim();
+    const transcript = meetingDraftTranscriptRef.current.trim();
+    return { collectionId: collectionId ?? '', title: readMeetingRecordingTitle(), audioFilePath: meetingAudioFilePathRef.current,
+      transcript: transcript ? `${summary}\n\n## 逐字转写\n\n${transcript}` : summary };
+  };
+  const sameRecorderSubmission = (left: ReturnType<typeof readRecorderSubmission>, right: ReturnType<typeof readRecorderSubmission>) => (
+    left.collectionId === right.collectionId && left.title === right.title && left.audioFilePath === right.audioFilePath && left.transcript === right.transcript
+  );
   const handleSaveMeetingRecordingDraft = async () => {
-    if (!desktop?.meetingSaveTranscript || !collectionId || !meetingAudioFilePath || !meetingSummaryDraft.trim()) return;
+    if (!desktop?.meetingSaveTranscript || !collectionId || !meetingAudioFilePath || !meetingSummaryDraft.trim() || meetingSaving) return;
+    const action = beginMeetingAction('save'); if (!action) return;
     setMeetingSaving(true);
     setMeetingMessage(null);
-    const title = readMeetingRecordingTitle();
-    const summary = meetingSummaryDraft.trim();
-    const transcript = meetingDraftTranscript.trim();
-    const content = transcript ? `${summary}\n\n## 逐字转写\n\n${transcript}` : summary;
+    setMeetingWindowError('');
+    const submission = readRecorderSubmission();
     try {
-      const result = await desktop.meetingSaveTranscript({
-        collectionId,
-        title,
-        audioFilePath: meetingAudioFilePath,
-        transcript: content,
-      }) as { ok?: boolean; error?: string };
-      if (result?.ok === false) {
-        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError(result.error ?? 'unknown') });
-        return;
+      let saved = recorderSavedSubmission.current;
+      if (!isMeetingRecorderWindow || !saved || !sameRecorderSubmission(saved, submission)) {
+        const result = await desktop.meetingSaveTranscript(submission) as { ok?: boolean; error?: string };
+        if (!currentMeetingAction(action)) return;
+        if (result?.ok !== true) {
+          setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingImportError(result?.error ?? 'unknown') });
+          return;
+        }
+        saved = { ...submission, notified: false };
+        if (isMeetingRecorderWindow) recorderSavedSubmission.current = saved;
       }
+      if (!currentMeetingAction(action)) return;
       if (isMeetingRecorderWindow) {
-        await desktop.meetingNotifyRecordingSaved?.({ collectionId });
-        await desktop.meetingCloseRecorderWindow?.();
+        if (!sameRecorderSubmission(submission, readRecorderSubmission())) {
+          setMeetingWindowError(t.knowledge.meetingRecorderNewDraftUnsaved); return;
+        }
+        if (!saved.notified) {
+          if (!await runRecorderOperation(() => desktop.meetingNotifyRecordingSaved?.({ collectionId: submission.collectionId }), true)) return;
+          if (!currentMeetingAction(action)) return;
+          saved.notified = true;
+        }
+        if (!sameRecorderSubmission(submission, readRecorderSubmission())) {
+          setMeetingWindowError(t.knowledge.meetingRecorderNewDraftUnsaved); return;
+        }
+        await runRecorderOperation(() => desktop.meetingCloseRecorderWindow?.(), true);
         return;
       }
       setMeetingSummaryDraft('');
@@ -1306,12 +1460,15 @@ export function KnowledgePage() {
       setMeetingAudioFilePath('');
       replaceMeetingPreviewSegments([]);
       setShowMeetingRecorder(false);
+      if (!currentMeetingAction(action)) return;
       await loadSources(collectionId);
+      if (!currentMeetingAction(action)) return;
       await loadCollections();
     } catch {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError('unknown') });
+      if (currentMeetingAction(action)) setMeetingMessage({ kind: 'error', render: labels => labels.knowledge.meetingImportError('unknown') });
     } finally {
-      setMeetingSaving(false);
+      endMeetingAction(action);
+      if (currentMeetingAction(action)) setMeetingSaving(false);
     }
   };
 
@@ -1324,7 +1481,8 @@ export function KnowledgePage() {
     try {
       const results = await desktop.kbSearch({ collectionId, query: searchQuery.trim(), topK: 20 });
       setSearchResults(results as KbSearchResult[]);
-    } catch { setSearchResults([]); }
+      setSearchError('');
+    } catch (error) { setSearchError(knowledgeFailureMessage(error, true)); }
     setSearching(false);
   };
 
@@ -1332,6 +1490,8 @@ export function KnowledgePage() {
     e.preventDefault();
     setDragOver(false);
     if (!desktop?.kbAddSource || !collectionId) return;
+    setKnowledgeError('');
+    try {
     const files = e.dataTransfer.files;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -1356,7 +1516,9 @@ export function KnowledgePage() {
     }
     await loadSources(collectionId);
     await loadCollections();
-  };
+  
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
+};
 
   const selectedCollection = collections.find(c => c.id === collectionId);
 
@@ -1381,24 +1543,32 @@ export function KnowledgePage() {
         recordingSaving={meetingRecordingSaving}
         processing={meetingProcessing}
         draftSaving={meetingSaving}
-        message={meetingMessage}
+        message={meetingWindowError ? { kind: 'error', text: meetingWindowError } : meetingMessage}
         onStartRecording={() => void handleStartMeetingRecording()}
         onPauseRecording={handlePauseMeetingRecording}
         onResumeRecording={handleResumeMeetingRecording}
         onFinishRecording={() => void handleStopMeetingRecording({ draftRecording: true })}
-        onCompact={() => {
-          setMeetingRecorderView('compact');
-          void desktop?.meetingSetRecorderWindowMode?.({ mode: 'compact' });
-        }}
-        onExpand={() => {
-          setMeetingRecorderView('workbench');
-          void desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
-        }}
+        onCompact={() => void handleRecorderMode('compact')}
+        onExpand={() => void handleRecorderMode('workbench')}
         onSaveDraft={() => void handleSaveMeetingRecordingDraft()}
-        onCancel={handleCloseMeetingRecorder}
+        onCancel={() => void handleCloseMeetingRecorder()}
       />
     );
   }
+
+  const knowledgeNoticeText = collectionsError || sourcesError || searchError || (!showCreateDialog ? knowledgeError : '') || meetingWindowError;
+  const knowledgeFailureNotice = knowledgeNoticeText ? (
+    <div role="alert" className="m-4 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-status-error-text)]">
+      <p>{knowledgeNoticeText}</p>
+      <button type="button" onClick={() => { void loadCollections(); if (collectionId) void loadSources(collectionId); }} className="mt-2 rounded-md border border-[var(--c-border-subtle)] px-2 py-1 text-xs">{t.knowledge.refreshData}</button>
+    </div>
+  ) : null;
+  if (!loading && collections.length === 0 && collectionsError) return (
+    <div className="flex h-full min-h-0 flex-col">
+      {knowledgeFailureNotice}
+      {showCreateDialog && <CreateCollectionDialog key="knowledge-create" error={knowledgeError} name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -1425,13 +1595,14 @@ export function KnowledgePage() {
         >
           {t.knowledge.createFirstCollection}
         </button>
-        {showCreateDialog && <CreateCollectionDialog name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
+        {showCreateDialog && <CreateCollectionDialog key="knowledge-create" error={knowledgeError} name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--c-bg-page)]">
+      {knowledgeFailureNotice}
       {/* Header */}
       <header className="border-b border-[var(--c-border)] px-6 py-4">
         <div className="flex items-center justify-between">
@@ -1645,7 +1816,7 @@ export function KnowledgePage() {
               )}
 
               {/* Source list */}
-              {sources.length === 0 ? (
+              {sources.length === 0 && !sourcesError ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 text-[var(--c-text-tertiary)]">
                   <FileText size={24} />
                   <p className="text-sm">{t.knowledge.emptyCollection}</p>
@@ -1690,6 +1861,8 @@ export function KnowledgePage() {
       {/* Create collection dialog */}
       {showCreateDialog && (
         <CreateCollectionDialog
+          key="knowledge-create"
+          error={knowledgeError}
           name={newCollectionName}
           setName={setNewCollectionName}
           onCreate={handleCreateCollection}
@@ -2046,6 +2219,7 @@ function MeetingRecorderWindowSurface({
             <Maximize2 size={18} />
           </button>
         </div>
+        {message?.kind === 'error' && <p role="alert" className="text-sm text-red-600">{message.text}</p>}
         <div data-testid="meeting-compact-waveform" className="mt-1">
           <MeetingAudioWaveform audioLevels={audioLevels} active={recording} paused={paused} compact />
         </div>
@@ -2195,7 +2369,7 @@ function MeetingRecorderWindowSurface({
           {t.knowledge.meetingRecordStop}
         </button>
       </footer>
-      {message?.kind === 'error' && <p className="absolute bottom-24 left-12 text-sm text-red-600">{message.text}</p>}
+      {message?.kind === 'error' && <p role="alert" className="absolute bottom-24 left-12 text-sm text-red-600">{message.text}</p>}
     </main>
   );
 }
@@ -3159,11 +3333,12 @@ function LegacyMeetingRecorderDialog({
   );
 }
 
-function CreateCollectionDialog({ name, setName, onCreate, onCancel }: {
+function CreateCollectionDialog({ name, setName, onCreate, onCancel, error }: {
   name: string;
   setName: (v: string) => void;
   onCreate: () => void;
   onCancel: () => void;
+  error?: string;
 }) {
   const { t } = useLocale();
   return (
@@ -3180,6 +3355,7 @@ function CreateCollectionDialog({ name, setName, onCreate, onCancel }: {
           aria-label={t.knowledge.collectionNamePlaceholder}
           className="mb-4 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
         />
+        {error && <p role="alert" className="mb-3 text-xs text-[var(--c-status-error-text)]">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)]">{t.knowledge.cancel}</button>
           <button type="button" onClick={onCreate} disabled={!name.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">{t.knowledge.createBtn}</button>

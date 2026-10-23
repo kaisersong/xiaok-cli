@@ -1,8 +1,11 @@
+import workerThreads from 'node:worker_threads';
+import { syncBuiltinESMExports } from 'node:module';
+import { types as nativeTypes } from 'node:util';
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, inject, it, vi } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -15,23 +18,97 @@ import { MaterialRegistry } from '../../../src/runtime/task-host/material-regist
 import { bounded, hostDelivery } from '../fixtures/desktop-post-seal-harness.js';
 import { DesktopGoalCoordinator } from '../../electron/desktop-goal-coordinator.js';
 import { SqliteGoalStore } from '../../electron/goal-store-sqlite.js';
+import { createPassiveTrace } from '../fixtures/desktop-post-seal-passive-trace.js';
+import type { PassiveTraceSnapshot } from '../fixtures/desktop-post-seal-passive-trace.js';
+
+const nativeProtectionUrlGetter = Object.getOwnPropertyDescriptor(URL.prototype, 'href')?.get;
+function protectionWorkerUrl(filename: unknown): string | undefined {
+  try {
+    if (!filename || typeof filename !== 'object' || nativeTypes.isProxy(filename) || !nativeProtectionUrlGetter) return undefined;
+    return Reflect.apply(nativeProtectionUrlGetter, filename, []);
+  } catch { return undefined; }
+}
+
+function selectProtectionObservation(filename: unknown, options: unknown, taskId: string) {
+  try {
+    if (protectionWorkerUrl(filename) !== new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href
+      || !options || typeof options !== 'object' || nativeTypes.isProxy(options)) return false;
+    const data = Object.getOwnPropertyDescriptor(options, 'workerData');
+    if (!data || !Object.hasOwn(data, 'value') || !data.value || typeof data.value !== 'object' || nativeTypes.isProxy(data.value)) return false;
+    const task = Object.getOwnPropertyDescriptor(data.value, 'taskId');
+    return Boolean(task && Object.hasOwn(task, 'value') && task.value === taskId);
+  } catch { return false; }
+}
+function installProtectionObservation(trace: ReturnType<typeof createPassiveTrace>, taskId: string): () => void {
+  const mark = (stage: string, token: number, threadId?: number) => { try { trace.record(stage, { token, ...(typeof threadId === 'number' ? { threadId } : {}) }); } catch { /* Passive only. */ } };
+  let original: PropertyDescriptor | undefined;
+  let installed: PropertyDescriptor | undefined;
+  const restore = () => {
+    try {
+      if (!installed) return;
+      const current = Object.getOwnPropertyDescriptor(workerThreads, 'Worker');
+      if (!current || current.value !== installed.value || current.writable !== installed.writable
+        || current.enumerable !== installed.enumerable || current.configurable !== installed.configurable) {
+        mark('restoration-conflict', 0); return;
+      }
+      Object.defineProperty(workerThreads, 'Worker', original!);
+      installed = undefined;
+      syncBuiltinESMExports();
+    } catch { mark('observer-error', 0); }
+  };
+  try {
+    original = Object.getOwnPropertyDescriptor(workerThreads, 'Worker');
+    if (!original || !Object.hasOwn(original, 'value') || typeof original.value !== 'function' || !original.writable) {
+      mark('observer-error', 0); return restore;
+    }
+    const NativeWorker = original.value as typeof workerThreads.Worker;
+    let token = 0;
+    class ObservedProtectionWorker extends NativeWorker {
+      constructor(filename: ConstructorParameters<typeof NativeWorker>[0], options?: ConstructorParameters<typeof NativeWorker>[1]) {
+        const observed = selectProtectionObservation(filename, options, taskId) ? ++token : undefined;
+        if (observed !== undefined) mark('parent-protection-worker-constructor-before', observed);
+        super(filename, options);
+        if (observed !== undefined) {
+          try {
+            mark('parent-protection-worker-constructor-after', observed, this.threadId);
+            this.once('online', () => mark('parent-protection-worker-online', observed));
+            this.once('message', () => mark('parent-protection-worker-message', observed));
+            this.once('exit', () => mark('parent-protection-worker-exit', observed));
+          } catch { mark('observer-error', observed); }
+        }
+      }
+    }
+    installed = { ...original, value: ObservedProtectionWorker };
+    Object.defineProperty(workerThreads, 'Worker', installed);
+    syncBuiltinESMExports();
+    return restore;
+  } catch { mark('observer-error', 0); restore(); return restore; }
+}
 
 interface RecoveryReceipt extends PersistedTaskEvent { authority: object }
 interface RecoveryGoalContract { handleRecoveredHostTerminal(input: RecoveryReceipt): Promise<void> }
 interface RecoveryServiceContract { assertDeliveryRecovery(input: unknown): void }
 
-interface OwnerEvent { stage: string; taskId: string; groupId: string; childId: string; elapsed?: number; status?: string; delivery?: unknown; inFlight?: boolean }
+interface OwnerEvent { stage: string; taskId: string; groupId: string; childId: string; elapsed?: number; status?: string; delivery?: unknown; inFlight?: boolean; trace?: PassiveTraceSnapshot; watchdogMs?: number; d10Trace?: PassiveTraceSnapshot }
 describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
-  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); });
-  async function start(mode: string) {
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-process-'));
+  const nativeRestores = new Set<() => void>();
+  afterEach(async () => {
+    for (const restore of nativeRestores) restore();
+    nativeRestores.clear();
+    for (const action of cleanup.splice(0).reverse()) await action();
+  });
+  async function start(mode: string, trace?: ReturnType<typeof createPassiveTrace>) {
+    const mark = (stage: string) => { try { trace?.record(stage); } catch { /* Diagnostic failure cannot change this fixture. */ } };
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-process-')));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     if (mode === 'fifo') execFileSync('mkfifo', [join(root, 'pending.pdf')]);
-    const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, mode], {
+    mark('spawn-before');
+    const child = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, mode, inject('profileTestAccountRoot'), userInfo().homedir], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    mark('spawn-after');
     const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
     const stop = async () => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await closed; };
     cleanup.push(stop);
@@ -42,7 +119,7 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
       for (;;) {
         const newline = output.indexOf('\n'); if (newline < 0) break;
         const line = output.slice(0, newline); output = output.slice(newline + 1);
-        if (line.startsWith('{')) { events.push(JSON.parse(line)); for (const listener of listeners) listener(); }
+        if (line.startsWith('{')) { events.push(JSON.parse(line)); mark('stdout-received:' + events[events.length - 1].stage); for (const listener of listeners) listener(); }
       }
     });
     const wait = (stage: string) => bounded(new Promise<OwnerEvent>((resolve, reject) => {
@@ -57,6 +134,7 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
       listeners.add(check); check();
     }));
     const sealed = await wait('sealed');
+    mark('sealed-received');
     return { root, child, events, wait, stop, sealed };
   }
   function open(root: string, withGoal = false, consumerHook?: (input: RecoveryReceipt, goal: DesktopGoalCoordinator) => Promise<void>) {
@@ -99,16 +177,26 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
 
   it.skipIf(process.platform === 'win32')('D6 actual file:// PDF FIFO cannot block host heartbeat; raw IO keeps in-flight ownership after deadline', async () => {
     const f = await start('fifo');
-    const heartbeat = await f.wait('heartbeat'); expect(heartbeat.elapsed).toBeLessThan(200);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    f.child.stdin!.write('inspect\n');
-    expect(await f.wait('inspection')).toMatchObject({ inFlight: true });
-    expect(f.events.filter(event => event.stage === 'native-worker-start')).toHaveLength(1);
-    expect(f.events.filter(event => event.stage === 'native-worker-exit')).toHaveLength(1);
-    const observer = open(f.root);
-    expect(observer.store.getAgent(f.sealed.groupId, `root_${f.sealed.groupId}`)).toMatchObject({ status: 'completed', hostDeliveryStatus: 'unknown',
-      hostDeliveryCleanupPending: true });
-    await f.stop();
+    let inspectWriteMonotonicMs: number | undefined;
+    try {
+      const heartbeat = await f.wait('heartbeat'); expect(heartbeat.elapsed).toBeLessThan(200);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      inspectWriteMonotonicMs = performance.now();
+      f.child.stdin!.write('inspect\n');
+      expect(await f.wait('inspection')).toMatchObject({ inFlight: true });
+      expect(f.events.filter(event => event.stage === 'native-worker-start')).toHaveLength(1);
+      expect(f.events.filter(event => event.stage === 'native-worker-exit')).toHaveLength(1);
+      const observer = open(f.root);
+      expect(observer.store.getAgent(f.sealed.groupId, `root_${f.sealed.groupId}`)).toMatchObject({ status: 'completed', hostDeliveryStatus: 'unknown',
+        hostDeliveryCleanupPending: true });
+      await f.stop();
+    } finally {
+      // Never wait for late diagnostics or weaken the original early-drain
+      // rejection. Owner and parent monotonic clocks have different origins.
+      console.info('[post-seal-fifo-passive-trace]', JSON.stringify({ inspectWriteParentMonotonicMs: inspectWriteMonotonicMs,
+        snapshots: f.events.filter(event => event.trace).map(event => ({ stage: event.stage,
+          watchdogMs: event.watchdogMs, status: event.status, inFlight: event.inFlight, delivery: event.delivery, trace: event.trace })) }));
+    }
   });
 
   it.each(['before-marker', 'marker-transaction', 'marker-committed', 'snapshot'])('D10/D18 actual OS crash at %s uses committed marker truth and never replays', async mode => {
@@ -178,21 +266,47 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
   });
 
   it.each(['before-host-write', 'host-committed', 'projection-committed'])('D10 OS crash at %s preserves actual host journal commit and never appends duplicate terminal', async mode => {
-    const f = await start(mode); await f.wait(mode);
-    expect(f.events.filter(event => event.stage === 'native-worker-start')).toHaveLength(1);
-    expect(f.events.filter(event => event.stage === 'native-worker-exit')).toHaveLength(1);
-    const committed = mode !== 'before-host-write'; const observer = open(f.root);
-    const before = await observer.host.inspectTask(f.sealed.taskId);
-    expect.soft(hostDelivery(before) ?? (observer.store.getRootBinding(f.sealed.taskId) as unknown as { delivery?: unknown })?.delivery).toBeDefined();
-    expect(before?.status).toBe(committed ? 'completed' : 'running');
-    await f.stop(); const next = open(f.root); await next.service.initialize(next.host);
-    const recovered = await next.host.inspectTask(f.sealed.taskId);
-    expect(recovered?.status).toBe(committed ? 'completed' : 'failed');
-    if (committed) expect(recovered).toEqual(before);
-    else expect(recovered?.salvage?.reason).toBe('recovery_unconfirmed');
-    expect(recovered?.events.filter(event => event.type === 'task_terminal')).toHaveLength(1);
-    expect(next.runner).not.toHaveBeenCalled(); expect(next.createSession).not.toHaveBeenCalled();
-    expect(next.store.getAgent(f.sealed.groupId, `root_${f.sealed.groupId}`)?.status).toBe('completed');
+    const trace = mode === 'before-host-write' ? createPassiveTrace() : undefined;
+    const mark = (stage: string) => { try { trace?.record(stage); } catch { /* Diagnostic failure cannot change assertions. */ } };
+    let boundary: PassiveTraceSnapshot | undefined;
+    let restoreProtection = () => {};
+    mark('test-enter');
+    try {
+      const f = await start(mode, trace);
+      if (trace) { restoreProtection = installProtectionObservation(trace, f.sealed.taskId); nativeRestores.add(restoreProtection); }
+      mark('start-resolved');
+      await f.wait(mode);
+      mark('boundary-received');
+      for (const event of f.events) if (event.stage === mode) boundary = event.d10Trace;
+      expect(f.events.filter(event => event.stage === 'native-worker-start')).toHaveLength(1);
+      expect(f.events.filter(event => event.stage === 'native-worker-exit')).toHaveLength(1);
+      const committed = mode !== 'before-host-write'; const observer = open(f.root);
+      mark('observer-inspect-before');
+      const before = await observer.host.inspectTask(f.sealed.taskId);
+      mark('observer-inspect-after');
+      expect.soft(hostDelivery(before) ?? (observer.store.getRootBinding(f.sealed.taskId) as unknown as { delivery?: unknown })?.delivery).toBeDefined();
+      expect(before?.status).toBe(committed ? 'completed' : 'running');
+      mark('kill-before');
+      await f.stop();
+      mark('kill-after');
+      const next = open(f.root);
+      mark('initialize-before');
+      await next.service.initialize(next.host);
+      mark('initialize-after');
+      mark('recovered-inspect-before');
+      const recovered = await next.host.inspectTask(f.sealed.taskId);
+      mark('recovered-inspect-after');
+      expect(recovered?.status).toBe(committed ? 'completed' : 'failed');
+      if (committed) expect(recovered).toEqual(before);
+      else expect(recovered?.salvage?.reason).toBe('recovery_unconfirmed');
+      expect(recovered?.events.filter(event => event.type === 'task_terminal')).toHaveLength(1);
+      expect(next.runner).not.toHaveBeenCalled(); expect(next.createSession).not.toHaveBeenCalled();
+      expect(next.store.getAgent(f.sealed.groupId, `root_${f.sealed.groupId}`)?.status).toBe('completed');
+    } finally {
+      restoreProtection();
+      nativeRestores.delete(restoreProtection);
+      if (trace) { try { console.info('[d10-before-host-write-passive-trace]', JSON.stringify({ parent: trace.snapshot(), boundary })); } catch { /* Logging cannot hide the original failure. */ } }
+    }
   });
 
   it('D18 concurrent recoverTask/getActiveTask cannot race startup into ordinary stale-running recovery', async () => {

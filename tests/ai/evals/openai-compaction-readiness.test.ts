@@ -508,8 +508,8 @@ describe('schema, identity, measurement window, freshness, and matched samples',
 
   it('requires every matched-cohort metric to cover exactly the matched task set', () => {
     const evidence = cloneEvidence();
-    evidence.metrics.qualityLift.sampleSize = 1;
-    evidence.metrics.toolCorrectness.sampleSize = 21;
+    (evidence.metrics.qualityLift as Extract<typeof evidence.metrics.qualityLift, { status: 'measured' }>).sampleSize = 1;
+    (evidence.metrics.toolCorrectness as Extract<typeof evidence.metrics.toolCorrectness, { status: 'measured' }>).sampleSize = 21;
 
     const result = evaluate(evidence);
 
@@ -545,7 +545,7 @@ describe('readiness policy boundaries', () => {
 
   it('requires context-pressure incidence to use the eligible task count as its denominator', () => {
     const evidence = cloneEvidence();
-    evidence.metrics.contextPressureIncidence.denominator = 400;
+    (evidence.metrics.contextPressureIncidence as Extract<typeof evidence.metrics.contextPressureIncidence, { status: 'measured' }>).denominator = 400;
 
     expect(evaluate(evidence).reasons).toContain('context_pressure_incidence_invalid');
   });
@@ -577,24 +577,24 @@ describe('readiness policy boundaries', () => {
 
   it('requires quality or key-fact recall lift to reach 5 percentage points', () => {
     const qualityBoundary = cloneEvidence();
-    qualityBoundary.metrics.qualityLift.value = 5;
-    qualityBoundary.metrics.keyFactRecallLift.value = 4.99;
+    (qualityBoundary.metrics.qualityLift as Extract<typeof qualityBoundary.metrics.qualityLift, { status: 'measured' }>).value = 5;
+    (qualityBoundary.metrics.keyFactRecallLift as Extract<typeof qualityBoundary.metrics.keyFactRecallLift, { status: 'measured' }>).value = 4.99;
     expect(evaluate(qualityBoundary).go).toBe(true);
 
     const recallBoundary = cloneEvidence();
-    recallBoundary.metrics.qualityLift.value = 4.99;
-    recallBoundary.metrics.keyFactRecallLift.value = 5;
+    (recallBoundary.metrics.qualityLift as Extract<typeof recallBoundary.metrics.qualityLift, { status: 'measured' }>).value = 4.99;
+    (recallBoundary.metrics.keyFactRecallLift as Extract<typeof recallBoundary.metrics.keyFactRecallLift, { status: 'measured' }>).value = 5;
     expect(evaluate(recallBoundary).go).toBe(true);
 
     const below = cloneEvidence();
-    below.metrics.qualityLift.value = 4.99;
-    below.metrics.keyFactRecallLift.value = 4.99;
+    (below.metrics.qualityLift as Extract<typeof below.metrics.qualityLift, { status: 'measured' }>).value = 4.99;
+    (below.metrics.keyFactRecallLift as Extract<typeof below.metrics.keyFactRecallLift, { status: 'measured' }>).value = 4.99;
     expect(evaluate(below).reasons).toContain('quality_or_recall_lift_below_threshold');
   });
 
   it('does not let one qualified lift hide missing companion evidence', () => {
     const evidence = cloneEvidence();
-    evidence.metrics.qualityLift.value = 5;
+    (evidence.metrics.qualityLift as Extract<typeof evidence.metrics.qualityLift, { status: 'measured' }>).value = 5;
     evidence.metrics.keyFactRecallLift = { status: 'missing' };
 
     expect(evaluate(evidence).reasons).toContain('key_fact_recall_lift_missing');
@@ -604,29 +604,29 @@ describe('readiness policy boundaries', () => {
     expect(evaluate(makeGoEvidence()).go).toBe(true);
 
     const toolOverrun = cloneEvidence();
-    toolOverrun.metrics.toolCorrectness.candidate = 97.99;
+    (toolOverrun.metrics.toolCorrectness as Extract<typeof toolOverrun.metrics.toolCorrectness, { status: 'measured' }>).candidate = 97.99;
     expect(evaluate(toolOverrun).reasons).toContain(
       'tool_correctness_regression_exceeded',
     );
 
     const approvalOverrun = cloneEvidence();
-    approvalOverrun.metrics.approvalCorrectness.candidate = 98.99;
+    (approvalOverrun.metrics.approvalCorrectness as Extract<typeof approvalOverrun.metrics.approvalCorrectness, { status: 'measured' }>).candidate = 98.99;
     expect(evaluate(approvalOverrun).reasons).toContain(
       'approval_correctness_regression_exceeded',
     );
 
     const costOverrun = cloneEvidence();
-    costOverrun.metrics.costPerSuccessfulTask.candidate.compactInputUsdPerMillion = 200.2;
+    (costOverrun.metrics.costPerSuccessfulTask as Extract<typeof costOverrun.metrics.costPerSuccessfulTask, { status: 'measured' }>).candidate.compactInputUsdPerMillion = 200.2;
     expect(evaluate(costOverrun).reasons).toContain('cost_per_success_increase_exceeded');
   });
 
   it('computes cost per success from partial matched-cohort successes', () => {
     const boundary = cloneEvidence();
-    boundary.metrics.costPerSuccessfulTask.baseline = {
+    (boundary.metrics.costPerSuccessfulTask as Extract<typeof boundary.metrics.costPerSuccessfulTask, { status: 'measured' }>).baseline = {
       successfulTasks: 10,
       ordinaryCostUsd: 1_000,
     };
-    boundary.metrics.costPerSuccessfulTask.candidate = {
+    (boundary.metrics.costPerSuccessfulTask as Extract<typeof boundary.metrics.costPerSuccessfulTask, { status: 'measured' }>).candidate = {
       successfulTasks: 12,
       ordinaryCostUsd: 1_120,
       compactInputTokens: 1_000_000,
@@ -641,20 +641,20 @@ describe('readiness policy boundaries', () => {
       reasons: [],
     });
 
-    boundary.metrics.costPerSuccessfulTask.candidate.compactInputUsdPerMillion = 200.2;
+    (boundary.metrics.costPerSuccessfulTask as Extract<typeof boundary.metrics.costPerSuccessfulTask, { status: 'measured' }>).candidate.compactInputUsdPerMillion = 200.2;
     expect(evaluate(boundary).reasons).toContain('cost_per_success_increase_exceeded');
   });
 
   it('rejects successful-task counts that exceed the matched cohort', () => {
     const evidence = cloneEvidence();
-    evidence.metrics.costPerSuccessfulTask.candidate.successfulTasks = 21;
+    (evidence.metrics.costPerSuccessfulTask as Extract<typeof evidence.metrics.costPerSuccessfulTask, { status: 'measured' }>).candidate.successfulTasks = 21;
 
     expect(evaluate(evidence).reasons).toContain('cost_per_success_invalid');
   });
 
   it('accepts a separately approved cost overrun only with hashed approval evidence', () => {
     const evidence = cloneEvidence();
-    evidence.metrics.costPerSuccessfulTask.candidate.compactInputUsdPerMillion = 400;
+    (evidence.metrics.costPerSuccessfulTask as Extract<typeof evidence.metrics.costPerSuccessfulTask, { status: 'measured' }>).candidate.compactInputUsdPerMillion = 400;
     evidence.costIncreaseOverride = {
       status: 'measured',
       approved: true,
@@ -670,8 +670,8 @@ describe('readiness policy boundaries', () => {
 
   it('requires compact p95 to stay strictly below 5 seconds', () => {
     const boundary = cloneEvidence();
-    boundary.metrics.compactLatencyP95.value = 5_000;
-    boundary.metrics.taskLatencyP95.value = 100_000;
+    (boundary.metrics.compactLatencyP95 as Extract<typeof boundary.metrics.compactLatencyP95, { status: 'measured' }>).value = 5_000;
+    (boundary.metrics.taskLatencyP95 as Extract<typeof boundary.metrics.taskLatencyP95, { status: 'measured' }>).value = 100_000;
 
     expect(evaluate(boundary).reasons).toContain(
       'compact_latency_absolute_limit_exceeded',
@@ -680,8 +680,8 @@ describe('readiness policy boundaries', () => {
 
   it('requires compact p95 to stay strictly below 10% of task p95', () => {
     const boundary = cloneEvidence();
-    boundary.metrics.compactLatencyP95.value = 4_000;
-    boundary.metrics.taskLatencyP95.value = 40_000;
+    (boundary.metrics.compactLatencyP95 as Extract<typeof boundary.metrics.compactLatencyP95, { status: 'measured' }>).value = 4_000;
+    (boundary.metrics.taskLatencyP95 as Extract<typeof boundary.metrics.taskLatencyP95, { status: 'measured' }>).value = 40_000;
 
     expect(evaluate(boundary).reasons).toContain(
       'compact_latency_ratio_limit_exceeded',
@@ -761,6 +761,7 @@ describe('fault injection, live smoke, and fallback integration', () => {
     expect(evaluate(invalid).reasons).toContain('live_smoke_invalid');
 
     const failed = cloneEvidence();
+    if (failed.liveRawLedgerSmoke.status !== 'passed') throw new Error('expected live smoke');
     failed.liveRawLedgerSmoke = {
       ...failed.liveRawLedgerSmoke,
       status: 'failed',

@@ -1,3 +1,5 @@
+import type {AssistantCandidateKind, AssistantCandidateStatus, AssistantEvidenceRef, AssistantCandidate} from '../../src/runtime/loop/producer-types.js';
+export type {AssistantCandidateKind, AssistantCandidateStatus, AssistantEvidenceRef, AssistantCandidate} from '../../src/runtime/loop/producer-types.js';
 export const DEFAULT_PERSONAL_ASSISTANT_ID = 'default-personal-assistant' as const;
 export const ASSISTANT_EVENING_LOOP_ID = 'personal-assistant-evening-reflection' as const;
 export const ASSISTANT_MORNING_LOOP_ID = 'personal-assistant-morning-briefing' as const;
@@ -19,29 +21,8 @@ export interface AssistantProfile {
   updatedAt: number;
 }
 
-export type AssistantCandidateKind = 'memory' | 'knowledge' | 'follow_up';
-export type AssistantCandidateStatus = 'staged' | 'pending' | 'accepting' | 'accepted' | 'rejected' | 'superseded' | 'accept_failed';
 
-export interface AssistantEvidenceRef { kind: string; id: string; }
 
-export interface AssistantCandidate {
-  id: string;
-  runId: string;
-  kind: AssistantCandidateKind;
-  title: string;
-  content: string;
-  scope: 'global' | 'project';
-  projectId?: string;
-  confidence: number;
-  evidenceRefs: AssistantEvidenceRef[];
-  dedupeKey: string;
-  status: AssistantCandidateStatus;
-  targetKind?: 'memory' | 'knowledge' | 'follow_up';
-  targetId?: string;
-  acceptedTargetRef?: string;
-  createdAt: number;
-  decidedAt?: number;
-}
 
 export type CreateAssistantCandidateInput = Omit<AssistantCandidate, 'id' | 'runId' | 'status' | 'createdAt' | 'decidedAt'>;
 

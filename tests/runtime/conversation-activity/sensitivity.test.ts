@@ -33,6 +33,7 @@ describe('field sensitivity', () => {
       projection: { watchId: 'watch-1', summary: canary, revision: 7, evidenceRefs: ['ref-1'], unknown: canary },
       origin: { profileId: 'profile-1', threadId: 'thread-1', actorId: 'actor-1', workspaceId: path, unknown: canary } };
     const result = projectMetadataOnly(kind, value);
+    if (result === null) throw new Error('expected_metadata_projection');
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain(canary);
     expect(serialized).not.toContain(path);

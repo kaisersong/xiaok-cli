@@ -15,3 +15,12 @@ describe('CapabilityRegistry', () => {
     expect(registry.get('cognitive-coach')).toMatchObject({ kind: 'skill' });
   });
 });
+
+
+it('restores the whole owner discovery snapshot and rejects invalid refresh atomically',()=>{
+ const registry=new CapabilityRegistry(),a={},b={},first={kind:'tool' as const,name:'read',description:'A'},second={...first,description:'B'};
+ registry.register(first,a);(registry as any).register(second,b,{effect:'read'});
+ expect((registry as any).getDiscovery('read')).toEqual({coreRecord:second,metadata:{effect:'read'}});
+ expect(()=> (registry as any).register(first,a,{effect:'bad'})).toThrow();expect(registry.get('read')).toBe(second);
+ registry.unregisterOwner(b);expect((registry as any).getDiscovery('read')).toEqual({coreRecord:first});
+});

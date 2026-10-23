@@ -1,5 +1,5 @@
 import type { InstalledSkill, MarketSkill, SkillPackageResponse, SkillReference } from '../../api'
-import { getActiveTimeZone } from '../shared'
+import { getActiveTimeZone } from '../../shared/index'
 
 export type ViewMode = 'installed' | 'marketplace' | 'builtin'
 
@@ -23,7 +23,7 @@ export type ViewSkill = {
   scan_summary?: string
   moderation_verdict?: string
   is_platform?: boolean
-  platform_status?: 'auto' | 'manual' | 'removed'
+  platform_status?: string
 }
 
 export type CandidateState = {

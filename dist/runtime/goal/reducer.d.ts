@@ -4,6 +4,9 @@ export type GoalAction = {
     reason: string;
     now: number;
 } | {
+    type: 'resume_publication';
+    now: number;
+} | {
     type: 'resume';
     turnLimit?: number;
     now: number;
@@ -45,6 +48,9 @@ export type GoalAction = {
     } | {
         kind: 'complete';
         reason: string;
+    } | {
+        kind: 'publication_pending';
+        intentId: string;
     } | {
         kind: 'blocked';
         reason: string;

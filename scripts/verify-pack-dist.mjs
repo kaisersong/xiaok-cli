@@ -5,7 +5,7 @@
 // 不改动 --repo 的工作区：用 git archive 导出到临时目录后在那里 build。退出码非 0 表示不得发布。
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
@@ -48,10 +48,12 @@ const scratch = mkdtempSync(join(tmpdir(), 'verify-pack-dist-'));
 const failures = [];
 try {
   const src = join(scratch, 'src'); const pkg = join(scratch, 'pkg');
-  execFileSync('mkdir', ['-p', src, pkg]);
-  run('bash', ['-c', `git -C ${JSON.stringify(repo)} archive ${JSON.stringify(ref)} | tar -x -C ${JSON.stringify(src)}`], repo);
+  mkdirSync(src, { recursive: true }); mkdirSync(pkg, { recursive: true });
+  // Resolve once and pass the commit/archive as data, without shell expansion.
+  const sha1 = run('git', ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], repo).toString().trim();
+  const archive = run('git', ['archive', '--format=tar', sha1], repo);
+  execFileSync('tar', ['-x', '-C', src], { input: archive, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 1 << 28 });
   run('tar', ['-xzf', resolve(tgz), '-C', pkg], repo);
-  const sha1 = run('git', ['rev-parse', ref], repo).toString().trim();
   const nm = join(repo, 'node_modules');
   if (!existsSync(nm)) throw new Error(`${nm} 不存在，先在 --repo 里 npm ci`);
   symlinkSync(nm, join(src, 'node_modules'));

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 /**
  * Design v58 §5.5 / R18-01 / R19-01: only `ShutdownAwareIpcMain` may hold the
@@ -47,7 +48,19 @@ describe('IPC registrar contract (design R18-01, R19-01)', () => {
   it('keeps the raw electron ipcMain import in exactly one non-wrapper file', () => {
     // main.ts still imports ipcMain, but only to construct the wrapper once.
     const main = stripComments(read('main.ts'));
-    expect(main).toMatch(/new ShutdownAwareIpcMain\(ipcMain, desktopShutdownGate\)/);
+    expect(main).toMatch(/new ShutdownAwareIpcMain\(ipcMain, desktopShutdownGate, authorizeDesktopInvoke\)/);
+    const ast = ts.createSourceFile('main.ts', read('main.ts'), ts.ScriptTarget.Latest, true);
+    const constructors: ts.NewExpression[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isNewExpression(node) && node.expression.getText(ast) === 'ShutdownAwareIpcMain') constructors.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+    expect(constructors).toHaveLength(1);
+    expect(constructors[0]!.arguments?.map(node => node.getText(ast))).toEqual(['ipcMain', 'desktopShutdownGate', 'authorizeDesktopInvoke']);
+    const admission = ast.statements.find((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === 'authorizeDesktopInvoke');
+    expect(admission?.body?.statements.length).toBeGreaterThan(0);
+    expect(admission?.modifiers?.some(node => node.kind === ts.SyntaxKind.ExportKeyword || node.kind === ts.SyntaxKind.AsyncKeyword) ?? false).toBe(false);
     const otherUses = main.match(/\bipcMain\b/g) ?? [];
     // One in the electron import list, one in the wrapper construction.
     expect(otherUses.length).toBe(2);

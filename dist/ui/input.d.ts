@@ -95,6 +95,8 @@ export declare class InputReader {
     private clipboardImageSaver;
     private busyCapture;
     private readActive;
+    private cancelRead?;
+    private readsClosed;
     private onToggleTranscript?;
     private suspendHooks;
     private suspendDepth;
@@ -102,6 +104,10 @@ export declare class InputReader {
     private onOtherInput?;
     constructor(renderer?: ReplRenderer | undefined);
     setInterruptHandler(handler?: () => void, onOtherInput?: () => void): void;
+    /** Host shutdown uses the original read's completion and detach path. */
+    cancelActiveRead(): void;
+    /** Closing the host also fences a late permission/confirmation prompt. */
+    close(): void;
     private dispatchInput;
     setToggleTranscriptHandler(handler: (() => void | Promise<void>) | undefined): void;
     /**

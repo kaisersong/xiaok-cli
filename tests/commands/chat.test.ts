@@ -121,7 +121,7 @@ describe('chat terminal layout', () => {
     expect(source).toContain([
       "        const pendingInput = inputReader.read('> ', busyDraft?.draft",
     ].join('\n'));
-    const loopStart = source.indexOf('interactiveLoop: while (true) {');
+    const loopStart = source.indexOf('interactiveLoop: while (!modelIngressClosed) {');
     const refreshIndex = source.indexOf('await refreshSkills();', loopStart);
     const stashIndex = source.indexOf('stashQueuedInputIfAny({ stopCapture: false });', refreshIndex);
     const inputDeclIndex = source.indexOf('let input: string | null;', stashIndex);
@@ -167,7 +167,8 @@ describe('chat terminal layout', () => {
   it('wires ESC abort controllers through the shared turn runner and records abort by turn id', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    expect(source).toContain("import { isAbortError } from '../ai/runtime/abort-utils.js';");
+    expect(source).toContain('const commandCancellations = new WeakMap<object, Set<unknown>>();');
+    expect(source).toContain('const observeCommandCancellation = (signal: AbortSignal): (() => void) => {');
     expect(source).toContain('let currentTurnAbortController: AbortController | null = null;');
     expect(source).toContain('const requestCurrentTurnAbort = (): void => {');
     expect(source).toContain('onAbortRequest: requestCurrentTurnAbort');
@@ -176,15 +177,17 @@ describe('chat terminal layout', () => {
     expect(source).toContain("event.reason === 'user_aborted'");
     expect(source).toContain('abortedRuntimeTurnIds.add(event.turnId);');
     expect(source).not.toContain('autoContinueController');
-    expect(source).toContain('isAbortError(e)');
+    expect(source).toContain('isCurrentCommandCancellation(e)');
+    expect(source).toContain('commandCancellations.delete(token);');
+    expect(source).not.toContain("Error('chat_model_ingress_closed')");
   });
 
-  it('does not render AbortError as a failed turn error after ESC', () => {
+  it('classifies the current command actual cancellation reason after ESC', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
     expect(source).toContain('const handleTurnAbort = (): void => {');
-    expect(source).toContain('if (isAbortError(e)) {\n            handleTurnAbort();');
-    expect(source).toContain('if (isAbortError(e)) {\n        handleTurnAbort();');
+    expect(source).toContain('if (isCurrentCommandCancellation(e)) {\n            handleTurnAbort();');
+    expect(source).toContain('if (isCurrentCommandCancellation(e)) {\n        handleTurnAbort();');
   });
 
   it('should render the status line inside the prompt renderer instead of after assistant output', () => {
@@ -221,7 +224,7 @@ describe('chat terminal layout', () => {
     const forkLoad = source.indexOf('persistedSession = await sessionStore.fork(opts.forkSession);');
     const agentConstruction = source.indexOf('agent = new Agent(');
 
-    expect(source).toContain('const sessionStore = createFileSessionStore();');
+    expect(source).toContain('const sessionStore = createFileSessionStore(sessionStoreRoot);');
     expect(continueLoad).toBeGreaterThan(-1);
     expect(resumeLoad).toBeGreaterThan(-1);
     expect(forkLoad).toBeGreaterThan(-1);
@@ -357,7 +360,7 @@ describe('chat terminal layout', () => {
 
     expect(normalInputStart).toBeGreaterThan(-1);
     expect(normalInputEnd).toBeGreaterThan(normalInputStart);
-    expect(normalInputSource).toContain("beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);");
+    expect(normalInputSource).toContain("beginNormalInputTurnChrome(commandInputKind === 'goal' ? '' : trimmed);");
   });
 
   it('keeps tool input transcript summaries string-valued for undefined input', async () => {
@@ -404,7 +407,7 @@ describe('chat terminal layout', () => {
   it('should render submitted input before the intent orchestration block in interactive chat', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    const inputWrite = source.indexOf("beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);");
+    const inputWrite = source.indexOf("beginNormalInputTurnChrome(commandInputKind === 'goal' ? '' : trimmed);");
     const intentPrime = source.indexOf('await primeTurnIntentPlan(true);');
 
     expect(inputWrite).toBeGreaterThan(-1);
@@ -493,7 +496,7 @@ describe('chat terminal layout', () => {
     const progressEnd = source.indexOf('const maybeWriteThinkingOnlyToolNotice = (): void => {', progressStart);
     const progressSource = source.slice(progressStart, progressEnd);
     const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): boolean => {');
-    const orchestrationEnd = source.indexOf('persistSession = async', orchestrationStart);
+    const orchestrationEnd = source.indexOf('const persistSessionBody = async', orchestrationStart);
     const orchestrationSource = source.slice(orchestrationStart, orchestrationEnd);
 
     expect(source).not.toContain("from './chat/terminal-surface.js';");
@@ -700,4 +703,13 @@ describe('chat terminal layout', () => {
     expect(source).toContain(".option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')");
     expect(source).not.toContain(".option('--auto', '自动执行所有工具，无需确认（适用于 CI）')");
   });
+});
+
+
+it('keeps feedback disabled and its dormant EOF path leaves teardown to the final owner',()=>{
+ const source=readFileSync(join(process.cwd(),'src','commands','chat.ts'),'utf8');
+ expect(source).toContain('const COMPLETED_INTENT_FEEDBACK_ENABLED = false;');
+ const helper=source.slice(source.indexOf('const handleCompletedIntentFeedbackResult ='),source.indexOf('// 交互循环'));
+ expect(helper).toContain('if (!result.exitRequested)');
+ expect(helper).not.toContain('scrollRegion.end()');expect(helper).not.toContain('statusBar.destroy()');
 });

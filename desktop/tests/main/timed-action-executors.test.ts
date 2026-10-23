@@ -140,6 +140,7 @@ describe('timed action executors', () => {
         scheduledDueAt: context.scheduledDueAt,
       }),
       undefined,
+      { requestSource: 'scheduler' },
     );
     expect(genericLoopExecutor.execute).not.toHaveBeenCalled();
   });

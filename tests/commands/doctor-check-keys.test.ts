@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Config } from '../../src/types.js';
+import type { Config, ConfigInput } from '../../src/types.js';
+import { normalizeConfig } from '../../src/ai/providers/normalize.js';
+import { SYSTEM_ONE_KEY_ENV_VARS } from '../../src/ai/providers/system-one-config.js';
 
 const loadConfigMock = vi.fn();
 const probeApiKeyMock = vi.fn();
@@ -15,8 +17,8 @@ vi.mock('../../src/ai/providers/key-probe.js', () => ({
 
 const { runCheckKeysCommand } = await import('../../src/commands/doctor.js');
 
-function createConfig(overrides: Partial<Config['providers']> = {}): Config {
-  return {
+function createConfig(overrides: Config['providers'] = {}): Config {
+  const input: ConfigInput = {
     schemaVersion: 2,
     defaultProvider: 'anthropic',
     defaultModelId: 'anthropic-default',
@@ -25,6 +27,8 @@ function createConfig(overrides: Partial<Config['providers']> = {}): Config {
     defaultMode: 'interactive',
     channels: {},
   };
+  // Use the same real normalization route as loadConfig; no copied defaults.
+  return normalizeConfig(input);
 }
 
 const ALL_ENV_PREFIXES = ['XIAOK_ANTHROPIC', 'XIAOK_CLAUDE', 'XIAOK_OPENAI', 'XIAOK_KIMI', 'XIAOK_DEEPSEEK', 'XIAOK_GLM', 'XIAOK_MINIMAX', 'XIAOK_GEMINI'];
@@ -35,6 +39,9 @@ function clearAllProviderEnvVars(): void {
     delete process.env[`${prefix}_API_KEY`];
   }
   for (const name of ALL_STANDARD_ENV_VARS) {
+    delete process.env[name];
+  }
+  for (const name of SYSTEM_ONE_KEY_ENV_VARS) {
     delete process.env[name];
   }
 }

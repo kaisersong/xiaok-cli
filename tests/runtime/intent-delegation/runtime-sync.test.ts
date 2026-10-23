@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +6,10 @@ import { FileSessionStore } from '../../../src/ai/runtime/session-store.js';
 import { createIntentDelegationTools } from '../../../src/ai/tools/intent-delegation.js';
 import { createRuntimeHooks } from '../../../src/runtime/hooks.js';
 import { wireIntentDelegationToRuntimeSync } from '../../../src/runtime/intent-delegation/runtime-sync.js';
+import type { SessionIntentLedger } from '../../../src/runtime/intent-delegation/types.js';
 import { SessionIntentDelegationStore } from '../../../src/runtime/intent-delegation/store.js';
+import { createSessionExecutionAuthority, createSessionExecutionContext } from '../../../src/ai/runtime/session-store/execution-authority.js';
+import { intentNativeLedgerHash } from '../../../src/runtime/intent-delegation/native-contract-journal.js';
 
 describe('intent delegation runtime sync', () => {
   let rootDir: string;
@@ -18,6 +21,58 @@ describe('intent delegation runtime sync', () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it.each(['turn_failed', 'turn_aborted', 'tool_finished'] as const)('drains an admitted %s actual save before allowing the final ownership release', async type => {
+    const store = new FileSessionStore(rootDir), id = 'drain-session';
+    await store.save({...createSessionSnapshot(id), intentDelegation:createExistingLedger(id, 'inst', 'intent')});
+    const ledgerStore = new SessionIntentDelegationStore(store), hooks = createRuntimeHooks();
+    let unblock!:()=>void, entered!:()=>void;
+    const gate = new Promise<void>(resolve=>{unblock=resolve;}), started = new Promise<void>(resolve=>{entered=resolve;});
+    const actualSave=store.save.bind(store);
+    const save=vi.spyOn(store,'save').mockImplementation(async snapshot=>{entered();await gate;await actualSave(snapshot);});
+    const stop=wireIntentDelegationToRuntimeSync({hooks,ledgerStore,sessionId:id});
+    if(type==='turn_failed')hooks.emit({type,sessionId:id,turnId:'turn',error:Error('provider')});
+    else if(type==='turn_aborted')hooks.emit({type,sessionId:id,turnId:'turn'});
+    else hooks.emit({type,sessionId:id,turnId:'turn',invocationId:'invocation',toolName:'Bash',ok:false});
+    await started;
+    const drain=stop();
+    let settled=false;void Promise.resolve(drain).then(()=>{settled=true;});
+    try {
+      expect(drain).toBeInstanceOf(Promise);expect(stop()).toBe(drain);
+      await flush();expect(settled).toBe(false);
+      hooks.emit({type:'turn_failed',sessionId:id,turnId:'late',error:Error('after-stop')});
+    } finally {unblock();await drain;expect(save).toHaveBeenCalledTimes(1);save.mockRestore();}
+    const authority=createSessionExecutionAuthority({root:rootDir,sessionIdentity:id,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'inst',scopeId:'test-exit'})});
+    const lease=await authority.acquire({invocationId:'release',kind:'direct-mutation'});
+    try {await store.transitionIntentSessionOwnership({sessionId:id,instanceId:'inst',expectedLedgerHash:intentNativeLedgerHash(store.getIntentNativeLedgerSync(id)),action:'release',confirmHighRisk:false,requestSource:'user',now:Date.now(),lease});}
+    finally {await lease.releaseAfterDrain();authority.dispose();}
+    await settleAsyncStoreWork();
+    expect((await ledgerStore.load(id))?.ownership.state).toBe('released');
+    expect((await ledgerStore.load(id))?.intents[0].overallStatus).toBe(type==='turn_aborted'?'cancelled':type==='turn_failed'?'failed':'drafting_plan');
+  });
+
+  it('includes initial actual read in the same stop and refuses post-stop admission', async()=>{
+    const store=new FileSessionStore(rootDir),id='initial-drain';await store.save(createSessionSnapshot(id));
+    const actualLoad=store.load.bind(store);let unblock!:()=>void,entered!:()=>void;
+    const gate=new Promise<void>(r=>{unblock=r;}),started=new Promise<void>(r=>{entered=r;});
+    const load=vi.spyOn(store,'load').mockImplementation(async session=>{entered();await gate;return actualLoad(session);});
+    const hooks=createRuntimeHooks(),stop=wireIntentDelegationToRuntimeSync({hooks,ledgerStore:new SessionIntentDelegationStore(store),sessionId:id});
+    await started;const drain=stop();let settled=false;void Promise.resolve(drain).then(()=>{settled=true;});
+    try{expect(drain).toBeInstanceOf(Promise);await flush();expect(settled).toBe(false);hooks.emit({type:'turn_aborted',sessionId:id,turnId:'late'});}
+    finally{unblock();await drain;expect(load).toHaveBeenCalledTimes(1);load.mockRestore();}
+  });
+
+  it('retains an already settled actual save rejection and returns the same failed stop',async()=>{
+    const store=new FileSessionStore(rootDir),id='failed-drain';await store.save({...createSessionSnapshot(id),intentDelegation:createExistingLedger(id,'inst','intent')});
+    const original=Error('actual-save-failed');
+    const save=vi.spyOn(store,'save').mockRejectedValue(original),hooks=createRuntimeHooks();
+    const stop=wireIntentDelegationToRuntimeSync({hooks,ledgerStore:new SessionIntentDelegationStore(store),sessionId:id});
+    hooks.emit({type:'turn_failed',sessionId:id,turnId:'turn',error:Error('provider')});
+    await settleAsyncStoreWork();const drain=stop();
+    try{expect(drain).toBeInstanceOf(Promise);expect(stop()).toBe(drain);await expect(drain).rejects.toMatchObject({errors:[original]});}
+    finally{save.mockRestore();await Promise.resolve(drain).catch(()=>{});}
+    expect((await store.load(id))?.intentDelegation?.ownership.state).toBe('owned');
   });
 
   it('emits trace events from real runtime tool events and keeps failure lifecycle updates', async () => {
@@ -62,6 +117,7 @@ describe('intent delegation runtime sync', () => {
     const created = JSON.parse(createdResponse) as { intentId: string; activeStepId: string; activeStageId: string };
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_1',
       turnId: 'turn_1',
       toolName: 'intent_create',
@@ -87,6 +143,7 @@ describe('intent delegation runtime sync', () => {
     await tools.get('intent_step_update')!.execute(runningInput);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_1',
       turnId: 'turn_1',
       toolName: 'intent_step_update',
@@ -113,6 +170,7 @@ describe('intent delegation runtime sync', () => {
     await tools.get('intent_step_update')!.execute(completedInput);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_1',
       turnId: 'turn_1',
       toolName: 'intent_step_update',
@@ -142,6 +200,7 @@ describe('intent delegation runtime sync', () => {
     await tools.get('intent_stage_artifact')!.execute(artifactInput);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_1',
       turnId: 'turn_1',
       toolName: 'intent_stage_artifact',
@@ -166,6 +225,7 @@ describe('intent delegation runtime sync', () => {
     await tools.get('intent_salvage')!.execute(salvageInput);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_1',
       turnId: 'turn_1',
       toolName: 'intent_salvage',
@@ -175,6 +235,7 @@ describe('intent delegation runtime sync', () => {
 
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_1',
       turnId: 'turn_1',
       toolName: 'read',
@@ -289,6 +350,7 @@ describe('intent delegation runtime sync', () => {
 
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_race',
       turnId: 'turn_race',
       toolName: 'intent_create',
@@ -354,6 +416,7 @@ describe('intent delegation runtime sync', () => {
     await tools.get('intent_step_update')!.execute(input);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_existing',
       turnId: 'turn_existing',
       toolName: 'intent_step_update',
@@ -421,6 +484,7 @@ describe('intent delegation runtime sync', () => {
     await tools.get('intent_salvage')!.execute(input);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_existing_salvage',
       turnId: 'turn_existing_salvage',
       toolName: 'intent_salvage',
@@ -463,6 +527,7 @@ describe('intent delegation runtime sync', () => {
 
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_terminal',
       turnId: 'turn_terminal',
       toolName: 'read',
@@ -495,24 +560,13 @@ describe('intent delegation runtime sync', () => {
     })) as { intentId: string; activeStepId: string };
 
     let throwOnBreadcrumb = true;
-    const ledgerStore = Object.assign(
-      Object.create(Object.getPrototypeOf(baseStore)),
-      baseStore,
-      {
-        load: baseStore.load.bind(baseStore),
-        appendIntent: baseStore.appendIntent.bind(baseStore),
-        updateIntent: baseStore.updateIntent.bind(baseStore),
-        recordReceipt: baseStore.recordReceipt.bind(baseStore),
-        recordSalvage: baseStore.recordSalvage.bind(baseStore),
-        saveDispatchedIntent: baseStore.saveDispatchedIntent.bind(baseStore),
-        recordBreadcrumb: async (...args: Parameters<SessionIntentDelegationStore['recordBreadcrumb']>) => {
-          if (throwOnBreadcrumb) {
-            throw new Error('breadcrumb write failed');
-          }
-          return baseStore.recordBreadcrumb(...args);
-        },
-      },
-    ) as SessionIntentDelegationStore;
+    // Keep the real Store identity; inject only the original ordinary breadcrumb failure.
+    const ledgerStore = baseStore;
+    const recordBreadcrumb = baseStore.recordBreadcrumb.bind(baseStore);
+    vi.spyOn(baseStore, 'recordBreadcrumb').mockImplementation(async (...args) => {
+      if (throwOnBreadcrumb) throw new Error('breadcrumb write failed');
+      return recordBreadcrumb(...args);
+    });
 
     const failingTools = new Map(
       createIntentDelegationTools({ ledgerStore, sessionId: 'sess_partial' }).map((tool) => [tool.definition.name, tool]),
@@ -545,6 +599,7 @@ describe('intent delegation runtime sync', () => {
     await expect(failingTools.get('intent_step_update')!.execute(failedInput)).rejects.toThrow('breadcrumb write failed');
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_partial',
       turnId: 'turn_partial_1',
       toolName: 'intent_step_update',
@@ -573,6 +628,7 @@ describe('intent delegation runtime sync', () => {
     await failingTools.get('intent_step_update')!.execute(completedInput);
     hooks.emit({
       type: 'tool_finished',
+      invocationId: 'fixture-invocation',
       sessionId: 'sess_partial',
       turnId: 'turn_partial_2',
       toolName: 'intent_step_update',
@@ -629,8 +685,9 @@ function hooksCollector(hooks: ReturnType<typeof createRuntimeHooks>) {
   return { types, breadcrumbs, salvageSummaries };
 }
 
-function createExistingLedger(sessionId: string, instanceId: string, intentId: string) {
-  return {
+function createExistingLedger(sessionId: string, instanceId: string, intentId: string): SessionIntentLedger {
+  // Deliberate legacy disk fixture: actual FileSessionStore/clone parser supplies stages.
+  const legacy = {
     instanceId,
     sessionId,
     activeIntentId: intentId,
@@ -726,4 +783,5 @@ function createExistingLedger(sessionId: string, instanceId: string, intentId: s
     },
     updatedAt: 100,
   };
+  return legacy as unknown as SessionIntentLedger;
 }

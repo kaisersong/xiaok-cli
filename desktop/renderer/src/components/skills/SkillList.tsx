@@ -1,5 +1,5 @@
 import { Download, Github, Loader2, MessageSquare, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react'
-import { PillToggle } from '../shared'
+import { BooleanSwitch } from '../ui/BooleanSwitch'
 import { openExternal } from '../../openExternal'
 import type { ViewSkill } from './types'
 import { formatDate } from './types'
@@ -44,6 +44,9 @@ type Props = {
   scanStatusBadge: (item: ViewSkill) => { label: string; style: React.CSSProperties } | null
   active: (item: ViewSkill) => boolean
   cardMenuRef: React.RefObject<HTMLDivElement | null>
+  catalogReady?: boolean
+  unknownLabel?: string
+  metricUnknownLabel?: string
   statsMap?: Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>
 }
 
@@ -66,8 +69,10 @@ export function SkillList({
   scanStatusBadge,
   active,
   cardMenuRef,
-  statsMap,
+  statsMap, catalogReady = true, unknownLabel, metricUnknownLabel,
 }: Props) {
+  if (!catalogReady) return <p className="text-xs">{unknownLabel}</p>
+
   if (loading) {
     return (
       <div className="flex h-40 items-center justify-center">
@@ -178,8 +183,8 @@ export function SkillList({
               {statsMap && item.skill_key && (() => {
                 const stat = statsMap.get(item.skill_key)
                 if (!stat || stat.totalCalls < 1) return null
-                const avgStr = skillText.statsDetailDurationValue?.(stat.avgDurationMs) ?? `${stat.avgDurationMs}ms`
-                const rateStr = skillText.statsDetailSuccessValue?.(stat.successCount, stat.totalCalls) ?? `${stat.successCount}/${stat.totalCalls}`
+                const avgStr = Number.isFinite(stat.avgDurationMs) ? skillText.statsDetailDurationValue?.(stat.avgDurationMs) ?? `${stat.avgDurationMs}ms` : metricUnknownLabel ?? '--'
+                const rateStr = Number.isFinite(stat.successCount) && Number.isFinite(stat.totalCalls) ? skillText.statsDetailSuccessValue?.(stat.successCount, stat.totalCalls) ?? `${stat.successCount}/${stat.totalCalls}` : metricUnknownLabel ?? '--'
                 return (
                   <span className="text-[10px] text-[var(--c-text-muted)]">
                     {skillText.statsCardLine?.(stat.totalCalls, avgStr, rateStr)}
@@ -195,7 +200,8 @@ export function SkillList({
             </div>
 
             <div className="mt-0.5" onClick={(e) => e.stopPropagation()}>
-              <PillToggle
+              <BooleanSwitch
+                      ariaLabel={`${skillText.enabledByDefault}: ${item.display_name}`}
                 checked={enabled}
                 disabled={busy}
                 onChange={() => {

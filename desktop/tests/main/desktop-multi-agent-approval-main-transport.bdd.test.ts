@@ -156,10 +156,11 @@ describe.skipIf(!implementationPresent)('BDD AP real transport + Service + SQLit
     expect(f.store.readEvents(f.context.groupId).filter(event => event.kind === 'approval')).toEqual(events);
     expect(f.get(pending.approvalId, 0)).not.toHaveProperty('inputPage');
   });
-  it('AP2 changing the retained input before consumption has zero effect, with no automatic retry', async () => {
+  it('AP2 changing caller-owned input cannot change the approved private snapshot or cause replay', async () => {
     const f = await setup(), input = { content: 'PRIVATE_INPUT' }, running = f.execute(input), pending = await f.pending();
     input.content = 'UNAPPROVED'; await f.decide(pending.approvalId, 'changed-input');
-    expect(await running).toContain('approval_input_changed'); expect(f.effect).not.toHaveBeenCalled();
+    expect(await running).toBe('{"content":"PRIVATE_INPUT"}'); expect(f.effect).toHaveBeenCalledOnce();
+    expect(f.effect.mock.calls[0]?.[0]).toEqual({ content: 'PRIVATE_INPUT' });
     expect(f.transport.getGroupProjection(f.context.groupId).pendingApprovalCount).toBe(0);
   });
   it.each(['before', 'after'] as const)('AP10 native %s-COMMIT decision fault never releases a grant and main projects raw DB status as unknown', async position => {

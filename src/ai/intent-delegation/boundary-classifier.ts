@@ -15,6 +15,7 @@ export function classifyIntentBoundaryByRules(input: IntentBoundaryInput): RuleB
   }
 
   const planResult = createIntentPlan({
+    ...(input.newIntentId !== undefined ? {newIntentId: input.newIntentId} : {}),
     instanceId: input.instanceId,
     sessionId: input.sessionId,
     input: input.input,

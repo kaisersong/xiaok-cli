@@ -62,9 +62,9 @@ describe('yzj channel helpers', () => {
   });
 
   it('builds yzj outbound payload with openId and reply param', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn<(_input: RequestInfo | URL, _init?: RequestInit) => Promise<{ ok: boolean; status?: number; text: () => Promise<string> }>>(async () => ({
       ok: true,
-      text: async () => '',
+      text: async (): Promise<string> => '',
     }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -113,9 +113,9 @@ describe('yzj channel helpers', () => {
   });
 
   it('splits oversized outbound text into multiple requests', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn<(_input: RequestInfo | URL, _init?: RequestInit) => Promise<{ ok: boolean; status?: number; text: () => Promise<string> }>>(async () => ({
       ok: true,
-      text: async () => '',
+      text: async (): Promise<string> => '',
     }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -150,9 +150,9 @@ describe('yzj channel helpers', () => {
     const fetchMock = vi.fn(async () => {
       calls += 1;
       if (calls < 3) {
-        return { ok: false, status: 429, text: async () => 'rate limited' };
+        return { ok: false, status: 429, text: async (): Promise<string> => 'rate limited' };
       }
-      return { ok: true, text: async () => '' };
+      return { ok: true, text: async (): Promise<string> => '' };
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -174,10 +174,10 @@ describe('yzj channel helpers', () => {
   });
 
   it('throws YZJTransportError with status 401 without retrying', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn<(_input: RequestInfo | URL, _init?: RequestInit) => Promise<{ ok: boolean; status?: number; text: () => Promise<string> }>>(async () => ({
       ok: false,
       status: 401,
-      text: async () => 'unauthorized',
+      text: async (): Promise<string> => 'unauthorized',
     }));
     vi.stubGlobal('fetch', fetchMock);
 

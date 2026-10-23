@@ -3,32 +3,11 @@ import { ArrowRight, RotateCw, Sparkles, Users } from 'lucide-react';
 
 import { useLocale } from '../../contexts/LocaleContext';
 
-export type ProjectTeamPlanOutcome = 'proposal' | 'no_change' | 'needs_manual_scope';
-export type ProjectTeamPlanAction = 'keep' | 'reuse' | 'create';
-
-export interface ProjectTeamPlanItemView {
-  desiredAgentId: string;
-  action: ProjectTeamPlanAction;
-  role: string;
-  agentName?: string;
-  capabilityLabels: string[];
-  reasonCode: string;
-}
-
-export interface ProjectTeamPlanView {
-  planId: string;
-  projectId: string;
-  projectRevision: number;
-  outcome: ProjectTeamPlanOutcome;
-  summary: string;
-  items: ProjectTeamPlanItemView[];
-}
-
-export interface ProjectTeamOperationView {
-  operationId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  message?: string;
-}
+export type ProjectTeamPlanView = import('../../../../shared/kswarm-team-ipc-contract').ProjectTeamPlanDto;
+export type ProjectTeamPlanItemView = import('../../../../shared/kswarm-team-ipc-contract').ProjectTeamPlanItemDto;
+export type ProjectTeamOperationView = import('../../../../shared/kswarm-team-ipc-contract').ProjectTeamOperationDto;
+export type ProjectTeamPlanOutcome = ProjectTeamPlanView['outcome'];
+export type ProjectTeamPlanAction = ProjectTeamPlanItemView['action'];
 
 export interface ProjectSmartTeamClient {
   planProjectTeam(input: { projectId: string }): Promise<ProjectTeamPlanView>;

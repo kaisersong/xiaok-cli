@@ -25,8 +25,10 @@ test.beforeAll(async () => {
       platform: 'browser', format: 'iife', jsx: 'automatic', tsconfig: join(desktop, 'tsconfig.renderer.json'), define: { 'process.env.NODE_ENV': '"development"',
         'import.meta.env': '{}', __APP_VERSION__: '"scroll-layout-test"' },
       plugins: [{ name: 'scroll-layout-api-boundary-only', setup(builder) {
-        builder.onResolve({ filter: /\/api$/ }, args => args.importer.includes(join('renderer', 'src', 'components'))
-          ? { path: join(fixtures, 'chat-scroll-layout-api.ts') } : undefined);
+        builder.onResolve({ filter: /\/api$/ }, args => (
+          args.importer.includes(join('renderer', 'src', 'components'))
+          || args.importer === join(desktop, 'renderer', 'src', 'hooks', 'useSkillReadonly.ts')
+        ) ? { path: join(fixtures, 'chat-scroll-layout-api.ts') } : undefined);
       } }],
     }),
   ]);

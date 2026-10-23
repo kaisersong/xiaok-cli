@@ -1,19 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { FULL_PRELOAD_KEYS } from '../../electron/preload-api';
+
+const frozenKeys = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'fixtures', 'preload-integration-frozen-keys.json'), 'utf8')) as {main: string[]; closure: string[]};
 
 const preloadSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'preload.cjs'), 'utf8');
 
 function extractPreloadApiKeys(source: string): string[] {
-  const keys: string[] = [];
-  const bodyMatch = source.match(/contextBridge\.exposeInMainWorld\('xiaokDesktop',\s*\{([\s\S]*)\}\s*\)/);
-  if (!bodyMatch) return keys;
-  const body = bodyMatch[1];
-  const propMatches = body.matchAll(/^\s+(\w+)\s*[:(]/gm);
-  for (const m of propMatches) {
-    keys.push(m[1]);
-  }
-  return keys.sort();
+  let exposed: object | undefined;
+  runInNewContext(source, {
+    require: (name: string) => {
+      if (name === 'electron') return {
+        contextBridge: { exposeInMainWorld: (key: string, api: object) => {
+          expect(key).toBe('xiaokDesktop');
+          expect(exposed).toBeUndefined();
+          exposed = api;
+        } },
+        ipcRenderer: {},
+      };
+      if (name === 'os') return { userInfo: () => ({ username: 'preload-fixture' }) };
+      throw new Error(`unexpected preload module: ${name}`);
+    },
+  });
+  expect(exposed).toBeDefined();
+  return Object.keys(exposed!).sort();
 }
 
 describe('preload API surface snapshot (Stage 5.5)', () => {
@@ -38,10 +50,15 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // status mutation, task start, or caller-controlled authority fields.
     // Room workspace adds 11 semantic configuration, file projection, and
     // artifact operations; it does not expose generic filesystem access.
-    // SystemOne adds exactly two auxiliary-decision-model keys
-    // (getSystemOneConfig / saveSystemOneConfig); they never touch providers.
-    // 1.5.6 adds deleteCollaborationRoom to the collaboration room lifecycle.
-    expect(keys.length).toMatchInlineSnapshot(`296`);
+    // Native Goal/publication, Loop publication and observation add only
+    // semantic commands; the canonical allowlist and real bridge must agree.
+    expect(frozenKeys.main).toHaveLength(295);
+    expect(frozenKeys.closure).toHaveLength(307);
+    const union = [...new Set([...frozenKeys.main, ...frozenKeys.closure])].sort();
+    expect(keys).toEqual(union);
+    expect([...FULL_PRELOAD_KEYS].sort()).toEqual(union);
+    expect(new Set(FULL_PRELOAD_KEYS).size).toBe(FULL_PRELOAD_KEYS.length);
+    expect(keys.length).toMatchInlineSnapshot(`310`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

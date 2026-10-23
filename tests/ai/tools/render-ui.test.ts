@@ -24,7 +24,7 @@ describe('A2UI dashboard tool', () => {
 
   it('exposes a discriminated section schema with the exact supported DSL fields', () => {
     const tool = buildToolList().find((candidate) => candidate.definition.name === DASHBOARD_TOOL_NAME);
-    const sections = tool?.definition.inputSchema.properties?.sections as { items?: unknown } | undefined;
+    const sections = (tool?.definition.inputSchema.properties as { sections?: unknown } | undefined)?.sections as { items?: unknown } | undefined;
     const schemaText = JSON.stringify(sections?.items);
 
     expect(schemaText).toContain('"oneOf"');

@@ -1,3 +1,4 @@
+import { loopManagementErrorMessage } from '../../lib/loop-management-errors';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, RefreshCw, Sparkles, Wrench } from 'lucide-react';
 
@@ -106,7 +107,7 @@ export function LoopConstraintsTab({ highlightConstraintId }: LoopConstraintsTab
       await loadAll();
     } catch (e) {
       console.error('[LoopConstraintsTab] confirm failed', e);
-      showToast(t.automationsConstraintsToastFailed, 'error');
+      showToast(loopManagementErrorMessage(e, t, t.automationsConstraintsToastFailed), 'error');
     } finally {
       setBusyId(null);
     }
@@ -123,7 +124,7 @@ export function LoopConstraintsTab({ highlightConstraintId }: LoopConstraintsTab
       await loadAll();
     } catch (e) {
       console.error('[LoopConstraintsTab] toggle failed', e);
-      showToast(t.automationsConstraintsToastFailed, 'error');
+      showToast(loopManagementErrorMessage(e, t, t.automationsConstraintsToastFailed), 'error');
     } finally {
       setBusyId(null);
     }

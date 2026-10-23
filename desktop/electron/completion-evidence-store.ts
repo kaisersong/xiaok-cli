@@ -1,6 +1,5 @@
+import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { validateCompletionEvidence } from '../../src/runtime/guards/completion-evidence.js';
 import type {
@@ -66,17 +65,16 @@ export class CompletionEvidenceValidationError extends Error {
 }
 
 export class CompletionEvidenceStore {
-  private readonly db: DatabaseSync;
+  private readonly connection:LoopDatabaseLease;
+  private get db():DatabaseSync{return this.connection.database;}
 
-  constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec('pragma journal_mode = WAL');
-    this.applySchema();
+  constructor(dbPath: string|LoopDatabaseSource) {
+    this.connection=openLoopDatabase(dbPath);
+    try{this.applySchema();this.connection.recordComponent('completion');}catch(error){this.connection.close();throw error;}
   }
 
   close(): void {
-    this.db.close();
+    this.connection.close();
   }
 
   upsertExpectation(input: CompletionExpectationUpsertInput): StoredCompletionExpectation {
@@ -326,7 +324,7 @@ export class CompletionEvidenceStore {
       return result;
     } catch (error) {
       try {
-        this.db.exec('rollback');
+        if(this.db.isTransaction)this.db.exec('rollback');
       } catch { /* ignore rollback errors */ }
       throw error;
     }

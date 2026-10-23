@@ -9,7 +9,7 @@ import type { ChatView as ActualChatView } from '../../renderer/src/components/C
 
 const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), subscribeTask: vi.fn(), updateThreadTaskId: vi.fn(),
   createTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
-vi.mock('../../renderer/src/api', () => ({ api: { ...f, updateThreadTitle: vi.fn(async () => {}), listSkills: vi.fn(async () => []) } }));
+vi.mock('../../renderer/src/api', () => ({ api: { ...f, getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })), updateThreadTitle: vi.fn(async () => {}), listSkills: vi.fn(async () => []) } }));
 vi.mock('../../renderer/src/layouts/AppLayout', () => ({ useSidebarCollapse: () => ({ collapsed: false, setCollapsed: f.setCollapsed }), AppLayout: () => null }));
 // Leaf presentation only: real ChatShell owns every state transition, real
 // GoalBar drives semantic handlers, and the production attachment helper runs.
@@ -823,5 +823,33 @@ describe('W2 actual ChatShell source ownership: no reimplemented handoff or fake
     await act(async () => outcome === 'resolve' ? reply.resolve(old) : reply.reject(new Error('old mutation error')));
     expect.soft(visibleState()).toEqual(before); expect.soft(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText('objective goal-C')).not.toBeNull(); expect(activeIds()).toEqual(['C']);
+  });
+});
+
+describe('pending publication uses the actual GoalBar and ChatShell without task attachment', () => {
+  it('continues only the original publication and applies Main result without resume, subscription or task preparation', async () => {
+    currentGoal = goal(); currentGoal.state.pendingCompletionIntentId = 'original-claim';
+    const completed = structuredClone(currentGoal); completed.state.status = 'complete'; completed.state.pendingCompletionIntentId = undefined;
+    const continuePublication = vi.fn(async () => completed);
+    window.xiaokDesktop!.continueGoalPublication = continuePublication;
+    await mount(); const original = observer('A'), subscriptions = observers.length;
+    fireEvent.click(screen.getByRole('button', { name: '继续完成确认' }));
+    await waitFor(() => expect(continuePublication).toHaveBeenCalledWith({ threadId }));
+    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument());
+    expect(resume).not.toHaveBeenCalled(); expect(ack).not.toHaveBeenCalled();
+    expect(f.updateThreadTaskId).not.toHaveBeenCalled(); expect(observers).toHaveLength(subscriptions);
+    expect(original.release).not.toHaveBeenCalled();
+  });
+  it('drops a pending publication query reply after changing threads, with no resumed task', async () => {
+    currentGoal = goal(); currentGoal.state.pendingCompletionIntentId = 'original-claim';
+    const old = structuredClone(currentGoal); old.state.objective = 'late old publication'; old.state.status = 'complete';
+    const reply = deferred<DesktopGoalProjection>(), recover = vi.fn(() => reply.promise);
+    window.xiaokDesktop!.recoverGoalPublication = recover;
+    await mount(); fireEvent.click(screen.getByRole('button', { name: '查询发布结果' }));
+    expect(recover).toHaveBeenCalledWith({ threadId });
+    currentGoal = null; fireEvent.click(screen.getByRole('button', { name: 'other thread' })); await act(async () => {});
+    await act(async () => reply.resolve(old));
+    expect(screen.queryByText('late old publication')).not.toBeInTheDocument();
+    expect(resume).not.toHaveBeenCalled(); expect(ack).not.toHaveBeenCalled();
   });
 });

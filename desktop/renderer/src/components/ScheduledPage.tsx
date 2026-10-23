@@ -1,3 +1,6 @@
+import type {ScheduledTriggerDto,ScheduledUpdateDto} from '../../../shared/scheduled-timed-action-ipc-contract';
+import {scheduledErrorMessage,reportScheduledReadFailure,SCHEDULED_READ_FAILURE_EVENT} from '../lib/scheduled-timed-action-error';
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../lib/loop-management-errors';
 import { useState, useEffect, useRef } from 'react';
 import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucide-react';
 import { api } from '../api';
@@ -40,6 +43,7 @@ export interface ScheduledTask {
   nextRunAt?: number;
   reviewedAt?: number;
   userApprovedAuto?: boolean;
+  mainKind?: 'reminder' | 'scheduled_task';
   scheduleConfig?: {
     intervalMinutes?: number;  // hourly: interval in minutes (30/60/120/...)
     hour?: number;             // daily/weekdays/weekly: 0-23
@@ -194,7 +198,7 @@ function toTimedActionTrigger(
   frequency: ScheduledTask['frequency'],
   config: ScheduledTask['scheduleConfig'],
   nextRunAt?: number
-) {
+): ScheduledTriggerDto {
   if (frequency === 'hourly' || frequency === 'interval') {
     return { kind: 'interval', intervalMinutes: config?.intervalMinutes ?? 60 };
   }
@@ -247,7 +251,7 @@ async function ensureThreadForRuntimeTask(task: ScheduledTask): Promise<Schedule
   const desktop = getDesktopApi();
   let runs: unknown[] = [];
   if (normalized.id && desktop?.getTimedActionRuns) {
-    runs = await desktop.getTimedActionRuns(normalized.id).catch(() => []);
+    runs = await desktop.getTimedActionRuns(normalized.id);
   }
   const runtimeTaskIds = collectScheduledRuntimeTaskIds(normalized, Array.isArray(runs) ? runs : []);
   return ensureAggregatedScheduledThread(normalized, runtimeTaskIds);
@@ -265,6 +269,10 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   const { t } = useLocale();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scheduledReadError, setScheduledReadError] = useState('');
+  const [scheduledOperationError, setScheduledOperationError] = useState('');
+  const readGeneration = useRef(0);
+  useEffect(() => {const receive = () => setScheduledReadError(t.scheduledProjectionUnavailable);window.addEventListener(SCHEDULED_READ_FAILURE_EVENT, receive);return () => {readGeneration.current++;window.removeEventListener(SCHEDULED_READ_FAILURE_EVENT, receive);};}, [t.scheduledProjectionUnavailable]);
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -355,6 +363,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   }, [loading, locationHash]);
 
   const loadTasks = async () => {
+    const generation = ++readGeneration.current;
     try {
       const raw = localStorage.getItem('xiaok:scheduled-tasks');
       const localItems = raw ? JSON.parse(raw) : [];
@@ -364,15 +373,15 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
         try {
           const mainItems = await desktop.getScheduledTasks();
           if (Array.isArray(mainItems)) {
-            scheduledItems = mergeScheduledTaskCache(mainItems as ScheduledTask[], localItems as ScheduledTask[]);
+            scheduledItems = mergeScheduledTaskCache((mainItems as ScheduledTask[]).map(item=>({...item,mainKind:'scheduled_task' as const})), localItems as ScheduledTask[]);
             const linkedItems: ScheduledTask[] = [];
             for (const item of scheduledItems) {
-              linkedItems.push(await ensureThreadForRuntimeTask(item).catch(() => item));
+              linkedItems.push(await ensureThreadForRuntimeTask(item));
             }
             scheduledItems = linkedItems;
-            localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(scheduledItems));
+
           }
-        } catch { /* fall back to local cache */ }
+        } catch (error) { throw error; }
       }
 
       // Also load IPC reminders and merge
@@ -381,6 +390,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
         const status = await api.getReminderStatus();
         ipcReminders = status.activeReminders.map((r: any) => ({
           id: r.reminderId,
+          mainKind: 'reminder' as const,
           name: r.content,
           description: '',
           prompt: r.content,
@@ -389,14 +399,19 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
         }));
-      } catch { /* ignore */ }
+      } catch (error) { throw error; }
 
       const allMap = new Map<string, ScheduledTask>();
       for (const t of [...ipcReminders, ...scheduledItems]) {
         allMap.set(t.id, normalizeScheduledTaskRuntimeLink(t));
       }
+      if (generation !== readGeneration.current) return;
+      localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(scheduledItems));
       setTasks(Array.from(allMap.values()));
-    } catch { /* ignore */ }
+      setScheduledReadError('');
+    } catch (error) {
+      if (generation === readGeneration.current) {setScheduledReadError(scheduledErrorMessage(error,t,true));reportScheduledReadFailure();}
+    }
     finally { setLoading(false); }
   };
 
@@ -473,6 +488,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       }
     }
 
+    setScheduledOperationError('');
     setSaving(true);
 
     const now = Date.now();
@@ -495,8 +511,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           showToast(t.scheduledLoopCreated, 'success');
           return;
         } catch (e) {
-          console.error('[Scheduled] createLoopSchedule failed:', e);
-          showToast(t.scheduledLoopCreateFailed(e instanceof Error ? e.message : String(e)), 'info');
+          setScheduledOperationError(scheduledErrorMessage(e,t));
           setSaving(false);
           return;
         }
@@ -517,7 +532,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           showToast(t.scheduledAutoExecCreatedNotice, 'info');
           return;
         } catch (e) {
-          console.warn('[Scheduled] main createScheduledTask failed, falling back to local cache:', e);
+          setScheduledOperationError(scheduledErrorMessage(e,t));setSaving(false);return;
         }
       }
       const newTask: ScheduledTask = {
@@ -538,7 +553,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       const desktop = getDesktopApi();
       if (desktop?.updateScheduledTask && formFrequency !== 'manual') {
         try {
-          const updateInput: Record<string, unknown> = {
+          const updateInput: ScheduledUpdateDto = {
             id: editingTask.id,
             name: formName.trim(),
             description: formDesc.trim(),
@@ -565,8 +580,9 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
             closeModal();
             return;
           }
+          setScheduledOperationError(t.scheduledMutationNotApplied);setSaving(false);return;
         } catch (e) {
-          console.warn('[Scheduled] main updateScheduledTask failed, falling back to local cache:', e);
+          setScheduledOperationError(scheduledErrorMessage(e,t));setSaving(false);return;
         }
       }
       const updated = tasks.map(t =>
@@ -588,11 +604,20 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
 
   const confirmDelete = async () => {
     if (!confirmDeleteId) return;
-    // Cancel in main process (IPC reminder) so it won't be re-merged on reload
-    try { await getDesktopApi()?.cancelScheduledTask?.(confirmDeleteId); } catch { /* may not exist in IPC */ }
-    try { await api.cancelReminder(confirmDeleteId); } catch { /* may not exist in IPC */ }
-    saveTasks(tasks.filter(task => task.id !== confirmDeleteId));
-    setConfirmDeleteId(null);
+    setScheduledOperationError('');
+    const task=latestTasks.current.find(item=>item.id===confirmDeleteId),desktop=getDesktopApi();
+    try {
+      let cancelled=false;
+      if(task?.mainKind==='reminder')cancelled=await api.cancelReminder(confirmDeleteId);
+      else if(desktop?.cancelScheduledTask){
+        cancelled=await desktop.cancelScheduledTask(confirmDeleteId);
+        // A valid false proves no effect; the reminder façade still rechecks
+        // current kind/ownership independently. Exceptions never take this path.
+        if(!cancelled&&task?.mainKind!=='scheduled_task')cancelled=await api.cancelReminder(confirmDeleteId);
+      }else if(task?.mainKind!=='scheduled_task')cancelled=await api.cancelReminder(confirmDeleteId);
+      if(!cancelled&&(task?.mainKind||desktop?.cancelScheduledTask)){setScheduledOperationError(t.scheduledMutationNotApplied);return;}
+      saveTasks(latestTasks.current.filter(item=>item.id!==confirmDeleteId));setConfirmDeleteId(null);
+    }catch(error){setScheduledOperationError(scheduledErrorMessage(error,t));}
   };
 
   const handleDeleteInstance = (id: string) => {
@@ -642,8 +667,9 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           await loadTasks();
           return;
         }
+        setScheduledOperationError(t.scheduledMutationNotApplied);return;
       } catch (e) {
-        console.warn('[Scheduled] setScheduledTaskStatus failed, falling back to local cache:', e);
+        setScheduledOperationError(scheduledErrorMessage(e,t));return;
       }
     }
     saveTasks(tasks.map(t =>
@@ -662,7 +688,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           : t));
       }
     } catch (e) {
-      console.warn('[Scheduled] approveAuto failed:', e);
+      setScheduledOperationError(scheduledErrorMessage(e,t));
     }
   };
 
@@ -677,7 +703,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           : t));
       }
     } catch (e) {
-      console.warn('[Scheduled] revokeAuto failed:', e);
+      setScheduledOperationError(scheduledErrorMessage(e,t));
     }
   };
 
@@ -689,6 +715,8 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       if (task.executorKind === 'loop') {
         if (!task.loopId) return;
         const result = await api.runLoopNow(task.loopId);
+        if(result.status==='publication_pending'){showToast(t.desktopSettings.loopDiagnosticsPublicationPending,'info');await loadTasks();return;}
+        if(result.status==='executing'){showToast(t.scheduledLoopAlreadyRunning,'info');return;}
         if (result.status === 'already_running') {
           showToast(t.scheduledLoopAlreadyRunning, 'info');
           return;
@@ -763,6 +791,9 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       navigate(`/t/${threadId}`, { state: { initialPrompt: task.prompt } });
     } catch (e) {
       console.error('[Scheduled] Run failed:', e);
+      if (task.executorKind === 'loop' && loopManagementFailureKind(e)) {
+        showToast(loopManagementErrorMessage(e, t, t.loopOperationResultUnknown), 'info');
+      }
     } finally {
       setRunningId(null);
     }
@@ -801,6 +832,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       data-testid="scheduled-page"
       data-embedded={embedded ? 'true' : 'false'}
     >
+      {(scheduledReadError || scheduledOperationError) && <div role="alert" className="m-4 rounded-lg border border-[var(--c-border)] p-3 text-sm text-[var(--c-status-error-text)]"><p>{scheduledReadError || scheduledOperationError}</p><button type="button" onClick={()=>void loadTasks()} className="mt-2 rounded-md border px-2 py-1">{t.scheduledRefreshData}</button></div>}
       {/* Toast */}
       {toastMsg && (
         <div className={`mx-auto mt-3 max-w-[600px] rounded-lg border px-4 py-2 text-center text-sm ${
@@ -858,7 +890,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
 
       {/* Task list */}
       <div className="flex-1 overflow-y-auto px-8 py-4">
-        {visibleTasks.length === 0 ? (
+        {visibleTasks.length === 0 && !scheduledReadError ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Clock size={48} className="mb-4 text-[var(--c-text-tertiary)] opacity-50" />
             <p className="text-sm text-[var(--c-text-secondary)]">{t.scheduledEmpty}</p>
@@ -996,7 +1028,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
 
       {/* Create/Edit Modal */}
       {modalMode && (
-        <div
+        <div key="scheduled-form"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
           role="presentation"
           onClick={closeModal}

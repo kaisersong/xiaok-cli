@@ -389,6 +389,16 @@ export class MultiAgentCoordinator {
             root.status = 'closed';
         this.notifyWaiters();
     }
+    /** Host resource owner only. The bounded UI dispose acknowledgement is not
+     * physical cleanup; callers retiring durable authorities await these facts. */
+    async waitForDisposedResources() {
+        if (!this.disposed)
+            throw Error('multi_agent_cleanup_not_started');
+        const records = [...this.records.values()].filter(record => record.id !== ROOT_AGENT_ID);
+        await Promise.all(records.map(record => record.cleanup));
+        if ([...this.records.values()].filter(record => record.id !== ROOT_AGENT_ID).length !== records.length || records.some(record => this.records.get(record.id) !== record || !record.resourcesReleased || record.cleanupError))
+            throw Error('multi_agent_cleanup_unconfirmed');
+    }
     schedule(record, externalController) {
         if (record.execution || this.isClosed(record) || record.cleanupError)
             return;

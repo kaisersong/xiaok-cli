@@ -1,3 +1,4 @@
+import { observeInstalledCompletion } from '../verification/installed-completion-observation.js';
 import { access, open, stat, realpath, lstat } from 'node:fs/promises';
 import { validateArtifactBytes } from '../../quality/artifact-structure.js';
 import { completionEvidenceFlow } from './completion-evidence.js';
@@ -34,6 +35,7 @@ export async function validateCompletionEvidenceAsync(input, options) {
 }
 async function executeEffect(effect, options) {
     switch (effect.kind) {
+        case 'current-completion': return raw(observeInstalledCompletion(effect.owner, options.signal), options);
         case 'exists':
             try {
                 await raw(access(effect.path), options);

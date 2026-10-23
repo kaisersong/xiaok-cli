@@ -9,6 +9,11 @@ import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types
 import type { TaskExecutionScope } from './runtime/task-host/types.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
+    /** Exact request preview for host projection before provider authorization. */
+    getObservationRequestPreview?(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): {
+        serializedBody: string;
+        destination: string;
+    } | undefined;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     getModelName(): string;
     getHarnessProfileId?(): string;
@@ -50,6 +55,11 @@ export interface ToolDefinition {
     inputSchema: Record<string, unknown>;
 }
 export interface ToolExecutionContext {
+    observationCollector?: import('./runtime/sol-pi/collector-port.js').ObservationCollectorPort;
+    /** Host-only native-body projection, before observers and independently sourced hook text. */
+    projectObservationResult?: (nativeResult: string) => Promise<string>;
+    /** Host-only, acquired after native projection; never a disclosure authorization. */
+    observationProvenance?: () => import('./runtime/sol-pi/observation-provenance.js').NativeObservationProvenancePort | undefined;
     taskId: string;
     executionScope?: TaskExecutionScope;
     session: AgentSessionSnapshot;
@@ -70,19 +80,25 @@ export interface ToolExecutionContext {
         wait(id: string): void;
         resume(id: string): void;
     };
-    /** Main-only, one-invocation guard installed by ToolRegistry after approval.
+    /** Main-only, one-invocation policy/grant guard installed by ToolRegistry.
      * Never tool input, an IPC credential, or a reusable permission grant. */
     assertPermissionApproval?: () => void;
+    /** Host-only, one-time producer input admission after actual approval consumption.
+     * May deny only; never an authorization or a model/IPC input field. */
+    assertToolInputApprovalAdmission?: () => void;
     /** Desktop scoped dispatch observer, appended only after provider projection.
      * Not an input field or permission; called at the actual bound invocation. */
     onToolInvocationStarted?: () => void;
     /** Host-only correlation fields. They are never part of tool input/model payloads. */
+    compoundPhase?: import('./runtime/sol-pi/compound-native-phase.js').CompoundNativePhasePort;
     toolInvocationId?: string;
     /** Host-only media port and actual adapter capability, attached after provider projection. */
     emitToolImage?: (image: Extract<MessageBlock, {
         type: 'image';
     }>) => void;
     modelSupportsImageInput?: boolean;
+    /** Actual host provider request namespace; never accepted from model tool input. */
+    hostProviderInvocationId?: string;
     runtimeFactSink?: {
         emit(fact: ToolExecutionFact): void;
     };
@@ -100,9 +116,16 @@ export type PermissionClass = 'safe' | 'write' | 'bash';
 export interface ToolPermissionGrant {
     approved: true;
     prepareInput(finalInput: Record<string, unknown>): Record<string, unknown>;
+    /** Synchronous, idempotent, non-consuming current-authority check. May run
+     * more than once, including after an awaited native journal operation. */
     assertCurrent(): void;
 }
 export interface Tool {
+    /** Trusted native host preflight; absent on unqualified/plugin mutation tools. */
+    compoundFilePrecondition?(input: Readonly<Record<string, unknown>>): {
+        filePath: string;
+        beforeHash: string | null;
+    };
     definition: ToolDefinition;
     permission: PermissionClass;
     companionTools?: Tool[];

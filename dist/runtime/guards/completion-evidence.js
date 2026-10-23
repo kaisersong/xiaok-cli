@@ -1,3 +1,5 @@
+import { observeInstalledCompletionSync } from '../verification/installed-completion-observation.js';
+import { completionConsumerOwner } from '../verification/completion-consumer-owner.js';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { resolveStructuralKind, validateArtifactStructure } from '../../quality/artifact-structure.js';
@@ -25,6 +27,14 @@ export function* completionEvidenceFlow(input) {
     if (!isCompletedStatus(input.targetStatus)) {
         return { ok: true };
     }
+    const verification = yield { kind: 'current-completion', owner: completionConsumerOwner({ ownerKind: input.ownerKind, ownerId: input.ownerId }) };
+    const observed = verification;
+    if (observed.kind === 'unavailable')
+        return fail('verification_unavailable', 'Current protected verification is unavailable.');
+    if (observed.kind === 'protected')
+        return observed.state.currentVerification === 'valid' ? { ok: true } : fail('verification_required', 'Protected obligations require current verification.');
+    if (observed.kind !== 'ordinary')
+        return fail('verification_unavailable', 'Current protected verification is unavailable.');
     const expectation = input.expectation;
     if (!expectation) {
         return fail('evidence_missing', 'Completed status requires an explicit or inferred completion expectation.');
@@ -286,6 +296,9 @@ export function validateCompletionEvidence(input) {
         try {
             const effect = step.value;
             switch (effect.kind) {
+                case 'current-completion':
+                    value = observeInstalledCompletionSync(effect.owner);
+                    break;
                 case 'exists':
                     value = existsSync(effect.path);
                     break;

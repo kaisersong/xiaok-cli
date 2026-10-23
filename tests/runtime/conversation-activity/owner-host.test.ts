@@ -30,7 +30,8 @@ describe('real authenticated owner socket and single writer', () => {
     const second = new ConversationActivityOwnerClient(f.root, 'user'); cleanup.push(() => second.dispose());
     expect(await second.request('list', { threadId: 'thread' })).toEqual(one);
     expect(one.filter(row => row.kind === 'completed')).toHaveLength(1);
-    f.user.dispose(); expect(await second.request('status')).toMatchObject({ ownerEpoch: f.host.ownerEpoch, generation: ACTIVITY_OWNER_GENERATION });
+    f.user.dispose(); expect(await second.request('status')).toMatchObject({ ownerEpoch: f.host.ownerEpoch });
+    expect(await second.request('status')).toMatchObject({ ownerEpoch: f.host.ownerEpoch, generation: ACTIVITY_OWNER_GENERATION });
   });
   it('reports authenticated unexpected disconnect once with its epoch, but not close/dispose', async () => {
     const f = await fixture(); const lost = vi.fn(), closed = vi.fn(), disposed = vi.fn();

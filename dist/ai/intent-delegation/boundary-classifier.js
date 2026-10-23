@@ -10,6 +10,7 @@ export function classifyIntentBoundaryByRules(input) {
         return { kind: 'ambiguous', ambiguityType: 'verb_no_output', reason: 'verb_without_output' };
     }
     const planResult = createIntentPlan({
+        ...(input.newIntentId !== undefined ? { newIntentId: input.newIntentId } : {}),
         instanceId: input.instanceId,
         sessionId: input.sessionId,
         input: input.input,

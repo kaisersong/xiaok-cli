@@ -1,3 +1,7 @@
+import type {AssistantPromotionTargetInput} from '../../src/runtime/loop/producer-types.js';
+export type {AssistantPromotionTargetInput} from '../../src/runtime/loop/producer-types.js';
+import {captureLoopProducerValue} from './loop-scan-publication-body.js';
+import {publicationFields,publicationIdentity} from './loop-publication-attempt.js';
 export type AssistantCandidateRequestSource = 'user' | 'agent' | 'scheduler';
 export type AssistantCandidatePromotionStatus = 'pending' | 'accepting' | 'accepted' | 'accept_failed';
 export type AssistantCandidatePromotionKind = 'memory' | 'knowledge' | 'follow_up';
@@ -31,23 +35,6 @@ export interface AssistantCandidatePromotionRepository {
   listAccepting(): AssistantCandidatePromotionRecord[];
 }
 
-export interface AssistantPromotionTargetInput {
-  candidateId: string;
-  loopRunId: string;
-  targetId: string;
-  title: string;
-  content: string;
-  scope: 'global' | 'project';
-  projectId?: string;
-  projectCwd?: string;
-  collectionId?: string;
-  provenance: {
-    kind: 'assistant_candidate';
-    candidateId: string;
-    loopRunId: string;
-    evidenceRefs: Array<{ kind: string; id: string }>;
-  };
-}
 
 export interface AssistantCandidatePromotionTargets {
   ensureMemory(input: AssistantPromotionTargetInput): Promise<{ targetRef: string }>;
@@ -66,6 +53,7 @@ export class AssistantCandidatePromotionService {
     requestSource: AssistantCandidateRequestSource;
     collectionId?: string;
   }): Promise<AssistantCandidatePromotionRecord> {
+    input=captureLoopProducerValue(input);publicationFields(input,['candidateId','requestSource',...(Object.hasOwn(input,'collectionId')?['collectionId']:[])]);publicationIdentity(input.candidateId);if(input.collectionId!==undefined)publicationIdentity(input.collectionId);
     if (input.requestSource !== 'user') throw new Error('assistant_candidate_user_only');
     const existing = this.requireCandidate(input.candidateId);
     if (existing.status === 'accepted') return existing;
@@ -87,9 +75,14 @@ export class AssistantCandidatePromotionService {
     }
   }
 
-  async recoverAccepting(): Promise<Array<{ candidateId: string; status: 'accepted' | 'accept_failed' }>> {
+  async recoverAccepting(input:{requestSource:AssistantCandidateRequestSource;candidateId?:string}): Promise<Array<{ candidateId: string; status: 'accepted' | 'accept_failed' }>> {
+    if(!input)throw Error('assistant_candidate_recovery_source');
+    input=captureLoopProducerValue(input);publicationFields(input,['requestSource',...(Object.hasOwn(input,'candidateId')?['candidateId']:[])]);
+    if(!['user','scheduler'].includes(input.requestSource))throw Error('assistant_candidate_recovery_source');
+    const candidateId=input.candidateId;
     const results: Array<{ candidateId: string; status: 'accepted' | 'accept_failed' }> = [];
     for (const candidate of this.dependencies.candidates.listAccepting()) {
+      if(candidateId!==undefined&&candidate.id!==candidateId)continue;
       try {
         const accepted = await this.ensureAndFinalize(candidate);
         results.push({ candidateId: accepted.id, status: 'accepted' });

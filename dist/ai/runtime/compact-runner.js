@@ -10,7 +10,7 @@ export class CompactRunner {
     constructor(adapter) {
         this.adapter = adapter;
     }
-    async run(messages, streamOptions, onProgress) {
+    prepareRequest(messages) {
         const summaryRequest = {
             role: 'user',
             content: [{
@@ -27,12 +27,16 @@ export class CompactRunner {
                         }],
                 }]
             : messages;
+        return { messages: [...structuredClone(providerMessages), summaryRequest], systemPrompt: NO_TOOLS_PREAMBLE };
+    }
+    async run(messages, streamOptions, onProgress) {
+        const prepared = this.prepareRequest(messages);
         const chunks = [];
         for await (const chunk of streamCliCompactionProviderConversation({
             adapter: this.adapter,
-            messages: [...providerMessages, summaryRequest],
+            messages: prepared.messages,
             tools: [],
-            systemPrompt: NO_TOOLS_PREAMBLE,
+            systemPrompt: prepared.systemPrompt,
             options: streamOptions,
             invocationId: `inv_${randomUUID()}`,
         })) {

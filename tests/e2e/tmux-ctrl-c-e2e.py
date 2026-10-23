@@ -3,7 +3,7 @@
 import json, os, runpy, signal, tempfile, time
 from pathlib import Path
 common=runpy.run_path(str(Path(__file__).with_name('tmux-e2e.py')))
-root=Path(tempfile.mkdtemp(prefix='xiaok-ctrl-c-e2e-'))
+root=Path(tempfile.mkdtemp(prefix='xiaok-ctrl-c-e2e-')).resolve()
 server=common['FakeOpenAIServer'](['LATE_RESPONSE'],first_token_delay=4)
 server.start()
 def dead(tty):return tty.tmux('display-message','-p','-t',tty.session,'#{pane_dead}').stdout.strip()=='1'

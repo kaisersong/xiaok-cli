@@ -1,8 +1,13 @@
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/stored-snapshot-types.js';
+import type { NormalizedStoredSessionIntentLedger, NormalizedStoredIntentRecord } from './stored-intent-clone.js';
+import {intentProducerLedgerHash,type IntentProducerAction,type IntentProducerActionInput} from './producer-facts.js';
+import type {SessionExecutionLease} from '../../ai/runtime/session-store/execution-authority.js';
+import {captureIntentData,parseIntentExecutionInput,type IntentExecutionTerminalInput} from './intent-commit-boundary.js';
 import type { PersistedSessionSnapshot, SessionStore } from '../../ai/runtime/session-store/store.js';
 import type {
   IntentBreadcrumb,
   IntentLedgerRecord,
-  IntentPlanDraft,
+  IntentPlanInput,
   IntentReceipt,
   IntentSalvage,
   RecordBreadcrumbInput,
@@ -21,10 +26,63 @@ import {
 export { createEmptySessionIntentLedger } from './types.js';
 export { rekeySessionIntentLedger } from './types.js';
 
-export class SessionIntentDelegationStore {
-  constructor(private readonly sessionStore: SessionStore) {}
+// Consumed report DATA only; not a producer/authority/control witness.
+function isProducerReportObject(value:unknown):value is Readonly<Record<string,unknown>> {
+  return value!==null&&(typeof value==='object'||typeof value==='function');
+}
+function producerReportObject(value:unknown):Readonly<Record<string,unknown>> {
+  if(!isProducerReportObject(value))throw Error('intent_producer_report_data');return value;
+}
+function producerReportNow(value:unknown,origin:IntentProducerAction['origin']):number|undefined {
+  if(value===undefined||value===null)return undefined;
+  if(!Array.isArray(value))throw Error('intent_producer_report_data');
+  const rows:readonly unknown[]=value,length=rows.length;
+  for(let index=0;index<length;index++){
+    const report=producerReportObject(rows[index]),action=producerReportObject(report.action),source=producerReportObject(action.origin);
+    if(source.providerInvocationId===origin.providerInvocationId&&source.toolInvocationId===origin.toolInvocationId){
+      const now=report.now;
+      if(now===undefined||now===null)return undefined;
+      if(typeof now!=='number')throw Error('intent_producer_report_time');
+      return now;
+    }
+  }
+  return undefined;
+}
 
-  async load(sessionId: string): Promise<SessionIntentLedger | null> {
+type ProducerMutationPort=SessionIntentDelegationStore['recordProducerAction'];
+const producerMutationPorts=new WeakMap<object,ProducerMutationPort>();
+const producerSessionStores=new WeakMap<object,SessionStore>();
+export function isIntentDelegationStoreFor(store:SessionIntentDelegationStore,sessionStore:SessionStore):boolean{return producerSessionStores.get(store)===sessionStore;}
+/** Fixed host port; the actual Store still requires its private source-bound lease. */
+export function getIntentProducerMutationPort(store:SessionIntentDelegationStore):ProducerMutationPort {
+  const port=producerMutationPorts.get(store);if(!port)throw Error('intent_producer_store_identity');return port;
+}
+export class SessionIntentDelegationStore {
+  constructor(private readonly sessionStore: SessionStore) {
+    producerSessionStores.set(this,sessionStore);
+    const load=sessionStore.load.bind(sessionStore),write=sessionStore.recordIntentProducerAction?.bind(sessionStore);
+    producerMutationPorts.set(this,async(sessionId,intentId,instanceId,action,requestSource,lease)=>{
+      const captured=captureIntentData(action),snapshot=await load(sessionId),ledger=snapshot?readLedger(snapshot):null;
+      if(!ledger||!write)throw Error('intent_producer_store_required');
+      await write({sessionId,intentId,instanceId,action:captured,requestSource,expectedLedgerHash:intentProducerLedgerHash(ledger),now:producerReportNow(ledger.intents.find(row=>row.intentId===intentId)?.producerReports,captured.origin)??Date.now(),lease});
+      const saved=await load(sessionId);if(!saved)throw Error('intent_producer_store_required');return readLedger(saved);
+    });
+  }
+
+  async recordExecutionTerminal(sessionId:string,input:Omit<IntentExecutionTerminalInput,'sessionId'>,lease:SessionExecutionLease):Promise<NormalizedStoredSessionIntentLedger> {
+    const captured=captureIntentData(input);
+    if(!captured||Object.keys(captured).sort().join(',')!=='identity,intentId,kind,recordedAt,requestSource,status')throw Error('intent_execution_input');
+    const value=parseIntentExecutionInput({...captured,sessionId});
+    if(!this.sessionStore.recordIntentExecutionTerminal)throw Error('intent_execution_store_required');
+    await this.sessionStore.recordIntentExecutionTerminal({...value,lease});
+    return (await this.load(sessionId))!;
+  }
+
+  async recordProducerAction(sessionId:string,intentId:string,instanceId:string,action:IntentProducerAction,requestSource:IntentProducerActionInput['requestSource'],lease:SessionExecutionLease):Promise<NormalizedStoredSessionIntentLedger> {
+    return getIntentProducerMutationPort(this)(sessionId,intentId,instanceId,action,requestSource,lease);
+  }
+
+  async load(sessionId: string): Promise<NormalizedStoredSessionIntentLedger | null> {
     const snapshot = await this.sessionStore.load(sessionId);
     if (!snapshot) {
       return null;
@@ -33,34 +91,34 @@ export class SessionIntentDelegationStore {
     return readLedger(snapshot);
   }
 
-  async appendIntent(sessionId: string, plan: IntentPlanDraft): Promise<SessionIntentLedger> {
+  async appendIntent(sessionId: string, plan: IntentPlanInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => appendIntentToLedger(ledger, plan));
   }
 
-  async updateIntent(sessionId: string, intentId: string, patch: UpdateIntentLedgerPatch): Promise<SessionIntentLedger> {
+  async updateIntent(sessionId: string, intentId: string, patch: UpdateIntentLedgerPatch): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => updateIntentInLedger(ledger, intentId, patch));
   }
 
-  async recordBreadcrumb(sessionId: string, input: RecordBreadcrumbInput): Promise<SessionIntentLedger> {
+  async recordBreadcrumb(sessionId: string, input: RecordBreadcrumbInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => recordBreadcrumbInLedger(ledger, input));
   }
 
-  async recordReceipt(sessionId: string, input: RecordReceiptInput): Promise<SessionIntentLedger> {
+  async recordReceipt(sessionId: string, input: RecordReceiptInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => recordReceiptInLedger(ledger, input));
   }
 
-  async recordSalvage(sessionId: string, input: RecordSalvageInput): Promise<SessionIntentLedger> {
+  async recordSalvage(sessionId: string, input: RecordSalvageInput): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => recordSalvageInLedger(ledger, input));
   }
 
-  async saveDispatchedIntent(sessionId: string, intent: IntentLedgerRecord): Promise<SessionIntentLedger> {
+  async saveDispatchedIntent(sessionId: string, intent: NormalizedStoredIntentRecord): Promise<NormalizedStoredSessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => saveDispatchedIntentInLedger(ledger, intent));
   }
 
   private async mutate(
     sessionId: string,
-    apply: (ledger: SessionIntentLedger) => SessionIntentLedger,
-  ): Promise<SessionIntentLedger> {
+    apply: (ledger: NormalizedStoredSessionIntentLedger) => NormalizedStoredSessionIntentLedger,
+  ): Promise<NormalizedStoredSessionIntentLedger> {
     const snapshot = await this.requireSnapshot(sessionId);
     const current = readLedger(snapshot);
     const next = apply(current);
@@ -72,7 +130,7 @@ export class SessionIntentDelegationStore {
     return next;
   }
 
-  private async requireSnapshot(sessionId: string): Promise<PersistedSessionSnapshot> {
+  private async requireSnapshot(sessionId: string): Promise<StoredSessionSnapshot> {
     const snapshot = await this.sessionStore.load(sessionId);
     if (!snapshot) {
       throw new Error(`session not found: ${sessionId}`);
@@ -81,11 +139,13 @@ export class SessionIntentDelegationStore {
   }
 }
 
+export function appendIntentToLedger(ledger: SessionIntentLedger, plan: IntentPlanInput, now?: number): SessionIntentLedger;
+export function appendIntentToLedger(ledger: NormalizedStoredSessionIntentLedger, plan: IntentPlanInput, now?: number): NormalizedStoredSessionIntentLedger;
 export function appendIntentToLedger(
-  ledger: SessionIntentLedger,
-  plan: IntentPlanDraft,
+  ledger: NormalizedStoredSessionIntentLedger,
+  plan: IntentPlanInput,
   now = Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const record = createIntentLedgerRecord(plan, now);
 
@@ -104,12 +164,14 @@ export function appendIntentToLedger(
   return next;
 }
 
+export function updateIntentInLedger(ledger: SessionIntentLedger, intentId: string, patch: UpdateIntentLedgerPatch, now?: number): SessionIntentLedger;
+export function updateIntentInLedger(ledger: NormalizedStoredSessionIntentLedger, intentId: string, patch: UpdateIntentLedgerPatch, now?: number): NormalizedStoredSessionIntentLedger;
 export function updateIntentInLedger(
-  ledger: SessionIntentLedger,
+  ledger: NormalizedStoredSessionIntentLedger,
   intentId: string,
   patch: UpdateIntentLedgerPatch,
   now = Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   if (
     patch.activeStageId !== undefined
     || patch.activeStepId !== undefined
@@ -136,11 +198,13 @@ export function updateIntentInLedger(
   return syncLedgerSummaryToIntent(next, intent, now);
 }
 
+export function recordBreadcrumbInLedger(ledger: SessionIntentLedger, input: RecordBreadcrumbInput, now?: number): SessionIntentLedger;
+export function recordBreadcrumbInLedger(ledger: NormalizedStoredSessionIntentLedger, input: RecordBreadcrumbInput, now?: number): NormalizedStoredSessionIntentLedger;
 export function recordBreadcrumbInLedger(
-  ledger: SessionIntentLedger,
+  ledger: NormalizedStoredSessionIntentLedger,
   input: RecordBreadcrumbInput,
   now = input.createdAt ?? Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const intent = requireIntent(next, input.intentId);
   const breadcrumb: IntentBreadcrumb = {
@@ -157,11 +221,13 @@ export function recordBreadcrumbInLedger(
   return syncLedgerSummaryToIntent(next, intent, now);
 }
 
+export function recordReceiptInLedger(ledger: SessionIntentLedger, input: RecordReceiptInput, now?: number): SessionIntentLedger;
+export function recordReceiptInLedger(ledger: NormalizedStoredSessionIntentLedger, input: RecordReceiptInput, now?: number): NormalizedStoredSessionIntentLedger;
 export function recordReceiptInLedger(
-  ledger: SessionIntentLedger,
+  ledger: NormalizedStoredSessionIntentLedger,
   input: RecordReceiptInput,
   now = input.createdAt ?? Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const intent = requireIntent(next, input.intentId);
   const receipt: IntentReceipt = {
@@ -177,11 +243,13 @@ export function recordReceiptInLedger(
   return syncLedgerSummaryToIntent(next, intent, now);
 }
 
+export function recordSalvageInLedger(ledger: SessionIntentLedger, input: RecordSalvageInput, now?: number): SessionIntentLedger;
+export function recordSalvageInLedger(ledger: NormalizedStoredSessionIntentLedger, input: RecordSalvageInput, now?: number): NormalizedStoredSessionIntentLedger;
 export function recordSalvageInLedger(
-  ledger: SessionIntentLedger,
+  ledger: NormalizedStoredSessionIntentLedger,
   input: RecordSalvageInput,
   now = input.createdAt ?? Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const intent = requireIntent(next, input.intentId);
   const salvage: IntentSalvage = {
@@ -197,10 +265,12 @@ export function recordSalvageInLedger(
   return syncLedgerSummaryToIntent(next, intent, now);
 }
 
+export function saveDispatchedIntentInLedger(ledger: SessionIntentLedger, intentRecord: IntentLedgerRecord): SessionIntentLedger;
+export function saveDispatchedIntentInLedger(ledger: NormalizedStoredSessionIntentLedger, intentRecord: NormalizedStoredIntentRecord): NormalizedStoredSessionIntentLedger;
 export function saveDispatchedIntentInLedger(
-  ledger: SessionIntentLedger,
-  intentRecord: IntentLedgerRecord,
-): SessionIntentLedger {
+  ledger: NormalizedStoredSessionIntentLedger,
+  intentRecord: NormalizedStoredIntentRecord,
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const existing = requireIntent(next, intentRecord.intentId);
   const replacement = cloneIntentRecord({
@@ -213,7 +283,9 @@ export function saveDispatchedIntentInLedger(
   return syncLedgerSummaryToIntent(next, replacement, replacement.updatedAt);
 }
 
-export function readLedger(snapshot: PersistedSessionSnapshot): SessionIntentLedger {
+export function readLedger(snapshot: Pick<PersistedSessionSnapshot, 'sessionId' | 'updatedAt' | 'intentDelegation'>): SessionIntentLedger;
+export function readLedger(snapshot: Pick<StoredSessionSnapshot, 'sessionId' | 'updatedAt' | 'intentDelegation'>): NormalizedStoredSessionIntentLedger;
+export function readLedger(snapshot: Pick<StoredSessionSnapshot, 'sessionId' | 'updatedAt' | 'intentDelegation'>): NormalizedStoredSessionIntentLedger {
   const existing = snapshot.intentDelegation;
   if (!existing) {
     return createEmptySessionIntentLedger(snapshot.sessionId, snapshot.updatedAt);
@@ -225,7 +297,7 @@ export function readLedger(snapshot: PersistedSessionSnapshot): SessionIntentLed
   };
 }
 
-function requireIntent(ledger: SessionIntentLedger, intentId: string): IntentLedgerRecord {
+function requireIntent(ledger: NormalizedStoredSessionIntentLedger, intentId: string): NormalizedStoredIntentRecord {
   const intent = ledger.intents.find((candidate) => candidate.intentId === intentId);
   if (!intent) {
     throw new Error(`intent not found: ${intentId}`);
@@ -233,7 +305,7 @@ function requireIntent(ledger: SessionIntentLedger, intentId: string): IntentLed
   return intent;
 }
 
-function normalizeOptional(value: string | undefined, fallback: string | undefined): string | undefined {
+function normalizeOptional(value: string | undefined, fallback: unknown): unknown {
   if (typeof value !== 'string') {
     return fallback;
   }
@@ -242,10 +314,10 @@ function normalizeOptional(value: string | undefined, fallback: string | undefin
 }
 
 function syncLedgerSummaryToIntent(
-  ledger: SessionIntentLedger,
-  intent: IntentLedgerRecord,
+  ledger: NormalizedStoredSessionIntentLedger,
+  intent: NormalizedStoredIntentRecord,
   now: number,
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   ledger.activeIntentId = intent.intentId;
   ledger.latestPlan = cloneIntentRecord(intent);
   ledger.updatedAt = now;

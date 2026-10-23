@@ -15,14 +15,12 @@ import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
 import { renderImageLines } from '../../src/ui/image-renderer.js';
 import { createTtyHarness } from '../support/tty.js';
 
-function createMockScrollRegion() {
-  const mock = new PassThrough();
+function createMockScrollRegion(dimensions: { rows: number; columns: number } = { rows: 24, columns: 80 }) {
+  const mock = Object.assign(new PassThrough(), dimensions);
   const chunks: string[] = [];
   mock.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
 
   const stream = mock as unknown as NodeJS.WriteStream;
-  (stream as any).rows = 24;
-  (stream as any).columns = 80;
 
   const manager = new ScrollRegionManager(stream);
   return {

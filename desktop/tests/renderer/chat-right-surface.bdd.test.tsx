@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Profiler, useState } from 'react';
+import { Profiler, useEffect, useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { ChatRightSurface } from '../../renderer/src/components/ChatRightSurface';
 import { CanvasPanel } from '../../renderer/src/components/CanvasPanel';
@@ -42,6 +42,39 @@ function setup(width = 1200) {
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('BDD: one Task / Agents / Canvas right surface', () => {
+  it.each([1200, 720])('keeps one shared approval mount interactive across tabs and responsive changes at width %s', width => {
+    const { mount } = setup(width);
+    let mounts = 0, unmounts = 0, decisions = 0;
+    function ApprovalMountProbe() {
+      useEffect(() => { mounts++; return () => { unmounts++; }; }, []);
+      return <button onClick={() => { decisions++; }}>pending decision probe</button>;
+    }
+    const patch = { pendingApprovalCount: 1, approvalContent: <ApprovalMountProbe /> };
+    const view = render(mount(patch));
+    if (width < 900) fireEvent.click(document.querySelector('.chat-right-entry')!);
+    const panel = screen.getByTestId('chat-right-panel');
+    const approval = within(panel).getByRole('button', { name: 'pending decision probe' });
+    expect(approval.closest('[role="tabpanel"]')).toBeNull();
+    expect(screen.getByTestId('chat-right-main')).not.toContainElement(approval);
+    for (const tab of ['task', 'agents', 'canvas']) {
+      const control = panel.querySelector<HTMLButtonElement>(`[role="tab"][id$="-${tab}-tab"]`);
+      if (!control) throw new Error('expected real surface tab');
+      fireEvent.click(control);
+      expect(within(panel).getByRole('button', { name: 'pending decision probe' })).toBe(approval);
+      expect(screen.getAllByRole('button', { name: 'pending decision probe' })).toHaveLength(1);
+      expect(approval.closest('[inert]')).toBeNull();
+    }
+    const nextWidth = width < 900 ? 1200 : 720;
+    act(() => resize(nextWidth));
+    expect(approval.closest('[inert]')).toBeNull();
+    if (nextWidth < 900) expect(screen.getByTestId('chat-right-main')).toHaveAttribute('inert');
+    fireEvent.click(approval);
+    expect(decisions).toBe(1); expect(mounts).toBe(1); expect(unmounts).toBe(0);
+    view.rerender(mount({ pendingApprovalCount: 0, approvalContent: null }));
+    expect(screen.queryByRole('button', { name: 'pending decision probe' })).toBeNull();
+    expect(unmounts).toBe(1);
+  });
+
   it('room files and instructions share the existing surface and preserve canvas', () => {
     const { mount } = setup(1200);
     render(mount({ taskContent: <span>room tasks</span>, filesContent: <span>directory listing</span>, instructionsContent: <span>published instructions</span>, canvasContent: <span>room canvas</span> }));

@@ -1,9 +1,10 @@
+// @vitest-environment node
+import { openOwnedWorkflowNormalCase } from '../support/owned-workflow-normal-case.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Message, ToolDefinition } from '../../../src/types.js';
-import type { KSwarmService } from '../../electron/kswarm-service.js';
 
 const adapterState = vi.hoisted(() => ({
   streamCalls: 0,
@@ -58,17 +59,6 @@ vi.mock('../../../src/ai/models.js', async (importOriginal) => ({
 
 const { createDesktopServices } = await import('../../electron/desktop-services.js');
 
-function mockKSwarmService(): KSwarmService {
-  return {
-    start: async () => {},
-    stop: async () => {},
-    restart: async () => {},
-    getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
-    onStatusChange: () => () => {},
-    request: async (path: string) => path === '/agents' ? new Response('{"agents":[]}') : new Response('{"error":"mock"}', { status: 501 }),
-  };
-}
-
 describe('desktop runner finalization', () => {
   let rootDir: string;
 
@@ -90,29 +80,21 @@ describe('desktop runner finalization', () => {
 
   it('runs a no-tool finalization turn at an explicit limit but does not report the exhausted task as completed', async () => {
     vi.stubEnv('XIAOK_AGENT_MAX_ITERATIONS', '2');
-    const workFolder = join(rootDir, 'workflow-project');
-    const services = createDesktopServices({
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-finalize","name":"AI infrastructure","goal":"Collect updates"},"workflowName":"dynamic_research_workflow","prompt":"Collect AI infrastructure updates and return structured JSON.","label":"Research node","phaseTitle":"Research node"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
     });
     // Binding resolution runs before the adapter is built and rejects an empty
     // config, so the finalization logic under test is never reached without it.
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
 
     const execution = services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-finalize',
-        workflowRunId: 'wf-proj-finalize-1',
-        workflowId: 'dynamic_research_workflow',
-        nodeId: 'script-agent-4',
-        nodeKind: 'agent_task',
-        nodeTitle: 'Research node',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-4',
-        project: { id: 'proj-finalize', name: 'AI infrastructure', goal: 'Collect updates', status: 'active', workFolder },
-        input: { prompt: 'Collect AI infrastructure updates and return structured JSON.' },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
@@ -120,31 +102,25 @@ describe('desktop runner finalization', () => {
     expect(adapterState.streamCalls).toBe(3);
     expect(adapterState.toolCounts.slice(0, 2).every((count) => count > 0)).toBe(true);
     expect(adapterState.toolCounts[2]).toBe(0);
+  
+    } finally { await owned.close(services); }
   });
 
   it('runs a no-tool finalization turn when the model returns an empty turn after tool results', async () => {
     adapterState.emptySecondTurn = true;
-    const workFolder = join(rootDir, 'workflow-project-empty-turn');
-    const services = createDesktopServices({
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-finalize-empty","name":"AI infrastructure","goal":"Collect updates"},"workflowName":"dynamic_research_workflow","prompt":"Collect AI infrastructure updates and return structured JSON.","label":"Research node","phaseTitle":"Research node"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-finalize-empty',
-        workflowRunId: 'wf-proj-finalize-empty-1',
-        workflowId: 'dynamic_research_workflow',
-        nodeId: 'script-agent-9',
-        nodeKind: 'agent_task',
-        nodeTitle: 'Research node',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-9',
-        project: { id: 'proj-finalize-empty', name: 'AI infrastructure', goal: 'Collect updates', status: 'active', workFolder },
-        input: { prompt: 'Collect AI infrastructure updates and return structured JSON.' },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
@@ -157,5 +133,7 @@ describe('desktop runner finalization', () => {
     expect(adapterState.toolCounts[0]).toBeGreaterThan(0);
     expect(adapterState.toolCounts[1]).toBeGreaterThan(0);
     expect(result.output?.summary).toBe('finalized from prior tool results');
+  
+    } finally { await owned.close(services); }
   });
 });

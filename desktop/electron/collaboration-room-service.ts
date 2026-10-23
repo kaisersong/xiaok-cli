@@ -1,3 +1,4 @@
+import type { RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../shared/collaboration-room-ipc-contract.js';
 /**
  * CollaborationRoom semantic service (design §9, §12, §16.3).
  *
@@ -115,6 +116,20 @@ function sanitizeRoomAttachmentPaths(value: unknown): Array<{ filePath: string; 
     if (attachments.length >= MAX_ROOM_ATTACHMENTS) break;
   }
   return attachments;
+}
+
+export interface CollaborationRoomService {
+  listRooms(): Promise<RoomListResultDto>;
+  getRoom(roomId: string): Promise<RoomSnapshotDto>;
+  createRoom(input: Record<string, unknown>, authority?: { requestSource: 'user'; signal?: AbortSignal }): Promise<RoomCreateResultDto>;
+  archiveRoom(input: Record<string, unknown>): Promise<RoomArchiveResultDto>;
+  deleteRoom(input: unknown, authority?: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<RoomDeleteResultDto>;
+  updateRoomMembers(input: Record<string, unknown>): Promise<RoomMembersResultDto>;
+  sendMessage(input: Record<string, unknown>): Promise<RoomSendResultDto>;
+  markRoomSeen(input: Record<string, unknown>): Promise<RoomSeenResultDto>;
+  cancelDiscussion(input: Record<string, unknown>): Promise<RoomCancelResultDto>;
+  createProjectFromRoom(input: Record<string, unknown>): Promise<RoomProjectCreateResultDto>;
+  createTaskFromRoomMessage(input: Record<string, unknown>): Promise<RoomTaskCreateResultDto>;
 }
 
 export function createCollaborationRoomService({
@@ -586,5 +601,5 @@ export function createCollaborationRoomService({
     listRooms,
     createProjectFromRoom,
     createTaskFromRoomMessage,
-  };
+  } as CollaborationRoomService;
 }

@@ -46,12 +46,12 @@ export class AssistantService {
       id: 'assistant:default-personal-assistant:evening', loopId: ASSISTANT_EVENING_LOOP_ID,
       title: 'Personal assistant evening reflection', time: profile.eveningTime,
       timeZone: profile.timeZone, workdays: profile.workdays, status: profile.status === 'active' ? 'active' : 'paused',
-    });
+    }, {requestSource: 'scheduler', ownerId: DEFAULT_PERSONAL_ASSISTANT_ID});
     this.options.timedActionService.ensureAssistantLoopSchedule({
       id: 'assistant:default-personal-assistant:morning', loopId: ASSISTANT_MORNING_LOOP_ID,
       title: 'Personal assistant morning briefing', time: profile.morningTime,
       timeZone: profile.timeZone, workdays: profile.workdays, status: profile.status === 'active' ? 'active' : 'paused',
-    });
+    }, {requestSource: 'scheduler', ownerId: DEFAULT_PERSONAL_ASSISTANT_ID});
     this.projectStatus(profile.status, now);
     return { profile: this.options.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)! };
   }

@@ -336,3 +336,98 @@ describe('W2 R4 P4 source copies cannot corrupt pending / reply or authorize exe
     expect(f.taskHost.startTask).not.toHaveBeenCalled(); expect(f.runs()).toBe(0);
   });
 });
+
+
+describe('actual sealed Goal continuation permits only its captured Main request', () => {
+  async function arrangeDecision() {
+    const f = await fixture();
+    const created = await f.goal.createGoal(correlatedInput());
+    await f.goal.ackGoalTaskAttached({ threadId, attachmentId: created.preparedTask.attachmentId });
+    await bounded(f.host.drain());
+    const original = (await f.host.inspectTask(created.preparedTask.taskId))!;
+    expect(original.status).toBe('completed');
+    if (original.executionScope?.kind !== 'goal_turn') throw Error('actual Goal source required');
+    const request: TaskCreateInput = { prompt: 'Continue the exact original Goal.', materials: [],
+      context: { threadId, taskIds: [original.taskId] },
+      executionScope: { ...original.executionScope, origin: 'continuation', goalTurnId: 'original-next-goal-turn' } };
+    // The third parameter is Main-only; it is absent from the first settlement.
+    const decision = f.service.withGoalDecision.bind(f.service) as <T>(id: string,
+      action: (state: 'ready' | 'waiting_children' | 'children_need_attention' | 'superseded') => Promise<T>,
+      request?: TaskCreateInput) => Promise<T>;
+    return { f, original, request, decision };
+  }
+
+  it('admits the one exact continuation request and preserves the persisted frozen source', async () => {
+    const { f, original, request, decision } = await arrangeDecision();
+    const prepared = await decision(original.taskId, async state => {
+      expect(state).toBe('ready');
+      const actual = await f.service.prepareRoot(f.host, threadId, request);
+      await expect(f.service.prepareRoot(f.host, threadId, request)).rejects.toThrow('goal_decision_pending');
+      return actual;
+    }, request);
+    const snapshot = await f.host.inspectTask(prepared.taskId);
+    expect(snapshot?.executionScope).toEqual(request.executionScope);
+    expect(snapshot?.status).toBe('understanding');
+    expect(snapshot?.context?.threadId).toBe(threadId);
+    expect(f.runs()).toBe(1);
+  });
+
+  it('first settlement callbacks and equal JSON objects cannot consume a continuation permit', async () => {
+    const { f, original, request, decision } = await arrangeDecision();
+    const before = f.groups.activeGroup(threadId)!.nextRootEpoch;
+    await decision(original.taskId, async state => {
+      expect(state).toBe('ready');
+      await expect(f.service.prepareRoot(f.host, threadId, request)).rejects.toThrow('goal_decision_pending');
+    });
+    await decision(original.taskId, async () => {
+      await expect(f.service.prepareRoot(f.host, threadId, structuredClone(request))).rejects.toThrow('goal_decision_pending');
+    }, request);
+    expect(f.groups.activeGroup(threadId)!.nextRootEpoch).toBe(before);
+  });
+
+  it.each(['goal', 'epoch', 'thread', 'origin'] as const)('rejects a captured wrong %s source before admitting any task', async kind => {
+    const { f, original, request, decision } = await arrangeDecision();
+    const bad = structuredClone(request);
+    if (bad.executionScope?.kind !== 'goal_turn') throw Error('actual scope required');
+    if (kind === 'goal') bad.executionScope.goalId = 'foreign-goal';
+    if (kind === 'epoch') bad.executionScope.epoch++;
+    if (kind === 'thread') bad.executionScope.threadId = 'foreign-thread';
+    if (kind === 'origin') bad.executionScope.origin = 'user';
+    const before = f.groups.activeGroup(threadId)!.nextRootEpoch;
+    await decision(original.taskId, async () => {
+      await expect(f.service.prepareRoot(f.host, threadId, bad)).rejects.toThrow('goal_decision_pending');
+    }, bad);
+    expect(f.groups.activeGroup(threadId)!.nextRootEpoch).toBe(before);
+  });
+
+  it('an escaped callback cannot prepare after its actual decision action settles', async () => {
+    const { f, original, request, decision } = await arrangeDecision();
+    const gate = f.barrier();
+    let escaped!: Promise<void>;
+    const before = f.groups.activeGroup(threadId)!.nextRootEpoch;
+    await decision(original.taskId, async () => {
+      escaped = gate.hold().then(async () => {
+        await expect(f.service.prepareRoot(f.host, threadId, request)).rejects.toThrow('goal_decision_pending');
+      });
+    }, request);
+    gate.release(); await escaped;
+    expect(f.groups.activeGroup(threadId)!.nextRootEpoch).toBe(before);
+  });
+
+  it('caller mutation after first admission cannot alter the actual persisted Goal scope', async () => {
+    const { f, original, request, decision } = await arrangeDecision();
+    const captured = structuredClone(request), prepare = f.host.prepareTask.bind(f.host);
+    vi.spyOn(f.host, 'prepareTask').mockImplementation(async (input, options) => {
+      if (request.executionScope?.kind !== 'goal_turn') throw Error('actual scope required');
+      request.executionScope.goalId = 'mutated-goal';
+      request.context!.threadId = 'foreign-thread';
+      const actual = await prepare(input, options);
+      Object.assign(request, structuredClone(captured));
+      return actual;
+    });
+    const prepared = await decision(original.taskId, () => f.service.prepareRoot(f.host, threadId, request), request);
+    const snapshot = (await f.host.inspectTask(prepared.taskId))!;
+    expect(snapshot.executionScope).toEqual(captured.executionScope);
+    expect(snapshot.context?.threadId).toBe(captured.context?.threadId);
+  });
+});

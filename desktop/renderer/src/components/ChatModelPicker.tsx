@@ -1,3 +1,4 @@
+import { modelConfigErrorMessage } from '../lib/model-config-error';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Cpu } from 'lucide-react';
@@ -19,6 +20,7 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [modelError, setModelError] = useState('');
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -27,7 +29,8 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
     try {
       const snapshot = await api.getModelConfig();
       setConfig(snapshot);
-    } catch {
+    } catch (error) {
+      setModelError(modelConfigErrorMessage(error, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? t.desktopSettings.modelConfigUnavailable);
       setConfig(null);
     }
   };
@@ -102,13 +105,15 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
     }
     setOpen(Boolean(model.runtimeConstraints?.reasoningEfforts?.length));
     setSaving(true);
+    setModelError('');
     try {
       const updated = await api.saveModelConfig({
         providerId: model.provider,
         modelId: model.id,
       });
       setConfig(updated);
-    } catch {
+    } catch (error) {
+      setModelError(modelConfigErrorMessage(error, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? t.desktopSettings.modelConfigUnavailable);
       void loadConfig();
     } finally {
       setSaving(false);
@@ -119,13 +124,15 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
     if (!currentModel || !currentEfforts.includes(effort) || saving) return;
     if (currentEffort === effort) return;
     setSaving(true);
+    setModelError('');
     try {
       const updated = await api.updateModelRuntimeOptions({
         modelId: currentModel.id,
         runtimeOptions: { ...currentModel.runtimeOptions, reasoningEffort: effort },
       });
       setConfig(updated);
-    } catch {
+    } catch (error) {
+      setModelError(modelConfigErrorMessage(error, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? t.desktopSettings.modelConfigUnavailable);
       void loadConfig();
     } finally {
       setSaving(false);
@@ -264,6 +271,7 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
         )}
         <ChevronDown size={12} className="shrink-0 opacity-70" />
       </button>
+      {modelError ? <span role="alert" className="text-xs text-[var(--c-status-error-text)]">{modelError}</span> : null}
       {menu && createPortal(menu, document.body)}
     </>
   );

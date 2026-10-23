@@ -1,0 +1,250 @@
+import { assertDockerRunnerDatabase } from '../isolated-execution/docker-runner.js';
+import { createHash, createHmac, timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
+import { canonicalVerificationJson as json } from './protocol.js';
+import { parseArchiveOperationReview, archiveReviewBytes } from './archive-operation-review.js';
+import { assertVerificationCompletionCompositionDatabase } from './completion-composition.js';
+import { assertExecutionTranscriptStoreDatabase } from './execution-transcripts.js';
+import { assertProtectedRunLedgerDatabase } from './protected-run-ledger.js';
+import { assertVerificationDatabaseBudget, runVerificationTransaction } from './storage-budget.js';
+const hash = (v) => createHash('sha256').update(v).digest('hex');
+const clone = (v) => JSON.parse(json(v));
+function shape(v, keys) { const p = clone(v); if (!p || Array.isArray(p) || Object.keys(p).sort().join(',') !== keys.sort().join(','))
+    throw Error('archive_request_shape'); return p; }
+function sync(v) { if (v !== undefined) {
+    void Promise.resolve(v).catch(() => { });
+    throw Error('archive_sync_authority');
+} }
+/** User-native archive access; deletion also requires actual physical and reference gates. */
+export function createUserArchiveOperations(input) {
+    const { database: db, authorityId, completion, transcripts, runs, raw } = input, currentPort = input.assertCurrent.bind(input), readClock = input.clock.bind(input), renew = input.ensureQualified.bind(input), resolve = input.resolvePrincipal.bind(input), approve = input.approve.bind(input), openOwner = completion.privateHost.enrollment.openOwner.bind(completion.privateHost.enrollment), ownerFor = completion.privateHost.enrollment.resolveOwnerKey.bind(completion.privateHost.enrollment), describeTranscript = transcripts.describeArchive.bind(transcripts), describeRun = runs.describeArchive.bind(runs), readTranscript = transcripts.read.bind(transcripts), readRun = runs.readOriginalSource.bind(runs);
+    const inspect = input.quiescence.inspectExecution.bind(input.quiescence), physical = input.quiescence.assertQuiescent.bind(input.quiescence), rawState = raw.readExecution.bind(raw), rawOwner = raw.readOwnerKey.bind(raw), reference = completion.privateHost.assertSourceDeletionUnreferenced.bind(completion.privateHost);
+    const deleteTranscript = transcripts.delete.bind(transcripts), deleteRun = runs.deleteSource.bind(runs), deleteSealed = runs.deleteSealedObservations.bind(runs), deleting = new WeakMap();
+    assertDockerRunnerDatabase(raw, db);
+    assertVerificationCompletionCompositionDatabase(completion, db);
+    assertExecutionTranscriptStoreDatabase(transcripts, db);
+    assertProtectedRunLedgerDatabase(runs, db);
+    if (db.inTransaction)
+        throw Error('archive_outer_transaction');
+    const cursorKey = randomBytes(32), boot = randomUUID(), lifetime = new AbortController(), handles = new Map(), caps = new WeakMap(), active = new Set();
+    let closing, lastLower = -1, clockIdentity;
+    function current() { lifetime.signal.throwIfAborted(); sync(currentPort()); assertVerificationCompletionCompositionDatabase(completion, db); assertExecutionTranscriptStoreDatabase(transcripts, db); assertProtectedRunLedgerDatabase(runs, db); }
+    function clock() { current(); const c = clone(readClock()); if (!c || typeof c.domainId !== 'string' || !Number.isSafeInteger(c.qualificationEpoch) || c.qualificationEpoch < 0 || !Number.isSafeInteger(c.lowerBound) || !Number.isSafeInteger(c.upperBound) || c.lowerBound < lastLower || c.upperBound < c.lowerBound || c.lowerBound < 0 || !Number.isSafeInteger(c.upperBound + 300000))
+        throw Error('archive_clock'); const identity = json([c.domainId, c.qualificationEpoch]); if (clockIdentity !== undefined && clockIdentity !== identity)
+        throw Error('archive_clock_changed'); clockIdentity = identity; lastLower = c.lowerBound; return c; }
+    clock();
+    db.exec('CREATE TABLE IF NOT EXISTS verification_archive_challenges(id TEXT PRIMARY KEY,principal TEXT NOT NULL,boot TEXT NOT NULL,state TEXT NOT NULL,review_json TEXT NOT NULL)');
+    function principal(raw) { const peer = shape(raw, ['uid', 'gid', 'auditSessionId']); if (!Number.isSafeInteger(peer.uid) || peer.uid < 1 || !Number.isSafeInteger(peer.gid) || peer.gid < 0 || !Number.isSafeInteger(peer.auditSessionId) || peer.auditSessionId < 1)
+        throw Error('archive_peer'); const p = clone(resolve(peer)); if (p.uid !== peer.uid || p.gid !== peer.gid || p.auditSessionId !== peer.auditSessionId || p.source !== 'macos-local-generateduid')
+        throw Error('archive_principal'); return { peer, p }; }
+    function describe(kind, id, action = 'read') {
+        if (kind === 'transcript') {
+            const d = describeTranscript(id), m = d.manifest;
+            if (d.state !== 'ready' && !(action === 'delete' && d.state === 'deleted'))
+                throw Error('archive_unavailable');
+            return { ownerKey: m.ownerKey, resource: { kind: 'transcript', resourceId: id, manifestHash: hash(json(m)), expected: m.expected, complete: m.complete, truncated: m.truncated, stdout: m.stdout, stderr: m.stderr } };
+        }
+        if (kind === 'protected-run') {
+            const d = describeRun(id);
+            if (action === 'read' ? d.state !== 'complete' : !['sealed', 'prepared', 'complete', 'deleted'].includes(d.state))
+                throw Error('archive_incomplete');
+            return { ownerKey: d.ownerKey, resource: { kind: 'protected-run', sourceRunId: d.sourceRunId, runNonce: d.runNonce, rootInvocation: d.rootInvocation, state: d.state, archiveHash: d.archiveHash, archiveBytes: d.archiveBytes, memberCount: d.memberCount, censusHash: d.censusHash } };
+        }
+        throw Error('archive_resource');
+    }
+    function check(review, peer) { current(); if (db.inTransaction)
+        throw Error('archive_outer_transaction'); const c = clock(), d = review.deadline, { p } = principal(peer); if (review.authorityId !== authorityId || p.uid !== review.principal.uid || p.auditSessionId !== review.principal.auditSessionId || p.accountGeneration !== review.principal.accountGeneration)
+        throw Error('archive_principal'); if (c.domainId !== d.domainId || c.qualificationEpoch !== d.qualificationEpoch || c.lowerBound < d.notBefore || c.upperBound >= d.validUntil)
+        throw Error('archive_expired'); const invocation = review.resource.kind === 'transcript' ? review.resource.expected : review.resource.rootInvocation; const exactInvocation = { sessionIdentity: invocation.sessionIdentity, compoundOperationId: invocation.compoundOperationId, validationInvocationId: invocation.validationInvocationId }; if (ownerFor(peer, exactInvocation) !== json(review.owner))
+        throw Error('archive_owner'); const opened = openOwner({ ownerKind: review.owner.ownerKind, ownerId: review.owner.ownerId }, peer); if (json(opened.owner) !== json(review.owner))
+        throw Error('archive_owner'); const resource = review.resource, actual = describe(resource.kind, resource.kind === 'transcript' ? resource.resourceId : resource.sourceRunId, review.action); if (actual.ownerKey !== json(review.owner) || json(actual.resource) !== json(resource))
+        throw Error('archive_resource_changed'); if (review.action === 'delete')
+        sync(reference(review.owner, review.resource)); const after = clock(); if (after.upperBound >= d.validUntil)
+        throw Error('archive_expired'); }
+    function load(id, state, peer) { current(); const row = db.prepare('SELECT * FROM verification_archive_challenges WHERE id=?').get(id); if (!row || row.boot !== boot || row.state !== state || row.principal !== json(peer))
+        throw Error('archive_challenge'); return parseArchiveOperationReview(JSON.parse(row.review_json)); }
+    function gc() { const c = clock(); db.prepare("DELETE FROM verification_archive_challenges WHERE boot<>? OR json_extract(review_json,'$.deadline.domainId')<>? OR json_extract(review_json,'$.deadline.qualificationEpoch')<>? OR json_extract(review_json,'$.deadline.validUntil')<=?").run(boot, c.domainId, c.qualificationEpoch, c.upperBound); for (const [handle, g] of handles)
+        if (!db.prepare("SELECT 1 FROM verification_archive_challenges WHERE id=? AND state='active' AND boot=?").get(g.review.challengeId, boot))
+            handles.delete(handle); }
+    function checkedCap(cap) { const g = caps.get(cap); if (!g || g.review.action !== 'read')
+        throw Error('archive_private_capability'); const review = load(g.review.challengeId, 'active', g.peer); if (json(review) !== json(g.review))
+        throw Error('archive_capability_changed'); check(g.review, g.peer); return g; }
+    function checkedDelete(cap) { const value = deleting.get(cap); if (!value)
+        throw Error('archive_delete_capability'); const g = value.grant; if (g.review.action !== 'delete' || json(load(g.review.challengeId, 'deleting', g.peer)) !== json(g.review))
+        throw Error('archive_delete_capability'); check(g.review, g.peer); for (const w of value.witnesses) {
+        if (rawOwner(w.expected) !== json(g.review.owner) || rawState(w.expected).state !== 'terminal')
+            throw Error('archive_delete_execution');
+        sync(physical(w.receipt, w.expected));
+    } sync(reference(g.review.owner, g.review.resource)); return g; }
+    function work(signal, fn) { if (lifetime.signal.aborted)
+        return Promise.reject(Error('archive_closed')); const combined = AbortSignal.any([signal, lifetime.signal]); const pending = Promise.resolve().then(() => { combined.throwIfAborted(); return fn(combined); }); active.add(pending); void pending.then(() => active.delete(pending), () => active.delete(pending)); return pending; }
+    gc();
+    return Object.freeze({
+        assertTranscriptDelete(manifest, cap) { const g = checkedDelete(cap), r = g.review.resource; if (r.kind !== 'transcript' || r.manifestHash !== hash(json(manifest)) || manifest.ownerKey !== json(g.review.owner))
+            throw Error('archive_delete_binding'); },
+        assertRunDelete(facts, cap) { const g = checkedDelete(cap), r = g.review.resource; if (r.kind !== 'protected-run' || facts.ownerKey !== json(g.review.owner) || facts.sourceRunId !== r.sourceRunId || facts.runNonce !== r.runNonce || facts.archiveHash !== r.archiveHash || facts.archiveBytes !== r.archiveBytes)
+            throw Error('archive_delete_binding'); },
+        assertTranscriptRead(manifest, cap) { const g = checkedCap(cap), r = g.review.resource; if (r.kind !== 'transcript' || r.manifestHash !== hash(json(manifest)) || manifest.ownerKey !== json(g.review.owner))
+            throw Error('archive_read_binding'); },
+        assertRunRead(facts, cap) { const g = checkedCap(cap), r = g.review.resource; if (r.kind !== 'protected-run' || facts.ownerKey !== json(g.review.owner) || facts.sourceRunId !== r.sourceRunId || facts.runNonce !== r.runNonce || facts.archiveHash !== r.archiveHash || facts.archiveBytes !== r.archiveBytes || facts.scope !== 'protected-execution-run')
+            throw Error('archive_read_binding'); },
+        isReadCapability(cap) { return caps.get(cap)?.review.action === 'read'; },
+        list(raw, rawPeer, signal) {
+            return work(signal, async (activeSignal) => {
+                const p = shape(raw, ['requestSource', 'ownerKind', 'ownerId', 'kind', 'cursor', 'limit']);
+                if (p.requestSource !== 'user')
+                    throw Error('archive_request_source');
+                if (!['transcript', 'protected-run'].includes(p.kind))
+                    throw Error('archive_resource');
+                if (!Number.isSafeInteger(p.limit) || p.limit < 1 || p.limit > 64)
+                    throw Error('archive_list_limit');
+                if (p.cursor !== null && (typeof p.cursor !== 'string' || p.cursor.length > 4096))
+                    throw Error('archive_cursor');
+                const { peer } = principal(rawPeer);
+                await renew(activeSignal);
+                activeSignal.throwIfAborted();
+                current();
+                if (db.inTransaction)
+                    throw Error('archive_outer_transaction');
+                const { owner } = openOwner({ ownerKind: p.ownerKind, ownerId: p.ownerId }, peer), ownerKey = json(owner), identity = json(principal(peer).p), sample = clock();
+                let after = '', validUntil = sample.lowerBound + 300000;
+                if (p.cursor !== null) {
+                    const parts = p.cursor.split('.');
+                    if (parts.length !== 2 || !parts[0] || !/^[a-f0-9]{64}$/.test(parts[1]))
+                        throw Error('archive_cursor');
+                    const expected = createHmac('sha256', cursorKey).update(parts[0]).digest();
+                    if (!timingSafeEqual(expected, Buffer.from(parts[1], 'hex')))
+                        throw Error('archive_cursor');
+                    const encoded = Buffer.from(parts[0], 'base64url');
+                    if (encoded.toString('base64url') !== parts[0])
+                        throw Error('archive_cursor');
+                    const c = shape(JSON.parse(encoded.toString('utf8')), ['owner', 'principal', 'kind', 'after', 'deadline']);
+                    if (c.owner !== ownerKey || c.principal !== identity || c.kind !== p.kind || typeof c.after !== 'string' || !/^[a-f0-9-]{36}$/.test(c.after) || c.deadline.domainId !== sample.domainId || c.deadline.qualificationEpoch !== sample.qualificationEpoch || !Number.isSafeInteger(c.deadline.validUntil) || sample.upperBound >= c.deadline.validUntil)
+                        throw Error('archive_cursor');
+                    after = c.after;
+                    validUntil = c.deadline.validUntil;
+                }
+                const table = p.kind === 'transcript' ? 'verification_execution_transcripts' : 'verification_protected_runs', column = p.kind === 'transcript' ? 'resource_id' : 'source_run_id';
+                const rows = db.prepare(`SELECT ${column} id,state FROM ${table} WHERE owner_key=? AND ${column}>? ORDER BY ${column} LIMIT ?`).all(ownerKey, after, p.limit + 1);
+                const page = rows.slice(0, p.limit);
+                for (const row of page) {
+                    if (!/^[a-f0-9-]{36}$/.test(row.id) || !(p.kind === 'transcript' ? ['prepared', 'ready', 'deleted'] : ['open', 'sealed', 'prepared', 'complete', 'deleted']).includes(row.state))
+                        throw Error('archive_list_state');
+                }
+                if (json(principal(peer).p) !== identity || json(openOwner({ ownerKind: p.ownerKind, ownerId: p.ownerId }, peer).owner) !== ownerKey || clock().upperBound >= validUntil)
+                    throw Error('archive_list_current');
+                let nextCursor = null;
+                if (rows.length > p.limit) {
+                    const encoded = Buffer.from(json({ owner: ownerKey, principal: identity, kind: p.kind, after: page[page.length - 1].id, deadline: { domainId: sample.domainId, qualificationEpoch: sample.qualificationEpoch, validUntil } })).toString('base64url');
+                    nextCursor = encoded + '.' + createHmac('sha256', cursorKey).update(encoded).digest('hex');
+                }
+                const result = { items: page.map(row => Object.freeze({ id: row.id, kind: p.kind, state: row.state })), nextCursor };
+                if (Buffer.byteLength(json(result)) > 65536)
+                    throw Error('archive_list_frame');
+                return Object.freeze({ ...result, items: Object.freeze(result.items) });
+            });
+        },
+        prepare(raw, rawPeer, signal) { return work(signal, async (activeSignal) => { const p = shape(raw, ['requestSource', 'action', 'ownerKind', 'ownerId', 'resource']); if (p.requestSource !== 'user')
+            throw Error('archive_request_source'); if (!['read', 'delete'].includes(p.action))
+            throw Error('archive_action'); const selected = shape(p.resource, ['kind', 'id']); if (typeof selected.id !== 'string' || selected.id.length > 160)
+            throw Error('archive_resource'); const { peer } = principal(rawPeer); await renew(activeSignal); activeSignal.throwIfAborted(); current(); if (db.inTransaction)
+            throw Error('archive_outer_transaction'); const { owner } = openOwner({ ownerKind: p.ownerKind, ownerId: p.ownerId }, peer), actual = describe(selected.kind, selected.id, p.action); if (actual.ownerKey !== json(owner))
+            throw Error('archive_owner'); const { p: identity } = principal(peer), c = clock(), review = parseArchiveOperationReview({ version: 1, purpose: 'execution-archive-access', authorityId, challengeId: randomUUID(), principal: { uid: identity.uid, auditSessionId: identity.auditSessionId, accountGeneration: identity.accountGeneration }, requestSource: 'user', action: p.action, owner, resource: actual.resource, deadline: { domainId: c.domainId, qualificationEpoch: c.qualificationEpoch, notBefore: c.lowerBound, validUntil: c.lowerBound + 300000 } }); check(review, peer); gc(); runVerificationTransaction(db, () => { if (db.prepare('SELECT COUNT(*) n FROM verification_archive_challenges').get().n >= 64)
+            throw Error('archive_capacity'); const serialized = json(review); assertVerificationDatabaseBudget(db, { additionalBytes: Buffer.byteLength(serialized) + 2048 }); db.prepare("INSERT INTO verification_archive_challenges VALUES(?,?,?,'prepared',?)").run(review.challengeId, json(peer), boot, serialized); }); check(review, peer); return Object.freeze({ challengeId: review.challengeId, validUntil: review.deadline.validUntil, resourceKind: review.resource.kind }); }); },
+        authorize(raw, rawPeer, signal) { return work(signal, async (activeSignal) => { const p = shape(raw, ['challengeId']), { peer } = principal(rawPeer); if (typeof p.challengeId !== 'string')
+            throw Error('archive_challenge'); const review = load(p.challengeId, 'prepared', peer); check(review, peer); const changed = db.prepare("UPDATE verification_archive_challenges SET state='authorizing' WHERE id=? AND boot=? AND state='prepared'").run(p.challengeId, boot); if (changed.changes !== 1)
+            throw Error('archive_challenge'); try {
+            const receipt = clone(await approve(review, activeSignal));
+            activeSignal.throwIfAborted();
+            await renew(activeSignal);
+            activeSignal.throwIfAborted();
+            const actual = load(p.challengeId, 'authorizing', peer);
+            if (json(actual) !== json(review))
+                throw Error('archive_challenge_changed');
+            check(review, peer);
+            if (receipt.uid !== peer.uid || receipt.auditSessionId !== peer.auditSessionId || receipt.reviewHash !== hash(archiveReviewBytes(review)))
+                throw Error('archive_approval');
+            const activated = db.prepare("UPDATE verification_archive_challenges SET state='active' WHERE id=? AND boot=? AND state='authorizing'").run(p.challengeId, boot);
+            if (activated.changes !== 1)
+                throw Error('archive_challenge');
+            check(review, peer);
+            const handle = randomBytes(32).toString('hex'), cap = Object.freeze({}), g = { cap, review, peer, offsets: review.resource.kind === 'transcript' ? { stdout: 0, stderr: 0 } : { archive: 0 }, ended: new Set() };
+            caps.set(cap, g);
+            handles.set(handle, g);
+            return Object.freeze({ handle, resource: review.resource, validUntil: review.deadline.validUntil });
+        }
+        catch (error) {
+            db.prepare("DELETE FROM verification_archive_challenges WHERE id=? AND boot=?").run(p.challengeId, boot);
+            throw error;
+        } }); },
+        deleteArchive(rawInput, rawPeer, signal) {
+            return work(signal, async (activeSignal) => {
+                const p = shape(rawInput, ['requestSource', 'handle']);
+                if (p.requestSource !== 'user')
+                    throw Error('archive_request_source');
+                const g = handles.get(p.handle);
+                if (!g || g.review.action !== 'delete' || json(rawPeer) !== json(g.peer))
+                    throw Error('archive_delete_handle');
+                handles.delete(p.handle);
+                caps.delete(g.cap);
+                if (db.prepare("UPDATE verification_archive_challenges SET state='deleting' WHERE id=? AND boot=? AND state='active'").run(g.review.challengeId, boot).changes !== 1)
+                    throw Error('archive_delete_handle');
+                const cap = Object.freeze({}), witnesses = [];
+                try {
+                    await renew(activeSignal);
+                    activeSignal.throwIfAborted();
+                    check(g.review, g.peer);
+                    const r = g.review.resource, all = r.kind === 'transcript' ? [r.expected] : describeRun(r.sourceRunId).members.map(m => m.expected);
+                    if (r.kind === 'protected-run' && describeRun(r.sourceRunId).producers.some((p) => p.state !== 'ended'))
+                        throw Error('archive_delete_producer');
+                    for (const expected of all) {
+                        if (rawState(expected).state !== 'terminal' || rawOwner(expected) !== json(g.review.owner))
+                            throw Error('archive_delete_execution');
+                        const receipt = await inspect(expected);
+                        activeSignal.throwIfAborted();
+                        check(g.review, g.peer);
+                        sync(physical(receipt, expected));
+                        witnesses.push({ expected, receipt });
+                    }
+                    deleting.set(cap, { grant: g, witnesses });
+                    checkedDelete(cap);
+                    activeSignal.throwIfAborted();
+                    if (r.kind === 'transcript')
+                        deleteTranscript(r.resourceId, { requestSource: 'user', authorization: cap });
+                    else if (r.archiveHash === null)
+                        deleteSealed(r.sourceRunId, { requestSource: 'user', authorization: cap });
+                    else
+                        deleteRun({ sourceRunId: r.sourceRunId, runNonce: r.runNonce, archiveHash: r.archiveHash, scope: 'protected-execution-run' }, { requestSource: 'user', authorization: cap });
+                    return Object.freeze({ deleted: true });
+                }
+                finally {
+                    deleting.delete(cap);
+                    db.prepare('DELETE FROM verification_archive_challenges WHERE id=? AND boot=?').run(g.review.challengeId, boot);
+                }
+            });
+        },
+        read(raw, rawPeer, signal) { return work(signal, async (activeSignal) => { const p = shape(raw, ['handle', 'stream', 'offset', 'maxBytes']); if (typeof p.handle !== 'string' || typeof p.stream !== 'string' || !Number.isSafeInteger(p.offset) || p.offset < 0 || !Number.isSafeInteger(p.maxBytes) || p.maxBytes < 1 || p.maxBytes > 256 * 1024)
+            throw Error('archive_chunk'); const g = handles.get(p.handle); if (!g || json(rawPeer) !== json(g.peer))
+            throw Error('archive_handle'); await renew(activeSignal); activeSignal.throwIfAborted(); if (!Object.hasOwn(g.offsets, p.stream) || g.ended.has(p.stream) || g.offsets[p.stream] !== p.offset)
+            throw Error('archive_offset'); checkedCap(g.cap); let body, total, contentHash; if (g.review.resource.kind === 'transcript') {
+            const data = readTranscript(g.review.resource.resourceId, g.cap), stream = p.stream;
+            body = data[stream];
+            total = g.review.resource[stream].size;
+            contentHash = g.review.resource[stream].sha256;
+        }
+        else {
+            const r = g.review.resource, data = readRun({ sourceRunId: r.sourceRunId, runNonce: r.runNonce, archiveHash: r.archiveHash, scope: 'protected-execution-run' }, g.cap, { maxBytes: 16 * 1024 ** 2 });
+            body = data.bytes;
+            total = r.archiveBytes;
+            contentHash = r.archiveHash;
+        } checkedCap(g.cap); if (body.length !== total || hash(body) !== contentHash)
+            throw Error('archive_content'); const bytes = body.subarray(p.offset, Math.min(total, p.offset + p.maxBytes)).toString('base64'), next = p.offset + Buffer.from(bytes, 'base64').length, eof = next === total; g.offsets[p.stream] = next; if (eof)
+            g.ended.add(p.stream); if (g.ended.size === Object.keys(g.offsets).length) {
+            handles.delete(p.handle);
+            db.prepare('DELETE FROM verification_archive_challenges WHERE id=? AND boot=?').run(g.review.challengeId, boot);
+        } return Object.freeze({ stream: p.stream, offset: p.offset, totalBytes: total, contentHash, bytes, eof, scope: g.review.resource.kind === 'transcript' ? 'isolated-execution' : 'protected-execution-run', ...(g.review.resource.kind === 'transcript' ? { complete: g.review.resource.complete, truncated: g.review.resource.truncated } : {}) }); }); },
+        closeHandle(raw, peer) { const p = shape(raw, ['handle']); current(); const g = handles.get(p.handle); if (!g || json(g.peer) !== json(peer))
+            throw Error('archive_handle'); handles.delete(p.handle); db.prepare('DELETE FROM verification_archive_challenges WHERE id=? AND boot=?').run(g.review.challengeId, boot); },
+        close() { if (closing)
+            return closing; let resolve, reject; closing = new Promise((yes, no) => { resolve = yes; reject = no; }); lifetime.abort(Error('archive_closed')); void (async () => { await Promise.allSettled([...active]); handles.clear(); db.prepare('DELETE FROM verification_archive_challenges WHERE boot=?').run(boot); })().then(resolve, reject); return closing; },
+    });
+}

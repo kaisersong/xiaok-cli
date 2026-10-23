@@ -33,7 +33,7 @@ describe('transcript output size cap', () => {
     const sizeBefore = statSync(path).size;
 
     logger.recordOutput('stdout', 'overflowing chunk');
-    logger.record({ type: 'input_key', key: '/k' });
+    logger.record({ type: 'input_key', key: '/k', timestamp: Date.now() });
 
     expect(statSync(path).size).toBeGreaterThan(sizeBefore);
     const lines = readFileSync(path, 'utf8').trim().split('\n');

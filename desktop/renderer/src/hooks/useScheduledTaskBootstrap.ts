@@ -1,3 +1,4 @@
+import {reportScheduledReadFailure} from '../lib/scheduled-timed-action-error';
 /**
  * useScheduledTaskBootstrap — global hook that syncs scheduled tasks to main process
  * on app startup and listens for task execution notifications to refresh UI.
@@ -65,7 +66,7 @@ export function useScheduledTaskBootstrap(): void {
             currentTasks = mainTasks;
             idx = currentTasks.findIndex((t: any) => t.id === payload.taskId);
           }
-        } catch { /* keep local cache */ }
+        } catch { reportScheduledReadFailure();return; }
       }
       if (idx === -1) return;
 
@@ -82,7 +83,7 @@ export function useScheduledTaskBootstrap(): void {
         if (runtimeTaskId) {
           try {
             const runs = desktop.getTimedActionRuns
-              ? await desktop.getTimedActionRuns(payload.taskId).catch(() => [])
+              ? await desktop.getTimedActionRuns(payload.taskId)
               : [];
             const linked = await ensureAggregatedScheduledThread(
               { ...task, runtimeTaskId },
@@ -90,7 +91,7 @@ export function useScheduledTaskBootstrap(): void {
             );
             task.threadId = linked.threadId;
             task.runtimeTaskId = linked.runtimeTaskId;
-          } catch { /* ignore thread errors */ }
+          } catch { reportScheduledReadFailure();return; }
         }
 
         currentTasks[idx] = {

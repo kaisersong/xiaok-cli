@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,6 +12,16 @@ describe('automation overview snapshot', () => {
   let rootDir: string;
   let loopStore: LoopStore;
   let timedActionStore: TimedActionStore;
+
+  // Frozen legacy rows for read-only history; never a current completion ticket.
+  function seedHistoricalTrigger(input: { actionId:string; runId:string; at:number; status:'success'|'skip'; actionStatus:'completed'|'active'; nextDueAt:number|null; decision:Record<string,unknown>; runCount:number; lastDueAt:number|null; error?:string }) {
+    const db=new DatabaseSync(join(rootDir,'timed-actions.sqlite'));
+    try {
+      db.prepare('UPDATE timed_action_runs SET status=?,finished_at=?,decision_json=?,error=? WHERE action_id=? AND run_id=?').run(input.status,input.at,JSON.stringify(input.decision),input.error??null,input.actionId,input.runId);
+      db.prepare('UPDATE timed_actions SET status=?,next_due_at=?,locked_run_id=NULL,locked_at=NULL,updated_at=?,last_error=?,run_count=?,last_due_at=? WHERE id=?').run(input.actionStatus,input.nextDueAt,input.at,input.error??null,input.runCount,input.lastDueAt,input.actionId);
+      db.exec("UPDATE automation_store_metadata SET value=value+1 WHERE key='version'");
+    } finally { db.close(); }
+  }
 
   beforeEach(() => {
     rootDir = mkdtempSync(join(tmpdir(), 'xiaok-automation-overview-'));
@@ -60,9 +71,7 @@ describe('automation overview snapshot', () => {
     });
     const [claimed] = timedActionStore.claimDueActions(4_000, 1);
     expect(claimed.action.id).toBe(action.id);
-    timedActionStore.finishRunSuccess(action.id, claimed.runId, 4_100, {
-      decision: { loopRunId: 'not-terminal-yet' },
-    });
+    seedHistoricalTrigger({actionId:action.id,runId:claimed.runId,at:4_100,status:'success',actionStatus:'completed',nextDueAt:null,runCount:1,lastDueAt:4_100,decision:{loopRunId:'not-terminal-yet'}});
 
     const failedAction = timedActionStore.createAction({
       id: 'failed-agent',
@@ -208,10 +217,7 @@ describe('automation overview snapshot', () => {
     const dueAt = timedActionStore.getAction(action.id)?.nextDueAt;
     if (!dueAt) throw new Error('expected retry due time');
     const [benignClaim] = timedActionStore.claimDueActions(dueAt, 1);
-    timedActionStore.finishRunSkipped(action.id, benignClaim.runId, dueAt + 100, {
-      action: 'skip',
-      reason: 'logical_run_already_completed: recovered-run',
-    });
+    seedHistoricalTrigger({actionId:action.id,runId:benignClaim.runId,at:dueAt+100,status:'skip',actionStatus:'active',runCount:0,lastDueAt:null,nextDueAt:dueAt+60_000,error:'logical_run_already_completed: recovered-run',decision:{recoveryDecision:{action:'skip',reason:'logical_run_already_completed: recovered-run'}}});
 
     const snapshot = buildAutomationOverviewSnapshot({
       loopStore,
@@ -284,7 +290,7 @@ describe('automation overview snapshot', () => {
       timedActionStore.finishRunSkipped(actionId, runId, at, { action: 'skip', reason: 'loop missing_loop' });
     });
     failThen('benign-owner', (actionId, runId, at) => {
-      timedActionStore.finishRunSkipped(actionId, runId, at, { action: 'skip', reason: 'logical_run_already_completed: run-ok' });
+      seedHistoricalTrigger({actionId,runId,at,status:'skip',actionStatus:'active',runCount:0,lastDueAt:null,nextDueAt:at+60_000,error:'logical_run_already_completed: run-ok',decision:{recoveryDecision:{action:'skip',reason:'logical_run_already_completed: run-ok'}}});
     });
 
     const snapshot = buildAutomationOverviewSnapshot({
@@ -395,12 +401,7 @@ describe('automation overview snapshot', () => {
     expect(loopRun.status).toBe('started');
     if (loopRun.status !== 'started') throw new Error('expected loop run to start');
     loopStore.finishLoopRunSuccess(loopRun.run.id, ['file-evidence'], 4_100, 'briefing written');
-    timedActionStore.finishRunSuccess(action.id, claimed.runId, 4_120, {
-      decision: {
-        loopRunId: loopRun.run.id,
-        loopStatus: 'success',
-      },
-    });
+    seedHistoricalTrigger({actionId:action.id,runId:claimed.runId,at:4_120,status:'success',actionStatus:'completed',nextDueAt:null,runCount:1,lastDueAt:4_120,decision:{loopRunId:loopRun.run.id,loopStatus:'success'}});
 
     const failedAction = timedActionStore.createAction({
       id: 'failed-agent',
