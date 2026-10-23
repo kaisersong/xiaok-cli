@@ -2,6 +2,7 @@ import {expect,it} from 'vitest';
 import {spawnSync} from 'node:child_process';
 import {createServer,createConnection,type Socket} from 'node:net';
 import {once} from 'node:events';
+import {fstatSync} from 'node:fs';
 import {NETDEVICE_CHECK_FUNCTIONS,buildNetdeviceTransmitDisabledCheck,assertDockerNoneNetworkAttachment} from '../../../src/runtime/verification/netdevice-transmit-disabled.js';
 import {WORKER_SECCOMP_JSON} from '../../../src/runtime/isolated-execution/docker-request.js';
 
@@ -69,9 +70,14 @@ it.runIf(linux)('rejects an actual connected INET socket inherited as stdout wit
   const address=server.address();if(!address||typeof address==='string')throw Error('owned_listener_address');
   socket=createConnection({host:'127.0.0.1',port:address.port});
   await once(socket,'connect');
+  // spawnSync needs the connected socket's numeric descriptor, not a Stream wrapper.
+  const handle:unknown=Reflect.get(socket,'_handle');
+  if(!handle||typeof handle!=='object')throw Error('owned_socket_handle_required');
+  const socketFd:unknown=Reflect.get(handle,'fd');
+  if(typeof socketFd!=='number'||!Number.isSafeInteger(socketFd)||socketFd<3||!fstatSync(socketFd).isSocket())throw Error('owned_socket_fd_required');
   // fd2 is the real pipeline write end; only fd1 is the inherited data socket.
   // Close the temporary fd3 after dup, so another rejected FD cannot mask fd1.
-  const result=spawnSync('/bin/bash',['-o','pipefail','-c',fixtureFds(true)+'/bin/sh -c "$1" netdevice-control </dev/null 2>&1 1>&3 3>&- | cat','socket-fd-control',NETDEVICE_CHECK_FUNCTIONS+'\nnetdevice_inherited_fds_valid'],{stdio:['ignore','pipe','pipe',socket]});
+  const result=spawnSync('/bin/bash',['-o','pipefail','-c',fixtureFds(true)+'/bin/sh -c "$1" netdevice-control </dev/null 2>&1 1>&3 3>&- | cat','socket-fd-control',NETDEVICE_CHECK_FUNCTIONS+'\nnetdevice_inherited_fds_valid'],{stdio:['ignore','pipe','pipe',socketFd]});
   expect(result.error).toBeUndefined();expect(result.status).toBe(1);
  }catch(error){errors.push(error);}finally{
   closing=true;
