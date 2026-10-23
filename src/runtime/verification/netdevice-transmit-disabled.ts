@@ -25,20 +25,27 @@ netdevice_fd_fact_valid() {
     END { if(seen!=1)exit 1 }'
 }
 netdevice_inherited_fds_valid() {
-  [ -d /proc/$$/fd ] && [ -r /proc/$$/fd ] && [ -x /proc/$$/fd ] || return 1
-  nd_count=0
-  for nd_path in /proc/$$/fd/*; do
-    nd_fd=$(basename "$nd_path") || return 1
-    case "$nd_fd" in 0|1|2) ;; *) return 1 ;; esac
-    nd_target=$(readlink "$nd_path") || return 1
-    nd_stat=$(stat -L -c '%f %t %T' "$nd_path") || return 1
-    printf '%s\n' "$nd_stat" | grep -Eq '^[0-9a-f]+ [0-9a-f]+ [0-9a-f]+$' || return 1
-    nd_flags=$(awk '$1=="flags:" {if(++n!=1||NF!=2)exit 1;f=$2} END {if(n!=1)exit 1;print f}' /proc/$$/fdinfo/"$nd_fd") || return 1
-    set -- $nd_stat
-    netdevice_fd_fact_valid "$nd_fd" "$nd_target" "$1" "$2" "$3" "$nd_flags" || return 1
-    nd_count=$((nd_count+1))
-  done
-  [ "$nd_count" = 3 ]
+  # Observe the worker from a separate process: globbing its own fd directory
+  # can enumerate the observer's temporary directory descriptor as a false extra.
+  nd_subject_pid=$$
+  (
+    [ -d /proc/"$nd_subject_pid"/fd ] && [ -r /proc/"$nd_subject_pid"/fd ] && [ -x /proc/"$nd_subject_pid"/fd ] || return 1
+    nd_count=0
+    for nd_path in /proc/"$nd_subject_pid"/fd/*; do
+      nd_fd=$(basename "$nd_path") || return 1
+      case "$nd_fd" in 0|1|2) ;; *) return 1 ;; esac
+      nd_target=$(readlink "$nd_path") || return 1
+      nd_stat=$(stat -L -c '%f %t %T' "$nd_path") || return 1
+      printf '%s\n' "$nd_stat" | grep -Eq '^[0-9a-f]+ [0-9a-f]+ [0-9a-f]+$' || return 1
+      nd_flags=$(awk '$1=="flags:" {if(++n!=1||NF!=2)exit 1;f=$2} END {if(n!=1)exit 1;print f}' /proc/"$nd_subject_pid"/fdinfo/"$nd_fd") || return 1
+      set -- $nd_stat
+      netdevice_fd_fact_valid "$nd_fd" "$nd_target" "$1" "$2" "$3" "$nd_flags" || return 1
+      nd_count=$((nd_count+1))
+    done
+    [ "$nd_count" = 3 ]
+  )
+  # A command after the subshell prevents a last-command no-fork optimization.
+  return "$?"
 }
 netdevice_capabilities_valid() {
   awk '
