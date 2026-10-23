@@ -60,6 +60,14 @@ it.runIf(linux)('checks actual inherited descriptors and rejects an inherited na
  expect(negative('exec 3</proc/self/ns/net').status).toBe(1);
  expect(negative('exec 3<>/proc/self/fd/1').status).toBe(1);
 });
+it.runIf(linux)('admits actual read-write null stdin while rejecting other character inputs and duplex stdout',()=>{
+ const verify=(open:string)=>check(open+' || exit 92\nnetdevice_inherited_fds_valid');
+ const positive=verify('exec 0<>/dev/null');
+ expect(positive.error).toBeUndefined();expect(positive.status,positive.stdout+positive.stderr).toBe(0);
+ for(const open of ['exec 0<>/dev/zero','exec 1<>/proc/self/fd/1']){
+  const negative=verify(open);expect(negative.error).toBeUndefined();expect(negative.status,negative.stdout+negative.stderr).toBe(1);
+ }
+});
 it.runIf(linux)('rejects an actual connected INET socket inherited as stdout without replacing the production FD inspector',async()=>{
  expect(check('netdevice_inherited_fds_valid').status).toBe(0);
  const accepted=new Set<Socket>(),errors:unknown[]=[];let closing=false;

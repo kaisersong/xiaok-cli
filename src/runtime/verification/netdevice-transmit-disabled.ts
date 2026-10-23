@@ -17,7 +17,7 @@ netdevice_fd_fact_valid() {
     { if(NF!=6)exit 1;mode=number($3,16);major=number($4,16);minor=number($5,16);flags=number($6,8)
       if(mode<0||major<0||minor<0||flags<0)exit 1
       kind=int(mode/4096)%16;access=flags%4
-      if($1=="0") { if($2!="/dev/null"||kind!=2||major!=1||minor!=3||access!=0)exit 1 }
+      if($1=="0") { if($2!="/dev/null"||kind!=2||major!=1||minor!=3||(access!=0&&access!=2))exit 1 }
       else if($1=="1"||$1=="2") { if($2!~/^pipe:\[[0-9]+\]$/||kind!=1||major!=0||minor!=0||access!=1)exit 1 }
       else exit 1
       seen++
