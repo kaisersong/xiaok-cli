@@ -27,3 +27,5 @@ gpt-6-astra (explicit model routing) identified two P1 cases, both accepted befo
 ## Verified existing timeout boundary
 
 The real SDK7.7 timeout carries an internal AbortError cause. With SDK HTTP retries disabled, the existing outer recovery treats that cause as terminal. This patch preserves its original class/cause and does not change that pre-existing policy; the real HTTP test asserts identity rather than claiming timeout recovery. Real disconnects separately exercise outer recovery. Generic adapter completion still commits on finish_reason, not HTTP EOF.
+
+Final independent review caught a missing permanent `invalid_api_key` code under a `server_error` wrapper. Added it to both whitelists and parameterized the real HTTP precedence test across all seven permanent codes before live installation.

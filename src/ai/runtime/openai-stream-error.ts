@@ -1,11 +1,11 @@
 const STREAM_ERROR_CODE = 'OPENAI_PROVIDER_STREAM_ERROR';
 const TYPES = new Set([
-  'server_error', 'rate_limit_error', 'rate_limit_exceeded', 'authentication_error',
+  'invalid_api_key', 'server_error', 'rate_limit_error', 'rate_limit_exceeded', 'authentication_error',
   'permission_denied', 'invalid_request_error', 'insufficient_quota',
   'model_not_found', 'context_length_exceeded',
 ]);
 const PERMANENT = new Set([
-  'authentication_error', 'permission_denied', 'invalid_request_error',
+  'invalid_api_key', 'authentication_error', 'permission_denied', 'invalid_request_error',
   'insufficient_quota', 'model_not_found', 'context_length_exceeded',
 ]);
 const DETAILS = new Set(['NoRoom', 'CudaFailed']);

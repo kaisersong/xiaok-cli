@@ -76,13 +76,13 @@ describe('real SDK status-less provider SSE errors', () => {
         expect(error.cause).toBeUndefined(); expect(error.error).toBeUndefined(); expect(error.headers).toBeUndefined();
       }, () => frame({ error: { type, code: type, message: 'PRIVATE_CANARY reasoning and authentication body', extra: 'PRIVATE_CANARY' } }));
     });
-  it('gives quota a permanent verdict even inside server_error/NoRoom', async () => {
+  it.each(['insufficient_quota', 'invalid_api_key', 'authentication_error', 'permission_denied', 'invalid_request_error', 'model_not_found', 'context_length_exceeded'])('gives %s a permanent verdict inside server_error/NoRoom', async code => {
     await fixture(async (adapter, calls) => {
       const error = await consume(adapter).catch(error => error);
       expect(calls).toHaveLength(1);
       expect(normalizeRuntimeError(error)).toMatchObject({ code: 'model_failed', retryable: false });
-      expect(error.message).toContain('insufficient_quota');
-    }, () => frame({ error: { type: 'server_error', code: 'insufficient_quota', message: 'NoRoom' } }));
+      expect(error.message).toContain(code);
+    }, () => frame({ error: { type: 'server_error', code, message: 'NoRoom' } }));
   });
   it('recovers a partial stream through the runtime without replaying completed effects', async () => {
     vi.stubEnv('XIAOK_MODEL_RECOVERY_WINDOW_MS', '10000');
