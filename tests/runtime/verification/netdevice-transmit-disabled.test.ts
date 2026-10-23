@@ -45,7 +45,7 @@ it.runIf(linux)('parses complete proc counters and rejects malformed or duplicat
  expect(parse(header+'renamed_loop: 0\n').status).toBe(1);
 });
 it.runIf(linux)('checks actual inherited descriptors and rejects an inherited namespace or bidirectional pipe descriptor',()=>{
- const positive=check('for fd in 1 2; do stat -L -c "%F" /proc/$$/fd/$fd || exit 91; done\nnetdevice_inherited_fds_valid || { nd_status=$?; set -x; netdevice_inherited_fds_valid; exit "$nd_status"; }');
+ const positive=check('for fd in 1 2; do stat -L -c "%F" /proc/$$/fd/$fd || exit 91; done\nnetdevice_inherited_fds_valid || { nd_status=$?; for nd_diag in /proc/$$/fd/*; do printf "descriptor=%s " "$nd_diag"; readlink "$nd_diag" || :; done; printf "BASH_ENV=%s\\n" "${BASH_ENV:+set}"; set -x; netdevice_inherited_fds_valid; exit "$nd_status"; }');
  expect(positive.error).toBeUndefined();expect(positive.status,positive.stdout+positive.stderr).toBe(0);expect(positive.stdout).toBe('fifo\nfifo\n');
  const negative=(open:string)=>check('netdevice_inherited_fds_valid || exit 91\n'+open+' || exit 92\nif netdevice_inherited_fds_valid; then exit 90; else code=$?; fi\nexec 3<&-\nexit "$code"');
  expect(negative('exec 3</proc/self/ns/net').status).toBe(1);
