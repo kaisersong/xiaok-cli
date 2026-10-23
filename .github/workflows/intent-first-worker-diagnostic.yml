@@ -1,0 +1,102 @@
+name: Intent first worker diagnostic
+on:
+  pull_request:
+    types: [opened]
+    paths:
+      - '.github/workflows/intent-first-worker-diagnostic.yml'
+      - 'scripts/diagnostics/intent-first-worker-cpu.py'
+      - 'scripts/diagnostics/intent-first-worker-freeze.py'
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    env:
+      R16_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind opened event and candidate head before candidate scripts
+        id: identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess, tempfile
+          event = json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          pr = event['pull_request']
+          full = re.compile(r'[0-9a-f]{40}')
+          assert os.environ['GITHUB_EVENT_NAME'] == 'pull_request' and event['action'] == 'opened'
+          assert os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+          assert pr['head']['repo']['full_name'] == event['repository']['full_name'] == os.environ['GITHUB_REPOSITORY']
+          assert type(event['number']) is int and event['number'] == pr['number'] and type(pr['draft']) is bool
+          assert all(full.fullmatch(x) for x in (pr['head']['sha'], pr['base']['sha'], os.environ['GITHUB_SHA']))
+          assert os.environ['GITHUB_REF'] == 'refs/pull/' + str(event['number']) + '/merge'
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], timeout=10).decode().strip()
+          assert head == pr['head']['sha'] == os.environ['R16_HEAD']
+          tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], timeout=10).decode().strip()
+          root = pathlib.Path(tempfile.mkdtemp(prefix='r16-', dir='/tmp')).resolve()
+          (root / 'tmp').mkdir(mode=0o700)
+          identity = {'repository': os.environ['GITHUB_REPOSITORY'], 'event': 'pull_request', 'action': event['action'],
+                      'prNumber': event['number'], 'draft': pr['draft'], 'baseRef': pr['base']['ref'], 'baseSHA': pr['base']['sha'],
+                      'headRef': pr['head']['ref'], 'headSHA': pr['head']['sha'], 'GITHUB_SHA': os.environ['GITHUB_SHA'],
+                      'GITHUB_REF': os.environ['GITHUB_REF'], 'checkedOutHEAD': head, 'tree': tree,
+                      'runID': os.environ['GITHUB_RUN_ID'], 'runAttempt': os.environ['GITHUB_RUN_ATTEMPT']}
+          (root / 'EVENT-IDENTITY.json').write_text(json.dumps(identity, indent=2) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write('R16_OUT=' + str(root) + '\n')
+              out.write('TMPDIR=' + str(root / 'tmp') + '\n')
+          PY
+      - name: Prove Pd36 plus exactly three tools
+        id: source
+        run: python3 scripts/diagnostics/intent-first-worker-freeze.py source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Fresh locked install without lifecycle scripts
+        id: install
+        run: npm ci --ignore-scripts
+      - name: Rebuild only original SQLite ABI dependency
+        id: rebuild
+        run: npm rebuild better-sqlite3
+      - name: Two fresh full dependency passes after rebuild
+        id: freeze
+        run: python3 scripts/diagnostics/intent-first-worker-freeze.py freeze
+      - name: One original first case with worker CPU sampling
+        id: diagnostic
+        continue-on-error: true
+        run: python3 scripts/diagnostics/intent-first-worker-cpu.py
+      - name: Always retain original diagnostic evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intent-first-worker-${{ matrix.os }}-${{ matrix.node }}-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.R16_OUT || format('{0}/r16-no-receipt', runner.temp) }}
+            !${{ env.R16_OUT || format('{0}/r16-no-receipt', runner.temp) }}/tmp/**
+          if-no-files-found: error
+          include-hidden-files: true
+      - name: Preserve every failure after evidence upload
+        if: always()
+        env:
+          IDENTITY: ${{ steps.identity.outcome }}
+          SOURCE: ${{ steps.source.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          REBUILD: ${{ steps.rebuild.outcome }}
+          FREEZE: ${{ steps.freeze.outcome }}
+          DIAGNOSTIC: ${{ steps.diagnostic.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          test "$IDENTITY" = success && test "$SOURCE" = success && test "$INSTALL" = success &&
+          test "$REBUILD" = success && test "$FREEZE" = success && test "$DIAGNOSTIC" = success && test "$UPLOAD" = success
