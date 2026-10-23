@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { join, dirname, basename } from 'node:path';
 import { existsSync, cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync } from 'node:fs';
 import { getConfigDir } from '../../src/utils/config.js';
+import { buildManagedPythonChildEnv } from '../../src/platform/mcp/python-server.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -76,7 +77,9 @@ export async function ensureManagedPythonVenv(options: ManagedPythonVenvOptions)
   const exec = options.exec ?? execFileAsync;
 
   try {
-    await exec(options.pythonCmd, ['-m', 'venv', options.venvDir], { timeout: 30_000 });
+    await exec(options.pythonCmd, ['-B', '-m', 'venv', options.venvDir], {
+      timeout: 30_000, env: buildManagedPythonChildEnv(process.env),
+    });
     return existsSync(options.venvPython);
   } catch {
     // Some Windows Python installs have a working global pip but a broken
@@ -85,14 +88,16 @@ export async function ensureManagedPythonVenv(options: ManagedPythonVenvOptions)
   }
 
   try {
-    await exec(options.pythonCmd, ['-m', 'venv', '--without-pip', options.venvDir], { timeout: 30_000 });
+    await exec(options.pythonCmd, ['-B', '-m', 'venv', '--without-pip', options.venvDir], {
+      timeout: 30_000, env: buildManagedPythonChildEnv(process.env),
+    });
     if (!existsSync(options.venvPython)) return false;
     await exec(options.pythonCmd, [
-      '-m', 'pip',
+      '-B', '-m', 'pip',
       '--python', options.venvPython,
       'install', 'pip',
       '--disable-pip-version-check',
-    ], { timeout: 120_000 });
+    ], { timeout: 120_000, env: buildManagedPythonChildEnv(process.env) });
     return true;
   } catch {
     return false;

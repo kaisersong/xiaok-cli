@@ -2,3 +2,4 @@
 set -e
 
 node scripts/check-external-docs.mjs
+node scripts/check-file-token-budget.mjs
