@@ -67,6 +67,7 @@ plan = {
       'occurrence': 1}],
 }
 sha = helper['sha']
+parse_process_table = helper['parse_process_table']
 profile_dir = root / 'profiles'
 def worker_family(child,index):
     name=f'{index}-worker-family';p=None
@@ -83,10 +84,7 @@ def worker_family(child,index):
         if p.returncode!=0 or (root/(name+'.stderr')).stat().st_size!=0:raise RuntimeError('worker_family_observer_failed')
         path=root/(name+'.stdout')
         if path.stat().st_size>1024**2:raise RuntimeError('worker_family_observer_bound')
-        text=[line.split() for line in path.read_text().splitlines()]
-        if not text or not all(len(r)==3 and all(x.isdecimal() for x in r) and int(r[0])>0 and int(r[1])>=0 and int(r[2])>0 for r in text):raise RuntimeError('worker_family_shape')
-        rows=[tuple(map(int,r)) for r in text]
-        if len({r[0] for r in rows})!=len(rows):raise RuntimeError('worker_family_duplicate_pid')
+        rows=parse_process_table(path.read_text(),3)
         if not any(r[0]==child.pid and r[2]==child.pid for r in rows):raise RuntimeError('leader_missing_from_family')
         same=[r for r in rows if r[2]==child.pid];parents={pid:ppid for pid,ppid,pgid in same};desc=[]
         for pid,ppid,pgid in same:
@@ -156,6 +154,8 @@ def report_oracle(command_exit):
 def closure(child):
     # Strict one terminal table read, distinct from the sole ~5s family snapshot.
     gone = None
+    if type(child.pid) is not int or child.pid <= 0:
+        return gone
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DYLD_', 'LD_'))}
     env['LC_ALL'] = 'C'
     with (root / '0-group-observer.stdout').open('xb') as out, (root / '0-group-observer.stderr').open('xb') as err:
@@ -176,9 +176,11 @@ def closure(child):
                    'waited': True, 'reaped': True, 'targetPGID': child.pid})
     out = root / '0-group-observer.stdout'
     if observer.returncode == 0 and out.stat().st_size <= 1024**2 and (root / '0-group-observer.stderr').stat().st_size == 0:
-        rows = [line.split() for line in out.read_text().splitlines()]
-        if rows and all(len(r) == 2 and all(x.isdecimal() and int(x) > 0 for x in r) for r in rows) and len({r[0] for r in rows}) == len(rows):
-            gone = not any(int(r[1]) == child.pid for r in rows)
+        try:
+            rows = parse_process_table(out.read_text(), 2)
+        except ValueError:
+            return gone
+        gone = not any(row[1] == child.pid for row in rows)
     return gone
 
 
