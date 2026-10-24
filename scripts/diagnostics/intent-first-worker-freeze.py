@@ -11,6 +11,22 @@ import math
 import re
 from collections import Counter
 
+
+def parse_process_table(text, columns):
+    """Retain every numeric ps row, including unrelated PGID-zero rows."""
+    if type(columns) is not int or columns not in (2, 3):
+        raise ValueError('process_table_columns')
+    fields = [line.split() for line in text.splitlines()]
+    if not fields or not all(len(row) == columns and all(
+            item.isascii() and item.isdecimal() for item in row) for row in fields):
+        raise ValueError('process_table_shape')
+    rows = [tuple(map(int, row)) for row in fields]
+    if any(row[0] <= 0 for row in rows):
+        raise ValueError('process_table_pid')
+    if len({row[0] for row in rows}) != len(rows):
+        raise ValueError('process_table_duplicate_pid')
+    return rows
+
 BASE = 'd36eef076b4eacf878775bbfe8cb21240af8fa5c'
 TOOLS = (
     '.github/workflows/intent-first-worker-diagnostic.yml',
