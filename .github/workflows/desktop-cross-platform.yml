@@ -15,12 +15,14 @@ on:
       - 'desktop/**'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
+      - 'src/ai/runtime/**'
       - '.github/workflows/desktop-cross-platform.yml'
   pull_request:
     paths:
       - 'desktop/**'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
+      - 'src/ai/runtime/**'
       - '.github/workflows/desktop-cross-platform.yml'
   workflow_dispatch: {}
 
@@ -64,6 +66,11 @@ jobs:
           tests/main/shutdown-aware-ipc-main.test.ts
           tests/main/conversation-activity-ipc.test.ts
           tests/main/artifact-export-package.test.ts
+          tests/main/desktop-text-repetition.test.ts
+          tests/main/desktop-task-stream-recovery.test.ts
+          tests/main/project-stream-reconnect-regression.test.ts
+          tests/renderer/chat-helpers-error-sanitization.test.ts
+          tests/renderer/chat-shell-draft-prompt.test.tsx
 
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'

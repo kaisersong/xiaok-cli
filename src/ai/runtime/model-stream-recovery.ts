@@ -1,5 +1,6 @@
 import type {ModelStreamPhysicalRun} from './model-stream-physical-owner.js';
 import type { StreamChunk } from '../../types.js';
+import { ModelTextRepetitionGuard } from './model-text-repetition.js';
 
 export interface ModelRecoveryPolicy { windowMs: number; idleMs: number; initialDelayMs: number; maxDelayMs: number }
 export interface ModelRecoveryNotice { attempt: number; delayMs: number; remainingMs: number }
@@ -60,6 +61,7 @@ export async function* recoverModelStream(input: {
     if (remaining <= 0) throw exhausted();
     const owned = new AbortController();
     const signal = AbortSignal.any([input.signal, owned.signal]);
+    const textGuard = new ModelTextRepetitionGuard();
     let iterator: AsyncIterator<StreamChunk> | undefined;
     let completed = false;
     try {
@@ -75,6 +77,7 @@ export async function* recoverModelStream(input: {
         catch(error){receipt?.classifyFailure(error);throw error;}
         if (next.done || next.value.type !== 'usage') input.signal.throwIfAborted();
         if (next.done) { completed = true; return; }
+        if (next.value.type === 'text') textGuard.append(next.value.delta);
         if (next.value.type === 'done') completed = true;
         yield next.value;
         if (next.value.type === 'done') { completed = true; return; }
