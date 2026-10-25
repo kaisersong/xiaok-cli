@@ -51,7 +51,9 @@ function wait(promise, signal, timeoutMs, onTimeout) {
 export async function* recoverModelStream(input) {
     const policy = input.policy ?? resolveModelRecoveryPolicy();
     let recoveryStarted, attempt = 0;
-    const exhausted = () => new Error('模型连接持续不可用，自动恢复窗口已耗尽；已完成的工作保留，可稍后继续。');
+    const exhausted = () => Object.assign(new Error('模型连接持续不可用，自动恢复窗口已耗尽；已完成的工作保留，可稍后继续。'), {
+        code: 'MODEL_RECOVERY_EXHAUSTED', retryable: false,
+    });
     while (true) {
         input.signal.throwIfAborted();
         const remaining = recoveryStarted === undefined ? Infinity : policy.windowMs - (Date.now() - recoveryStarted);

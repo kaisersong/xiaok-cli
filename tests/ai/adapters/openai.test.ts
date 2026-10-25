@@ -70,6 +70,7 @@ type UsageDiagnostic = KimiUsageDiagnostic;
 vi.mock('openai', () => {
   return {
     default: class OpenAI {
+      static APIError = localOpenAISDK.Client.APIError;
       constructor(opts?: ConstructorParameters<typeof localOpenAISDK.Client>[0]) {
         openAIConstructorCalls.push(opts);
         localOpenAISDK.completionReturns.recordOptions(this, opts);
