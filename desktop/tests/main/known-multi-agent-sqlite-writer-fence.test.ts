@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 // @vitest-environment node
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,existsSync,statSync} from 'node:fs';
@@ -10,7 +11,7 @@ vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInsta
 import {DesktopMultiAgentStore} from '../../electron/desktop-multi-agent-store.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 let root:string;const stores:DesktopMultiAgentStore[]=[];
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-multiagent-sqlite-')));fixture.home=join(root,'account');fixture.denyAccount=false;fixture.reads=0;mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-multiagent-sqlite-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);fixture.denyAccount=false;fixture.reads=0;mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
 afterEach(()=>{for(const store of stores.splice(0).reverse())store.close();rmSync(root,{recursive:true,force:true});});
 function open(path:string,options:ConstructorParameters<typeof DesktopMultiAgentStore>[1]={}){const store=new DesktopMultiAgentStore(path,options);stores.push(store);return store;}
 function seeded(){const directory=join(root,'groups'),path=join(directory,'groups.db'),store=open(path);store.registerThread({threadId:'thread',profileId:'profile',workspaceId:'workspace',cwd:root});const group=store.createGroup('thread');return {directory,path,store,group};}

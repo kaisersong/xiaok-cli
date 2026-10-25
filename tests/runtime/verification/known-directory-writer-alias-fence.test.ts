@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,existsSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -14,7 +15,7 @@ import {registerSessionAliasLocked,releaseSessionAliasLocked} from '../../../src
 import {acquireSaveLock} from '../../../src/ai/runtime/session-store/mutation-lock.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 let root:string;const cleanup:Array<()=>unknown>=[];
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-alias-fence-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-alias-fence-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
 afterEach(async()=>{fixture.failDirectoryInode=0;for(const close of cleanup.splice(0).reverse())await close();rmSync(root,{recursive:true,force:true});});
 async function seeded(){const canonical=join(root,'canonical'),holderRoot=join(root,'holder');mkdirSync(holderRoot);const store=new FileSessionStore(canonical),authority=createSessionExecutionAuthority({root:canonical,sessionIdentity:'source',hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'owner',scopeId:'alias-fence'})});cleanup.push(()=>authority.dispose());const lease=await authority.acquire({invocationId:'alias',kind:'recovery'});cleanup.push(()=>lease.releaseAfterDrain());const snapshot={...new AgentSessionState().exportSnapshot(),sessionId:'source',cwd:root};await store.compareAndSave({nextSnapshot:snapshot,expectedStoreRevision:0,expectedHistoryDigest:computeSessionHistoryDigest({messages:[]}),lease});const binding={aliasId:'alias',holderRoot,holderId:'holder-task',targetSessionId:'source',domainInitializationId:'domain',domainGeneration:1};const installed=await store.registerSessionAlias({...binding,requestSource:'user',lease});return {canonical,holderRoot,store,lease,binding,marker:installed.markerPath};}
 function lowerLocked<T>(f:Awaited<ReturnType<typeof seeded>>,work:()=>T):T{const releaseRoot=acquireSaveLock(join(f.canonical,'.session-store-lock'));try{const releaseSession=acquireSaveLock(join(f.canonical,'source.json.save-lock'));try{return work();}finally{releaseSession();}}finally{releaseRoot();}}

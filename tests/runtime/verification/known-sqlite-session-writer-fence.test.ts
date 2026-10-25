@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,writeFileSync,readdirSync,rmSync,existsSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -12,7 +13,7 @@ import {AgentSessionState} from '../../../src/ai/runtime/session.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 import {createSessionExecutionAuthority,createSessionExecutionContext} from '../../../src/ai/runtime/session-store/execution-authority.js';
 let root:string;const stores:SQLiteSessionStore[]=[];
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-sqlite-session-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});fixture.denyAccount=false;fixture.reads=0;});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-sqlite-session-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});fixture.denyAccount=false;fixture.reads=0;});
 afterEach(()=>{fixture.denyAccount=false;for(const store of stores.splice(0).reverse())store.dispose();rmSync(root,{recursive:true,force:true});});
 const snapshot=()=>({...new AgentSessionState().exportSnapshot(),sessionId:'source',cwd:root});
 function open(path:string){const store=new SQLiteSessionStore(path);stores.push(store);return store;}

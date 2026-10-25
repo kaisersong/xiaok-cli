@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {constants,closeSync,fstatSync,fsyncSync,linkSync,lstatSync,mkdirSync,openSync,readSync,readdirSync,realpathSync,unlinkSync,writeSync} from 'node:fs';
 import {userInfo} from 'node:os';
+import {resolveProfileAccountHome} from './profile-account-home.js';
 import {basename,dirname,join,resolve} from 'node:path';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {readOrdinaryProfileSources} from './ordinary-profile-source-registry.js';
@@ -26,11 +27,11 @@ function canonical(path:string):string{
 /** No directory or registry creation on the ordinary admission read path. */
 function location(){
  const account=userInfo(),uid=process.getuid?.();if(!uid||uid!==process.geteuid?.()||account.uid!==uid)fail('user');
- const home=resolve(account.homedir);chain(home);const original=directory(home,uid),paths=[join(home,'.xiaok'),join(home,'.xiaok','profile-sources'),join(home,'.xiaok','profile-sources','writer-fences')];
+ const selected=resolveProfileAccountHome(),home=selected.home;chain(home);const original=directory(home,uid),paths=[selected.base,join(selected.base,'profile-sources'),join(selected.base,'profile-sources','writer-fences')];
  const observed:Array<{path:string;identity:string;mode:number}>=[];
  let absent=false;
  for(let i=0;i<paths.length;i++){try{const stat=directory(paths[i]!,uid,i===2?0o700:undefined);observed.push({path:paths[i]!,identity:identity(stat),mode:stat.mode});}catch(error){if(!missing(error))throw error;absent=true;break;}}
- function current(){if(identity(directory(home,uid))!==identity(original))fail('directory_changed');for(const item of observed){const stat=directory(item.path,uid,item.path===paths[2]?0o700:undefined);if(identity(stat)!==item.identity||stat.mode!==item.mode)fail('directory_changed');}}
+ function current(){if(JSON.stringify(resolveProfileAccountHome())!==JSON.stringify(selected))fail('directory_changed');if(identity(directory(home,uid))!==identity(original))fail('directory_changed');for(const item of observed){const stat=directory(item.path,uid,item.path===paths[2]?0o700:undefined);if(identity(stat)!==item.identity||stat.mode!==item.mode)fail('directory_changed');}}
  current();return {uid,home,root:paths[2]!,parent:paths[1]!,absent,current};
 }
 

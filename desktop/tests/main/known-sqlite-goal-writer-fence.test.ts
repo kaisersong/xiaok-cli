@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 // @vitest-environment node
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,existsSync,statSync} from 'node:fs';
@@ -16,7 +17,7 @@ import {createGoalCompletionIntent} from '../../../src/runtime/goal/completion-i
 import {createGoalPublicationAttempt,type GoalPublicationAttempt} from '../../../src/runtime/goal/publication-attempt.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 let root:string;const stores:SqliteGoalStore[]=[];
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-sqlite-goal-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});fixture.denyAccount=false;fixture.reads=0;});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-sqlite-goal-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});fixture.denyAccount=false;fixture.reads=0;});
 afterEach(()=>{fixture.denyAccount=false;for(const store of stores.splice(0).reverse())store.close();rmSync(root,{recursive:true,force:true});});
 function open(path:string){const store=new SqliteGoalStore(path);stores.push(store);return store;}
 async function seeded(){const directory=join(root,'goals'),path=join(directory,'goals.db'),store=open(path),state={...createGoalState({sessionId:'session',objective:'original',expectedEvidenceKinds:['answer'],now:1}),turnsUsed:1,tokensUsed:7};const intent=createGoalCompletionIntent({state,taskId:'task',turnId:'turn',summary:'original claim',now:1});await store.commit({sessionId:'session',expectedRevision:null,next:state,events:[],evidence:[],turns:[{goalId:state.goalId,epoch:state.epoch,turnId:'turn',tokensUsed:7,activeWallClockMs:9,recordedAt:1}],completionIntent:{expectedRevision:null,next:intent}});const attempt=createGoalPublicationAttempt(intent,'user',2,1);await store.updateCompletionAttempt('session',{expectedRevision:null,next:attempt});store.bindTask({goalId:state.goalId,epoch:1,goalTurnId:'turn',threadId:'session',taskId:'bound',origin:'user',attachedAt:null});return {directory,path,store,state,intent,attempt};}
