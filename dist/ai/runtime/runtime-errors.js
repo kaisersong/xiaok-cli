@@ -1,4 +1,5 @@
 import { isAbortError } from './abort-utils.js';
+import { getOpenAIStreamFailure } from './openai-stream-error.js';
 import { formatKimiProviderRequestError, getKimiProviderRequestDiagnostic } from './provider-request-error.js';
 export function normalizeRuntimeError(error) {
     if (isAbortError(error)) {
@@ -24,6 +25,12 @@ export function normalizeRuntimeError(error) {
         return { code: 'model_failed', message: formatKimiProviderRequestError(providerDiagnostic), retryable: providerDiagnostic.retryable };
     }
     const transportCode = typeof errorCode === 'string' ? errorCode : '';
+    const streamFailure = getOpenAIStreamFailure(error);
+    if (streamFailure)
+        return { code: 'model_failed', ...streamFailure };
+    if (transportCode === 'MODEL_RECOVERY_EXHAUSTED') {
+        return { code: 'model_failed', message, retryable: false };
+    }
     if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(transportCode)
         || /502|503|timeout|ECONNRESET|ETIMEDOUT|EPIPE|Bad gateway|Premature close|terminated|socket hang up|network|fetch failed/i.test(message)) {
         return { code: 'model_failed', message, retryable: true };

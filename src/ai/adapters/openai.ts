@@ -12,6 +12,7 @@ import type {
 } from '../../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createOpenAIStreamError } from '../runtime/openai-stream-error.js';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
@@ -300,6 +301,11 @@ async function runProviderOperation<T>(
     return await operation();
   } catch (error) {
     if (!strictKimiK3) {
+      // SDK SSE errors have no HTTP failure status. Exclude transport/abort
+      // subclasses, preserving their original cancellation and cause semantics.
+      if (error instanceof OpenAI.APIError && error.constructor === OpenAI.APIError && error.status === undefined) {
+        throw createOpenAIStreamError(error);
+      }
       throw error;
     }
     const sanitized = createKimiProviderRequestError(error, isRetryableError(error));
