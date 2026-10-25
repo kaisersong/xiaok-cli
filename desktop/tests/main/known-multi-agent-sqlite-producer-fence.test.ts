@@ -1,5 +1,5 @@
-import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 // @vitest-environment node
+import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';

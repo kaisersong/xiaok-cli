@@ -18,6 +18,7 @@ it.skipIf(process.platform==='win32')('saves after a deleted sqlite source ident
   // Make B's database before constructing its store, which registers on open.
   const {default:Database}=await import('better-sqlite3');const db=new Database(join(b,'sessions.sqlite'));db.close();
   const path=join(root,'.xiaok','profile-sources','registry.json'),raw=decodeOrdinaryProfileSourceStorage(JSON.parse(readFileSync(path,'utf8'))) as {uid:number;sources:OrdinaryProfileSource[]};
+  expect(raw.sources.some(row=>row.directory.canonicalPath===a&&row.database)).toBe(true);
   const dir=lstatSync(b,{bigint:true}),file=lstatSync(join(b,'sessions.sqlite'),{bigint:true});
   raw.sources=raw.sources.map(row=>{
    if(row.directory.canonicalPath!==a)return row;

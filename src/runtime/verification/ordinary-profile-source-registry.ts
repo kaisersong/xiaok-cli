@@ -1,3 +1,4 @@
+import {canonicalVerificationJson as canonicalJson} from './protocol.js';
 import {decodeOrdinaryProfileSourceStorage,serializeOrdinaryProfileSourceStorage} from './ordinary-profile-source-storage-codec.js';
 import {createHash} from 'node:crypto';
 import {constants,closeSync,fstatSync,lstatSync,mkdirSync,openSync,readSync,realpathSync} from 'node:fs';
@@ -138,11 +139,11 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   if(priorBySource&&priorBySource!==priorByNamespace&&isStaleOrdinaryProfileSource(priorBySource)){removed.push(priorBySource);sources=sources.filter(row=>row!==priorBySource);priorBySource=undefined;}
   if(priorByNamespace&&priorBySource&&priorByNamespace!==priorBySource)fail('identity');
   const prior=priorByNamespace??priorBySource;let rebound=false;
-  if(prior){const {componentHistory:_,...identity}=prior;if(JSON.stringify(identity)!==JSON.stringify(observed)){if(prior!==priorByNamespace||!isDeviceRenumbering(prior,observed)&&!isStaleOrdinaryProfileSource(prior))fail('identity');rebound=true;}}
+  if(prior){const {componentHistory:_,...identity}=prior;if(canonicalJson(identity)!==canonicalJson(observed)){if(prior!==priorByNamespace||!isDeviceRenumbering(prior,observed)&&!isStaleOrdinaryProfileSource(prior))fail('identity');rebound=true;}}
   let merged:Readonly<OrdinaryProfileSource>=prior&&!rebound?prior:observed;
   const histories=[...removed,...(prior?[prior]:[])].filter(row=>row.kind===observed.kind&&row.snapshotFormat===observed.snapshotFormat).flatMap(row=>row.componentHistory?[row.componentHistory]:[]);
-  if(layout||histories.length){const observations=histories.flatMap(row=>row.observations).filter((row,index,all)=>all.findIndex(item=>item.layoutHash===row.layoutHash)===index);if(layout&&!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
-  if(!removed.length&&prior&&JSON.stringify(prior)===JSON.stringify(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
+  if(layout||(removed.length||rebound)&&histories.length){const observations=histories.flatMap(row=>row.observations).filter((row,index,all)=>all.findIndex(item=>item.layoutHash===row.layoutHash)===index);if(layout&&!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
+  if(!removed.length&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail('capacity');
   const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true,sources:prior?sources.map(row=>row===prior?merged:row):[...sources,merged]};const validated=parseOrdinaryProfileSources(next,loc.uid);const bytes=serializeOrdinaryProfileSourceStorage(validated);if(Buffer.byteLength(bytes)>MAX_BYTES)fail('capacity');
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');

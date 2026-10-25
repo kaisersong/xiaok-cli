@@ -1,6 +1,7 @@
+import {resolveProfileAccountHome} from '../../../src/runtime/verification/profile-account-home.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {createHash} from 'node:crypto';
-import {closeSync,constants,existsSync,lstatSync,mkdirSync,mkdtempSync,openSync,readFileSync,realpathSync,renameSync,rmSync,rmdirSync,writeFileSync} from 'node:fs';
+import {chmodSync,closeSync,constants,existsSync,lstatSync,mkdirSync,mkdtempSync,openSync,readFileSync,readdirSync,realpathSync,renameSync,rmSync,rmdirSync,symlinkSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {isStaleOrdinaryProfileSource,parseOrdinaryProfileSources,readOrdinaryProfileSources,registerOrdinaryProfileSource,registerOrdinarySQLiteLayout} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
@@ -8,8 +9,8 @@ import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification
 import type {OrdinaryProfileSource} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 import {decodeOrdinaryProfileSourceStorage,serializeOrdinaryProfileSourceStorage} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
 vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>({...await load<typeof import('../../../src/runtime/verification/migration-markers.js')>(),readInstalledCurrentProfile:()=>({kind:'ordinary'})}));
-const fake=vi.hoisted(()=>({path:'',target:'',code:''}));
-vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,lstatSync:(p:string,options:unknown)=>{if(p===fake.path&&fake.code)throw Object.assign(Error(fake.code),{code:fake.code});return actual.lstatSync(p===fake.path?fake.target:p,options as never);}};});
+const fake=vi.hoisted(()=>({path:'',target:'',code:'',hits:0}));
+vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,lstatSync:(p:string,options:unknown)=>{if(p===fake.path)fake.hits++;if(p===fake.path&&fake.code)throw Object.assign(Error(fake.code),{code:fake.code});return actual.lstatSync(p===fake.path?fake.target:p,options as never);}};});
 let root:string;
 const env={HOME:process.env.HOME,XIAOK_CONFIG_DIR:process.env.XIAOK_CONFIG_DIR};
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -60,8 +61,8 @@ it('still rejects a conflicting source when the recorded path is live',()=>{
  const a=join(root,'A'),b=join(root,'B');mkdirSync(a);mkdirSync(b);registerOrdinaryProfileSource({kind:'session-root',directory:a});
  rewrite(rows=>{rows[0]=carryIdentity(rows[0]!,b);});
  // Simulate two live paths resolving to B's physical directory.
- fake.path=a;fake.target=b;
- try{expect(()=>registerOrdinaryProfileSource({kind:'session-root',directory:b})).toThrow('profile_source_registry_identity');}finally{fake.path='';fake.target='';}
+ fake.path=a;fake.target=b;fake.hits=0;
+ try{expect(()=>registerOrdinaryProfileSource({kind:'session-root',directory:b})).toThrow('profile_source_registry_identity');expect(fake.hits).toBeGreaterThan(0);}finally{fake.path='';fake.target='';}
 });
 it('preserves unknown component history when a sqlite file is replaced',()=>{
  const a=join(root,'A');mkdirSync(a);const db=join(a,'loop.sqlite');writeFileSync(db,'old');
@@ -70,11 +71,21 @@ it('preserves unknown component history when a sqlite file is replaced',()=>{
  const next=join(a,'next');writeFileSync(next,'new');rmSync(db);renameSync(next,db);registerOrdinaryProfileSource(input);
  expect(readOrdinaryProfileSources()!.sources[0]!.componentHistory).toEqual(history);
 });
+it('does not rewrite an unchanged loop sqlite source with component history',()=>{
+ const a=join(root,'A');mkdirSync(a);writeFileSync(join(a,'loop.sqlite'),'db');
+ const input={kind:'sqlite-db' as const,directory:a,databaseBasename:'loop.sqlite',snapshotFormat:'loop-sqlite-v1' as const},components=['loop'] as const;
+ registerOrdinarySQLiteLayout(input,{version:1,components,layoutRevision:1,layoutHash:hash({version:1,components,layoutRevision:1})});
+ const before=readFileSync(registry(),'utf8'),stat=lstatSync(registry(),{bigint:true}),facts=readOrdinaryProfileSources()!;
+ registerOrdinaryProfileSource(input);
+ expect(readOrdinaryProfileSources()!.generation).toBe(facts.generation);expect(readFileSync(registry(),'utf8')).toBe(before);
+ expect(lstatSync(registry(),{bigint:true}).mtimeNs).toBe(stat.mtimeNs);expect(lstatSync(registry(),{bigint:true}).ino).toBe(stat.ino);
+});
 it('writes only under HOME and honors an explicit config directory',async()=>{
- const actual=await vi.importActual<typeof import('node:os')>('node:os'),real=join(actual.userInfo().homedir,'.xiaok','profile-sources','registry.json');
- const before=existsSync(real)?lstatSync(real,{bigint:true}):undefined,a=join(root,'A');mkdirSync(a);registerOrdinaryProfileSource({kind:'session-root',directory:a});expect(existsSync(registry())).toBe(true);
- const after=existsSync(real)?lstatSync(real,{bigint:true}):undefined;expect(after?.mtimeNs).toBe(before?.mtimeNs);expect(after?.ino).toBe(before?.ino);
- process.env.XIAOK_CONFIG_DIR=join(root,'config');registerOrdinaryProfileSource({kind:'session-root',directory:a});expect(existsSync(join(root,'config','profile-sources','registry.json'))).toBe(true);
+ const actual=await vi.importActual<typeof import('node:os')>('node:os'),real=join(actual.userInfo().homedir,'.xiaok','profile-sources');
+ function snapshot(path:string):unknown[]{if(!existsSync(path))return [];const stat=lstatSync(path,{bigint:true});return [[path,String(stat.mtimeNs),String(stat.size)],...(stat.isDirectory()?readdirSync(path).sort().flatMap(name=>snapshot(join(path,name))):[])];}
+ const before=snapshot(real),a=join(root,'A');mkdirSync(a);registerOrdinaryProfileSource({kind:'session-root',directory:a});expect(existsSync(registry())).toBe(true);
+ expect(snapshot(real)).toEqual(before);
+ process.env.XIAOK_CONFIG_DIR=join(root,'config');registerOrdinaryProfileSource({kind:'session-root',directory:a});expect(existsSync(join(root,'config','profile-sources','registry.json'))).toBe(true);expect(snapshot(real)).toEqual(before);
 });
 
 it('merges unknown histories when both namespace and source rows are stale',()=>{
@@ -90,10 +101,20 @@ it('propagates stat failures without deleting registry rows',()=>{
  fake.path=a;fake.code='EACCES';try{expect(()=>registerOrdinaryProfileSource({kind:'session-root',directory:b})).toThrow('EACCES');expect(readFileSync(registry(),'utf8')).toBe(before);}finally{fake.path='';fake.code='';}
 });
 
-it.skipIf(process.platform==='win32'||!process.getuid?.())('uses the same HOME and config roots for writer fences',()=>{
- const a=join(root,'A');mkdirSync(a);
- for(const config of [undefined,join(root,'config')]){
-  if(config===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=config;
-  registerOrdinaryProfileSource({kind:'session-root',directory:a});const fence=createKnownDirectoryWriterFence(a,'session-root');fence.assertOpen();fence.persist();expect(()=>fence.assertOpen()).toThrow('known_writer_fence_fenced');expect(existsSync(join(config??join(root,'.xiaok'),'profile-sources','writer-fences'))).toBe(true);
- }
+it.skipIf(process.platform==='win32'||!process.getuid?.())('keeps writer fences at passwd home across environment roots',async()=>{
+ const actual=await import('node:os'),home=actual.userInfo().homedir,a=join(root,'A');mkdirSync(a);
+ registerOrdinaryProfileSource({kind:'session-root',directory:a});const fence=createKnownDirectoryWriterFence(a,'session-root');fence.assertOpen();fence.persist();
+ process.env.HOME=join(root,'other');mkdirSync(process.env.HOME);process.env.XIAOK_CONFIG_DIR=join(root,'config');
+ expect(()=>createKnownDirectoryWriterFence(a,'session-root').assertOpen()).toThrow('known_writer_fence_fenced');
+ expect(existsSync(join(home,'.xiaok','profile-sources','writer-fences'))).toBe(true);
+});
+
+it.skipIf(process.platform==='win32')('rejects writable bases and symlinks anywhere in the selected home/config chain',()=>{
+ const unsafe=join(root,'unsafe');mkdirSync(unsafe);chmodSync(unsafe,0o777);
+ try{process.env.HOME=unsafe;expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
+ process.env.HOME=root;process.env.XIAOK_CONFIG_DIR=unsafe;expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
+ }finally{chmodSync(unsafe,0o700);}
+ const alias=join(root,'alias');symlinkSync(unsafe,alias,'dir');
+ process.env.XIAOK_CONFIG_DIR=join(alias,'config');expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
+ delete process.env.XIAOK_CONFIG_DIR;process.env.HOME=alias;expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
 });
