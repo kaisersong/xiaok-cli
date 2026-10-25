@@ -22,3 +22,9 @@ it('keeps previously emitted CLI text when the next delta fails', async () => {
   })()).rejects.toMatchObject({ retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' });
   expect(emitted).toEqual(['already printed text']);
 });
+it('maps the repetition code even when the caller appends context', () => {
+  for (const raw of ['Error: MODEL_TEXT_REPETITION_DETECTED (attempt 2/3)', 'model_failed: MODEL_TEXT_REPETITION_DETECTED; provider=kimi']) {
+    expect(formatErrorText(raw)).toContain('检测到重复输出，已停止');
+  }
+  expect(formatErrorText('Error: XMODEL_TEXT_REPETITION_DETECTEDX')).not.toContain('检测到重复输出');
+});
