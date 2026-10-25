@@ -2449,7 +2449,10 @@ async function takeEvents(iterable: AsyncIterable<DesktopTaskEvent>, count: numb
   return events;
 }
 
-async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
+// Polling ceiling only (assertions unchanged). Windows runners' snapshot fs I/O is several times
+// slower; this suite first ran on windows-2022 with the startup/room workflow and hit the 1s ceiling.
+const DEFAULT_WAIT_FOR_MS = process.platform === 'win32' ? 5000 : 1000;
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = DEFAULT_WAIT_FOR_MS): Promise<void> {
   const startedAt = Date.now();
   while (!await predicate()) {
     if (Date.now() - startedAt > timeoutMs) {
