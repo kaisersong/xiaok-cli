@@ -16,6 +16,9 @@ export function writeError(text: string): void {
 }
 
 export function formatErrorText(text: string): string {
+  if (/^(?:Error:\s*)?(?:model_failed:\s*)?MODEL_TEXT_REPETITION_DETECTED$/.test(text)) {
+    return '检测到重复输出，已停止\n重新发送上一条请求以重新生成。';
+  }
   return text.replace(/^Error:\s*/u, '');
 }
 

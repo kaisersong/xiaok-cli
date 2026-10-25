@@ -117,6 +117,10 @@ export async function createProjectAgentModel(options: {
           providerError = new Error('project_agent_model_incomplete_response');
         }
         if (providerFailed) {
+          if (providerError && typeof providerError === 'object' && (providerError as { code?: unknown }).code === MODEL_TEXT_REPETITION_CODE) {
+            // Keep accepted narration, but never execute buffered tool calls from a failed reply.
+            for (const chunk of chunks) if (chunk.type === 'text') yield chunk;
+          }
           if (isBoundaryFailure(providerError)) throw providerError;
           const current = resolveRuntimeModelBinding(await options.loadConfig());
           if (current.modelId === binding.modelId && current.providerId === binding.providerId && current.wireModel === binding.wireModel) throw providerError;

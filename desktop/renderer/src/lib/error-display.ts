@@ -19,6 +19,10 @@ function errorText(error: unknown): string {
   return String(error)
 }
 
+export function isModelTextRepetitionError(error: unknown): boolean {
+  return /^(?:Error:\s*)?(?:model_failed:\s*)?MODEL_TEXT_REPETITION_DETECTED$/.test(errorText(error).trim())
+}
+
 export function isModelKeyMissingError(text: string): boolean {
   const keyOrProvider = '(?:api[\\s_-]*key|model\\s+provider)'
   return /\brequires\s+api[\s_-]*key\b/i.test(text)
@@ -64,7 +68,7 @@ export function sanitizeUserFacingErrorMessage(
 ): string {
   const text = errorText(error).trim()
   if (!text) return fallbackMessage
-  if (/^(?:Error:\s*)?MODEL_TEXT_REPETITION_DETECTED$/.test(text) && options?.modelTextRepetition) {
+  if (isModelTextRepetitionError(text) && options?.modelTextRepetition) {
     return options.modelTextRepetition
   }
   if (isModelKeyMissingError(text)) {
