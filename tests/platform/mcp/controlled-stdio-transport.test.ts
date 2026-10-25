@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   ControlledStdioClientTransport,
   type ForceKillGuard,
+  type ControlledStdioOptions,
 } from '../../../src/platform/mcp/controlled-stdio-transport.js';
 
 const FAST_BUDGET = { stdinGraceMs: 150, termGraceMs: 150, killGraceMs: 400 };
@@ -40,7 +41,7 @@ process.stdin.resume();
 setInterval(() => {}, 1000);
 `);
 
-function makeTransport(script: string, overrides: Partial<Parameters<typeof ControlledStdioClientTransport.prototype.constructor>[0]> = {}) {
+function makeTransport(script: string, overrides: Partial<ControlledStdioOptions> = {}) {
   return new ControlledStdioClientTransport({
     command: process.execPath,
     args: [script],
@@ -49,7 +50,7 @@ function makeTransport(script: string, overrides: Partial<Parameters<typeof Cont
     forceKillGuard: allowGuard,
     closeBudget: FAST_BUDGET,
     ...overrides,
-  } as never);
+  });
 }
 
 afterAll(() => {

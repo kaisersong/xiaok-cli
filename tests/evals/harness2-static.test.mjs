@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -20,9 +20,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const source = OPERATIONS[0];
 const sections = OPERATIONS[1];
 const refs = OPERATIONS[2];
-const run = args => spawnSync(process.execPath,
+const run = args => {
+  const result = spawnSync(process.execPath,
   ['--import', 'tsx', 'scripts/evals/harness2-static/run.mjs', ...args],
   { cwd: root, encoding: 'utf8', timeout: 30000 });
+  assert.ifError(result.error);
+  return result;
+};
 
 test('T15: current V ignores over-selection and scores actual missing requirements', () => {
   assert.deepEqual([...OPERATIONS], ['VERIFY_SOURCE_DATE', 'CHECK_REQUIRED_SECTIONS', 'VERIFY_REFERENCES_BEFORE_FINAL']);
@@ -162,4 +166,30 @@ test('P0a real command is zero-call, uses exclusive evidence output, and rejects
     assert.equal(stdout.status, 0, stdout.stderr);
     assert.equal(JSON.parse(stdout.stdout).productQualified, false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('source inventory accepts CRLF checkout bytes and fails closed on missing/duplicate anchors', async () => {
+  const original = await buildStaticReport(root);
+  const fixture = mkdtempSync(join(tmpdir(), 'harness2-crlf-'));
+  try {
+    for (const item of original.inventory) {
+      const target = join(fixture, item.path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, readFileSync(join(root, item.path), 'utf8').replace(/\r?\n/g, '\r\n'));
+    }
+    const actual = await buildStaticReport(fixture);
+    assert.deepEqual(actual.inventory.map(item => item.sourceRefs), original.inventory.map(item => item.sourceRefs));
+    for (const item of actual.inventory) {
+      assert.equal(item.sha256, createHash('sha256').update(readFileSync(join(fixture, item.path))).digest('hex'));
+      assert.ok(!item.path.includes('\\'));
+    }
+    const item = actual.inventory[0];
+    const target = join(fixture, item.path);
+    const bytes = readFileSync(target, 'utf8');
+    writeFileSync(target, bytes + '\r\n' + item.sourceRefs[0].symbol + '\r\n');
+    await assert.rejects(() => buildStaticReport(fixture), /source_anchor_changed/);
+    writeFileSync(target, '');
+    await assert.rejects(() => buildStaticReport(fixture), /source_anchor_changed/);
+  } finally { rmSync(fixture, { recursive: true, force: true, maxRetries: 3 }); }
 });

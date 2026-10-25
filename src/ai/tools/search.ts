@@ -1,7 +1,9 @@
+import type {ToolDiscovery} from '../../shared/tool-description-metadata.js';
 import type { Tool, ToolDefinition } from '../../types.js';
 
 export interface DeferredToolSearch {
   searchTools(query: string): ToolDefinition[];
+  searchToolDiscoveries?(query:string):ToolDiscovery[];
   searchDeferredTools(query: string): ToolDefinition[];
 }
 
@@ -21,7 +23,7 @@ export function createToolSearchTool(registry: DeferredToolSearch): Tool {
     },
     async execute(input) {
       const query = typeof input.query === 'string' ? input.query : '';
-      const tools = registry.searchTools(query);
+      const tools = registry.searchToolDiscoveries ? registry.searchToolDiscoveries(query).map(({coreDefinition,metadata})=>metadata?{...coreDefinition,...metadata}:coreDefinition) : registry.searchTools(query);
       return JSON.stringify(tools, null, 2);
     },
   };

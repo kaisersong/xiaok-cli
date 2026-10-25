@@ -69,7 +69,11 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run eval:harness2:static:test
-      - run: npm run eval:harness2:static -- --output harness2-p0a.json
+      # bash on every OS: under the Windows default pwsh, PowerShell consumes the
+      # `--` separator, so npm swallowed `--output` and run.mjs got a bare
+      # positional (harness2_static_failed: invalid_arguments_or_source_inventory).
+      - shell: bash
+        run: npm run eval:harness2:static -- --output harness2-p0a.json
       - uses: actions/upload-artifact@v4
         with:
           name: harness2-p0a-${{ matrix.os }}-${{ matrix.node }}

@@ -1,3 +1,4 @@
+import type { MobileSnapshot } from '../../electron/mobile-gateway.js';
 import { describe, expect, it } from 'vitest';
 import {
   createMobileRelayBridge,
@@ -59,7 +60,7 @@ describe('mobile relay bridge', () => {
         approvals: [],
         loops: [],
         artifacts: [],
-      }),
+      } as unknown as MobileSnapshot),
     });
 
     bridge.start();
@@ -174,7 +175,7 @@ describe('mobile relay bridge', () => {
         approvals: [],
         loops: [],
         artifacts: [],
-      }),
+      } as unknown as MobileSnapshot),
     });
 
     bridge.start();

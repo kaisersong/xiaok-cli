@@ -1,0 +1,42 @@
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,existsSync,statSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const fixture=vi.hoisted(()=>({home:'',failDirectoryInode:0}));
+vi.mock('node:os',async load=>{const actual=await load<typeof import('node:os')>();return {...actual,userInfo:()=>({...actual.userInfo(),homedir:fixture.home})};});
+vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,fsyncSync:(fd:number)=>{const stat=actual.fstatSync(fd);if(stat.isDirectory()&&stat.ino===fixture.failDirectoryInode)throw Error('actual_holder_sync_failed');return actual.fsyncSync(fd);}};});
+vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInstalledCurrentProfile:()=>({kind:'ordinary'})}));
+import {FileSessionStore} from '../../../src/ai/runtime/session-store/file-store.js';
+import {AgentSessionState} from '../../../src/ai/runtime/session.js';
+import {computeSessionHistoryDigest} from '../../../src/ai/runtime/session-store/store.js';
+import {createSessionExecutionAuthority,createSessionExecutionContext,type SessionExecutionLease} from '../../../src/ai/runtime/session-store/execution-authority.js';
+import {registerSessionAliasLocked,releaseSessionAliasLocked} from '../../../src/ai/runtime/session-store/aliases.js';
+import {acquireSaveLock} from '../../../src/ai/runtime/session-store/mutation-lock.js';
+import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
+let root:string;const cleanup:Array<()=>unknown>=[];
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-alias-fence-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
+afterEach(async()=>{fixture.failDirectoryInode=0;for(const close of cleanup.splice(0).reverse())await close();rmSync(root,{recursive:true,force:true});});
+async function seeded(){const canonical=join(root,'canonical'),holderRoot=join(root,'holder');mkdirSync(holderRoot);const store=new FileSessionStore(canonical),authority=createSessionExecutionAuthority({root:canonical,sessionIdentity:'source',hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'owner',scopeId:'alias-fence'})});cleanup.push(()=>authority.dispose());const lease=await authority.acquire({invocationId:'alias',kind:'recovery'});cleanup.push(()=>lease.releaseAfterDrain());const snapshot={...new AgentSessionState().exportSnapshot(),sessionId:'source',cwd:root};await store.compareAndSave({nextSnapshot:snapshot,expectedStoreRevision:0,expectedHistoryDigest:computeSessionHistoryDigest({messages:[]}),lease});const binding={aliasId:'alias',holderRoot,holderId:'holder-task',targetSessionId:'source',domainInitializationId:'domain',domainGeneration:1};const installed=await store.registerSessionAlias({...binding,requestSource:'user',lease});return {canonical,holderRoot,store,lease,binding,marker:installed.markerPath};}
+function lowerLocked<T>(f:Awaited<ReturnType<typeof seeded>>,work:()=>T):T{const releaseRoot=acquireSaveLock(join(f.canonical,'.session-store-lock'));try{const releaseSession=acquireSaveLock(join(f.canonical,'source.json.save-lock'));try{return work();}finally{releaseSession();}}finally{releaseRoot();}}
+function bytes(f:Awaited<ReturnType<typeof seeded>>){return {index:readFileSync(join(f.canonical,'.session-aliases.json')),sentinel:readFileSync(join(f.canonical,'.session-aliases-enabled')),marker:existsSync(f.marker)?readFileSync(f.marker):null,indexInode:statSync(join(f.canonical,'.session-aliases.json')).ino};}
+async function fenceRoot(f:Awaited<ReturnType<typeof seeded>>){await (f.store as unknown as {fenceKnownWriter(source:'user'):Promise<void>}).fenceKnownWriter('user');}
+function fenceHolder(f:Awaited<ReturnType<typeof seeded>>){createKnownDirectoryWriterFence(join(f.holderRoot,'.canonical-session-aliases'),'session-alias-holder' as never).persist();}
+it('blocks register and release through both original Class and lower exports when the actual canonical Session root is fenced',async()=>{
+ const f=await seeded(),before=bytes(f);await fenceRoot(f);for(const source of ['user','agent'] as const)await expect(f.store.registerSessionAlias({...f.binding,requestSource:source,lease:f.lease})).rejects.toThrow(/closed|fenced/);await expect(new FileSessionStore(f.canonical).releaseSessionAlias({...f.binding,requestSource:'user',lease:f.lease})).rejects.toThrow('fenced');expect(()=>lowerLocked(f,()=>registerSessionAliasLocked(f.canonical,f.binding))).toThrow('fenced');expect(()=>lowerLocked(f,()=>releaseSessionAliasLocked(f.canonical,f.binding))).toThrow('fenced');expect(bytes(f)).toEqual(before);
+});
+it('publishes a real registered holder with the lower component and denies both namespace mutations without claiming a host holder publisher',async()=>{
+ const f=await seeded(),before=bytes(f);fenceHolder(f);await expect(f.store.registerSessionAlias({...f.binding,requestSource:'user',lease:f.lease})).rejects.toThrow('fenced');await expect(f.store.releaseSessionAlias({...f.binding,requestSource:'user',lease:f.lease})).rejects.toThrow('fenced');expect(()=>lowerLocked(f,()=>registerSessionAliasLocked(f.canonical,f.binding))).toThrow('fenced');expect(()=>lowerLocked(f,()=>releaseSessionAliasLocked(f.canonical,f.binding))).toThrow('fenced');expect(bytes(f)).toEqual(before);
+});
+it('checks the actual fenced holder even for released tombstone rewrites and preserves the canonical index inode',async()=>{
+ const f=await seeded();await f.store.releaseSessionAlias({...f.binding,requestSource:'user',lease:f.lease});const before=bytes(f);expect(before.marker).toBeNull();fenceHolder(f);await expect(f.store.releaseSessionAlias({...f.binding,requestSource:'user',lease:f.lease})).rejects.toThrow('fenced');expect(()=>lowerLocked(f,()=>releaseSessionAliasLocked(f.canonical,f.binding))).toThrow('fenced');expect(bytes(f)).toEqual(before);
+});
+it('cannot publish an unregistered or uncreated holder and admits a separate real holder namespace',async()=>{
+ const f=await seeded();const missing=join(root,'missing','.canonical-session-aliases');expect(()=>createKnownDirectoryWriterFence(missing,'session-alias-holder' as never).persist()).toThrow();expect(existsSync(missing)).toBe(false);fenceHolder(f);const holderRoot=join(root,'other-holder');mkdirSync(holderRoot);await f.store.registerSessionAlias({...f.binding,aliasId:'other-alias',holderId:'other-task',holderRoot,requestSource:'user',lease:f.lease});expect(existsSync(join(holderRoot,'.canonical-session-aliases'))).toBe(true);expect(readdirSync(join(f.holderRoot,'.canonical-session-aliases'))).toHaveLength(1);
+});
+it('denies ordinary protected Session CAS and deletion siblings before receipt callbacks after a confirmed canonical fence',async()=>{
+ const f=await seeded(),before=readFileSync(join(f.canonical,'source.json')),snapshot=(await f.store.load('source'))!;await fenceRoot(f);const reopened=new FileSessionStore(f.canonical);await expect(reopened.compareAndSave({nextSnapshot:snapshot,expectedStoreRevision:snapshot.storeRevision!,expectedHistoryDigest:snapshot.historyDigest!,lease:f.lease})).rejects.toThrow('fenced');let receipts=0;await expect(reopened.deleteSession({requestSource:'user',sessionId:'source',executionLease:f.lease,receipts:{begin(){receipts++;return 'a'.repeat(64);},complete(){receipts++;}}})).rejects.toThrow('fenced');expect(receipts).toBe(0);expect(readFileSync(join(f.canonical,'source.json'))).toEqual(before);
+});
+
+it('refuses the actual release_pending recovery rewrite when its registered holder is fenced after a real directory fsync failure',async()=>{
+ const f=await seeded();fixture.failDirectoryInode=statSync(join(f.holderRoot,'.canonical-session-aliases')).ino;await expect(f.store.releaseSessionAlias({...f.binding,requestSource:'user',lease:f.lease})).rejects.toThrow('actual_holder_sync_failed');fixture.failDirectoryInode=0;expect(JSON.parse(readFileSync(join(f.canonical,'.session-aliases.json'),'utf8')).rows[0].state).toBe('release_pending');const before=bytes(f);fenceHolder(f);await expect(f.store.releaseSessionAlias({...f.binding,requestSource:'user',lease:f.lease})).rejects.toThrow('fenced');expect(()=>lowerLocked(f,()=>releaseSessionAliasLocked(f.canonical,f.binding))).toThrow('fenced');expect(bytes(f)).toEqual(before);
+});

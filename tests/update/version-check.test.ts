@@ -1,15 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import { checkForUpdate } from '../../src/update/version-check.js';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { AbortSignal } from 'node-fetch';
+const account = await vi.hoisted(async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  return { root: fs.mkdtempSync(path.join(os.tmpdir(), 'version-check-account-')) };
+});
+vi.mock('os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => account.root }));
+afterAll(() => rmSync(account.root, { recursive: true, force: true }));
 
 const CACHE_FILE = join(homedir(), '.xiaok', '.update-check.json');
 
 describe('version-check', () => {
   afterEach(() => {
     try { unlinkSync(CACHE_FILE); } catch {}
+    vi.unstubAllGlobals();
   });
 
   it('detects an available update', async () => {
@@ -36,13 +42,9 @@ describe('version-check', () => {
   it('returns null when no cache and network fails', async () => {
     // No cache file, and fetch will fail
     try { unlinkSync(CACHE_FILE); } catch {}
-
+    vi.stubGlobal('fetch', async () => { throw Error('original network unavailable'); });
     const result = await checkForUpdate('99.99.99');
-    // With current version higher than any cached value, hasUpdate should be false
-    // or null if truly no cache + no network
-    if (result) {
-      expect(result.hasUpdate).toBe(false);
-    }
+    expect(result).toBeNull();
   });
 
   it('handles semver comparison correctly', async () => {

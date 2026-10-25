@@ -1,0 +1,3 @@
+import os from 'node:os';import {realpathSync,statSync} from 'node:fs';import {basename,dirname} from 'node:path';import {syncBuiltinESMExports} from 'node:module';
+const root=process.env.XIAOK_MODEL_CONFIG_TEST_HOME;if(!root||realpathSync(root)!==root||dirname(root)!==realpathSync(os.tmpdir())||!basename(root).startsWith('xiaok-model-config-')||statSync(root).uid!==os.userInfo().uid)throw Error('owned_config_account_required');
+const original=os.userInfo;os.userInfo=options=>{const v=original.call(os,options);return {...v,homedir:Buffer.isBuffer(v.homedir)?Buffer.from(root):root};};os.homedir=()=>root;syncBuiltinESMExports();

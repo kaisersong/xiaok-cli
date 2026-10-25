@@ -1,10 +1,47 @@
+import { intentProducerLedgerHash } from './producer-facts.js';
+import { captureIntentData, parseIntentExecutionInput } from './intent-commit-boundary.js';
 import { cloneIntentRecord, cloneSessionIntentLedger, createEmptySessionIntentLedger, createIntentLedgerRecord, } from './types.js';
 export { createEmptySessionIntentLedger } from './types.js';
 export { rekeySessionIntentLedger } from './types.js';
+const producerMutationPorts = new WeakMap();
+const producerSessionStores = new WeakMap();
+export function isIntentDelegationStoreFor(store, sessionStore) { return producerSessionStores.get(store) === sessionStore; }
+/** Fixed host port; the actual Store still requires its private source-bound lease. */
+export function getIntentProducerMutationPort(store) {
+    const port = producerMutationPorts.get(store);
+    if (!port)
+        throw Error('intent_producer_store_identity');
+    return port;
+}
 export class SessionIntentDelegationStore {
     sessionStore;
     constructor(sessionStore) {
         this.sessionStore = sessionStore;
+        producerSessionStores.set(this, sessionStore);
+        const load = sessionStore.load.bind(sessionStore), write = sessionStore.recordIntentProducerAction?.bind(sessionStore);
+        producerMutationPorts.set(this, async (sessionId, intentId, instanceId, action, requestSource, lease) => {
+            const captured = captureIntentData(action), snapshot = await load(sessionId), ledger = snapshot ? readLedger(snapshot) : null;
+            if (!ledger || !write)
+                throw Error('intent_producer_store_required');
+            await write({ sessionId, intentId, instanceId, action: captured, requestSource, expectedLedgerHash: intentProducerLedgerHash(ledger), now: ledger.intents.find(row => row.intentId === intentId)?.producerReports?.find(report => report.action.origin.providerInvocationId === captured.origin.providerInvocationId && report.action.origin.toolInvocationId === captured.origin.toolInvocationId)?.now ?? Date.now(), lease });
+            const saved = await load(sessionId);
+            if (!saved)
+                throw Error('intent_producer_store_required');
+            return readLedger(saved);
+        });
+    }
+    async recordExecutionTerminal(sessionId, input, lease) {
+        const captured = captureIntentData(input);
+        if (!captured || Object.keys(captured).sort().join(',') !== 'identity,intentId,kind,recordedAt,requestSource,status')
+            throw Error('intent_execution_input');
+        const value = parseIntentExecutionInput({ ...captured, sessionId });
+        if (!this.sessionStore.recordIntentExecutionTerminal)
+            throw Error('intent_execution_store_required');
+        await this.sessionStore.recordIntentExecutionTerminal({ ...value, lease });
+        return (await this.load(sessionId));
+    }
+    async recordProducerAction(sessionId, intentId, instanceId, action, requestSource, lease) {
+        return getIntentProducerMutationPort(this)(sessionId, intentId, instanceId, action, requestSource, lease);
     }
     async load(sessionId) {
         const snapshot = await this.sessionStore.load(sessionId);

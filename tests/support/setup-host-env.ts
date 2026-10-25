@@ -1,3 +1,5 @@
+import {afterEach} from 'vitest';
+import {setImmediate as yieldWorkerIo} from 'node:timers/promises';
 import { stripHostLeaks } from './host-env.js';
 
 // Vitest `setupFiles` entry shared by every config (default, sandbox,
@@ -8,3 +10,7 @@ const removed = stripHostLeaks();
 if (removed.length > 0 && process.env.XIAOK_TEST_ENV_STRICT === '1') {
   throw new Error(`test_env_leak: host variables present at test start: ${removed.join(', ')}`);
 }
+
+// Synchronous test/cleanup chains can otherwise starve runner RPC replies.
+// Yield once after each successful cleanup without changing any deadlines.
+afterEach(async()=>{await yieldWorkerIo();});

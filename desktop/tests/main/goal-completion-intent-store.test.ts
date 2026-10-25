@@ -1,0 +1,43 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SqliteGoalStore } from '../../electron/goal-store-sqlite.js';
+import { createGoalState } from '../../../src/runtime/goal/reducer.js';
+import { createGoalCompletionIntent } from '../../../src/runtime/goal/completion-intent.js';
+import type { GoalCommitInput } from '../../../src/runtime/goal/types.js';
+const roots: string[] = [], stores: SqliteGoalStore[] = [];
+afterEach(() => { for (const store of stores.splice(0)) store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+it('keeps the original claim across SQLite restart and rejects stale intent writes atomically', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'goal-sqlite-intent-')); roots.push(root);
+  const path = join(root, 'goals.db');
+  const store = new SqliteGoalStore(path);
+  const state = createGoalState({ sessionId: 'thread', objective: 'original', expectedEvidenceKinds: ['answer'], now: 1 });
+  const intent = createGoalCompletionIntent({ state, taskId: 'task', turnId: 'turn', summary: 'claim', now: 2 });
+  const input: GoalCommitInput = { sessionId: 'thread', expectedRevision: null, next: state, events: [], turns: [], evidence: [], completionIntent: { expectedRevision: null, next: intent } };
+  await store.commit(input); store.close();
+  const reopened = new SqliteGoalStore(path); stores.push(reopened);
+  expect((await reopened.load('thread'))?.completionIntents).toEqual([intent]);
+  await expect(reopened.commit({ ...input, expectedRevision: state.revision, next: { ...state, revision: state.revision + 1 }, completionIntent: { expectedRevision: 12, next: { ...intent, revision: 2, status: 'superseded', updatedAt: 3 } } })).rejects.toThrow(/intent.*revision/);
+  expect((await reopened.load('thread'))?.state.revision).toBe(state.revision);
+  expect((await reopened.load('thread'))?.completionIntents).toEqual([intent]);
+});
+
+it('updates original historical intent while leaving a new current Goal pointer and state intact', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'goal-sqlite-history-')); roots.push(root);
+  const store = new SqliteGoalStore(join(root, 'goals.db')); stores.push(store);
+  const first = createGoalState({ sessionId: 'thread', objective: 'first', expectedEvidenceKinds: ['answer'], now: 1 });
+  const intent = createGoalCompletionIntent({ state: first, taskId: 'task', turnId: 'turn', summary: 'claim', now: 2 });
+  await store.commit({ sessionId: 'thread', expectedRevision: null, next: { ...first, status: 'cancelled' }, events: [], turns: [], evidence: [], completionIntent: { expectedRevision: null, next: intent } });
+  const second = createGoalState({ sessionId: 'thread', objective: 'second', expectedEvidenceKinds: ['answer'], now: 3 });
+  await store.commit({ sessionId: 'thread', expectedRevision: first.revision, next: second, events: [], turns: [], evidence: [] });
+  await store.updateCompletionIntent('thread', { expectedRevision: 1, next: { ...intent, revision: 2, status: 'superseded', updatedAt: 4 } });
+  expect((await store.load('thread'))?.state).toEqual(second);
+  expect((await store.load('thread'))?.completionIntents).toEqual([]);
+  expect(store.loadGoalById(first.goalId)?.completionIntents?.[0]).toMatchObject({ revision: 2, status: 'superseded', application: { goalId: first.goalId } });
+  const other = createGoalState({ sessionId: 'other', objective: 'other', expectedEvidenceKinds: ['answer'], now: 5 });
+  const colliding = createGoalCompletionIntent({ state: other, taskId: 'other-task', turnId: 'other-turn', summary: 'other', now: 5 });
+  await expect(store.commit({ sessionId: 'other', expectedRevision: null, next: other, events: [], turns: [], evidence: [], completionIntent: { expectedRevision: null, next: { ...colliding, intentId: intent.intentId } } })).rejects.toThrow();
+  expect(await store.load('other')).toBeNull();
+  expect(store.loadGoalById(first.goalId)?.completionIntents?.[0].revision).toBe(2);
+});

@@ -1,12 +1,13 @@
 import type { Config, ModelAdapter } from '../types.js';
-import { type LoginCommandResult, type LoginOptions } from './login.js';
+import { type LoginCommandResult, type LoginOptions, type LoginCancellation } from './login.js';
 export interface ChatLoginBootstrapOptions {
     interactive: boolean;
     hasInitialInput: boolean;
+    cancellation?: LoginCancellation;
 }
 export interface ChatLoginBootstrapDependencies {
     createAdapter(config: Config): ModelAdapter;
-    runLogin(options: LoginOptions): Promise<LoginCommandResult>;
+    runLogin(options: LoginOptions, cancellation?: LoginCancellation): Promise<LoginCommandResult>;
     loadConfig(): Promise<Config>;
     writeLine(text: string): void;
 }

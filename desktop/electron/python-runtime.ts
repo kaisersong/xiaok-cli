@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { buildManagedPythonChildEnv } from '../../src/platform/mcp/python-server.js';
 
 const execFileAsync = promisify(execFile);
 const REQUIRED_MODULES = ['jsonschema', 'pydantic', 'bs4'];
@@ -13,7 +14,7 @@ const PYTHON_COMPATIBILITY_TAG_SNIPPET = 'import sys; print(f"cp{sys.version_inf
 export type PythonExecFile = (
   command: string,
   args: string[],
-  options: { timeout: number }
+  options: { timeout: number; env?: NodeJS.ProcessEnv }
 ) => Promise<unknown>;
 
 export interface EnsureSlideRendererPythonReadyOptions {
@@ -40,9 +41,31 @@ export function buildPythonServerEnv(
   };
 }
 
+export function resolvePythonServerLaunch(options: {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  platform: NodeJS.Platform;
+  preferredPython?: string;
+}): { command: string; args: string[]; env?: Record<string, string> } {
+  if (options.command !== 'python' && options.command !== 'python3') {
+    return { command: options.command, args: options.args, env: options.env };
+  }
+  const command = normalizePythonServerCommand(options.command, options.platform, options.preferredPython);
+  const env = buildPythonServerEnv(options.env);
+  const managed = Boolean(options.preferredPython) && command === options.preferredPython;
+  return {
+    command,
+    args: managed ? ['-B', ...options.args] : options.args,
+    env: managed ? buildManagedPythonChildEnv(env) : env,
+  };
+}
+
 async function canImportRequiredModules(exec: PythonExecFile, pythonCommand: string): Promise<boolean> {
   try {
-    await exec(pythonCommand, ['-c', IMPORT_CHECK_SNIPPET], { timeout: 15_000 });
+    await exec(pythonCommand, ['-B', '-c', IMPORT_CHECK_SNIPPET], {
+      timeout: 15_000, env: buildManagedPythonChildEnv(process.env),
+    });
     return true;
   } catch {
     return false;
@@ -157,7 +180,9 @@ export async function detectPythonCompatibilityTag(
   exec: PythonExecFile = execFileAsync,
 ): Promise<string | null> {
   try {
-    const result = await exec(pythonCommand, ['-c', PYTHON_COMPATIBILITY_TAG_SNIPPET], { timeout: 15_000 });
+    const result = await exec(pythonCommand, ['-B', '-c', PYTHON_COMPATIBILITY_TAG_SNIPPET], {
+      timeout: 15_000, env: buildManagedPythonChildEnv(process.env),
+    });
     const stdout = readExecStdout(result).trim().toLowerCase();
     return /^cp\d{2,3}$/.test(stdout) ? stdout : null;
   } catch {
@@ -189,9 +214,9 @@ export async function ensureSlideRendererPythonReady(
   if (options.wheelsDir) {
     try {
       await exec(options.venvPython, [
-        '-m', 'pip', 'install', '--no-index', '--find-links', options.wheelsDir,
+        '-B', '-m', 'pip', 'install', '--no-index', '--find-links', options.wheelsDir,
         ...REQUIRED_DISTRIBUTIONS,
-      ], { timeout: 60_000 });
+      ], { timeout: 60_000, env: buildManagedPythonChildEnv(process.env) });
     } catch {
       // Fall through to import check and then online fallback.
     }
@@ -204,9 +229,9 @@ export async function ensureSlideRendererPythonReady(
 
   try {
     await exec(options.venvPython, [
-      '-m', 'pip', 'install',
+      '-B', '-m', 'pip', 'install',
       ...REQUIRED_DISTRIBUTIONS,
-    ], { timeout: 120_000 });
+    ], { timeout: 120_000, env: buildManagedPythonChildEnv(process.env) });
   } catch {
     // Online fallback failed, final import check below determines ready state.
   }

@@ -1,4 +1,4 @@
-import type { Config, LegacyConfig } from '../../types.js';
+import type { Config, LegacyConfig, ConfigInput, ConfigV2Input } from '../../types.js';
 import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
 import {
@@ -205,7 +205,7 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
   };
 }
 
-export function normalizeConfig(config: Config | LegacyConfig): Config {
+export function normalizeConfig(config: ConfigInput): Config {
   if (config.schemaVersion === 2) {
     const normalized = {
       ...config,
@@ -219,7 +219,7 @@ export function normalizeConfig(config: Config | LegacyConfig): Config {
   return withNormalizedDefaults(normalizeLegacyConfig(config));
 }
 
-function withNormalizedDefaults(config: Config): Config {
+function withNormalizedDefaults(config: ConfigV2Input): Config {
   return {
     ...config,
     intentBoundary: {

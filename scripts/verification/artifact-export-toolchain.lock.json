@@ -1,0 +1,36 @@
+{
+  "version": "go1.27.1",
+  "source": "https://go.dev/dl/?mode=json",
+  "hosts": {
+    "darwin-x64": {
+      "filename": "go1.27.1.darwin-amd64.tar.gz",
+      "sha256": "8f8f52c6649542cf027bbc9b9c68d1ec042f9f34808a40413f0b8b3f66f3caa4",
+      "size": 71621873
+    },
+    "darwin-arm64": {
+      "filename": "go1.27.1.darwin-arm64.tar.gz",
+      "sha256": "ee215d57e0ec269c60cc9ceca68e6bda321ba9ee5afe24f4b0988703c2d87d12",
+      "size": 68100347
+    },
+    "linux-x64": {
+      "filename": "go1.27.1.linux-amd64.tar.gz",
+      "sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445",
+      "size": 70553950
+    },
+    "linux-arm64": {
+      "filename": "go1.27.1.linux-arm64.tar.gz",
+      "sha256": "3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec",
+      "size": 67009954
+    },
+    "win32-x64": {
+      "filename": "go1.27.1.windows-amd64.zip",
+      "sha256": "a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d",
+      "size": 78931360
+    },
+    "win32-arm64": {
+      "filename": "go1.27.1.windows-arm64.zip",
+      "sha256": "13b69b87bb0e83f96bc68560a8cace7f0343b1e03469f1110ea18d17e3234069",
+      "size": 75038673
+    }
+  }
+}

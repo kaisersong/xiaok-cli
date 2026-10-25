@@ -60,10 +60,11 @@ describe('ScheduledPage stale schedule edits', () => {
     await waitFor(() => expect(mocks.deleteThread).toHaveBeenCalledWith('old-thread'));
     mocks.getScheduledTasks.mockResolvedValue([{ ...oldTask, threadId: 'new-thread', lastRunAt: 200, updatedAt: 3 }]);
     const writes: unknown[] = [];
-    // jsdom 29 exposes Storage as a Proxy, so owning/overriding `setItem` on the
-    // `localStorage` instance is silently ignored; spy on the prototype instead.
-    const originalSetItem = Storage.prototype.setItem;
-    const cacheWrites = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    // The Node compatibility storage has own methods; real jsdom Storage is a
+    // Proxy whose methods live on Storage.prototype. Observe the actual owner.
+    const storageOwner = Object.hasOwn(localStorage, 'setItem') ? localStorage : Storage.prototype;
+    const originalSetItem = storageOwner.setItem;
+    const cacheWrites = vi.spyOn(storageOwner, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
       if (key === 'xiaok:scheduled-tasks') writes.push(JSON.parse(value));
       return originalSetItem.call(this, key, value);
     });
@@ -333,6 +334,13 @@ describe('ScheduledPage stale schedule edits', () => {
     });
     expect(mocks.createTask).not.toHaveBeenCalled();
     expect(mocks.createThread).not.toHaveBeenCalled();
+  });
+
+  it('pending publication does not create a task or report a successful Loop start', async () => {
+    mocks.getScheduledTasks.mockResolvedValue([{id:'pending-schedule',name:'Pending Loop',description:'',prompt:'',frequency:'manual',status:'active',executorKind:'loop',loopId:'user-loop-1',createdAt:1,updatedAt:1}]);
+    mocks.runLoopNow.mockResolvedValue({status:'publication_pending',run:{id:'run',status:'running'}});
+    renderScheduledPage();await screen.findByText('Pending Loop');fireEvent.click(screen.getByRole('button',{name:'运行'}));
+    await screen.findByText('等待验证发布');expect(mocks.createTask).not.toHaveBeenCalled();expect(mocks.createThread).not.toHaveBeenCalled();expect(screen.queryByText('循环已启动')).not.toBeInTheDocument();
   });
 
   it('暂停 Loop 计划时写回 main process 的 TimedAction 状态', async () => {

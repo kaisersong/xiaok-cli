@@ -1,0 +1,2 @@
+/** Host composition only. These calls do not expose the controller's authorization issuer. */
+export const COMPLETION_METHODS = ['completion.read-intent-registration', 'completion.read-intent-contract', 'completion.read-goal-fork-source', 'completion.open-owner', 'completion.prepare-owner', 'completion.prepare-owner-request', 'completion.lookup-owner-request', 'completion.recover-owner-request', 'completion.authorize-owner', 'completion.inspect', 'completion.settle', 'completion.authorize', 'completion.receiver-challenge', 'completion.receiver-reply'];

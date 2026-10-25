@@ -1,5 +1,6 @@
-import { builtinModules, isBuiltin, registerHooks } from 'node:module';
+import { builtinModules, isBuiltin, registerHooks, syncBuiltinESMExports } from 'node:module';
 import { realpathSync } from 'node:fs';
+import os from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -84,6 +85,22 @@ export async function verifyGuardTree(guardRoot, expectedDigest) {
     fail('KIMI_D9_GUARD_DIGEST_MISMATCH');
   }
   return actualDigest;
+}
+
+const accountHome = process.env.XIAOK_TEST_ACCOUNT_HOME;
+if (accountHome) {
+  const originalUserInfo = os.userInfo.bind(os);
+  os.homedir = () => accountHome;
+  os.userInfo = options => {
+    const info = originalUserInfo(options);
+    return {
+      ...info,
+      homedir: Buffer.isBuffer(info.homedir)
+        ? Buffer.from(accountHome)
+        : accountHome,
+    };
+  };
+  syncBuiltinESMExports();
 }
 
 if (process.env.XIAOK_D9_RUNTIME_GUARD_POLICY) {

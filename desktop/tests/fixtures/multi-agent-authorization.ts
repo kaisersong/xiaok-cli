@@ -47,7 +47,7 @@ export async function authorizationFixture(cleanup: Array<() => void | Promise<v
   cleanup.push(() => services.disposeMultiAgent());
   const boundary = services.multiAgent!;
   await boundary.ready;
-  await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' });
+  await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
   const store = (boundary.service as unknown as { options: { store: DesktopMultiAgentStore } }).options.store;
   const db = (store as unknown as { db: SqliteWithAuthorizer }).db;
   const contexts: DesktopAgentExecutionContext[] = [];

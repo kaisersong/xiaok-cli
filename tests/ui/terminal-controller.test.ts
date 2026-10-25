@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTerminalController } from '../../src/ui/terminal-controller.js';
+import type { SlashOverlayState } from '../../src/ui/overlay-state.js';
 
 describe('terminal-controller surface state', () => {
   it('opens slash overlay from input text', () => {
@@ -49,7 +50,7 @@ describe('terminal-controller', () => {
     ]);
     controller.insertText('/');
     controller.handleKey('\x1b[B');
-    expect(controller.getState().overlay?.selectedIndex).toBe(1);
+    expect((controller.getState().overlay as SlashOverlayState | null)?.selectedIndex).toBe(1);
     expect(controller.getState().focusTarget).toBe('input');
   });
 

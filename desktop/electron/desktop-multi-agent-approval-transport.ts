@@ -97,9 +97,9 @@ export class DesktopMultiAgentApprovalTransport {
         if (record.phase !== 'reserved') return;
         let admissionRejected = false;
         try {
-          this.options.store.transaction(() => {
+          this.options.store.transaction((acceptedPort) => {
             try { this.assertCurrent(record); } catch (error) { admissionRejected = !this.failure(context.groupId); throw error; }
-            this.options.store.commitApprovalRequest(operation);
+            acceptedPort.commitApprovalRequest(operation);
             record.phase = 'pending';
             if (this.taskPolicies.get(context)?.has(this.policyKey(dto))) {
               // Persist a fresh decision for this invocation, then use the same
@@ -108,7 +108,7 @@ export class DesktopMultiAgentApprovalTransport {
               const operationId = `task-policy:${approvalId}`;
               const result = { operationId, state: 'applied' as const, groupId: dto.groupId,
                 targetAgentId: dto.agentId, expectedTurn: dto.turn };
-              const finalized = this.options.store.finalizeApproval({ groupId: dto.groupId, approvalId, bootId: dto.bootId, status: 'approved',
+              const finalized = acceptedPort.finalizeApproval({ groupId: dto.groupId, approvalId, bootId: dto.bootId, status: 'approved',
                 decisionOperation: { groupId: dto.groupId, operationId, command: 'approval_decision',
                   requestHash: digest(encodeMultiAgentRow({ scope: this.policyKey(dto), approvalId })), applyState: 'applied', result } });
               record.dto = finalized.operation.result.approval; record.phase = 'approved';
@@ -177,7 +177,7 @@ export class DesktopMultiAgentApprovalTransport {
           || record.phase !== 'finalizing' && record.phase !== 'pending') throw new Error('approval_already_decided_or_invalidated');
         let result!: MultiAgentControlResult;
         try {
-          this.options.store.transaction(() => {
+          this.options.store.transaction((acceptedPort) => {
             this.options.service.assertApprovalUserAccess(input.access, input.requestSource, input.groupId);
             // BEGIN is synchronous IO, but wall time can cross the deadline
             // during it. Classify ordinary invalidation inside this same
@@ -188,7 +188,7 @@ export class DesktopMultiAgentApprovalTransport {
             const reason = invalid ? record.invalidation ?? (status === 'expired' ? 'approval_deadline' : 'actor_aborted') : input.decision === 'deny' ? 'user_denied' : undefined;
             result = { operationId: input.operationId, state: 'applied', groupId: input.groupId,
               targetAgentId: record.dto.agentId, expectedTurn: record.dto.turn, ...(invalid ? { outcome: 'rejected' as const, error: 'approval_invalidated' } : {}) };
-            const finalized = this.options.store.finalizeApproval({ groupId: input.groupId, approvalId: input.approvalId,
+            const finalized = acceptedPort.finalizeApproval({ groupId: input.groupId, approvalId: input.approvalId,
               bootId: record.dto.bootId, status, ...(reason === undefined ? {} : { reason }),
               decisionOperation: { groupId: input.groupId, operationId: input.operationId, command: 'approval_decision', requestHash, applyState: 'applied', result: { ...result } } });
             record.dto = finalized.operation.result.approval;
@@ -264,8 +264,8 @@ export class DesktopMultiAgentApprovalTransport {
     this.track(this.options.service.runApprovalCommand(this.owner, record.dto.groupId, () => {
       if (!this.records.has(record.dto.approvalId)) return;
       try {
-        this.options.store.transaction(() => {
-          const finalized = this.options.store.finalizeApproval({ groupId: record.dto.groupId, approvalId: record.dto.approvalId,
+        this.options.store.transaction((acceptedPort) => {
+          const finalized = acceptedPort.finalizeApproval({ groupId: record.dto.groupId, approvalId: record.dto.approvalId,
             bootId: record.dto.bootId, status: record.invalidation === 'approval_deadline' || record.invalidation === 'actor_deadline' ? 'expired' : 'invalidated', reason: record.invalidation });
           record.dto = finalized.operation.result.approval; record.phase = 'terminal';
         });

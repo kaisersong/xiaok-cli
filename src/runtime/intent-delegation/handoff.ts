@@ -1,10 +1,29 @@
 import type { IntentLedgerRecord, SessionIntentLedger } from './types.js';
 import { cloneIntentRecord } from './types.js';
+import type {StoredIntentRecordInput,NormalizedStoredIntentRecord} from './stored-intent-clone.js';
 
-export function resolveOwnedActiveIntent(
-  ledger: SessionIntentLedger | null | undefined,
+/** Only selection/stage/flag DATA consumed by the pending-handoff query. */
+export interface PendingHandoffIntentData {
+  readonly intentId: unknown;
+  readonly activeStageId?: unknown;
+  readonly stages?: unknown;
+}
+export interface PendingHandoffLedgerData<T extends PendingHandoffIntentData = PendingHandoffIntentData> {
+  readonly activeIntentId?: unknown;
+  readonly ownership: { readonly ownerInstanceId?: unknown; readonly previousOwnerInstanceId?: unknown };
+  readonly intents: readonly T[];
+}
+function handoffObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function handoffFail(field: string): never { throw new TypeError(`intent_handoff:${field}`); }
+
+export function resolveOwnedActiveIntent(ledger: SessionIntentLedger | null | undefined, instanceId: string): IntentLedgerRecord | undefined;
+export function resolveOwnedActiveIntent<T extends PendingHandoffIntentData>(ledger: PendingHandoffLedgerData<T> | null | undefined, instanceId: string): T | undefined;
+export function resolveOwnedActiveIntent<T extends PendingHandoffIntentData>(
+  ledger: PendingHandoffLedgerData<T> | null | undefined,
   instanceId: string,
-): IntentLedgerRecord | undefined {
+): T | undefined {
   if (!ledger?.activeIntentId) {
     return undefined;
   }
@@ -18,21 +37,30 @@ export function resolveOwnedActiveIntent(
 }
 
 export function hasPendingFreshContextHandoff(
-  ledger: SessionIntentLedger | null | undefined,
+  ledger: PendingHandoffLedgerData | null | undefined,
   instanceId: string,
 ): boolean {
   const activeIntent = resolveOwnedActiveIntent(ledger, instanceId);
-  if (!activeIntent) {
-    return false;
+  if (!activeIntent) return false;
+  const stages = activeIntent.stages;
+  if (!Array.isArray(stages)) return handoffFail('stages');
+  const entries: readonly unknown[] = stages;
+  for (const value of entries) {
+    if (!handoffObject(value)) return handoffFail('stage');
+    if (value.stageId !== activeIntent.activeStageId) continue;
+    const flag = value.needsFreshContextHandoff;
+    if (typeof flag !== 'boolean') return handoffFail('needsFreshContextHandoff');
+    return flag;
   }
-  const activeStage = activeIntent.stages.find((stage) => stage.stageId === activeIntent.activeStageId);
-  return Boolean(activeStage?.needsFreshContextHandoff);
+  return false;
 }
 
+export function consumeFreshContextHandoff(intent: IntentLedgerRecord, now?: number): IntentLedgerRecord;
+export function consumeFreshContextHandoff(intent: StoredIntentRecordInput, now?: number): NormalizedStoredIntentRecord;
 export function consumeFreshContextHandoff(
-  intent: IntentLedgerRecord,
+  intent: StoredIntentRecordInput,
   now = Date.now(),
-): IntentLedgerRecord {
+): NormalizedStoredIntentRecord {
   const next = cloneIntentRecord(intent);
   const activeStage = next.stages.find((stage) => stage.stageId === next.activeStageId);
   if (!activeStage?.needsFreshContextHandoff) {

@@ -24,6 +24,7 @@ describeE2E('artifact workspace real two-window convergence', () => {
         ...process.env,
         NODE_ENV: 'test',
         XIAOK_E2E_USER_DATA: userData,
+        XIAOK_CONFIG_DIR: join(userData, 'config'),
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
     });

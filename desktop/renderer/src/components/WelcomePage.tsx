@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FolderKanban } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { api } from '../api';
-import type { AutomationOverviewSnapshotView } from '../api/types';
+import type { AutomationOverviewSnapshotView, AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../api/types';
 import { getDesktopApi } from '../shared/desktop';
 import { useLocale } from '../contexts/LocaleContext';
 import { useKSwarm } from '../contexts/KSwarmContext';
@@ -21,17 +21,13 @@ import {
   type WelcomeHomeProjection,
 } from './welcome-home-projection';
 
-interface AssistantOverviewView extends AssistantHomeSnapshot {
-  candidates: AssistantCandidateView[];
-}
-
 interface AssistantDesktopApi {
-  getAssistantOverview(): Promise<AssistantOverviewView>;
-  activateAssistant(): Promise<unknown>;
-  pauseAssistant(): Promise<unknown>;
-  resumeAssistant(): Promise<unknown>;
-  acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }): Promise<unknown>;
-  rejectAssistantCandidate(input: { candidateId: string }): Promise<unknown>;
+  getAssistantOverview(): Promise<AssistantOverviewDto>;
+  activateAssistant(): Promise<AssistantProfileDto>;
+  pauseAssistant(): Promise<AssistantProfileDto>;
+  resumeAssistant(): Promise<AssistantProfileDto>;
+  acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }): Promise<AssistantAcceptResultDto>;
+  rejectAssistantCandidate(input: { candidateId: string }): Promise<AssistantCandidateDto>;
   kbListCollections(): Promise<unknown[]>;
 }
 
@@ -89,6 +85,7 @@ export function WelcomePage() {
   const [assistantCandidates, setAssistantCandidates] = useState<AssistantCandidateView[]>([]);
   const [assistantLoadState, setAssistantLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantOperationUnknown, setAssistantOperationUnknown] = useState(false);
   const [assistantBusyCandidateId, setAssistantBusyCandidateId] = useState<string | null>(null);
   const [assistantDetailsOpen, setAssistantDetailsOpen] = useState(false);
   const [assistantKnowledgeCollections, setAssistantKnowledgeCollections] = useState<Array<{ id: string; name: string }>>([]);
@@ -116,7 +113,9 @@ export function WelcomePage() {
       setAssistantSnapshot(buildAssistantHomeProjection(overview));
       setAssistantCandidates(overview.candidates ?? []);
       setAssistantLoadState('ready');
+      setAssistantOperationUnknown(false);
     } catch {
+      setAssistantOperationUnknown(true);
       setAssistantSnapshot(null);
       setAssistantCandidates([]);
       setAssistantLoadState('unavailable');
@@ -154,10 +153,13 @@ export function WelcomePage() {
       setAssistantLoadState('unavailable');
       return;
     }
+    setAssistantOperationUnknown(false);
     setAssistantBusy(true);
     try {
       await mutation.call(assistantApi);
       await loadAssistantOverview();
+    } catch {
+      setAssistantOperationUnknown(true);
     } finally {
       setAssistantBusy(false);
     }
@@ -170,10 +172,13 @@ export function WelcomePage() {
       setAssistantLoadState('unavailable');
       return;
     }
+    setAssistantOperationUnknown(false);
     setAssistantBusyCandidateId(candidateId);
     try {
       await mutation.call(assistantApi, { candidateId, ...(collectionId ? { collectionId } : {}) });
       await loadAssistantOverview();
+    } catch {
+      setAssistantOperationUnknown(true);
     } finally {
       setAssistantBusyCandidateId(null);
     }
@@ -240,6 +245,14 @@ export function WelcomePage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col px-6 pt-[clamp(4rem,12vh,6.25rem)] sm:px-8">
+      {assistantOperationUnknown && (
+        <div role="alert" className="mx-auto mb-4 flex w-full max-w-[920px] items-center gap-3 text-sm text-[var(--c-text-secondary)]">
+          <span>{t.assistant.operationUnknown}</span>
+          <button type="button" disabled={assistantBusy || assistantBusyCandidateId !== null} onClick={() => void loadAssistantOverview()} className="shrink-0 underline">
+            {t.assistant.refreshStatus}
+          </button>
+        </div>
+      )}
       <ConversationFirstHome
         typedGreeting={typedGreeting}
         prompt={prompt}

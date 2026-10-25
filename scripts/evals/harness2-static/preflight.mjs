@@ -89,7 +89,7 @@ const inventorySpecs = [
     '已有分层整理；未读取用户记忆正文，不断言目标问题未覆盖。'],
   ['desktop/electron/desktop-system-prompt.ts', 'desktop_prompt', ['export function buildDesktopSystemPrompt'],
     'Desktop base prompt 源码；实际 skill/workspace/memory 义务仍需真实 frame 对照。'],
-  ['desktop/electron/desktop-services.ts', 'desktop_execution', ['    const modelIdentity =', '      loopResult = await runDesktopToolLoop('],
+  ['desktop/electron/desktop-services.ts', 'desktop_execution', ['    const modelIdentity =', '      const runLoop='],
     'Desktop 独立拼装 system prompt 并调用真实 loop；不可借 CLI 能力推断已接入。'],
   ['desktop/electron/loop-evaluator.ts', 'production_verifier_registry', ['export async function evaluateLoopContract'],
     '只聚合已注册 verifier；具体 operation 映射需实际 criterion/version/回执。'],
@@ -104,10 +104,10 @@ const inventorySpecs = [
 function collectInventory(root) {
   return inventorySpecs.map(([path, role, anchors, note]) => {
     const bytes = readFileSync(join(root, path));
-    const lines = bytes.toString('utf8').split('\n');
+    const lines = bytes.toString('utf8').split(/\r?\n/);
     const sourceRefs = anchors.map(symbol => {
       const matches = lines.flatMap((line, index) => line.startsWith(symbol) ? [index + 1] : []);
-      if (matches.length !== 1) throw new Error('source_anchor_changed');
+      if (matches.length !== 1) throw new Error(`source_anchor_changed: ${path}: ${symbol.trim()} (${matches.length} matches)`);
       return { symbol: symbol.trim(), line: matches[0] };
     });
     return { path, role, sha256: createHash('sha256').update(bytes).digest('hex'), sourceRefs, note };

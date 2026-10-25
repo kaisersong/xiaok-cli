@@ -50,7 +50,7 @@ describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission call
 
   it.each(['prepare', 'root-followup', 'user-followup'].flatMap(caller => ['groups', 'thread_bindings'].map(table => ({ caller, table }))))('AF6a $caller × $table actual read failure cancels the existing sibling before new dispatch', async ({ caller, table }) => {
     const f = await siblings(caller === 'prepare');
-    const site = caller === 'prepare' ? serviceSite('async prepareRoot(', 'this.assertWritable(group);')
+    const site = caller === 'prepare' ? serviceSite('async prepareRoot(', "this.assertWritable(group, 'multi_agent_persistence_failed', decisionToken);")
       : caller === 'root-followup' ? serviceSite('private enqueueNextFollowup(', "this.assertWritable(group, 'multi_agent_followup_admission_failed')")
       : serviceSite('private async userCommand(', 'this.assertWritable(group);');
     const access = f.access();
@@ -78,7 +78,7 @@ describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission call
     vi.spyOn(f.host, 'prepareTask').mockImplementation(async (...args) => { const value = await original(...args); prepared.release(); await resume.wait; return value; });
     const outcome = f.service.prepareRoot(f.host, 'activity-thread', { prompt: 'second window', materials: [] }).then(value => ({ value }), error => ({ error }));
     await prepared.wait;
-    const fault = sqliteFault(f, { table, column: table === 'groups' ? 'data_json' : 'thread_id', site: serviceSite('async prepareRoot(', 'this.assertWritable(group);', 1) });
+    const fault = sqliteFault(f, { table, column: table === 'groups' ? 'data_json' : 'thread_id', site: serviceSite('async prepareRoot(', "this.assertWritable(group, 'multi_agent_persistence_failed', decisionToken);", 1) });
     resume.release(); const result = await outcome;
     expect(result).toHaveProperty('error'); expect(fault.traces).toHaveLength(1);
     expect.soft(f.live().frozen).toBe('multi_agent_persistence_failed'); expect.soft(f.busy.signal.aborted).toBe(true);

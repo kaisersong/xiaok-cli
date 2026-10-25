@@ -1,3 +1,5 @@
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
@@ -49,25 +51,39 @@ export class OpenAIResponsesAdapter {
         return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity), this.catalogIdentity);
     }
     async *stream(messages, tools, systemPrompt, options) {
-        let attempt = 0;
-        while (true) {
-            options?.signal?.throwIfAborted();
-            let emittedAny = false;
-            try {
-                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options)) {
-                    emittedAny = true;
-                    yield chunk;
+        const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+        if (disclosure !== undefined) {
+            assertProviderDisclosureActive(disclosure);
+            const disclosureSignal = getProviderDisclosureSignal(disclosure);
+            options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
+        }
+        try {
+            let attempt = 0;
+            while (true) {
+                options?.signal?.throwIfAborted();
+                let emittedAny = false;
+                try {
+                    for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options)) {
+                        emittedAny = true;
+                        yield chunk;
+                    }
+                    return;
                 }
-                return;
+                catch (error) {
+                    if (disclosure !== undefined)
+                        assertProviderDisclosureActive(disclosure);
+                    // 已产出 chunk 后重试会重复输出，必须放弃重试
+                    if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES)
+                        throw error;
+                    const delayMs = Math.min(2000 * 2 ** attempt, 10000);
+                    await sleep(delayMs, options?.signal);
+                    attempt++;
+                }
             }
-            catch (error) {
-                // 已产出 chunk 后重试会重复输出，必须放弃重试
-                if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES)
-                    throw error;
-                const delayMs = Math.min(2000 * 2 ** attempt, 10000);
-                await sleep(delayMs, options?.signal);
-                attempt++;
-            }
+        }
+        finally {
+            if (disclosure !== undefined)
+                disposeProviderDisclosureContext(disclosure);
         }
     }
     async *streamOnce(messages, tools, systemPrompt, options) {
@@ -80,7 +96,9 @@ export class OpenAIResponsesAdapter {
         const endpoint = new URL('responses', ensureTrailingSlash(this.baseUrl)).toString();
         let response;
         try {
-            response = await fetch(endpoint, {
+            const fetchImpl = options?.providerDisclosure
+                ? createProviderDisclosureFetch(options.providerDisclosure, globalThis.fetch.bind(globalThis)) : fetch;
+            response = await fetchImpl(endpoint, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.apiKey}`,

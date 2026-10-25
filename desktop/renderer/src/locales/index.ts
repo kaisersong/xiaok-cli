@@ -7,6 +7,11 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  loopPublication: import('./loop-publication').LoopPublicationLabels;
+  observation: {enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
+    compoundExperiment:string;compoundStep:Record<'not_started'|'pending'|'denied'|'succeeded'|'failed'|'cancelled'|'unknown',string>;compoundEdit:(status:string)=>string;compoundValidation:(status:string)=>string;compoundUnknown:(count:number)=>string;
+    semanticState:Record<'waiting'|'compacted'|'skipped'|'failed',string>;semanticReason:Record<'economics'|'changed'|'no-gain'|'budget'|'unavailable',string>;
+    semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>string;semanticExperiment:string};
   diffView: { showFull: string };
   roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
@@ -34,7 +39,7 @@ export interface LocaleStrings {
     contentSegmented: string; contentSegment: (current: number, total: number) => string;
     previousContentSegment: string; nextContentSegment: string;
     queuedReceipt: (agentId: string, expectedTurn?: number) => string;
-    checkOperation: string; userSender: string; moreGroups: string;
+    checkOperation: string; userSender: string; finalContentUnavailable: string; moreGroups: string;
     resources: string; resourcesEmpty: string; moreResources: string; keepResource: string; retryCleanup: string; resourceConfirmation: string;
     confirmKeep: string; keepExplanation: string; newGroup: string; confirmReset: string; resetExplanation: string; resetPending: string;
     resourceStates: Record<string, string>;
@@ -1199,9 +1204,12 @@ export interface LocaleStrings {
     mobileRelayStateMissing: string;
     mobileRelayStateUnparseable: string;
     mobileRelayExpiredAt: string;
+    mobileRelaySignInFailed: string;
     mobileRelaySignInAction: string;
     mobileRelayReauthHint: string;
     mobilePairingLoading: string;
+    mobileRelayReadUnavailable: string;
+    mobileRelayReadRetry: string;
     mobilePairingLoadFailed: string;
     mobilePairingQrAlt: string;
     mobilePairingCopyLink: string;
@@ -1237,6 +1245,8 @@ export interface LocaleStrings {
     // general pane - service status
     serviceStatusTitle: string;
     serviceStatusChecking: string;
+    serviceStatusReadRetry: string;
+    serviceRestartUnknown: string;
     serviceStatusLoadError: string;
     serviceRestartFailed: string;
     serviceStatusRunning: string;
@@ -1251,6 +1261,12 @@ export interface LocaleStrings {
     taskConcurrencyMin: string;
     taskConcurrencyMax: string;
     // general pane - stage debug
+    configLoadFailed: string;
+    configSaveFailed: string;
+    configOperationUnknown: string;
+    modelConfigOperationUnknown: string;
+    modelConfigInputInvalid: string;
+    modelConfigUnavailable: string;
     stageDebugTitle: string;
     stageDebugDesc: string;
     stageDebugOn: string;
@@ -1351,6 +1367,15 @@ export interface LocaleStrings {
     userLoopOutputDirectoryLabel: string;
     userLoopOutputFileNameLabel: string;
     userLoopOutputPath: string;
+    userLoopArtifactsOpen: string;
+    userLoopArtifactsLoading: string;
+    userLoopArtifactsUnavailable: string;
+    userLoopArtifactsEmpty: string;
+    userLoopArtifactsPrevious: string;
+    userLoopArtifactsNext: string;
+    userLoopArtifactsPage: (first:number,last:number,total:number)=>string;
+    userLoopArtifactBytes: (size:number)=>string;
+    userLoopWorkspaceNavigationHint: string;
     userLoopOpenOutputDirectory: string;
     userLoopPreviewOutputFile: string;
     userLoopViewTaskResult: string;
@@ -1369,6 +1394,9 @@ export interface LocaleStrings {
     loopDiagnosticsDesc: string;
     loopDiagnosticsRefresh: string;
     loopDiagnosticsRunNow: string;
+    loopDiagnosticsCopyLabels: {loop:string;status:string;history:string;observation:string;finishedAt:string;openAnomalies:string;owner:string;seen:string;suggestedAction:string;logs:string;none:string};
+    loopDiagnosticsVerifiedAt: (time: string) => string;
+    loopDiagnosticsPublicationPending: string;
     loopDiagnosticsRunning: string;
     loopDiagnosticsAlreadyRunning: string;
     loopDiagnosticsLastRun: string;
@@ -1813,6 +1841,10 @@ export interface LocaleStrings {
     aboutDownloadedVersion: (version: string) => string;
     aboutDownloadProgress: (progress: number) => string;
     aboutVersionAvailable: (version: string) => string;
+    updaterProjectionUnavailable: string;
+    updaterOperationUnknown: string;
+    updaterInputInvalid: string;
+    updaterRefreshData: string;
     aboutChecking: string;
     aboutInstallRestart: string;
     aboutInstallProgress: string;
@@ -1909,6 +1941,11 @@ export interface LocaleStrings {
     // connectors pane
     connectorSaveFailedNoDesktop: string;
     connectorConfigParseError: string;
+    connectorProjectionUnavailable: string;
+    connectorOperationUnknown: string;
+    connectorInputInvalid: string;
+    connectorRefreshData: string;
+    connectorStatusDecryptFailed: string;
     connectorLoadFailed: string;
     networkTools: string;
     networkToolsDesc: string;
@@ -1992,6 +2029,10 @@ export interface LocaleStrings {
     pluginsInstall: string;
     pluginsInstallFailed: string;
     pluginsRestartHint: string;
+    pluginsCatalogUnavailable: string;
+    pluginsCatalogRetry: string;
+    pluginsCatalogLoading: string;
+    pluginsCatalogToolCount: (count: number) => string;
     // LocalMemoryStatsCard
     relativeTimeJustNow: string;
     relativeTimeMinutesAgo: (n: number) => string;
@@ -2382,6 +2423,10 @@ export interface LocaleStrings {
   projectsPageOffline: string;
 
   // projects - knowledge and rules tab
+  projectsPrinciplesOperationUnknown: string;
+  projectsPrinciplesInputInvalid: string;
+  projectsPrinciplesProjectionUnavailable: string;
+  projectsPrinciplesRefresh: string;
   projectsPrinciplesTab: string;
   projectsPrinciplesAdd: string;
   projectsPrinciplesImportMemory: string;
@@ -2663,6 +2708,8 @@ export interface LocaleStrings {
   };
 
   assistant: {
+    operationUnknown: string;
+    refreshStatus: string;
     title: string;
     morningScheduleName: string;
     eveningScheduleName: string;
@@ -2736,6 +2783,11 @@ export interface LocaleStrings {
 
   // knowledge page
   knowledge: {
+    projectionUnavailable: string;
+    operationUnknown: string;
+    inputInvalid: string;
+    refreshData: string;
+
     loading: string;
     pageTitle: string;
     emptyTitle: string;
@@ -2786,6 +2838,10 @@ export interface LocaleStrings {
     meetingRecorderFinishEditing: string;
     meetingRecorderProcessingTitle: string;
     meetingRecorderProcessingHint: string;
+    meetingRecorderInputInvalid: string;
+    meetingRecorderOperationUnknown: string;
+    meetingRecorderSavedFollowupFailed: string;
+    meetingRecorderNewDraftUnsaved: string;
     meetingRecorderCloseBlocked: string;
     meetingSettings: string;
     meetingControlPanelTitle: string;
@@ -2882,6 +2938,27 @@ export interface LocaleStrings {
   };
 
   // automations page
+  skillsReadonlyListFailed: string;
+  skillsReadonlyStatsFailed: string;
+  skillsReadonlyRetry: string;
+  meetingModelsReadonlyUnknown: string;
+  meetingModelsReadonlyUnavailable: string;
+  meetingAsrReadonlyUnknown: string;
+  meetingAsrReadonlyUnavailable: string;
+  channelMutationFailed: string;
+  mcpMutationFailed: string;
+  mcpInstallDeleteConfirm: string;
+  channelReadonlyUnknown: string;
+  channelReadonlyUnavailable: string;
+  mcpInstallsReadonlyUnknown: string;
+  mcpInstallsReadonlyUnavailable: string;
+  desktopReadonlyRetry: string;
+  skillsReadonlyUnknown: string;
+  skillsReadonlyMetricUnknown: string;
+  automationsReadFailed: string;
+  automationsMutationUnknown: string;
+  automationsStateUnknown: string;
+  automationsReadRetry: string;
   automationsTitle: string;
   automationsSubtitle: string;
   automationsOverview: string;
@@ -2933,6 +3010,11 @@ export interface LocaleStrings {
   automationsConstraintsNewBadge: string;
 
   // scheduled page
+  scheduledProjectionUnavailable: string;
+  scheduledOperationUnknown: string;
+  scheduledInputInvalid: string;
+  scheduledRefreshData: string;
+  scheduledMutationNotApplied: string;
   scheduledTitle: string;
   scheduledSubtitle: string;
   scheduledNew: string;
@@ -3050,6 +3132,22 @@ export interface LocaleStrings {
   };
 
   goalBar: {
+    verificationDefinition: string;
+    verificationDefinitionHelp: string;
+    verificationDefinitionInvalid: string;
+    nativePending: string;
+    recoverNative: string;
+    continueNative: string;
+    cancelNative: string;
+    nativeRetired: string;
+
+    statusVerificationUnavailable: string;
+    statusNeedsRevalidation: string;
+    statusPublicationPending: string;
+    statusBindingPending: string;
+    statusBindingRequired: string;
+    statusBindingMismatch: string;
+    statusVerifiedComplete: string;
     createGoal: string;
     goal: string;
     completionCriterion: string;
@@ -3062,6 +3160,8 @@ export interface LocaleStrings {
     confirmCreate: string;
     close: string;
     pause: string;
+    recoverPublication: string;
+    continuePublication: string;
     resume: string;
     retry: string;
     cancelGoal: string;
@@ -3344,6 +3444,9 @@ export interface LocaleStrings {
   automationsViewLoopDetail: string;
   automationsViewScheduleDetail: string;
   automationsClearRecord: string;
+  loopOperationResultUnknown: string;
+  loopProjectionUnavailable: string;
+  loopInputInvalid: string;
   automationsClearConfirm: (title: string) => string;
 
   // user loop starter templates

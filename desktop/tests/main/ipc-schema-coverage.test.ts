@@ -1,9 +1,45 @@
+import { registerHarnessOptimizationIpc } from '../../electron/harness-optimization-ipc.js';
+import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
+import { registerSkillMutationIpc } from '../../electron/skill-mutation-typed-ipc.js';
+import { registerChannelMcpMutationIpc } from '../../electron/channel-mcp-mutation-typed-ipc.js';
+import { registerMeetingMutationIpc } from '../../electron/meeting-mutation-typed-ipc.js';
+import { registerMeetingReadonlyIpc } from '../../electron/meeting-readonly-typed-ipc.js';
+import { registerChannelMcpReadonlyIpc } from '../../electron/channel-mcp-readonly-typed-ipc.js';
+import { registerSkillListIpc } from '../../electron/skill-list-typed-ipc.js';
+import { registerAutomationConfigIpc } from '../../electron/automation-config-typed-ipc.js';
+import { registerMobileSignInIpc } from '../../electron/mobile-signin-typed-ipc.js';
+import { registerServiceControlIpc } from '../../electron/service-control-typed-ipc.js';
+import { registerMobileReadonlyIpc } from '../../electron/mobile-readonly-typed-ipc.js';
+import { registerScheduledTimedActionIpc } from '../../electron/scheduled-timed-action-typed-ipc.js';
+import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
+import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
+import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
+import {registerLoopManagementIpc} from '../../electron/loop-management-typed-ipc.js';
+import {registerThreadMetadataIpc} from '../../electron/thread-metadata-typed-ipc.js';
+import {registerDesktopSmallConfigIpc} from '../../electron/desktop-small-config-typed-ipc.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'main.ts'), 'utf8');
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
+const currentViewChannels:string[]=[];
+registerHarnessOptimizationIpc({handle:channel=>{currentViewChannels.push(channel);}}, {} as never, () => null);
+registerMobileSignInIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerAutomationConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerSkillListIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerChannelMcpReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerMeetingReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerComputerUseCapabilityReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});registerKswarmStatusReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});registerSkillMutationIpc({handle:channel=>{currentViewChannels.push(channel);}});registerChannelMcpMutationIpc({handle:channel=>{currentViewChannels.push(channel);}});registerMeetingMutationIpc({handle:channel=>{currentViewChannels.push(channel);}}, new Map());
+registerServiceControlIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerMobileReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerScheduledTimedActionIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerLoopCurrentViewIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
+registerLoopOutputIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
+registerLoopManagementIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerThreadMetadataIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerDesktopSmallConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});
 
 function extractIpcChannels(source: string): string[] {
   const matches = [...source.matchAll(/(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*['"]([^'"]+)['"]/g)];
@@ -12,7 +48,7 @@ function extractIpcChannels(source: string): string[] {
 
 describe('IPC schema coverage', () => {
   it('enumerates all registered IPC channels from main.ts and ipc.ts', () => {
-    const mainChannels = extractIpcChannels(mainSource);
+    const mainChannels = [...extractIpcChannels(mainSource),...currentViewChannels];
     const ipcChannels = extractIpcChannels(ipcSource);
     const allChannels = [...new Set([...mainChannels, ...ipcChannels])].sort();
 
@@ -20,7 +56,7 @@ describe('IPC schema coverage', () => {
   });
 
   it('has no duplicate channel registrations across files', () => {
-    const mainChannels = extractIpcChannels(mainSource);
+    const mainChannels = [...extractIpcChannels(mainSource),...currentViewChannels];
     const ipcChannels = extractIpcChannels(ipcSource);
 
     const dupes = mainChannels.filter(c => ipcChannels.includes(c));
@@ -28,7 +64,7 @@ describe('IPC schema coverage', () => {
   });
 
   it('all channels follow the desktop: prefix convention', () => {
-    const mainChannels = extractIpcChannels(mainSource);
+    const mainChannels = [...extractIpcChannels(mainSource),...currentViewChannels];
     const ipcChannels = extractIpcChannels(ipcSource);
     const allChannels = [...mainChannels, ...ipcChannels];
 
@@ -36,8 +72,18 @@ describe('IPC schema coverage', () => {
     expect(nonConforming, `Channels not using desktop: prefix: ${nonConforming.join(', ')}`).toEqual([]);
   });
 
+  it('includes the five Harness channels in the semantic inventory', () => {
+    expect(currentViewChannels.filter(channel => /HarnessOptimization|OptimizationClockGuard/.test(channel)).sort()).toEqual([
+      'desktop:getHarnessOptimizationConfig',
+      'desktop:resetOptimizationClockGuard',
+      'desktop:revokeHarnessOptimizationGrants',
+      'desktop:saveHarnessOptimizationConfig',
+      'desktop:setHarnessOptimizationEnabled',
+    ]);
+  });
+
   it('registers loop diagnostics channels without renderer mutation channels', () => {
-    const mainChannels = extractIpcChannels(mainSource);
+    const mainChannels = [...extractIpcChannels(mainSource),...currentViewChannels];
     const ipcChannels = extractIpcChannels(ipcSource);
     const allChannels = new Set([...mainChannels, ...ipcChannels]);
 

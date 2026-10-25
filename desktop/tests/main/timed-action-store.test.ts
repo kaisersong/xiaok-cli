@@ -1,3 +1,6 @@
+import {createDesktopLoopRuntime} from '../../electron/loop-executor.js';
+import {LoopStore} from '../../electron/loop-store.js';
+import {createLoopTimedCompletionHost} from '../../electron/loop-timed-completion.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -138,7 +141,7 @@ describe('TimedActionStore', () => {
     });
   });
 
-  it('relinks stale loop action locks from terminal LoopRun decisions without counting success as a failure', () => {
+  it('relinks stale loop action locks from terminal LoopRun decisions without counting success as a failure', async () => {
     store.createAction({
       id: 'loop_relink',
       title: '循环恢复',
@@ -151,28 +154,11 @@ describe('TimedActionStore', () => {
     const [claimed] = store.claimDueActions(5 * 60_000, 1, { recoveryReason: 'normal_tick' });
     store.markRunRunning('loop_relink', claimed.runId, 5 * 60_000);
 
-    const releaseStaleLocks = store.releaseStaleLocks as unknown as (
-      now: number,
-      staleAfterMs: number,
-      options: {
-        resolveLinkedLoopRun: (input: { actionId: string; timedActionRunId: string }) => {
-          loopRunId: string;
-          loopStatus: 'success' | 'failed' | 'blocked';
-        } | undefined;
-      }
-    ) => number;
-    const recovered = releaseStaleLocks.call(store, 65 * 60_000, 60_000, {
-      resolveLinkedLoopRun: ({ actionId, timedActionRunId }) => {
-        expect(actionId).toBe('loop_relink');
-        expect(timedActionRunId).toBe(claimed.runId);
-        return {
-          loopRunId: 'loop-run-success',
-          loopStatus: 'success',
-        };
-      },
-    });
+    const loops=new LoopStore(join(rootDir,'loop.sqlite'));loops.createUserLoopTemplate({loopId:'user-loop-1',title:'Original',kind:'task_completion',prompt:'Original',now:1});
+    const began=loops.beginLoopRun('user-loop-1',{kind:'scheduled',timedActionId:'loop_relink',timedActionRunId:claimed.runId},300001,60000,{requestSource:'scheduler'});if(began.status!=='started')throw Error('begin');loops.finishLoopRunSuccess(began.run.id,[],300002,'Original');
+    const host=createLoopTimedCompletionHost({timedStore:store,loopStore:loops,captureAdmission:()=>()=>{},now:()=>65*60000});
+    try{expect(await host.finalize({actionId:'loop_relink',timedRunId:claimed.runId,mode:'stale',requestSource:'scheduler'})).toMatchObject({status:'applied',outcome:'success'});}finally{await host.close();loops.close();}
 
-    expect(recovered).toBe(1);
     expect(store.getAction('loop_relink')).toMatchObject({
       status: 'active',
       runCount: 1,
@@ -186,10 +172,23 @@ describe('TimedActionStore', () => {
       error: undefined,
       decision: expect.objectContaining({
         recoveryReason: 'stale_lock',
-        loopRunId: 'loop-run-success',
+        loopRunId: began.run.id,
         loopStatus: 'success',
       }),
     });
+  });
+
+  it('recovers stale pending Loop facts without success or failure accounting', async () => {
+    const loopId='artifact-evidence-regression';store.createAction({id:'pending',title:'pending',trigger:{kind:'interval',intervalMinutes:5},executor:{kind:'loop',loopId},source:'user',consecutiveFailures:2,now:0});
+    const [claimed]=store.claimDueActions(300000,1,{recoveryReason:'normal_tick'});store.markRunRunning('pending',claimed.runId,300000);
+    const runtime=createDesktopLoopRuntime({dataRoot:join(rootDir,'loop-runtime'),now:()=>300001}),recipe={version:1,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject',recipe:{kind:'artifact-content',checks:[{id:'check',path:'report',sha256:'a'.repeat(64),structure:'bytes'}]}}]};
+    runtime.loopStore.saveLoopPublicationConfiguration({loopId,expectedRevision:null,requestSource:'user',now:300001,configuration:{version:1,contract:{kind:'builtin-diagnostic',scanner:loopId,objective:'Original',completionCriterion:'Original'},verificationDefinitions:{run:recipe,stages:{scan:recipe}}}});
+    const host=createLoopTimedCompletionHost({timedStore:store,loopStore:runtime.loopStore,captureAdmission:()=>()=>{},now:()=>3900000});
+    try{const run=await runtime.runner.runLoopNow(loopId,{kind:'scheduled',timedActionId:'pending',timedActionRunId:claimed.runId},undefined,{requestSource:'scheduler'});if(!('run'in run))throw Error('run');
+      expect(await host.finalize({actionId:'pending',timedRunId:claimed.runId,mode:'stale',requestSource:'scheduler'})).toMatchObject({status:'applied',outcome:'publication_pending'});
+      expect(store.getAction('pending')).toMatchObject({status:'active',runCount:1,consecutiveFailures:2,lockedRunId:undefined});
+      expect(store.listRuns('pending')[0]).toMatchObject({status:'publication_pending',decision:expect.objectContaining({loopStatus:'publication_pending',loopRunId:run.run.id})});
+    }finally{await host.close();runtime.close();}
   });
 
   it('migrates legacy timed action databases that do not have a description column', () => {

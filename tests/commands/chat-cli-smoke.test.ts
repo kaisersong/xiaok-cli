@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { execFile, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,7 @@ import { platform } from 'node:process';
 
 const execFileAsync = promisify(execFile);
 const cliEntryPath = join(process.cwd(), '.test-dist', 'src', 'index.js');
+const profileAccountChildSetupPath = join(process.cwd(), 'tests', 'support', 'profile-account-child.setup.mjs');
 
 function canSpawnChildProcesses(): boolean {
   const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
@@ -130,7 +131,9 @@ function cleanupDir(dir: string): void {
 
 describe('chat CLI smoke', () => {
   const tempDirs: string[] = [];
-  const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
+  const canSpawn = canSpawnChildProcesses();
+  const itIfCanSpawn = canSpawn ? it : it.skip;
+  const itIfCanSpawnPosix = canSpawn && platform !== 'win32' ? it : it.skip;
 
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
@@ -139,7 +142,7 @@ describe('chat CLI smoke', () => {
   });
 
   itIfCanSpawn('runs chat --auto --json end-to-end against a custom OpenAI-compatible provider', async () => {
-    const rootDir = join(tmpdir(), `xiaok-chat-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-chat-cli-')));
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');
     const projectDir = join(rootDir, 'project');
@@ -181,13 +184,14 @@ describe('chat CLI smoke', () => {
 
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
-        [cliEntryPath, 'chat', '--auto', '--json', '只回复 PONG'],
+        ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', '只回复 PONG'],
         {
           cwd: projectDir,
           env: {
             ...process.env,
             HOME: homeDir,
             XIAOK_CONFIG_DIR: configDir,
+            XIAOK_TEST_ACCOUNT_HOME: homeDir,
           },
         },
       );
@@ -203,8 +207,84 @@ describe('chat CLI smoke', () => {
     }
   }, 10_000);
 
+  itIfCanSpawnPosix('rebinds the session source after device renumbering without failing auto startup', async () => {
+    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-chat-device-rebind-')));
+    const configDir = join(rootDir, 'config');
+    const homeDir = join(rootDir, 'home');
+    const projectDir = join(rootDir, 'project');
+    const sessionRoot = join(configDir, 'sessions');
+    tempDirs.push(rootDir);
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(homeDir, { recursive: true });
+    ensureTestDistPackageJson();
+
+    const server = await withFakeOpenAiServer(async (_req, _body, res) => {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        connection: 'keep-alive',
+        'cache-control': 'no-cache',
+      });
+      res.write(`data: ${buildStreamingChunk('PONG', null)}\n\n`);
+      res.write(`data: ${buildStreamingChunk('', 'stop')}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+
+    try {
+      writeConfig(configDir, {
+        schemaVersion: 1,
+        defaultModel: 'custom',
+        models: {
+          custom: {
+            baseUrl: server.baseUrl,
+            apiKey: 'test-key',
+            model: 'gpt-smoke',
+          },
+        },
+        defaultMode: 'interactive',
+        contextBudget: 4000,
+        channels: {},
+      });
+      const run = (deviceOffset?: string) => execFileAsync(
+        process.execPath,
+        ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', '只回复 PONG'],
+        {
+          cwd: projectDir,
+          env: {
+            ...process.env,
+            HOME: homeDir,
+            XIAOK_CONFIG_DIR: configDir,
+            XIAOK_TEST_ACCOUNT_HOME: homeDir,
+            XIAOK_TEST_DEVICE_PATH: sessionRoot,
+            ...(deviceOffset ? { XIAOK_TEST_DEVICE_OFFSET: deviceOffset } : {}),
+          },
+        },
+      );
+
+      const firstRun = await run('1');
+      expect(JSON.parse(firstRun.stdout)).toMatchObject({ text: 'PONG' });
+      const registryPath = join(homeDir, '.xiaok', 'profile-sources', 'registry.json');
+      const canonicalSessionRoot = realpathSync(sessionRoot);
+      const firstRegistry = JSON.parse(readFileSync(registryPath, 'utf8')) as { generation: string; sources: Array<{ sourceId: string; directory: { canonicalPath: string; device: string; inode: string } }> };
+      const firstSource = firstRegistry.sources.find(source => source.directory.canonicalPath === canonicalSessionRoot)!;
+      expect(firstSource.directory.device).toBe(String(statSync(sessionRoot, { bigint: true }).dev + 1n));
+
+      const secondRun = await run();
+      expect(JSON.parse(secondRun.stdout)).toMatchObject({ text: 'PONG' });
+      const secondRegistry = JSON.parse(readFileSync(registryPath, 'utf8')) as typeof firstRegistry;
+      const secondSource = secondRegistry.sources.find(source => source.directory.canonicalPath === canonicalSessionRoot)!;
+      expect(secondRegistry.sources.filter(source => source.directory.canonicalPath === canonicalSessionRoot)).toHaveLength(1);
+      expect(BigInt(secondRegistry.generation)).toBe(BigInt(firstRegistry.generation) + 1n);
+      expect(secondSource.sourceId).not.toBe(firstSource.sourceId);
+      expect(secondSource.directory).toEqual({ ...firstSource.directory, device: String(statSync(sessionRoot, { bigint: true }).dev) });
+      expect(existsSync(join(configDir, 'crashes'))).toBe(false);
+    } finally {
+      await server.close();
+    }
+  }, 20_000);
+
   itIfCanSpawn('prints degraded capability health to stderr while still returning the chat result', async () => {
-    const rootDir = join(tmpdir(), `xiaok-chat-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-chat-cli-')));
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');
     const projectDir = join(rootDir, 'project');
@@ -256,13 +336,14 @@ describe('chat CLI smoke', () => {
 
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
-        [cliEntryPath, 'chat', '--auto', '--json', '只回复 healthy reply'],
+        ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', '只回复 healthy reply'],
         {
           cwd: projectDir,
           env: {
             ...process.env,
             HOME: homeDir,
             XIAOK_CONFIG_DIR: configDir,
+            XIAOK_TEST_ACCOUNT_HOME: homeDir,
           },
         },
       );

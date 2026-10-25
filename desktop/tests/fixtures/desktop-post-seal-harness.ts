@@ -61,7 +61,10 @@ export async function createPostSealHarness(options: {
   aheGuards?: InProcessTaskRuntimeHostOptions['aheGuards'];
   snapshotStore?: (directory: string) => FileTaskSnapshotStore;
   root?: string;
+  /** Diagnostic-only passive recorder; production ordering and awaits stay unchanged. */
+  passiveTrace?: { record(stage: string): void };
 } = {}) {
+  const mark = (stage: string) => { try { options.passiveTrace?.record(stage); } catch { /* Observer failure cannot affect the fixture. */ } };
   const root = options.root ?? mkdtempSync(join(tmpdir(), 'xiaok-post-seal-bdd-'));
   const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
   const coordinator = new DesktopExecutionCoordinator();
@@ -84,7 +87,7 @@ export async function createPostSealHarness(options: {
   }
   const snapshots = options.snapshotStore?.(join(root, 'tasks')) ?? new BarrierStore(join(root, 'tasks'));
   const service = new DesktopMultiAgentService({ store, coordinator, closeGraceMs: 10,
-    createSession: async () => ({ run: async () => { childEntered.resolve(); return childRelease.promise; }, suspend: async () => {}, dispose: async () => {} }),
+    createSession: async () => ({ run: async () => { mark('runner-child-run-enter'); childEntered.resolve(); return childRelease.promise; }, suspend: async () => {}, dispose: async () => {} }),
   });
   service.registerThread({ threadId: 'post-seal-thread', profileId: 'profile', workspaceId: 'workspace', cwd: root });
   let authority: DesktopHostDeliveryAuthority | undefined;
@@ -99,19 +102,36 @@ export async function createPostSealHarness(options: {
     acquireExecutionToken: () => ({ release: () => { tokenReleases++; } }),
     completionGate: options.completionGate,
     runner: async input => {
+      mark('runner-enter');
       runnerCalls++; rootSignal = input.signal;
       const body = async () => { await options.emit?.(input); };
       if (options.explicit === false) await body();
-      else await service.runRoot(input, async context => {
-        groupId = context.groupId;
-        if (options.spawnChild !== false) {
-          childId = (await service.spawn({ actor: context.actor, requestSource: 'agent', operationId: `spawn-${input.taskId}`,
-            taskName: 'held_child', message: 'Controlled fixture child' })).targetAgentId!;
-          await childEntered.promise;
-        }
-        await body();
-      });
-      rootSealed.resolve(); await options.runnerTail?.(); armed = true;
+      else {
+        mark('runner-runRoot-before');
+        await service.runRoot(input, async context => {
+          mark('runner-action-enter');
+          groupId = context.groupId;
+          if (options.spawnChild !== false) {
+            mark('runner-spawn-before');
+            childId = (await service.spawn({ actor: context.actor, requestSource: 'agent', operationId: `spawn-${input.taskId}`,
+              taskName: 'held_child', message: 'Controlled fixture child' })).targetAgentId!;
+            mark('runner-spawn-after');
+            mark('runner-child-enter-before');
+            await childEntered.promise;
+            mark('runner-child-enter-after');
+          }
+          mark('runner-body-before');
+          await body();
+          mark('runner-body-after');
+        });
+        mark('runner-runRoot-after');
+      }
+      mark('runner-rootSealed-before');
+      rootSealed.resolve();
+      mark('runner-tail-before');
+      await options.runnerTail?.();
+      mark('runner-tail-after');
+      armed = true;
     },
   } satisfies InProcessTaskRuntimeHostOptions, {
     onDeliveryReport: async (report: HostDeliveryReport): Promise<HostDeliveryReport> => {

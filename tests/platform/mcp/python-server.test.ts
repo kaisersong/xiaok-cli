@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
-import { resolveBuiltinSlideRendererConfig } from '../../../src/platform/mcp/python-server.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildManagedPythonChildEnv, resolveBuiltinSlideRendererConfig } from '../../../src/platform/mcp/python-server.js';
 import type { NamedMcpServerConfig } from '../../../src/platform/mcp/types.js';
+
+const child = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock('node:child_process', () => ({ execFile: child.execFile }));
+beforeEach(() => {
+  child.execFile.mockReset();
+  child.execFile.mockImplementation((_command: string, _args: string[], _options: object, callback: (error: Error | null, stdout: string, stderr: string) => void) => callback(null, '', ''));
+});
 
 function slideServer(): NamedMcpServerConfig {
   return {
@@ -30,6 +37,7 @@ describe('built-in slide renderer Python runtime', () => {
     expect(resolved).toMatchObject({
       command: '/Users/test/.xiaok/runtime/python-env/bin/python3',
       env: {
+        PYTHONDONTWRITEBYTECODE: '1',
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
       },
@@ -45,6 +53,7 @@ describe('built-in slide renderer Python runtime', () => {
       canImportMcpV2: async () => true,
     });
 
+    if (resolved.type !== 'stdio') throw new Error('expected_stdio_slide_renderer_config');
     expect(resolved.command).toBe('C:\\Users\\test\\.xiaok\\runtime\\python-env\\Scripts\\python.exe');
   });
 
@@ -76,5 +85,34 @@ describe('built-in slide renderer Python runtime', () => {
 
     expect(resolved).toBe(server);
     expect(canImportMcpV2).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('managed Python bytecode policy', () => {
+  it('copies policy without mutating the inherited environment', () => {
+    const base = { KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '' };
+    expect(buildManagedPythonChildEnv(base)).toEqual({ KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '1' });
+    expect(base).toEqual({ KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '' });
+  });
+
+  it('protects the real default import probe before selecting the managed server', async () => {
+    const server = slideServer();
+    if (server.type !== 'stdio') throw new Error('expected_stdio');
+    server.args = ['-I', '-E', 'server.py'];
+    server.env = { KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '' };
+    const resolved = await resolveBuiltinSlideRendererConfig(server, { platform: 'darwin', homeDir: '/Users/test', pathExists: () => true });
+    if (resolved.type !== 'stdio') throw new Error('expected_stdio');
+    expect(child.execFile).toHaveBeenCalledWith('/Users/test/.xiaok/runtime/python-env/bin/python3', ['-B', '-c', 'from mcp.server.mcpserver import MCPServer'], expect.objectContaining({ timeout: 15_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }), expect.any(Function));
+    expect(resolved.args).toEqual(['-B', '-I', '-E', 'server.py']);
+    expect(resolved.env).toEqual({ KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' });
+    expect(server.args).toEqual(['-I', '-E', 'server.py']);
+    expect(server.env.PYTHONDONTWRITEBYTECODE).toBe('');
+  });
+
+  it('retains the original server when the actual managed probe fails', async () => {
+    child.execFile.mockImplementationOnce((_command: string, _args: string[], _options: object, callback: (error: Error) => void) => callback(new Error('missing dependency')));
+    const server = slideServer();
+    await expect(resolveBuiltinSlideRendererConfig(server, { platform: 'darwin', homeDir: '/Users/test', pathExists: () => true })).resolves.toBe(server);
   });
 });

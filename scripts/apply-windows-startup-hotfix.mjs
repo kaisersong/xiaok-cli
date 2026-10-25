@@ -3,13 +3,18 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {machine} from 'node:os';
 
+// Reject emulated/unknown Windows hosts before package IO, checks or writes.
+if(process.platform==='win32'){
+ const native=machine().toLowerCase();
+ if(process.arch!=='x64'||!['amd64','x86_64'].includes(native))throw Error('This native patch requires native Windows x64');
+}
 const patchRoot=path.dirname(fileURLToPath(import.meta.url));
 const destination=path.resolve(process.argv[2]??'.');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const pkg=JSON.parse(fs.readFileSync(path.join(destination,'package.json'),'utf8'));
 if(pkg.name!=='xiaokcode'||pkg.version!=='1.5.6')throw Error('This patch supports xiaokcode 1.5.6 only');
-if(process.platform==='win32'&&process.arch!=='x64')throw Error('This native patch is x64 only');
 const reader=fs.readFileSync(path.join(destination,'dist/runtime/verification/windows-installation-absence.js'),'utf8');
 if(!reader.includes("'windows-installation-absence.exe'")||!reader.includes('readWindowsInstallationAbsence'))throw Error('Unsupported Windows reader');
 const manifest=JSON.parse(fs.readFileSync(path.join(patchRoot,'manifest.json'),'utf8'));

@@ -9,7 +9,7 @@
  *     `providerRuntime.beginShutdown()` to close the executing→finalizing
  *     transition gate and freeze the protected lease set with their original
  *     phase deadlines.
- *  ② synchronously destroy owned windows so queued preload invokes can no
+ *  ② synchronously hide/destroy owned windows so queued preload invokes can no
  *     longer take a token.
  *  ③ tell every ingress owner to stop/abort without waiting for them to settle.
  *  ④ without waiting for ③, hide provider slots, abort non-protected leases and
@@ -98,86 +98,107 @@ export class DesktopShutdownCoordinator {
    * event after completion is simply allowed through.
    */
   onBeforeQuit(): { preventDefault: boolean; shutdown: Promise<ShutdownReport> } {
-    if (this.complete) {
-      return { preventDefault: false, shutdown: this.shutdownPromise! };
-    }
-    if (this.shutdownPromise) {
-      return { preventDefault: true, shutdown: this.shutdownPromise };
-    }
-
-    // ---- Phase ①: synchronous section, no await allowed in here. ----
+    if (this.complete) return { preventDefault: false, shutdown: this.shutdownPromise! };
+    if (this.shutdownPromise) return { preventDefault: true, shutdown: this.shutdownPromise };
+    // Cache before callbacks such as window destruction can synchronously reenter.
+    let resolve!: (report: ShutdownReport) => void;
+    let reject!: (error: unknown) => void;
+    this.shutdownPromise = new Promise<ShutdownReport>((done, failed) => { resolve = done; reject = failed; });
     this.isQuittingFlag = true;
+    const failures: string[] = [];
     this.deps.gate.close();
-    const protectedDrain = this.deps.providerRuntime.beginShutdown();
-
-    // ---- Phase ②: windows die before anything can await. ----
-    this.deps.destroyWindows();
-
-    this.shutdownPromise = this.runAfterSynchronousPhases(protectedDrain);
+    let protectedDrain: ProtectedDrainHandle = { leases: [], waitForSettled: async () => false };
+    try { protectedDrain = this.deps.providerRuntime.beginShutdown(); }
+    catch (error) { this.recordFailure(failures, 'protected_begin', error); }
+    try { this.deps.destroyWindows(); }
+    catch (error) { this.recordFailure(failures, 'destroy_windows', error); }
+    void this.runAfterSynchronousPhases(protectedDrain, failures).then(resolve, reject);
     return { preventDefault: true, shutdown: this.shutdownPromise };
   }
 
-  private async runAfterSynchronousPhases(protectedDrain: ProtectedDrainHandle): Promise<ShutdownReport> {
-    const log = this.deps.log ?? (() => {});
+  private log(event: string, detail?: Record<string, unknown>): void {
+    try { this.deps.log?.(event, detail); } catch { /* diagnostics cannot skip cleanup */ }
+  }
+
+  private recordFailure(failures: string[], name: string, error: unknown): void {
+    failures.push(name);
+    this.log('shutdown_cleanup_unconfirmed', { owner: name, error: error instanceof Error ? error.message : String(error) });
+  }
+
+  private async runAfterSynchronousPhases(protectedDrain: ProtectedDrainHandle, cleanupFailed: string[]): Promise<ShutdownReport> {
     const ordinaryDeadline = this.deps.ordinaryCleanupDeadlineMs ?? 5_000;
     const protectedCap = this.deps.protectedDrainCapMs ?? 34_000;
-    const protectedLeaseIds = protectedDrain.leases.map((l) => l.leaseId);
+    const protectedLeaseIds = protectedDrain.leases.map(l => l.leaseId);
 
-    // ---- Phase ③: stop/abort ingress without waiting for settle. ----
+    // Phase ③: one failing producer does not prevent siblings from stopping.
     for (const owner of this.deps.ingressOwners) {
-      owner.stopAccepting();
-      owner.abortAllActive('app_shutdown');
+      try { owner.stopAccepting(); }
+      catch (error) { this.recordFailure(cleanupFailed, `ingress_stop:${owner.name}`, error); }
+      try { owner.abortAllActive('app_shutdown'); }
+      catch (error) { this.recordFailure(cleanupFailed, `ingress_abort:${owner.name}`, error); }
     }
-    const ingressDrains = this.deps.ingressOwners.map((o) => o.drain(ordinaryDeadline));
-    const tokenDrain = this.deps.gate.drain(ordinaryDeadline);
+    const start = <T>(work: () => Promise<T>): Promise<T> => {
+      try { return work(); } catch (error) { return Promise.reject(error); }
+    };
+    const ingressDrains = this.deps.ingressOwners.map(owner => start(() => owner.drain(ordinaryDeadline)));
+    const tokenDrain = start(() => this.deps.gate.drain(ordinaryDeadline));
 
-    // ---- Phase ④: hide slots, abort non-protected, close ordinary children. ----
-    this.deps.providerRuntime.hideAndAbortNonProtected();
-    const ordinaryProviderClose = this.deps.providerRuntime.closeOrdinaryProviders();
+    // Phase ④: provider cleanup starts alongside producer drain.
+    try { this.deps.providerRuntime.hideAndAbortNonProtected(); }
+    catch (error) { this.recordFailure(cleanupFailed, 'provider_hide', error); }
+    const ordinaryProviderClose = start(() => this.deps.providerRuntime.closeOrdinaryProviders());
+    const protectedWait = start(() => protectedDrain.waitForSettled(protectedCap));
 
-    // ---- Phase ⑤: ordinary cleanup and protected drain run concurrently. ----
-    const [ordinaryResults, tokensDrained, providerCleanup, protectedSettled] = await Promise.all([
-      Promise.all(ingressDrains),
-      tokenDrain,
-      ordinaryProviderClose,
-      protectedDrain.waitForSettled(protectedCap),
+    // Phase ⑤: settle every original owner; a rejected promise is not a drain.
+    const [ownerResults, [tokenResult], [providerResult], [protectedResult]] = await Promise.all([
+      Promise.allSettled(ingressDrains), Promise.allSettled([tokenDrain]),
+      Promise.allSettled([ordinaryProviderClose]), Promise.allSettled([protectedWait]),
     ]);
-    const ordinaryDrained = ordinaryResults.every(Boolean) && tokensDrained;
-    if (!ordinaryDrained) {
-      log('shutdown_ordinary_cleanup_timeout', { outstanding: this.deps.gate.describeOutstanding() });
-    }
-    if (!protectedSettled) {
-      log('protected_finalization_timeout', { protectedLeaseIds });
-    }
+    ownerResults.forEach((result, index) => {
+      if (result.status === 'rejected') this.recordFailure(cleanupFailed, `ingress_drain:${this.deps.ingressOwners[index]!.name}`, result.reason);
+    });
+    if (tokenResult!.status === 'rejected') this.recordFailure(cleanupFailed, 'token_drain', tokenResult!.reason);
+    if (providerResult!.status === 'rejected') this.recordFailure(cleanupFailed, 'provider_close', providerResult!.reason);
+    else cleanupFailed.push(...providerResult!.value.cleanupFailed);
+    if (protectedResult!.status === 'rejected') this.recordFailure(cleanupFailed, 'protected_drain', protectedResult!.reason);
+    const ordinaryDrained = cleanupFailed.length === 0
+      && ownerResults.every(result => result.status === 'fulfilled' && result.value)
+      && tokenResult!.status === 'fulfilled' && tokenResult!.value;
+    const protectedSettled = protectedResult!.status === 'fulfilled' && protectedResult!.value;
+    if (!ordinaryDrained) this.log('shutdown_ordinary_cleanup_timeout', { outstanding: this.deps.gate.describeOutstanding() });
+    if (!protectedSettled) this.log('protected_finalization_timeout', { protectedLeaseIds });
 
-    // ---- Phase ⑥: final token re-check decides store close vs defer. ----
+    // Phase ⑥: failed store closure retains the original source pin.
     let storesClosed = false;
     let deferredReason: string | undefined;
     if (this.deps.gate.outstanding === 0 && ordinaryDrained && protectedSettled) {
+      const beforeStores = cleanupFailed.length;
       for (const store of this.deps.durableStores) {
-        await store.close();
+        try { await store.close(); }
+        catch (error) { this.recordFailure(cleanupFailed, `store_close:${store.name}`, error); }
       }
-      await this.deps.releaseMainSourcePin();
-      storesClosed = true;
-    } else {
-      deferredReason = 'store_close_deferred_to_process_exit';
-      log(deferredReason, { outstanding: this.deps.gate.describeOutstanding() });
+      if (cleanupFailed.length === beforeStores) {
+        try { await this.deps.releaseMainSourcePin(); storesClosed = true; }
+        catch (error) { this.recordFailure(cleanupFailed, 'source_pin_release', error); }
+      }
+      if (!storesClosed) deferredReason = 'store_close_unconfirmed';
+    } else deferredReason = 'store_close_deferred_to_process_exit';
+    if (deferredReason) this.log(deferredReason, { outstanding: this.deps.gate.describeOutstanding() });
+
+    // Independent resources and the once-only continuation still run on failure.
+    try { await this.deps.disposeLifetimeResources(); }
+    catch (error) {
+      this.recordFailure(cleanupFailed, 'lifetime_resources', error);
+      if (error instanceof AggregateError) {
+        for (const failure of error.errors) {
+          cleanupFailed.push(`lifetime_resources:${failure instanceof Error ? failure.message : String(failure)}`);
+        }
+      }
     }
-
-    // Independent non-store cleanup always runs.
-    await this.deps.disposeLifetimeResources();
-
-    // ---- Phase ⑦: once-only continuation, no await after the finalize tick. ----
     this.complete = true;
-    this.deps.continuation();
-
-    return {
-      ordinaryDrained,
-      protectedSettled,
-      storesClosed,
-      ...(deferredReason ? { deferredReason } : {}),
-      cleanupFailed: providerCleanup.cleanupFailed,
-      protectedLeaseIds,
-    };
+    try { this.deps.continuation(); }
+    catch (error) { this.recordFailure(cleanupFailed, 'continuation', error); }
+    return { ordinaryDrained, protectedSettled, storesClosed,
+      ...(deferredReason ? { deferredReason } : {}), cleanupFailed, protectedLeaseIds };
   }
 }

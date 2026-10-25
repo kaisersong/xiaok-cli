@@ -48,7 +48,8 @@ export function createDesktopMultiAgentTools(options: DesktopMultiAgentToolOptio
     execute: async (input, context) => {
       identity(); context?.signal?.throwIfAborted();
       if (Object.keys(input).some(key => !Object.hasOwn(schema, key))) throw new Error('unexpected multi-agent control argument');
-      return JSON.stringify(decorate(await invoke(input, context)));
+      const result=await invoke(input, context);
+      return options.service.getFixedObservationAck(result) ?? JSON.stringify(decorate(result));
     },
   });
   const tools = [
@@ -87,7 +88,7 @@ export function createDesktopMultiAgentTools(options: DesktopMultiAgentToolOptio
       operationId: input.operation_id as string | undefined, expectedTurn: input.expected_turn as number | undefined })),
     make('list_agents', '分页读取同组执行状态和物理清理状态。严禁根据 status=closed 推断资源已释放；只有 resourcesReleased=true 才表示完整释放。', {
       cursor: { type: 'string' },
-    }, [], input => options.service.list({ ...identity(), cursor: input.cursor as string | undefined })),
+    }, [], input => options.service.listForModel({ ...identity(), cursor: input.cursor as string | undefined })),
     make('interrupt_agent', '只能中断严格后代的当前执行并取消此前排队续跑。严禁中断 main、自身、祖先、兄弟。接受取消不等于执行已退出。', { target: properties.target }, ['target'], (input, context) =>
       options.service.interrupt({ ...operation(context), target: String(input.target) })),
     make('close_agent', '只能关闭严格后代及其子树。严禁关闭 main、自身、祖先、兄弟。cleanup_pending 时严禁声称已释放资源；关闭后不能续跑。', { target: properties.target }, ['target'], (input, context) =>

@@ -44,7 +44,7 @@ it('fails closed on observation or signal errors', async () => {
 });
 it.each(['darwin', 'linux'] as const)('verifies command boundaries on %s', async platform => {
   const { status, deps } = fixture(); deps.platform = platform;
-  const readCmdline = vi.fn(async () => platform === 'darwin' ? 'node /app/owner-entry.js /root/activity-owner.config.json' : ['node', '/app/owner-entry.js', '/root/activity-owner.config.json']);
+  const readCmdline = vi.fn(async (): Promise<string[] | string> => platform === 'darwin' ? 'node /app/owner-entry.js /root/activity-owner.config.json' : ['node', '/app/owner-entry.js', '/root/activity-owner.config.json']);
   expect(await retireOutdatedOwner('/root', status, { ...deps, readCmdline })).toBe('retired');
   readCmdline.mockResolvedValue(platform === 'darwin' ? 'node owner-entry.js /root/activity-owner.config.json.other' : ['owner-entry.js', '/root/activity-owner.config.json.other']);
   deps.kill.mockClear(); deps.readPendingTasks.mockClear(); expect(await retireOutdatedOwner('/root', status, { ...deps, readCmdline })).toBe('kept_unverified'); expect(deps.kill).not.toHaveBeenCalled(); expect(deps.readPendingTasks).not.toHaveBeenCalled();

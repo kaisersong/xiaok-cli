@@ -1,0 +1,87 @@
+name: Windows verification namespace helper
+on:
+  pull_request:
+    paths:
+      - 'src/runtime/verification/native/windows-*'
+      - 'src/runtime/verification/windows-installation-absence.ts'
+      - 'scripts/verification/*windows-absence.mjs'
+      - 'scripts/apply-windows-startup-hotfix.mjs'
+      - 'tests/scripts/windows-*.test.mjs'
+      - 'tests/fixtures/windows-absence-sdk-boundaries.c'
+      - 'tests/runtime/verification/windows-*.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/windows-verification-helper.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  diagnostic-helper:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.3'
+      - name: Install pinned diagnostic dependencies
+        run: npm ci --ignore-scripts
+      - name: Download exact official diagnostic toolchain
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260922-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-x86_64.zip' -OutFile $archive
+          if ((Get-Item -LiteralPath $archive).Length -ne 190725905 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant() -ne 'e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666') { throw 'Official archive mismatch' }
+      - name: Compile both targets from captured snapshots (diagnostic only)
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260922-ucrt-x86_64.zip'
+          # Only disposable generated outputs in this fresh checkout are removed.
+          # The builder itself rejects stale/partial preexisting artifacts.
+          foreach ($arch in @('x64', 'arm64')) {
+            foreach ($name in @('windows-installation-absence.exe', 'windows-installation-absence.json')) {
+              $output = Join-Path $env:GITHUB_WORKSPACE "data/verification/windows/win32-$arch/$name"
+              if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
+            }
+          }
+          node scripts/verification/build-windows-absence.mjs --target x64 --toolchain-archive $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verification/build-windows-absence.mjs --target arm64 --toolchain-archive $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run actual Windows x64 read-only helper
+        run: node scripts/verification/test-windows-absence.mjs
+      - name: Run original and new native script regressions
+        shell: pwsh
+        run: |
+          # Test-owned compiler fixture, separate from build receipts and authority.
+          $archive = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260922-ucrt-x86_64.zip'
+          $fixture = Join-Path $env:RUNNER_TEMP 'xiaok-sdk-test-fixture'
+          Expand-Archive -LiteralPath $archive -DestinationPath $fixture
+          $bin = Join-Path $fixture 'llvm-mingw-20260922-ucrt-x86_64/bin'
+          $env:XIAOK_TEST_NATIVE_COMPILER = Join-Path $bin 'x86_64-w64-mingw32-clang.exe'
+          if ((Get-FileHash -Algorithm SHA256 $env:XIAOK_TEST_NATIVE_COMPILER).Hash.ToLowerInvariant() -ne '20ba1856942744291a6aaaf9f2c94f6d0cd7cac5aa9557fce96471dc7ef25d6f') { throw 'Fixture compiler mismatch' }
+          $env:PATH = $bin + [IO.Path]::PathSeparator + $env:PATH
+          node --test tests/scripts/windows-absence.test.mjs tests/scripts/windows-native-observation-copy.test.mjs tests/scripts/windows-native-api-boundaries.test.mjs tests/scripts/windows-native-diagnostic-build.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run runtime reader and packaging regressions
+        run: node node_modules/vitest/vitest.mjs run tests/runtime/verification/windows-installation-absence.test.ts tests/runtime/verification/windows-native-packaging.test.ts
+      - name: Build and check actual universal runtime copy
+        shell: pwsh
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verification/copy-windows-absence.mjs cli --require-all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verification/copy-windows-absence.mjs cli --check --require-all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve diagnostic bytes and separate evidence (no release grant)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-verification-helper-diagnostic
+          include-hidden-files: true
+          path: |
+            data/verification/windows/win32-x64/
+            data/verification/windows/win32-arm64/
+            .artifacts/p3r/windows-native/*.json
+          if-no-files-found: error

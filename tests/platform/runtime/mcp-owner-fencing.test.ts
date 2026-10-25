@@ -18,8 +18,8 @@ function fixture(mcpTools: Tool[], workflowTools: Tool[] = [], check = async () 
     onMcpToolsChanged: (listener: typeof update) => { update = listener; return () => {}; },
   } as unknown as PlatformRuntimeContext;
   const factory = createPlatformRegistryFactory({ platform, workflowTools, source: 'review', sessionId: 'owner-fence',
-    adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
-    permissionManager: { getMode: () => 'auto', check } as any,
+    adapter: () => ({ getModelName: () => '', async *stream() {} }), buildSystemPrompt: async () => 'test',
+    permissionManager: { getMode: () => 'auto', getRevision: () => 1, check } as any,
   });
   return { factory, update: (tools: Tool[]) => update(tools), capabilities: platform.capabilityRegistry };
 }
@@ -68,7 +68,7 @@ describe('MCP registration instance fencing', () => {
       const pending = registry.executeTool(old.definition.name, {});
       f.update([next]);
       approve();
-      expect(await pending).toContain('no longer registered');
+      expect(await pending).toContain('tool authorization changed');
       expect(old.execute).not.toHaveBeenCalled();
       expect(await registry.executeTool(next.definition.name, {})).toBe('next');
       f.update([]);

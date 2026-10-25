@@ -1,7 +1,13 @@
+import {createKnownDirectoryWriterFence} from '../../src/runtime/verification/known-directory-writer-fence.js';
+import { assertOrdinarySourceWriterRoute, observeOrdinarySQLiteWriter } from '../../src/runtime/verification/ordinary-source-writer-observation.js';
+import { captureGoalCommitForStore } from '../../src/runtime/goal/completion-projection.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { applyGoalCompletionIntentUpdate, type GoalCompletionIntent, type GoalCompletionIntentUpdate } from '../../src/runtime/goal/completion-intent.js';
+import { assertGoalTurnAppend } from '../../src/runtime/goal/turn-ledger.js';
+import { applyGoalPublicationAttemptUpdate, finalizeGoalPublicationAttempt, type GoalPublicationAttempt, type GoalPublicationAttemptUpdate } from '../../src/runtime/goal/publication-attempt.js';
 import type {
   GoalCommitInput,
   GoalDocument,
@@ -35,15 +41,29 @@ export interface GoalContextTask {
   recordedAt: number;
 }
 
+const knownSqliteGoalWriters=new WeakMap<object,{fence?:ReturnType<typeof createKnownDirectoryWriterFence>}>();
 export class SqliteGoalStore implements GoalStore {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
+    assertOrdinarySourceWriterRoute();
+    const writer={fence:dbPath===':memory:'||dbPath===''?undefined:createKnownDirectoryWriterFence(dirname(dbPath),'sqlite-db')};
+    knownSqliteGoalWriters.set(this,writer);writer.fence?.assertOpen();
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
-    this.db.exec('pragma journal_mode = WAL');
-    this.db.exec('pragma busy_timeout = 5000');
-    this.applySchema();
+    try {
+      observeOrdinarySQLiteWriter(dbPath, 'goal-sqlite-v1');
+      assertOrdinarySourceWriterRoute();
+      this.db.exec('pragma journal_mode = WAL');
+      this.db.exec('pragma busy_timeout = 5000');
+      assertOrdinarySourceWriterRoute();
+      this.applySchema();
+    } catch (error) {
+      try { this.db.close(); } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'goal_source_initialization_failed', { cause: error });
+      }
+      throw error;
+    }
   }
 
   close(): void {
@@ -77,6 +97,12 @@ export class SqliteGoalStore implements GoalStore {
           'select evidence_json as payload_json from goal_evidence where goal_id = ? order by recorded_at, rowid',
           goalId,
         ),
+        completionIntents: this.readPayloads<GoalCompletionIntent>(
+          'select intent_json as payload_json from goal_completion_intents where goal_id = ? order by rowid', goalId,
+        ),
+        completionAttempts: this.readPayloads<GoalPublicationAttempt>(
+          'select attempt_json as payload_json from goal_publication_attempts where goal_id = ? order by rowid', goalId,
+        ),
       };
     } catch (error) {
       console.error('[goal-store] persisted Goal is unavailable', {
@@ -87,6 +113,58 @@ export class SqliteGoalStore implements GoalStore {
     }
   }
 
+  async loadCompletionIntent(sessionId: string, intentId: string): Promise<GoalCompletionIntent | null> {
+    return this.readCompletionIntent(sessionId, intentId);
+  }
+
+  private readCompletionIntent(sessionId: string, intentId: string): GoalCompletionIntent | null {
+    const row = this.db.prepare(`select i.intent_json as payload_json
+      from goal_completion_intents i join goals g on g.goal_id = i.goal_id
+      where i.intent_id = ? and g.session_id = ?`).get(intentId, sessionId) as JsonRow | undefined;
+    if (!row) return null;
+    const intent = JSON.parse(row.payload_json) as GoalCompletionIntent;
+    if (intent.intentId !== intentId || intent.application.sessionId !== sessionId) throw Error('goal_intent_identity');
+    return intent;
+  }
+
+  async listCompletionAttempts(sessionId: string, intentId: string): Promise<GoalPublicationAttempt[]> {
+    if (!this.readCompletionIntent(sessionId, intentId)) return [];
+    return this.readCompletionAttempts(intentId);
+  }
+
+  private readCompletionAttempts(intentId: string): GoalPublicationAttempt[] {
+    return this.readPayloads<GoalPublicationAttempt>('select attempt_json as payload_json from goal_publication_attempts where intent_id = ? order by sequence', intentId);
+  }
+
+  async updateCompletionAttempt(sessionId: string, update: GoalPublicationAttemptUpdate): Promise<void> {
+    const captured = structuredClone(update);
+    this.transaction(() => {
+      const intent = this.readCompletionIntent(sessionId, captured.next.intentId);
+      if (!intent) throw Error('goal_attempt_intent_missing');
+      const attempts = applyGoalPublicationAttemptUpdate(this.readCompletionAttempts(intent.intentId), intent, captured);
+      const next = attempts.find(row => row.attemptId === captured.next.attemptId)!;
+      if (captured.expectedRevision === null) {
+        this.db.prepare('insert into goal_publication_attempts(attempt_id, intent_id, goal_id, sequence, revision, attempt_json) values (?, ?, ?, ?, ?, ?)')
+          .run(next.attemptId, next.intentId, next.application.goalId, next.sequence, next.revision, JSON.stringify(next));
+      } else {
+        const result = this.db.prepare('update goal_publication_attempts set revision = ?, attempt_json = ? where attempt_id = ? and intent_id = ? and revision = ?')
+          .run(next.revision, JSON.stringify(next), next.attemptId, next.intentId, captured.expectedRevision);
+        if (result.changes !== 1) throw Error('goal_attempt_stale_revision');
+      }
+    });
+  }
+
+  async finalizeCompletionAttempt(sessionId: string, attemptId: string): Promise<GoalCompletionIntent> {
+    return this.transaction(() => {
+      const row = this.db.prepare('select intent_id from goal_publication_attempts where attempt_id = ?').get(attemptId) as { intent_id: string } | undefined;
+      const intent = row && this.readCompletionIntent(sessionId, row.intent_id);
+      if (!intent) throw Error('goal_attempt_intent_missing');
+      const result = finalizeGoalPublicationAttempt(intent, this.readCompletionAttempts(intent.intentId), attemptId);
+      if (result.revision !== intent.revision) this.writeCompletionIntent(result, intent.revision);
+      return result;
+    });
+  }
+
   listGoalIdsForSession(sessionId: string): string[] {
     return (this.db.prepare(
       'select goal_id from goals where session_id = ? order by created_at, rowid',
@@ -94,11 +172,23 @@ export class SqliteGoalStore implements GoalStore {
   }
 
   async commit(input: GoalCommitInput): Promise<void> {
+    const captured = captureGoalCommitForStore(this, input);
+    input = captured.input;
+    const { assertProjection } = captured;
     this.transaction(() => {
+      assertGoalTurnAppend(this.readPayloads<GoalTurnRecord>(
+        'select turn_json as payload_json from goal_turns where goal_id = ? order by rowid', input.next.goalId,
+      ), input.turns, input.next);
+      const currentIntents = this.readPayloads<GoalCompletionIntent>(
+        'select intent_json as payload_json from goal_completion_intents where goal_id = ? order by rowid', input.next.goalId,
+      );
+      const nextIntents = applyGoalCompletionIntentUpdate(currentIntents, input.completionIntent, input.next);
       const pointer = this.db.prepare(
         'select current_goal_id from goal_sessions where session_id = ?',
       ).get(input.sessionId) as GoalPointerRow | undefined;
 
+      assertProjection(pointer ? this.requireState(pointer.current_goal_id) : null);
+      assertOrdinarySourceWriterRoute();
       if (!pointer) {
         if (input.expectedRevision !== null) throw stale(input.expectedRevision, null);
         this.insertGoal(input.next);
@@ -163,7 +253,37 @@ export class SqliteGoalStore implements GoalStore {
           JSON.stringify(evidence), evidence.recordedAt,
         );
       }
+      if (input.completionIntent) {
+        const next = nextIntents.find(row => row.intentId === input.completionIntent!.next.intentId)!;
+        this.writeCompletionIntent(next, input.completionIntent.expectedRevision);
+      }
     });
+  }
+
+  async updateCompletionIntent(sessionId: string, update: GoalCompletionIntentUpdate): Promise<void> {
+    const captured = structuredClone(update);
+    this.transaction(() => {
+      const state = this.requireState(captured.next.application.goalId);
+      if (state.sessionId !== sessionId || captured.next.application.sessionId !== sessionId) throw Error('goal_intent_identity');
+      const current = this.readPayloads<GoalCompletionIntent>(
+        'select intent_json as payload_json from goal_completion_intents where goal_id = ? order by rowid', state.goalId,
+      );
+      const next = applyGoalCompletionIntentUpdate(current, captured).find(row => row.intentId === captured.next.intentId)!;
+      this.writeCompletionIntent(next, captured.expectedRevision);
+    });
+  }
+
+  private writeCompletionIntent(next: GoalCompletionIntent, expectedRevision: number | null): void {
+    if (expectedRevision === null) {
+      this.db.prepare(`insert into goal_completion_intents(intent_id, goal_id, epoch, turn_id, revision, intent_json)
+        values (?, ?, ?, ?, ?, ?)`)
+        .run(next.intentId, next.application.goalId, next.application.epoch, next.turnId, next.revision, JSON.stringify(next));
+    } else {
+      const updated = this.db.prepare(`update goal_completion_intents set revision = ?, intent_json = ?
+        where intent_id = ? and goal_id = ? and epoch = ? and turn_id = ? and revision = ?`)
+        .run(next.revision, JSON.stringify(next), next.intentId, next.application.goalId, next.application.epoch, next.turnId, expectedRevision);
+      if (updated.changes !== 1) throw Error('goal_intent_stale_revision');
+    }
   }
 
   bindTask(input: Omit<GoalTaskBinding, 'ordinal'>): GoalTaskBinding {
@@ -199,9 +319,9 @@ export class SqliteGoalStore implements GoalStore {
   }
 
   markTaskAttached(taskId: string, attachedAt: number): boolean {
-    return this.db.prepare(
+    return this.transaction(() => this.db.prepare(
       'update goal_thread_tasks set attached_at = ? where task_id = ? and attached_at is null',
-    ).run(attachedAt, taskId).changes === 1;
+    ).run(attachedAt, taskId).changes === 1);
   }
 
   listTaskBindings(threadId: string): GoalTaskBinding[] {
@@ -288,8 +408,11 @@ export class SqliteGoalStore implements GoalStore {
   }
 
   private transaction<T>(action: () => T): T {
+    const writer=knownSqliteGoalWriters.get(this);if(!writer)throw Error('known_writer_fence_owner');
+    writer.fence?.assertOpen();
     this.db.exec('begin immediate');
     try {
+      assertOrdinarySourceWriterRoute();
       const result = action();
       this.db.exec('commit');
       return result;
@@ -342,6 +465,25 @@ export class SqliteGoalStore implements GoalStore {
         recorded_at integer not null
       );
       create index if not exists goal_evidence_goal on goal_evidence(goal_id, epoch, recorded_at);
+      create table if not exists goal_completion_intents (
+        intent_id text primary key,
+        goal_id text not null,
+        epoch integer not null,
+        turn_id text not null,
+        revision integer not null,
+        intent_json text not null,
+        unique(goal_id, epoch, turn_id)
+      );
+      create table if not exists goal_publication_attempts (
+        attempt_id text primary key,
+        intent_id text not null,
+        goal_id text not null,
+        sequence integer not null,
+        revision integer not null,
+        attempt_json text not null,
+        unique(intent_id, sequence)
+      );
+      create index if not exists goal_publication_attempts_goal on goal_publication_attempts(goal_id);
       create table if not exists goal_thread_tasks (
         binding_id text primary key,
         goal_id text not null,

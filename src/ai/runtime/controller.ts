@@ -28,12 +28,12 @@ export class AgentRunController {
     return Boolean(this.active);
   }
 
-  abortActiveRun(): boolean {
+  abortActiveRun(reason?:unknown): boolean {
     if (!this.active) {
       return false;
     }
 
-    this.active.controller.abort();
+    this.active.controller.abort(reason);
     return true;
   }
 

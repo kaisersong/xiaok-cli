@@ -1,41 +1,29 @@
+import { useKswarmStatusReadonly } from '../hooks/useKswarmStatusReadonly';
 /**
  * KSwarmContext — provides kswarm client state and actions to the component tree.
  *
  * Also manages the kswarm service lifecycle status via IPC.
  */
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { useKSwarmClient, type KSwarmClientState, type KSwarmClientActions } from '../hooks/useKSwarmClient';
 import type { KSwarmServiceStatus } from '../../../electron/preload-api';
-import { getDesktopApi } from '../shared/desktop';
 
 interface KSwarmContextValue extends KSwarmClientState, KSwarmClientActions {
   serviceStatus: KSwarmServiceStatus | null;
+  serviceStatusReadFailed: boolean;
+  serviceStatusReading: boolean;
+  reloadServiceStatus(): void;
 }
 
 const KSwarmContext = createContext<KSwarmContextValue | null>(null);
 
 export function KSwarmProvider({ children }: { children: ReactNode }) {
   const client = useKSwarmClient();
-  const [serviceStatus, setServiceStatus] = useState<KSwarmServiceStatus | null>(null);
-
-  useEffect(() => {
-    const api = getDesktopApi() as { kswarmGetStatus(): Promise<KSwarmServiceStatus>; onKSwarmStatus(cb: (s: KSwarmServiceStatus) => void): () => void } | null;
-    if (!api) return;
-
-    // Get initial status
-    api.kswarmGetStatus().then(setServiceStatus).catch(() => {});
-
-    // Subscribe to status changes
-    const unsub = api.onKSwarmStatus((status) => {
-      setServiceStatus(status);
-    });
-
-    return unsub;
-  }, []);
+  const status = useKswarmStatusReadonly();
 
   return (
-    <KSwarmContext.Provider value={{ ...client, serviceStatus }}>
+    <KSwarmContext.Provider value={{ ...client, serviceStatus: status.data, serviceStatusReadFailed: status.failed, serviceStatusReading: status.reading, reloadServiceStatus: status.refresh }}>
       {children}
     </KSwarmContext.Provider>
   );

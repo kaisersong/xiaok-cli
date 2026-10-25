@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SESSION_STORE_SCHEMA_VERSION = 2;
+export const SESSION_STORE_SCHEMA_VERSION = 3;
 
 export function applySessionStoreSchema(db: Database.Database): void {
   db.exec(`
@@ -8,6 +8,8 @@ export function applySessionStoreSchema(db: Database.Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS session_migrations (session_id TEXT PRIMARY KEY, marker_json TEXT NOT NULL);
 
     CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY,
@@ -44,9 +46,15 @@ export function applySessionStoreSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_session_messages_session ON session_messages(session_id, message_index);
   `);
 
+  ensureColumn(db, 'sessions', 'semantic_compaction_json', 'TEXT');
+  ensureColumn(db, 'sessions', 'compound_operations_json', 'TEXT');
+  ensureColumn(db, 'sessions', 'store_revision', 'INTEGER');
+  ensureColumn(db, 'sessions', 'history_digest', 'TEXT');
+  ensureColumn(db, 'sessions', 'execution_protected', 'INTEGER');
   ensureColumn(db, 'sessions', 'intent_delegation_json', 'TEXT');
   ensureColumn(db, 'sessions', 'skill_eval_json', 'TEXT');
   ensureColumn(db, 'sessions', 'skill_execution_json', 'TEXT');
+  ensureColumn(db, 'sessions', 'protected_observation_closure_json', 'TEXT');
 
   db.prepare(`
     INSERT INTO session_meta (key, value)

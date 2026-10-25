@@ -58,7 +58,7 @@ describe('welcome home projection', () => {
       projectIntervention: {
         required: true,
         message: 'Blocked task needs a decision',
-        primaryAction: { label: 'Continue project' },
+        primaryAction: { label: 'Continue project' } as NonNullable<import('../../renderer/src/hooks/useKSwarmClient').ProjectIntervention['primaryAction']>,
       },
     }], null);
 

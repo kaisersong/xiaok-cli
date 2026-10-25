@@ -7,6 +7,8 @@ export interface ActiveIntentContext {
     templateId: string;
 }
 export interface CreateIntentPlanInput {
+    /** Fixed product host identity, allocated before construction; never an approval. */
+    newIntentId?: string;
     instanceId: string;
     sessionId: string;
     input: string;

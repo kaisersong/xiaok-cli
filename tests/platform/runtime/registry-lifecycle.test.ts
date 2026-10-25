@@ -60,12 +60,12 @@ describe('registry lifecycle ownership', () => {
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const execute = tool('write');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
     } as any }, [execute]);
     const result = registry.executeTool('write', {});
     registry.dispose();
     allow();
-    expect(await result).toContain('disposed');
+    expect(await result).toContain('tool authorization changed');
     expect(execute.execute).not.toHaveBeenCalled();
   });
 
@@ -114,7 +114,7 @@ describe('registry lifecycle ownership', () => {
       onMcpToolsChanged: (listener: (tools: Tool[]) => void) => { update = listener; return () => {}; },
     } as unknown as PlatformRuntimeContext;
     const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'catalog',
-      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
+      adapter: () => ({ getModelName: () => '', async *stream() {} }), buildSystemPrompt: async () => 'test',
     });
     const main = factory.createRegistry(process.cwd());
     const restricted = factory.createRegistry(process.cwd(), [old.definition.name], 'restricted');
@@ -136,12 +136,12 @@ describe('registry lifecycle ownership', () => {
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const removed = tool('mcp__one__removed');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
     } as any }, [removed]);
     const result = registry.executeTool(removed.definition.name, {});
     registry.unregisterTool(removed.definition.name);
     allow();
-    expect(await result).toContain('no longer registered');
+    expect(await result).toContain('tool authorization changed');
     expect(removed.execute).not.toHaveBeenCalled();
     registry.dispose();
   });
@@ -156,7 +156,7 @@ describe('registry lifecycle ownership', () => {
       onMcpToolsChanged: (listener: typeof update) => { update = listener; return () => {}; },
     } as unknown as PlatformRuntimeContext;
     const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'collision',
-      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => '',
+      adapter: () => ({ getModelName: () => '', async *stream() {} }), buildSystemPrompt: async () => '',
     });
     const registry = factory.createRegistry(process.cwd());
     const builtinRead = registry.getToolDefinitions().find((item) => item.name === 'read');

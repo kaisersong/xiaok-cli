@@ -123,7 +123,7 @@ class FakeAudioContext {
     disconnect: vi.fn(),
   }));
   createAnalyser = vi.fn(() => {
-    let samples = new Float32Array(128);
+    let samples: Float32Array = new Float32Array(128);
     activeAnalyser = {
       fftSize: 128,
       smoothingTimeConstant: 0,

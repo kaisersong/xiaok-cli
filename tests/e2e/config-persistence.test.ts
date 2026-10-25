@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { loadConfig, saveConfig } from '../../src/utils/config.js';
 import { registerConfigCommands } from '../../src/commands/config.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../src/types.js';
 
 function freshProgram(): Command {
   const program = new Command();
@@ -162,6 +163,7 @@ describe('config persistence end-to-end', () => {
         },
       },
       defaultMode: 'interactive' as const,
+      intentBoundary: { ...DEFAULT_INTENT_BOUNDARY_CONFIG },
       channels: {
         yzj: {
           webhookUrl: 'https://hook.com',

@@ -31,7 +31,11 @@ export function filterWorkflowToolsForAgent(tools, agentId) {
 }
 export function createPlatformRegistryFactory(options) {
     const registries = new Set();
+    const hooksOwners = new Set();
+    const hooksDrains = new Set();
     let factoryDisposed = false;
+    let disposal;
+    let physicalDisposal;
     const multiAgentCoordinator = options.source === 'chat'
         ? createMultiAgentCoordinator({
             maxDepth: readPositiveIntegerEnv('XIAOK_SUBAGENT_MAX_DEPTH'),
@@ -178,6 +182,7 @@ export function createPlatformRegistryFactory(options) {
             ...multiAgentTools,
         ];
         // 构建基础 tool list
+        const descriptions = new Map();
         const baseTools = buildToolList(options.skillTool, {
             cwd,
             allowOutsideCwd: Boolean(options.platform.sandboxEnforcer),
@@ -185,7 +190,7 @@ export function createPlatformRegistryFactory(options) {
             ...(options.platform.sandboxEnforcer
                 ? { outsideCwdGuard: (resolvedPath) => options.platform.sandboxPolicy?.checkPath(resolvedPath) ?? { allowed: false, reason: 'sandbox policy unavailable' } }
                 : {}),
-        }, extraTools, { isYolo: () => options.permissionManager?.getMode() === 'yolo' });
+        }, extraTools, descriptions, { isYolo: () => options.permissionManager?.getMode() === 'yolo' });
         // 应用 sandbox
         const executionTools = options.source === 'chat' && agentId === 'main' && options.runInteractiveBash
             ? baseTools.map(tool => tool.definition.name === 'bash' ? createInteractiveBashTool(options.runInteractiveBash, { isYolo: () => options.permissionManager?.getMode() === 'yolo' }) : tool)
@@ -193,6 +198,9 @@ export function createPlatformRegistryFactory(options) {
         const sandboxedTools = applySandboxToTools(executionTools, options.platform.sandboxEnforcer, {
             onSandboxDenied: handleSandboxDenied,
         });
+        const wrappedDescriptions = new Map();
+        executionTools.forEach((source, index) => { const metadata = descriptions.get(source); if (metadata)
+            wrappedDescriptions.set(sandboxedTools[index], metadata); });
         // 合并 built-in 和 MCP tools（保证 ordering）
         const sandboxedMcpTools = applySandboxToTools(expandMcpCatalog(options.platform.mcpTools), options.platform.sandboxEnforcer, {
             onSandboxDenied: handleSandboxDenied,
@@ -205,23 +213,25 @@ export function createPlatformRegistryFactory(options) {
             ? orderedTools.filter((tool) => (allowedToolIds.has(getCanonicalToolId(tool.definition.name))
                 || (coordinatorToolsAvailable && agentId !== 'main' && CHILD_COMMUNICATION_TOOL_NAMES.has(tool.definition.name))))
             : orderedTools;
+        const hooksRunner = createHooksRunner({
+            hooks: options.platform.pluginRuntime.hookConfigs,
+            context: {
+                session_id: options.sessionId,
+                cwd,
+                transcript_path: options.transcriptPath,
+            },
+        });
+        hooksOwners.add(hooksRunner);
         const registry = new ToolRegistry({
             capabilityRegistry: options.platform.capabilityRegistry,
             capabilitySearch: agentId === 'main',
             permissionManager: options.permissionManager,
             dryRun: options.dryRun,
-            hooksRunner: createHooksRunner({
-                hooks: options.platform.pluginRuntime.hookConfigs,
-                context: {
-                    session_id: options.sessionId,
-                    cwd,
-                    transcript_path: options.transcriptPath,
-                },
-            }),
+            hooksRunner,
             onPrompt: options.onPrompt,
             agentId,
             onToolObserved: options.onToolObserved,
-        }, filteredTools);
+        }, filteredTools, wrappedDescriptions);
         registries.add(registry);
         const platformMcpInstances = new Set(sandboxedMcpTools);
         const baseNames = new Set(sandboxedTools.map((tool) => tool.definition.name));
@@ -238,24 +248,69 @@ export function createPlatformRegistryFactory(options) {
         getReminderApi() {
             return reminders;
         },
-        async dispose() {
-            if (factoryDisposed)
-                return;
+        dispose() {
+            if (disposal)
+                return disposal;
             factoryDisposed = true;
-            unsubscribeMcpTools();
-            try {
-                const backgroundShutdown = backgroundRunner.dispose();
-                const agentShutdown = multiAgentCoordinator?.dispose();
-                for (const registry of registries)
-                    registry.dispose();
-                await Promise.all([backgroundShutdown, agentShutdown]);
-            }
-            finally {
-                for (const registry of registries)
-                    registry.dispose();
+            // Callback reentrancy must observe this same attempt.
+            disposal = Promise.resolve().then(async () => {
+                const errors = [];
+                try {
+                    unsubscribeMcpTools();
+                }
+                catch (error) {
+                    errors.push(error);
+                }
+                const shutdowns = [
+                    Promise.resolve().then(() => backgroundRunner.dispose()),
+                    Promise.resolve().then(() => multiAgentCoordinator?.dispose()),
+                ];
+                for (const registry of registries) {
+                    try {
+                        registry.dispose();
+                    }
+                    catch (error) {
+                        errors.push(error);
+                    }
+                }
+                const results = await Promise.allSettled(shutdowns);
+                errors.push(...results.flatMap((result) => result.status === 'rejected' ? [result.reason] : []));
+                for (const registry of registries) {
+                    try {
+                        registry.dispose();
+                    }
+                    catch (error) {
+                        errors.push(error);
+                    }
+                }
                 registries.clear();
                 registryMcpState.clear();
+                if (errors.length)
+                    throw new AggregateError(errors, 'platform registry shutdown failed');
+            });
+            for (const runner of hooksOwners) {
+                const drain = runner.closeAndDrain();
+                hooksDrains.add(drain);
+                void drain.catch(() => { });
             }
+            return disposal;
+        },
+        waitForDisposedResources() {
+            if (!disposal)
+                return Promise.reject(new Error('platform_cleanup_not_started'));
+            const originalDisposal = disposal;
+            physicalDisposal ??= Promise.resolve().then(async () => {
+                const original = await Promise.allSettled([originalDisposal]);
+                const resources = await Promise.allSettled([
+                    Promise.resolve().then(() => backgroundRunner.waitForDisposedResources()),
+                    Promise.resolve().then(() => multiAgentCoordinator?.waitForDisposedResources()),
+                    ...hooksDrains,
+                ]);
+                const errors = [...original, ...resources].flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+                if (errors.length)
+                    throw new AggregateError(errors, 'platform registry physical cleanup failed');
+            });
+            return physicalDisposal;
         },
     };
 }

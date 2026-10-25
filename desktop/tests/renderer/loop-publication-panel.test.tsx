@@ -1,0 +1,20 @@
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {LocaleProvider} from '../../renderer/src/contexts/LocaleContext';
+import {LoopPublicationPanel} from '../../renderer/src/components/loops/LoopPublicationPanel';
+const wire=vi.hoisted(()=>({getLoopPublicationConfiguration:vi.fn(),getLoopPublicationState:vi.fn(),performLoopPublicationAction:vi.fn()}));
+vi.mock('../../renderer/src/api/bridge',()=>({api:wire}));
+const state={historyOnly:true,loopId:'loop',runId:'run',businessState:'publication_pending',workspaceRoot:'/workspace',projection:{generation:1,generationHash:'hash'},candidates:[{candidateId:'candidate',stageKind:null,definition:{version:1,obligations:[]},natives:[],publications:[]}]};
+beforeEach(()=>{Object.values(wire).forEach(fn=>fn.mockReset());wire.getLoopPublicationConfiguration.mockResolvedValue(null);wire.getLoopPublicationState.mockResolvedValue(state);wire.performLoopPublicationAction.mockResolvedValue({kind:'reserveNative'});});afterEach(cleanup);
+function show(){return render(<LocaleProvider><LoopPublicationPanel loopId="loop" runs={[{id:'run'}]}/></LocaleProvider>);}
+it('loads on demand, displays historical projection without success, and reserves only one explicit native request',async()=>{show();expect(wire.getLoopPublicationState).not.toHaveBeenCalled();fireEvent.click(screen.getByTestId('loop-publication-open-loop'));await screen.findByTestId('loop-publication-reserve-candidate');expect(wire.performLoopPublicationAction).not.toHaveBeenCalled();expect(screen.queryByTestId('loop-publication-checked')).toBeNull();fireEvent.click(screen.getByTestId('loop-publication-reserve-candidate'));await waitFor(()=>expect(wire.performLoopPublicationAction).toHaveBeenCalledWith({kind:'reserveNative',candidateId:'candidate',expectedLatestAttemptId:null}));expect(wire.performLoopPublicationAction).toHaveBeenCalledTimes(1);});
+it('fresh inspection is explicit and the historical refresh clears its observation',async()=>{wire.performLoopPublicationAction.mockResolvedValue({kind:'inspect',inspection:{runId:'run',checkedAt:1000}});show();fireEvent.click(screen.getByTestId('loop-publication-open-loop'));await screen.findByTestId('loop-publication-inspect');fireEvent.click(screen.getByTestId('loop-publication-inspect'));await screen.findByTestId('loop-publication-checked');expect(wire.performLoopPublicationAction).toHaveBeenCalledWith({kind:'inspect',runId:'run'});fireEvent.click(screen.getByTestId('loop-publication-refresh'));await waitFor(()=>expect(screen.queryByTestId('loop-publication-checked')).toBeNull());});
+it('receiver failure stays visible and never reruns or automatically retries',async()=>{wire.performLoopPublicationAction.mockRejectedValue(Error('receiver_offline'));show();fireEvent.click(screen.getByTestId('loop-publication-open-loop'));await screen.findByTestId('loop-publication-inspect');fireEvent.click(screen.getByTestId('loop-publication-inspect'));expect(await screen.findByRole('alert')).toHaveTextContent('receiver_offline');expect(wire.performLoopPublicationAction).toHaveBeenCalledTimes(1);expect(screen.queryByTestId('loop-publication-checked')).toBeNull();});
+it.each(['needs_reauthorization','retired'])('explicit application retry uses latest revision and cannot start a new enrollment: %s',async phase=>{
+ wire.getLoopPublicationState.mockResolvedValue({...state,candidates:[{...state.candidates[0],natives:[{id:'expired',kind:'application-reauthorization',revision:7,phase,sessions:[]}]}]});
+ show();fireEvent.click(screen.getByTestId('loop-publication-open-loop'));
+ const retry=await screen.findByTestId('loop-publication-reauthorize-expired');
+ expect(wire.performLoopPublicationAction).not.toHaveBeenCalled();expect(screen.getByTestId('loop-publication-reserve-candidate')).toBeDisabled();
+ fireEvent.click(retry);await waitFor(()=>expect(wire.performLoopPublicationAction).toHaveBeenCalledWith({kind:'reauthorizeNative',attemptId:'expired',expectedRevision:7}));
+ expect(wire.performLoopPublicationAction).toHaveBeenCalledTimes(1);
+});

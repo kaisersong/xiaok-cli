@@ -7,16 +7,18 @@ import {
   runLoginCommand as runProductionLogin,
   type LoginCommandResult,
   type LoginOptions,
+  type LoginCancellation,
 } from './login.js';
 
 export interface ChatLoginBootstrapOptions {
   interactive: boolean;
   hasInitialInput: boolean;
+  cancellation?: LoginCancellation;
 }
 
 export interface ChatLoginBootstrapDependencies {
   createAdapter(config: Config): ModelAdapter;
-  runLogin(options: LoginOptions): Promise<LoginCommandResult>;
+  runLogin(options: LoginOptions, cancellation?: LoginCancellation): Promise<LoginCommandResult>;
   loadConfig(): Promise<Config>;
   writeLine(text: string): void;
 }
@@ -38,6 +40,7 @@ export async function createChatAdapterWithLoginBootstrap(
   options: ChatLoginBootstrapOptions,
   dependencies: ChatLoginBootstrapDependencies = productionDependencies,
 ): Promise<{ config: Config; adapter: ModelAdapter }> {
+  options.cancellation?.signal.throwIfAborted();
   try {
     return { config, adapter: dependencies.createAdapter(config) };
   } catch (error) {
@@ -50,12 +53,16 @@ export async function createChatAdapterWithLoginBootstrap(
     }
 
     dependencies.writeLine('首次使用需要先登录并配置 AI provider。现在进入登录向导；按 Ctrl+C 可退出。');
-    const result = await dependencies.runLogin({ setDefault: true });
+    const result = options.cancellation
+      ? await dependencies.runLogin({ setDefault: true }, options.cancellation)
+      : await dependencies.runLogin({ setDefault: true });
+    options.cancellation?.signal.throwIfAborted();
     if (result.status !== 'saved') {
       throw error;
     }
 
     const configured = await dependencies.loadConfig();
+    options.cancellation?.signal.throwIfAborted();
     return {
       config: configured,
       adapter: dependencies.createAdapter(configured),

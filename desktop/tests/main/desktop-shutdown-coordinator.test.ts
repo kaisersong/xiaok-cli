@@ -219,4 +219,38 @@ describe('DesktopShutdownCoordinator protected finalization (design §5.5 ⑤, R
     expect(logged).toContain('protected_finalization_timeout');
     expect(report.storesClosed).toBe(false);
   });
+
+  it.each(['begin', 'destroy', 'owner-stop', 'owner-abort', 'owner-drain', 'provider-hide', 'provider-close', 'protected-drain', 'store', 'pin', 'lifetime'] as const)('continues final cleanup exactly once after %s fails', async stage => {
+    const failure = () => { throw Error('controlled failure:' + stage); };
+    const lifetime = vi.fn(async () => { if (stage === 'lifetime') failure(); });
+    const continuation = vi.fn(); const pin = vi.fn(async () => { if (stage === 'pin') failure(); });
+    const store = vi.fn(async () => { if (stage === 'store') failure(); });
+    const { deps: d } = deps({
+      providerRuntime: {
+        beginShutdown: () => { if (stage === 'begin') failure(); return { leases: [], waitForSettled: async () => { if (stage === 'protected-drain') failure(); return true; } }; },
+        hideAndAbortNonProtected: () => { if (stage === 'provider-hide') failure(); },
+        closeOrdinaryProviders: async () => { if (stage === 'provider-close') failure(); return { cleanupFailed: [] }; },
+      },
+      destroyWindows: () => { if (stage === 'destroy') failure(); },
+      ingressOwners: [{ name: 'producer', stopAccepting() { if (stage === 'owner-stop') failure(); }, abortAllActive() { if (stage === 'owner-abort') failure(); }, async drain() { if (stage === 'owner-drain') failure(); return true; } }],
+      durableStores: [{ name: 'store', close: store }], releaseMainSourcePin: pin,
+      disposeLifetimeResources: lifetime, continuation,
+    });
+    const coordinator = new DesktopShutdownCoordinator(d);
+    const first = coordinator.onBeforeQuit(); const second = coordinator.onBeforeQuit();
+    expect(first.shutdown).toBe(second.shutdown);
+    const report = await first.shutdown;
+    expect(lifetime).toHaveBeenCalledTimes(1); expect(continuation).toHaveBeenCalledTimes(1);
+    expect(report.cleanupFailed.length).toBeGreaterThan(0);
+    if (stage !== 'lifetime') expect(report.storesClosed).toBe(false);
+    if (stage === 'store') expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('caches shutdown before synchronous callbacks can reenter', async () => {
+    let nested: ReturnType<DesktopShutdownCoordinator['onBeforeQuit']> | undefined;
+    const { deps: d } = deps({ destroyWindows: () => { nested = coordinator.onBeforeQuit(); } });
+    const coordinator = new DesktopShutdownCoordinator(d); const first = coordinator.onBeforeQuit();
+    expect(nested!.shutdown).toBe(first.shutdown); await first.shutdown;
+  });
+
 });

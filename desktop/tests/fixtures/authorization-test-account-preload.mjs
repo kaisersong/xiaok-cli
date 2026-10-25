@@ -1,0 +1,18 @@
+// Owned Node crash fixture only; all native account facts except home stay real.
+import os from 'node:os';
+import {syncBuiltinESMExports} from 'node:module';
+import {lstatSync,realpathSync,existsSync,readdirSync,readFileSync,readlinkSync,writeSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {basename,dirname,isAbsolute,resolve,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const nativeUserInfo=os.userInfo,nativeIdentity=nativeUserInfo();
+const same=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+function canonical(input,kind){if(typeof input!=='string'||!isAbsolute(input))throw Error('test_account_path_required');const stat=lstatSync(input),path=realpathSync(input);if(stat.isSymbolicLink()||!same(resolve(input),path)||!(kind==='directory'?stat.isDirectory():stat.isFile()))throw Error('test_account_path_denied');if(process.platform!=='win32'&&stat.uid!==nativeIdentity.uid)throw Error('test_account_owner_denied');return path;}
+const entry=canonical(process.argv[1],'file'),expected=realpathSync(fileURLToPath(new URL('./multi-agent-authorization-crash.mts',import.meta.url)));
+if(!same(entry,expected)||!['committed-deny','uncommitted-deny','retired-receipt'].includes(process.argv[3]))throw Error('test_account_entry_denied');
+const root=canonical(process.argv[2],'directory'),accountRoot=canonical(process.argv[4],'directory'),home=canonical(process.argv[5],'directory'),temp=realpathSync(os.tmpdir());
+if(!same(dirname(root),temp)||!/^xiaok-auth-crash-[A-Za-z0-9]{6}$/.test(basename(root))||!same(dirname(accountRoot),temp)||!/^xiaok-vitest-accounts-[A-Za-z0-9]{6}$/.test(basename(accountRoot))||!same(dirname(home),accountRoot)||!/^account-[A-Za-z0-9]{6}$/.test(basename(home))||same(home,realpathSync(nativeIdentity.homedir)))throw Error('test_account_namespace_denied');
+function registrySnapshot(directory){if(!existsSync(directory))return null;const result=[];function walk(dir,prefix){for(const name of readdirSync(dir).sort()){const path=join(dir,name),key=prefix?join(prefix,name):name,stat=lstatSync(path);if(stat.isSymbolicLink())result.push({path:key,kind:'symlink',link:readlinkSync(path)});else if(stat.isDirectory()){result.push({path:key,kind:'directory',inode:stat.ino,mode:stat.mode});walk(path,key);}else if(stat.isFile())result.push({path:key,kind:'file',inode:stat.ino,mode:stat.mode,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')});else throw Error('test_account_registry_entry_denied');}}walk(directory,'');return result;}
+const realRegistry=join(nativeIdentity.homedir,'.xiaok','profile-sources'),realBefore=registrySnapshot(realRegistry);
+os.userInfo=options=>{const info=nativeUserInfo(options);return {...info,homedir:Buffer.isBuffer(info.homedir)?Buffer.from(home):home};};os.homedir=()=>home;syncBuiltinESMExports();
+process.on('exit',()=>{try{const realAfter=registrySnapshot(realRegistry),after=nativeUserInfo(),identityKeys=Object.keys(nativeIdentity).filter(key=>key!=='homedir');const nativeIdentityPreserved=identityKeys.every(key=>Object.is(after[key],nativeIdentity[key]));const unchanged=JSON.stringify(realBefore)===JSON.stringify(realAfter),childRegistry=registrySnapshot(join(home,'.xiaok','profile-sources'));writeSync(1,'FIXTURE_ACCOUNT '+JSON.stringify({entry,root,home,accountRoot,nativeIdentityPreserved,realRegistryUnchanged:unchanged,realBeforeDigest:createHash('sha256').update(JSON.stringify(realBefore)).digest('hex'),realAfterDigest:createHash('sha256').update(JSON.stringify(realAfter)).digest('hex'),childRegistry})+'\n');if(!nativeIdentityPreserved||!unchanged)process.exitCode=1;}catch(error){writeSync(2,String(error)+'\n');process.exitCode=1;}});

@@ -33,6 +33,7 @@ describe('task runtime sync', () => {
       type: 'tool_finished',
       sessionId: 'sess_1',
       turnId: 'turn_1',
+      invocationId: 'test_skill_failure',
       toolName: 'skill',
       ok: false,
     });

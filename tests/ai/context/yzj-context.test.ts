@@ -1,6 +1,10 @@
 // tests/ai/context/yzj-context.test.ts
 import { describe, it, expect } from 'vitest';
 import { buildSystemPrompt } from '../../../src/ai/context/yzj-context.js';
+import { discoverSkills } from '../../../src/ai/skills/loader.js';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('buildSystemPrompt', () => {
   it('does not force yzj API context into generic chat prompts', async () => {
@@ -28,24 +32,26 @@ describe('buildSystemPrompt', () => {
   });
 
   it('includes builtin skill summary in the system prompt', async () => {
-    const prompt = await buildSystemPrompt({
-      enterpriseId: null,
-      devApp: null,
-      cwd: '/tmp/demo',
-      budget: 2000,
-      skills: [
-        {
-          name: 'review',
-          description: 'review code',
-          content: 'Do review',
-          path: '/builtin/review.md',
-          source: 'builtin',
-          tier: 'system',
-        },
-      ],
-    });
+    const root = mkdtempSync(join(tmpdir(), 'yzj-skill-summary-'));
+    try {
+      const builtinRoot = join(root, 'builtin');
+      mkdirSync(join(builtinRoot, 'review'), { recursive: true });
+      writeFileSync(join(builtinRoot, 'review', 'SKILL.md'), '---\nname: review\ndescription: review code\n---\nDo review');
+      const skills = await discoverSkills(join(root, 'config'), join(root, 'workspace'), { builtinRoots: [builtinRoot], extraRoots: [] });
+      expect(skills).toHaveLength(1);
+      expect(skills[0]).toMatchObject({ name: 'review', description: 'review code', source: 'builtin', tier: 'system' });
+      const prompt = await buildSystemPrompt({
+        enterpriseId: null,
+        devApp: null,
+        cwd: '/tmp/demo',
+        budget: 2000,
+        skills,
+      });
 
-    expect(prompt).toContain('review');
+      expect(prompt).toContain('review');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('instructs the agent to search remote sources before giving up on missing skills', async () => {

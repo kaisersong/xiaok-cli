@@ -33,7 +33,7 @@ function fakeBashTool(): Tool {
         required: ['command'],
       },
     },
-    permission: 'unsafe',
+    permission: 'bash',
     execute: async (input: Record<string, unknown>) => `executed: ${input.command} in ${input.workdir ?? '.'}`,
   };
 }
@@ -135,7 +135,7 @@ describe('sandbox tool wrappers — denial callback flow', () => {
           required: ['file_path', 'content'],
         },
       },
-      permission: 'unsafe',
+      permission: 'write',
       execute: async (input: Record<string, unknown>) => `wrote ${input.file_path}`,
     };
 
@@ -149,7 +149,7 @@ describe('sandbox tool wrappers — denial callback flow', () => {
           required: ['file_path'],
         },
       },
-      permission: 'unsafe',
+      permission: 'write',
       execute: async (input: Record<string, unknown>) => `edited ${input.file_path}`,
     };
 

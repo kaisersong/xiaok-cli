@@ -21,3 +21,11 @@ export interface SaveFileResult {
     error?: string;
     ok?: boolean;
 }
+export interface ShowSaveDialogInput {
+    defaultPath?: string;
+    filters?: Array<{ name: string; extensions: string[] }> | null;
+}
+export interface ShowSaveDialogResult {
+    canceled: boolean;
+    filePath: string;
+}

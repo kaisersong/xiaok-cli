@@ -24,7 +24,7 @@ describe('MeetingService recovery', () => {
   it('marks active recordings as interrupted on startup', async () => {
     const audioFilePath = join(rootDir, 'interrupted.wav');
     writeFileSync(audioFilePath, 'partial wav');
-    store.createMeeting({ id: 'meeting-recording', status: 'recording', title: 'Interrupted', audioFilePath, startedAt: 10 });
+    store.createMeeting({ id: 'meeting-recording', status: 'recording', title: 'Interrupted', audioFilePath, startedAt: 10 }, 'user');
     const service = createMeetingService({ store });
 
     const result = await service.recoverMeetings();
@@ -34,7 +34,7 @@ describe('MeetingService recovery', () => {
   });
 
   it('does not replay summarization after restart', async () => {
-    store.createMeeting({ id: 'meeting-summary', status: 'summarizing', title: 'Summary', startedAt: 10 });
+    store.createMeeting({ id: 'meeting-summary', status: 'summarizing', title: 'Summary', startedAt: 10 }, 'user');
     const service = createMeetingService({ store });
 
     const result = await service.recoverMeetings();
@@ -46,7 +46,7 @@ describe('MeetingService recovery', () => {
   it('marks in-flight transcription as interrupted on startup while keeping the audio for retry', async () => {
     const audioFilePath = join(rootDir, 'transcribing.wav');
     writeFileSync(audioFilePath, 'complete wav');
-    store.createMeeting({ id: 'meeting-transcribing', status: 'transcribing', title: 'Transcribing', audioFilePath, startedAt: 10 });
+    store.createMeeting({ id: 'meeting-transcribing', status: 'transcribing', title: 'Transcribing', audioFilePath, startedAt: 10 }, 'user');
     const service = createMeetingService({ store });
 
     const result = await service.recoverMeetings();

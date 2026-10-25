@@ -1,0 +1,29 @@
+import {deflateSync} from 'node:zlib';
+import {it,expect} from 'vitest';
+import {createHash,randomBytes} from 'node:crypto';
+import {parseIntentBusinessContract} from '../../../src/runtime/verification/intent-business-contract.js';
+import {intentApplicationCandidate} from '../../support/intent-application-fixture.js';
+import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
+import {createIntentApplicationBinding} from '../../../src/runtime/verification/intent-application-binding.js';
+// Original large population acceptance remains explicitly red, not a routine PASS.
+// Pure schema fixture here establishes byte feasibility, not native/receiver evidence.
+it.runIf(process.env.SOLPI_INTENT_POPULATION==='1')('complete original 99-stage parent application fits the unchanged transport without truncating original references',()=>{
+ const raw=structuredClone(intentApplicationCandidate()),H='a'.repeat(64),definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe:{kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:createHash('sha256').update('result').digest('hex'),structure:'bytes' as const}]}}]};raw.contract.verification=definition;
+ const sample=structuredClone(raw.contract.stages[0]);raw.contract.stages=[];
+ for(let i=0;;i++){raw.contract.stages.push({...structuredClone(sample),stageId:`s${i}`,order:i,label:'stage',deliverable:'result',templateId:'template',verification:definition,dependsOnStageIds:[],steps:[{...sample.steps[0],stepId:`p${i}`,key:'main',order:0,skillName:null,dependsOn:[]}]});if(Buffer.byteLength(json(raw.contract))>61000){raw.contract.stages.pop();break;}}
+ raw.subject.stageId=null;raw.body={kind:'intent-parent',summary:'complete original result',stages:raw.contract.stages.map((s:any,i:number)=>({subject:{...raw.subject,stageId:s.stageId},candidateId:`candidate-${i}`,candidateRevision:1,bindingHash:H,immutablePayloadHash:H,operationId:`publication-${i}`,fullTupleHash:H,committedBusinessRevision:1,receiverId:'receiver',receiverProtocolVersion:1,receiverInstanceEpoch:1})),artifacts:[]} as any;
+ const {contract,...referenced}=raw;const referenceCandidate={...referenced,contractReference:{version:1,sessionId:contract.sessionId,intentId:contract.intentId,contractHash:createHash('sha256').update(json(contract)).digest('hex')}};const review={version:1,purpose:'completion-application-binding',authorityId:'authority',challengeId:'00000000-0000-4000-8000-000000000000',principal:{uid:501,auditSessionId:1,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555'},requestSource:'user',owner:{profileId:'profile',ownerKind:'intent',ownerId:contract.intentId},registrationHash:H,previousBindingHash:null,binding:referenceCandidate,bindingHash:H,deadline:{domainId:'clock',qualificationEpoch:1,notBefore:1000,validUntil:2000}};
+ const compressedContract=deflateSync(Buffer.from(json(contract))).toString('base64'),compressedReview={...review,binding:{...referenceCandidate,contractBytes:{encoding:'zlib-base64',value:compressedContract}}};console.info(json({compressedContractBase64Bytes:Buffer.byteLength(compressedContract),compressedFullReviewAsciiBytes:Buffer.byteLength(json(compressedReview).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0')))}));
+ const completeReview={...review,binding:raw},completeRecovery={state:'committed',challengePhase:'committed',challenge:{challengeId:review.challengeId,alreadyCommitted:true,canonicalReview:completeReview},observation:{state:'active',current:{binding:raw,bindingHash:H,revision:1},pendingTransitionId:null,pendingTarget:null}};for(const [name,value]of [['nativeReview',completeReview],['recovery',completeRecovery]] as const){const bytes=Buffer.from(json(value)),encoded=deflateSync(bytes).toString('base64');console.info(json({name,uncompressed:bytes.length,losslessFrameAscii:Buffer.byteLength(json({version:1,encoding:'zlib-base64',uncompressedBytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),payload:encoded}))}));}
+ console.info(json({stageCount:raw.contract.stages.length,contractBytes:Buffer.byteLength(json(raw.contract)),completeCandidateBytes:Buffer.byteLength(json(raw)),proposedReferenceCandidateBytes:Buffer.byteLength(json(referenceCandidate)),proposedReferenceReviewUtf8Bytes:Buffer.byteLength(json(review)),proposedReferenceReviewAsciiBytes:Buffer.byteLength(json(review).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0')))}));expect(raw.contract.stages).toHaveLength(99);expect(createIntentApplicationBinding(raw).body.kind).toBe('intent-parent');
+});
+
+it.runIf(process.env.SOLPI_INTENT_POPULATION==='1')('preserves legal near-limit high-entropy contract and candidate even when compression cannot fit one 64 KiB frame',()=>{
+ const raw=structuredClone(intentApplicationCandidate(true));raw.contract.normalizedIntent='';
+ const contractRoom=65000-Buffer.byteLength(json(raw.contract));raw.contract.normalizedIntent=randomBytes(contractRoom).toString('base64').slice(0,contractRoom);
+ expect(Buffer.byteLength(json(parseIntentBusinessContract(raw.contract)))).toBe(65000);
+ raw.body.summary='';const {contract,...rest}=raw,bodyRoom=64800-Buffer.byteLength(json(rest));raw.body.summary=randomBytes(bodyRoom).toString('base64').slice(0,bodyRoom);
+ const encoded=Buffer.from(json(raw));expect(deflateSync(encoded).length).toBeGreaterThan(65536);
+ console.info(json({kind:'high-entropy',contractBytes:Buffer.byteLength(json(contract)),nonContractBytes:Buffer.byteLength(json({...rest,body:raw.body})),completeBytes:encoded.length,compressedBytes:deflateSync(encoded).length}));
+ const binding=createIntentApplicationBinding(raw);expect(binding.contract).toEqual(contract);expect(binding.body).toEqual(raw.body);
+});

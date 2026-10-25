@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 export interface AtomicFileOperations {
   mkdirSync: typeof mkdirSync;
@@ -24,6 +24,8 @@ export interface AtomicWriteOptions {
   operations?: Partial<AtomicFileOperations>;
   platform?: NodeJS.Platform;
   tempName?: string;
+  /** Protected publication barrier: unsupported directory flush is a hard failure. */
+  requireDirectorySync?: boolean;
 }
 
 export type AtomicWriteFile = (
@@ -53,6 +55,10 @@ export const writeFileAtomicallySync: AtomicWriteFile = (
   contents,
   options = {},
 ) => {
+  const platform = options.platform ?? process.platform;
+  if (options.requireDirectorySync && platform === 'win32') {
+    throw new Error('directory sync durability unsupported on Windows');
+  }
   const operations = {
     ...defaultOperations,
     ...options.operations,
@@ -75,7 +81,8 @@ export const writeFileAtomicallySync: AtomicWriteFile = (
     fileDescriptor = undefined;
     operations.renameSync(tempPath, targetPath);
     renamed = true;
-    syncDirectory(parentDir, operations, options.platform ?? process.platform);
+    if (options.requireDirectorySync) syncDirectoryTreeStrict(parentDir, { operations, platform });
+    else syncDirectory(parentDir, operations, platform);
   } catch (error) {
     if (fileDescriptor !== undefined) {
       try {
@@ -91,10 +98,24 @@ export const writeFileAtomicallySync: AtomicWriteFile = (
   }
 };
 
+/** A publication barrier, not a best-effort durability hint. Failures must propagate. */
+export function syncDirectoryTreeStrict(directoryPath: string, options: Pick<AtomicWriteOptions, 'operations' | 'platform'> = {}): void {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'win32') throw new Error('directory sync durability unsupported on Windows');
+  const operations = { ...defaultOperations, ...options.operations };
+  let directory = resolve(directoryPath);
+  for (;;) {
+    syncDirectory(directory, operations, platform, true);
+    const parent = dirname(directory); if (parent === directory) return;
+    directory = parent;
+  }
+}
+
 function syncDirectory(
   directoryPath: string,
   operations: AtomicFileOperations,
   platform: NodeJS.Platform,
+  required = false,
 ): void {
   if (platform === 'win32') {
     return;
@@ -106,7 +127,7 @@ function syncDirectory(
     operations.fsyncSync(directoryDescriptor);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (!code || !UNSUPPORTED_DIRECTORY_FSYNC_CODES.has(code)) {
+    if (required || !code || !UNSUPPORTED_DIRECTORY_FSYNC_CODES.has(code)) {
       throw error;
     }
   } finally {

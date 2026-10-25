@@ -1,7 +1,43 @@
-import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
+import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
+import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
+import type { MeetingMutationModelResult } from '../shared/meeting-mutation-ipc-contract.js';
+import type { MeetingReadonlyPermission, MeetingReadonlyAsr, MeetingReadonlyModels } from '../shared/meeting-readonly-ipc-contract.js';
+import type { ChannelReadonlyView, McpInstallReadonlyView } from '../shared/channel-mcp-readonly-ipc-contract.js';
+import type { SkillListDto } from '../shared/skill-list-ipc-contract.js';
+import type { AutomationConfigDto, AutomationOverviewDto } from '../shared/automation-config-ipc-contract.js';
+import type { MobileRelaySignInResult } from '../shared/mobile-signin-ipc-contract.js';
+import type { RelatedServiceIdDto, RelatedServiceStatusDto, ServiceStatusSnapshotDto } from '../shared/service-control-ipc-contract.js';
+import type { MobilePairingInfoDto, MobileRelayStatusDto } from '../shared/mobile-readonly-ipc-contract.js';
+import type { PluginMcpServerDto, PluginDependencyStatusDto, AvailablePluginDto } from '../shared/plugin-catalog-ipc-contract.js';
+import type { UpdateIpcStatusDto, UpdateInstallDto } from '../shared/updater-ipc-contract.js';
+import type { RecorderWindowReply, RecorderWindowNotificationReply } from '../shared/recorder-window-ipc-contract.js';
+import type {ConnectorsConfigDto as ConnectorsConfig,ConnectorsRuntimeDto as ProviderRuntime,ConnectorsSnapshotDto,ConnectorTestResultDto,ConnectorsSearchProviderName as SearchProviderName,ConnectorsFetchProviderName as FetchProviderName} from '../shared/connectors-ipc-contract.js';
+import type { ScheduledTaskDto, ScheduledCreateDto, ScheduledUpdateDto, ScheduledUpdateResultDto, ScheduledActionDto, ScheduledRunDto, ScheduledBindingDto, ScheduledLoopCreateDto, ScheduledReminderDto, ScheduledReminderStatusDto } from '../shared/scheduled-timed-action-ipc-contract.js';
+import type { KnowledgeCollectionDto, KnowledgeSourceDto, KnowledgeCreateCollectionInput, KnowledgeAddSourceInput, KnowledgeCollectionStateDto, KnowledgeSourceContentInput, KnowledgeSourceContentDto, KnowledgeSearchInput, KnowledgeSearchResultDto } from '../shared/knowledge-ipc-contract.js';
+import type { ProjectPrincipleDto, PrincipleSaveInput, PrincipleSaveResult, PrincipleDeleteResult } from '../shared/principles-ipc-contract.js';
+import type * as ModelProviderDTO from '../shared/model-provider-ipc-contract.js';
+import type { DesktopTraceTarget, DesktopTraceExportResult, DesktopDiagnosisReport, DesktopSkillStats } from '../shared/desktop-diagnostics-ipc-contract.js';
+export type { DesktopTraceTarget } from '../shared/desktop-diagnostics-ipc-contract.js';
+import type { ProxyJsonResult, ProxyTextResult, ProxyDeleteResult, ProxyHttpBody, ProxyStreamResult, ProxyStatusResult, ProxyHealthResult } from '../shared/kswarm-proxy-ipc-contract.js';
+import type { ThreadMetadataSnapshotDto, ThreadMetadataMigrationResultDto } from '../shared/thread-metadata-ipc-contract.js';
+import type { LoopCreateTemplateDto, LoopTemplatePatchDto, LoopDefinitionDto, UserLoopTemplateDto, CreateLoopTemplateResultDto, LoopConstraintDto, LoopAnomalyDto, LoopManagementRunResultDto } from '../shared/loop-management-ipc-contract.js';
+import type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../shared/collaboration-room-ipc-contract.js';
+import type { KSwarmProjectFactDto, KSwarmProjectModeResultDto, KSwarmProjectDeleteResultDto, KSwarmAgentFactDto, KSwarmProbeFactDto, KSwarmProjectCreateDto, KSwarmAgentCreateDto } from '../shared/kswarm-project-agent-ipc-contract.js';
+import type { ProjectTeamPlanItemDto, ProjectTeamPlanDto, ProjectTeamOperationDto } from '../shared/kswarm-team-ipc-contract.js';
+import type { AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../shared/assistant-ipc-contract.js';
+import type {LoopRunObservationDto,AutomationRunHistoryDto} from '../shared/loop-current-view-ipc-contract.js';
+import type {LoopOutputActionResultView,LoopOutputPreviewView,LoopTaskResultView,LoopPublishedArtifactsView} from '../shared/loop-output-ipc-contract.js';
+import type { MemoryIpcEntry, MemoryImportIpcResult, MemoryStatsIpcSnapshot, MemoryPersonaIpcTrait, MemoryLayerIpcEntry, EmbeddingModelIpcEntry } from '../shared/memory-ipc-types.js';
+import type {OpenFileResult, ReadFileResult, SaveFileInput, SaveFileResult, ShowSaveDialogInput, ShowSaveDialogResult} from '../shared/file-ipc-contract.js';
+import type { CompoundExecutionStatus, SemanticCompactionStatus } from '../shared/host-observation-types.js';
+import type {LoopArtifactPageRequest} from '../shared/loop-artifacts.js';
+import type {LoopPublicationActionDto,LoopPublicationActionResultDto,LoopPublicationStateDto,StoredLoopPublicationConfigurationDto} from '../shared/loop-publication-ipc-contract.js';
+import type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
+export type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
+import type { GoalCompletionObservation } from '../shared/host-observation-types.js';
 import type { ConversationActivity, WorkWatch, WorkProjection, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
-import type {OpenFileResult, ReadFileResult, SaveFileInput, SaveFileResult} from '../shared/file-ipc-contract.js';
+import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -18,18 +54,12 @@ import type {
   TaskUnderstanding,
   UserAnswer,
 } from '../../src/runtime/task-host/types.js';
-import type { GoalActivation, GoalInput, GoalState } from '../../src/runtime/goal/types.js';
+import type { GoalActivation, GoalCreationInput, GoalInput, GoalState } from '../shared/host-observation-types.js';
 import type {
   ModelRuntimeConstraints,
   ModelRuntimeOptions,
   ProtocolId,
 } from '../../src/ai/providers/types.js';
-import type {
-  ConnectorsConfig,
-  ProviderRuntime,
-  SearchProviderName,
-  FetchProviderName,
-} from '../../src/ai/tools/connectors/config.js';
 import type {
   ArtifactWorkspaceErrorCode,
   ArtifactWorkspaceEventName,
@@ -78,6 +108,11 @@ export const PRELOAD_API_KEYS = [
   'selectDirectory',
   'selectMaterials',
   'importMaterial',
+  'prepareObservationTask',
+  'createObservationTask',
+  'stopObservationTask',
+  'revokeObservationTask',
+  'getObservationTaskStatus',
   'createTask',
   'createTaskWithFiles',
   'subscribeTask',
@@ -118,9 +153,15 @@ export const PRELOAD_API_KEYS = [
   'subscribeLocalExecutionAuthorization',
   'unsubscribeLocalExecutionAuthorization',
   'getGoal',
+  'getGoalNativeMutation',
+  'recoverGoalNativeMutation',
+  'continueGoalNativeMutation',
+  'cancelGoalNativeMutation',
   'createGoal',
   'pauseGoal',
   'resumeGoal',
+  'recoverGoalPublication',
+  'continueGoalPublication',
   'cancelGoal',
   'replaceGoal',
   'ackGoalTaskAttached',
@@ -240,7 +281,11 @@ export const PRELOAD_API_KEYS = [
   'openLoopOutputDirectory',
   'readLoopOutputPreview',
   'readLoopTaskResult',
+  'listLoopPublishedArtifacts',
   'getLoopRuns',
+  'getLoopPublicationConfiguration',
+  'getLoopPublicationState',
+  'performLoopPublicationAction',
   'getEvidenceAnomalies',
   'runLoopNow',
   'listLoopConstraints',
@@ -472,12 +517,23 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   selectDirectory: 'desktop:selectDirectory',
   selectMaterials: 'desktop:selectMaterials',
   importMaterial: 'desktop:importMaterial',
+  prepareObservationTask: 'desktop:prepareObservationTask',
+  createObservationTask: 'desktop:createObservationTask',
+  stopObservationTask: 'desktop:stopObservationTask',
+  revokeObservationTask: 'desktop:revokeObservationTask',
+  getObservationTaskStatus: 'desktop:getObservationTaskStatus',
   createTask: 'desktop:createTask',
   createTaskWithFiles: 'desktop:createTaskWithFiles',
   getGoal: 'desktop:goal:get',
+  getGoalNativeMutation: 'desktop:goal:getNativeMutation',
+  recoverGoalNativeMutation: 'desktop:goal:recoverNativeMutation',
+  continueGoalNativeMutation: 'desktop:goal:continueNativeMutation',
+  cancelGoalNativeMutation: 'desktop:goal:cancelNativeMutation',
   createGoal: 'desktop:goal:create',
   pauseGoal: 'desktop:goal:pause',
   resumeGoal: 'desktop:goal:resume',
+  recoverGoalPublication: 'desktop:goal:recoverPublication',
+  continueGoalPublication: 'desktop:goal:continuePublication',
   cancelGoal: 'desktop:goal:cancel',
   replaceGoal: 'desktop:goal:replace',
   ackGoalTaskAttached: 'desktop:goal:ackTaskAttached',
@@ -589,7 +645,11 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   openLoopOutputDirectory: 'desktop:loops:openOutputDirectory',
   readLoopOutputPreview: 'desktop:loops:readOutputPreview',
   readLoopTaskResult: 'desktop:loops:readTaskResult',
+  listLoopPublishedArtifacts: 'desktop:loops:listPublishedArtifacts',
   getLoopRuns: 'desktop:loops:listRuns',
+  getLoopPublicationConfiguration: 'desktop:loops:getPublicationConfiguration',
+  getLoopPublicationState: 'desktop:loops:getPublicationState',
+  performLoopPublicationAction: 'desktop:loops:performPublicationAction',
   getEvidenceAnomalies: 'desktop:loops:listAnomalies',
   runLoopNow: 'desktop:loops:runNow',
   listLoopConstraints: 'desktop:loops:listConstraints',
@@ -737,63 +797,17 @@ export const KNOWN_UNROUTED_HANDLERS: readonly string[] = [
   'desktop:artifactUnwatch',
 ];
 
-export interface DesktopModelProviderView {
-  id: string;
-  label: string;
-  type: 'first_party' | 'custom';
-  protocol: ProtocolId;
-  baseUrl?: string;
-  apiKeyConfigured: boolean;
-}
+export type DesktopModelProviderView = ModelProviderDTO.ModelProviderView;
 
-export interface DesktopModelEntryView {
-  projectAgentSelectable?: boolean;
-  id: string;
-  provider: string;
-  model: string;
-  label: string;
-  capabilities?: string[];
-  runtimeOptions?: ModelRuntimeOptions;
-  runtimeConstraints?: ModelRuntimeConstraints;
-  isDefault: boolean;
-}
+export type DesktopModelEntryView = ModelProviderDTO.ModelEntryView;
 
-export interface DesktopProviderProfileView {
-  id: string;
-  label: string;
-  protocol: ProtocolId;
-  baseUrl?: string;
-  defaultModelId: string;
-  defaultModel: string;
-  defaultModelLabel: string;
-  capabilities?: string[];
-  availableModels?: AvailableModelView[];
-}
+export type DesktopProviderProfileView = ModelProviderDTO.ModelProviderProfileView;
 
-export interface DesktopModelConfigSnapshot {
-  configuredDefaultModelId?: string;
-  configPath: string;
-  defaultProvider: string;
-  defaultModelId: string;
-  providers: DesktopModelProviderView[];
-  models: DesktopModelEntryView[];
-  providerProfiles: DesktopProviderProfileView[];
-}
+export type DesktopModelConfigSnapshot = ModelProviderDTO.ModelConfigResult;
 
-export interface DesktopSaveModelConfigInput {
-  providerId: string;
-  modelId?: string;
-  modelName?: string;
-  label?: string;
-  apiKey?: string;
-  baseUrl?: string;
-  protocol?: ProtocolId;
-}
+export type DesktopSaveModelConfigInput = ModelProviderDTO.SaveModelConfigInput;
 
-export interface DesktopUpdateModelRuntimeOptionsInput {
-  modelId: string;
-  runtimeOptions: ModelRuntimeOptions;
-}
+export type DesktopUpdateModelRuntimeOptionsInput = ModelProviderDTO.UpdateModelRuntimeInput;
 
 /**
  * TypeSafe System One（Jev）辅助决策模型配置快照。
@@ -801,42 +815,14 @@ export interface DesktopUpdateModelRuntimeOptionsInput {
  * Jev 不是推理 provider：它不出现在 `providers` / `models` / `defaultModelId`
  * 里，所以单独走这一对 IPC。主进程只回传掩码，明文 Key 永不进入 renderer。
  */
-export interface DesktopSystemOneConfigSnapshot {
-  /** 是否已有可用 Key（config.json 或环境变量）。 */
-  configured: boolean;
-  /** Key 来源：配置文件 / 环境变量 / 都没有。 */
-  keySource: 'config' | 'env' | 'none';
-  /** 命中环境变量时的变量名，便于 UI 说明来源。 */
-  keyEnvVar: string | null;
-  /** 生效的端点 base URL（已含默认值）。 */
-  baseUrl: string;
-  /** 生效的模型名（已含默认值）。 */
-  model: string;
-  /** 掩码后的 Key；未配置时为 null。 */
-  apiKeyMasked: string | null;
-}
+export type DesktopSystemOneConfigSnapshot = ModelProviderDTO.SystemOneConfigResult;
 
 /** `undefined` = 不变更，空串 = 清除该字段。 */
-export interface DesktopSaveSystemOneConfigInput {
-  apiKey?: string;
-  baseUrl?: string;
-  model?: string;
-}
+export type DesktopSaveSystemOneConfigInput = ModelProviderDTO.SystemOneConfigPatch;
 
-export interface AvailableModelView {
-  modelId: string;
-  model: string;
-  label: string;
-  capabilities?: string[];
-  runtimeOptions?: ModelRuntimeOptions;
-  runtimeConstraints?: ModelRuntimeConstraints;
-}
+export type AvailableModelView = ModelProviderDTO.AvailableModelResult;
 
-export interface TestProviderConnectionResult {
-  success: boolean;
-  latencyMs?: number;
-  error?: string;
-}
+export type TestProviderConnectionResult = ModelProviderDTO.ProviderConnectionResult;
 
 export type MeetingAsrProviderId = 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
 
@@ -875,58 +861,26 @@ export interface MeetingSaveAsrConfigInput {
   };
 }
 
-export type DesktopMobileRelayCredentialState =
-  | 'ok' | 'missing' | 'expired' | 'rejected' | 'unparseable';
-
-export interface DesktopMobileRelayStatus {
-  running: boolean;
-  connected: boolean;
-  relayUrl: string;
-  roomId: string;
-  lastError: string | null;
-  credentialState: DesktopMobileRelayCredentialState;
-  credentialExpiresAt?: string;
-  requiresUserReauth: boolean;
-}
-
-export interface DesktopMobilePairingInfo {
-  desktopId: string;
-  desktopName: string;
-  gatewayURL: string;
-  reachableURLs: string[];
-  relayUrl?: string;
-  relayJwt?: string;
-  relayRoomSecret: string;
-  deepLink: string;
-}
+export type DesktopMobileRelayCredentialState = MobileRelayStatusDto['credentialState'];
+export type DesktopMobileRelayStatus = MobileRelayStatusDto;
+export type DesktopMobilePairingInfo = MobilePairingInfoDto;
 
 export type DesktopChannelType = 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
 
-export interface DesktopChannelView {
-  id: string;
-  type: DesktopChannelType;
-  name: string;
-  webhookUrl?: string;
-  enabled: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
+export type DesktopChannelView = ChannelReadonlyView;
 
 export interface DesktopChannelInput {
   type: DesktopChannelType;
   name: string;
   webhookUrl?: string;
+  appId?: string;
+  appSecret?: string;
+  token?: string;
+  botToken?: string;
+  chatId?: string;
 }
 
-export interface DesktopMCPInstallView {
-  id: string;
-  name: string;
-  source: 'npm' | 'github' | 'local';
-  command: string;
-  args?: string[];
-  enabled: boolean;
-  createdAt: number;
-}
+export type DesktopMCPInstallView = McpInstallReadonlyView;
 
 export interface DesktopMCPInput {
   name: string;
@@ -946,31 +900,8 @@ export interface PluginMcpErrorDetail {
   missingModule?: string;
 }
 
-export interface PluginMcpServerView {
-  name: string;
-  pluginName: string;
-  toolCount: number;
-  connected: boolean;
-  enabled: boolean;
-  lastError?: string;
-  lastErrorDetail?: PluginMcpErrorDetail;
-}
-
-export interface PluginDependencyStatusView {
-  pluginName: string;
-  dependencyId: string;
-  displayName: string;
-  pluginInstalled?: boolean;
-  state: 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
-  code: string;
-  resolvedBinary?: string;
-  version?: string;
-  detail?: string;
-  canInstall: boolean;
-  canUpdate: boolean;
-  canDiagnose: boolean;
-  task?: { taskId: string; dependencyId: string; state: 'running' | 'cancelling' };
-}
+export type PluginMcpServerView = PluginMcpServerDto;
+export type PluginDependencyStatusView = PluginDependencyStatusDto;
 
 export interface PluginDependencyActionInput {
   pluginName: string;
@@ -1003,20 +934,7 @@ export interface UpdateStatus {
   error?: string;
 }
 
-export interface ReminderRecord {
-  reminderId: string;
-  content: string;
-  scheduleAt: number;
-  timezone: string;
-  status: 'pending' | 'delivering' | 'sent' | 'failed' | 'cancelled';
-  retryCount: number;
-  maxRetry: number;
-  nextAttemptAt: number;
-  lastError?: string;
-  createdAt: number;
-  updatedAt: number;
-  sentAt?: number;
-}
+export type ReminderRecord = ScheduledReminderDto;
 
 export interface KSwarmServiceStatus {
   running: boolean;
@@ -1024,36 +942,19 @@ export interface KSwarmServiceStatus {
   pid: number | null;
   restartCount: number;
   lastError: string | null;
+  terminalDegraded?: boolean;
+  persistenceFailStopCount?: number;
+  lastPersistenceFailStop?: string | null;
 }
 
-export type DesktopRelatedServiceId = 'kswarm' | 'intent-broker' | 'runtime-bridge';
-
-export interface DesktopRelatedServiceStatus {
-  id: DesktopRelatedServiceId;
-  label: string;
-  running: boolean;
-  reachable: boolean;
-  port: number;
-  pid: number | null;
-  restartCount?: number;
-  lastError: string | null;
-  detail?: string;
-}
-
-export interface DesktopServiceStatusSnapshot {
-  checkedAt: number;
-  services: DesktopRelatedServiceStatus[];
-}
+export type DesktopRelatedServiceId = RelatedServiceIdDto;
+export type DesktopRelatedServiceStatus = RelatedServiceStatusDto;
+export type DesktopServiceStatusSnapshot = ServiceStatusSnapshotDto;
 
 export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
 
-export interface ConnectorsConfigSnapshot {
-  config: ConnectorsConfig;
-  loadStatus: ConnectorsLoadStatus;
-  providers: ProviderRuntime[];
-}
+export type ConnectorsConfigSnapshot = ConnectorsSnapshotDto;
 
-export type DesktopTraceTarget = { kind: 'session' | 'project' | 'task'; id: string };
 
 export interface HtmlEditMediaSelection {
   canceled: boolean;
@@ -1248,68 +1149,17 @@ export function sanitizeKSwarmSemanticInput(
   return sanitizeAgent(input);
 }
 
-export interface AssistantOverviewView {
-  profile: { status: 'needs_consent' | 'active' | 'paused'; eveningTime: string; morningTime: string };
-  suggestions: Array<{ id: string; title: string; summary: string }>;
-  pendingCandidateCount: number;
-  candidates: Array<Record<string, unknown>>;
-}
+export type AssistantOverviewView = AssistantOverviewDto;
 
-export interface ProjectTeamPlanItemView {
-  desiredAgentId: string;
-  action: 'keep' | 'reuse' | 'create';
-  role: string;
-  agentName?: string;
-  capabilityLabels: string[];
-  reasonCode: string;
-}
+export type ProjectTeamPlanItemView = ProjectTeamPlanItemDto;
+export type ProjectTeamPlanView = ProjectTeamPlanDto;
+export type ProjectTeamOperationView = ProjectTeamOperationDto;
 
-export interface ProjectTeamPlanView {
-  planId: string;
-  projectId: string;
-  projectRevision: number;
-  outcome: 'proposal' | 'no_change' | 'needs_manual_scope';
-  summary: string;
-  items: ProjectTeamPlanItemView[];
-}
-
-export interface ProjectTeamOperationView {
-  operationId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  message?: string;
-}
-
-export interface CreateKSwarmProjectSemanticInput {
-  startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
-  name: string;
-  goal: string;
-  requirements?: string;
-  poAgent: string;
-  members?: string[];
-  workFolder?: string;
-  enableSummary?: boolean;
-  executionMode?: 'direct' | 'auto' | 'workflow_preferred';
-  agentSelection?: {
-    poAgent: { agentId: string; source: string };
-    members: Array<{ agentId: string; source: string }>;
-  };
-  planningGuidance?: string;
-  autoStartPlanning?: boolean;
-}
-
-export interface KSwarmAgentSemanticInput {
-  desktopModelId?: string | null;
-  name: string;
-  description?: string;
-  roles?: string[];
-  capabilities?: string[];
-  instructions?: string;
-  runtimeType?: string;
-  maxConcurrentTasks?: number;
-  fallbackToDesktopModel?: boolean;
-}
+export type CreateKSwarmProjectSemanticInput = KSwarmProjectCreateDto;
+export type KSwarmAgentSemanticInput = KSwarmAgentCreateDto;
 
 export interface DesktopGoalProjection {
+  currentCompletion?: GoalCompletionObservation;
   state: GoalState;
   activation: GoalActivation;
   waitingReason?: 'waiting_children' | 'children_need_attention';
@@ -1340,16 +1190,8 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
   getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot>;
-  saveSystemOneConfig(input: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot>;
-  createManagedXiaokAgent(input: {
-    name: string;
-    description?: string;
-    roles?: string[];
-    capabilities?: string[];
-    instructions?: string;
-    maxConcurrentTasks?: number;
-    desktopModelId?: string | null;
-  }): Promise<unknown>;
+  saveSystemOneConfig(input?: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot>;
+  createManagedXiaokAgent(input: ModelProviderDTO.ManagedAgentInput): Promise<ModelProviderDTO.ManagedAgentResult>;
   testProviderConnection(input: { providerId: string; modelId?: string }): Promise<TestProviderConnectionResult>;
   listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]>;
   deleteProvider(providerId: string): Promise<void>;
@@ -1359,28 +1201,39 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getMobileRelayStatus(): Promise<DesktopMobileRelayStatus>;
   onMobileRelayStatus(handler: (status: DesktopMobileRelayStatus) => void): () => void;
   /** Opens the relay's own sign-in page; the URL is derived in main, not passed in. */
-  openMobileRelaySignIn(): Promise<{ ok: boolean; url?: string; error?: string }>;
+  openMobileRelaySignIn(): Promise<MobileRelaySignInResult>;
   readClipboardFilePaths(): Promise<string[]>;
   readClipboardImage(): Promise<string | null>;
   selectDirectory(): Promise<{ filePath: string }>;
   selectMaterials(): Promise<{ filePaths: string[] }>;
   importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }): Promise<MaterialView>;
+  prepareObservationTask(): Promise<{draftId:string;expiresAt:number;model:string}|null>;
+  createObservationTask(input:{draftId:string;prompt:string;threadId?:string}): Promise<{taskId:string}>;
+  stopObservationTask(taskId:string): Promise<{mode:string}>;
+  revokeObservationTask(taskId:string): Promise<{mode:string}>;
+  getObservationTaskStatus(taskId:string): Promise<{mode:string;semantic?:SemanticCompactionStatus;compound?:CompoundExecutionStatus}>;
   createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     context?: TaskCreateContext;
-  }): Promise<{ taskId: string; understanding: TaskUnderstanding }>;
+  }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   createTaskWithFiles(input: {
     prompt: string;
     filePaths: string[];
     context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   getGoal(threadId: string): Promise<DesktopGoalProjection | null>;
-  createGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  getGoalNativeMutation(threadId: string): Promise<DesktopGoalNativeMutationProjection | null>;
+  recoverGoalNativeMutation(input: { threadId: string }): Promise<{ mutation: DesktopGoalNativeMutationProjection; goal: DesktopGoalProjection | null }>;
+  continueGoalNativeMutation(input: { threadId: string } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  cancelGoalNativeMutation(input: { threadId: string }): Promise<DesktopGoalNativeMutationProjection>;
+  createGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   pauseGoal(threadId: string): Promise<DesktopGoalProjection>;
   resumeGoal(input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  recoverGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
+  continueGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
   cancelGoal(threadId: string): Promise<DesktopGoalProjection>;
-  replaceGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  replaceGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void>;
   setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
   onGoalChanged(handler: (input: DesktopGoalChangedEvent) => void): () => void;
@@ -1424,143 +1277,132 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   setArtifactCollectionMembership(input: SetArtifactCollectionMembershipInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
   recordArtifactWorkspaceEvent(input: RecordArtifactWorkspaceEventInput): Promise<ArtifactWorkspaceIpcResult<{ recorded: boolean }>>;
   selectHtmlEditMedia(input: { kind: 'image' | 'svg' }): Promise<HtmlEditMediaSelection>;
-  listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
+  listSkills(): Promise<SkillListDto>;
   installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   listChannels(): Promise<DesktopChannelView[]>;
   testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }>;
   createChannel(input: DesktopChannelInput): Promise<DesktopChannelView>;
-  updateChannel(id: string, input: Partial<DesktopChannelInput>): Promise<DesktopChannelView>;
+  updateChannel(id: string, input: Partial<DesktopChannelInput> & { enabled?: boolean }): Promise<DesktopChannelView>;
   deleteChannel(id: string): Promise<void>;
   listMCPInstalls(): Promise<DesktopMCPInstallView[]>;
   createMCPInstall(input: DesktopMCPInput): Promise<DesktopMCPInstallView>;
-  updateMCPInstall(id: string, input: Partial<DesktopMCPInput>): Promise<DesktopMCPInstallView>;
+  updateMCPInstall(id: string, input: Partial<DesktopMCPInput> & { enabled?: boolean }): Promise<DesktopMCPInstallView>;
   deleteMCPInstall(id: string): Promise<void>;
   listPluginMcpServers(): Promise<PluginMcpServerView[]>;
   /** Design v58 §7.2: component-scoped retry; never writes persisted desired state. */
   retryPluginComponent(input: { componentId: string }): Promise<PluginMcpServerView[]>;
-  getComputerUseCapabilityStatus(): Promise<ComputerUseCapabilityStatusView>;
+  getComputerUseCapabilityStatus(): Promise<ComputerUseReadonlyStatus>;
   enableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
   reconnectComputerUse(): Promise<ComputerUseCapabilityStatusView>;
   disableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
   openPluginDependencyPermissionSettings(input: { permission: 'accessibility' | 'screen' }): Promise<void>;
   installPlugin(name: string): Promise<{ success: boolean; error?: string }>;
-  listAvailablePlugins(): Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>;
+  listAvailablePlugins(): Promise<AvailablePluginDto[]>;
   listPluginDependencyStatuses(): Promise<PluginDependencyStatusView[]>;
   installPluginDependency(input: PluginDependencyActionInput): Promise<PluginDependencyActionResult>;
   updatePluginDependency(input: PluginDependencyActionInput): Promise<PluginDependencyActionResult>;
   cancelPluginDependencyTask(input: Omit<PluginDependencyActionInput, 'confirmed'>): Promise<{ cancelling: boolean }>;
   diagnosePluginDependency(input: Omit<PluginDependencyActionInput, 'confirmed'>): Promise<PluginDependencyActionResult>;
-  getUpdateStatus(): Promise<UpdateStatus>;
+  getUpdateStatus(): Promise<UpdateIpcStatusDto>;
   checkForUpdates(): Promise<void>;
-  quitAndInstall(): Promise<void>;
+  quitAndInstall(): Promise<UpdateInstallDto>;
   onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
   onSkillsChanged(handler: () => void): () => void;
   createReminder(input: { content: string; scheduleAt: number; timezone?: string }): Promise<ReminderRecord>;
   listReminders(): Promise<ReminderRecord[]>;
   cancelReminder(id: string): Promise<boolean>;
-  getReminderStatus(): Promise<{
-    pendingCount: number;
-    activeReminders: ReminderRecord[];
-    desktopNotification?: { ok: boolean; skipped?: boolean; reason?: string; at: number } | null;
-  }>;
+  getReminderStatus(): Promise<ScheduledReminderStatusDto>;
   onReminder(handler: (event: { reminderId: string; content: string; createdAt: number }) => void): () => void;
   getSkillDebugConfig(): Promise<{ enabled: boolean }>;
   saveSkillDebugConfig(input: { enabled: boolean }): Promise<{ enabled: boolean }>;
   getKswarmConfig(): Promise<{ maxConcurrentTasks: number }>;
   saveKswarmConfig(input: { maxConcurrentTasks: number }): Promise<{ maxConcurrentTasks: number }>;
-  getSkillStats(): Promise<Array<{
-    skillName: string;
-    totalCalls: number;
-    successCount: number;
-    errorCount: number;
-    avgDurationMs: number;
-    p95DurationMs: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    lastCalledAt: number;
-    firstCalledAt: number;
-  }>>;
+  getSkillStats(): Promise<DesktopSkillStats[]>;
   getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
-  kswarmGetStatus(): Promise<KSwarmServiceStatus>;
+  kswarmGetStatus(): Promise<KswarmReadonlyStatus>;
   kswarmStart(): Promise<void>;
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
   getAssistantOverview(): Promise<AssistantOverviewView>;
-  activateAssistant(): Promise<unknown>;
-  pauseAssistant(): Promise<unknown>;
-  resumeAssistant(): Promise<unknown>;
-  acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }): Promise<unknown>;
-  rejectAssistantCandidate(input: { candidateId: string }): Promise<unknown>;
+  activateAssistant(): Promise<AssistantProfileDto>;
+  pauseAssistant(): Promise<AssistantProfileDto>;
+  resumeAssistant(): Promise<AssistantProfileDto>;
+  acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }): Promise<AssistantAcceptResultDto>;
+  rejectAssistantCandidate(input: { candidateId: string }): Promise<AssistantCandidateDto>;
   planProjectTeam(input: { projectId: string }): Promise<ProjectTeamPlanView>;
   applyProjectTeamPlan(input: { projectId: string; planId: string; projectRevision: number }): Promise<ProjectTeamOperationView>;
   getProjectTeamOperation(input: { projectId: string }): Promise<ProjectTeamOperationView | null>;
-  createKSwarmProject(input: CreateKSwarmProjectSemanticInput): Promise<unknown>;
-  updateKSwarmProjectExecutionMode(input: { projectId: string; executionMode: 'direct' | 'auto' | 'workflow_preferred' }): Promise<unknown>;
-  deleteKSwarmProject(input: { projectId: string }): Promise<unknown>;
-  createKSwarmAgent(input: KSwarmAgentSemanticInput): Promise<unknown>;
-  updateKSwarmAgent(input: { agentId: string; patch: Partial<KSwarmAgentSemanticInput> }): Promise<unknown>;
-  archiveKSwarmAgent(input: { agentId: string }): Promise<unknown>;
-  startKSwarmAgent(input: { agentId: string }): Promise<unknown>;
-  stopKSwarmAgent(input: { agentId: string }): Promise<unknown>;
-  probeKSwarmAgent(input: { agentId: string }): Promise<unknown>;
+  createKSwarmProject(input: CreateKSwarmProjectSemanticInput): Promise<KSwarmProjectFactDto>;
+  updateKSwarmProjectExecutionMode(input: { projectId: string; executionMode: 'direct' | 'auto' | 'workflow_preferred' }): Promise<KSwarmProjectModeResultDto>;
+  deleteKSwarmProject(input: { projectId: string }): Promise<KSwarmProjectDeleteResultDto>;
+  createKSwarmAgent(input: KSwarmAgentSemanticInput): Promise<KSwarmAgentFactDto>;
+  updateKSwarmAgent(input: { agentId: string; patch: Partial<KSwarmAgentSemanticInput> }): Promise<KSwarmAgentFactDto>;
+  archiveKSwarmAgent(input: { agentId: string }): Promise<boolean>;
+  startKSwarmAgent(input: { agentId: string }): Promise<boolean>;
+  stopKSwarmAgent(input: { agentId: string }): Promise<boolean>;
+  probeKSwarmAgent(input: { agentId: string }): Promise<KSwarmProbeFactDto>;
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
-  exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
-  diagnose(input: DesktopTraceTarget): Promise<unknown>;
-  getLoopDefinitions(): Promise<unknown[]>;
-  listUserLoopTemplates(): Promise<unknown[]>;
-  createUserLoopTemplate(input: unknown): Promise<unknown>;
-  updateUserLoopTemplate(loopId: string, patch: unknown): Promise<unknown>;
+  exportTraceBundle(input: DesktopTraceTarget): Promise<DesktopTraceExportResult>;
+  diagnose(input: DesktopTraceTarget): Promise<DesktopDiagnosisReport>;
+  getLoopDefinitions(): Promise<LoopDefinitionDto[]>;
+  listUserLoopTemplates(): Promise<UserLoopTemplateDto[]>;
+  createUserLoopTemplate(input: LoopCreateTemplateDto): Promise<CreateLoopTemplateResultDto>;
+  updateUserLoopTemplate(loopId: string, patch?: LoopTemplatePatchDto | null): Promise<UserLoopTemplateDto | undefined>;
   deleteUserLoopTemplate(loopId: string): Promise<void>;
   clearLoopRunHistory(loopId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
-  createLoopSchedule(input: unknown): Promise<unknown>;
-  getLoopScheduleBindings(): Promise<unknown[]>;
-  getAutomationOverviewSnapshot(): Promise<unknown>;
-  getAutomationRunHistory(): Promise<unknown[]>;
-  getAutomationsConfig(): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
-  setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
-  openLoopOutputDirectory(loopId: string): Promise<unknown>;
-  readLoopOutputPreview(loopId: string): Promise<unknown>;
-  readLoopTaskResult(loopId: string): Promise<unknown>;
-  getLoopRuns(loopId: string): Promise<unknown[]>;
-  getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
-  runLoopNow(loopId: string): Promise<unknown>;
-  listLoopConstraints(loopId: string): Promise<unknown[]>;
-  setLoopConstraintActive(constraintId: string, active: boolean): Promise<unknown>;
-  confirmLoopConstraint(constraintId: string): Promise<unknown>;
+  createLoopSchedule(input: ScheduledLoopCreateDto): Promise<ScheduledActionDto>;
+  getLoopScheduleBindings(): Promise<ScheduledBindingDto[]>;
+  getAutomationOverviewSnapshot(): Promise<AutomationOverviewDto>;
+  getAutomationRunHistory(): Promise<AutomationRunHistoryDto[]>;
+  getAutomationsConfig(): Promise<AutomationConfigDto>;
+  setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<AutomationConfigDto>;
+  openLoopOutputDirectory(loopId: string): Promise<LoopOutputActionResultView>;
+  readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView>;
+  readLoopTaskResult(loopId: string): Promise<LoopTaskResultView>;
+  listLoopPublishedArtifacts(loopId:string,page:LoopArtifactPageRequest):Promise<LoopPublishedArtifactsView>;
+  getLoopRuns(loopId: string): Promise<LoopRunObservationDto[]>;
+  getLoopPublicationConfiguration(loopId:string):Promise<Readonly<StoredLoopPublicationConfigurationDto>|null>;
+  getLoopPublicationState(runId:string):Promise<Readonly<LoopPublicationStateDto>>;
+  performLoopPublicationAction(input:LoopPublicationActionDto):Promise<LoopPublicationActionResultDto>;
+  getEvidenceAnomalies(loopId: string): Promise<LoopAnomalyDto[]>;
+  runLoopNow(loopId: string): Promise<LoopManagementRunResultDto>;
+  listLoopConstraints(loopId: string): Promise<LoopConstraintDto[]>;
+  setLoopConstraintActive(constraintId: string, active: boolean): Promise<LoopConstraintDto | undefined>;
+  confirmLoopConstraint(constraintId: string): Promise<LoopConstraintDto | undefined>;
   onLoopConstraintAdded(handler: (constraint: unknown) => void): () => void;
-  syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
-  getScheduledTasks(): Promise<unknown[]>;
-  createScheduledTask(input: unknown): Promise<unknown>;
-  updateScheduledTask(input: unknown): Promise<unknown>;
-  setScheduledTaskStatus(id: string, status: 'active' | 'paused'): Promise<unknown | null>;
+  syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<ScheduledTaskDto[]>;
+  getScheduledTasks(): Promise<ScheduledTaskDto[]>;
+  createScheduledTask(input: ScheduledCreateDto): Promise<ScheduledTaskDto>;
+  updateScheduledTask(input: ScheduledUpdateDto): Promise<ScheduledUpdateResultDto>;
+  setScheduledTaskStatus(id: string, status: 'active' | 'paused'): Promise<ScheduledTaskDto | null>;
   cancelScheduledTask(id: string): Promise<boolean>;
-  getTimedActions(): Promise<unknown[]>;
-  getTimedActionRuns(actionId: string): Promise<unknown[]>;
-  approveTimedActionAuto(actionId: string): Promise<unknown | null>;
-  revokeTimedActionAuto(actionId: string): Promise<unknown | null>;
+  getTimedActions(): Promise<ScheduledActionDto[]>;
+  getTimedActionRuns(actionId: string): Promise<ScheduledRunDto[]>;
+  approveTimedActionAuto(actionId: string): Promise<ScheduledActionDto | null>;
+  revokeTimedActionAuto(actionId: string): Promise<ScheduledActionDto | null>;
   clearScheduledTaskRunHistory(actionId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
   onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; dispatchStatus?: 'success' | 'failed' | 'skipped'; runtimeState?: 'accepted' | 'not_started'; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
-  listMemories(): Promise<unknown[]>;
-  createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
-  updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<unknown>;
-  deleteMemory(id: string): Promise<void>;
-  importMemories(raw: string): Promise<unknown>;
-  memoryStats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
+  listMemories(): Promise<MemoryIpcEntry[]>;
+  createMemory(input: { content: string; tags: string[]; source?: string }): Promise<MemoryIpcEntry>;
+  updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<MemoryIpcEntry>;
+  deleteMemory(id: string): Promise<boolean>;
+  importMemories(raw: string): Promise<MemoryImportIpcResult>;
+  memoryStats(): Promise<MemoryStatsIpcSnapshot | null>;
   memoryCompact(): Promise<MemoryCompactionResult>;
-  memoryPersonaTraits(): Promise<{ trait: string; confidence: number }[]>;
-  memoryListLayer(layer: number, limit?: number, offset?: number): Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>;
+  memoryPersonaTraits(): Promise<MemoryPersonaIpcTrait[]>;
+  memoryListLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
   memoryClearAll(): Promise<boolean>;
   memoryGetModelId(): Promise<string | null>;
   memorySetModelId(modelId: string | null): Promise<boolean>;
-  getEmbeddingModels(): Promise<{ id: string; name: string; dims: number; size: string; languages: string; downloaded: boolean; active: boolean; manualHint: { urls: { file: string; url: string }[]; targetDir: string } }[]>;
+  getEmbeddingModels(): Promise<EmbeddingModelIpcEntry[]>;
   downloadEmbeddingModel(modelId: string): Promise<void>;
   setEmbeddingModel(modelId: string): Promise<void>;
-  getConnectorsConfig(): Promise<ConnectorsConfigSnapshot | null>;
+  getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
   getHarnessOptimizationConfig(): Promise<HarnessOptimizationState>;
   saveHarnessOptimizationConfig(input: Partial<Omit<HarnessOptimizationConfig, 'schemaVersion' | 'enabled' | 'configRevision' | 'publicGeneration' | 'researchGeneration'>>): Promise<HarnessOptimizationState>;
   setHarnessOptimizationEnabled(enabled: boolean): Promise<unknown>;
@@ -1571,77 +1413,63 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult>;
 
   // Knowledge Base
-  kbListCollections(): Promise<unknown[]>;
-  kbCreateCollection(input: unknown): Promise<unknown>;
+  kbListCollections(): Promise<KnowledgeCollectionDto[]>;
+  kbCreateCollection(input: KnowledgeCreateCollectionInput): Promise<KnowledgeCollectionDto>;
   kbDeleteCollection(id: string): Promise<void>;
-  kbListSources(collectionId: string): Promise<unknown[]>;
-  kbAddSource(input: unknown): Promise<unknown>;
+  kbListSources(collectionId: string): Promise<KnowledgeSourceDto[]>;
+  kbAddSource(input: KnowledgeAddSourceInput): Promise<KnowledgeSourceDto>;
   kbDeleteSource(id: string): Promise<void>;
-  kbGetCollectionState(collectionId: string): Promise<unknown>;
-  kbGetSourceContent(input: unknown): Promise<unknown>;
-  kbSearch(input: unknown): Promise<unknown[]>;
+  kbGetCollectionState(collectionId: string): Promise<KnowledgeCollectionStateDto | undefined>;
+  kbGetSourceContent(input?: KnowledgeSourceContentInput | null): Promise<KnowledgeSourceContentDto | undefined>;
+  kbSearch(input?: KnowledgeSearchInput | null): Promise<KnowledgeSearchResultDto[]>;
   kbPickFiles(): Promise<string[]>;
-  meetingPickAudioFile(): Promise<string | null>;
-  meetingGetMicrophonePermission(): Promise<unknown>;
-  meetingRequestMicrophonePermission(): Promise<unknown>;
-  meetingGetAsrConfig(): Promise<MeetingAsrConfigSnapshot>;
+  meetingPickAudioFile(): Promise<MeetingActions10Replies['pickAudioFile']>;
+  meetingGetMicrophonePermission(): Promise<MeetingReadonlyPermission>;
+  meetingRequestMicrophonePermission(): Promise<import('../shared/meeting-readonly-ipc-contract.js').MeetingReadonlyPermission>;
+  meetingGetAsrConfig(): Promise<MeetingReadonlyAsr>;
   meetingSaveAsrConfig(input: MeetingSaveAsrConfigInput): Promise<MeetingAsrConfigSnapshot>;
-  meetingListModels(): Promise<unknown[]>;
-  meetingDownloadModel(modelId: string): Promise<unknown>;
-  meetingUninstallModel(modelId: string): Promise<unknown>;
-  meetingSaveRecordedAudio(input: unknown): Promise<unknown>;
-  meetingTranscribePreview(input: unknown): Promise<unknown>;
-  meetingStartLiveTranscription(input: { engine: 'aliyun-asr' | 'volcengine-asr'; sampleRate: number; language?: string }): Promise<{ ok: boolean; sessionId?: string; error?: string }>;
-  meetingPushLiveTranscriptionAudio(input: { sessionId: string; pcmBase64: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingFinishLiveTranscription(input: { sessionId: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingCancelLiveTranscription(input: { sessionId: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingDraftRecording(input: unknown): Promise<unknown>;
-  meetingProcessRecording(input: unknown): Promise<unknown>;
-  meetingSaveTranscript(input: unknown): Promise<unknown>;
-  listCollaborationRooms(): Promise<unknown>;
-  getCollaborationRoom(roomId: string): Promise<unknown>;
-  createCollaborationRoom(input: unknown): Promise<unknown>;
-  archiveCollaborationRoom(input: unknown): Promise<unknown>;
-  deleteCollaborationRoom(input: {roomId: string; expectedRoomRevision: number}): Promise<unknown>;
-  updateCollaborationRoomMembers(input: unknown): Promise<unknown>;
-  sendCollaborationRoomMessage(input: {
-    roomId: string;
-    text: string;
-    filePaths: string[];
-    idempotencyKey: string;
-    replyToMessageId?: string;
-    contextScope?: { kind: string; projectId?: string };
-  }): Promise<unknown>;
-  markCollaborationRoomSeen(input: unknown): Promise<unknown>;
-  cancelRoomDiscussion(input: unknown): Promise<unknown>;
-  createProjectFromRoom(input: unknown): Promise<unknown>;
-  createTaskFromRoomMessage(input: unknown): Promise<unknown>;
+  meetingListModels(): Promise<MeetingReadonlyModels>;
+  meetingDownloadModel(modelId: string): Promise<MeetingMutationModelResult>;
+  meetingUninstallModel(modelId: string): Promise<MeetingMutationModelResult>;
+  meetingSaveRecordedAudio(input: unknown): Promise<MeetingActions10Replies['saveRecordedAudio']>;
+  meetingTranscribePreview(input: unknown): Promise<MeetingActions10Replies['transcribePreview']>;
+  meetingStartLiveTranscription(input: { engine: 'aliyun-asr' | 'volcengine-asr'; sampleRate: number; language?: string }): Promise<MeetingActions10Replies['live:start']>;
+  meetingPushLiveTranscriptionAudio(input: { sessionId: string; pcmBase64: string }): Promise<MeetingActions10Replies['live:pushAudio']>;
+  meetingFinishLiveTranscription(input: { sessionId: string }): Promise<MeetingActions10Replies['live:finish']>;
+  meetingCancelLiveTranscription(input: { sessionId: string }): Promise<MeetingActions10Replies['live:cancel']>;
+  meetingDraftRecording(input: unknown): Promise<MeetingActions10Replies['draftRecording']>;
+  meetingProcessRecording(input: unknown): Promise<MeetingActions10Replies['processRecording']>;
+  meetingSaveTranscript(input: unknown): Promise<MeetingActions10Replies['saveTranscript']>;
+  listCollaborationRooms(): Promise<RoomListResultDto>;
+  getCollaborationRoom(roomId: string): Promise<RoomSnapshotDto>;
+  createCollaborationRoom(input: RoomCreateInput): Promise<RoomCreateResultDto>;
+  archiveCollaborationRoom(input: RoomArchiveInput): Promise<RoomArchiveResultDto>;
+  deleteCollaborationRoom(input: RoomDeleteInput): Promise<RoomDeleteResultDto>;
+  updateCollaborationRoomMembers(input: RoomMembersInput): Promise<RoomMembersResultDto>;
+  sendCollaborationRoomMessage(input: RoomSendInput): Promise<RoomSendResultDto>;
+  markCollaborationRoomSeen(input: RoomSeenInput): Promise<RoomSeenResultDto>;
+  cancelRoomDiscussion(input: RoomCancelInput): Promise<RoomCancelResultDto>;
+  createProjectFromRoom(input: RoomProjectCreateInput): Promise<RoomProjectCreateResultDto>;
+  createTaskFromRoomMessage(input: RoomTaskCreateInput): Promise<RoomTaskCreateResultDto>;
   onCollaborationRoomEvent(listener: (event: unknown) => void): () => void;
-  meetingOpenRecorderWindow(input: { collectionId: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingSetRecorderWindowMode(input: { mode: 'workbench' | 'compact' | 'summary' }): Promise<{ ok: boolean }>;
-  meetingSetRecorderSessionState(input: { state: 'idle' | 'recording' | 'processing' | 'summary' }): Promise<{ ok: boolean }>;
-  meetingNotifyRecorderSummaryReady(input: { title: string }): Promise<{ ok: boolean; skipped?: boolean; reason?: string }>;
-  meetingNotifyRecordingSaved(input: { collectionId: string }): Promise<{ ok: boolean }>;
-  meetingCloseRecorderWindow(): Promise<{ ok: boolean }>;
+  meetingOpenRecorderWindow(input: { collectionId: string }): Promise<RecorderWindowReply>;
+  meetingSetRecorderWindowMode(input: { mode: 'workbench' | 'compact' | 'summary' }): Promise<RecorderWindowReply>;
+  meetingSetRecorderSessionState(input: { state: 'idle' | 'recording' | 'processing' | 'summary' }): Promise<RecorderWindowReply>;
+  meetingNotifyRecorderSummaryReady(input: { title: string }): Promise<RecorderWindowNotificationReply>;
+  meetingNotifyRecordingSaved(input: { collectionId: string }): Promise<RecorderWindowReply>;
+  meetingCloseRecorderWindow(): Promise<RecorderWindowReply>;
   onMeetingRecorderCloseRequested(handler: () => void): () => void;
   onMeetingRecordingSaved(handler: (input: { collectionId: string }) => void): () => void;
-  onMeetingLiveTranscriptionUpdate(handler: (input: {
-    sessionId: string;
-    sentenceId: string;
-    start: number;
-    end: number;
-    text: string;
-    final: boolean;
-  }) => void): () => void;
+  onMeetingLiveTranscriptionUpdate(handler: (input: MeetingActions10LiveUpdate) => void): () => void;
 
   // Thread meta (GTD / pinned)
-  getThreadLabels(): Promise<ThreadMetaSnapshot>;
+  getThreadLabels(): Promise<ThreadMetadataSnapshotDto>;
   setThreadLabel(threadId: string, label: string): Promise<ThreadMetaWriteResult>;
   unsetThreadLabel(threadId: string, label: string): Promise<ThreadMetaWriteResult>;
   moveThreadLabel(threadId: string, from: string, to: string): Promise<ThreadMetaWriteResult>;
   getAppFlag(key: AppFlagKey): Promise<string | null>;
   setAppFlag(key: AppFlagKey, value: string): Promise<ThreadMetaWriteResult>;
-  migrateLegacyThreadMeta(data: ThreadMetaSnapshot): Promise<{ migrated: boolean; reason?: string }>;
+  migrateLegacyThreadMeta(data: ThreadMetaSnapshot): Promise<ThreadMetadataMigrationResultDto>;
 }
 
 export type AppFlagKey = 'gtd-enabled';
@@ -1661,13 +1489,7 @@ export interface ThreadMetaWriteResult {
   degraded?: boolean;
 }
 
-export interface ConnectorTestResult {
-  success: boolean;
-  latencyMs: number;
-  providerName: string;
-  detail?: string;
-  error?: string;
-}
+export type ConnectorTestResult = ConnectorTestResultDto;
 
 export interface KSwarmArtifact {
   name?: string;
@@ -1705,29 +1527,22 @@ export interface KSwarmProjectDeliverable {
   description?: string;
 }
 
-/**
- * KSwarm HTTP proxy interface.
- * ⚠️ All methods return Promise<unknown> — these are IPC pass-throughs to the
- * kswarm REST API. Consumers must perform runtime type validation or type
- * assertions. High-frequency endpoints (/projects, /tasks, /agents) should be
- * wrapped in type-safe accessor functions in useKSwarmClient with zod/runtime
- * validation on return values.
- */
+/** Route-aware own-data gateway; display facts never grant execution authority. */
 export interface KSwarmProxyApi {
-  kswarmProxyGet(path: string): Promise<unknown>;
-  kswarmProxyGetText(path: string): Promise<string>;
-  kswarmProxyPost(path: string, body: unknown): Promise<unknown>;
-  kswarmProxyPostJson(path: string, body: unknown): Promise<unknown>;
-  kswarmProxyPut(path: string, body: unknown): Promise<unknown>;
-  kswarmProxyPatch(path: string, body: unknown): Promise<unknown>;
-  kswarmProxyDelete(path: string): Promise<unknown>;
-  kswarmStreamSubscribe(): Promise<void>;
-  kswarmStreamUnsubscribe(): Promise<void>;
-  kswarmStreamGetStatus(): Promise<unknown>;
+  kswarmProxyGet(path: string): Promise<ProxyJsonResult>;
+  kswarmProxyGetText(path: string): Promise<ProxyTextResult>;
+  kswarmProxyPost(path: string, body?: ProxyHttpBody): Promise<ProxyJsonResult>;
+  kswarmProxyPostJson(path: string, body?: ProxyHttpBody): Promise<ProxyJsonResult>;
+  kswarmProxyPut(path: string, body?: ProxyHttpBody): Promise<ProxyJsonResult>;
+  kswarmProxyPatch(path: string, body?: ProxyHttpBody): Promise<ProxyJsonResult>;
+  kswarmProxyDelete(path: string): Promise<ProxyDeleteResult>;
+  kswarmStreamSubscribe(): Promise<ProxyStreamResult>;
+  kswarmStreamUnsubscribe(): Promise<ProxyStreamResult>;
+  kswarmStreamGetStatus(): Promise<ProxyStatusResult>;
   onKSwarmWsEvent(handler: (event: unknown) => void): () => void;
   onKSwarmConnectionStatus(handler: (status: unknown) => void): () => void;
-  connectionHealthz(url: string): Promise<boolean>;
-  connectionHealth(url: string): Promise<unknown>;
+  connectionHealthz(url: string): Promise<ProxyHealthResult>;
+  connectionHealth(url: string): Promise<ProxyHealthResult>;
 }
 
 /**
@@ -1736,11 +1551,11 @@ export interface KSwarmProxyApi {
  * permission checks should use IPC real-time queries.
  */
 export type FullDesktopApi = DesktopApi & KSwarmProxyApi & {
-  showSaveDialog(input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<{ filePath: string; canceled: boolean }>;
+  showSaveDialog(input: ShowSaveDialogInput): Promise<ShowSaveDialogResult>;
   saveFile(input: SaveFileInput): Promise<SaveFileResult>;
-  listPrinciples(): Promise<unknown[]>;
-  savePrinciple(principle: unknown): Promise<unknown>;
-  deletePrinciple(id: string): Promise<void>;
+  listPrinciples(): Promise<ProjectPrincipleDto[]>;
+  savePrinciple(principle: PrincipleSaveInput): Promise<PrincipleSaveResult>;
+  deletePrinciple(id: string): Promise<PrincipleDeleteResult>;
   systemUsername: string;
 };
 
@@ -1765,7 +1580,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
     getMobilePairingInfo: () => ipcRenderer.invoke('desktop:mobile:getPairingInfo') as Promise<DesktopMobilePairingInfo>,
     getMobileRelayStatus: () => ipcRenderer.invoke('desktop:mobile:getRelayStatus') as Promise<DesktopMobileRelayStatus>,
-    openMobileRelaySignIn: () => ipcRenderer.invoke('desktop:mobile:openRelaySignIn') as Promise<{ ok: boolean; url?: string; error?: string }>,
+    openMobileRelaySignIn: () => ipcRenderer.invoke('desktop:mobile:openRelaySignIn') as Promise<MobileRelaySignInResult>,
     onMobileRelayStatus(handler) {
       const channel = 'desktop:mobileRelayStatus';
       const listener = (_event: unknown, payload: unknown) => {
@@ -1781,12 +1596,23 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory') as Promise<{ filePath: string }>,
     selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials') as ReturnType<DesktopApi['selectMaterials']>,
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
+    prepareObservationTask: () => ipcRenderer.invoke('desktop:prepareObservationTask') as ReturnType<DesktopApi['prepareObservationTask']>,
+    createObservationTask: input => ipcRenderer.invoke('desktop:createObservationTask',input) as ReturnType<DesktopApi['createObservationTask']>,
+    stopObservationTask: taskId => ipcRenderer.invoke('desktop:stopObservationTask',{taskId}) as ReturnType<DesktopApi['stopObservationTask']>,
+    revokeObservationTask: taskId => ipcRenderer.invoke('desktop:revokeObservationTask',{taskId}) as ReturnType<DesktopApi['revokeObservationTask']>,
+    getObservationTaskStatus: taskId => ipcRenderer.invoke('desktop:getObservationTaskStatus',{taskId}) as ReturnType<DesktopApi['getObservationTaskStatus']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
     getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }) as ReturnType<DesktopApi['getGoal']>,
+    getGoalNativeMutation: (threadId) => ipcRenderer.invoke('desktop:goal:getNativeMutation', { threadId }) as ReturnType<DesktopApi['getGoalNativeMutation']>,
+    recoverGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:recoverNativeMutation', input) as ReturnType<DesktopApi['recoverGoalNativeMutation']>,
+    continueGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:continueNativeMutation', input) as ReturnType<DesktopApi['continueGoalNativeMutation']>,
+    cancelGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:cancelNativeMutation', input) as ReturnType<DesktopApi['cancelGoalNativeMutation']>,
     createGoal: (input) => ipcRenderer.invoke('desktop:goal:create', input) as ReturnType<DesktopApi['createGoal']>,
     pauseGoal: (threadId) => ipcRenderer.invoke('desktop:goal:pause', { threadId }) as ReturnType<DesktopApi['pauseGoal']>,
     resumeGoal: (input) => ipcRenderer.invoke('desktop:goal:resume', input) as ReturnType<DesktopApi['resumeGoal']>,
+    recoverGoalPublication: input => ipcRenderer.invoke('desktop:goal:recoverPublication', input) as ReturnType<DesktopApi['recoverGoalPublication']>,
+    continueGoalPublication: input => ipcRenderer.invoke('desktop:goal:continuePublication', input) as ReturnType<DesktopApi['continueGoalPublication']>,
     cancelGoal: (threadId) => ipcRenderer.invoke('desktop:goal:cancel', { threadId }) as ReturnType<DesktopApi['cancelGoal']>,
     replaceGoal: (input) => ipcRenderer.invoke('desktop:goal:replace', input) as ReturnType<DesktopApi['replaceGoal']>,
     ackGoalTaskAttached: (input) => ipcRenderer.invoke('desktop:goal:ackTaskAttached', input) as Promise<void>,
@@ -1940,21 +1766,21 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
     listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers') as Promise<PluginMcpServerView[]>,
     retryPluginComponent: (input) => ipcRenderer.invoke('desktop:retryPluginComponent', input) as Promise<PluginMcpServerView[]>,
-    getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus') as Promise<ComputerUseCapabilityStatusView>,
+    getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus') as Promise<ComputerUseReadonlyStatus>,
     enableComputerUse: () => ipcRenderer.invoke('desktop:enableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
     reconnectComputerUse: () => ipcRenderer.invoke('desktop:reconnectComputerUse') as Promise<ComputerUseCapabilityStatusView>,
     disableComputerUse: () => ipcRenderer.invoke('desktop:disableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
     openPluginDependencyPermissionSettings: (input) => ipcRenderer.invoke('desktop:openPluginDependencyPermissionSettings', input) as Promise<void>,
     installPlugin: (name) => ipcRenderer.invoke('desktop:installPlugin', name) as Promise<{ success: boolean; error?: string }>,
-    listAvailablePlugins: () => ipcRenderer.invoke('desktop:listAvailablePlugins') as Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>,
+    listAvailablePlugins: () => ipcRenderer.invoke('desktop:listAvailablePlugins') as Promise<AvailablePluginDto[]>,
     listPluginDependencyStatuses: () => ipcRenderer.invoke('desktop:listPluginDependencyStatuses') as Promise<PluginDependencyStatusView[]>,
     installPluginDependency: (input) => ipcRenderer.invoke('desktop:installPluginDependency', input) as Promise<PluginDependencyActionResult>,
     updatePluginDependency: (input) => ipcRenderer.invoke('desktop:updatePluginDependency', input) as Promise<PluginDependencyActionResult>,
     cancelPluginDependencyTask: (input) => ipcRenderer.invoke('desktop:cancelPluginDependencyTask', input) as Promise<{ cancelling: boolean }>,
     diagnosePluginDependency: (input) => ipcRenderer.invoke('desktop:diagnosePluginDependency', input) as Promise<PluginDependencyActionResult>,
-    getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateStatus>,
+    getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateIpcStatusDto>,
     checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates') as Promise<void>,
-    quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall') as Promise<void>,
+    quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall') as Promise<UpdateInstallDto>,
     onUpdateStatus(handler) {
       const channel = 'desktop:updateStatus';
       const listener = (_event: unknown, payload: unknown) => {
@@ -1978,7 +1804,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     createReminder: (input) => ipcRenderer.invoke('desktop:createReminder', input) as Promise<ReminderRecord>,
     listReminders: () => ipcRenderer.invoke('desktop:listReminders') as Promise<ReminderRecord[]>,
     cancelReminder: (id) => ipcRenderer.invoke('desktop:cancelReminder', id) as Promise<boolean>,
-    getReminderStatus: () => ipcRenderer.invoke('desktop:getReminderStatus') as Promise<{ pendingCount: number; activeReminders: ReminderRecord[] }>,
+    getReminderStatus: () => ipcRenderer.invoke('desktop:getReminderStatus') as Promise<ScheduledReminderStatusDto>,
     onReminder(handler) {
       const channel = 'desktop:reminder';
       const listener = (_event: unknown, payload: unknown) => {
@@ -1996,18 +1822,18 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
     getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus') as Promise<DesktopServiceStatusSnapshot>,
     restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId) as Promise<void>,
-    kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KSwarmServiceStatus>,
+    kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KswarmReadonlyStatus>,
     kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
-    activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate'),
-    pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause'),
-    resumeAssistant: () => ipcRenderer.invoke('desktop:assistant:resume'),
-    acceptAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:acceptCandidate', sanitizeAssistantCandidateInput(input)),
-    rejectAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:rejectCandidate', sanitizeAssistantCandidateInput(input)),
+    activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
+    pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,
+    resumeAssistant: () => ipcRenderer.invoke('desktop:assistant:resume') as ReturnType<DesktopApi['resumeAssistant']>,
+    acceptAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:acceptCandidate', sanitizeAssistantCandidateInput(input)) as ReturnType<DesktopApi['acceptAssistantCandidate']>,
+    rejectAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:rejectCandidate', sanitizeAssistantCandidateInput(input)) as ReturnType<DesktopApi['rejectAssistantCandidate']>,
     planProjectTeam: (input) => ipcRenderer.invoke(
       'desktop:kswarm:team:plan',
       sanitizeKSwarmSemanticInput('team-plan', input),
@@ -2023,39 +1849,39 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     createKSwarmProject: (input) => ipcRenderer.invoke(
       'desktop:kswarm:project:create',
       sanitizeKSwarmSemanticInput('project-create', input as unknown as Record<string, unknown>),
-    ),
+    ) as ReturnType<DesktopApi['createKSwarmProject']>,
     updateKSwarmProjectExecutionMode: (input) => ipcRenderer.invoke(
       'desktop:kswarm:project:updateExecutionMode',
       sanitizeKSwarmSemanticInput('project-execution-mode', input),
-    ),
+    ) as ReturnType<DesktopApi['updateKSwarmProjectExecutionMode']>,
     deleteKSwarmProject: (input) => ipcRenderer.invoke(
       'desktop:kswarm:project:delete',
       sanitizeKSwarmSemanticInput('project-delete', input),
-    ),
+    ) as ReturnType<DesktopApi['deleteKSwarmProject']>,
     createKSwarmAgent: (input) => ipcRenderer.invoke(
       'desktop:kswarm:agent:create',
       sanitizeKSwarmSemanticInput('agent-create', input as unknown as Record<string, unknown>),
-    ),
+    ) as ReturnType<DesktopApi['createKSwarmAgent']>,
     updateKSwarmAgent: (input) => ipcRenderer.invoke(
       'desktop:kswarm:agent:update',
       sanitizeKSwarmSemanticInput('agent-update', input),
-    ),
+    ) as ReturnType<DesktopApi['updateKSwarmAgent']>,
     archiveKSwarmAgent: (input) => ipcRenderer.invoke(
       'desktop:kswarm:agent:archive',
       sanitizeKSwarmSemanticInput('agent-id', input),
-    ),
+    ) as ReturnType<DesktopApi['archiveKSwarmAgent']>,
     startKSwarmAgent: (input) => ipcRenderer.invoke(
       'desktop:kswarm:agent:start',
       sanitizeKSwarmSemanticInput('agent-id', input),
-    ),
+    ) as ReturnType<DesktopApi['startKSwarmAgent']>,
     stopKSwarmAgent: (input) => ipcRenderer.invoke(
       'desktop:kswarm:agent:stop',
       sanitizeKSwarmSemanticInput('agent-id', input),
-    ),
+    ) as ReturnType<DesktopApi['stopKSwarmAgent']>,
     probeKSwarmAgent: (input) => ipcRenderer.invoke(
       'desktop:kswarm:agent:probe',
       sanitizeKSwarmSemanticInput('agent-id', input),
-    ),
+    ) as ReturnType<DesktopApi['probeKSwarmAgent']>,
     onKSwarmStatus(handler) {
       const channel = 'desktop:kswarm:statusChange';
       const listener = (_event: unknown, payload: unknown) => {
@@ -2066,39 +1892,43 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
         ipcRenderer.off(channel, listener);
       };
     },
-    exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
-    diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<unknown>,
-    getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions') as Promise<unknown[]>,
-    listUserLoopTemplates: () => ipcRenderer.invoke('desktop:loops:listUserTemplates') as Promise<unknown[]>,
-    createUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:createUserTemplate', input) as Promise<unknown>,
-    updateUserLoopTemplate: (loopId, patch) => ipcRenderer.invoke('desktop:loops:updateUserTemplate', loopId, patch) as Promise<unknown>,
+    exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<DesktopTraceExportResult>,
+    diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<DesktopDiagnosisReport>,
+    getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions') as Promise<LoopDefinitionDto[]>,
+    listUserLoopTemplates: () => ipcRenderer.invoke('desktop:loops:listUserTemplates') as Promise<UserLoopTemplateDto[]>,
+    createUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:createUserTemplate', input) as Promise<CreateLoopTemplateResultDto>,
+    updateUserLoopTemplate: (loopId, patch) => ipcRenderer.invoke('desktop:loops:updateUserTemplate', loopId, patch) as Promise<UserLoopTemplateDto | undefined>,
     deleteUserLoopTemplate: (loopId) => ipcRenderer.invoke('desktop:loops:deleteUserTemplate', loopId) as Promise<void>,
     clearLoopRunHistory: (loopId, statuses) => ipcRenderer.invoke('desktop:loops:clearRunHistory', loopId, statuses) as Promise<{ ok: boolean; removed: number }>,
-    createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input) as Promise<unknown>,
-    getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings') as Promise<unknown[]>,
-    getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<unknown>,
-    getAutomationRunHistory: () => ipcRenderer.invoke('desktop:automations:getRunHistory') as Promise<unknown[]>,
-    getAutomationsConfig: () => ipcRenderer.invoke('desktop:automations:getConfig') as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
-    setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
-    openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId) as Promise<unknown>,
-    readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId) as Promise<unknown>,
-    readLoopTaskResult: (loopId) => ipcRenderer.invoke('desktop:loops:readTaskResult', loopId) as Promise<unknown>,
-    getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
-    getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
-    runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
-    listLoopConstraints: (loopId) => ipcRenderer.invoke('desktop:loops:listConstraints', loopId) as Promise<unknown[]>,
-    setLoopConstraintActive: (constraintId, active) => ipcRenderer.invoke('desktop:loops:setConstraintActive', constraintId, active) as Promise<unknown>,
-    confirmLoopConstraint: (constraintId) => ipcRenderer.invoke('desktop:loops:confirmConstraint', constraintId) as Promise<unknown>,
-    syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
-    getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
-    createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
-    updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input) as Promise<unknown>,
-    setScheduledTaskStatus: (id, status) => ipcRenderer.invoke('desktop:setScheduledTaskStatus', id, status) as Promise<unknown | null>,
+    createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input) as Promise<ScheduledActionDto>,
+    getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings') as Promise<ScheduledBindingDto[]>,
+    getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<AutomationOverviewDto>,
+    getAutomationRunHistory: () => ipcRenderer.invoke('desktop:automations:getRunHistory') as Promise<AutomationRunHistoryDto[]>,
+    getAutomationsConfig: () => ipcRenderer.invoke('desktop:automations:getConfig') as Promise<AutomationConfigDto>,
+    setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<AutomationConfigDto>,
+    openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId) as Promise<LoopOutputActionResultView>,
+    readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId) as Promise<LoopOutputPreviewView>,
+    listLoopPublishedArtifacts: (loopId,page) => ipcRenderer.invoke('desktop:loops:listPublishedArtifacts',loopId,page) as Promise<LoopPublishedArtifactsView>,
+    readLoopTaskResult: (loopId) => ipcRenderer.invoke('desktop:loops:readTaskResult', loopId) as Promise<LoopTaskResultView>,
+    getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<LoopRunObservationDto[]>,
+    getLoopPublicationConfiguration: loopId => ipcRenderer.invoke('desktop:loops:getPublicationConfiguration',loopId) as Promise<StoredLoopPublicationConfigurationDto|null>,
+    getLoopPublicationState: runId => ipcRenderer.invoke('desktop:loops:getPublicationState',runId) as Promise<LoopPublicationStateDto>,
+    performLoopPublicationAction: input => ipcRenderer.invoke('desktop:loops:performPublicationAction',input) as Promise<LoopPublicationActionResultDto>,
+    getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<LoopAnomalyDto[]>,
+    runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<LoopManagementRunResultDto>,
+    listLoopConstraints: (loopId) => ipcRenderer.invoke('desktop:loops:listConstraints', loopId) as Promise<LoopConstraintDto[]>,
+    setLoopConstraintActive: (constraintId, active) => ipcRenderer.invoke('desktop:loops:setConstraintActive', constraintId, active) as Promise<LoopConstraintDto | undefined>,
+    confirmLoopConstraint: (constraintId) => ipcRenderer.invoke('desktop:loops:confirmConstraint', constraintId) as Promise<LoopConstraintDto | undefined>,
+    syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<ScheduledTaskDto[]>,
+    getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<ScheduledTaskDto[]>,
+    createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<ScheduledTaskDto>,
+    updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input) as Promise<ScheduledUpdateResultDto>,
+    setScheduledTaskStatus: (id, status) => ipcRenderer.invoke('desktop:setScheduledTaskStatus', id, status) as Promise<ScheduledTaskDto | null>,
     cancelScheduledTask: (id) => ipcRenderer.invoke('desktop:cancelScheduledTask', id) as Promise<boolean>,
-    getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions') as Promise<unknown[]>,
-    getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<unknown[]>,
-    approveTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:approveAuto', actionId) as Promise<unknown | null>,
-    revokeTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:revokeAuto', actionId) as Promise<unknown | null>,
+    getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions') as Promise<ScheduledActionDto[]>,
+    getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<ScheduledRunDto[]>,
+    approveTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:approveAuto', actionId) as Promise<ScheduledActionDto | null>,
+    revokeTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:revokeAuto', actionId) as Promise<ScheduledActionDto | null>,
     clearScheduledTaskRunHistory: (actionId, statuses) => ipcRenderer.invoke('desktop:scheduledTasks:clearRunHistory', actionId, statuses) as Promise<{ ok: boolean; removed: number }>,
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';
@@ -2120,15 +1950,15 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
         ipcRenderer.off(channel, listener);
       };
     },
-    listMemories: () => ipcRenderer.invoke('desktop:listMemories') as Promise<unknown[]>,
-    createMemory: (input) => ipcRenderer.invoke('desktop:createMemory', input) as Promise<unknown>,
-    updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input) as Promise<unknown>,
-    deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<void>,
-    importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<unknown>,
-    memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>,
+    listMemories: () => ipcRenderer.invoke('desktop:listMemories') as Promise<MemoryIpcEntry[]>,
+    createMemory: (input) => ipcRenderer.invoke('desktop:createMemory', input) as Promise<MemoryIpcEntry>,
+    updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input) as Promise<MemoryIpcEntry>,
+    deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<boolean>,
+    importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<MemoryImportIpcResult>,
+    memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<MemoryStatsIpcSnapshot | null>,
     memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<MemoryCompactionResult>,
-    memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<{ trait: string; confidence: number }[]>,
-    memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>,
+    memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<MemoryPersonaIpcTrait[]>,
+    memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,
     memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll') as Promise<boolean>,
     memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId') as Promise<string | null>,
@@ -2136,7 +1966,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,
     downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
-    getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot | null>,
+    getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,
     getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig') as ReturnType<DesktopApi['getHarnessOptimizationConfig']>,
     saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input) as ReturnType<DesktopApi['saveHarnessOptimizationConfig']>,
     setHarnessOptimizationEnabled: enabled => ipcRenderer.invoke('desktop:setHarnessOptimizationEnabled', enabled),
@@ -2145,34 +1975,34 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input) as Promise<ConnectorsConfigSnapshot>,
     listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes') as Promise<ProviderRuntime[]>,
     testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind) as Promise<ConnectorTestResult>,
-    kbListCollections: () => ipcRenderer.invoke('desktop:kb:listCollections') as Promise<unknown[]>,
-    kbCreateCollection: (input) => ipcRenderer.invoke('desktop:kb:createCollection', input) as Promise<unknown>,
+    kbListCollections: () => ipcRenderer.invoke('desktop:kb:listCollections') as Promise<KnowledgeCollectionDto[]>,
+    kbCreateCollection: (input) => ipcRenderer.invoke('desktop:kb:createCollection', input) as Promise<KnowledgeCollectionDto>,
     kbDeleteCollection: (id) => ipcRenderer.invoke('desktop:kb:deleteCollection', id) as Promise<void>,
-    kbListSources: (collectionId) => ipcRenderer.invoke('desktop:kb:listSources', collectionId) as Promise<unknown[]>,
-    kbAddSource: (input) => ipcRenderer.invoke('desktop:kb:addSource', input) as Promise<unknown>,
+    kbListSources: (collectionId) => ipcRenderer.invoke('desktop:kb:listSources', collectionId) as Promise<KnowledgeSourceDto[]>,
+    kbAddSource: (input) => ipcRenderer.invoke('desktop:kb:addSource', input) as Promise<KnowledgeSourceDto>,
     kbDeleteSource: (id) => ipcRenderer.invoke('desktop:kb:deleteSource', id) as Promise<void>,
-    kbGetCollectionState: (collectionId) => ipcRenderer.invoke('desktop:kb:getCollectionState', collectionId) as Promise<unknown>,
-    kbGetSourceContent: (input) => ipcRenderer.invoke('desktop:kb:getSourceContent', input) as Promise<unknown>,
-    kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<unknown[]>,
+    kbGetCollectionState: (collectionId) => ipcRenderer.invoke('desktop:kb:getCollectionState', collectionId) as Promise<KnowledgeCollectionStateDto | undefined>,
+    kbGetSourceContent: (input) => ipcRenderer.invoke('desktop:kb:getSourceContent', input) as Promise<KnowledgeSourceContentDto | undefined>,
+    kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<KnowledgeSearchResultDto[]>,
     kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles') as Promise<string[]>,
-    meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<string | null>,
-    meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<unknown>,
-    meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<unknown>,
-    meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingAsrConfigSnapshot>,
+    meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<MeetingActions10Replies['pickAudioFile']>,
+    meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<MeetingReadonlyPermission>,
+    meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<import('../shared/meeting-readonly-ipc-contract.js').MeetingReadonlyPermission>,
+    meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingReadonlyAsr>,
     meetingSaveAsrConfig: (input) => ipcRenderer.invoke('desktop:meeting:saveAsrConfig', input) as Promise<MeetingAsrConfigSnapshot>,
-    meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<unknown[]>,
-    meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<unknown>,
-    meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<unknown>,
-    meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<unknown>,
-    meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<unknown>,
+    meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<MeetingReadonlyModels>,
+    meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<MeetingMutationModelResult>,
+    meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<MeetingMutationModelResult>,
+    meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<MeetingActions10Replies['saveRecordedAudio']>,
+    meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<MeetingActions10Replies['transcribePreview']>,
     meetingStartLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:start', input) as ReturnType<DesktopApi['meetingStartLiveTranscription']>,
     meetingPushLiveTranscriptionAudio: (input) => ipcRenderer.invoke('desktop:meeting:live:pushAudio', input) as ReturnType<DesktopApi['meetingPushLiveTranscriptionAudio']>,
     meetingFinishLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:finish', input) as ReturnType<DesktopApi['meetingFinishLiveTranscription']>,
     meetingCancelLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:cancel', input) as ReturnType<DesktopApi['meetingCancelLiveTranscription']>,
-    meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<unknown>,
-    meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<unknown>,
-    meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<unknown>,
-    listCollaborationRooms: () => ipcRenderer.invoke('desktop:collaborationRoom:listRooms') as Promise<unknown>,
+    meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<MeetingActions10Replies['draftRecording']>,
+    meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<MeetingActions10Replies['processRecording']>,
+    meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<MeetingActions10Replies['saveTranscript']>,
+    listCollaborationRooms: () => ipcRenderer.invoke('desktop:collaborationRoom:listRooms') as ReturnType<DesktopApi['listCollaborationRooms']>,
     getCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:get', input) as ReturnType<RoomWorkspaceApi['getCollaborationRoomWorkspace']>,
     previewCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:preview', input) as ReturnType<RoomWorkspaceApi['previewCollaborationRoomWorkspace']>,
     commitCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:commit', input) as ReturnType<RoomWorkspaceApi['commitCollaborationRoomWorkspace']>,
@@ -2185,16 +2015,16 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     mapCollaborationRoomWorkspaceProject: (input) => ipcRenderer.invoke('desktop:roomWorkspace:mapProject', input) as ReturnType<RoomWorkspaceApi['mapCollaborationRoomWorkspaceProject']>,
     setCollaborationRoomLocalCommands: (input) => ipcRenderer.invoke('desktop:roomWorkspace:localCommands', input) as ReturnType<RoomWorkspaceApi['setCollaborationRoomLocalCommands']>,
     retryCollaborationRoomWorkspaceChange: (input) => ipcRenderer.invoke('desktop:roomWorkspace:retryChange', input) as ReturnType<RoomWorkspaceApi['retryCollaborationRoomWorkspaceChange']>,
-    getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as Promise<unknown>,
-    createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,
-    archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,
-    deleteCollaborationRoom: (input: {roomId: string; expectedRoomRevision: number}) => ipcRenderer.invoke('desktop:collaborationRoom:deleteRoom', input) as Promise<unknown>,
-    updateCollaborationRoomMembers: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input) as Promise<unknown>,
-    sendCollaborationRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as ReturnType<DesktopApi['sendCollaborationRoomMessage']>,
-    markCollaborationRoomSeen: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input) as Promise<unknown>,
-    cancelRoomDiscussion: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:cancelDiscussion', input) as Promise<unknown>,
-    createProjectFromRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createProjectFromRoom', input) as Promise<unknown>,
-    createTaskFromRoomMessage: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createTaskFromRoomMessage', input) as Promise<unknown>,
+    getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as ReturnType<DesktopApi['getCollaborationRoom']>,
+    createCollaborationRoom: (input: RoomCreateInput) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as ReturnType<DesktopApi['createCollaborationRoom']>,
+    deleteCollaborationRoom: (input: RoomDeleteInput) => ipcRenderer.invoke('desktop:collaborationRoom:deleteRoom', input) as ReturnType<DesktopApi['deleteCollaborationRoom']>,
+    archiveCollaborationRoom: (input: RoomArchiveInput) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as ReturnType<DesktopApi['archiveCollaborationRoom']>,
+    updateCollaborationRoomMembers: (input: RoomMembersInput) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input) as ReturnType<DesktopApi['updateCollaborationRoomMembers']>,
+    sendCollaborationRoomMessage: (input: RoomSendInput) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as ReturnType<DesktopApi['sendCollaborationRoomMessage']>,
+    markCollaborationRoomSeen: (input: RoomSeenInput) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input) as ReturnType<DesktopApi['markCollaborationRoomSeen']>,
+    cancelRoomDiscussion: (input: RoomCancelInput) => ipcRenderer.invoke('desktop:collaborationRoom:cancelDiscussion', input) as ReturnType<DesktopApi['cancelRoomDiscussion']>,
+    createProjectFromRoom: (input: RoomProjectCreateInput) => ipcRenderer.invoke('desktop:collaborationRoom:createProjectFromRoom', input) as ReturnType<DesktopApi['createProjectFromRoom']>,
+    createTaskFromRoomMessage: (input: RoomTaskCreateInput) => ipcRenderer.invoke('desktop:collaborationRoom:createTaskFromRoomMessage', input) as ReturnType<DesktopApi['createTaskFromRoomMessage']>,
     onCollaborationRoomEvent: (listener: (event: unknown) => void) => {
       const handler = (_event: unknown, payload: unknown) => listener(payload);
       ipcRenderer.on('desktop:collaborationRoom:event', handler as never);
@@ -2202,12 +2032,12 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
         ipcRenderer.off?.('desktop:collaborationRoom:event', handler as never);
       };
     },
-    meetingOpenRecorderWindow: (input) => ipcRenderer.invoke('desktop:meetingOpenRecorderWindow', input) as Promise<{ ok: boolean; error?: string }>,
-    meetingSetRecorderWindowMode: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderWindowMode', input) as Promise<{ ok: boolean }>,
-    meetingSetRecorderSessionState: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderSessionState', input) as Promise<{ ok: boolean }>,
-    meetingNotifyRecorderSummaryReady: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecorderSummaryReady', input) as Promise<{ ok: boolean; skipped?: boolean; reason?: string }>,
-    meetingNotifyRecordingSaved: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecordingSaved', input) as Promise<{ ok: boolean }>,
-    meetingCloseRecorderWindow: () => ipcRenderer.invoke('desktop:meetingCloseRecorderWindow') as Promise<{ ok: boolean }>,
+    meetingOpenRecorderWindow: (input) => ipcRenderer.invoke('desktop:meetingOpenRecorderWindow', input) as Promise<RecorderWindowReply>,
+    meetingSetRecorderWindowMode: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderWindowMode', input) as Promise<RecorderWindowReply>,
+    meetingSetRecorderSessionState: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderSessionState', input) as Promise<RecorderWindowReply>,
+    meetingNotifyRecorderSummaryReady: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecorderSummaryReady', input) as Promise<RecorderWindowNotificationReply>,
+    meetingNotifyRecordingSaved: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecordingSaved', input) as Promise<RecorderWindowReply>,
+    meetingCloseRecorderWindow: () => ipcRenderer.invoke('desktop:meetingCloseRecorderWindow') as Promise<RecorderWindowReply>,
     onMeetingRecorderCloseRequested: (handler) => {
       const channel = 'desktop:meetingRecorderCloseRequested';
       const listener = () => handler();
@@ -2226,28 +2056,28 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       ipcRenderer.on(channel, listener);
       return () => ipcRenderer.off(channel, listener);
     },
-    getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetaSnapshot>,
+    getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetadataSnapshotDto>,
     setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
     unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
     moveThreadLabel: (threadId, from, to) => ipcRenderer.invoke('desktop:moveThreadLabel', threadId, from, to) as Promise<ThreadMetaWriteResult>,
     getAppFlag: (key) => ipcRenderer.invoke('desktop:getAppFlag', key) as Promise<string | null>,
     setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value) as Promise<ThreadMetaWriteResult>,
-    migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data) as Promise<{ migrated: boolean; reason?: string }>,
-    showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input) as Promise<{ filePath: string; canceled: boolean }>,
+    migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data) as Promise<ThreadMetadataMigrationResultDto>,
+    showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input) as Promise<ShowSaveDialogResult>,
     saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input) as Promise<SaveFileResult>,
-    listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples') as Promise<unknown[]>,
-    savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle) as Promise<unknown>,
-    deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id) as Promise<void>,
-    kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path) as Promise<unknown>,
-    kswarmProxyGetText: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:getText', path) as Promise<string>,
-    kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body) as Promise<unknown>,
-    kswarmProxyPostJson: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:postJson', path, body) as Promise<unknown>,
-    kswarmProxyPut: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:put', path, body) as Promise<unknown>,
-    kswarmProxyPatch: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:patch', path, body) as Promise<unknown>,
-    kswarmProxyDelete: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:delete', path) as Promise<unknown>,
-    kswarmStreamSubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:subscribe') as Promise<void>,
-    kswarmStreamUnsubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:unsubscribe') as Promise<void>,
-    kswarmStreamGetStatus: () => ipcRenderer.invoke('desktop:kswarm:stream:status') as Promise<unknown>,
+    listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples') as Promise<ProjectPrincipleDto[]>,
+    savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle) as Promise<PrincipleSaveResult>,
+    deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id) as Promise<PrincipleDeleteResult>,
+    kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path) as Promise<ProxyJsonResult>,
+    kswarmProxyGetText: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:getText', path) as Promise<ProxyTextResult>,
+    kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body) as Promise<ProxyJsonResult>,
+    kswarmProxyPostJson: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:postJson', path, body) as Promise<ProxyJsonResult>,
+    kswarmProxyPut: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:put', path, body) as Promise<ProxyJsonResult>,
+    kswarmProxyPatch: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:patch', path, body) as Promise<ProxyJsonResult>,
+    kswarmProxyDelete: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:delete', path) as Promise<ProxyDeleteResult>,
+    kswarmStreamSubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:subscribe') as Promise<ProxyStreamResult>,
+    kswarmStreamUnsubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:unsubscribe') as Promise<ProxyStreamResult>,
+    kswarmStreamGetStatus: () => ipcRenderer.invoke('desktop:kswarm:stream:status') as Promise<ProxyStatusResult>,
     onKSwarmWsEvent(handler) {
       const channel = 'desktop:kswarm:wsEvent';
       const listener = (_event: unknown, payload: unknown) => {
@@ -2268,8 +2098,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
         ipcRenderer.off(channel, listener);
       };
     },
-    connectionHealthz: (url) => ipcRenderer.invoke('desktop:connection:healthz', url) as Promise<boolean>,
-    connectionHealth: (url) => ipcRenderer.invoke('desktop:connection:health', url) as Promise<unknown>,
+    connectionHealthz: (url) => ipcRenderer.invoke('desktop:connection:healthz', url) as Promise<ProxyHealthResult>,
+    connectionHealth: (url) => ipcRenderer.invoke('desktop:connection:health', url) as Promise<ProxyHealthResult>,
     systemUsername,
   };
 }

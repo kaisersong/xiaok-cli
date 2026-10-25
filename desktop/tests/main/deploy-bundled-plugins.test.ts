@@ -456,6 +456,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('reconciles report renderer css compatibility even when bundled-managed plugin is already current', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -490,6 +491,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('reconciles missing report renderer runtime files even when bundled-managed plugin is already current', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -524,6 +526,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('replaces a stale symlinked bundled plugin with packaged resources', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -647,6 +650,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('deploys the bundled CUA computer-use plugin from packaged resources', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -669,6 +673,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('deploys the bundled meeting assistant transcriber plugin from packaged resources', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -695,6 +700,7 @@ describe('deploy-bundled-plugins', () => {
     });
 
     it('upgrades the bundled CUA plugin so v0.2 window tools replace stale v0.1 metadata', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, '.xiaok');
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
       process.env.PATH = '';
@@ -789,6 +795,7 @@ describe('deploy-bundled-plugins', () => {
       const exec = vi.fn(async () => ({ stdout: 'cp311' }));
       expect(await ensureHealthyManagedPythonVenv({ venvDir, venvPython, candidates: [], exec })).toBe(true);
       expect(exec).toHaveBeenCalledTimes(1);
+      expect(exec).toHaveBeenCalledWith(venvPython, ['-B', '-c', expect.any(String)], expect.objectContaining({ timeout: 15_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
       expect(readFileSync(venvPython, 'utf8')).toBe('existing');
     });
 
@@ -798,7 +805,7 @@ describe('deploy-bundled-plugins', () => {
       mkdirSync(dirname(venvPython), { recursive: true });
       writeFileSync(venvPython, 'old');
       const exec = vi.fn(async (command: string, args: string[]) => {
-        if (args[0] === '-m') {
+        if (args[1] === '-m') {
           expect(command).toBe('bundled-python');
           expect(existsSync(venvDir)).toBe(false);
           mkdirSync(dirname(venvPython), { recursive: true });
@@ -835,7 +842,7 @@ describe('deploy-bundled-plugins', () => {
       mkdirSync(dirname(venvPython), { recursive: true });
       writeFileSync(venvPython, 'old');
       const exec = vi.fn(async (command: string, args: string[]) => {
-        if (args[0] === '-m') {
+        if (args[1] === '-m') {
           mkdirSync(dirname(venvPython), { recursive: true });
           writeFileSync(venvPython, 'broken-new');
           return { stdout: '' };
@@ -865,7 +872,7 @@ describe('deploy-bundled-plugins', () => {
       })).resolves.toBe(true);
 
       expect(exec).toHaveBeenCalledTimes(1);
-      expect(exec).toHaveBeenCalledWith('python', ['-m', 'venv', venvDir], { timeout: 30_000 });
+      expect(exec).toHaveBeenCalledWith('python', ['-B', '-m', 'venv', venvDir], expect.objectContaining({ timeout: 30_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
     });
 
     it('falls back to without-pip venv and global pip bootstrap when ensurepip is broken', async () => {
@@ -887,13 +894,14 @@ describe('deploy-bundled-plugins', () => {
         exec,
       })).resolves.toBe(true);
 
-      expect(exec).toHaveBeenNthCalledWith(2, 'python', ['-m', 'venv', '--without-pip', venvDir], { timeout: 30_000 });
+      expect(exec).toHaveBeenNthCalledWith(1, 'python', ['-B', '-m', 'venv', venvDir], expect.objectContaining({ timeout: 30_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
+      expect(exec).toHaveBeenNthCalledWith(2, 'python', ['-B', '-m', 'venv', '--without-pip', venvDir], expect.objectContaining({ timeout: 30_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
       expect(exec).toHaveBeenNthCalledWith(3, 'python', [
-        '-m', 'pip',
+        '-B', '-m', 'pip',
         '--python', venvPython,
         'install', 'pip',
         '--disable-pip-version-check',
-      ], { timeout: 120_000 });
+      ], expect.objectContaining({ timeout: 120_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
     });
   });
 });

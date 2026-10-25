@@ -136,3 +136,117 @@ describe('BDD: bridge deletes local metadata only after main completion', () => 
     expect(db.put).not.toHaveBeenCalled();
   });
 });
+
+
+/** R288: these are preload/storage transport doubles, not grants or Main authorization evidence. */
+function pendingDeletionDto(state: 'cleanup_pending' | 'unknown'): import('../../shared/multi-agent-types').MultiAgentThreadDeletionSnapshot {
+  return { threadId: 'thread', threadRevision: 8, deleteState: 'delete_pending',
+    operation: { operationId: 'delete:7:prior-user-attempt', state } };
+}
+
+describe('R288: an existing reservation resumes only a same-thread Main pending receipt', () => {
+  it.each(['cleanup_pending', 'unknown'] as const)('resumes a %s receipt through a fresh Main operation without recovering old tasks', async status => {
+    const db = storage(true, { currentTaskId: 'task_old', taskIds: ['task_old'], deletionPending: true });
+    const transport = desktop('completed');
+    transport.getMultiAgentThreadDeletion.mockResolvedValue(pendingDeletionDto(status));
+    transport.recoverTask.mockRejectedValue(new Error('task_scope_forbidden'));
+    await api.deleteThread('thread');
+    expect(transport.recoverTask).not.toHaveBeenCalled();
+    expect(transport.deleteMultiAgentThread).toHaveBeenCalledTimes(1);
+    expect(transport.deleteMultiAgentThread).toHaveBeenCalledWith({ threadId: 'thread', expectedThreadRevision: 8,
+      operationId: expect.stringMatching(/^delete:8:/), confirmTerminate: true });
+    expect(transport.deleteMultiAgentThread.mock.calls[0][0].operationId).not.toBe('delete:7:prior-user-attempt');
+    expect(db.deletion).toHaveBeenCalledWith('thread');
+  });
+
+  it('performs the first recover and reservation, then resumes the next explicit attempt without another recover', async () => {
+    const db = storage(true, { currentTaskId: 'task_old', taskIds: ['task_old'] });
+    const transport = desktop('cleanup_pending');
+    await expect(api.deleteThread('thread')).rejects.toThrow(/pending/);
+    expect(transport.recoverTask).toHaveBeenCalledTimes(1);
+    expect(db.put).toHaveBeenCalledWith(expect.objectContaining({ deletionPending: true }));
+    expect(db.deletion).not.toHaveBeenCalled();
+    const firstOperation = transport.deleteMultiAgentThread.mock.calls[0][0].operationId;
+    const receipt = pendingDeletionDto('cleanup_pending'); receipt.operation!.operationId = firstOperation;
+    transport.getMultiAgentThreadDeletion.mockResolvedValue(receipt);
+    transport.deleteMultiAgentThread.mockImplementationOnce(async input => ({ operationId: input.operationId, state: 'completed' }));
+    await api.deleteThread('thread');
+    expect(transport.recoverTask).toHaveBeenCalledTimes(1);
+    expect(transport.deleteMultiAgentThread).toHaveBeenCalledTimes(2);
+    expect(transport.deleteMultiAgentThread.mock.calls[1][0]).toEqual({ threadId: 'thread', expectedThreadRevision: 8,
+      operationId: expect.stringMatching(/^delete:8:/), confirmTerminate: true });
+    expect(transport.deleteMultiAgentThread.mock.calls[1][0].operationId).not.toBe(firstOperation);
+    expect(db.deletion).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['cleanup_pending', 'unknown'] as const)('keeps the reservation and local record when the resumed Main returns %s', async state => {
+    const db = storage(true, { currentTaskId: 'task_old', taskIds: ['task_old'], deletionPending: true });
+    const transport = desktop(state); transport.getMultiAgentThreadDeletion.mockResolvedValue(pendingDeletionDto('cleanup_pending'));
+    await expect(api.deleteThread('thread')).rejects.toThrow(state === 'cleanup_pending' ? /pending/ : /unknown/);
+    expect(transport.recoverTask).not.toHaveBeenCalled(); expect(transport.deleteMultiAgentThread).toHaveBeenCalledTimes(1);
+    expect(db.deletion).not.toHaveBeenCalled();
+    expect(await api.getThread('thread')).toMatchObject({ deletionPending: true, taskIds: ['task_old'] });
+  });
+
+  it.each(['no-reservation', 'none', 'no-operation', 'applied', 'queued_next_admission', 'completed'] as const)(
+    'still requires recover when the pending conjunction is missing: %s', async boundary => {
+      const db = storage(true, { currentTaskId: 'task_old', taskIds: ['task_old'], deletionPending: boundary !== 'no-reservation' });
+      const transport = desktop('completed'), receipt = pendingDeletionDto('cleanup_pending');
+      if (boundary === 'none') { receipt.deleteState = 'none'; receipt.operation = null; }
+      else if (boundary === 'no-operation') receipt.operation = null;
+      else if (boundary === 'applied' || boundary === 'queued_next_admission' || boundary === 'completed') receipt.operation!.state = boundary;
+      transport.getMultiAgentThreadDeletion.mockResolvedValue(receipt);
+      transport.recoverTask.mockRejectedValue(new Error('task_scope_forbidden'));
+      await expect(api.deleteThread('thread')).rejects.toThrow(/unknown/);
+      expect(transport.recoverTask).toHaveBeenCalledTimes(1);
+      expect(transport.deleteMultiAgentThread).not.toHaveBeenCalled(); expect(db.deletion).not.toHaveBeenCalled();
+    });
+
+  it.each(['foreign-thread', 'negative-revision', 'fractional-revision'] as const)('rejects an invalid receipt before routing a retry: %s', async boundary => {
+    const db = storage(true, { taskIds: ['task_old'], deletionPending: true }), transport = desktop('completed');
+    const receipt = pendingDeletionDto('cleanup_pending');
+    if (boundary === 'foreign-thread') receipt.threadId = 'other';
+    else receipt.threadRevision = boundary === 'negative-revision' ? -1 : 1.5;
+    transport.getMultiAgentThreadDeletion.mockResolvedValue(receipt);
+    await expect(api.deleteThread('thread')).rejects.toThrow(/unknown/);
+    expect(transport.recoverTask).not.toHaveBeenCalled(); expect(transport.deleteMultiAgentThread).not.toHaveBeenCalled();
+    expect(db.deletion).not.toHaveBeenCalled();
+  });
+
+  it.each(['task-identity', 'reservation-lost'] as const)('rejects a change while reading the pending receipt: %s', async boundary => {
+    const db = storage(true, { currentTaskId: 'task_old', taskIds: ['task_old'], deletionPending: true });
+    const transport = desktop('completed');
+    transport.getMultiAgentThreadDeletion.mockImplementationOnce(async () => {
+      db.change(boundary === 'task-identity'
+        ? { currentTaskId: 'task_new', taskIds: ['task_old', 'task_new'], deletionPending: true }
+        : { currentTaskId: 'task_old', taskIds: ['task_old'], deletionPending: false });
+      return pendingDeletionDto('cleanup_pending');
+    });
+    await expect(api.deleteThread('thread')).rejects.toThrow(/pending/);
+    expect(transport.recoverTask).not.toHaveBeenCalled(); expect(transport.deleteMultiAgentThread).not.toHaveBeenCalled();
+    expect(db.deletion).not.toHaveBeenCalled(); expect(db.put).not.toHaveBeenCalled();
+  });
+
+  it('retains changed local task identity even if Main completed the resumed attempt', async () => {
+    const db = storage(true, { currentTaskId: 'task_old', taskIds: ['task_old'], deletionPending: true });
+    const transport = desktop('completed'); transport.getMultiAgentThreadDeletion.mockResolvedValue(pendingDeletionDto('cleanup_pending'));
+    transport.deleteMultiAgentThread.mockImplementationOnce(async input => {
+      db.change({ currentTaskId: 'task_new', taskIds: ['task_new'], deletionPending: true });
+      return { operationId: input.operationId, state: 'completed' };
+    });
+    await expect(api.deleteThread('thread')).rejects.toThrow(/pending/);
+    expect(transport.recoverTask).not.toHaveBeenCalled(); expect(db.deletion).not.toHaveBeenCalled();
+    expect(await api.getThread('thread')).toMatchObject({ currentTaskId: 'task_new', deletionPending: true });
+  });
+
+  it.each(['receipt-read', 'main-mutation'] as const)('cannot turn a rejected %s IPC into a local deletion', async boundary => {
+    const db = storage(true, { taskIds: ['task_old'], deletionPending: true }), transport = desktop('completed');
+    transport.getMultiAgentThreadDeletion.mockResolvedValue(pendingDeletionDto('cleanup_pending'));
+    if (boundary === 'receipt-read') transport.getMultiAgentThreadDeletion.mockRejectedValueOnce(new Error('multi_agent_unauthorized_sender'));
+    else transport.deleteMultiAgentThread.mockRejectedValueOnce(new Error('multi_agent_unauthorized_sender'));
+    await expect(api.deleteThread('thread')).rejects.toThrow(/unauthorized/);
+    expect(db.deletion).not.toHaveBeenCalled();
+    expect(await api.getThread('thread')).toMatchObject({ deletionPending: true });
+    expect(transport.deleteMultiAgentThread).toHaveBeenCalledTimes(boundary === 'receipt-read' ? 0 : 1);
+  });
+});

@@ -1,11 +1,14 @@
+import type { StoredSessionIntentLedgerInput, NormalizedStoredSessionIntentLedger } from './stored-intent-clone.js';
 import type { SessionIntentLedger, TakeoverSessionOptions } from './types.js';
 import { cloneSessionIntentLedger, resolveActiveRiskTier } from './types.js';
 
+export function markSessionOwned(ledger: SessionIntentLedger, instanceId: string, now?: number): SessionIntentLedger;
+export function markSessionOwned(ledger: StoredSessionIntentLedgerInput, instanceId: string, now?: number): NormalizedStoredSessionIntentLedger;
 export function markSessionOwned(
-  ledger: SessionIntentLedger,
+  ledger: StoredSessionIntentLedgerInput,
   instanceId: string,
   now = Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const currentOwner = next.ownership.ownerInstanceId;
   const previousOwner = next.ownership.previousOwnerInstanceId;
@@ -28,11 +31,13 @@ export function markSessionOwned(
   return next;
 }
 
+export function releaseSessionOwnership(ledger: SessionIntentLedger, instanceId: string, now?: number): SessionIntentLedger;
+export function releaseSessionOwnership(ledger: StoredSessionIntentLedgerInput, instanceId: string, now?: number): NormalizedStoredSessionIntentLedger;
 export function releaseSessionOwnership(
-  ledger: SessionIntentLedger,
+  ledger: StoredSessionIntentLedgerInput,
   instanceId: string,
   now = Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   if (next.ownership.ownerInstanceId && next.ownership.ownerInstanceId !== instanceId) {
     throw new Error(`cannot release session owned by ${next.ownership.ownerInstanceId}`);
@@ -48,11 +53,13 @@ export function releaseSessionOwnership(
   return next;
 }
 
+export function resumeSessionOwnership(ledger: SessionIntentLedger, instanceId: string, now?: number): SessionIntentLedger;
+export function resumeSessionOwnership(ledger: StoredSessionIntentLedgerInput, instanceId: string, now?: number): NormalizedStoredSessionIntentLedger;
 export function resumeSessionOwnership(
-  ledger: SessionIntentLedger,
+  ledger: StoredSessionIntentLedgerInput,
   instanceId: string,
   now = Date.now(),
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);
   const currentOwner = next.ownership.ownerInstanceId;
   const previousOwner = next.ownership.previousOwnerInstanceId;
@@ -72,8 +79,20 @@ export function resumeSessionOwnership(
   return next;
 }
 
+/** Data fields consumed by the existing ownership check; never a grant. */
+export interface SessionWriteOwnershipData {
+  readonly ownership: {
+    readonly ownerInstanceId?: unknown;
+    readonly previousOwnerInstanceId?: unknown;
+    readonly state?: unknown;
+  };
+  readonly instanceId?: unknown;
+  readonly intents: readonly unknown[];
+  readonly latestPlan: unknown;
+}
+
 export function assertSessionWriteOwnership(
-  ledger: SessionIntentLedger,
+  ledger: SessionWriteOwnershipData,
   instanceId: string,
   action = 'write',
   options: { allowInitialClaim?: boolean } = {},
@@ -110,11 +129,13 @@ export function assertSessionWriteOwnership(
   throw new Error(`cannot ${action}: session ownership is not established`);
 }
 
+export function takeoverSessionOwnership(ledger: SessionIntentLedger, instanceId: string, options?: TakeoverSessionOptions): SessionIntentLedger;
+export function takeoverSessionOwnership(ledger: StoredSessionIntentLedgerInput, instanceId: string, options?: TakeoverSessionOptions): NormalizedStoredSessionIntentLedger;
 export function takeoverSessionOwnership(
-  ledger: SessionIntentLedger,
+  ledger: StoredSessionIntentLedgerInput,
   instanceId: string,
   options: TakeoverSessionOptions = {},
-): SessionIntentLedger {
+): NormalizedStoredSessionIntentLedger {
   const now = options.now ?? Date.now();
   const next = cloneSessionIntentLedger(ledger);
   const currentOwner = next.ownership.ownerInstanceId ?? next.ownership.previousOwnerInstanceId;

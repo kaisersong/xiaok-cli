@@ -1,0 +1,92 @@
+import { createHash } from 'node:crypto';
+import { readInstalledCurrentOwner } from '../verification/installed-owner-state.js';
+import { createInstalledLoopApplicationClient } from '../verification/installed-loop-application.js';
+import { createInstalledCompletionPublisher } from '../verification/installed-completion-publication.js';
+import { parseLoopApplicationBinding } from '../verification/loop-application-binding.js';
+import { parseActiveBusinessApplicationBinding } from '../verification/business-application-binding.js';
+import { loopHostSubjectOwner } from '../verification/loop-host-subject.js';
+import { assertLoopApplicationArtifacts } from '../verification/loop-application-artifacts.js';
+import { canonicalVerificationJson as json } from '../verification/protocol.js';
+const negativeReads = new WeakSet();
+function notCurrent(message) { const error = Error(message); negativeReads.add(error); return error; }
+/** Only negatives issued by this fixed reader, never an arbitrary dependency message. */
+export function isLoopPublicationNotCurrent(error) { return error instanceof Error && negativeReads.has(error); }
+/** Fixed installed read only. The returned data is neither a completion write
+ * grant nor a continuously current snapshot. Consumers must not cache it as
+ * authority, and a Run observation never substitutes for its required stages. */
+export async function readCurrentLoopPublishedCandidate(raw, signal) {
+    const binding = parseLoopApplicationBinding(raw), requested = loopHostSubjectOwner(binding.subject);
+    const deadline = new AbortController(), active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
+    const timer = setTimeout(() => deadline.abort(Error('loop_publication_read_timeout')), 10000);
+    let application;
+    let publisher;
+    // Cancellation fences the result but never releases the enclosing host's
+    // lifetime before an already-started transport settles. Cooperative transports
+    // receive the deadline signal; an uncooperative one must keep shutdown draining.
+    async function wait(read) {
+        active.throwIfAborted();
+        try {
+            const value = await read();
+            active.throwIfAborted();
+            return value;
+        }
+        catch (error) {
+            active.throwIfAborted();
+            throw error;
+        }
+    }
+    try {
+        active.throwIfAborted();
+        const route = readInstalledCurrentOwner(requested);
+        if (route.kind !== 'migrated' && route.kind !== 'protected-unregistered')
+            throw notCurrent('loop_publication_owner_unavailable');
+        const routeKey = json(route), owner = Object.freeze({ ...route.owner });
+        function current() { active.throwIfAborted(); if (json(readInstalledCurrentOwner(requested)) !== routeKey)
+            throw notCurrent('loop_publication_owner_changed'); }
+        application = createInstalledLoopApplicationClient(binding, 'scheduler');
+        const before = await wait(() => application.inspect(active));
+        current();
+        if (before.state !== 'active' || before.pendingTransitionId !== null || before.pendingTarget !== null)
+            throw notCurrent('loop_publication_application_pending');
+        const originalApplication = parseActiveBusinessApplicationBinding(before.current);
+        if (originalApplication.binding.kind !== 'loop' || json(originalApplication.binding) !== json(binding))
+            throw notCurrent('loop_publication_application_changed');
+        publisher = createInstalledCompletionPublisher(requested, 'scheduler');
+        const observed = await wait(() => publisher.observe(active));
+        current();
+        const publication = observed.publication;
+        if (json(observed.owner) !== json(owner) || observed.currentVerification !== 'valid' || publication.status !== 'committed' || !publication.current)
+            throw notCurrent('loop_publication_not_current');
+        const payload = await wait(() => publisher.readPayload(observed, active));
+        current();
+        if (json(payload.owner) !== json(owner) || payload.businessRevision !== observed.businessRevision || payload.operationId !== publication.operationId
+            || payload.fullTupleHash !== publication.fullTupleHash || !Buffer.isBuffer(payload.bytes) || payload.bytes.length > 32 * 1024 ** 2
+            || createHash('sha256').update(payload.bytes).digest('hex') !== payload.payloadHash)
+            throw Error('loop_publication_payload');
+        const bytes = Buffer.from(payload.bytes), body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        if (!body || body.version !== 1 || json(body.owner) !== json(owner) || !Buffer.from(json(body)).equals(bytes)
+            || json(parseActiveBusinessApplicationBinding(body.application)) !== json(originalApplication))
+            throw Error('loop_publication_payload_application');
+        assertLoopApplicationArtifacts(owner, binding, owner, body.evaluations);
+        const afterApplication = await wait(() => application.inspect(active));
+        current();
+        if (json(afterApplication) !== json(before))
+            throw notCurrent('loop_publication_application_changed');
+        const afterPublication = await wait(() => publisher.observe(active));
+        current();
+        if (json(afterPublication) !== json(observed))
+            throw notCurrent('loop_publication_changed');
+        return Object.freeze({ binding, application: originalApplication, owner,
+            businessRevision: payload.businessRevision, operationId: payload.operationId, fullTupleHash: payload.fullTupleHash, payloadHash: payload.payloadHash,
+            get bytes() { return Buffer.from(bytes); } });
+    }
+    finally {
+        clearTimeout(timer);
+        try {
+            publisher?.dispose();
+        }
+        finally {
+            application?.dispose();
+        }
+    }
+}

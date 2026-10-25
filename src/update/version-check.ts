@@ -55,12 +55,11 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateChec
     };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
 
     const res = await fetch(REGISTRY_URL, { signal: controller.signal });
-    clearTimeout(timeout);
 
     if (!res.ok) return null;
     const data = await res.json() as { version?: string };
@@ -83,5 +82,7 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateChec
       };
     }
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }

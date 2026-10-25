@@ -219,9 +219,11 @@ export async function showPermissionPrompt(
     let resolved = false;
     let renderWithRenderer = useRenderer;
     let directPromptStarted = false;
+    let completeRendererModal: (() => void) | undefined;
     transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
 
     const degradeRenderer = (context: string, _error: unknown) => {
+      try { renderer?.closeModal(); } catch {}
       renderWithRenderer = false;
       try {
         stdout.write(`\n${dim(`[xiaok] UI 已降级：${context}`)}\n`);
@@ -229,6 +231,9 @@ export async function showPermissionPrompt(
     };
 
     const renderAll = () => {
+      const reviewRules = rememberedRules(toolName, input, rule);
+      const reviewScopes = typeof input.command === 'string'
+        ? reviewRules.filter(scope => scope.endsWith(' *)')) : [];
       const lines = formatPermissionPromptLines(
         toolName,
         input,
@@ -238,27 +243,20 @@ export async function showPermissionPrompt(
 
       if (renderWithRenderer && renderer) {
         try {
-          if (renderer.hasActiveScrollRegion()) {
-            const currentState = renderer.getState();
-            renderer.renderInput({
-              prompt: currentState.prompt || 'Type your message...',
-              input: '',
-              cursor: 0,
-              footerLines: currentState.footerLines,
-              overlayLines: [],
-            });
-          }
-          renderer.openPermissionModal({
+          completeRendererModal = renderer.openPermissionModal({
             toolName,
+            reviewRules,
+            reviewScopes,
             targetLines: lines.slice(2, lines.length - (promptOptions.length + 1)),
             options: promptOptions.map((option) => option.label),
-          });
+          }, () => done({ action: 'deny' }));
           for (let index = 0; index < selectedIdx; index += 1) {
             renderer.handleKey('\x1b[B');
           }
           return;
         } catch (error) {
           degradeRenderer('permission_prompt_renderer', error);
+          throw error; // A failed review surface must never fall through to approval.
         }
       }
 
@@ -275,22 +273,8 @@ export async function showPermissionPrompt(
     const clearAll = () => {
       if (renderWithRenderer && renderer) {
         try {
-          const currentState = renderer.getState();
-          if (renderer.hasActiveScrollRegion()) {
-            const preserveFooter = !(process.platform === 'win32' && process.env.TMUX);
-            if (process.platform === 'win32' && process.env.TMUX) {
-              renderer.clearVisibleContent();
-            }
-            renderer.renderInput({
-              prompt: currentState.prompt || 'Type your message...',
-              input: '',
-              cursor: 0,
-              footerLines: preserveFooter ? currentState.footerLines : [],
-              overlayLines: [],
-            });
-          } else {
-            renderer.closeModal();
-          }
+          completeRendererModal?.();
+          completeRendererModal = undefined;
           return;
         } catch (error) {
           degradeRenderer('permission_prompt_clear', error);
@@ -316,8 +300,10 @@ export async function showPermissionPrompt(
       if (resolved) return;
       resolved = true;
       config?.signal?.removeEventListener('abort', onAbort);
-      clearAll();
-      stopPermissionInput(onData);
+      let cleanupFailed = false;
+      try { clearAll(); } catch { cleanupFailed = true; }
+      try { stopPermissionInput(onData, onEnd); } catch { cleanupFailed = true; }
+      if (cleanupFailed) choice = { action: 'deny' };
 
       const summary = formatPermissionDecisionSummary(choice);
       if (summary) {
@@ -330,6 +316,11 @@ export async function showPermissionPrompt(
     const handleKey = (key: string) => {
       if (resolved) return;
 
+      if (key === '\x1b[5~' || key === '\x1b[6~') {
+        if (renderWithRenderer) renderer?.pagePermissionModal(key === '\x1b[5~' ? -1 : 1);
+        return;
+      }
+
       // Ctrl-C / Esc → 拒绝
       if (key === '\x03' || key === '\x1b') {
         done({ action: 'deny' });
@@ -338,6 +329,7 @@ export async function showPermissionPrompt(
 
       // Enter → 选择当前项
       if (key === '\r' || key === '\n') {
+        if (promptOptions[selectedIdx].choice.action !== 'deny' && renderWithRenderer && renderer && !renderer.canApprovePermissionModal()) return;
         transcriptLogger?.record({
           type: 'permission_prompt_decision',
           action: promptOptions[selectedIdx].choice.action,
@@ -350,6 +342,7 @@ export async function showPermissionPrompt(
       // Number keys → 直接选择对应项
       const num = /^[1-9]$/.test(key) ? Number(key) : 0;
       if (num >= 1 && num <= promptOptions.length) {
+        if (promptOptions[num - 1].choice.action !== 'deny' && renderWithRenderer && renderer && !renderer.canApprovePermissionModal()) return;
         transcriptLogger?.record({
           type: 'permission_prompt_decision',
           action: promptOptions[num - 1].choice.action,
@@ -368,8 +361,7 @@ export async function showPermissionPrompt(
             renderer.handleKey('\x1b[A');
           } catch (error) {
             degradeRenderer('permission_prompt_nav_up', error);
-            clearAll();
-            renderAll();
+            done({ action: 'deny' });
           }
         } else {
           clearAll();
@@ -387,8 +379,7 @@ export async function showPermissionPrompt(
             renderer.handleKey('\x1b[B');
           } catch (error) {
             degradeRenderer('permission_prompt_nav_down', error);
-            clearAll();
-            renderAll();
+            done({ action: 'deny' });
           }
         } else {
           clearAll();
@@ -402,19 +393,26 @@ export async function showPermissionPrompt(
       const input = data.toString();
       // stdin batches can contain multiple complete keys. Unknown/pasted text
       // remains ignored as a whole; multi-digit numbers stay a single token.
-      const keys = input.match(/\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
+      const keys = input.match(/\x1b\[[56]~|\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
       if (keys.join('') !== input) return;
       for (const key of keys) {
         if (resolved) break;
-        handleKey(key);
+        try { handleKey(key); }
+        catch { done({ action: 'deny' }); }
       }
     };
 
     const onAbort = () => done({ action: 'deny' });
-    renderAll();
-    startPermissionInput(onData);
-    config?.signal?.addEventListener('abort', onAbort, { once: true });
-    if (config?.signal?.aborted) onAbort();
+    const onEnd = () => done({ action: 'deny' });
+    try {
+      renderAll();
+      if (resolved) return;
+      startPermissionInput(onData, onEnd);
+      config?.signal?.addEventListener('abort', onAbort, { once: true });
+      if (config?.signal?.aborted) onAbort();
+    } catch {
+      done({ action: 'deny' });
+    }
   });
 }
 

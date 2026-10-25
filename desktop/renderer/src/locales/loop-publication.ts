@@ -1,0 +1,24 @@
+export interface LoopPublicationLabels {
+ title:string;close:string;loading:string;refresh:string;configuration:string;configHelp:string;save:string;run:string;
+ history:string;noRun:string;noCandidates:string;runSubject:string;workspace:string;obligations:string;
+ reserve:string;reauthorizeNative:string;continueNative:string;recoverNative:string;prepareSession:string;recoverSession:string;enroll:string;recoverEnrollment:string;
+ verify:string;recoverVerification:string;publish:string;recoverPublication:string;project:string;inspect:string;
+ command:string;relativeDirectory:string;minutes:string;unknown:string;stage:Record<string,string>;phase:Record<string,string>;
+ checked:(time:string)=>string;error:(message:string)=>string;generation:(n:number)=>string;
+}
+export const loopPublicationZh:LoopPublicationLabels={
+ title:'验证与发布',close:'收起',loading:'读取中…',refresh:'刷新记录',configuration:'独立验证配置',configHelp:'填写 JSON 验证配置，分别定义整次运行和各阶段的独立验证条件。保存仅应用于后续新运行。',save:'保存配置',run:'运行记录',
+ history:'以下为历史进度。发布记录和执行结束均不代表当前验证仍有效。',noRun:'尚无运行记录，请先配置并运行循环。',noCandidates:'当前运行尚无可发布结果。',runSubject:'整次运行',workspace:'验证工作目录',obligations:'验证条件',
+ reserve:'申请原生授权',reauthorizeNative:'重新批准应用绑定',continueNative:'继续原生授权',recoverNative:'恢复授权结果',prepareSession:'准备验证会话',recoverSession:'恢复验证会话',enroll:'授权验证会话',recoverEnrollment:'恢复会话授权',verify:'选择材料并验证',recoverVerification:'恢复验证结果',publish:'发布此结果',recoverPublication:'恢复发布结果',project:'汇总发布结果',inspect:'检查当前有效性',command:'验证命令参数（JSON 数组）',relativeDirectory:'相对工作目录',minutes:'授权有效期（分钟）',unknown:'未知状态',
+ checked:time=>`已于 ${time} 核验全部结果。后续操作仍需重新检查。`,error:message=>`操作未完成：${message}`,generation:n=>`历史汇总版本 ${n}`,
+ stage:{scan:'扫描阶段',execute:'执行阶段',verify:'验证阶段'},
+ phase:{reserved:'已保留请求',enrolling:'等待授权结果',enrolled:'已授权',binding:'等待绑定结果',ready:'绑定已确认',retired:'已结束',stale:'需要重新验证',needs_reauthorization:'需要重新授权',session_ready:'会话已准备',selecting:'等待选择材料',preparing_material:'准备材料授权',authorizing_material:'等待材料授权',staging_material:'准备验证材料',preparing_verification:'准备验证',dispatching:'验证执行中',observing:'等待验证结果',terminal:'验证已结束',preparing:'准备发布',prepared:'等待发布授权',authorizing:'等待发布结果',pending:'发布结果待确认',committed:'已发布',not_prepared:'请求未发送',not_approved:'未授权',rejected:'已拒绝',unknown:'结果未知',not_published:'尚未发布'},
+};
+export const loopPublicationEn:LoopPublicationLabels={
+ title:'Verification and publication',close:'Collapse',loading:'Loading…',refresh:'Refresh records',configuration:'Independent verification configuration',configHelp:'Enter JSON configuration with independent criteria for the run and each stage. Saving applies only to future runs.',save:'Save configuration',run:'Run history',
+ history:'Historical progress. Publication and finished execution do not establish current validity.',noRun:'No runs yet. Configure and run the loop first.',noCandidates:'This run has no publishable result yet.',runSubject:'Entire run',workspace:'Verification workspace',obligations:'Verification criteria',
+ reserve:'Request native authorization',reauthorizeNative:'Reauthorize application binding',continueNative:'Continue native authorization',recoverNative:'Recover authorization result',prepareSession:'Prepare verification session',recoverSession:'Recover verification session',enroll:'Authorize verification session',recoverEnrollment:'Recover session authorization',verify:'Select materials and verify',recoverVerification:'Recover verification result',publish:'Publish this result',recoverPublication:'Recover publication result',project:'Aggregate published results',inspect:'Check current validity',command:'Validation arguments (JSON array)',relativeDirectory:'Relative working directory',minutes:'Authorization lifetime (minutes)',unknown:'Unknown state',
+ checked:time=>`All results checked at ${time}. Subsequent actions require another check.`,error:message=>`Action incomplete: ${message}`,generation:n=>`Historical aggregate version ${n}`,
+ stage:{scan:'Scan stage',execute:'Execution stage',verify:'Verification stage'},
+ phase:{reserved:'Request reserved',enrolling:'Awaiting authorization',enrolled:'Authorized',binding:'Awaiting binding',ready:'Binding confirmed',retired:'Retired',stale:'Revalidation needed',needs_reauthorization:'Authorization needed',session_ready:'Session ready',selecting:'Awaiting materials',preparing_material:'Preparing material authorization',authorizing_material:'Awaiting material authorization',staging_material:'Preparing materials',preparing_verification:'Preparing verification',dispatching:'Verification running',observing:'Awaiting verification result',terminal:'Verification ended',preparing:'Preparing publication',prepared:'Awaiting publication approval',authorizing:'Awaiting publication result',pending:'Publication pending',committed:'Published',not_prepared:'Request not sent',not_approved:'Not approved',rejected:'Rejected',unknown:'Result unknown',not_published:'Not published'},
+};

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
+import * as fileIo from 'node:fs/promises';
+import * as installedCompletion from '../../../src/runtime/verification/installed-completion-observation.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,9 +16,15 @@ import { createPostSealHarness, bounded } from '../fixtures/desktop-post-seal-ha
 import { loadVerifierContract, snapshotFixture } from '../fixtures/desktop-post-seal-verifier-contract.js';
 import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
 
+// ESM builtin namespaces are immutable. Copy their actual function references
+// into the Vitest observation namespace; every spy still returns native SDK IO.
+vi.mock('node:fs/promises', async importOriginal => ({
+  ...await importOriginal<typeof import('node:fs/promises')>(),
+}));
+
 describe('R4 explicit raw async IO and unchanged guard language', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
-  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.useRealTimers(); });
+  afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.useRealTimers(); vi.restoreAllMocks(); });
   function directory() { const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-io-')); cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 })); return root; }
 
   it.skipIf(process.platform === 'win32')('D4/D6 real recoverTask FIFO abort rejects continuation while its raw read Promise stays pending until OS IO settles', async () => {
@@ -27,23 +35,43 @@ describe('R4 explicit raw async IO and unchanged guard language', () => {
     const fifo = join(root, 'snapshots', `${prepared.taskId}.json`); execFileSync('mkfifo', [fifo]);
     const store = new FileTaskSnapshotStore(root); const controller = new AbortController();
     const raw: Promise<unknown>[] = []; let rawSettles = 0; let waitSettled = false; let result: unknown;
+    let checkpointRaw: Promise<unknown> | undefined; let checkpointSettled = false;
+    let entered!: () => void; const checkpointEntered = new Promise<void>(resolve => { entered = resolve; });
+    const originalReadFile = fileIo.readFile;
+    vi.spyOn(fileIo, 'readFile').mockImplementation((...args: Parameters<typeof fileIo.readFile>) => {
+      const promise = originalReadFile(...args);
+      if (String(args[0]) === fifo) {
+        checkpointRaw = promise;
+        void promise.then(() => { checkpointSettled = true; }, () => { checkpointSettled = true; });
+        entered();
+      }
+      return promise;
+    });
     const read = (store.recoverTask as (id: string, options: { signal: AbortSignal; trackPending(raw: Promise<unknown>): void }) => Promise<TaskSnapshot | null>)(prepared.taskId,
       { signal: controller.signal, trackPending: promise => { raw.push(promise); void promise.then(() => { rawSettles++; }, () => { rawSettles++; }); } });
     const observed = read.then(value => { waitSettled = true; result = value; }, error => { waitSettled = true; result = error; });
     // Genuine libuv IO, not a rejected replacement Promise. A writer remains
     // absent until cleanup below, so the kernel FIFO open cannot finish early.
-    await new Promise(resolve => setTimeout(resolve, 30));
-    controller.abort(new DOMException('delivery_timeout', 'AbortError'));
-    await new Promise(resolve => setTimeout(resolve, 30));
     try {
+      await bounded(checkpointEntered);
+      expect(raw).toContain(checkpointRaw);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      const settledBeforeAbort = rawSettles;
+      controller.abort(new DOMException('delivery_timeout', 'AbortError'));
+      await new Promise(resolve => setTimeout(resolve, 30));
       expect.soft(waitSettled).toBe(true);
       expect.soft(result).toMatchObject({ name: 'AbortError' });
-      expect.soft(raw.length).toBeGreaterThan(0); expect(rawSettles).toBe(0);
+      expect.soft(raw.length).toBeGreaterThan(0); expect(rawSettles).toBe(settledBeforeAbort);
+      expect(checkpointSettled).toBe(false);
     } finally {
-      const writer = await open(fifo, 'w'); await writer.writeFile(JSON.stringify(original)); await writer.close();
+      controller.abort();
+      if (checkpointRaw) {
+        const writer = await open(fifo, 'w'); await writer.writeFile(JSON.stringify(original)); await writer.close();
+      }
       await bounded(observed); await Promise.allSettled(raw);
     }
     expect(rawSettles).toBe(raw.length);
+    expect(checkpointSettled).toBe(true);
     expect(result).toMatchObject({ name: 'AbortError' });
   });
 
@@ -100,13 +128,29 @@ describe('R4 explicit raw async IO and unchanged guard language', () => {
 
   it('D5 original URI priority and unsupported kinds do not gain new file reads; localPaths still has its existing priority', async () => {
     const root = directory(); const path = join(root, 'bad.pdf'); writeFileSync(path, 'invalid');
+    const completionPromises: Promise<unknown>[] = [];
+    const observe = installedCompletion.observeInstalledCompletion;
+    vi.spyOn(installedCompletion, 'observeInstalledCompletion').mockImplementation((...args) => {
+      const promise = observe(...args); completionPromises.push(promise); return promise;
+    });
+    const artifactReads: string[] = [];
+    for (const name of ['access', 'open', 'stat', 'realpath', 'lstat'] as const) {
+      const originalIo = fileIo[name];
+      vi.spyOn(fileIo, name).mockImplementation(((...args: unknown[]) => {
+        if (String(args[0]) === path) artifactReads.push(name);
+        return Reflect.apply(originalIo, fileIo, args);
+      }) as never);
+    }
     for (const uri of ['artifact://owned', 'https://example.test/file.pdf', path]) {
+      artifactReads.length = 0; completionPromises.length = 0;
       const input: CompletionEvidenceInput = { ownerKind: 'task', ownerId: 'task', targetStatus: 'completed',
         expectation: { ownerKind: 'task', ownerId: 'task', expectedKinds: ['file_artifact'], source: 'task_spec', confidence: 'explicit' },
         evidence: [{ ownerKind: 'task', ownerId: 'task', kind: 'file_artifact', summary: 'Saved evidence', uri, metadata: { paths: [path] } }] };
       const raw: Promise<unknown>[] = [];
       expect(await validateCompletionEvidenceAsync(input, { signal: new AbortController().signal, trackPending: promise => raw.push(promise) })).toEqual(validateCompletionEvidence(input));
-      expect(raw).toHaveLength(0);
+      expect(completionPromises).toHaveLength(1);
+      expect(raw).toEqual(completionPromises);
+      expect(artifactReads).toEqual([]);
       input.evidence![0]!.metadata = { localPaths: [path], workspaceRoot: root };
       expect(await validateCompletionEvidenceAsync(input, { signal: new AbortController().signal, trackPending: promise => raw.push(promise) })).toMatchObject({ ok: true, warning: expect.stringContaining('pdf') });
       expect(raw.length).toBeGreaterThan(0); await Promise.allSettled(raw);
@@ -132,7 +176,7 @@ describe('R4 explicit raw async IO and unchanged guard language', () => {
     const tasks = paths.map((path, index) => verifier.verify(snapshotFixture({ taskId: `fifo-task-${index}`, prompt: '生成 PDF 文件',
       events: [{ type: 'artifact_recorded', artifactId: 'saved', kind: 'pdf', label: 'Saved PDF', filePath: pathToFileURL(path).href, previewAvailable: false, turnId: 'turn' }] }),
     { signal: controllers[index].signal, deadline: performance.now() + 5000, trackPending: promise => {
-      raw[index].push(promise); if (raw.every(items => items.length >= 3)) opensObserved();
+      raw[index].push(promise); if (raw.every(items => items.length >= 4)) opensObserved();
     } }).then(value => ({ ok: true, value }), error => ({ ok: false, error })));
     let physicalDrains = 0;
     try {
@@ -140,15 +184,15 @@ describe('R4 explicit raw async IO and unchanged guard language', () => {
       // The final native effect in each attempt still waits in the kernel.
       let rawSettles = 0; raw.flat().forEach(promise => { void promise.then(() => rawSettles++, () => rawSettles++); });
       const heartbeat = performance.now(); await new Promise(resolve => setTimeout(resolve, 25));
-      expect(performance.now() - heartbeat).toBeLessThan(500); expect(rawSettles).toBe(2);
+      expect(performance.now() - heartbeat).toBeLessThan(500); expect(rawSettles).toBe(4);
       controllers.forEach(controller => controller.abort(new DOMException('Stop delivery', 'AbortError')));
       expect(await bounded(Promise.all(tasks))).toEqual([expect.objectContaining({ ok: false }), expect.objectContaining({ ok: false })]);
       await expect(verifier.verify(snapshotFixture(), { signal: new AbortController().signal, deadline: performance.now() + 1000,
         trackPending: () => { throw new Error('third attempt must not start IO'); } })).rejects.toMatchObject({ code: 'verifier_capacity' });
-      expect.soft(raw.flat()).toHaveLength(6); // physical receipt + original access + original open per attempt
+      expect.soft(raw.flat()).toHaveLength(8); // physical receipt + current-completion + original access + original open per attempt
       raw.forEach(items => { void items[0].then(() => physicalDrains++); });
       await Promise.resolve(); expect.soft(physicalDrains).toBe(0);
-      expect(rawSettles).toBe(2);
+      expect(rawSettles).toBe(4);
     } finally {
       controllers.forEach(controller => controller.abort());
       // Real writers release the kernel opens. No substitute/rejected IO Promise.
@@ -173,7 +217,7 @@ describe('R4 explicit raw async IO and unchanged guard language', () => {
     try {
       expect(await bounded(read)).toMatchObject({ ok: true });
       expect(await Promise.allSettled(raw)).toContainEqual(expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ code: 'ESPIPE' }) }));
-      expect(raw).toHaveLength(4); // original access/open/read/close, all actually settled
+      expect(raw).toHaveLength(5); // current-completion plus original access/open/read/close, all actually settled
     } finally { await writer.close(); }
   });
 });

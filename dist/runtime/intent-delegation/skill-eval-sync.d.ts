@@ -8,5 +8,6 @@ export interface SkillEvalRuntimeSyncOptions {
     skillEvalStore: SessionSkillEvalStore;
     scoreStore: FileSkillScoreStore;
     sessionId: string;
+    onError?: (error: unknown) => void;
 }
-export declare function wireSkillEvalToRuntimeSync(options: SkillEvalRuntimeSyncOptions): () => void;
+export declare function wireSkillEvalToRuntimeSync(options: SkillEvalRuntimeSyncOptions): () => Promise<void>;
