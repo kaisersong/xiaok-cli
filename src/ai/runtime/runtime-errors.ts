@@ -1,5 +1,6 @@
 import { isAbortError } from './abort-utils.js';
 import { MODEL_TEXT_REPETITION_CODE } from './model-text-repetition.js';
+import { getOpenAIStreamFailure } from './openai-stream-error.js';
 import { formatKimiProviderRequestError, getKimiProviderRequestDiagnostic } from './provider-request-error.js';
 
 export interface RuntimeErrorShape {
@@ -40,6 +41,11 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
   const transportCode = typeof errorCode === 'string' ? errorCode : '';
   if (transportCode === MODEL_TEXT_REPETITION_CODE || message === MODEL_TEXT_REPETITION_CODE) {
     return { code: 'model_failed', message: MODEL_TEXT_REPETITION_CODE, retryable: false };
+  }
+  const streamFailure = getOpenAIStreamFailure(error);
+  if (streamFailure) return { code: 'model_failed', ...streamFailure };
+  if (transportCode === 'MODEL_RECOVERY_EXHAUSTED') {
+    return { code: 'model_failed', message, retryable: false };
   }
   if (
     /ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(transportCode)
