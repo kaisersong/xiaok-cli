@@ -673,9 +673,9 @@ describe('InProcessTaskRuntimeHost', () => {
     expect(await host.getActiveTask()).toBeNull();
   });
 
-  it('persists failed snapshots with error event and salvage', async () => {
+  it.each(['runner unavailable', 'model_failed: MODEL_TEXT_REPETITION_DETECTED'])('persists failed snapshots with error event and salvage: %s', async message => {
     const host = createHost(async () => {
-      throw new Error('runner unavailable');
+      throw new Error(message);
     });
     await host.createTask({
       prompt: '生成 A 客户方案 PPT',
@@ -686,11 +686,11 @@ describe('InProcessTaskRuntimeHost', () => {
     const recovered = await host.recoverTask('task_1');
     expect(recovered.snapshot.status).toBe('failed');
     expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
-      { type: 'error', message: 'runner unavailable' },
+      { type: 'error', message, ...(message.startsWith('model_failed:') ? { retryable: false } : {}) },
     ]));
     expect(recovered.snapshot.salvage).toEqual({
       summary: ['已保留任务理解', '已保留 1 个材料引用'],
-      reason: 'runner unavailable',
+      reason: message,
     });
     expect(await host.getActiveTask()).toBeNull();
   });

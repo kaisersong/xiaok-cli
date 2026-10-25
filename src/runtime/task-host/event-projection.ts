@@ -162,9 +162,11 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
     return null;
   }
   if (event.type === 'turn_failed') {
+    const retryable = (event.error as Error & { retryable?: boolean }).retryable;
     return {
       type: 'error',
       message: event.error.message,
+      ...(typeof retryable === 'boolean' ? { retryable } : {}),
     };
   }
   return null;

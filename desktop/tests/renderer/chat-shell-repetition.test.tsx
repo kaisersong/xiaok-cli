@@ -112,6 +112,8 @@ vi.mock('../../renderer/src/layouts/AppLayout', () => ({
 
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ChatShell } from '../../renderer/src/components/ChatShell';
+import { zh } from '../../renderer/src/locales/zh';
+import { projectRuntimeEventToDesktopEvent } from '../../../src/runtime/task-host/event-projection';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
 beforeEach(() => {
@@ -142,13 +144,63 @@ it('keeps partial output and offers manual regeneration after repetition', async
   await waitFor(() => expect(handler).toBeTypeOf('function'));
   await act(async () => {
     handler({ type: 'assistant_delta', delta: 'Already emitted partial answer' });
-    handler({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED' });
+    const failure = projectRuntimeEventToDesktopEvent({ taskId: 'task-rep', event: {
+      type: 'turn_failed', sessionId: 's', turnId: 'turn',
+      error: Object.assign(new Error('MODEL_TEXT_REPETITION_DETECTED'), { retryable: false }),
+    } });
+    expect(failure).toEqual({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED', retryable: false });
+    handler(failure);
   });
   expect(screen.getByText('Already emitted partial answer')).toBeTruthy();
   expect(screen.getByText('检测到重复输出，已停止', { exact: false })).toBeTruthy();
   expect(screen.getByRole('button', { name: '重新生成' })).toBeTruthy();
   expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: /自动重试|auto.?retry/i })).toBeNull();
   mockCreateTask.mockResolvedValue({ taskId: 'regenerated' });
   fireEvent.click(screen.getByRole('button', { name: '重新生成' }));
-  await waitFor(() => expect(mockCreateTask).toHaveBeenCalled());
+  await waitFor(() => expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'original request' })));
+  expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
+});
+
+async function renderFailure(message: string, history = false, materials: Array<{ filePath: string; name: string }> = []) {
+  mockGetThread.mockResolvedValue({ id: 'rep', title: 'test', status: history ? 'failed' : 'running', mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task-rep', taskIds: ['task-rep'] });
+  mockRecoverTask.mockResolvedValue({ snapshot: { taskId: 'task-rep', sessionId: 's', status: history ? 'failed' : 'running', prompt: 'original request', materials, events: history ? [{ type: 'error', message, retryable: false }] : [], createdAt: 1, updatedAt: 2 } });
+  let handler: ((event: unknown) => void) | undefined;
+  mockSubscribeTask.mockImplementation((_id, next) => { handler = next; return () => {}; });
+  render(<MemoryRouter initialEntries={['/t/rep']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+  if (history) await screen.findByTestId('chat-messages');
+  else {
+    await waitFor(() => expect(handler).toBeTypeOf('function'));
+    await act(async () => { handler!({ type: 'error', message, retryable: false }); });
+  }
+}
+
+it.each([false, true])('does not infer repetition from identical rendered error text (history=%s)', async history => {
+  // Make the final rendered message exactly equal to the repetition label.
+  // The previous text comparison would incorrectly expose regeneration here.
+  const spy = vi.spyOn(zh.chatShell, 'taskExecutionFailed').mockImplementation(reason => reason);
+  try {
+    await renderFailure(zh.chatShell.modelTextRepetition, history);
+    expect(await screen.findByText(zh.chatShell.modelTextRepetition)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
+  } finally { spy.mockRestore(); }
+});
+
+it.each([false, true])('clears repetition after a new submit (history=%s)', async history => {
+  await renderFailure('MODEL_TEXT_REPETITION_DETECTED', history);
+  expect(await screen.findByRole('button', { name: '重新生成' })).toBeTruthy();
+  mockCreateTask.mockResolvedValue({ taskId: 'new-task' });
+  fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+  await waitFor(() => expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: '触发提交' })));
+  expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /自动重试|auto.?retry/i })).toBeNull();
+});
+
+it('regenerates the original history prompt with its files', async () => {
+  const files = [{ filePath: '/tmp/context.md', name: 'context.md' }];
+  await renderFailure('MODEL_TEXT_REPETITION_DETECTED', true, files);
+  mockCreateTaskWithFiles.mockResolvedValue({ taskId: 'regenerated-files' });
+  fireEvent.click(await screen.findByRole('button', { name: '重新生成' }));
+  await waitFor(() => expect(mockCreateTaskWithFiles).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'original request', filePaths: files.map(file => file.filePath) })));
+  expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
 });
