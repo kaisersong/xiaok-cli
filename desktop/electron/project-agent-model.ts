@@ -73,7 +73,11 @@ export async function createProjectAgentModel(options: {
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const invocationId = randomUUID();
-        const request = {...input, adapter, messages, systemPrompt, invocationId};
+        // Per-request signal: a failed selected request (e.g. text repetition) cancels its own provider read.
+        const requestAbort = new AbortController();
+        const parentSignal = input.options?.signal;
+        const requestSignal = parentSignal ? AbortSignal.any([parentSignal, requestAbort.signal]) : requestAbort.signal;
+        const request = {...input, adapter, messages, systemPrompt, invocationId, options: {...input.options, signal: requestSignal}};
         const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
@@ -101,6 +105,7 @@ export async function createProjectAgentModel(options: {
           }
         } catch (error) { providerFailed = true; providerError = error; }
         finally {
+          if (providerFailed && !requestSignal.aborted) requestAbort.abort(providerError);
           let observedReturn = false;
           try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
           catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }
