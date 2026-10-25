@@ -1,0 +1,3213 @@
+{
+  "schema": 1,
+  "productBase": "0bbadfa7633b929e4300f0ddef501209b43d095d",
+  "pluginRepository": "kaisersong/kai-xiaok-plugins",
+  "pluginHead": "210998993f6a95ff0f5fcf0a431edca08676a195",
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "fdcd4443a20bc9a30970a087ceca0350f11297c09e51ae951b4fef5cda511635",
+      "size": 663,
+      "mode": "100644"
+    },
+    {
+      "path": ".governance-log/Kevin-MBP.local-1780497846.jsonl",
+      "sha256": "c90fa5699df5b339d476e341c8bc2e55d43e0e23213d411c17a5fefeda2c8c8a",
+      "size": 1922,
+      "mode": "100644"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "c1a88db6ca1937061f216a1405c6a73ed7a7529b89e1e6357dc72cd53099581b",
+      "size": 10788,
+      "mode": "100644"
+    },
+    {
+      "path": "README.md",
+      "sha256": "b1c32d9d1cec1496796d0efff23f5822ceb2b6e0e0bb71ecebc1bfead9166423",
+      "size": 11840,
+      "mode": "100644"
+    },
+    {
+      "path": "README.zh-CN.md",
+      "sha256": "1fbaeb8687d3e6d42014806b21cbe083bcb1645077d4b1819696091b303f6ebc",
+      "size": 10132,
+      "mode": "100644"
+    },
+    {
+      "path": "docs/canvas-plugin-implementation-plan-v2.md",
+      "sha256": "8bf2e35c3f2dae77cdb789de5b8738a4b427a4c278d34211de1c0b492f1d47ba",
+      "size": 34570,
+      "mode": "100644"
+    },
+    {
+      "path": "docs/canvas-plugin-implementation-plan-v3.md",
+      "sha256": "048447a621bd0d25e4e9e2b529d1f9dfa535bab03052de681391a3be216164be",
+      "size": 41201,
+      "mode": "100644"
+    },
+    {
+      "path": "docs/canvas-plugin-implementation-plan-v4.md",
+      "sha256": "4ff1a8eda764ba29a01878748a765bf2f221963dd18dcdbd6faf47ae3732eb9d",
+      "size": 28211,
+      "mode": "100644"
+    },
+    {
+      "path": "docs/canvas-plugin-implementation-plan.md",
+      "sha256": "c60cc9ac6e40530345abaeca8d56bbc4157996cc4f43d055be5511254d50aa74",
+      "size": 27914,
+      "mode": "100644"
+    },
+    {
+      "path": "docs/sync-maintenance.md",
+      "sha256": "fa932801edada6e4a6eb03e24126bbf5e30d5319b0e0daf64ad2f57a353dd12d",
+      "size": 5366,
+      "mode": "100644"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "b04d3446548ba3989d59f03fcb55361476ab00a53ea48a1966df0dbe71946f22",
+      "size": 5775,
+      "mode": "100644"
+    },
+    {
+      "path": "package.json",
+      "sha256": "3e09aa37dd16f98a971cc052f9cde7bbe14855815e899acf2551d028613e87f7",
+      "size": 220,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/cua-computer-use/plugin.json",
+      "sha256": "2084e6227ac3fd1be83e83eb222a973e25715b9a7a3470c954653202ef0cbbf0",
+      "size": 1300,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/cua-computer-use/skills/computer-use/SKILL.md",
+      "sha256": "ca09968674d79ee6f09074329640be31ad34a6d783aca1541f2c298e2ca65fd3",
+      "size": 4717,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/.gitignore",
+      "sha256": "78fdf60be6f18fb23de10d4d8b47f8ee5253af5cfaaf150915b66d4bd7d46aba",
+      "size": 27,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/README.md",
+      "sha256": "7fb01345e02a43c3da67f81dcc748ffd662cf06f3e0a3e9ef970e5de5442f990",
+      "size": 4300,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/evals/canvas-eval.mjs",
+      "sha256": "b3537612be1d99c5af97161004a4c3fa37d3a4772b37677b42d018f56fcac7ed",
+      "size": 7930,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/index.html",
+      "sha256": "623559cbaf5329785c06b1ab80f983ba0d41948896d92633c62f4e206525dc27",
+      "size": 287,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/dist/server.bundle.js",
+      "sha256": "0f080f13cbd536da0ec414589f25d3fd89b85e7ad265e7119d487e20df7f6a18",
+      "size": 856223,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/package-lock.json",
+      "sha256": "9942fa5069188d555df2bb297d2391c2eafdcf8136513152aaba227be0945397",
+      "size": 16308,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/package.json",
+      "sha256": "143acbd46ca69806a588bb622568727f2b51e9ddd130a4f99c3dce161753e06d",
+      "size": 414,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/server.mjs",
+      "sha256": "74af8ea71cb859db619b8662db5956783d704246a35caf335a0f7410c77721ea",
+      "size": 28685,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/package-lock.json",
+      "sha256": "6c9eb89f934940b102564662223d9d06c045790bca0e1dd1da844822eab7d9e5",
+      "size": 168386,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/package.json",
+      "sha256": "b3ba65fa8f28927514967c46d373088e4f9f39326127fa962c6c86a01fd6e978",
+      "size": 426,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/plugin.json",
+      "sha256": "bb94259e1226fa07887f748b97b3fdf25a847a7ce6080cecadf4fea5e60d2a6b",
+      "size": 1233,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/scripts/prebuild.mjs",
+      "sha256": "27c4c6ce9df4a911232246b9cd5c7b65a4b6b6194840088391d65caaa1259ca8",
+      "size": 1409,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/scripts/start-canvas.mjs",
+      "sha256": "cf137c76f1e250e5f2c1d558be503e05ad4f70688c3ed39adebc7b36d890bf55",
+      "size": 6940,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/server/index.mjs",
+      "sha256": "3cd20cb5362a6bf369ad197eeceed8f8804c21298b12e2fb11e3aab532cb0601",
+      "size": 20519,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/skills/canvas-annotate/SKILL.md",
+      "sha256": "e2adaa6ed138161291f90f819c185875a4f8bd85766137436b283f3cf7f1caa4",
+      "size": 1962,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/skills/canvas-edit/SKILL.md",
+      "sha256": "04cfaf0eac81c00a59fe2238fc8623fd5cbfb523d6ecaec8efedf7095f20bdee",
+      "size": 6601,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/skills/canvas-image-gen/SKILL.md",
+      "sha256": "1cda98a6a8123eabdd4c8becbf121c5768398d9b5588f5f53686508ea61a46b7",
+      "size": 2786,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/skills/canvas-insert/SKILL.md",
+      "sha256": "739d739baa9e1748539a78e425ab666bb869b02614d63b242ea2428319e31793",
+      "size": 1311,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/skills/canvas-open/SKILL.md",
+      "sha256": "00d2e65348bb2e53175af1fe2809e5da4064e878ff468d203cc60ecedcd635d5",
+      "size": 4763,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/skills/canvas-open/launcher.html",
+      "sha256": "8c7080bdf689ab297a13e4ca8ba6c17f7eaf23e11c96ad912e873d905b27c202",
+      "size": 1521,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/src/App.tsx",
+      "sha256": "66d813726a7ea3384ce704ccd219805ac85050bb833047fb5e7da80c2c37ffca",
+      "size": 30324,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/src/main.tsx",
+      "sha256": "afda97f0e153231ee6445a40502056327741ccf31096a368928f49ac509d4a3a",
+      "size": 229,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/src/styles.css",
+      "sha256": "243576a6c85b98a301e14824688955174ae095dbf03dec6fefa6ecf2e9d4e2bf",
+      "size": 6157,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/tests/mcp.test.mjs",
+      "sha256": "aa5666f2fecab0d38464cfc7bcd63d2399ec161ee0339df8db080b4cb942ee18",
+      "size": 4300,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/tsconfig.json",
+      "sha256": "bc5a8f82b38480cb716bc6b1b09e5e95b85a326df43d846bab32554938bdc345",
+      "size": 360,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-infinity-canvas/vite.config.ts",
+      "sha256": "eaaa3d9ab09f2f54e30c4fc29364247d001320951bdeed0e6516c6db2ef8e3fc",
+      "size": 391,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-meeting-assistant/mcp-servers/meeting-transcriber/requirements.txt",
+      "sha256": "652b8181365754246af416da9cf25645d41e92f3ca6057050388e790e6d2b596",
+      "size": 62,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-meeting-assistant/mcp-servers/meeting-transcriber/server.py",
+      "sha256": "da8050d8712ca2bb7cfa5e7e47dd12fecc26103b319b765123abc181e38254d1",
+      "size": 6540,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-meeting-assistant/plugin.json",
+      "sha256": "38732b5f4e63f3fe3899d504ba2ddfc9b6064cd9a09e1492f6943edc3e5e0dfb",
+      "size": 691,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-meeting-assistant/skills/meeting-summarizer/SKILL.md",
+      "sha256": "f3c0dfb39f98b69b12586b17be7b6be70b158a757daf0690ef81e2c76511bea1",
+      "size": 805,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-meeting-assistant/tests/test_meeting_transcriber.py",
+      "sha256": "89cad7e994354701a247f3e5197013f21b94fed35f3acee9f0b05706d3ea3d22",
+      "size": 5533,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/evals/cases/competitor-analysis.report.md",
+      "sha256": "4696c2ad201ae083a6cff1f3be4308fc97821b185e2c49f996cde5b993a6bdd0",
+      "size": 1710,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/evals/cases/sales-dashboard.report.md",
+      "sha256": "2aa2c472651abef9057d850e86407e8c7261f8c809526e780c685412fe98e30b",
+      "size": 1446,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/evals/cases/tech-architecture.report.md",
+      "sha256": "d736202ffcc7be1bd1516973f87025b14f056b154d66dde413b6c14cab05f26e",
+      "size": 2479,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/evals/rubric.json",
+      "sha256": "835a538b0476882f775a1f649c755ac02615bab7e1a9b7bdbed73f8012fbe051",
+      "size": 1009,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/evals/run-evals.ts",
+      "sha256": "87a6389b06f323b599999116fd3a75769f1ecc13962c31d3f047a4c4ea809283",
+      "size": 4269,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/cli.d.ts",
+      "sha256": "43e818adf60173644896298637f47b01d5819b17eda46eaa32d0c7d64724d012",
+      "size": 31,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/cli.js",
+      "sha256": "82557a1cacf5fa2a3545ba9c5ffde72d69b76328661616a89462e98a23a0fb05",
+      "size": 2742,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/cli.js.map",
+      "sha256": "332ecfda5aa99fc467c9325ae9a67be3be0dd4a5cffa0cbc2729ad175e3afe91",
+      "size": 2953,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/frontmatter.d.ts",
+      "sha256": "3f58c8061338deee9ffb907035a6b117aa0ce10d4492b9d320786b15c39ff873",
+      "size": 885,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/frontmatter.js",
+      "sha256": "c6c01f654ead9da31d18f33dade5dce7e2ec827a8a13808b36a0ca71fef336cd",
+      "size": 5816,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/frontmatter.js.map",
+      "sha256": "25f2cb57df9f7610b5c47c723a238c1ecf67177403cd1368a72f5230568f39ad",
+      "size": 6602,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/ir-parser.d.ts",
+      "sha256": "fbf55a26e228eae79666ea8efec247fa82c970c200af3b98af7f53d169c9931d",
+      "size": 1110,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/ir-parser.js",
+      "sha256": "54ef76a2699fad99fe3517893bc2687957ca9c0b4267412a152771ca8017cdc9",
+      "size": 4852,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/ir-parser.js.map",
+      "sha256": "f0bf8043203ca189ae059a50f57e45787f95a3ed26d46366fc3096db4bdbc975",
+      "size": 4752,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/callout.d.ts",
+      "sha256": "b2c42dc094b9cad7150c647d76d28cc14acd325cc71d1495fffc2ddd4dad204f",
+      "size": 243,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/callout.js",
+      "sha256": "4f4592d2ccaf7ca1857ccb9ef9e0745821d0ce67df371fc686769eab71a0b43e",
+      "size": 705,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/callout.js.map",
+      "sha256": "c83dec8ed7d42d5042907065c2efd1048cdd57c3400dcc69dbd2306fa9318991",
+      "size": 706,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/chart.d.ts",
+      "sha256": "6426104ae71161c37d0afe9826eefbbdd82b7dcfed0addf188fd7fd64d0bfdef",
+      "size": 327,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/chart.js",
+      "sha256": "72655681738e13d794f0569e4633ec2ca2a80cb9a9cb5734489be7a22af4cb41",
+      "size": 8499,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/chart.js.map",
+      "sha256": "fb8fa040ee07bb7a906055ae4f61f19495c04d8c0de656e3fb5b6ec80d8e081c",
+      "size": 8715,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/code.d.ts",
+      "sha256": "39fc51cf5ff11d4bec70de7c5f2db937f414d5127f629a1de7a9937f66da0d52",
+      "size": 311,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/code.js",
+      "sha256": "14cde23e53e7ccf9bc3f5ed5f7c39681adb22b8428f6d4e1385f6b1735a4c9ba",
+      "size": 787,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/code.js.map",
+      "sha256": "387671f44a3cd5b6c1f108af05fcab690d7cf5aa7aa0aee42a91b0e5454410f1",
+      "size": 762,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/diagram.d.ts",
+      "sha256": "489fdd99904a8e33abead908f429f2225f26bbb5c5ac859c64c5c3fc5ff2bb55",
+      "size": 297,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/diagram.js",
+      "sha256": "8dfc67077ca5b3e9280a575a11e0bc5a17d70122b90a18f7450a1e728249f8e6",
+      "size": 15174,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/diagram.js.map",
+      "sha256": "e675397cf7e72e7d1a6d68a5e438fb83611577bd1863cf0fb39d8afd82bdf976",
+      "size": 14695,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/image.d.ts",
+      "sha256": "49aa140361777d45e15a3df2f27d9e4aef84fa28af9a2fe259445ed99569705f",
+      "size": 249,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/image.js",
+      "sha256": "95588da51264f223f12ae87660deddf67b41f854bf49977a8908f079fa20aa16",
+      "size": 892,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/image.js.map",
+      "sha256": "dfffca485a222e4d21895023fbba944c5786b2ec0af08ff10d6a633bb3203d43",
+      "size": 949,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/kpi.d.ts",
+      "sha256": "1fcfe4d63cd2ddb34e4f65ab8dfff02b9e8f49558595b1c3460342c1f9b3c143",
+      "size": 337,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/kpi.js",
+      "sha256": "5593fa5609bf1a0e95785f393efaba51a5abee1e6a42090769c1aa637d768931",
+      "size": 2551,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/kpi.js.map",
+      "sha256": "0e59ee56c54ca99adca8489b687393b83a662f59b32778534a7d6133d9aae9d3",
+      "size": 2719,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/list.d.ts",
+      "sha256": "e98f203fd1057a4b45494455bfc450f777701ae4a3510457ec49450b687ad337",
+      "size": 237,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/list.js",
+      "sha256": "8e3911d51f368adc0259a4e88c88df15f566bb4e94d2a9fe5775af4663218c13",
+      "size": 754,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/list.js.map",
+      "sha256": "4c89a472e3da5224ffcf79055d21a75884f04a91c729f6d873e9c868810786b3",
+      "size": 946,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/table.d.ts",
+      "sha256": "83d56834f274087f4ff0ac23e80b6adf3eb325f5c2a3f6e2e2282f183a1bb22a",
+      "size": 268,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/table.js",
+      "sha256": "f0c9b9ea112cd356a758885bb3e21c99c58d1653dbcbefa71305b501bc1fbbbe",
+      "size": 1172,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/table.js.map",
+      "sha256": "2d2398301fad9924b5667e8498b01a75bb629c8106dc7a3fdbe855b1cfa2f3f3",
+      "size": 1345,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/timeline.d.ts",
+      "sha256": "95788a33728ba5f230c006bb87c8740dfe76387f7a9850715af9e8eb10c177d2",
+      "size": 281,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/timeline.js",
+      "sha256": "09ae81a52d154f016fc77da87c4e0178e4dadbd22819f4e11c42e2085f929b93",
+      "size": 1568,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/timeline.js.map",
+      "sha256": "43a1b31dcc7ce447b46d66583d0edd75a9b53f49b3be393ef944f2662eb54970",
+      "size": 1545,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/escape.d.ts",
+      "sha256": "e7c0866b8e1c7c3d4978c0efd3305a2b2e5cf020a5bc1ba1cc8381d0ddafad57",
+      "size": 912,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/escape.js",
+      "sha256": "8f2dbe0b2f1bdaca1cd3f8c5fb943000e6843cefd1d3754c260cf2fd87cdbef7",
+      "size": 1914,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/escape.js.map",
+      "sha256": "bd181ddded347c3a2282fdd14e696637b2f0b9c48556d7ac8ee4caa8e27dbbf3",
+      "size": 1250,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/html-builder.d.ts",
+      "sha256": "6c9f3e68ad075629c7afc0006f97d52b69e7672e31cb9563188390a1ed8b28da",
+      "size": 561,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/html-builder.js",
+      "sha256": "a22bddceb963dc88c221d40791a9fc7bebb5f1a42e542d85df6b0a14e84e62b9",
+      "size": 22174,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/html-builder.js.map",
+      "sha256": "e42159b207d870c549f04cc353f700e3a017258e3ec0358542994a1e5158b6f1",
+      "size": 20200,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/shell.d.ts",
+      "sha256": "13fda5d4383765dad945638c38922b0dca996dd84aafaddf643c9cfd903c6235",
+      "size": 753,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/shell.js",
+      "sha256": "c52a31820338b0207bb1ceb05ff64b02386cf71d87c84eca0c6201c8ba0dd8c7",
+      "size": 21564,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/shell.js.map",
+      "sha256": "c1ea546992269b1ea71dec0120fdc0ebe5fd280f99f8ee2c24c2b02afb7ee0ba",
+      "size": 4942,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/types.d.ts",
+      "sha256": "ca1d384f40f74de6c6e4f62388b8f3befce66e85ca6665eb40a128bc60646de9",
+      "size": 251,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/types.js",
+      "sha256": "01ae2a5b120382f9a648ced7ee8507493a134f216d100fc61600c6c9738235d2",
+      "size": 44,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/types.js.map",
+      "sha256": "35688ff23501996ad178923406011e279a1f0cf6d598896d7d861de1b34ea8bf",
+      "size": 114,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/report-tasks.d.ts",
+      "sha256": "73f1111963940507e028757786a61b5449dee81385b9f06ea591e9502d7683e8",
+      "size": 1142,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/report-tasks.js",
+      "sha256": "f51679ec328c75af316a58fa5a33bd3ab9d6b1f793672fb62f92e05f20692505",
+      "size": 11394,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/report-tasks.js.map",
+      "sha256": "ea246e45f7ca1a90509c68cbe84508c97386ed0c17d2f4509d49dbd04bdf303b",
+      "size": 10902,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js",
+      "sha256": "c593e900e3ae7e3c9b1b8b36804922d5712eb33ea22ad7fe77eb613c33e49b26",
+      "size": 1636351,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.d.ts",
+      "sha256": "2bd9c711c74d45074ed0bac9002c955a1b3e3db74b724fd3643136b4439d5e8e",
+      "size": 108,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.js",
+      "sha256": "2b0068e89f65a9f6e8d5ecccb330b6e880b4a4ec3b21711f9558dedae52c6c86",
+      "size": 3356,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.js.map",
+      "sha256": "96b944f4480dbfe7ba4ff3eb533f6579a95596875ce1b00a9bc7223ea9082c7b",
+      "size": 3437,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/corporate-blue.css",
+      "sha256": "99da2926d1dd5bc9955b2409a1ed0cfc846609484c1c75a350f8ddef7930ba9b",
+      "size": 1614,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/dark-board.css",
+      "sha256": "eabd88dfb122f6a68fe527d5b5ef77440f56fd08a898dbd1bb4387c9afa69393",
+      "size": 2808,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/dark-tech.css",
+      "sha256": "220bc131554e2dcfac7607aa1318792cd85419c02309770bb43392871e34bb59",
+      "size": 1605,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/data-story.css",
+      "sha256": "de890467f29187718bf25c24bf1854d752df1f34d96408ce0f010e2875ce9447",
+      "size": 1767,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/fangsong.css",
+      "sha256": "1c95d20eb89ee72fe15f0ea431a377682a11b7ffd3061bcb27f45dac78e02f45",
+      "size": 7606,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/minimal.css",
+      "sha256": "7085a7e10a4180acba22b4ac5a15b31696d578e0c4385ecee12edcec38925a9e",
+      "size": 1144,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/newspaper.css",
+      "sha256": "86d25f316924dcf791d6e43f04aa000ebb672e14f3011ddba967bee36c50db1a",
+      "size": 2096,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/regular-lumen.css",
+      "sha256": "c6fb280393c6aae8a8df8380dd53c53570e098d6eaf95f848d1e1fb214c48120",
+      "size": 7841,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/shared.css",
+      "sha256": "9f922cbbf1c50fff3cf866e33b2465b1dcad1ccf9eba775735058331baee9734",
+      "size": 18219,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/loader.d.ts",
+      "sha256": "df935c5f7d895b1a4f79ff216d476e9b43e02f24274342150162cbd97148373c",
+      "size": 608,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/loader.js",
+      "sha256": "1348ef56fe3a606b9c129266ad0ebf20df518f98702bf75d8458069062d6fb44",
+      "size": 2341,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/loader.js.map",
+      "sha256": "43822810c83251dc62307afd01afa4418950a920c30cc0c28d6ede3c5c1f0755",
+      "size": 2313,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/list-themes.d.ts",
+      "sha256": "2a4eaad358778c5fc2a89322fa7a9a6c8e3d5521205873eced81dfb13724200b",
+      "size": 249,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/list-themes.js",
+      "sha256": "a073f22cd1f04ff02bc4148f2c6b283182d6e107c096812a3e383790b9298040",
+      "size": 2604,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/list-themes.js.map",
+      "sha256": "6dd185a216ad56e97a3b247beb6c86bef04cf68c626fc362f49186eea5934c8c",
+      "size": 1416,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/preview-section.d.ts",
+      "sha256": "30754de2a6c387151df97d4a81e7e1585e7b89f89d168cc78151e2b946a5b45e",
+      "size": 302,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/preview-section.js",
+      "sha256": "8e076babbcd04585e6b49eb7982ec899ecdb0c060df3273121522155dbd2d7d1",
+      "size": 2307,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/preview-section.js.map",
+      "sha256": "4fbb07a3e85c017fdbc125245cd1e3218526098a93380b55fad0db1c2a5a6f9f",
+      "size": 2282,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/render-report.d.ts",
+      "sha256": "e39e30767f9b73b1d4d8129b90afc89d9f6bc6c1b98f9945fe185435fb782905",
+      "size": 524,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/render-report.js",
+      "sha256": "2be22f0511ed39267c36b75a6b6507f7f65490605c1f5900a201a6c134e0293e",
+      "size": 852,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/render-report.js.map",
+      "sha256": "8c28852826c3c9fb83612482af1c29a0ff87c5393f1d77d051821935c0d4ce90",
+      "size": 823,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/validate-ir.d.ts",
+      "sha256": "a0085d50a3277b8c804c0aa2efcff2f19b09020539001ba50ca54e32357613c2",
+      "size": 580,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/validate-ir.js",
+      "sha256": "74c910752e740bccaee7d7fd033c8cb06dce18e7181705df217a90e58f210d8f",
+      "size": 1354,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/validate-ir.js.map",
+      "sha256": "866852471843d630ae4f54d1306ae5ab165c49866e929996b58e5fa0a96b46fb",
+      "size": 1298,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/ir-validator.d.ts",
+      "sha256": "f5a2f7510817886df2a23334f287be0f2ecabd2f03385f1cad651eeda4742d66",
+      "size": 907,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/ir-validator.js",
+      "sha256": "18126d8362afa20a23c8768baf20cc7251db29b560a67840eba8fbe6120d85ca",
+      "size": 11181,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/ir-validator.js.map",
+      "sha256": "228c252c2263cbeefb1f65010cbf15fa30d14f2b0ab8349d00558276b76606ff",
+      "size": 9877,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/quality-checks.d.ts",
+      "sha256": "5ee8bc9894d5dd65fee7736068bd973d111e440bdc47f4bc35ed82eab23c20cd",
+      "size": 410,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/quality-checks.js",
+      "sha256": "e26aef64a716913ccbe00c397539e05648f2bd2c5ef23fe8e6ab3ed5d70ed51b",
+      "size": 5371,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/quality-checks.js.map",
+      "sha256": "418ca8dff6cac39ea23d0be73eccd9a8a4c3dd21355820576c19484fcfcd09ca",
+      "size": 3859,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/package-lock.json",
+      "sha256": "2971e4296fa32144ce21e51952f97ce3b04e2c5e18b4c495b9e4afa85c11f239",
+      "size": 87163,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/package.json",
+      "sha256": "36b2d09f34a1f60a7b618ed6b31c702adbeee91a93d2c438877fa05c458dc314",
+      "size": 927,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/cli.ts",
+      "sha256": "52092c945a12ca0f70c178d219eeeacecd28b9fe53db4a308725fdba2338e756",
+      "size": 2588,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/parser/frontmatter.ts",
+      "sha256": "808eaba79b22349417ad2b4caa1507361b3a4e3c5133b8a70f143761f623aeb9",
+      "size": 6401,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/parser/ir-parser.ts",
+      "sha256": "0eadb31d639fb24522570edd0ee3fed737d99629b2a65704d1c635917ba60981",
+      "size": 5159,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/animated/common.ts",
+      "sha256": "ae9155e1a5b80b6f130be403c8a7218786551697fccaaed9b5776796d7556c18",
+      "size": 13359,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/animated/iridescence.ts",
+      "sha256": "8f98de7617f6aa4ebf9aabdb7e3efb314e4f1e0fe05c95ccd4d19c8ff4e48b99",
+      "size": 19912,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/animated/scrollytelling.ts",
+      "sha256": "7f2e047c5d301f0f7dfebe6e3737871fd71fcacda029677c1c2c3f054d65cc32",
+      "size": 24670,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/callout.ts",
+      "sha256": "e3866f9b255e2dccb6c6780560c979a8af1d5713edf2d96b896bb4b9684b21f7",
+      "size": 809,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/chart.ts",
+      "sha256": "7d178e15578ee3da24be6e243daf9bafc936f172a9db053b470c74785b56759a",
+      "size": 8269,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/code.ts",
+      "sha256": "6b450d9278917cc23a44fb4fc9b30e16af292b1615fd4bfeedb61974ae31c6d3",
+      "size": 885,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/diagram.ts",
+      "sha256": "efc003e8fb68b331638945d553bcae8e264e9d2487dd5713b64adb1bfa284b10",
+      "size": 14054,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/image.ts",
+      "sha256": "b0f7047bda7026839918466057e925f7522245793554a9313179e9b43969cb4d",
+      "size": 978,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/kpi.ts",
+      "sha256": "ba4bc2f3edfeddf761d01609d1a8d930f13a41dfef1a2a2ef0abf9a8c00e71ae",
+      "size": 2680,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/list.ts",
+      "sha256": "4b7a09842ecc6bc50d9b6e5555422b3e95c4002656daadd4bf019ead9d6c4fbc",
+      "size": 836,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/table.ts",
+      "sha256": "71db6bd6e460c47b940a924dc62e008ddbecc7a0cc5d16dc5376ec86f3d248a7",
+      "size": 1256,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/components/timeline.ts",
+      "sha256": "c42ef7792c2b8682f0f926dc4cca9bf437697bbec86a60f9def1a5993d72c06f",
+      "size": 1683,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/cover.ts",
+      "sha256": "ad9e313c7a9b413791e76b8df1efe5a25ee2c2407a16b35b00155e97154367f9",
+      "size": 9754,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/escape.ts",
+      "sha256": "e166e177c77a2603d13a579198872bebd08ddeee8aeef6a27331a9d22a786358",
+      "size": 1920,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/html-builder.ts",
+      "sha256": "c1f55ae269d52ee0e55a8f675c50da50063e44dfdd0d9e7e5b84841bd5d24c73",
+      "size": 21440,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/jsonld.ts",
+      "sha256": "3c3e1e14a95b4ea47086923d355d2c3405deabae08ddb04f3bc0b84115487254",
+      "size": 2664,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/shell.ts",
+      "sha256": "2c52563fb220801df2ac69fc63c8f039137a8bc1cd49fdcaf4af009380c83839",
+      "size": 22189,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/renderer/types.ts",
+      "sha256": "ae09def232174e083458ab2295a3490e582b73991b128eaf2a7b65a0cfe32ab6",
+      "size": 245,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/report-tasks.ts",
+      "sha256": "fba3cee136803b40a6ccb28cd9258d125db8dcc82f62ab73ec3c55657984f01f",
+      "size": 10596,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/server.ts",
+      "sha256": "a293151a900d51ac40ee557322db9c6bad9344be91380f8fd808c423e3292d74",
+      "size": 3378,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/corporate-blue.css",
+      "sha256": "99da2926d1dd5bc9955b2409a1ed0cfc846609484c1c75a350f8ddef7930ba9b",
+      "size": 1614,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/dark-board.css",
+      "sha256": "eabd88dfb122f6a68fe527d5b5ef77440f56fd08a898dbd1bb4387c9afa69393",
+      "size": 2808,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/dark-tech.css",
+      "sha256": "220bc131554e2dcfac7607aa1318792cd85419c02309770bb43392871e34bb59",
+      "size": 1605,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/data-story.css",
+      "sha256": "de890467f29187718bf25c24bf1854d752df1f34d96408ce0f010e2875ce9447",
+      "size": 1767,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/fangsong.css",
+      "sha256": "1c95d20eb89ee72fe15f0ea431a377682a11b7ffd3061bcb27f45dac78e02f45",
+      "size": 7606,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/forest-editorial.css",
+      "sha256": "34abacc2577533aef3efa47293978b3eb4b5ef1446b97cdf4852a1a92f0b7dda",
+      "size": 6198,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/minimal.css",
+      "sha256": "7085a7e10a4180acba22b4ac5a15b31696d578e0c4385ecee12edcec38925a9e",
+      "size": 1144,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/newspaper.css",
+      "sha256": "86d25f316924dcf791d6e43f04aa000ebb672e14f3011ddba967bee36c50db1a",
+      "size": 2096,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/regular-lumen.css",
+      "sha256": "c6fb280393c6aae8a8df8380dd53c53570e098d6eaf95f848d1e1fb214c48120",
+      "size": 7841,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/css/shared.css",
+      "sha256": "9f922cbbf1c50fff3cf866e33b2465b1dcad1ccf9eba775735058331baee9734",
+      "size": 18219,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/themes/loader.ts",
+      "sha256": "e3b69b812d55fc37aa93ba4017bf94a51c002a4b43b8635eee94276e68dd2b0b",
+      "size": 2421,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/tools/list-themes.ts",
+      "sha256": "7d77613f8b37c2af61ab1ac3dbeab1f5b27f724a36786d6a9baaefbebbddf2d5",
+      "size": 2343,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/tools/preview-section.ts",
+      "sha256": "1355d0fc664f61d0e3fe0eac6823d2867cfb2f826766d35a9cd9e4caf48cd7bf",
+      "size": 2550,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/tools/render-report.ts",
+      "sha256": "d77789ca0efc36642d3cc3598417c452fa1a098affb943877932b47799c58316",
+      "size": 871,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/tools/validate-ir.ts",
+      "sha256": "4cbf0726972ce4fcccbd06ed29509fd9cfc458d91d27997628d8139f9b4893aa",
+      "size": 1679,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/validation/ir-validator.ts",
+      "sha256": "7a976878fd869b8a27eb8c03110626dc46cda909ba29a4b86eeaf6dbd3ef0386",
+      "size": 11547,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/validation/quality-checks.ts",
+      "sha256": "adb05c0f5407d1fb062c29b8822ab59563b1cef17a00e526ee7cf98ab1f5790c",
+      "size": 5277,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/animated.test.ts",
+      "sha256": "ea9c8b856651caeb75f6328f4e339205fdebd708cf198be6f0fcd7f0c69da32b",
+      "size": 8681,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/cover.test.ts",
+      "sha256": "858818f29cbb4a331535f53e55a510a6e2d0898b83f48267c8792e4adb9a742f",
+      "size": 7833,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/fixtures/invalid-blocks.report.md",
+      "sha256": "7e82dd20f4cd4d45e584334021a0d7b051440a76cff6b0a57be1f32ed3e9abc8",
+      "size": 294,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/fixtures/valid-mixed.report.md",
+      "sha256": "688f5e6628a0e3439534c0c3a72647380fa58589604f3e9124b39df2dad254c0",
+      "size": 1229,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/jsonld.test.ts",
+      "sha256": "3061bebce123fbd3d06c66355dfba79ed95993f989cabfca30f8c41046f42611",
+      "size": 9411,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/output-theme-compat.html",
+      "sha256": "dd57166820377ae19ec4f7b26262fa90f6238f5af682c67e5c5fc5c11a78e000",
+      "size": 52731,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/parser.test.ts",
+      "sha256": "67336d9128d2bfc8ac0b124496ab816d15acb0ff949370c8614b5e97e8f43b95",
+      "size": 5391,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/renderer.test.ts",
+      "sha256": "894e85871fd14f9583d9df509866604b300bfac8d3da3577ffd63f79c8f2fa42",
+      "size": 8150,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/report-tasks.test.ts",
+      "sha256": "b3aa796c3ce878c33c344b11040b000be2c918f034b9fcf726bb4cfd2b21a86b",
+      "size": 5319,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/shell.test.ts",
+      "sha256": "1550a548dd6187662a8fa5dd0b6497f06aa869228cb93063da11e08ed62f8c47",
+      "size": 12299,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/source-sync.test.ts",
+      "sha256": "d352aff090af087a7a9e59fed86ad7b20b53fbe0ea46a9ea19cdcd03782bbbb3",
+      "size": 1986,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/theme-compat.test.ts",
+      "sha256": "81e9c1a52febdeb998585129e36474738dc542e037370d242654918427a25a5b",
+      "size": 9439,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tests/validator.test.ts",
+      "sha256": "110905c3c58490142352125865c113661dfd91d3360b2e8854c3283416b8897b",
+      "size": 5378,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/tsconfig.json",
+      "sha256": "4ae1fb28ec292c07543b07944bac4899129a5bb2898ef32ee2a653eeb2d61387",
+      "size": 376,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/mcp-servers/report-renderer/vitest.config.ts",
+      "sha256": "ca50a0eb43780d733ea8c31c4f6a9b966fb8e8dce52bf768eea80d69a7a5c89b",
+      "size": 133,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/plugin.json",
+      "sha256": "a6f6830828ddc8f1536b3246ff195fde9ddfc467641087d64b80635f2d0db24f",
+      "size": 1175,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/INDEX.md",
+      "sha256": "be48445977ddb5e4ba3d5082f222d7624e7ce5a3a3c04db0aa36ed2c32edd74b",
+      "size": 4208,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/animated-shell/iridescence.md",
+      "sha256": "ad66ed77a0e83d86b514d77a439432e99ac1f6191e3ce158cf5d6ccf85cabb1e",
+      "size": 4385,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/animated-shell/overview.md",
+      "sha256": "94ef3acb9e12fababfe17a704d67ec3d1002ced6da9baade230df9f0ffa13570",
+      "size": 5252,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/animated-shell/scrollytelling.md",
+      "sha256": "b666cc2cec0d8a4bff3db5605047aeca2748f2950a4ad28146cb90f17f16278b",
+      "size": 9334,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/anti-patterns.md",
+      "sha256": "333c704d95525fc37d26bab79d328bfd125723d76da2ac83658ed5271bc76e97",
+      "size": 4303,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/design-quality.md",
+      "sha256": "b44e0e236e142fbdc17fb78026d38a9f278c4102a5b26f0006b094254e99b797",
+      "size": 15801,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/diagram-decision-rules.md",
+      "sha256": "d89d14e9e2d1645b69ea8af8c3e35eb931dd775d75dc7254cfb410f4aad11c8a",
+      "size": 1317,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/generate-flow.md",
+      "sha256": "be8b8b90874f6084140043465c8e5487f2f4bb011404aa192f970fe773b5da2a",
+      "size": 2419,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell-template.md",
+      "sha256": "a51b69bd664ce7c07a97824b632fed796c0d0a1d46d2873eac44fd797f4e19c0",
+      "size": 5060,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/core-structure.md",
+      "sha256": "dd6c489e31888eae06467fbf90ee753c42eec79a822ffc07d14dcf576a23e82d",
+      "size": 7455,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/cover.md",
+      "sha256": "e9de2c411cd2767ed666f03ff2ef18f98fd7b993e02d5f960cd3e1159d659f9a",
+      "size": 9099,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/export.md",
+      "sha256": "6a0201052c86c5ad06130bd32156f6f77127ec64bc3934392fb3b2c76cbd9e81",
+      "size": 9769,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/print-responsive.md",
+      "sha256": "3705f3e30c085776838fe29f72d72621056c07bdc542e504d7e1a20b27884dc0",
+      "size": 1509,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/shared-component-css.md",
+      "sha256": "d0eb6dd8cc6f0d0b1397af8f862283f8621ea08e78e4eb5201085cd60e8e71e5",
+      "size": 12342,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/summary-card.md",
+      "sha256": "91caf3e5049e33ad64a4e86f72f813fe2e26e2729c10ac1fc98620c7aaeb2782",
+      "size": 10413,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/html-shell/toc-edit-summary.md",
+      "sha256": "d90928d1898a2425721cf7ef91fe915d249d946af5365f9f4c3e1aae156fe829",
+      "size": 11506,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/impeccable-anti-patterns.md",
+      "sha256": "1ec59a0ee5b58d73570105cf8f92be997c1ef1009cc8713ec9d095cd27defdf5",
+      "size": 5625,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/ir-contract.md",
+      "sha256": "aff0cff7bffc055da738d07ce2ded8b86b32f16b6bb696df0deef09928df4ca9",
+      "size": 3022,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/output-metadata.md",
+      "sha256": "544ec9489935c6c211af6430a12e2d9354815befcaaf7076af664f6f951b1231",
+      "size": 4774,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/plan-flow.md",
+      "sha256": "b755699c2bdb6526a1dbc4f4848b6ec611e549710ebcf284ed3e13a857014460",
+      "size": 1544,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/regular-report-content-rules.md",
+      "sha256": "a6a16404d95397be30ff5c7423925f0a95f9ee02f81c7ed2c41d8221533278c9",
+      "size": 1726,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering-rules.md",
+      "sha256": "91a4e08089b376e9f07c36731e9c56f0b4ddbe649418602de131fe6a740098d0",
+      "size": 3597,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering/chart.md",
+      "sha256": "329dffeadb08c162f7d296923cd4dfd32070933be723777aeba77ecac0c97052",
+      "size": 8595,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering/kpi.md",
+      "sha256": "b607ee6cce3412cabd65ff5b0d6c1e27cadc688fa119ce6a70588436b61ea2c1",
+      "size": 8359,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering/media-code-callout.md",
+      "sha256": "c5fbd82dc5f5c034656b119b7cc83330fe6ec9f5a44b9d75bab2c17a65c20878",
+      "size": 2088,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering/plain-markdown.md",
+      "sha256": "44528c39b241630ea0514e8c934b821cb60fdf8b03e67a411ee3de7c00642816",
+      "size": 1449,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering/table-list.md",
+      "sha256": "383b627129a09f141398f8b530e08f2e3b981eb90b39be7bc63f03767499ba77",
+      "size": 1304,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/rendering/timeline-diagram.md",
+      "sha256": "794834e8078403c47603190c6a39cc4aab7201480ab6253a82d9ed871ba5f2ff",
+      "size": 3486,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/review-checklist.md",
+      "sha256": "2ea062bde00448a7435b6351f8a5e58440d5e9290dca3fcb410d65fda16c5f62",
+      "size": 10967,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/review-report-template.md",
+      "sha256": "d689d98d38d8045879f9bbc98e84e5c5327186c589770b6bcc8963e298231cc1",
+      "size": 2069,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/spec-loading-matrix.md",
+      "sha256": "7b04321bf09d58a7de079b1e42fa0ab76409e7a804aa6c09ed639ed42c781024",
+      "size": 1939,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/theme-css.md",
+      "sha256": "0b6bb49af183c6bff5added6be1095e03410ec1b7d65782a7c0a735bbc90553a",
+      "size": 3670,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/theme-routing.md",
+      "sha256": "2cf727edd0728456b18f9bd1cf48aef831d42522f91076bc6ec703b255d3519f",
+      "size": 2091,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/references/toc-and-template.md",
+      "sha256": "6cc2c34d4888caf0f381412d0b6b51bee714156768a97c44f8b3b27d1c1cd9ec",
+      "size": 1972,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/skills/report-planner/SKILL.md",
+      "sha256": "9cdf0a3a6229c617028d357ded2ff408a785d399be42ff50b1bc095429ef9f24",
+      "size": 14671,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/themes/README.md",
+      "sha256": "aa1cbce143bdcf1fd9405bee3ba591bae58666d7c77e193cdd0b76a1c38edf80",
+      "size": 4608,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/themes/README.zh-CN.md",
+      "sha256": "8ce3dc05d824042eef987a9854916f12e506aa5f511b839f333241d40465ea84",
+      "size": 4499,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/themes/_example-warm-editorial/reference.md",
+      "sha256": "106a6c156461469119a3aa8a465c9490e2d9a1787399a44fde5cbc0ad8bd4c76",
+      "size": 1780,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/themes/_example-warm-editorial/theme.css",
+      "sha256": "67dc661d19f48803bafcec2888e3f05956833abb643915e158ec20bc63822c22",
+      "size": 923,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-report-creator/vendor-manifest.json",
+      "sha256": "eb4e712234cb9bdec084d42bc4f2caf055a2e024d9b0529404237c7123259f7d",
+      "size": 4419,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/SKILL.md",
+      "sha256": "62fedac8c59abfb80c75378b4cf179710c1860fcccec3012ee1d5ad31f496efa",
+      "size": 29,
+      "mode": "120000"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/annotated_types-0.8.0-py3-none-any.whl",
+      "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+      "size": 13427,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/anyio-4.14.2-py3-none-any.whl",
+      "sha256": "9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494",
+      "size": 125813,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/attrs-26.1.0-py3-none-any.whl",
+      "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+      "size": 67548,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/beautifulsoup4-4.15.0-py3-none-any.whl",
+      "sha256": "d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9",
+      "size": 109924,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/cffi-2.1.0-cp311-cp311-macosx_11_0_arm64.whl",
+      "sha256": "f5bce581e6b8c235e566a14768a943b172ada3ed73537bb0c0be1edee312d4e7",
+      "size": 184186,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/cffi-2.1.0-cp314-cp314-win_amd64.whl",
+      "sha256": "1b96bfe2c4bd825681b7d311ad6d9b7280a091f43e8f63da5729638083cd3bfb",
+      "size": 187937,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/click-8.4.2-py3-none-any.whl",
+      "sha256": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+      "size": 119243,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/colorama-0.4.6-py2.py3-none-any.whl",
+      "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+      "size": 25335,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/cryptography-49.0.0-cp311-abi3-macosx_11_0_arm64.whl",
+      "sha256": "966fe0e9c67490071f14c0d2b1cb2dfb3023c5ce39457343931415f08382f2db",
+      "size": 4032100,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/cryptography-49.0.0-cp311-abi3-win_amd64.whl",
+      "sha256": "e5dfc1e64de5677cec922ffa8da89c546d0415bf6efdf081842e5d44c84e1f0e",
+      "size": 3810026,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/h11-0.16.0-py3-none-any.whl",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "size": 37515,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/httpcore2-2.13.1-py3-none-any.whl",
+      "sha256": "e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a",
+      "size": 83423,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/httpx2-2.13.1-py3-none-any.whl",
+      "sha256": "6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4",
+      "size": 95597,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/idna-3.18-py3-none-any.whl",
+      "sha256": "7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2",
+      "size": 65455,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/jsonschema-4.26.0-py3-none-any.whl",
+      "sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
+      "size": 90630,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/jsonschema_specifications-2025.9.1-py3-none-any.whl",
+      "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+      "size": 18437,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/mcp-2.3.0-py3-none-any.whl",
+      "sha256": "dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377",
+      "size": 368664,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/mcp_types-2.3.0-py3-none-any.whl",
+      "sha256": "968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d",
+      "size": 69108,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/opentelemetry_api-1.44.0-py3-none-any.whl",
+      "sha256": "94b98c893a91b88657eaac1e3ba89618cdb85be6918196705354f34728b2cdef",
+      "size": 60018,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/pycparser-3.0-py3-none-any.whl",
+      "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+      "size": 48172,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/pydantic-2.13.4-py3-none-any.whl",
+      "sha256": "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba",
+      "size": 472262,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl",
+      "sha256": "e0d65b8c354be7fb5f720c3caa8bc940bc2d20ce749c8e06135f07f8ed95dd7c",
+      "size": 1948255,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/pydantic_core-2.46.4-cp314-cp314-win_amd64.whl",
+      "sha256": "811ff8e9c313ab425368bcbb36e5c4ebd7108c2bbf4e4089cfbb0b01eff63fac",
+      "size": 2072238,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/pyjwt-2.13.0-py3-none-any.whl",
+      "sha256": "66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728",
+      "size": 31274,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/python_multipart-0.0.32-py3-none-any.whl",
+      "sha256": "ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23",
+      "size": 30042,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/pywin32-312-cp314-cp314-win_amd64.whl",
+      "sha256": "a4dd3a848290ef724347b19f301045831d8e802fa4464f491b98b1e0a081432e",
+      "size": 7024157,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/referencing-0.37.0-py3-none-any.whl",
+      "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+      "size": 26766,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/rpds_py-2026.6.3-cp311-cp311-macosx_11_0_arm64.whl",
+      "sha256": "db08f45aecde626498fb3df07bcf6d2ec040af42e859a4f5040d79c200342911",
+      "size": 345513,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/rpds_py-2026.6.3-cp314-cp314-win_amd64.whl",
+      "sha256": "0be972be84cfcaf46c8c6edf690ca0f154ac17babf1f6a955a51579b34ad2dc5",
+      "size": 220380,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/soupsieve-2.9.1-py3-none-any.whl",
+      "sha256": "4f4477399246b7a0c720a88ca2454b11cd6bb9ae4c9d170140786e916776c14c",
+      "size": 37404,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/sse_starlette-3.4.6-py3-none-any.whl",
+      "sha256": "56217ab4c9a9f9c5db7b21e08732d3e7c2b807f45231ad23de0551a24c4a41f6",
+      "size": 16516,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/starlette-1.3.1-py3-none-any.whl",
+      "sha256": "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6",
+      "size": 73632,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/truststore-0.10.4-py3-none-any.whl",
+      "sha256": "adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981",
+      "size": 18660,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "size": 45571,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/typing_inspection-0.4.2-py3-none-any.whl",
+      "sha256": "4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7",
+      "size": 14611,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/bundled-wheels/uvicorn-0.52.0-py3-none-any.whl",
+      "sha256": "3d887809810b89ed33501bcf0a9aba469b06ecd608158efce04bd6b48d8c9b08",
+      "size": 79058,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/aurora-mesh-en.html",
+      "sha256": "342a0fa1484ffdec4dddce5bb1034f95cab90919bd0aeb1116d0f28f6b0c3d1e",
+      "size": 40927,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/aurora-mesh-zh.html",
+      "sha256": "af4a8604b5e24fb75f69e90c505303b127362f515f0e769bfc660ddef6c305ba",
+      "size": 43617,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/blue-sky-en.html",
+      "sha256": "5a2ef418e6458953e70b92d06774924f74ac32c429611d23624b4eeed648c5f2",
+      "size": 37435,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/blue-sky-zh.html",
+      "sha256": "0bc025ae94a4a58ccabcdae061524a9a950725d396becf8d43a0c670075b6c8f",
+      "size": 62994,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/bold-signal-en.html",
+      "sha256": "ef48876d5f6d9083bc5839ce00756f82c3bad67bb528f53519039c3dd4a9eb42",
+      "size": 38221,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/bold-signal-zh.html",
+      "sha256": "3fd1f4e32ae242b00978fa83c4e7c4d60ce3dd60be2aad494009d6f3a011f3c1",
+      "size": 56401,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/chinese-chan-en.html",
+      "sha256": "1c08b9e67c6034f2296a67960f84d22589302b7873160dd313cacb87319df4f7",
+      "size": 32478,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/chinese-chan-zh.html",
+      "sha256": "3a29e39b47840852f8a23d407b2bab527e33a17c6b6470888f65334b91f7a73f",
+      "size": 33112,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/creative-voltage-en.html",
+      "sha256": "abec497ed4bb8a4c02176aa63775b4f02a3a444c807ec8d2e4c73f65d687b368",
+      "size": 36169,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/creative-voltage-zh.html",
+      "sha256": "5f1928543d1de9d4d6de10842be94a905f05eff88d1c1336b4c4f72be46f5f22",
+      "size": 45257,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/dark-botanical-en.html",
+      "sha256": "d115924ff91f8e41eecf48e970886f350430ed2cdbedc0bebd1f6f2f2826d6b6",
+      "size": 43120,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/dark-botanical-zh.html",
+      "sha256": "7053657c60780fb10196795917b96cc2508b29a0c56b97f93c9702c773896af2",
+      "size": 42248,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/data-story-en.html",
+      "sha256": "42efba9910b4639d4ccc7daaae895be4ef40c3b0d414f69d9ffcabcf9a84be9c",
+      "size": 42988,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/data-story-zh.html",
+      "sha256": "20aca7058860ea95d573d5451f33fa9cbb8e3244614264501b8462951237e41d",
+      "size": 48716,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/electric-studio-en.html",
+      "sha256": "510d984b71b53d2c5a14bb4213cf20ceda0458043462dae9c5fc3f33ba7766c9",
+      "size": 43022,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/electric-studio-zh.html",
+      "sha256": "6e0f4cbf219ff9ed68292fcefc3fd2fa4c489cde1e86d6111a3a543ba50796d4",
+      "size": 44196,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/enterprise-dark-en.html",
+      "sha256": "dc6964e2b2677464001bb29badc8bf1574a3566a57097b689c3a376f170c9b70",
+      "size": 43421,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/enterprise-dark-zh.html",
+      "sha256": "01d385996d55e53031582ecea106bc8676f320ceccb46b56bbeea7a984a1b81a",
+      "size": 49285,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/fantasy-rainbow-en.html",
+      "sha256": "1399718c0167fea9708680b636ef9200fabd9bca54158b4f998b8e77f8d26904",
+      "size": 64625,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/fantasy-rainbow-zh.html",
+      "sha256": "12fc7a02e51bc0b98719fb1898f8ad984f236a05d82868ef346bf784343d8002",
+      "size": 64536,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/glassmorphism-en.html",
+      "sha256": "968c58d0277fc8c6bcf62ccd1c600f25ed066eeb3c238bcb932b5313ee09bb76",
+      "size": 43384,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/glassmorphism-zh.html",
+      "sha256": "960bb86584935b8b1492b1d8bd84678e941263a87d980ea047c0f7aa51be567e",
+      "size": 54425,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/mode-paths/intent-broker-auto.html",
+      "sha256": "6f2c57152d8ef39d302f2c6af59c64f9dd8fe9226aeb90f8dcffbf2676c457b2",
+      "size": 40523,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/mode-paths/intent-broker-polish.html",
+      "sha256": "de8dd6681c43e2da221d27ab2b396b9b6881c201a31acb8fdeb9ab5f4d4d2e4a",
+      "size": 42301,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/modern-newspaper-en.html",
+      "sha256": "4672903ff6098f7c96fe11537e989ec3b3e0439552eb3df93cd9157861a71b1f",
+      "size": 42817,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/modern-newspaper-zh.html",
+      "sha256": "89f0f23a732634b75e2d4c273346be717b335350b32509959e15a98b491bffe3",
+      "size": 52556,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/molten-flow-zh.html",
+      "sha256": "b597ee5f7e1c7efec4dad6d9663775d6d6d9c486f02c41949f331ee0696e4ede",
+      "size": 86225,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/neo-brutalism-en.html",
+      "sha256": "a639b632e4abcb5b35ae2bf5245b4895cf8964e677ec82fb7ab64249c2ad3789",
+      "size": 39089,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/neo-brutalism-zh.html",
+      "sha256": "98aa25073ad1f9d716aa1ebea63e26b69fa2ff01ab740e77e60fc0bba476a675",
+      "size": 49338,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/neo-retro-dev-en.html",
+      "sha256": "be8dced5c37bbe7635a40bf06f45094718595143b0836724b58348cf3b4e6c24",
+      "size": 42195,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/neo-retro-dev-zh.html",
+      "sha256": "9c8de63799f1f232708da40b04e15534e4c89179e6bc7363be33e7e96127a80b",
+      "size": 56516,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/neon-cyber-en.html",
+      "sha256": "909510b7a1696d85130aff7b3d2ba166da45f2e9186b78ae2263d930f8fdadf0",
+      "size": 42489,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/neon-cyber-zh.html",
+      "sha256": "001959cc90026f7ac53d8d2ef0497c0c19620d2917208385380215f6a0a77d01",
+      "size": 59054,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/notebook-tabs-en.html",
+      "sha256": "642f21fd4222be9a7d2f5b280636b50ef2ae7473cbfbf7fdfa0fdc52506abcb5",
+      "size": 42273,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/notebook-tabs-zh.html",
+      "sha256": "ec9224550422e8b7a3584743e2ce391249357635725cf3bcabe9c521957462ba",
+      "size": 70488,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/paper-ink-en.html",
+      "sha256": "8f055da6ff469f461998cd8362718e9215e1191c7c3bab26fba6d5829f30bea2",
+      "size": 48096,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/paper-ink-zh.html",
+      "sha256": "f31298c404b0865dcf8349d19aafa7fe89f07c50285a22baf5ffb590d76ec25d",
+      "size": 54668,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/pastel-geometry-en.html",
+      "sha256": "9f75b1b2b27c1ee1a95c655151a8e0808968156f42b08e45ed40c6edd14a291f",
+      "size": 42169,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/pastel-geometry-zh.html",
+      "sha256": "33e7da5e1e3380c2b2d2a38ed87c705ca0e9557a36dce9748cfb66b0a7d6e59d",
+      "size": 56924,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/shader-hero-zh.html",
+      "sha256": "b6f3e07044005b6efc132434e3241626c6ecb5671c76a522a46baa8050c70ca9",
+      "size": 112499,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/slide-creator-intro.html",
+      "sha256": "0f41af2b4cf8d7b0806e56f0c1c910ac5987e5444f11741f13c689690233a5f0",
+      "size": 57872,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/split-pastel-en.html",
+      "sha256": "558de74a2d25f21af66e9c9614d405dbfb32203c9223eccbd3c1854fec83ddde",
+      "size": 42073,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/split-pastel-zh.html",
+      "sha256": "ca4e2315c4c691025027e41e7b7d485e6a3eee3180b4dcc4b59fef528e6c0a34",
+      "size": 48190,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/stellar-vortex-zh.html",
+      "sha256": "c4603b8e223a927d1b02c56ac4b86dccd8df33bf2ac6f070bbd197b3118fea4d",
+      "size": 234556,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/strategy-consulting-en.html",
+      "sha256": "7abec4272476a87afdfdeeb2ea55859f3cddc4395be31e7d2d08646da8e0af75",
+      "size": 39104,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/strategy-consulting-zh.html",
+      "sha256": "f990eb7836e9ef43d35f8fe2fa138a9396d808ebddd1db2173af9a784be59690",
+      "size": 38769,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/swiss-modern-en.html",
+      "sha256": "edc2f3c7b771e74ee359b3b42211968b8fd8c1a0c1aed1b1442c2a89f166408e",
+      "size": 42329,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/swiss-modern-zh.html",
+      "sha256": "cecbcb4d860fed5bef8516c67774cd94d9f994a69df185c081d4a8c13fd01088",
+      "size": 63847,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/terminal-green-en.html",
+      "sha256": "9935332f05865d209065b28e2aa0d4a6ca027e4afe01480350484c11d0417fac",
+      "size": 34028,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/terminal-green-zh.html",
+      "sha256": "06e54aa01da77cf2d24b9cb2af467803c3d9f8889dd37ccbaf9795ce15f8ad19",
+      "size": 43329,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/vintage-editorial-en.html",
+      "sha256": "033f0cdfc12661c2d8fb2c81757b09213fd670a03a1340db9477781c19681ed7",
+      "size": 42723,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/demos/vintage-editorial-zh.html",
+      "sha256": "4966ebf79db0f35df41339dad0f58e3447c1a0e172f929f9de0fa13421d95d7b",
+      "size": 44178,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/audience_readability.py",
+      "sha256": "27d72067fe2a2e0b7024cd4ade0a6207a5c5e63668bf5f5ecc13ddf8a31c0288",
+      "size": 11647,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/check_style_fidelity.py",
+      "sha256": "c38995394f9c995200ac5e99186624ef79f4db03fb00d1d6ba5d7bf522af31c1",
+      "size": 1990,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/low_context.py",
+      "sha256": "388d169230ce96ff371bd8193cdc7ebfc16518aa4c2360c18b172bf27349ccbb",
+      "size": 385039,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/model_context.py",
+      "sha256": "9a842f97d88b61fcd46d55c08565c347310531e9c9205d5b3df49cec18fd1aee",
+      "size": 7758,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/preset_capabilities.py",
+      "sha256": "4da9c2e65cbc246186127d2ada75fe446ea7125f03e83abf0e25b92b30e69567",
+      "size": 18435,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/preset_contracts.py",
+      "sha256": "58943db0855cf6eab2a0e2cd566529db1f67f5cb74086ca65e4b873d1120f21d",
+      "size": 14075,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/preset_profile_renderer.py",
+      "sha256": "47b92d3756971fed770124fee1a3988bb9bd9fca1620e444c8ca88c9495c720c",
+      "size": 128726,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/preset_profile_specs.py",
+      "sha256": "75dae63d120f8971b5970d1b2ff3945d3d417cb64c67dee6df3825fa76c1a79d",
+      "size": 18312,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/preset_runtime_qa.py",
+      "sha256": "4f320a9be594616a166009d957f305e81b3d6c92f12ba9c12c85395d09c80843",
+      "size": 13057,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/preset_support.py",
+      "sha256": "92242ee9172c23494be24b98c9985710336cfa7fc7c2fae9c0d35d514dfcba20",
+      "size": 1882,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/pyproject.toml",
+      "sha256": "fece47fa654b8829582cb3bb799acbc35f76762c072cd0e569c4078944c2428c",
+      "size": 343,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/requirements.txt",
+      "sha256": "8a67f1e688e6017569ebce003d1910bcce247ef7f159de10be46bab9a09e6b77",
+      "size": 69,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/server.py",
+      "sha256": "8f7192f0d35e5bf9f39283005f84d6717f49ba0c687b36f94701b6662354f9db",
+      "size": 13003,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/shader_hero_renderer.py",
+      "sha256": "d5812599209dd5b22f9559696f4cad8ee8ebd34cd69cf7974d20cab4bf3f7047",
+      "size": 3710,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/style_signature_eval.py",
+      "sha256": "7d4f7b1b1c4cee18fe688047a23576d639d9fdaf51d52291e09d2b7c6cb59a4e",
+      "size": 14082,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/fixtures/animated-covers/molten-flow.json",
+      "sha256": "67a21c1c759efa3c7a3302228c656eb2e705cac854daf885a2b78a72f248427c",
+      "size": 6171,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/fixtures/animated-covers/shader-hero.json",
+      "sha256": "7c0aa1a274bede9603e9a711201f924912f97fb739a775496692f6622a1730d3",
+      "size": 6164,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/fixtures/animated-covers/stellar-vortex.json",
+      "sha256": "91215566aae2e36aac7e8c9c1904411eadff3f3a4d686ef4f10926ffa4b00cbe",
+      "size": 6189,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/fixtures/invalid-brief-bad-preset.json",
+      "sha256": "4d18b114df9de262280e9f1ba2def3a99212e7a6eb1adea2f24fdd9d82947e7b",
+      "size": 2029,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/fixtures/invalid-brief-missing-required.json",
+      "sha256": "ec83acf28e6c526e62f355d21168d50bb8b9989c937cb7c7acbaedf6501c30e0",
+      "size": 52,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/fixtures/valid-brief.json",
+      "sha256": "800d8d596876263abe9728a183902318b3447324d6c3f26ef85d4b493d5f8005",
+      "size": 7353,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/test_list_presets.py",
+      "sha256": "93c09412f708a5b37189d1c7c6b691ff52db145e4f0bfec19effb735f726b9ae",
+      "size": 1869,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/test_render_slide.py",
+      "sha256": "22c9518cb9f901a17db17824f30345c4fbf6108d8504afe223d241bfd9188aa8",
+      "size": 5258,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/test_server_contract.py",
+      "sha256": "096482c21cdc5298dd30dc3656550dd92a081979d85427c96910c765ee4359fe",
+      "size": 1004,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/test_stdio_protocol.py",
+      "sha256": "c8547feb3a8184f04dce5750a91f0721eb83d84b75415b44af1f1775774378be",
+      "size": 5259,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/test_upstream_alignment.py",
+      "sha256": "c6d87eb5e741cf938d6269d55fae69168a684aa15662519cb06a54ea64f7cc9e",
+      "size": 2431,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests/test_validate_brief.py",
+      "sha256": "ed337d92745d78b4332c89ce8305803a0d8cd353c237150299a39be0e5a78114",
+      "size": 2452,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/title_profiles.py",
+      "sha256": "240fc16a3657442c4b924cd3d33e526e64632023e7c8066fc80d423b37ff2aad",
+      "size": 7191,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/mcp-servers/slide-renderer/validate_html.py",
+      "sha256": "79d036008972673ddca5fb942a89ccb1690b115f53031ca9e76f37315788c259",
+      "size": 62974,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/plugin.json",
+      "sha256": "9499c0fdb55f7a9051033213fb179fd84d0381af11248c6f50149ef0ce34db77",
+      "size": 1064,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/animated-covers.md",
+      "sha256": "022f475df24913473bd5e05599b3b731122292af673f320f2eadeae9a44c457c",
+      "size": 3276,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/aurora-mesh.md",
+      "sha256": "c45c3d127914078d49244932eb614fecb0baff60fdff455df1755eed4e5d26f5",
+      "size": 11732,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/base-css.md",
+      "sha256": "792e8a39b0ec2e144876de356f7de8a8c466a7a8425c5057ac8e96e0c68f25e4",
+      "size": 9477,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/blue-sky-starter.html",
+      "sha256": "5f88fea51a40bc6792c1befe04f107182dd877f8b73f5e1c9ca514f526bfe0db",
+      "size": 72694,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/bold-signal.md",
+      "sha256": "1ae89a6918fac897920702b6e51222fa22b64e710a648168f2f9954687b95f25",
+      "size": 8567,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/brief-template.json",
+      "sha256": "7b1770db54d3d2a559f5629592533e497a986fbea6b067f06edf6bc1578cd78b",
+      "size": 6725,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/chinese-chan.md",
+      "sha256": "e332003fbe6d8251feed37b61823cfae8de3a69b63792db6c30b48e1c0d0cdb3",
+      "size": 14915,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/composition-8.md",
+      "sha256": "4398cd28c94b8b9e538a9e5b2dac006517959d621f84b6731c9e8e80aa382710",
+      "size": 5428,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/composition-guide.md",
+      "sha256": "c0530aea355f9e6b7e3558d8a0de8d78c976f266f29397aba3158ca5ec6e96a4",
+      "size": 3863,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/copy-residual-blocklist.json",
+      "sha256": "22cb38ae923993e3cdb36517b94d7b2729078ccdc0154385ab3698d631f06ffe",
+      "size": 553,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/cover-effects-runtime.js",
+      "sha256": "aa3998b0865e5bddfc5a2b2c639fb07b20f73f85eb8889875f6d457f4ee52041",
+      "size": 8561,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/creative-voltage.md",
+      "sha256": "b405d2412966d922f1c023d262794cd5712285d234c79e79a5fe443fad3323dd",
+      "size": 10958,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/dark-botanical.md",
+      "sha256": "4bb9e85e5a38fc302828ec324d43395518da883f56de48e1816ae613f6c4ce93",
+      "size": 9139,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/data-story.md",
+      "sha256": "4d627b72106426ff1a3ff59ed89755ebc99d51971edf57b6166174a152263146",
+      "size": 18107,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/design-quality.md",
+      "sha256": "cbad140ce6a6beb1cf3017c4433881bce1595eedef55974f4a1e559b3c0fb076",
+      "size": 13707,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/design-system.md",
+      "sha256": "8b33d56dc3c834b9a5ec458b7c5dde9e0dec419ba8df4d66ea7be75fd089558d",
+      "size": 7317,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/diagram-patterns.md",
+      "sha256": "0f744b594ad8f44d7faafaac8bd99bc6df6f3d37e7d71c913bcb19d38c56cef0",
+      "size": 10412,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/electric-studio.md",
+      "sha256": "6b4635ffa6cff5637d8c9e5e8d2071fb55a0a8a33f991279da5549fb3d4bb783",
+      "size": 8478,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/enterprise-dark.md",
+      "sha256": "7a1634a208caeef0fbfde059eaa737aeaf9e1f1550f848ac43940d01bee36ca7",
+      "size": 26580,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/generation-contract.md",
+      "sha256": "d4d20c807ffc2db13b8aaf0c582a71e5cb78681a0669e2d9b68a9bae6e08ab97",
+      "size": 4307,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/glassmorphism.md",
+      "sha256": "715cadb5285ffe16085f49ffef6f19ba19b82f65dedd03427be9500440e2b4d9",
+      "size": 13660,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/html-template.md",
+      "sha256": "34a2f54a940ba1877e8ade02be971fe6a193589e61ac7491775189863e7d90c6",
+      "size": 21768,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/impeccable-anti-patterns.md",
+      "sha256": "39de24f8714ca38ae41b8cf5132d34c239d683291308a030c362e5f0396072fe",
+      "size": 14474,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/js-engine.md",
+      "sha256": "b99f15902919d3051924c36d524be01bdaf3bd117fd5cc2fb498bb96d366e58d",
+      "size": 20084,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/modern-newspaper.md",
+      "sha256": "0a745242206e5739941dfdbaf8414be1c7016eff4a1247f7288d362787a1e55d",
+      "size": 8696,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/neo-brutalism.md",
+      "sha256": "8bb3ed8fa24d04c606f0110ffb618151270c3d8de567e992ade45e8bf16bfe6b",
+      "size": 11097,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/neo-retro-dev.md",
+      "sha256": "7505be528c322cbbfa8fc7382a3b7f303a869cef4f9d295ee134b930c72be86c",
+      "size": 9734,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/neon-cyber.md",
+      "sha256": "61b76d4f6ec3b383f46fb430ea571ccfdaea27adbcdd7982c378b2c552f665be",
+      "size": 9464,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/notebook-tabs.md",
+      "sha256": "c015f5361c94135dbd68bf38555481bf01714f4d606c82285f6d52be59f63523",
+      "size": 7317,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/paper-ink.md",
+      "sha256": "c0a5cc53531775b635dbaaa489f1c7fc279b026ba9cdcac95aa8356d140da79b",
+      "size": 14844,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/pastel-geometry.md",
+      "sha256": "f48fca0056e71b5af59e27574b5edc93875be02a981e13205217b934fe72452d",
+      "size": 7067,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/planning-template.md",
+      "sha256": "3f4f657221c757735af976164ec855b09d12f7b6ac392694ab31fa530df6ba12",
+      "size": 4823,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/pptx-extraction.md",
+      "sha256": "8f9c2da0f393625b9811d4d8de69bf91ca218e5df2bad24cb67234342d410d06",
+      "size": 2810,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/aurora-mesh.json",
+      "sha256": "0835707c2e1bd7fdc8c8d5ab4f2352dc8d60fe9fc489692cc02da34d7c273f60",
+      "size": 5341,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/blue-sky.json",
+      "sha256": "93dda4fd5497de1707231ae381b9062b8afb2c5b8893c6680031b09cd12199ba",
+      "size": 5281,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/bold-signal.json",
+      "sha256": "d4340116d03d9acada347870ef4d389f66007bfbd58e63f2c0387df66c5742ad",
+      "size": 4780,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/chinese-chan.json",
+      "sha256": "5d716b227289da2887c6b617c6699a7bd514f06c29974cb387e17cff780fff00",
+      "size": 4234,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/creative-voltage.json",
+      "sha256": "793a59341e6d64078c403e31adc9172b5c2433bdaa1975d8eeec5ea10964f740",
+      "size": 5242,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/dark-botanical.json",
+      "sha256": "32abdb3ad86820190686515bddf6ba192b4f26a6f51e6b79e7fbc9af2133e8f2",
+      "size": 5085,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/data-story.json",
+      "sha256": "f1a194ed600194197c4e0e6caed47ee473c98348ac95a0d5900b1ad2d4641c20",
+      "size": 4244,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/electric-studio.json",
+      "sha256": "f60c5bfbd1e7a90449a113235a8a6833d1c03216361d9c6794c6d9df0a13e090",
+      "size": 5250,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/enterprise-dark.json",
+      "sha256": "9f56363df9ef86bfb3f1684c03d5ed6f2cc8cef84ca86a5593328f349d8d02df",
+      "size": 4224,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/glassmorphism.json",
+      "sha256": "93519a7bd0435e5fdf648fd318a5ac739d8696e6acacb85374eacb0a6ff5fa04",
+      "size": 5436,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/modern-newspaper.json",
+      "sha256": "57e591e107926dcace22b20cca5d786f5a1ddd8c73a9ca963ef52f64ace0b293",
+      "size": 4949,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/neo-brutalism.json",
+      "sha256": "cf4c0306691eb688028145a56cc487b8f680bef75c8e1ea7610d8c785181527e",
+      "size": 4843,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/neo-retro-dev-deck.json",
+      "sha256": "5fa5590db07e2027244d09ffe558fdac264c8c32d4ce84174e6697bec1061583",
+      "size": 5068,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/neon-cyber.json",
+      "sha256": "056b95d2d4ae2ad99d1230a76b711fceaffa7c332bdb025cc67075eaae995dd1",
+      "size": 5172,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/notebook-tabs.json",
+      "sha256": "96032b760196fe60db6bb04442356839cb910bd78b7e06c7d0d24bb597b83000",
+      "size": 5307,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/paper-ink.json",
+      "sha256": "e4b1bb768e898948f964f15576de108023129d8f0e2685bd95d2ad8e59cac9b2",
+      "size": 5110,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/pastel-geometry.json",
+      "sha256": "d1f73b56f27e4c27e49caf705465426edf5e59977909bed24cd2bced09f5b532",
+      "size": 5107,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/split-pastel.json",
+      "sha256": "fa525b6fe89377e221256d2c9be835da2e936d4f9e3881196e01e513ffa2b78c",
+      "size": 5134,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/strategy-consulting.json",
+      "sha256": "f253a37178dbfe7cf4a706a8cb6afa84a28cf035fc63b698c9c0459d4ae0ff32",
+      "size": 5010,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/swiss-modern.json",
+      "sha256": "bfac40c9e67d251e2654665bd2c459dc7b394cf9fcd74c8188afae03da5f5c65",
+      "size": 4228,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/terminal-green.json",
+      "sha256": "c23a2481847901acc54ac30a87be8d46168f14dab5e3086ddce002dc47a4ce6b",
+      "size": 5224,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-contracts/vintage-editorial.json",
+      "sha256": "c5dbb4de712c778a1c5dbc3147b36623c1f7d348364e1d05a6a842beda7a990e",
+      "size": 4909,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/aurora-mesh.json",
+      "sha256": "e54a1c1d2909a2ab921635461b6e039f8fcbe700f9a59d3354711bd21fb0d5b4",
+      "size": 3494,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/blue-sky.json",
+      "sha256": "2f3ce3e061ecce931add2ccea29be511f9163923b888aec321075bfed526b79f",
+      "size": 3440,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/bold-signal.json",
+      "sha256": "e78d6ddd34a1095442f802cc5d6609f246e543bd76a636e3de50ce7d295b9f49",
+      "size": 2933,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/chinese-chan.json",
+      "sha256": "e81587dc538a732e2bdad3bcfb09a9203ad84aa19f29a1d56249e80cb999606f",
+      "size": 2393,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/creative-voltage.json",
+      "sha256": "8f6c8a40f46bc85a929df3d3ab70e43f55a5b70193a59368cd77978871b82f58",
+      "size": 3390,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/dark-botanical.json",
+      "sha256": "1ae899e12155987b2a84f62a61c31fce60226cb0ec837a4e8a9d2c38593b94f6",
+      "size": 3235,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/data-story.json",
+      "sha256": "b33bd03d6c655efc44ce5634eed0865cb2d33d6ddc6ca43f5d05561fdcb8dfa0",
+      "size": 2403,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/electric-studio.json",
+      "sha256": "79c5ea058359ef1c4ec562bc7d4e5ca585319c8621182b370f1d386480313397",
+      "size": 3399,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/enterprise-dark.json",
+      "sha256": "8913f7575bd94ae748d9f84c0ede919ef2f81d537884fda560dda6dadf7917ba",
+      "size": 2383,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/glassmorphism.json",
+      "sha256": "79a91e82b32c4b9d25341b3817f751c7442957034de7f4f59892819a03678292",
+      "size": 3587,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/modern-newspaper.json",
+      "sha256": "d8ea1c0e8a73e6fccb01002d00b16549677d5cf227e6b23ed3e7647929348717",
+      "size": 3097,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/neo-brutalism.json",
+      "sha256": "c710f4b55dab3cd70a490c1bdcd85895df44b9c1909b685722f4c10029c0489c",
+      "size": 2994,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/neo-retro-dev-deck.json",
+      "sha256": "938e0d47b28e591e25857b0e46706fa08bc2107f08c5ce6222c084d032d7b7d5",
+      "size": 3214,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/neon-cyber.json",
+      "sha256": "931e6ed6f41335f98d2f1daa0ddd2a6882b6f4970e5ae03c0a7da575c644223e",
+      "size": 3326,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/notebook-tabs.json",
+      "sha256": "5bd898de070d053beeeb5bb58e31462ff121fa212f44439e7bf8dcd3b63c7e30",
+      "size": 3458,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/paper-ink.json",
+      "sha256": "465234c77768253fdd28c866b59b221356fd2b7d3fa43e9f55860fc7054b2b37",
+      "size": 3261,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/pastel-geometry.json",
+      "sha256": "4b44fa157a3f847f545710bc2d2828867391e2c146f97d91cfb5a1e63ece5312",
+      "size": 3256,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/split-pastel.json",
+      "sha256": "098d02dc1c3ac31ad4cf613fac41af933f51dbf91e530d3cb39d1f7f4f49e601",
+      "size": 3286,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/strategy-consulting.json",
+      "sha256": "a9411cf2ac08896c984b7fe883278896091015b00c16b19c743007cba0734af7",
+      "size": 3155,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/swiss-modern.json",
+      "sha256": "e5c128972ab624780bc67a6abd072b9094293b6fef0238e6b0ec2aa1d30a82d2",
+      "size": 2387,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/terminal-green.json",
+      "sha256": "6b15652f37499bb6ffe743f171305d457d283c316db2cea3c3f04ae901027c03",
+      "size": 3330,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-manifests/vintage-editorial.json",
+      "sha256": "8133008ecd386bab15dc980da48b6308679d920e75e9b671183468269212b8ed",
+      "size": 3056,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-support-tiers.json",
+      "sha256": "f7b8dcc0abb81d8eb4ce773b302bff2364e8147625de3a2c2ff1eb52bf0593a1",
+      "size": 2568,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/preset-usage-rules.json",
+      "sha256": "b681659ad6652c87a6046202ab77bf9025de2a2652f7271bf840418667dfb45b",
+      "size": 7762,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/aurora-mesh-en.html",
+      "sha256": "ebefa51b74f52c1e5278d4d6a0eec862d0bd7980a5c5e461035470b8d411d38f",
+      "size": 24000,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/aurora-mesh-zh.html",
+      "sha256": "73cc54bbc876147c048d34216b7ac8f48744668f88c7bea09def195c975a0e45",
+      "size": 22886,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/bold-signal-en.html",
+      "sha256": "c7f18c86a3cfe704926d29a721c5dc14fb2d5e26b8fddb0fcac0a1f40cfc69f6",
+      "size": 23172,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/bold-signal-zh.html",
+      "sha256": "0f515aa720f8b6cd42bb42ed6aba0b793c67e29d9a3cba7e1bc9d2af343829fb",
+      "size": 28377,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/creative-voltage-en.html",
+      "sha256": "53a216bf0dca454e4c8a5a58d198c758d2190b26f485727b63163f941c3dc49c",
+      "size": 19907,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/creative-voltage-zh.html",
+      "sha256": "96b3213283667a3e0e2556b3861c5528673457a5ad31ee057b89f5a53e4e568a",
+      "size": 24912,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/dark-botanical-en.html",
+      "sha256": "31384d16801dc084ddb22ab046570d416e8d70a4b074b47c232954cae14a51a0",
+      "size": 26731,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/dark-botanical-zh.html",
+      "sha256": "b61f465157c2c03a4327b2637420dc2f0af3125379f6c8e2d785770fce563fed",
+      "size": 22240,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/electric-studio-en.html",
+      "sha256": "1aeb39d0e4160cb1803d31770db90f4d938b38410a56dc7cc1ab290d2263a58e",
+      "size": 26626,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/electric-studio-zh.html",
+      "sha256": "d4c1c8588db9c386483dda9cc984a29a01206ed3a7bcb5c8522e3078af767459",
+      "size": 25538,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/glassmorphism-en.html",
+      "sha256": "f4c0a47c61d41aeed5f2801349ea07c852e258f6dece4523b02cf8f3d9d02ca5",
+      "size": 26998,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/glassmorphism-zh.html",
+      "sha256": "11ee6f72941b2e40e21f6c560b057dc762bf925824b2310b95af979f50e199c4",
+      "size": 29016,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/manifest.json",
+      "sha256": "7831963e11bf9c79969858f7db6eeab3b1497f3746d8f50d88aee23a59e3f0b2",
+      "size": 6620,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/modern-newspaper-en.html",
+      "sha256": "ac5af3071a853246f434eb8ed7cebba205412cbd63ceb20367079fa0ada5bbcf",
+      "size": 26422,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/modern-newspaper-zh.html",
+      "sha256": "0927211d6d0c3a414b5f9e36ffcb6f36ba415bf5ab0b1d2b2a34b9f9e1f97a2f",
+      "size": 26649,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/neo-brutalism-en.html",
+      "sha256": "e072c91aa47b162d49e6aa83a9ffa49525bbe2e5c6b59f4df21187417570e5f4",
+      "size": 22428,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/neo-brutalism-zh.html",
+      "sha256": "fa56a38680640be1cfabfa57d09a3c7bca80b50a35498786176a13f6dfd189a8",
+      "size": 29067,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/neo-retro-dev-en.html",
+      "sha256": "a8c666bafa12413c5b8d0a0b21ed30cdb1a67a2502e1e4ccddce114179e5bd96",
+      "size": 25805,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/neo-retro-dev-zh.html",
+      "sha256": "dbc26af5cc6fc0d5de9bc02b78bf98caa531884439ea010ac4d7ea060c4602e0",
+      "size": 32055,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/neon-cyber-en.html",
+      "sha256": "64c3ddbb2c2ae60a13df05875701dcf8894b347da6eaff2f3b3175a035e5f31a",
+      "size": 26627,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/neon-cyber-zh.html",
+      "sha256": "87f4107fdcf10ba1bf7d4b9b519f783720f14fe0099b354bce04c83b3fff5352",
+      "size": 32876,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/notebook-tabs-en.html",
+      "sha256": "24f1d6c4fafa5815137dbf186f2f96ac56eb7401190898f08bc0da7c3622b279",
+      "size": 26402,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/notebook-tabs-zh.html",
+      "sha256": "a2bb649dc874121570be47ace5c2e4fe375857be27f6fa44d5982f2bb3c60448",
+      "size": 41542,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/paper-ink-en.html",
+      "sha256": "e63cbf582f5ac6731155b73f675ed46fdcc68d2c0ef9a0d68809ee2c81f687ab",
+      "size": 26573,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/paper-ink-zh.html",
+      "sha256": "6f09f22ae140d2fc9eb81341c5f7021330ecc3c247900962a814b5969ab9cf09",
+      "size": 32144,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/pastel-geometry-en.html",
+      "sha256": "f95eefdbbc34a08347c1fbf6638efeb213c94e47e969533f91cae8acf903ce8f",
+      "size": 26288,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/pastel-geometry-zh.html",
+      "sha256": "d04093f1b8dd59ff807b539f6f2fed3bc7ee938ed9d10027663154661db40c1b",
+      "size": 35288,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/split-pastel-en.html",
+      "sha256": "5d8d04a2f9837a89b994d6f6c4cf983598285b9a97d0b21315a2ff5ea7c12d69",
+      "size": 26201,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/split-pastel-zh.html",
+      "sha256": "aaa6ea74dd30a09d4ef7f6db887fb94d60474a28f9a6de1a3dac3d92365f5850",
+      "size": 27652,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/strategy-consulting-en.html",
+      "sha256": "efee4c8085b3cc03aa66173d54d92def669dd4fb11fd2570e1369ecb818387de",
+      "size": 24596,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/strategy-consulting-zh.html",
+      "sha256": "a94818b3eb9ff9d5d4201ee2be28c8b24aadce77f30bba5be649fb01b63e67df",
+      "size": 24270,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/terminal-green-en.html",
+      "sha256": "64d7166ac5d3b0ced1ced1f1bf71baa8fc981e40e76b993b118e4fa6b0bd89a1",
+      "size": 23188,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/terminal-green-zh.html",
+      "sha256": "01ebfffe4ded404848ced24018f1d28e810b9ae0b20bf5525c90fe9ba7c406a4",
+      "size": 23992,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/vintage-editorial-en.html",
+      "sha256": "da159a017b56e41205c0535a0c3796ba5782769e0fc519d1dd267705a04b412e",
+      "size": 26417,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/profile-templates/vintage-editorial-zh.html",
+      "sha256": "480e41d1537be52511419613d4a0ebc11ed54157282211b4ccd8e8264277c0a1",
+      "size": 25695,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/review-checklist.md",
+      "sha256": "5af3131f37e8a7b295d796fff417a3777d5a8ffa20c2722e1fb00d4ccf68f9b5",
+      "size": 13944,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/split-pastel.md",
+      "sha256": "48a9788e061eb783da0ae4c98e9e1affe0955b4b2c9da734038e5e23d6f2f0d5",
+      "size": 8330,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/strategy-consulting.md",
+      "sha256": "bfa878e8ae877e10acd9fe7774bd00456b2e2d755978ad9e959f12ec7dbc199d",
+      "size": 24924,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/style-index.md",
+      "sha256": "30f629f73aecb55de23b3fb8e1ba706e442d9db2f00888faba29c72ea7fbf9ed",
+      "size": 6650,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/swiss-modern.md",
+      "sha256": "d3c1801351b8d93961c9f74ac2f2769966811f690813cd95f7f835ffd3f96a5f",
+      "size": 21066,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/technical-language.md",
+      "sha256": "8655c848c52e66ff67e783c4c198ce53b5c81499e2ace6a7936d002401b51537",
+      "size": 2268,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/terminal-green.md",
+      "sha256": "123b22f1204f9c2071cd6f97155e6a9b0bfa8287f4ddba51a7287026416f0d83",
+      "size": 8932,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/title-profile-registry.json",
+      "sha256": "663d595d1a5c9b94d1b9980ee88943845f32ebfcf0a128ec327078a1ef40a52f",
+      "size": 6060,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/title-quality.md",
+      "sha256": "75b51a5407e440d715dddf6eeba9af462d48b5353e0ed8ac94cf78c03ceb6a77",
+      "size": 4036,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/vintage-editorial.md",
+      "sha256": "3130fdbabea9995cdf131d3d60906c97a91096c1af3d51ae97ce2612b77f8e66",
+      "size": 8847,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/references/workflow.md",
+      "sha256": "bffa63ac3383697bda2e567cfb844538fcfed99b3737fd1a5ae92114d4bf9a42",
+      "size": 29916,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/schemas/generation-brief.schema.json",
+      "sha256": "74a23aa99a05042c35cabae5a1aafcb5bd1b1193c9c69569902d6ac73f1fe22c",
+      "size": 14798,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/schemas/preset-contract.schema.json",
+      "sha256": "2659c52436b01c42b21702b1339754dec55fea9b602cb51dab448974c0154d5b",
+      "size": 5210,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/schemas/preset-manifest.schema.json",
+      "sha256": "fd2915e492253b67967ef25f4b35965c9a7e542a5d7f9810eec8dc65948e35eb",
+      "size": 1495,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/skills/slide-planner/SKILL.md",
+      "sha256": "a5e5d60512599ef34acce9645d2e19a3c3232c5f49d52783b60d8998cc66db51",
+      "size": 6183,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/tests/test_plugin_integration.py",
+      "sha256": "04d7f82bbe0b74e303bd053829836490fa0d11b01af566fc0d064b908462fe34",
+      "size": 12561,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/README.md",
+      "sha256": "25edb771983f5c9a2753126a0329557fde195c66294f87c9fb87dd4c6d970a64",
+      "size": 2846,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/README.zh-CN.md",
+      "sha256": "00b938e03d557d0d34b068220733624355a0be0c57979c0ee72b7479deadb7d6",
+      "size": 2839,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/_example-coral-dawn/reference.md",
+      "sha256": "aba3b9644cc64f0576894ab7afceb168f84ef35c995e72187d1bd05a49e1e230",
+      "size": 6973,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/_example-coral-dawn/starter.html",
+      "sha256": "136a9ff216b2dd07b880070dc35179a1e90139a40091c9999eba8c3736c6ec9c",
+      "size": 42135,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/ascii-stream/reference.md",
+      "sha256": "683ba8dcc66cdbb41f148043210f91f62fc4a8d4b43334e5a036e766eb533551",
+      "size": 12176,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/ascii-stream/starter.html",
+      "sha256": "bf05874ff9d44e7f47826e3aa5f995ffb2833500a7b0ce1df6217725345de368",
+      "size": 26992,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/Cloudhub_slogan2025.png",
+      "sha256": "c61e06369dccf74b0aa4788d2efad219f6a09e00d28c0fb0d7146d2b5747d633",
+      "size": 5489,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/README.md",
+      "sha256": "023fbd3c638dfaeafdfa9ca8680f3e35c590eefc159aebb4901cf48852357c28",
+      "size": 888,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_blue.png",
+      "sha256": "0fa98e3d79426410121addb0ec35ab4916379b886b82991ec5124e3734ed0581",
+      "size": 29153,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_endpage.png",
+      "sha256": "ae7b72a46e0fd581ce59cb1ad7e9ae01ded01e951ba22764b22ab8c2267a020f",
+      "size": 80207,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_homepage.png",
+      "sha256": "a62175e6c5359beae5f06dd91ab22e6710f09e1c1185425dc149d3dfd2ffc5a2",
+      "size": 494178,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_thanks.png",
+      "sha256": "8d71018305eb90760ac57de5fd130519f7312e330edba76b473fba52b7bacdc1",
+      "size": 24433,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_white.png",
+      "sha256": "3f198bb6fc609eb91db00922304b96ca4f383ed72ad6b12167cdf056dc590708",
+      "size": 19278,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/reference.md",
+      "sha256": "eea008bb695e26bcc3758172ff9ca01c44a2410c073eecb7b3b4866e57085943",
+      "size": 32963,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/cloudhub/starter.html",
+      "sha256": "a1b38a481eb1f15dcc9c5b36457caf4095dc0ce9ad50892b41861c9ff8fd3892",
+      "size": 25882,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/fantasy-rainbow/reference.md",
+      "sha256": "a5b3082479338e471228e30d3c4d59d750402bc4771327fb1404211f1226fd53",
+      "size": 16311,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/fantasy-rainbow/starter.html",
+      "sha256": "9d0439791033fe6447bfbc5453fe3ed8ad90fb35e0e010124b7038c6ed21e4ac",
+      "size": 86073,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/homepage.png",
+      "sha256": "4924cb25328198c3240f350f954468a405e26274c2d3c7019c7548d918cecde2",
+      "size": 150373,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee-blue.png",
+      "sha256": "824084d654a9e4a004c99ace41f4a158af8e96982408491e89dd9beb3943c997",
+      "size": 8562,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee-thanks.png",
+      "sha256": "66912481aab85bbaab6ba3e8292c41c0ecc3413c8943f67a955b05eeaf7e63c3",
+      "size": 60850,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee-white.png",
+      "sha256": "87a2accd4145624c6341362fd71ab12f25938415cbd3304184b5401663a9a44c",
+      "size": 6194,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_ColorWhitedynamic.gif",
+      "sha256": "644ad57f690015a87d6fc9fff97547aca9ad376b67484dcdcae30fbd358608e5",
+      "size": 1525470,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_ColorWhitedynamic.gif.zip",
+      "sha256": "87548e41fb64cc44836c52b30897d212839c853a757dd984a8851245eecca9dd",
+      "size": 1086641,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_Colordynamic.gif",
+      "sha256": "cf5bf5a540bc5f51d3276a1b0ca786960980225c1d6357bae363434504483bfd",
+      "size": 1525470,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_catalogue.png",
+      "sha256": "37e5dfdd7de5952ec9ae661a6c69fd1c137e817baee86c1d5ba5a92da3444176",
+      "size": 161489,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_chapter.png",
+      "sha256": "048a1d61892023051e0f7f890229041cfb6a93298a91262f8a7ec2e0842d8e28",
+      "size": 105333,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_endpage.png",
+      "sha256": "e82d81aa70a106d758839f811663fd1b1410e6c3ad960a1613c0e1624e8c83c2",
+      "size": 78096,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/reference.md",
+      "sha256": "9bd1705f17670847d07d4ca880a64293c3ed584d294f1c51db26728027dac953",
+      "size": 27890,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/kingdee/starter.html",
+      "sha256": "6a2914fee26e3c8fe6fb08ca5b0b619c147761419e61a6e3661c33b6a7030933",
+      "size": 26927,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/molten-flow/cover.webp",
+      "sha256": "b655f22d8bddedc6bbfd591b00366d4f387e130adaf745d431d00cf2ef8b2ba3",
+      "size": 23974,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/molten-flow/effect.frag",
+      "sha256": "afa9a4e03c907c8168056fd79fad47147f0f1c7d7683d0099458fdd243b74230",
+      "size": 2629,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/molten-flow/reference.md",
+      "sha256": "e83ddf14625ef5a326b08ebb30a057e554c18131acdc9149a758fc12d61ac7fe",
+      "size": 5201,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/molten-flow/starter.html",
+      "sha256": "932244ccacb5d329bd36260f13078fd5661871370676ae0cf030cfa15d388732",
+      "size": 52706,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/shader-hero/LICENSE",
+      "sha256": "eeaaa26f5c65cb6dfebf1c098ac2375fdcdb497cebf105b0542f229482b106f4",
+      "size": 1076,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/shader-hero/reference.md",
+      "sha256": "f0e48ce8dc17bc5b0ded7105e289255d767f122d049c552cd518c8afceaaa9e3",
+      "size": 5324,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/shader-hero/starter.html",
+      "sha256": "ccacf75e9c7e954084cb00d191b53408a6deb10faeb252878f7c09eb9f35a140",
+      "size": 79073,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/stellar-vortex/cover.webp",
+      "sha256": "d2c53fd5883a17d9c95d00d3cda862e6c9e2dedc2a1335bdea9706d3eb949c1a",
+      "size": 134588,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/stellar-vortex/effect.frag",
+      "sha256": "25dd354a80767bf01fb7520a42e81f305ccb8ce808aa31572f5d90bfb6723d97",
+      "size": 3427,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/stellar-vortex/reference.md",
+      "sha256": "863c064f08dd04eaca7a5721cd75457b2e67dbce4c5d80896c5732c0374d0e13",
+      "size": 5556,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/themes/stellar-vortex/starter.html",
+      "sha256": "3021590594b87b5646dfa5a6cf80ad6bdc066a286b18ff5ae6516cf4a05e1709",
+      "size": 200999,
+      "mode": "100644"
+    },
+    {
+      "path": "plugins/kai-slide-creator/vendor-manifest.json",
+      "sha256": "7fb502cbb11bb2e4d0d59623195efaa58d95ee9a51592e8dff44881670b63e57",
+      "size": 26720,
+      "mode": "100644"
+    },
+    {
+      "path": "registry-v2.json",
+      "sha256": "e4403f09426a73a1717a2eaf097e7aa13252926737a8145b8ed248a2aab7b061",
+      "size": 5498,
+      "mode": "100644"
+    },
+    {
+      "path": "registry.json",
+      "sha256": "3b033df6bad54d41358212fb3c7c1a41b5c46d66f24dc46429b4e5bfb704b01e",
+      "size": 6282,
+      "mode": "100644"
+    },
+    {
+      "path": "runtime-lock.json",
+      "sha256": "141600239882d83babad037d3dfadb3425b20e6997231eea410eff0266cbd410",
+      "size": 6978,
+      "mode": "100644"
+    },
+    {
+      "path": "scripts/update-registry-v2.mjs",
+      "sha256": "880e28dc5c7b43df889005f464d1075ababca57070d47c3cb2698bc304e9c259",
+      "size": 11452,
+      "mode": "100644"
+    },
+    {
+      "path": "scripts/vendor-manifest.py",
+      "sha256": "eaa3501cc2d98c1ec7012518a61e8889f3a7c618227802cf166f751b3ebe276c",
+      "size": 1376,
+      "mode": "100644"
+    },
+    {
+      "path": "scripts/vendor-runtimes.mjs",
+      "sha256": "b24bf8fdbb535a8d96be8b0a0b12104656b93df06130e738347a4380ac7de3a1",
+      "size": 20182,
+      "mode": "100644"
+    },
+    {
+      "path": "scripts/vendor.sh",
+      "sha256": "03b2199a7d307ee1094ceacda90f6ec1e58c0dd8bd970e2f37f1d1d479294db3",
+      "size": 7873,
+      "mode": "100755"
+    },
+    {
+      "path": "tests/mcp-events.test.mjs",
+      "sha256": "580eef2fd20d4133589dfd877d6ffee9f5b20e874f0bd720e9bbaf93d69005eb",
+      "size": 4730,
+      "mode": "100644"
+    },
+    {
+      "path": "tests/registry-integrity.test.mjs",
+      "sha256": "4500e1e73c7f210820abe41c974846b794c4c1aa4811a71d151c2f1727e8d2d4",
+      "size": 6259,
+      "mode": "100644"
+    },
+    {
+      "path": "tests/sync-smoke.mjs",
+      "sha256": "f9f3c47dc1c4c3c67150320dbff9d32343a9686f9fe4e621dc2ed9d08512d8df",
+      "size": 2118,
+      "mode": "100644"
+    }
+  ],
+  "requirements": "plugins/kai-slide-creator/mcp-servers/slide-renderer/requirements.txt",
+  "wheels": "plugins/kai-slide-creator/bundled-wheels",
+  "tests": [
+    "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests",
+    "plugins/kai-slide-creator/tests"
+  ],
+  "pytest": "8.4.2"
+}
