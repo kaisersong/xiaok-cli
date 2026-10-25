@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { normalizeEnhancedKeys, retainKeyboardProtocol } from '../../src/ui/keyboard-protocol.js';
+import { canMeasureTerminalCursor, normalizeEnhancedKeys, retainKeyboardProtocol } from '../../src/ui/keyboard-protocol.js';
 import { createTtyHarness } from '../support/tty.js';
 
 const outputTty = process.stdout.isTTY;
@@ -20,6 +20,21 @@ describe('keyboard protocol boundaries', () => {
     const h = createTtyHarness(); process.stdout.isTTY = true; process.stdin.isTTY = false;
     try { retainKeyboardProtocol()(); expect(h.output.raw).toBe(''); }
     finally { h.restore(); }
+  });
+
+  it('requires a real disambiguated ESC and a current keyboard owner before cursor queries', () => {
+    const h = createTtyHarness(); process.stdout.isTTY = true;
+    const release = retainKeyboardProtocol();
+    try {
+      expect(canMeasureTerminalCursor()).toBe(false);
+      normalizeEnhancedKeys(Buffer.from('\x1b[13u\x1b[120;9u'));
+      expect(canMeasureTerminalCursor()).toBe(false);
+      expect(normalizeEnhancedKeys(Buffer.from('\x1b')).toString()).toBe('\x1b');
+      expect(canMeasureTerminalCursor()).toBe(false);
+      normalizeEnhancedKeys(Buffer.from('\x1b[27u'));
+      expect(canMeasureTerminalCursor()).toBe(true);
+      release(); expect(canMeasureTerminalCursor()).toBe(false);
+    } finally { release(); h.restore(); }
   });
 
   it.each([
