@@ -76,11 +76,13 @@ describe('RuntimeFacade', () => {
 
   it('keeps one cache affinity and effective signal across a real tool-use continuation', async () => {
     const captured: Array<StreamOptions | undefined> = [];
+    const abortedAtCall: Array<boolean | undefined> = [];
     let callCount = 0;
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
       stream: (_messages, _tools, _systemPrompt, options) => {
         captured.push(options);
+        abortedAtCall.push(options?.signal?.aborted);
         callCount += 1;
         return callCount === 1
           ? streamChunks([
@@ -106,8 +108,10 @@ describe('RuntimeFacade', () => {
     expect(captured).toHaveLength(2);
     expect(captured[0]?.cacheKey).toBe(createPromptCacheAffinity(sessionId));
     expect(captured[1]?.cacheKey).toBe(captured[0]?.cacheKey);
-    expect(captured[1]?.signal?.aborted).toBe(false);
-    expect(captured[0]?.signal?.aborted).toBe(false);
+    // Each attempt's owned signal is released after the attempt settles; while
+    // the provider was streaming, the effective signal was still live.
+    expect(abortedAtCall).toEqual([false, false]);
+    expect(controller.signal.aborted).toBe(false);
     controller.abort();
     expect(captured[0]?.signal?.aborted).toBe(true);
     expect(captured[1]?.signal?.aborted).toBe(true);
