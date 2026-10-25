@@ -6,6 +6,7 @@ on:
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/runtime/**'
       - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/adapters/openai-provider-sse-error.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
@@ -14,6 +15,7 @@ on:
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/runtime/**'
       - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/adapters/openai-provider-sse-error.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
       - '.github/workflows/model-recovery.yml'
@@ -41,6 +43,7 @@ jobs:
         run: >
           npm run test:sandbox:run --
           .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ai/adapters/openai-provider-sse-error.test.js
           .test-dist/tests/ai/runtime/model-stream-recovery.test.js
           .test-dist/tests/ai/runtime/model-text-repetition.test.js
           .test-dist/tests/ai/runtime/agent-model-recovery.test.js
