@@ -673,10 +673,21 @@ describe('InProcessTaskRuntimeHost', () => {
     expect(await host.getActiveTask()).toBeNull();
   });
 
-  it.each(['runner unavailable', 'model_failed: MODEL_TEXT_REPETITION_DETECTED'])('persists failed snapshots with error event and salvage: %s', async message => {
-    const host = createHost(async () => {
-      throw new Error(message);
+  it.each([
+    { message: 'runner unavailable', repetition: false },
+    { message: 'model_failed: RATE_LIMIT', repetition: false },
+    { message: 'model_failed: MODEL_TEXT_REPETITION_DETECTED_EXTRA', repetition: false },
+    { message: 'model_failed: MODEL_TEXT_REPETITION_DETECTED', repetition: true },
+    { message: 'wrapped: MODEL_TEXT_REPETITION_DETECTED (provider)', repetition: true },
+    { message: 'opaque diagnostic', repetition: true, code: 'MODEL_TEXT_REPETITION_DETECTED' },
+    { message: 'outer failure', repetition: true, cause: { code: 'MODEL_TEXT_REPETITION_DETECTED' } },
+  ])('persists failed snapshots with error event and salvage: $message', async ({ message, repetition, ...fields }) => {
+    const runner = vi.fn(async ({ sessionId, emitRuntimeEvent }: Parameters<TaskRunner>[0]) => {
+      await emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId: 'turn_failure',
+        intentId: 'intent_failure', stepId: 'step_failure', delta: 'Accepted partial answer' });
+      throw Object.assign(new Error(message), fields);
     });
+    const host = createHost(runner);
     await host.createTask({
       prompt: '生成 A 客户方案 PPT',
       materials: [{ materialId: material.materialId }],
@@ -686,8 +697,18 @@ describe('InProcessTaskRuntimeHost', () => {
     const recovered = await host.recoverTask('task_1');
     expect(recovered.snapshot.status).toBe('failed');
     expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
-      { type: 'error', message, ...(message.startsWith('model_failed:') ? { retryable: false } : {}) },
+      { type: 'error', message, ...(repetition ? { retryable: false } : {}) },
     ]));
+    expect(recovered.snapshot.events).toContainEqual(expect.objectContaining({ type: 'assistant_delta', delta: 'Accepted partial answer' }));
+    await host.drain();
+    const replayed: DesktopTaskEvent[] = [];
+    for await (const event of host.subscribeTask('task_1')) replayed.push(event);
+    const failureIndex = replayed.findIndex(event => event.type === 'error');
+    expect(failureIndex).toBeGreaterThanOrEqual(0);
+    // After the failure only the terminal marker follows; no further model output.
+    expect(replayed.slice(failureIndex + 1)).toEqual([{ type: 'task_terminal', status: 'failed' }]);
+    expect(replayed).toEqual(recovered.snapshot.events);
+    expect(runner).toHaveBeenCalledOnce();
     expect(recovered.snapshot.salvage).toEqual({
       summary: ['已保留任务理解', '已保留 1 个材料引用'],
       reason: message,

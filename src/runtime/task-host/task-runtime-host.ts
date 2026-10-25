@@ -1,4 +1,4 @@
-import { MODEL_TEXT_REPETITION_CODE } from '../../ai/runtime/model-text-repetition.js';
+import { isModelTextRepetitionError } from '../../ai/runtime/model-text-repetition.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {getCompoundFinalPublicationBinding,type CompoundFinalPublicationTicket} from '../sol-pi/compound-publication-producer.js';
 import {computeSessionHistoryDigest} from '../../ai/runtime/session-store/store.js';
@@ -1380,7 +1380,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         reason: message,
       };
       // RuntimeFacade wraps model failures in a plain Error, losing diagnostic fields.
-      const retryable = message === MODEL_TEXT_REPETITION_CODE || message === `model_failed: ${MODEL_TEXT_REPETITION_CODE}`
+      const retryable = isModelTextRepetitionError(executionError)
         ? false
         : executionError && typeof executionError === 'object'
           ? (executionError as { retryable?: unknown }).retryable

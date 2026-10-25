@@ -1,4 +1,20 @@
 export const MODEL_TEXT_REPETITION_CODE = 'MODEL_TEXT_REPETITION_DETECTED';
+/** Shared classification for runtime diagnostics and user-facing error text. */
+export function isModelTextRepetitionError(error: unknown): boolean {
+  const seen = new Set<object>();
+  let current = error;
+  while (current != null) {
+    if (typeof current === 'string') return /\bMODEL_TEXT_REPETITION_DETECTED\b/.test(current);
+    if (typeof current !== 'object' || seen.has(current)) return false;
+    seen.add(current);
+    const diagnostic = current as { code?: unknown; message?: unknown; cause?: unknown };
+    if (diagnostic.code === MODEL_TEXT_REPETITION_CODE
+      || (typeof diagnostic.message === 'string' && /\bMODEL_TEXT_REPETITION_DETECTED\b/.test(diagnostic.message))) return true;
+    current = diagnostic.cause;
+  }
+  return false;
+}
+
 export const REPETITION_MIN_COPIES = 8;
 export const REPETITION_MIN_SPAN_CHARS = 512;
 export const STRUCTURAL_LINE_BACKSTOP_REPEATS = 50;

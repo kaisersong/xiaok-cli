@@ -9,14 +9,20 @@ it.each([false, true])('keeps accepted text without tools or fallback (binding c
     yield { type: 'text', delta: '普通正文重复。'.repeat(100) };
   });
   const changedConfig = { ...config, defaultModelId: 'selected' };
-  const loadConfig = vi.fn().mockResolvedValue(config);
+  let availableConfig = config;
+  const consultedConfigs: Config[] = [];
+  const loadConfig = vi.fn(async () => {
+    consultedConfigs.push(availableConfig);
+    return availableConfig;
+  });
   const createAdapter = vi.fn(() => ({ getModelName: () => 'Selected', stream: open }));
   const onRecovery = vi.fn();
   const model = await createProjectAgentModel({ modelId: 'selected', loadConfig, createAdapter });
-  // Make failure-time configuration differ from the initial selected binding.
+  // A changed backing config is available at failure time. Repetition must throw
+  // at the boundary before loadConfig can read it or activate recovery.
   if (bindingChanged) {
     changedConfig.models = { ...config.models, selected: { ...config.models.selected!, model: 'changed-wire-model' } };
-    loadConfig.mockResolvedValue(changedConfig);
+    availableConfig = changedConfig;
   }
   const delivered: StreamChunk[] = [];
   await expect((async () => {
@@ -27,4 +33,12 @@ it.each([false, true])('keeps accepted text without tools or fallback (binding c
   expect(createAdapter).toHaveBeenCalledOnce();
   expect(onRecovery).not.toHaveBeenCalled();
   expect(loadConfig).toHaveBeenCalledOnce();
+  await expect(loadConfig.mock.results[0]!.value).resolves.toBe(config);
+  // Prove the queued failure-time config really differs, without reading it:
+  // the production boundary above must prevent a second loadConfig call.
+  expect(consultedConfigs).toEqual([config]);
+  if (bindingChanged) {
+    expect(availableConfig).toBe(changedConfig);
+    expect(availableConfig.models.selected!.model).toBe('changed-wire-model');
+  }
 });

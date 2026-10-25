@@ -1,3 +1,4 @@
+import { isModelTextRepetitionError } from '../ai/runtime/model-text-repetition.js';
 import * as readline from 'readline';
 
 /** 流式输出文本（直接写 stdout，无换行缓冲） */
@@ -16,7 +17,7 @@ export function writeError(text: string): void {
 }
 
 export function formatErrorText(text: string): string {
-  if (/\bMODEL_TEXT_REPETITION_DETECTED\b/.test(text)) {
+  if (isModelTextRepetitionError(text)) {
     return '检测到重复输出，已停止\n重新发送上一条请求以重新生成。';
   }
   return text.replace(/^Error:\s*/u, '');

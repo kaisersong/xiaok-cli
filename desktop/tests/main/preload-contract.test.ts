@@ -1335,3 +1335,11 @@ it.each([undefined, false, true])('preserves optional task error retryable=%s ac
   };
   expect(captureTask7Event(event)).toEqual(event);
 });
+
+it('replays an old persisted error without retryable and validates its schema', () => {
+  const persisted = JSON.parse('{"type":"error","message":"model_failed: MODEL_TEXT_REPETITION_DETECTED"}');
+  const replayed = captureTask7Event(persisted);
+  expect(replayed).toEqual(persisted);
+  expect(replayed).not.toHaveProperty('retryable');
+  expect(() => captureTask7Event({ ...persisted, retryable: 'false' })).toThrow('task_event_projection_unavailable');
+});

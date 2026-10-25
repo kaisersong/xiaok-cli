@@ -159,12 +159,13 @@ it('keeps partial output and offers manual regeneration after repetition', async
   mockCreateTask.mockResolvedValue({ taskId: 'regenerated' });
   fireEvent.click(screen.getByRole('button', { name: '重新生成' }));
   await waitFor(() => expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'original request' })));
+  expect(within(screen.getByTestId('chat-messages')).getByText('Already emitted partial answer')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
 });
 
-async function renderFailure(message: string, history = false, materials: Array<{ filePath: string; name: string }> = []) {
+async function renderFailure(message: string, history = false, materials: Array<{ filePath: string; name: string }> = [], legacyError = false) {
   mockGetThread.mockResolvedValue({ id: 'rep', title: 'test', status: history ? 'failed' : 'running', mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task-rep', taskIds: ['task-rep'] });
-  mockRecoverTask.mockResolvedValue({ snapshot: { taskId: 'task-rep', sessionId: 's', status: history ? 'failed' : 'running', prompt: 'original request', materials, events: history ? [{ type: 'error', message, retryable: false }] : [], createdAt: 1, updatedAt: 2 } });
+  mockRecoverTask.mockResolvedValue({ snapshot: { taskId: 'task-rep', sessionId: 's', status: history ? 'failed' : 'running', prompt: 'original request', materials, events: history ? [{ type: 'error', message, ...(legacyError ? {} : { retryable: false }) }] : [], createdAt: 1, updatedAt: 2 } });
   let handler: ((event: unknown) => void) | undefined;
   mockSubscribeTask.mockImplementation((_id, next) => { handler = next; return () => {}; });
   render(<MemoryRouter initialEntries={['/t/rep']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
@@ -203,4 +204,11 @@ it('regenerates the original history prompt with its files', async () => {
   fireEvent.click(await screen.findByRole('button', { name: '重新生成' }));
   await waitFor(() => expect(mockCreateTaskWithFiles).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'original request', filePaths: files.map(file => file.filePath) })));
   expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
+});
+
+it('replays a legacy persisted repetition error without retryable', async () => {
+  await renderFailure('model_failed: MODEL_TEXT_REPETITION_DETECTED', true, [], true);
+  expect(await screen.findByRole('button', { name: '重新生成' })).toBeTruthy();
+  expect(screen.getByText('检测到重复输出，已停止', { exact: false })).toBeTruthy();
+  expect(mockCreateTask).not.toHaveBeenCalled();
 });
