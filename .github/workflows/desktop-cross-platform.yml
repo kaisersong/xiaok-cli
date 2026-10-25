@@ -15,12 +15,16 @@ on:
       - 'desktop/**'
       - 'src/ai/runtime/**'
       - 'src/ai/adapters/**'
+      - 'src/platform/mcp/python-server.ts'
+      - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
   pull_request:
     paths:
       - 'desktop/**'
       - 'src/ai/runtime/**'
       - 'src/ai/adapters/**'
+      - 'src/platform/mcp/python-server.ts'
+      - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
   workflow_dispatch: {}
 
@@ -71,9 +75,21 @@ jobs:
           tests/main/project-stream-reconnect-regression.test.ts
           tests/renderer/chat-helpers-error-sanitization.test.ts
           tests/renderer/chat-shell-draft-prompt.test.tsx
+          tests/main/conversation-activity-ipc.test.ts
+          tests/main/artifact-export-package.test.ts
+
+      - name: Activity owner handoff regression (macOS)
+        if: runner.os == 'macOS'
+        run: cd desktop && npm run test -- --run tests/main/activity-owner-attach-retry.test.ts
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
+
+      - name: Managed Python runtime regression
+        run: cd desktop && npm run test -- --run tests/main/python-runtime.test.ts tests/main/deploy-bundled-plugins.test.ts
+
+      - name: Managed Python CLI resolver regression
+        run: node node_modules/vitest/vitest.mjs run tests/platform/mcp/python-server.test.ts --config vitest.config.ts
 
   windows-kimi-packaged-smoke:
     name: Windows packaged Kimi K3 smoke

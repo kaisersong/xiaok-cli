@@ -403,7 +403,7 @@ export function getDesktopMemoryBackend(dataRoot: string): 'layered' | 'fallback
   getDesktopMemoryStore(dataRoot);
   return _desktopMemoryStoreBackend;
 }
-import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
+import { resolvePythonServerLaunch } from './python-runtime.js';
 import { buildManagedXiaokAgentPayload, buildManagedXiaokAgentSemanticPayload } from './managed-xiaok-agent.js';
 import { ArtifactWorkspaceStore } from './artifact-workspace-store.js';
 import { ArtifactWorkspaceFileManager } from './artifact-workspace-files.js';
@@ -1537,8 +1537,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               });
               continue;
             }
-            const command = isPythonServer
-              ? normalizePythonServerCommand(launch.command, process.platform, managedPythonCommand)
+            const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
+            const pythonLaunch = isPythonServer ? resolvePythonServerLaunch({
+              command: launch.command,
+              args: launch.args,
+              env: baseEnv,
+              platform: process.platform,
+              preferredPython: managedPythonCommand,
+            }) : undefined;
+            const command = pythonLaunch
+              ? pythonLaunch.command
               : isNodeServer
                 ? (process.env.XIAOK_NODE_CMD || process.execPath)
                 : launch.command;
@@ -1546,9 +1554,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             // Design v58 §6.1: no Xiaok-owned daemon launch. The official
             // `cua-driver mcp` proxy is the only owner of app-daemon reuse and
             // auto-relaunch, so a second `open -n` owner is removed here.
-            const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
-            const runtimeEnv = isPythonServer
-              ? buildPythonServerEnv(baseEnv)
+            const runtimeEnv = pythonLaunch
+              ? pythonLaunch.env
               : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
                 ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
                 : isCuaServer && process.platform === 'win32'
@@ -1557,7 +1564,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             const connection = await createMcpClientConnection(server.name, {
               type: 'stdio',
               command,
-              args: launch.args,
+              args: pythonLaunch?.args ?? launch.args,
               env: runtimeEnv,
               timeout: server.timeout,
               protocol: server.protocol,
@@ -3715,17 +3722,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return attempt;
     },
     conversationActivity: activityEnabled && multiAgentStore ? {
-      mcpInputs: async (watchId: string, actor: ActivityActor) => { await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
+      mcpInputs: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
       mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
       mcpCancel: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
-      unread: (actor: ActivityActor) => activityService!.unreadThreads(actor),
-      read: (threadId: string, through: number, actor: ActivityActor) => activityService!.markRead(threadId, through, actor),
-      overview: (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => activityService!.subscribeOverview(actor, callback),
-      getWork: (watchId: string, actor: ActivityActor) => activityService!.getWork(watchId, actor),
+      unread: async (actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.unreadThreads(actor); },
+      read: async (threadId: string, through: number, actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.markRead(threadId, through, actor); },
+      overview: async (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => { await awaitActivityAttachment(); return activityService!.subscribeOverview(actor, callback); },
+      getWork: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.getWork(watchId, actor); },
       list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
       subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
-      reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
-      stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
+      reporting: async (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.updateReporting(watchId, preference, revision, actor); },
+      stop: async (watchId: string, revision: number, actor: ActivityActor) => { await awaitActivityAttachment(); const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
       projectChanged: async (projectId: string) => {
         await awaitActivityAttachment();
         if (!activitySources) throw new Error('activity_owner_unavailable');

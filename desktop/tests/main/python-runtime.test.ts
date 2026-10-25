@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildPythonServerEnv,
+  resolvePythonServerLaunch,
   detectPythonCompatibilityTag,
   ensureSlideRendererPythonReady,
   isCompatibleSlideRendererWheelhouse,
@@ -11,7 +12,7 @@ import {
 describe('python runtime helper', () => {
   it('returns ready immediately when imports already work', async () => {
     const exec: PythonExecFile = vi.fn(async (_command, args) => {
-      if (args[0] === '-c') return;
+      if (args[1] === '-c') return;
       throw new Error(`unexpected args: ${args.join(' ')}`);
     });
 
@@ -25,10 +26,10 @@ describe('python runtime helper', () => {
     expect(result).toEqual({ ready: true, mode: 'existing' });
     expect(exec).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledWith('C:\\runtime\\python.exe', [
-      '-c',
+      '-B', '-c',
       expect.stringContaining('from mcp.server.mcpserver import MCPServer'),
-    ], { timeout: 15_000 });
-    expect((exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.[1]).toContain("version('mcp') == '2.3.0'");
+    ], expect.objectContaining({ timeout: 15_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
+    expect((exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.[2]).toContain("version('mcp') == '2.3.0'");
   });
 
   it('falls back to online pip install when offline wheel install fails', async () => {
@@ -51,13 +52,13 @@ describe('python runtime helper', () => {
 
     expect(result).toEqual({ ready: true, mode: 'online' });
     expect(exec).toHaveBeenNthCalledWith(2, 'C:\\runtime\\python.exe', [
-      '-m', 'pip', 'install', '--no-index', '--find-links', 'C:\\wheels',
+      '-B', '-m', 'pip', 'install', '--no-index', '--find-links', 'C:\\wheels',
       'mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
-    ], { timeout: 60_000 });
+    ], expect.objectContaining({ timeout: 60_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
     expect(exec).toHaveBeenNthCalledWith(4, 'C:\\runtime\\python.exe', [
-      '-m', 'pip', 'install',
+      '-B', '-m', 'pip', 'install',
       'mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
-    ], { timeout: 120_000 });
+    ], expect.objectContaining({ timeout: 120_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
     expect(markerWrites).toEqual(['C:\\runtime\\.deps-installed']);
   });
 
@@ -77,9 +78,9 @@ describe('python runtime helper', () => {
 
     expect(result).toEqual({ ready: true, mode: 'offline' });
     expect(exec).toHaveBeenNthCalledWith(2, '/runtime/bin/python3', [
-      '-m', 'pip', 'install', '--no-index', '--find-links', '/wheels',
+      '-B', '-m', 'pip', 'install', '--no-index', '--find-links', '/wheels',
       'mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
-    ], { timeout: 60_000 });
+    ], expect.objectContaining({ timeout: 60_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
   });
 
   it('does not trust a stale marker when imports are still broken', async () => {
@@ -117,9 +118,9 @@ describe('python runtime helper', () => {
 
     await expect(detectPythonCompatibilityTag('/runtime/bin/python3', exec)).resolves.toBe('cp311');
     expect(exec).toHaveBeenCalledWith('/runtime/bin/python3', [
-      '-c',
+      '-B', '-c',
       'import sys; print(f"cp{sys.version_info[0]}{sys.version_info[1]}")',
-    ], { timeout: 15_000 });
+    ], expect.objectContaining({ timeout: 15_000, env: expect.objectContaining({ PYTHONDONTWRITEBYTECODE: '1' }) }));
   });
 
   it('rejects macOS native wheels for Windows offline slide-renderer installs', () => {
@@ -195,5 +196,34 @@ describe('python runtime helper', () => {
       'pydantic-2.13.4-py3-none-any.whl',
       'jsonschema-4.26.0-py3-none-any.whl',
     ], 'linux', 'x64')).toBe(false);
+  });
+});
+
+
+describe('Python launch policy', () => {
+  it.each(['darwin', 'win32'] as const)('protects the actual managed runtime on %s including custom isolated plugins', (platform) => {
+    const args = ['-I', '-E', 'custom.py'];
+    const env = { KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '' };
+    const result = resolvePythonServerLaunch({ command: 'python3', args, env, platform, preferredPython: '/owned/python' });
+    expect(result).toEqual({ command: '/owned/python', args: ['-B', ...args], env: { ...env, PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' } });
+    expect(args).toEqual(['-I', '-E', 'custom.py']);
+    expect(env).toEqual({ KEEP: 'sentinel', PYTHONDONTWRITEBYTECODE: '' });
+  });
+
+  it('preserves unmanaged Python fallback arguments and policy', () => {
+    const args = ['-E', 'custom.py'];
+    const env = { PYTHONDONTWRITEBYTECODE: '', KEEP: 'sentinel' };
+    const result = resolvePythonServerLaunch({ command: 'python3', args, env, platform: 'win32' });
+    expect(result).toEqual({ command: 'python', args, env: { ...env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' } });
+    expect(result.args).toBe(args);
+  });
+
+  it.each(['/custom/python', 'node', 'cua-driver'])('does not route or change an explicit non-managed command %s', (command) => {
+    const args = ['server.py'];
+    const env = { KEEP: 'sentinel' };
+    const result = resolvePythonServerLaunch({ command, args, env, platform: 'darwin', preferredPython: '/owned/python' });
+    expect(result).toEqual({ command, args, env });
+    expect(result.args).toBe(args);
+    expect(result.env).toBe(env);
   });
 });
