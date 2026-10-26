@@ -2,7 +2,8 @@ export default {
   cacheDir: '.test-cache/vitest-sandbox',
   test: {
     globalSetup: ['./tests/support/profile-account.global.mjs'],
-    setupFiles: ['./tests/support/profile-account.setup.mjs','./.test-dist/tests/support/setup-host-env.js'],
+    // Host-env scrub snapshots the inherited env first; account isolation then rewrites HOME.
+    setupFiles: ['./.test-dist/tests/support/setup-host-env.js','./tests/support/profile-account.setup.mjs'],
     sequence: { setupFiles: 'list' },
     globals: true,
     environment: 'node',

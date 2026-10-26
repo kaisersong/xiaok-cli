@@ -64,6 +64,13 @@ it('still rejects a conflicting source when the recorded path is live',()=>{
  fake.path=a;fake.target=b;fake.hits=0;
  try{expect(()=>registerOrdinaryProfileSource({kind:'session-root',directory:b})).toThrow('profile_source_registry_identity');expect(fake.hits).toBeGreaterThan(0);}finally{fake.path='';fake.target='';}
 });
+it('live identity conflict still errors',()=>{
+ // Public API only: B observes A's live dev/ino, so sourceId matches while namespaceId differs.
+ const a=join(root,'A'),b=join(root,'B');mkdirSync(a);mkdirSync(b);registerOrdinaryProfileSource({kind:'session-root',directory:a});const before=readFileSync(registry());
+ fake.path=b;fake.target=a;fake.hits=0;
+ try{expect(()=>registerOrdinaryProfileSource({kind:'session-root',directory:b})).toThrow('profile_source_registry_identity');expect(fake.hits).toBeGreaterThan(0);}finally{fake.path='';fake.target='';}
+ expect(readFileSync(registry())).toEqual(before);expect(readOrdinaryProfileSources()!.sources.map(row=>row.directory.canonicalPath)).toEqual([a]);
+});
 it('preserves unknown component history when a sqlite file is replaced',()=>{
  const a=join(root,'A');mkdirSync(a);const db=join(a,'loop.sqlite');writeFileSync(db,'old');
  const input={kind:'sqlite-db' as const,directory:a,databaseBasename:'loop.sqlite',snapshotFormat:'loop-sqlite-v1' as const},components=['loop'] as const;
