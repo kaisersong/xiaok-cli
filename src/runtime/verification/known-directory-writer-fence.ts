@@ -26,11 +26,11 @@ function canonical(path:string):string{
 /** No directory or registry creation on the ordinary admission read path. */
 function location(){
  const account=userInfo(),uid=process.getuid?.();if(!uid||uid!==process.geteuid?.()||account.uid!==uid)fail('user');
- const home=resolve(account.homedir);chain(home);const original=directory(home,uid),paths=[join(home,'.xiaok'),join(home,'.xiaok','profile-sources'),join(home,'.xiaok','profile-sources','writer-fences')];
+ const home=account.homedir,base=join(home,'.xiaok');chain(home);const original=directory(home,uid),paths=[base,join(base,'profile-sources'),join(base,'profile-sources','writer-fences')];
  const observed:Array<{path:string;identity:string;mode:number}>=[];
  let absent=false;
  for(let i=0;i<paths.length;i++){try{const stat=directory(paths[i]!,uid,i===2?0o700:undefined);observed.push({path:paths[i]!,identity:identity(stat),mode:stat.mode});}catch(error){if(!missing(error))throw error;absent=true;break;}}
- function current(){if(identity(directory(home,uid))!==identity(original))fail('directory_changed');for(const item of observed){const stat=directory(item.path,uid,item.path===paths[2]?0o700:undefined);if(identity(stat)!==item.identity||stat.mode!==item.mode)fail('directory_changed');}}
+ function current(){if(userInfo().homedir!==home)fail('directory_changed');if(identity(directory(home,uid))!==identity(original))fail('directory_changed');for(const item of observed){const stat=directory(item.path,uid,item.path===paths[2]?0o700:undefined);if(identity(stat)!==item.identity||stat.mode!==item.mode)fail('directory_changed');}}
  current();return {uid,home,root:paths[2]!,parent:paths[1]!,absent,current};
 }
 
@@ -68,7 +68,7 @@ export function createKnownDirectoryWriterFence(rootDir:string,kind:'task-root'|
   },
   persist(){
    supported();for(const item of held)closeActual(item);unknownOwners.delete(owner);let loc=location();const before=scope(loc);
-   if(loc.absent){directory(loc.parent,loc.uid);try{mkdirSync(loc.root,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}loc=location();}
+   if(loc.absent){for(const path of [dirname(loc.parent),loc.parent]){try{mkdirSync(path,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}directory(path,loc.uid);}loc.current();try{mkdirSync(loc.root,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}loc=location();}
    const target=join(loc.root,before.name+'.json');
    function check(){loc.current();if(!scope(loc).encoded.equals(before.encoded))fail('source_changed');}
    function syncParent(){use(loc.root,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW,fd=>{check();fsyncSync(fd);check();});}

@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {chmodSync,mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,statSync,symlinkSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -23,7 +24,7 @@ import {readOrdinaryProfileSources,registerOrdinaryProfileSource} from '../../..
 import {FileTaskSnapshotStore} from '../../../src/runtime/task-host/snapshot-store.js';
 import type {TaskSnapshot} from '../../../src/runtime/task-host/types.js';
 let root:string;
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-task-fence-')));boundary.home=join(root,'account');mkdirSync(boundary.home,{mode:0o750});chmodSync(boundary.home,0o750);mkdirSync(join(boundary.home,'.xiaok'),{mode:0o755});chmodSync(join(boundary.home,'.xiaok'),0o755);mkdirSync(join(boundary.home,'.xiaok/profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-task-fence-')));boundary.home=join(root,'account');setProfileTestHome(boundary.home);mkdirSync(boundary.home,{mode:0o750});chmodSync(boundary.home,0o750);mkdirSync(join(boundary.home,'.xiaok'),{mode:0o755});chmodSync(join(boundary.home,'.xiaok'),0o755);mkdirSync(join(boundary.home,'.xiaok/profile-sources'),{mode:0o700});});
 afterEach(()=>{io.write=undefined;io.sync=undefined;io.faultSync=undefined;io.faultClose=undefined;io.temporary.clear();io.paths.clear();io.swap=false;io.faultParent=undefined;io.parents.clear();rmSync(root,{recursive:true,force:true});});
 const snapshot=(taskId:string):TaskSnapshot=>({taskId,sessionId:'session-original',status:'running',prompt:'original',materials:[],events:[],createdAt:1,updatedAt:2});
 type Fencable={fenceKnownWriter(source:'user'|'agent'|'scheduler'):Promise<void>};

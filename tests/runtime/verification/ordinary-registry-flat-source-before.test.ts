@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -11,7 +12,7 @@ vi.mock('../../../src/runtime/verification/migration-markers.js', () => ({readIn
 // Deliberately no value import of the new storage codec or a new production API.
 import {registerOrdinaryProfileSource, readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 let root = '';
-beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-flat-source-before-'))); state.home = join(root, 'account'); mkdirSync(state.home); });
+beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-flat-source-before-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); });
 afterEach(() => { if (root) rmSync(root, {recursive: true, force: true}); root = ''; });
 it('migrates a valid near-limit v1 flat registry only when a real new source no longer fits', () => {
   const MAX = 512 * 1024;
