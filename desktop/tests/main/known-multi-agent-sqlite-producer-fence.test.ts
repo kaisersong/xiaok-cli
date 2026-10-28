@@ -1,4 +1,5 @@
 // @vitest-environment node
+import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -18,7 +19,7 @@ import {FileTaskSnapshotStore} from '../../../src/runtime/task-host/snapshot-sto
 import {MaterialRegistry} from '../../../src/runtime/task-host/material-registry.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 let root:string;const cleanup:Array<()=>void|Promise<void>>=[];
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-multiagent-producer-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-multiagent-producer-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
 afterEach(async()=>{const errors:unknown[]=[];for(const action of cleanup.splice(0).reverse())try{await action();}catch(error){errors.push(error);}rmSync(root,{recursive:true,force:true});expect(errors).toEqual([]);});
 function storeFixture(){const directory=join(root,'groups'),store=new DesktopMultiAgentStore(join(directory,'groups.db'));cleanup.push(()=>store.close());store.registerThread({threadId:'thread',profileId:'profile',workspaceId:'workspace',cwd:root});return {store,directory};}
 function publish(directory:string){createKnownDirectoryWriterFence(directory,'sqlite-db').persist();}

@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {once} from 'node:events';
 import {renameSync,realpathSync,mkdtempSync,mkdirSync,readFileSync,rmSync,writeFileSync,symlinkSync} from 'node:fs';
@@ -9,13 +10,13 @@ vi.mock('node:os',async load=>{const actual=await load<typeof import('node:os')>
 vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInstalledCurrentProfile:()=>({kind:state.route})}));
 import {registerOrdinaryProfileSource,readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 let root:string;
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'profile-source-registry-')));state.home=join(root,'account');mkdirSync(state.home);state.route='ordinary';state.failDirectorySync=false;state.failRegistryFileSync=false;state.onDirectorySync=undefined;state.deviceOffset=0n;state.devicePaths.clear();state.descriptorPaths.clear();});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'profile-source-registry-')));state.home=join(root,'account');setProfileTestHome(state.home);mkdirSync(state.home);state.route='ordinary';state.failDirectorySync=false;state.failRegistryFileSync=false;state.onDirectorySync=undefined;state.deviceOffset=0n;state.devicePaths.clear();state.descriptorPaths.clear();});
 afterEach(()=>{rmSync(root,{recursive:true,force:true});vi.unstubAllEnvs();});
 function source(name:string){const p=join(root,name);mkdirSync(p);return p;}
-it('keeps actual sources across config changes in the fixed OS account registry',()=>{
+it('keeps distinct registries for explicit config directories',()=>{
  const a=source('old'),b=source('new');vi.stubEnv('XIAOK_CONFIG_DIR',a);vi.stubEnv('HOME',a);registerOrdinaryProfileSource({kind:'session-root',directory:a});
  vi.stubEnv('XIAOK_CONFIG_DIR',b);vi.stubEnv('HOME',b);registerOrdinaryProfileSource({kind:'task-root',directory:b});
- const facts=readOrdinaryProfileSources();expect(facts?.sources).toHaveLength(2);expect(facts?.generation).toBe('2');expect(facts?.legacyInventoryRequired).toBe(true);expect(readFileSync(join(state.home,'.xiaok/profile-sources/registry.json'),'utf8')).toContain('old');
+ const facts=readOrdinaryProfileSources();expect(facts?.sources).toHaveLength(1);expect(facts?.generation).toBe('1');expect(facts?.legacyInventoryRequired).toBe(true);expect(readFileSync(join(a,'profile-sources','registry.json'),'utf8')).toContain('old');expect(facts?.sources[0]!.directory.canonicalPath).toBe(b);
 });
 it('does not declare absent inventory complete and does not issue snapshot hashes',()=>{
  expect(readOrdinaryProfileSources()).toBeUndefined();const directory=source('source');registerOrdinaryProfileSource({kind:'session-root',directory});registerOrdinaryProfileSource({kind:'session-root',directory});
@@ -27,8 +28,8 @@ it('retains separate same-directory SQLite and Session original lock domains',()
 it('rejects pending/protected/offline registration without changing old registry',()=>{
  const directory=source('source');registerOrdinaryProfileSource({kind:'session-root',directory});const before=readOrdinaryProfileSources();for(const route of ['protected','unavailable']){state.route=route;expect(()=>registerOrdinaryProfileSource({kind:'task-root',directory})).toThrow('profile_source_registry_route');expect(readOrdinaryProfileSources()).toEqual(before);}
 });
-it('rejects corrupt registry, path symlink and reused path identity',()=>{
- const directory=source('source');registerOrdinaryProfileSource({kind:'session-root',directory});renameSync(directory,directory+'-old');mkdirSync(directory);expect(()=>registerOrdinaryProfileSource({kind:'session-root',directory})).toThrow('profile_source_registry_identity');
+it('rejects corrupt registry and path symlink after rebinding a reused path',()=>{
+ const directory=source('source');registerOrdinaryProfileSource({kind:'session-root',directory});renameSync(directory,directory+'-old');mkdirSync(directory);registerOrdinaryProfileSource({kind:'session-root',directory});expect(readOrdinaryProfileSources()!.generation).toBe('2');
  const link=join(root,'alias');symlinkSync(directory,link);expect(()=>registerOrdinaryProfileSource({kind:'task-root',directory:link})).toThrow('profile_source_registry_identity');
  writeFileSync(join(state.home,'.xiaok/profile-sources/registry.json'),'{}');expect(()=>registerOrdinaryProfileSource({kind:'task-root',directory})).toThrow('profile_source_registry_schema');
 });
@@ -44,11 +45,11 @@ it('preserves SQLite layout history across one coherent device renumbering',asyn
  expect(rebound.version).toBe(2);expect(rebound.generation).toBe('2');expect(rebound.sources).toHaveLength(1);expect(current.sourceId).not.toBe(first.sourceId);expect(current.componentHistory).toEqual(first.componentHistory);expect(current.directory.device).toBe(String(BigInt(first.directory.device)+1n));expect(current.database?.device).toBe(expectedDevice);
  registerOrdinarySQLiteLayout(input,layout,`${current.database!.device}:${current.database!.inode}`);expect(readOrdinaryProfileSources()!.generation).toBe('2');
 });
-it('rejects partial device drift and device drift combined with identity changes',()=>{
- const directory=source('sqlite-partial-device'),database=join(directory,'sessions.sqlite');writeFileSync(database,'first');const input={kind:'sqlite-db' as const,directory,databaseBasename:'sessions.sqlite',snapshotFormat:'session-sqlite-v1' as const};registerOrdinaryProfileSource(input);const registry=join(state.home,'.xiaok/profile-sources/registry.json'),before=readFileSync(registry,'utf8');
- state.devicePaths.add(realpathSync(directory));state.deviceOffset=1n;expect(()=>registerOrdinaryProfileSource(input)).toThrow('profile_source_registry_identity');expect(readFileSync(registry,'utf8')).toBe(before);
- state.devicePaths.add(database);expect(()=>registerOrdinaryProfileSource({...input,snapshotFormat:'goal-sqlite-v1'})).toThrow('profile_source_registry_identity');expect(readFileSync(registry,'utf8')).toBe(before);
- renameSync(database,database+'.old');writeFileSync(database,'second');expect(()=>registerOrdinaryProfileSource(input)).toThrow('profile_source_registry_identity');expect(readFileSync(registry,'utf8')).toBe(before);
+it('replaces stale partial device and database identities',()=>{
+ const directory=source('sqlite-partial-device'),database=join(directory,'sessions.sqlite');writeFileSync(database,'first');const input={kind:'sqlite-db' as const,directory,databaseBasename:'sessions.sqlite',snapshotFormat:'session-sqlite-v1' as const};registerOrdinaryProfileSource(input);
+ state.devicePaths.add(realpathSync(directory));state.deviceOffset=1n;registerOrdinaryProfileSource(input);expect(readOrdinaryProfileSources()!.generation).toBe('2');
+ state.devicePaths.add(database);registerOrdinaryProfileSource({...input,snapshotFormat:'goal-sqlite-v1'});expect(readOrdinaryProfileSources()!.generation).toBe('3');
+ renameSync(database,database+'.old');writeFileSync(database,'second');registerOrdinaryProfileSource(input);expect(readOrdinaryProfileSources()!.generation).toBe('4');expect(readOrdinaryProfileSources()!.sources).toHaveLength(1);
 });
 
 it('requires the durable directory barrier again after visible rename with failed fsync',()=>{
