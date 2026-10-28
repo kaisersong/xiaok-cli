@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync,realpathSync,statSync,rmSync,readFileSync,writeFileSync,mkdirSync} from 'node:fs';
@@ -12,7 +13,7 @@ vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>({.
 import {startProfileSourceCapture,readProfileSqliteSchema,type ProfileCaptureSource} from '../../../src/runtime/verification/profile-source-capture.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'captured-kswarm-'))),directoryHelper=join(root,'directory'),sqliteHelper=join(root,'sqlite');
 beforeAll(()=>{
- discovery.home=join(root,'account');mkdirSync(discovery.home);
+ discovery.home=join(root,'account');setProfileTestHome(discovery.home);mkdirSync(discovery.home);
  const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');
  execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);

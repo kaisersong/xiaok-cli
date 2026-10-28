@@ -8,10 +8,11 @@ vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>{co
 import {FileTaskSnapshotStore} from '../../../src/runtime/task-host/snapshot-store.js';
 import {readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 import type {TaskSnapshot} from '../../../src/runtime/task-host/types.js';
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 let work:string,root:string;const stores:FileTaskSnapshotStore[]=[];
 const task=(id='task-a'):TaskSnapshot=>({taskId:id,sessionId:'original-session',status:'running',prompt:'Original task',materials:[],events:[],createdAt:1,updatedAt:2});
 function store(path=root,diagnostics={}){const result=new FileTaskSnapshotStore(path,diagnostics);stores.push(result);return result;}
-beforeEach(()=>{work=realpathSync(mkdtempSync(join(tmpdir(),'task-source-routing-')));state.home=join(work,'account');mkdirSync(state.home);root=join(work,'tasks');state.route='ordinary';state.read=undefined;});
+beforeEach(()=>{work=realpathSync(mkdtempSync(join(tmpdir(),'task-source-routing-')));state.home=join(work,'account');mkdirSync(state.home);setProfileTestHome(state.home);root=join(work,'tasks');state.route='ordinary';state.read=undefined;});
 afterEach(async()=>{state.read=undefined;await Promise.all(stores.splice(0).map(s=>s.closeAndDrain()));rmSync(work,{recursive:true,force:true,maxRetries:3});});
 it('records the actual first write root and preserves prior roots with duplicate generations unchanged',async()=>{
  const first=store();await first.save(task());const original=readOrdinaryProfileSources()!;
