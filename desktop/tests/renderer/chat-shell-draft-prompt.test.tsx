@@ -1029,6 +1029,38 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(mockSubscribeTask).not.toHaveBeenCalled();
   });
 
+  it.each(['live', 'history'])('shows repetition failure and retained prefix in %s ChatShell', async mode => {
+    let handler: ((event: any) => void) | undefined;
+    mockGetThread.mockResolvedValue({ id: 'thread-repeat', title: 'Example', status: 'idle', mode: 'work',
+      createdAt: 1, updatedAt: 1, starred: false, gtdBucket: 'inbox', pinnedAt: null,
+      currentTaskId: mode === 'history' ? 'task-repeat' : null, taskIds: mode === 'history' ? ['task-repeat'] : [] });
+    mockRecoverTask.mockResolvedValue({ snapshot: { taskId: 'task-repeat', sessionId: 'session-repeat', status: 'failed',
+      prompt: '检查示例状态', materials: [], createdAt: 1, updatedAt: 2,
+      events: [{ type: 'assistant_delta', eventId: 'prefix', delta: '保留的执行前缀。' },
+        { type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED' }, { type: 'task_terminal', status: 'failed' }] } });
+    mockCreateTask.mockResolvedValue({ taskId: 'task-repeat' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubscribeTask.mockImplementation((_id, callback) => { handler = callback; return () => {}; });
+    render(<MemoryRouter initialEntries={['/t/thread-repeat']}><LocaleProvider><Routes>
+      <Route path="/t/:taskId" element={<ChatShell />} />
+    </Routes></LocaleProvider></MemoryRouter>);
+    if (mode === 'live') {
+      await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+      fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+      await waitFor(() => expect(handler).toBeTypeOf('function'));
+      act(() => {
+        handler?.({ type: 'assistant_delta', eventId: 'prefix', delta: '保留的执行前缀。' });
+        handler?.({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED' });
+        handler?.({ type: 'task_terminal', status: 'failed' });
+      });
+    }
+    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('failed'));
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('模型连续重复输出');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('本轮任务未完成');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('保留的执行前缀。');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('MODEL_TEXT_REPETITION_DETECTED');
+  });
+
   it('shows localized live failures and preserves partial assistant output', async () => {
     let subscribedHandler: ((event: { type: string; delta?: string; message?: string; eventId?: string }) => void) | null = null;
     mockGetThread.mockResolvedValue({

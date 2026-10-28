@@ -1,0 +1,25 @@
+name: Provider stream lifecycle
+on:
+  push:
+    paths: ['package.json', 'package-lock.json', 'src/ai/adapters/**', 'src/ai/runtime/model-stream-recovery.ts', 'src/runtime/task-host/**', 'tests/runtime/task-host/task-recovery-race.test.ts', 'tests/ai/adapters/**', 'tests/e2e/provider-stream-memory.mjs', '.github/workflows/provider-stream-lifecycle.yml']
+  pull_request:
+    paths: ['package.json', 'package-lock.json', 'src/ai/adapters/**', 'src/ai/runtime/model-stream-recovery.ts', 'src/runtime/task-host/**', 'tests/runtime/task-host/task-recovery-race.test.ts', 'tests/ai/adapters/**', 'tests/e2e/provider-stream-memory.mjs', '.github/workflows/provider-stream-lifecycle.yml']
+jobs:
+  stream-ownership:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-2022]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:sandbox:build
+      - run: npm run test:sandbox:run -- .test-dist/tests/ai/adapters/openai-stream-lifecycle.test.js .test-dist/tests/ai/adapters/openai.test.js .test-dist/tests/ai/adapters/claude.test.js .test-dist/tests/ai/runtime/agent-model-recovery.test.js .test-dist/tests/runtime/task-host/task-recovery-race.test.js
+      - run: node --expose-gc --max-old-space-size=192 tests/e2e/provider-stream-memory.mjs .test-dist/src
+      - run: node --expose-gc --max-old-space-size=192 tests/e2e/provider-stream-memory.mjs .test-dist/src --hold-open
