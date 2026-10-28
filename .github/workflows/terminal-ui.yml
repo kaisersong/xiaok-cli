@@ -65,9 +65,13 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci --ignore-scripts
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
+      - shell: bash
+        run: bash .github/scripts/retry.sh npm ci --ignore-scripts
       # Memory search assertions exercise Chinese/English token boundaries.
-      - run: npm rebuild better-sqlite3 node-pty nodejieba
+      - shell: bash
+        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty nodejieba
       - run: npm run build:release
       - run: npm run test:sandbox:build
       - name: Test image layout, questions and actual chat entry

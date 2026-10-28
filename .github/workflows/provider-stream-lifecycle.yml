@@ -18,7 +18,10 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
+      - shell: bash
+        run: bash .github/scripts/retry.sh npm ci
       - run: npm run test:sandbox:build
       - run: npm run test:sandbox:run -- .test-dist/tests/ai/adapters/openai-stream-lifecycle.test.js .test-dist/tests/ai/adapters/openai.test.js .test-dist/tests/ai/adapters/claude.test.js .test-dist/tests/ai/runtime/agent-model-recovery.test.js .test-dist/tests/runtime/task-host/task-recovery-race.test.js
       - run: node --expose-gc --max-old-space-size=192 tests/e2e/provider-stream-memory.mjs .test-dist/src
