@@ -21,7 +21,7 @@ import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
-import { isModelTextRepetitionError, sanitizeUserFacingErrorMessage } from '../lib/error-display';
+import { isRepetitionStopEvent, sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
@@ -658,7 +658,8 @@ export function ChatShell() {
           break;
         }
         lastLiveErrorRef.current = { taskKey: eventTaskKey, rawMessage: msg };
-        setRepetitionStopped(isModelTextRepetitionError(msg));
+        const repetitionStop = isRepetitionStopEvent(event as { message: string; retryable?: boolean; code?: string });
+        setRepetitionStopped(repetitionStop);
         const partialText = streamRef.current;
         const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
           providerAuth: t.chatShell.modelAuthFailed,
@@ -692,7 +693,7 @@ export function ChatShell() {
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: isModelTextRepetitionError(msg) ? reason : t.chatShell.taskExecutionFailed(reason),
+              content: repetitionStop ? t.chatShell.modelTextRepetition : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -1041,7 +1042,8 @@ export function ChatShell() {
           lastProgress = null;
         } else if (ev.type === 'error') {
           const rawMessage = (ev as { type: 'error'; message: string }).message;
-          setRepetitionStopped(isModelTextRepetitionError(rawMessage));
+          const repetitionStop = isRepetitionStopEvent(ev as { message: string; retryable?: boolean; code?: string });
+          setRepetitionStopped(repetitionStop);
           if (accumulated.trim()) {
             msgs.push({
               id: `msg-assistant-partial-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1063,7 +1065,7 @@ export function ChatShell() {
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: isModelTextRepetitionError(rawMessage) ? reason : t.chatShell.taskExecutionFailed(reason),
+              content: repetitionStop ? t.chatShell.modelTextRepetition : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }

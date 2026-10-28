@@ -1343,3 +1343,9 @@ it('replays an old persisted error without retryable and validates its schema', 
   expect(replayed).not.toHaveProperty('retryable');
   expect(() => captureTask7Event({ ...persisted, retryable: 'false' })).toThrow('task_event_projection_unavailable');
 });
+
+it('preserves repetition code and rejects unknown error codes', () => {
+  const event = { type: 'error', message: 'opaque', code: 'MODEL_TEXT_REPETITION_DETECTED', retryable: false };
+  expect(captureTask7Event(event)).toEqual(event);
+  expect(() => captureTask7Event({ ...event, code: 'OTHER' })).toThrow('task_event_projection_unavailable');
+});

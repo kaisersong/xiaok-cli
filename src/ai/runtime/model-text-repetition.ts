@@ -1,18 +1,24 @@
 export const MODEL_TEXT_REPETITION_CODE = 'MODEL_TEXT_REPETITION_DETECTED';
-/** Shared classification for runtime diagnostics and user-facing error text. */
+/** Matches diagnostic code prefix chains, never incidental mentions. */
+export function isModelTextRepetitionMessage(text: string): boolean {
+  return /^(?:[A-Za-z_][A-Za-z0-9_]*:\s*)*MODEL_TEXT_REPETITION_DETECTED(?![A-Za-z0-9_])/.test(text);
+}
+
+/** Prefer structured diagnostics throughout the cause chain before text fallback. */
 export function isModelTextRepetitionError(error: unknown): boolean {
   const seen = new Set<object>();
+  const messages: string[] = [];
   let current = error;
   while (current != null) {
-    if (typeof current === 'string') return /\bMODEL_TEXT_REPETITION_DETECTED\b/.test(current);
-    if (typeof current !== 'object' || seen.has(current)) return false;
+    if (typeof current === 'string') { messages.push(current); break; }
+    if (typeof current !== 'object' || seen.has(current)) break;
     seen.add(current);
     const diagnostic = current as { code?: unknown; message?: unknown; cause?: unknown };
-    if (diagnostic.code === MODEL_TEXT_REPETITION_CODE
-      || (typeof diagnostic.message === 'string' && /\bMODEL_TEXT_REPETITION_DETECTED\b/.test(diagnostic.message))) return true;
+    if (diagnostic.code === MODEL_TEXT_REPETITION_CODE) return true;
+    if (typeof diagnostic.message === 'string') messages.push(diagnostic.message);
     current = diagnostic.cause;
   }
-  return false;
+  return messages.some(isModelTextRepetitionMessage);
 }
 
 export const REPETITION_MIN_COPIES = 8;

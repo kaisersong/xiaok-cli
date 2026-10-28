@@ -697,7 +697,7 @@ describe('InProcessTaskRuntimeHost', () => {
     const recovered = await host.recoverTask('task_1');
     expect(recovered.snapshot.status).toBe('failed');
     expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
-      { type: 'error', message, ...(repetition ? { retryable: false } : {}) },
+      { type: 'error', message, ...(repetition ? { retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' } : {}) },
     ]));
     expect(recovered.snapshot.events).toContainEqual(expect.objectContaining({ type: 'assistant_delta', delta: 'Accepted partial answer' }));
     await host.drain();

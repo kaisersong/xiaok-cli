@@ -27,7 +27,7 @@ export const TASK7_EVENT = z.discriminatedUnion('type', [
   event('needs_user', { question }), event('question_resolved', { questionId: id }),
   event('task_cancelled', { taskId: id, reason: text, partialText: text.optional() }), event('result', { result }),
   event('artifact_recorded', { artifactId: id, kind: text, label: text, filePath: text, previewAvailable: z.boolean(), turnId: id, creator: text.optional(), mimeType: text.optional() }),
-  event('salvage', { salvage }), event('error', { message: text, retryable: z.boolean().optional() }),
+  event('salvage', { salvage }), event('error', { message: text, retryable: z.boolean().optional(), code: z.literal('MODEL_TEXT_REPETITION_DETECTED').optional() }),
   event('canvas_tool_call', { toolName: text, input: z.unknown(), toolUseId: id, eventId: id, ts: time.optional(), displayInputSummary: text.optional() }),
   event('canvas_tool_result', { toolName: text, toolUseId: id, ok: z.boolean(), response: text, eventId: id, ts: time.optional() }),
   event('canvas_file_changed', { filePath: text, change: z.enum(['add', 'change', 'unlink']), eventId: id }),

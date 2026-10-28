@@ -1,4 +1,4 @@
-import { isModelTextRepetitionError } from '../../../../src/ai/runtime/model-text-repetition';
+import { isModelTextRepetitionError, isModelTextRepetitionMessage } from '../../../../src/ai/runtime/model-text-repetition';
 export { isModelTextRepetitionError };
 
 // 待设计师确认：缺少模型 Key 的保守文案，设置入口暂以文字呈现。
@@ -86,4 +86,11 @@ export function sanitizeUserFacingErrorMessage(
     return options?.providerService ?? MODEL_SERVICE_ERROR_MESSAGE
   }
   return text.replace(/^Error:\s*/i, '').trim() || fallbackMessage
+}
+
+/** Structured current events with anchored fallback for legacy persisted events. */
+export function isRepetitionStopEvent(event: { message: string; retryable?: boolean; code?: string }): boolean {
+  if (event.retryable === true) return false;
+  if (event.code !== undefined) return event.code === 'MODEL_TEXT_REPETITION_DETECTED';
+  return isModelTextRepetitionMessage(event.message);
 }

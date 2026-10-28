@@ -1379,14 +1379,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         ],
         reason: message,
       };
-      // RuntimeFacade wraps model failures in a plain Error, losing diagnostic fields.
-      const retryable = isModelTextRepetitionError(executionError)
-        ? false
-        : executionError && typeof executionError === 'object'
-          ? (executionError as { retryable?: unknown }).retryable
-          : undefined;
       await this.appendEvent(taskId, { type: 'error', message,
-        ...(typeof retryable === 'boolean' ? { retryable } : {}),
+        ...(isModelTextRepetitionError(executionError)
+          ? { retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' as const } : {}),
       }, { runtimeOrigin: true });
       await this.updateSnapshot(taskId, { status: 'failed', salvage }, execution);
       await this.clearSourceActiveTask(taskId);

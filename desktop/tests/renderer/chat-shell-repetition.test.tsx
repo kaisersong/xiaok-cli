@@ -148,7 +148,7 @@ it('keeps partial output and offers manual regeneration after repetition', async
       type: 'turn_failed', sessionId: 's', turnId: 'turn',
       error: Object.assign(new Error('MODEL_TEXT_REPETITION_DETECTED'), { retryable: false }),
     } });
-    expect(failure).toEqual({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED', retryable: false });
+    expect(failure).toEqual({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED', retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' });
     handler(failure);
   });
   expect(screen.getByText('Already emitted partial answer')).toBeTruthy();
