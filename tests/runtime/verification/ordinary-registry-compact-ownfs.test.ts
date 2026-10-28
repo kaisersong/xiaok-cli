@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSync, lstatSync, readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -13,7 +14,7 @@ vi.mock('../../../src/runtime/verification/migration-markers.js', () => ({readIn
 import {registerOrdinaryProfileSource, readOrdinaryProfileSources, parseOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 import {encodeOrdinaryProfileSourceStorage as encode} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
 let root = '';
-beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-registry-compact-'))); state.home = join(root, 'account'); mkdirSync(state.home); state.route = 'ordinary'; state.failDirectorySync = false; });
+beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-registry-compact-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); state.route = 'ordinary'; state.failDirectorySync = false; });
 afterEach(() => { state.failDirectorySync = false; if (root) rmSync(root, {recursive: true, force: true}); root = ''; });
 function registryPath() { return join(state.home, '.xiaok/profile-sources/registry.json'); }
 function initial() { const directory = join(root, 'actual-source'); mkdirSync(directory); registerOrdinaryProfileSource({kind: 'session-root', directory}); return directory; }

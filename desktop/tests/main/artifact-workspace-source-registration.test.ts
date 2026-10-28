@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {mkdtempSync,mkdirSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -10,7 +11,7 @@ import {createDesktopServices} from '../../electron/desktop-services.js';
 import {readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 import type {KSwarmService} from '../../electron/kswarm-service.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'artifact-main-source-'))),prior=process.env.XIAOK_CONFIG_DIR;
-beforeAll(()=>{fixture.home=join(root,'account');mkdirSync(fixture.home);process.env.XIAOK_CONFIG_DIR=join(root,'config');});
+beforeAll(()=>{fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home);process.env.XIAOK_CONFIG_DIR=join(root,'config');});
 afterAll(()=>{if(prior===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=prior;rmSync(root,{recursive:true,force:true});});
 it('registers the workspace source from the real Main service composition',async()=>{
  const kswarmService={start:async()=>{},stop:async()=>{},restart:async()=>{},getStatus:()=>({running:false,port:4400,pid:null,restartCount:0,lastError:null}),onStatusChange:()=>()=>{},getDesktopMutationToken:()=> 'fixture',request:async()=>new Response('{}',{status:501})} as unknown as KSwarmService;
