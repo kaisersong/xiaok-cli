@@ -50,7 +50,9 @@ export const KSWARM_PROJECT_FACT_SCHEMA = z.object({
   workFolder: maybeText, artifactsDir: maybeText, workspaceResultOperations: factObject,
   roomEventSeq: maybeNumber, roomEventOutbox: factArray, roomLink: factObject,
   roomOutboxRetryOperations: factObject, clientRequestKey: maybeText, autoStartTransactions: factArray,
-  startPolicyDecision: factObject, closeSummary: maybeText, riskProfile: factObject,
+  // KSwarm emits risk levels as strings; retain historical object display facts.
+  startPolicyDecision: factObject, closeSummary: maybeText,
+  riskProfile: z.union([text, z.record(z.string(), facts)]).nullable().optional(),
   planRevisionRequired: factObject, deliveredAt: timestamp, artifactEvidenceExtensions: factObject,
 }).catchall(facts);
 export const KSWARM_PROJECT_MODE_RESULT_SCHEMA = z.object({ ok: z.literal(true), project: KSWARM_PROJECT_FACT_SCHEMA }).strict();
