@@ -2111,6 +2111,27 @@ describe('InProcessTaskRuntimeHost', () => {
       expect(emitSettled).toBe(true);
     });
 
+    it('answers recoverTask polls for a live execution without queueing behind its blocked mutation chain', async () => {
+      const blockingStore = new InstrumentedSnapshotStore(join(rootDir, 'poll-snapshots'));
+      blockingStore.blockAssistantDeltaSaves();
+      const runner: TaskRunner = async ({ sessionId, emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn_poll', intentId: 'intent_poll', stepId: 'step_poll', delta: 'x'.repeat(16 * 1024),
+        });
+      };
+      const host = createHostWithStore(runner, blockingStore, 'task_poll');
+
+      await host.createTask({ prompt: '验证轮询不排队', materials: [] });
+      await blockingStore.waitForBlockedAssistantSave();
+      const polled = await Promise.race([
+        host.recoverTask('task_poll').then(result => result.snapshot.status),
+        new Promise<'queued'>(resolve => setTimeout(() => resolve('queued'), 500)),
+      ]);
+      blockingStore.releaseAssistantDeltaSaves();
+      expect(polled).toBe('running');
+      await waitFor(async () => (await host.recoverTask('task_poll')).snapshot.status === 'completed', 5000);
+    });
+
     it('preserves each delta exactly once when timer and threshold flushes overlap', async () => {
       const blockingStore = new InstrumentedSnapshotStore(join(rootDir, 'overlap-snapshots'));
       blockingStore.blockAssistantDeltaSaves();
