@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,existsSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -14,7 +15,7 @@ import {AgentSessionState} from '../../../src/ai/runtime/session.js';
 import {createSessionExecutionAuthority,createSessionExecutionContext} from '../../../src/ai/runtime/session-store/execution-authority.js';
 import {computeSessionSnapshotHash} from '../../../src/ai/runtime/session-store/migration.js';
 let root:string;
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-session-fence-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-session-fence-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});});
 afterEach(()=>{fixture.faultPath='';fixture.swapPath='';fixture.fault=undefined;rmSync(root,{recursive:true,force:true});});
 type Fencable={fenceKnownWriter(source:'user'|'agent'|'scheduler'):Promise<void>};
 const fence=(store:FileSessionStore)=>(store as unknown as Fencable).fenceKnownWriter('user');
