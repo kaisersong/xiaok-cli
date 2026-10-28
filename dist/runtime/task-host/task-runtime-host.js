@@ -213,7 +213,6 @@ export class InProcessTaskRuntimeHost {
     taskHistories = new Map();
     activeExecutions = new Map();
     executionPromises = new Map();
-    staleRecoveryWrites = new Set();
     taskWatchdogs = new Map();
     taskOrdinal = 0;
     permissionModes = new Map();
@@ -371,8 +370,6 @@ export class InProcessTaskRuntimeHost {
      * here, so `drain()` observes a real map rather than a second counter.
      */
     startTrackedExecution(taskId) {
-        if (this.staleRecoveryWrites.has(taskId))
-            throw new Error(`task recovery in progress: ${taskId}`);
         if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId)) {
             throw new Error(`task already started: ${taskId}`);
         }
@@ -1683,44 +1680,20 @@ export class InProcessTaskRuntimeHost {
         return false;
     }
     async recoverStaleRunningTask(snapshot) {
-        if (snapshot.status !== 'running')
+        if (snapshot.status !== 'running' || this.activeExecutions.has(snapshot.taskId)) {
             return snapshot;
-        const taskId = snapshot.taskId;
-        let recovered = false;
-        await this.enqueueMutation(taskId, async () => {
-            // An earlier async read can return running after this execution completed.
-            // Read under the same queue that owns terminal writes, then keep both
-            // original durable event/snapshot transitions in that queue.
-            const current = await this.requireSnapshot(taskId);
-            if (current.status !== 'running' || this.activeExecutions.has(taskId) || this.executionPromises.has(taskId))
-                return;
-            if (Object.hasOwn(current, 'multiAgentPreparation'))
-                throw new Error('multi_agent_recovery_unconfirmed');
-            this.staleRecoveryWrites.add(taskId);
-            try {
-                const error = { type: 'error', message: 'stale_running_task_recovered' };
-                const withError = { ...current, events: [...current.events, error], updatedAt: this.now() };
-                await this.saveSnapshot(withError, current);
-                this.pushLiveEvent(taskId, error, withError.events.length - 1, withError.sessionId);
-                this.schedulePersistedEvent({ taskId, eventIndex: withError.events.length - 1, event: error, snapshot: withError });
-                const terminal = { type: 'task_terminal', status: 'failed' };
-                const next = { ...withError, status: 'failed',
-                    salvage: { summary: ['任务执行进程已中断，已保留当前快照，可重新发起或基于现有上下文继续。'], reason: 'stale_running_task_recovered' },
-                    events: [...withError.events, terminal], updatedAt: this.now() };
-                await this.saveSnapshot(next, withError);
-                this.pushLiveEvent(taskId, terminal, next.events.length - 1, next.sessionId);
-                this.schedulePersistedEvent({ taskId, eventIndex: next.events.length - 1, event: terminal, snapshot: next });
-                recovered = true;
-            }
-            finally {
-                this.staleRecoveryWrites.delete(taskId);
-            }
-        });
-        if (recovered) {
-            await this.clearSourceActiveTask(taskId);
-            this.closeSubscribers(taskId);
         }
-        return this.requireSnapshot(taskId);
+        if (Object.hasOwn(snapshot, 'multiAgentPreparation'))
+            throw new Error('multi_agent_recovery_unconfirmed');
+        const salvage = {
+            summary: ['任务执行进程已中断，已保留当前快照，可重新发起或基于现有上下文继续。'],
+            reason: 'stale_running_task_recovered',
+        };
+        await this.appendEvent(snapshot.taskId, { type: 'error', message: 'stale_running_task_recovered' });
+        await this.updateSnapshot(snapshot.taskId, { status: 'failed', salvage });
+        await this.clearSourceActiveTask(snapshot.taskId);
+        this.closeSubscribers(snapshot.taskId);
+        return this.requireSnapshot(snapshot.taskId);
     }
     async appendEvent(taskId, event, options) {
         let persisted;
