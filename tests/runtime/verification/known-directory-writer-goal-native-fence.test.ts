@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {chmodSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,realpathSync,renameSync,rmSync,statSync,writeFileSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -12,7 +13,7 @@ import {createGoalState} from '../../../src/runtime/goal/reducer.js';
 import {FileGoalNativeJournal,type GoalNativeMutation} from '../../../src/runtime/goal/native-mutation-journal.js';
 import {writeFileAtomicallySync} from '../../../src/utils/atomic-file.js';
 let root:string;
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-goal-native-fence-')));boundary.home=join(root,'account');mkdirSync(boundary.home,{mode:0o750});chmodSync(boundary.home,0o750);mkdirSync(join(boundary.home,'.xiaok'),{mode:0o755});chmodSync(join(boundary.home,'.xiaok'),0o755);mkdirSync(join(boundary.home,'.xiaok','profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-goal-native-fence-')));boundary.home=join(root,'account');setProfileTestHome(boundary.home);mkdirSync(boundary.home,{mode:0o750});chmodSync(boundary.home,0o750);mkdirSync(join(boundary.home,'.xiaok'),{mode:0o755});chmodSync(join(boundary.home,'.xiaok'),0o755);mkdirSync(join(boundary.home,'.xiaok','profile-sources'),{mode:0o700});});
 afterEach(()=>rmSync(root,{recursive:true,force:true}));
 function row():GoalNativeMutation{return {id:'draft',revision:1,sessionId:'session',kind:'create',previous:null,target:{version:1,kind:'goal',sessionId:'session',goalId:'goal',epoch:1,objective:'Original goal',completionCriterion:null,expectedEvidenceKinds:['answer']},turnLimit:3,definition:{version:1,obligations:[{obligationId:'original',predicateId:'exact-content',predicateVersion:'1',semantics:'current-subject',recipe:{kind:'artifact-content',checks:[{id:'content',path:'result.txt',sha256:'a'.repeat(64),structure:'utf8'}]}}]},enrollmentRequestId:'draft-enrollment',applicationRequestId:'draft-application',status:'reserved',createdAt:1000,updatedAt:1000};}
 const put=(journal:FileGoalNativeJournal,next:GoalNativeMutation,requestSource:'user'|'scheduler'='user',expectedRevision:number|null=null)=>journal.put({sessionId:'session',requestSource,expectedRevision,next});
