@@ -261,6 +261,8 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
+  localCommands?: import('./ChatInput').LocalChatCommand[];
+  inputAccessory?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -290,7 +292,7 @@ interface ChatViewProps {
 
 export function ChatView({
   thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
-  executionConnection,
+  executionConnection, localCommands, inputAccessory,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
@@ -663,7 +665,9 @@ export function ChatView({
         }}
       >
         {activityContent}
+        {inputAccessory}
         <ChatInput
+          localCommands={localCommands}
           value={prompt}
           onChange={onPromptChange}
           onSubmit={onSubmit}

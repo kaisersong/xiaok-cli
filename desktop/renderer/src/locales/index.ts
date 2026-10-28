@@ -8,7 +8,7 @@ export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
   loopPublication: import('./loop-publication').LoopPublicationLabels;
-  observation: {enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
+  observation: {menuTitle:string;refresh:string;commandHint:string;dismiss:string;pending:string;disabled:string;running:string;enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
     compoundExperiment:string;compoundStep:Record<'not_started'|'pending'|'denied'|'succeeded'|'failed'|'cancelled'|'unknown',string>;compoundEdit:(status:string)=>string;compoundValidation:(status:string)=>string;compoundUnknown:(count:number)=>string;
     semanticState:Record<'waiting'|'compacted'|'skipped'|'failed',string>;semanticReason:Record<'economics'|'changed'|'no-gain'|'budget'|'unavailable',string>;
     semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>string;semanticExperiment:string};
