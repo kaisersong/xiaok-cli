@@ -25,7 +25,13 @@ interface SkillItem {
   tier: string;
 }
 
+export interface LocalChatCommand {
+  name: string;
+  description: string;
+}
+
 interface ChatInputProps {
+  localCommands?: LocalChatCommand[];
   value?: string;
   onChange?: (value: string) => void;
   onSubmit: (text: string, files: AttachedFile[]) => void | boolean | Promise<void | boolean>;
@@ -69,7 +75,7 @@ function resolveMentionTrigger(value: string, caret: number, enabled: boolean): 
   return { start: caret - tokenLength, end: caret, query: match[1].toLowerCase() };
 }
 
-export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles, mentionItems = [], mentionAllLabel }: ChatInputProps) {
+export function ChatInput({ localCommands = [], value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles, mentionItems = [], mentionAllLabel }: ChatInputProps) {
   const { t } = useLocale();
   const resolvedPlaceholder = placeholder ?? t.chatInput.replyPlaceholder;
   const [internalValue, setInternalValue] = useState(value ?? '');
@@ -226,7 +232,9 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     }
   }, [internalValue, mentionTrigger]);
 
-  const matchedSkills = skills.filter(s =>
+  const isLocalCommand = localCommands.some(command => internalValue.trim().split(/\s+/)[0] === `/${command.name}`);
+  const matchedSkills = [...localCommands.map(command => ({ ...command, aliases: [], source: 'builtin', tier: 'builtin' })),
+    ...skills.filter(skill => !localCommands.some(command => command.name === skill.name))].filter(s =>
     s.name.toLowerCase().includes(slashQuery) ||
     s.aliases.some(a => a.toLowerCase().includes(slashQuery))
   );
@@ -368,7 +376,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (isRunning && onQueue && (internalValue.trim() || files.length > 0)) {
+      if (!isLocalCommand && isRunning && onQueue && (internalValue.trim() || files.length > 0)) {
         onQueue(internalValue.trim() || t.chatInput.processFiles, files);
         setInternalValue('');
         onChange?.('');

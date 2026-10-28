@@ -14,6 +14,9 @@ vi.mock('../../renderer/src/components/ChatRightSurface',()=>({ChatRightSurface:
 vi.mock('../../renderer/src/components/TaskPanel',()=>({TaskPanel:(p:any)=><div>{p.goalContent}</div>}));
 vi.mock('../../renderer/src/components/CanvasPanel',()=>({CanvasPanel:()=>null}));
 vi.mock('../../renderer/src/components/ChatView',()=>({ChatView:(p:any)=><div>
+ {p.inputAccessory}
+ <button onClick={()=>void p.onSubmit('/observation')}>open observation</button>
+ <button onClick={()=>void p.onSubmit('/observation on')}>observation with old arguments</button>
  <output data-testid="thread-current">{p.thread?.currentTaskId??''}</output><output data-testid="chat-status">{p.status}</output>
  <output data-testid="chat-history">{p.messages?.map((m:any)=>m.content).join('\n')}</output>
  <button type="button" onClick={()=>void p.onSubmit('  owned prompt  ')}>submit ordinary prompt</button>
@@ -36,6 +39,7 @@ async function setup(locale:'zh'|'en'='en') {
  window.xiaokDesktop=createPreloadApi({invoke:async(channel:string,...args:unknown[])=>{calls.push([channel,...args]);return Reflect.apply(f.listeners.get(channel)!,undefined,[{sender:f.sender,senderFrame:f.frame},...args]);},on(){},off(){},removeListener(){},send(){}} as never);
  const view=render(<MemoryRouter initialEntries={['/t/thread_1']}><LocaleProvider><NavigateThread/><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
  await screen.findByTestId('chat-status');await waitFor(()=>expect(state.getThread).toHaveBeenCalledWith('thread_1'));
+ fireEvent.click(screen.getByRole('button',{name:'open observation'}));await screen.findByRole('region',{name:(locale==='zh'?zh:en).observation.menuTitle});
  return {...f,ordinary,calls,view,labels:(locale==='zh'?zh:en).observation};
 }
 it.each(['zh','en'] as const)('%s ChatShell native draft -> real bridge/preload/Main create consumes real approval once, exact thread/prompt/materials and updates thread before subscribe',async locale=>{
@@ -70,3 +74,9 @@ it('ChatShell healthy draft submit is one admission, even under two immediate cl
 // Layout/ChatView and unrelated ordinary storage are surrogates. ObservationControls, ChatShell,
 // the observation bridge methods, preload, Main registrar and WeakMap consumption are production.
 // No actual model/controller/native/material/metadata/P4 operations or whole-parent qualification.
+it('ChatShell consumes observation status without creating a model task',async()=>{
+ const f=await setup();expect(screen.getByRole('button',{name:f.labels.enable})).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'observation with old arguments'}));await screen.findByText(f.labels.unavailable);expect(f.ordinary.calls).toHaveLength(0);expect(state.createTask).not.toHaveBeenCalled();expect(f.calls.some(call=>call[0]==='desktop:prepareObservationTask')).toBe(false);
+});
+it('ChatShell held prepare cannot publish a draft after switching between empty threads',async()=>{
+ const f=await setup(),held=deferred<any>();window.xiaokDesktop.prepareObservationTask=()=>held.promise;fireEvent.click(screen.getByRole('button',{name:f.labels.enable}));fireEvent.click(screen.getByRole('button',{name:'change ordinary thread'}));await waitFor(()=>expect(state.getThread).toHaveBeenCalledWith('thread_2'));await act(async()=>held.resolve({draftId:'late-approved',model:'fixture',expiresAt:Date.now()+10000}));expect(screen.queryByText(f.labels.ready)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'submit ordinary prompt'}));await waitFor(()=>expect(state.createTask).toHaveBeenCalled());expect(f.ordinary.calls).toHaveLength(0);
+});
