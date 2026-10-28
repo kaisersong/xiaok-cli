@@ -22,3 +22,9 @@ it.each(['build', 'run'])('preserves original structured cause from facade %s fa
   });
   await expect(facade.runTurn({ sessionId: 's', cwd: '/ws', source: 'chat', input: 'hello' }, () => {})).rejects.toHaveProperty('cause', original);
 });
+it('keeps the repetition sub-type after normalization to model_failed', async () => {
+  const { normalizeRuntimeError } = await import('../../../src/ai/runtime/runtime-errors.js');
+  expect(normalizeRuntimeError(Object.assign(new Error(code), { code, retryable: false }))).toEqual({ code: 'model_failed', message: code, retryable: false, detail: 'model_text_repetition' });
+  expect(normalizeRuntimeError(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))).not.toHaveProperty('detail');
+  expect(normalizeRuntimeError(Object.assign(new Error('bad request'), { status: 400 }))).not.toHaveProperty('detail');
+});

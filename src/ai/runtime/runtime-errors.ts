@@ -12,6 +12,8 @@ export interface RuntimeErrorShape {
     | 'kimi_k3_durable_resume_unsupported';
   message: string;
   retryable: boolean;
+  /** Sub-type kept after normalization so consumers can tell repetition apart from other model failures. */
+  detail?: 'model_text_repetition';
 }
 
 export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
@@ -40,7 +42,7 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
   }
   const transportCode = typeof errorCode === 'string' ? errorCode : '';
   if (transportCode === MODEL_TEXT_REPETITION_CODE || message === MODEL_TEXT_REPETITION_CODE) {
-    return { code: 'model_failed', message: MODEL_TEXT_REPETITION_CODE, retryable: false };
+    return { code: 'model_failed', message: MODEL_TEXT_REPETITION_CODE, retryable: false, detail: 'model_text_repetition' };
   }
   const streamFailure = getOpenAIStreamFailure(error);
   if (streamFailure) return { code: 'model_failed', ...streamFailure };

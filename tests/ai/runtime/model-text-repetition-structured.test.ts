@@ -41,3 +41,14 @@ it('finds blocks after unrelated history and across arbitrary delta boundaries',
     expect(() => run('unrelated\n' + block.repeat(10), size)).toThrow();
   }
 });
+it.each([
+  ['2-line log', ['INFO worker 0 started', '[WARN] worker 1 slow']],
+  ['20-line timestamped log', Array.from({ length: 20 }, (_, i) => `2026-10-28T09:00:${String(i).padStart(2, '0')}Z step ${i}`)],
+  ['mixed log/table', ['12:34:56 sync begin', '| shard | 3 |', '[ERROR] retry shard 3']],
+])('detects %s blocks at ten copies across delta boundaries', (_name, lines) => {
+  const block = lines.map(line => line + '\n').join('');
+  for (const size of [1, 13, 100000]) {
+    expect(() => run(block.repeat(9), size)).not.toThrow();
+    expect(() => run(block.repeat(10), size)).toThrow('MODEL_TEXT_REPETITION_DETECTED');
+  }
+});
