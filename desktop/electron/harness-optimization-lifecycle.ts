@@ -44,7 +44,11 @@ export class HarnessOptimizationLifecycle {
       witness = { schemaVersion: 1, ownerId: randomUUID(), initOperationId: randomUUID(), canonicalRoot: this.lock.root,
         identity: this.lock.identity, initialized: false, initPhase: 'owner_created' };
       await writeHarnessFile(this.witnessPath, witness, true);
-    } else witness = JSON.parse(await fs.readFile(this.witnessPath, 'utf8')) as HarnessOwnerWitness;
+    } else {
+      const contents = await fs.readFile(this.witnessPath, 'utf8');
+      try { witness = JSON.parse(contents) as HarnessOwnerWitness; }
+      catch { throw new Error('owner_witness_invalid'); }
+    }
     if (witness.schemaVersion !== 1 || typeof witness.initialized !== 'boolean'
       || !/^[a-f0-9-]{36}$/.test(witness.ownerId) || !/^[a-f0-9-]{36}$/.test(witness.initOperationId)
       || witness.canonicalRoot !== this.lock.root || witness.identity !== this.lock.identity
@@ -75,9 +79,16 @@ export class HarnessOptimizationLifecycle {
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
     const result: HarnessCloseIntent[] = [];
     for (const name of files) {
+      if (/^[a-f0-9-]{36}\.json\.[a-f0-9-]{36}\.tmp$/.test(name)) {
+        await fs.unlink(join(this.journalDir, name)).catch(() => {});
+        continue;
+      }
       if (!/^[a-f0-9-]{36}\.json$/.test(name)) throw new Error('journal_invalid');
       const path = join(this.journalDir, name); await present(path);
-      const value = JSON.parse(await fs.readFile(path, 'utf8')) as HarnessCloseIntent;
+      const contents = await fs.readFile(path, 'utf8');
+      let value: HarnessCloseIntent;
+      try { value = JSON.parse(contents) as HarnessCloseIntent; }
+      catch { throw new Error('journal_invalid'); }
       if (`${value.operationId}.json` !== name || !['all', 'research'].includes(value.scope) || typeof value.disable !== 'boolean'
         || !Number.isSafeInteger(value.ownerEpoch) || value.ownerEpoch < 1
         || !Array.isArray(value.knownSends) || value.knownSends.some(id => typeof id !== 'string')) throw new Error('journal_invalid');
@@ -96,10 +107,10 @@ export class HarnessOptimizationLifecycle {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       // Only the same root-held, main-issued operation reaches this retry path.
       await present(path);
-      const handle = await fs.open(path, 'r+');
-      try { await handle.truncate(0); await handle.writeFile(`${JSON.stringify(intent)}\n`); await handle.sync(); }
-      finally { await handle.close(); }
-      await syncDirectory(this.journalDir);
+      const contents = await fs.readFile(path, 'utf8');
+      try { if (JSON.stringify(JSON.parse(contents)) === JSON.stringify(intent)) return; }
+      catch { /* Replace a malformed journal atomically as well. */ }
+      await writeHarnessFile(path, intent);
     }
   }
   async clearJournal(operationId: string) {

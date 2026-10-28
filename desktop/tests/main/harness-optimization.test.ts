@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createHarnessOptimizationRuntime } from '../../electron/harness-optimization-service.js';
 import type { HarnessResearchManifest } from '../../electron/harness-optimization-types.js';
+import { harnessOwnerPlatformQualified } from '../../electron/harness-optimization-owner-lock.js';
 
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 const roots: string[] = [];
@@ -42,7 +43,37 @@ afterEach(async () => {
   clock = Date.UTC(2026, 9, 20, 12);
 });
 
-describe('D0 real local owner and configuration', () => {
+// The D0 owner uses a darwin-only OS lock (harness-optimization-owner-lock.ts). On other
+// platforms the real runtime must fail closed, so the darwin-only scenarios are gated and
+// the unqualified-platform behaviour is asserted instead of failing with optimization_unavailable.
+const ownerQualified = harnessOwnerPlatformQualified(process.platform);
+
+describe('D0 actor checks and unqualified platforms', () => {
+  it('denies agent, scheduler and forged user identities on every mutation', async () => {
+    const { host } = await open();
+    for (const requestSource of ['agent', 'scheduler', 'user']) {
+      const fake = { requestSource, principalId: 'local-user' };
+      await expect(host.api.saveConfig({ mode: 'probe' }, fake)).rejects.toThrow('actor_forbidden');
+      await expect(host.api.setEnabled(false, fake)).rejects.toThrow('actor_forbidden');
+      await expect(host.api.issueResearchIntent({ manifestId: 'x' }, fake)).rejects.toThrow('actor_forbidden');
+      await expect(host.api.startResearch({ manifestId: 'x', requestId: 'x' }, fake)).rejects.toThrow('actor_forbidden');
+      await expect(host.api.revoke({ scope: 'all' }, fake)).rejects.toThrow('actor_forbidden');
+    }
+  });
+
+  it.skipIf(ownerQualified)('fails closed on an unqualified owner platform without touching the data root', async () => {
+    const { host, dataRoot } = await open();
+    expect(await host.api.read()).toEqual({ status: 'unavailable', publicStatus: 'unavailable', reason: 'owner_platform_unqualified' });
+    await expect(host.api.saveConfig({ mode: 'probe' }, actor)).rejects.toThrow('optimization_unavailable');
+    await expect(host.api.setEnabled(false, actor)).rejects.toThrow('optimization_unavailable');
+    await expect(host.api.issueResearchIntent({ manifestId: 'x' }, actor)).rejects.toThrow('optimization_unavailable');
+    await expect(host.api.startResearch({ manifestId: 'x', requestId: 'x' }, actor)).rejects.toThrow('optimization_unavailable');
+    await expect(host.api.revoke({ scope: 'all' }, actor)).rejects.toThrow('optimization_unavailable');
+    expect(readdirSync(dataRoot)).toEqual([]);
+  });
+});
+
+describe.skipIf(!ownerQualified)('D0 real local owner and configuration', () => {
   it('initializes off/none, rejects public enable and reflect without overwriting state', async () => {
     const { host } = await open();
     const state = await host.api.read();
@@ -55,18 +86,6 @@ describe('D0 real local owner and configuration', () => {
       await expect(host.api.saveConfig(patch, actor)).rejects.toThrow();
     }
     expect((await host.api.read()).config).toEqual(state.config);
-  });
-
-  it('denies agent, scheduler and forged user identities on every mutation', async () => {
-    const { host } = await open();
-    for (const requestSource of ['agent', 'scheduler', 'user']) {
-      const fake = { requestSource, principalId: 'local-user' };
-      await expect(host.api.saveConfig({ mode: 'probe' }, fake)).rejects.toThrow('actor_forbidden');
-      await expect(host.api.setEnabled(false, fake)).rejects.toThrow('actor_forbidden');
-      await expect(host.api.issueResearchIntent({ manifestId: 'x' }, fake)).rejects.toThrow('actor_forbidden');
-      await expect(host.api.startResearch({ manifestId: 'x', requestId: 'x' }, fake)).rejects.toThrow('actor_forbidden');
-      await expect(host.api.revoke({ scope: 'all' }, fake)).rejects.toThrow('actor_forbidden');
-    }
   });
 
   it('holds the OS owner lock across aliases and preserves owner identity on clean reopen', async () => {
@@ -106,7 +125,7 @@ describe('D0 real local owner and configuration', () => {
   });
 });
 
-describe('D0 escrow, attempts and recovery', () => {
+describe.skipIf(!ownerQualified)('D0 escrow, attempts and recovery', () => {
   it('replays the same root intent once, charges parent escrow once and slots only subdivide', async () => {
     const f = await open(); const { intent, run } = await register(f);
     expect(await f.host.api.startResearch({ manifestId: 'manifest', requestId: intent.requestId }, actor)).toEqual(run);

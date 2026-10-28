@@ -22,7 +22,8 @@ export function validateHarnessConfigPatch(input: unknown): Record<string, unkno
         if (!Number.isSafeInteger(nested[name]) || (nested[name] as number) < bounds[0] || (nested[name] as number) > bounds[1]) throw new Error('invalid_config');
       }
     } else {
-      const bounds = ranges[key];
+      // Own keys only: inherited names such as toString or __proto__ must not pass the whitelist.
+      const bounds = Object.prototype.hasOwnProperty.call(ranges, key) ? ranges[key] : undefined;
       if (!bounds || !Number.isSafeInteger(value) || (value as number) < bounds[0] || (value as number) > bounds[1]) throw new Error('invalid_config');
     }
   }
