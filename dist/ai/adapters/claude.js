@@ -137,6 +137,8 @@ export class ClaudeAdapter {
                 }
                 finally {
                     clearTimeout(timer);
+                    // Every attempt owns its transport, including successful completion.
+                    controller.abort();
                 }
             }
         }

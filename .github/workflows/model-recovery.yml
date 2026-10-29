@@ -45,6 +45,8 @@ jobs:
           .test-dist/tests/ai/adapters/openai.test.js
           .test-dist/tests/ai/adapters/openai-provider-sse-error.test.js
           .test-dist/tests/ai/runtime/model-stream-recovery.test.js
+          .test-dist/tests/ai/runtime/model-text-repetition.test.js
+          .test-dist/tests/ai/runtime/agent-model-recovery.test.js
           .test-dist/tests/ai/runtime/abort-error-discrimination.test.js
           .test-dist/tests/ai/runtime/agent-runtime.test.js
           .test-dist/tests/ai/runtime/provider-request-error.test.js

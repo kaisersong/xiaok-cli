@@ -23,11 +23,13 @@ import {createLoopOutputService,registerLoopOutputIpc} from './loop-output-servi
 import {createLoopCurrentViews,registerLoopCurrentViewIpc} from './loop-current-views.js';
 import {createLoopTimedCompletionHost} from './loop-timed-completion.js';
 import {withDesktopBootstrapWriter} from './desktop-bootstrap-writer.js';
+import { startDesktopTaskRecovery } from './desktop-startup-task-recovery.js';
 import {createDesktopLoopPublicationService} from './loop-desktop-publication-service.js';
 import {registerLoopPublicationIpc,createLoopPublicationIpcAuthorizer} from './loop-publication-ipc.js';
 import {createLoopPublicationShutdownOwner} from './loop-publication-shutdown.js';
 import {createShutdownAwareTimedActionService} from './timed-action-service-lifetime.js';
 import { scheduledRunPresentation } from './scheduled-run-presentation.js';
+import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -808,7 +810,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       platform: process.platform, executablePath: process.execPath, resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
     }) : undefined;
+  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
     notifyConversationActivity: async activity => {
@@ -1138,16 +1142,17 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
 
   try {
-    await services.recoverStaleTasks();
-  } catch (err) {
-    console.error('[main] recoverStaleTasks failed (startup continues):', err);
-  }
-  try {
     await services.reconcileArtifactWorkspace();
   } catch (err) {
     console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
   }
 
+  registerHarnessOptimizationIpc(shutdownAwareIpc, services, event => {
+    return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
+      && event.senderFrame === mainWindow.webContents.mainFrame
+      && isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer })
+      ? harnessUserActor : null;
+  });
   const connectorsProducers = new Map<string, IpcHandlerListener>();
   const connectorsIpc: IpcHandleRegistrar = {handle(channel, listener) {connectorsProducers.set(channel, listener);}};
   registerConnectorsIpc(shutdownAwareIpc, connectorsProducers);
@@ -1971,6 +1976,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
+  // Historical multi-agent validation may require thousands of isolated reads.
+  // It must not hold the first frame hostage. Admission still uses the actual
+  // multiAgentReady promise; this writer retains recovery through app shutdown.
+  const taskRecovery = startDesktopTaskRecovery(desktopShutdownGate, async () => {
+    debugMain('task-recovery:started');
+    await services.recoverStaleTasks();
+    debugMain('task-recovery:completed');
+  });
+  void taskRecovery?.catch(err => {
+    debugMain('task-recovery:failed');
+    console.error('[main] recoverStaleTasks failed (startup continues):', err);
+  });
   if (desktopShutdownGate.isOpen) {
     const writer = acquireAutomationWriter('assistant:recover-accepting');
     void assistantController.recoverAccepting({requestSource: 'scheduler'}).catch(error => {
