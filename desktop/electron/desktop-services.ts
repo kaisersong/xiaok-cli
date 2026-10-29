@@ -102,6 +102,8 @@ import { projectRuntimeEventsToDesktopEvents } from '../../src/runtime/task-host
 import type { ArtifactSummary, DesktopTaskEvent, MaterialRecord, MaterialRole, TaskCreateContext, TaskCreateInput, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
 import type { RuntimeEvent } from '../../src/runtime/events.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
+import { createHarnessOptimizationRuntime } from './harness-optimization-service.js';
+import type { HarnessUserContext } from '../shared/harness-optimization-contract.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
 import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
 import { extractMaterialText, MATERIAL_EXTRACTOR_VERSION, type OfficeTextExtractionResult } from '../../src/runtime/materials/text-extractor.js';
@@ -515,6 +517,8 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  /** Main owns this object identity; it is never supplied by renderer/tools. */
+  harnessOptimizationUserActor?: HarnessUserContext;
   notifyConversationActivity?: (activity: import('../../src/runtime/conversation-activity/types.js').ConversationActivity,
     watch: import('../../src/runtime/conversation-activity/types.js').WorkWatch) => Promise<'shown' | 'suppressed' | 'failed'>;
   /** Main-owned embedding/profile path; never accepted from renderer or tools. */
@@ -1034,6 +1038,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
   const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
   const multiAgentWorkspaceId = createHash('sha256').update(multiAgentCwd).digest('hex');
+  let harnessRuntime: ReturnType<typeof createHarnessOptimizationRuntime> | undefined;
+  let harnessDisposed = false;
+  const requireHarnessUserActor = (actor: HarnessUserContext) => {
+    if (!actor || actor.requestSource !== 'user' || actor !== options.harnessOptimizationUserActor) throw new Error('actor_forbidden');
+  };
+  const getHarnessRuntime = () => {
+    if (harnessDisposed) throw new Error('optimization_unavailable');
+    harnessRuntime ??= createHarnessOptimizationRuntime({ dataRoot: options.dataRoot, profileId: multiAgentProfileId,
+      workspaceId: multiAgentWorkspaceId, now: options.now,
+      authorizeUser: actor => actor === options.harnessOptimizationUserActor,
+      // Real manifests enter only after P2a qualification; D0 exposes no registration bypass.
+      manifestLookup: () => undefined });
+    return harnessRuntime;
+  };
   const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, sourcePopulation: taskSourcePopulation, admitThread: async threadId => {
     await multiAgentReady;
     const revision=multiAgentService?.assertExecutionAdmission(threadId);
@@ -2924,6 +2942,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     sealAndDrainArtifactWorkspaceServiceInstance: () => artifactWorkspaceService.sealAndDrainInstanceMutations(),
     async disposeMultiAgent(): Promise<void> {
       goalShutdown.ingress.stopAccepting();
+      harnessDisposed = true;
+      if (harnessRuntime) await (await harnessRuntime).dispose();
       activityMcp?.dispose();
       unsubscribeActivityGroups?.(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
       await codexTasks.dispose();
@@ -2945,6 +2965,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     getConnectorsConfig(request?: ConnectorsMutationRequest) {
       return connectorsService.getConfig(request);
     },
+    async getHarnessOptimizationConfig() { return (await getHarnessRuntime()).api.read(); },
+    async saveHarnessOptimizationConfig(input: unknown, actor: HarnessUserContext) { requireHarnessUserActor(actor); return (await getHarnessRuntime()).api.saveConfig(input, actor); },
+    async setHarnessOptimizationEnabled(enabled: boolean, actor: HarnessUserContext) { requireHarnessUserActor(actor); return (await getHarnessRuntime()).api.setEnabled(enabled, actor); },
+    async revokeHarnessOptimizationGrants(input: { scope: 'all' | 'research'; manifestId?: string }, actor: HarnessUserContext) { requireHarnessUserActor(actor); return (await getHarnessRuntime()).api.revoke(input, actor); },
+    async resetOptimizationClockGuard(input: { expectedHighWaterMark: number; correctionEventId?: string }, actor: HarnessUserContext) { requireHarnessUserActor(actor); return (await getHarnessRuntime()).api.resetClockGuard(input, actor); },
     async setConnectorsConfig(input: unknown, request?: ConnectorsMutationRequest) {
       return connectorsService.setConfig(input, request);
     },

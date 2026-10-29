@@ -38,12 +38,16 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
 
       - name: Install root dependencies
-        run: npm ci
+        shell: bash
+        run: bash .github/scripts/retry.sh npm ci
 
       - name: Install desktop dependencies
-        run: cd desktop && npm ci
+        shell: bash
+        run: cd desktop && bash ../.github/scripts/retry.sh npm ci
 
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
@@ -71,22 +75,28 @@ jobs:
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
+        shell: bash
         run: |
-          cd ../kswarm && npm ci --omit=dev
-          cd ../intent-broker && npm ci --omit=dev
+          retry="$PWD/.github/scripts/retry.sh"
+          cd ../kswarm && bash "$retry" npm ci --omit=dev
+          cd ../intent-broker && bash "$retry" npm ci --omit=dev
 
       - name: Build report-renderer bundle
+        shell: bash
         run: |
+          retry="$PWD/.github/scripts/retry.sh"
           cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
-          npm ci
+          bash "$retry" npm ci
           npm run build
           npm run build:bundle
 
       - name: Build canvas frontend and MCP bundle
+        shell: bash
         run: |
-          npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
+          retry="$PWD/.github/scripts/retry.sh"
+          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
           npm run build --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
           npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
 
       - name: Download Python wheels (macOS)
@@ -261,6 +271,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
 
       - name: Compile Windows verification namespace helper
         shell: cmd
@@ -270,10 +282,12 @@ jobs:
           node scripts/verification/test-windows-absence.mjs
 
       - name: Install root dependencies
-        run: npm ci
+        shell: bash
+        run: bash .github/scripts/retry.sh npm ci
 
       - name: Install desktop dependencies
-        run: cd desktop && npm ci
+        shell: bash
+        run: cd desktop && bash ../.github/scripts/retry.sh npm ci
 
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
@@ -301,22 +315,28 @@ jobs:
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
+        shell: bash
         run: |
-          cd ../kswarm && npm ci --omit=dev
-          cd ../intent-broker && npm ci --omit=dev
+          retry="$PWD/.github/scripts/retry.sh"
+          cd ../kswarm && bash "$retry" npm ci --omit=dev
+          cd ../intent-broker && bash "$retry" npm ci --omit=dev
 
       - name: Build report-renderer bundle
+        shell: bash
         run: |
+          retry="$PWD/.github/scripts/retry.sh"
           cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
-          npm ci
+          bash "$retry" npm ci
           npm run build
           npm run build:bundle
 
       - name: Build canvas frontend and MCP bundle
+        shell: bash
         run: |
-          npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
+          retry="$PWD/.github/scripts/retry.sh"
+          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
           npm run build --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
           npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
 
       - name: Download Python wheels (Windows)

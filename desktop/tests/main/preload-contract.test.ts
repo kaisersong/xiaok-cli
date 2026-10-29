@@ -43,6 +43,7 @@ import { registerDesktopSmallConfigIpc } from '../../electron/desktop-small-conf
 import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
 import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
 import { registerMemoryDistillationIpc } from '../../electron/memory-distillation.js';
+import { registerHarnessOptimizationIpc } from '../../electron/harness-optimization-ipc.js';
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
@@ -51,6 +52,15 @@ import { registerRoomWorkspaceIpc } from '../../electron/room-workspace-ipc.js';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+
+// Match other main IPC tests: exercise real registrars without an Electron binary.
+vi.mock('electron', () => ({
+  app: { getPath: () => process.cwd(), getLocale: () => 'en' },
+  BrowserWindow: { getAllWindows: () => [], fromWebContents: () => undefined },
+  clipboard: { read: vi.fn() },
+  dialog: { showOpenDialog: vi.fn(), showMessageBox: vi.fn() },
+  shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
+}));
 import {
   createPreloadApi,
   PRELOAD_API_KEYS,
@@ -313,6 +323,11 @@ describe('preload API contract', () => {
       'downloadEmbeddingModel',
       'setEmbeddingModel',
       'getConnectorsConfig',
+      'getHarnessOptimizationConfig',
+      'saveHarnessOptimizationConfig',
+      'setHarnessOptimizationEnabled',
+      'revokeHarnessOptimizationGrants',
+      'resetOptimizationClockGuard',
       'saveConnectorsConfig',
       'listConnectorRuntimes',
       'testConnectorProvider',
@@ -1087,6 +1102,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
   registerMemoryDistillationIpc({ handle: channel => { channels.add(channel); } }, {}, () => false);
+  registerHarnessOptimizationIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => null);
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerSemanticDesktopIpc({handle:channel=>{channels.add(channel);}}, {assistant:{} as never,kswarm:{} as never,authorizeAssistant:()=>false});
   registerLoopPublicationIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
