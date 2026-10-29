@@ -573,14 +573,19 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     ?resolveCompoundHostStorage({configRoot:getConfigDir()}):undefined;
   const sessionStoreRoot=compoundStorage?.canonicalRoot??getConfigDir('sessions');
   const sessionStore = createFileSessionStore(sessionStoreRoot);
-  // Other resolver errors keep their previous behaviour and surface at the first save.
+  // Unexpected resolver errors keep the previous behaviour: surface at the first save.
   let profileInspection:ReturnType<typeof inspectProfileAccountHome>;
   try{profileInspection=inspectProfileAccountHome();}catch{profileInspection={ok:true};}
   let sessionPersistenceDisabled=!profileInspection.ok;
   let sessionStorageNotice=profileInspection.ok?undefined:getUiCopy().sessionStorageDisabled(profileInspection.path,profileInspection.reason);
+  const flushPrintStorageNotice=():void=>{
+    if(opts.print&&sessionStorageNotice){process.stderr.write(sessionStorageNotice+'\n');sessionStorageNotice=undefined;}
+  };
+  flushPrintStorageNotice();
   const disableSessionPersistence=(error:ProfileAccountHomeError):void=>{
     if(!sessionPersistenceDisabled)sessionStorageNotice=getUiCopy().sessionStorageDisabled(error.path,error.reason);
     sessionPersistenceDisabled=true;
+    flushPrintStorageNotice();
   };
   const saveSession=sessionStore.save.bind(sessionStore);
   sessionStore.save=async (...args:Parameters<typeof saveSession>):Promise<void>=>{
