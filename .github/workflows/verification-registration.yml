@@ -50,10 +50,14 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
       - name: Install locked dependencies without unrelated lifecycle scripts
-        run: npm ci --ignore-scripts
+        shell: bash
+        run: bash .github/scripts/retry.sh npm ci --ignore-scripts
       - name: Prepare the original native SQLite dependency
-        run: npm rebuild better-sqlite3
+        shell: bash
+        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3
       - name: Run the nine complete source wholes
         run: >-
           npm run test:full -- --config vitest.config.ts
