@@ -18,7 +18,7 @@ describe('Desktop model request recovery', () => {
     expect(out.some(x => x.type === 'text' && x.delta === 'continued')).toBe(true); expect(calls).toBe(3);
     expect(prepare).toHaveBeenCalledTimes(3); expect(new Set(ids).size).toBe(3);
     expect(signals[0].aborted).toBe(true); expect(signals[1].aborted).toBe(true);
-    expect(signals[2].aborted).toBe(false);
+    expect(signals[2].aborted).toBe(true);
   });
   it('never retries preparation or consumer persistence failures', async () => {
     const adapter = { stream: vi.fn(async function*() { yield { type: 'text', delta: 'prefix' }; }) };

@@ -1,3 +1,4 @@
+import { registerHarnessOptimizationIpc } from '../../electron/harness-optimization-ipc.js';
 import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
 import { registerSkillMutationIpc } from '../../electron/skill-mutation-typed-ipc.js';
 import { registerChannelMcpMutationIpc } from '../../electron/channel-mcp-mutation-typed-ipc.js';
@@ -23,6 +24,7 @@ import { join } from 'node:path';
 const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'main.ts'), 'utf8');
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 const currentViewChannels:string[]=[];
+registerHarnessOptimizationIpc({handle:channel=>{currentViewChannels.push(channel);}}, {} as never, () => null);
 registerMobileSignInIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerAutomationConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerSkillListIpc({handle:channel=>{currentViewChannels.push(channel);}});
@@ -68,6 +70,16 @@ describe('IPC schema coverage', () => {
 
     const nonConforming = allChannels.filter(c => !c.startsWith('desktop:'));
     expect(nonConforming, `Channels not using desktop: prefix: ${nonConforming.join(', ')}`).toEqual([]);
+  });
+
+  it('includes the five Harness channels in the semantic inventory', () => {
+    expect(currentViewChannels.filter(channel => /HarnessOptimization|OptimizationClockGuard/.test(channel)).sort()).toEqual([
+      'desktop:getHarnessOptimizationConfig',
+      'desktop:resetOptimizationClockGuard',
+      'desktop:revokeHarnessOptimizationGrants',
+      'desktop:saveHarnessOptimizationConfig',
+      'desktop:setHarnessOptimizationEnabled',
+    ]);
   });
 
   it('registers loop diagnostics channels without renderer mutation channels', () => {

@@ -9,6 +9,7 @@ import { bridgeClient } from '../../api-bridge'
 import { PillToggle } from '../shared'
 import { useToast } from '../shared'
 import type { DesktopSettingsHydrationSnapshot } from '../DesktopSettings'
+import { HarnessOptimizationSettingsStatus } from './HarnessOptimizationSettingsStatus'
 
 const DEFAULT_FALLBACK_WINDOW = 128_000
 
@@ -231,6 +232,7 @@ export function ChatSettings({
 
   return (
     <div className="flex max-w-xl flex-col gap-4">
+      <HarnessOptimizationSettingsStatus />
       <p className="text-sm font-medium text-[var(--c-text-heading)]">{st.chatCompactCardTitle}</p>
 
       {loadErr ? (

@@ -1,0 +1,137 @@
+name: Harness2 preflight and local D0
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'scripts/evals/harness2-static/**'
+      - 'desktop/electron/harness-*'
+      - 'desktop/shared/harness-*'
+      - 'desktop/tests/**/harness-*'
+      - 'desktop/renderer/src/components/settings/Harness*'
+      - 'native/harness-optimization-owner-lock/**'
+      - 'scripts/copy-harness-runtime.mjs'
+      - 'desktop/package*.json'
+      - 'tests/evals/harness2-static.test.mjs'
+      - 'src/runtime/diagnostics/**'
+      - 'src/runtime/harness-memory/**'
+      - 'src/ai/prompts/**'
+      - 'src/ai/memory/compaction.ts'
+      - 'src/ai/memory/layered-store.ts'
+      - 'desktop/electron/desktop-services.ts'
+      - 'desktop/electron/desktop-system-prompt.ts'
+      - 'desktop/electron/loop-evaluator.ts'
+      - 'desktop/electron/completion-evidence-store.ts'
+      - 'src/runtime/guards/completion-evidence.ts'
+      - 'scripts/evals/xiaok-product/scorers/**'
+      - 'package*.json'
+      - '.github/workflows/harness2-static.yml'
+  pull_request:
+    paths:
+      - 'scripts/evals/harness2-static/**'
+      - 'desktop/electron/harness-*'
+      - 'desktop/shared/harness-*'
+      - 'desktop/tests/**/harness-*'
+      - 'desktop/renderer/src/components/settings/Harness*'
+      - 'native/harness-optimization-owner-lock/**'
+      - 'scripts/copy-harness-runtime.mjs'
+      - 'desktop/package*.json'
+      - 'tests/evals/harness2-static.test.mjs'
+      - 'src/runtime/diagnostics/**'
+      - 'src/runtime/harness-memory/**'
+      - 'src/ai/prompts/**'
+      - 'src/ai/memory/compaction.ts'
+      - 'src/ai/memory/layered-store.ts'
+      - 'desktop/electron/desktop-services.ts'
+      - 'desktop/electron/desktop-system-prompt.ts'
+      - 'desktop/electron/loop-evaluator.ts'
+      - 'desktop/electron/completion-evidence-store.ts'
+      - 'src/runtime/guards/completion-evidence.ts'
+      - 'scripts/evals/xiaok-product/scorers/**'
+      - 'package*.json'
+      - '.github/workflows/harness2-static.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  static-preflight:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run eval:harness2:static:test
+      # bash on every OS: under the Windows default pwsh, PowerShell consumes the
+      # `--` separator, so npm swallowed `--output` and run.mjs got a bare
+      # positional (harness2_static_failed: invalid_arguments_or_source_inventory).
+      - shell: bash
+        run: npm run eval:harness2:static -- --output harness2-p0a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harness2-p0a-${{ matrix.os }}-${{ matrix.node }}
+          path: harness2-p0a.json
+  d0-local:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.14.0', '24']
+    runs-on: macos-14
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: xiaok-cli
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xiaok-cli
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          ref: 63f2f1e78a7adf5d75ee3a19e5c1c48c88113ed4
+          path: kswarm
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/intent-broker
+          ref: 419ea454b958101e9750b28c052e43f316e667fb
+          path: intent-broker
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kai-xiaok-plugins
+          ref: 56b9df72dfbc4541cab6032d4039e2e208b8be68
+          path: kai-xiaok-plugins
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            xiaok-cli/package-lock.json
+            xiaok-cli/desktop/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix desktop
+      - run: npm ci --ignore-scripts --omit=dev --prefix ../kswarm
+      - run: npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
+      - run: npm run build:harness-owner-lock
+      - run: npm run build:main --prefix desktop
+      - name: Real D0 owner, journal, budget, crash, IPC and UI regressions
+        run: >-
+          npm run test --prefix desktop -- --run
+          tests/main/harness-optimization.test.ts
+          tests/main/harness-optimization-crash.test.ts
+          tests/main/harness-optimization-ipc.test.ts
+          tests/main/harness-optimization-services.test.ts
+          tests/main/preload-contract.test.ts
+          tests/main/preload-sandbox.test.ts
+          tests/renderer/harness-optimization-settings.test.tsx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: d0-process-audit-node-${{ matrix.node }}
+          path: xiaok-cli/.xiaok/evals/harness2-d0/crash-process-audit-node-*.json
