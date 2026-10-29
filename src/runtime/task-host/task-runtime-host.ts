@@ -1804,6 +1804,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private async recoverStaleRunningTask(snapshot: TaskSnapshot): Promise<TaskSnapshot> {
     if (snapshot.status !== 'running') return snapshot;
     const taskId = snapshot.taskId;
+    // Fast path: a live execution owns this task, so polling reads must not
+    // queue behind (and congest) its mutation chain. Re-checked in the queue.
+    if (this.activeExecutions.has(taskId) || this.executionPromises.has(taskId)) return snapshot;
     let recovered = false;
     await this.enqueueMutation(taskId, async () => {
       // An earlier async read can return running after this execution completed.
