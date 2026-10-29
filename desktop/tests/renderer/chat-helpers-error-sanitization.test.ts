@@ -4,6 +4,14 @@ import { isModelKeyMissingError, sanitizeUserFacingErrorMessage } from '../../re
 import { zh } from '../../renderer/src/locales/zh'
 import { en } from '../../renderer/src/locales/en'
 
+it.each([zh, en])('uses localized repetition failure text for live and replay errors', locale => {
+  const label = locale.chatShell.modelTextRepetition
+  expect(typeof label).toBe('string')
+  expect(label.length).toBeGreaterThan(30)
+  expect(sanitizeUserFacingErrorMessage('MODEL_TEXT_REPETITION_DETECTED', 'fallback', { modelTextRepetition: label })).toBe(label)
+  expect(sanitizeUserFacingErrorMessage(new Error('MODEL_TEXT_REPETITION_DETECTED'), 'fallback', { modelTextRepetition: label })).toBe(label)
+})
+
 const rawProviderAuthError = 'Error: 401 {"error":{"type":"authentication_error","message":"The API Key appears to be invalid or may have expired. Please verify your credentials and try again."},"type":"error"}'
 
 const zhUsageLimit = (resetAt?: string) => resetAt

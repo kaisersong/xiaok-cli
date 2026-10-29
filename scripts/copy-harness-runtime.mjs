@@ -1,0 +1,11 @@
+import { copyFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const destination = join(root, 'desktop', 'dist', 'main', 'desktop', 'electron');
+mkdirSync(destination, { recursive: true });
+copyFileSync(join(root, 'desktop', 'electron', 'harness-optimization-store-worker.mjs'), join(destination, 'harness-optimization-store-worker.mjs'));
+const binary = join(root, 'native', 'harness-optimization-owner-lock', 'build', 'Release', 'harness_owner_lock.node');
+const target = join(destination, 'harness_owner_lock.node');
+if (existsSync(binary)) copyFileSync(binary, target);
+else rmSync(target, { force: true });

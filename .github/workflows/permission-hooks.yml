@@ -99,8 +99,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm rebuild better-sqlite3 node-pty
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
+      - shell: bash
+        run: bash .github/scripts/retry.sh npm ci --ignore-scripts
+      - shell: bash
+        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty
       - run: npm run build:release
       - run: npm run test:sandbox:build
       - name: Exercise real hooks, registry and permission UI

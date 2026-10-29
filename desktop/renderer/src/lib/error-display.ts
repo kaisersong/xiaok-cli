@@ -8,6 +8,7 @@ interface UserFacingErrorOptions {
   providerAuth?: string
   providerService?: string
   modelConnectionFailed?: string
+  modelTextRepetition?: string
   modelUsageLimitReached?: (resetAt?: string) => string
 }
 
@@ -63,6 +64,9 @@ export function sanitizeUserFacingErrorMessage(
 ): string {
   const text = errorText(error).trim()
   if (!text) return fallbackMessage
+  if (/^(?:Error:\s*)?MODEL_TEXT_REPETITION_DETECTED$/.test(text) && options?.modelTextRepetition) {
+    return options.modelTextRepetition
+  }
   if (isModelKeyMissingError(text)) {
     console.error('[error-display] missing model configuration (raw):', text)
     return options?.modelKeyMissing ?? MODEL_KEY_MISSING_MESSAGE

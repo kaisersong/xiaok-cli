@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -9,7 +10,7 @@ import {registerOrdinaryProfileSource, readOrdinaryProfileSources} from '../../.
 import {encodeOrdinaryProfileSourceStorage} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 let root = '';
-beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-compact-fence-'))); state.home = join(root, 'account'); mkdirSync(state.home); });
+beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-compact-fence-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); });
 afterEach(() => { if (root) rmSync(root, {recursive: true, force: true}); root = ''; });
 it('uses the genuine public fence consumer on raw v3 without changing generation or inventory', () => {
   const directory = join(root, 'actual-directory'); mkdirSync(directory);

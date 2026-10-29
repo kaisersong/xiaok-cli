@@ -1491,6 +1491,9 @@ export const zh: LocaleStrings = {
     chatCompactThresholdLate: "延迟",
     chatCompactKeepLabel: "目标上下文比例",
     chatCompactKeepDesc: "压缩循环希望回落到的上下文窗口百分比（5–95）。",
+    harnessOptimizationTitle: "执行配置优化",
+    harnessOptimizationUnavailable: "尚不可用，研究与报告指导资格仍待验证。",
+    harnessOptimizationReadError: "无法读取执行优化状态。",
     chatCompactSave: "保存",
     chatCompactSaving: "保存中…",
     chatCompactSaved: "已保存",
@@ -3318,6 +3321,7 @@ export const zh: LocaleStrings = {
     modelAuthFailed: "模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。",
     modelServiceFailed: "模型服务请求失败，请检查模型配置或稍后重试。",
     modelConnectionFailed: "模型连接中断，未能完成自动恢复。已保留对话与完成的执行记录；请在下方回复继续，或切换模型后重试。",
+    modelTextRepetition: "检测到模型连续重复输出，已停止本轮生成。本轮任务未完成，已有对话与执行记录已保留；可切换模型后继续。",
     modelUsageLimitReached: (resetAt) => resetAt
       ? `当前模型使用额度已达上限，将于 ${resetAt} 重置。请在额度恢复后重试，或切换其他可用模型。`
       : "当前模型使用额度已达上限。请稍后重试，或切换其他可用模型。",
