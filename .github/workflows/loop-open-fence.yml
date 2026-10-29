@@ -80,10 +80,14 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      - name: Prepare node-gyp headers (retrying download, cached)
+        uses: ./.github/actions/node-headers
       - name: Install root locked dependencies
-        run: npm ci --ignore-scripts
+        shell: bash
+        run: bash .github/scripts/retry.sh npm ci --ignore-scripts
       - name: Prepare the original root native SQLite dependency
-        run: npm rebuild better-sqlite3
+        shell: bash
+        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3
       - name: Run the complete root source-route whole
         run: >-
           npm run test:full -- --config vitest.config.ts
@@ -93,7 +97,8 @@ jobs:
       - name: Install Desktop locked dependencies (Node24 only)
         if: ${{ matrix.node == '24' }}
         working-directory: desktop
-        run: npm ci --ignore-scripts
+        shell: bash
+        run: bash ../.github/scripts/retry.sh npm ci --ignore-scripts
       - name: Run the five complete Main wholes with Desktop Vitest (Node24 only)
         if: ${{ matrix.node == '24' }}
         working-directory: desktop
