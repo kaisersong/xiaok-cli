@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -16,7 +17,7 @@ import {computeSessionHistoryDigest} from '../../../src/ai/runtime/session-store
 import {FileGoalNativeJournal,type GoalNativeMutation} from '../../../src/runtime/goal/native-mutation-journal.js';
 import * as capture from '../../../src/runtime/verification/profile-source-capture.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'captured-file-sources-'))),defaultAccountHome=join(root,'account-default'),directoryHelper=join(root,'directory'),sqliteHelper=join(root,'sqlite');
-account.home=defaultAccountHome;mkdirSync(defaultAccountHome,{recursive:true});
+account.home=defaultAccountHome;setProfileTestHome(account.home);mkdirSync(defaultAccountHome,{recursive:true});
 beforeAll(()=>{const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
 afterAll(()=>rmSync(root,{recursive:true,force:true}));
 function directory(path:string){const s=statSync(path,{bigint:true});return {canonicalPath:path,device:String(s.dev),inode:String(s.ino)}}
@@ -52,7 +53,7 @@ it.each(['task-root','session-root','profile-registry'] as const)('reads an actu
  const parentSource:capture.ProfileCaptureSource={sourceId:'parent',directory:directory(parent),...(kind==='task-root'?{kind,snapshotFormat:'task-root-v1'}:kind==='session-root'?{kind,snapshotFormat:'session-root-v1'}:{kind,snapshotFormat:'profile-source-registry-v1'})};
  if(kind==='task-root'){const {FileTaskSnapshotStore}=await import('../../../src/runtime/task-host/snapshot-store.js');const tasks=new FileTaskSnapshotStore(parent);await tasks.save({taskId:'parent-task',sessionId:f.id,status:'completed',prompt:'original',materials:[],events:[],createdAt:1,updatedAt:1});await tasks.closeAndDrain();}
  if(kind==='profile-registry'){
-  account.home=home;try{const {registerOrdinaryProfileSource,readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');registerOrdinaryProfileSource({kind:'session-root',directory:f.path});const sourceId=readOrdinaryProfileSources()!.sources[0]!.sourceId;f.sources=f.sources.map(s=>s.kind==='session-root'?{...s,sourceId}:s);}finally{account.home=defaultAccountHome;}
+  account.home=home;setProfileTestHome(account.home);try{const {registerOrdinaryProfileSource,readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');registerOrdinaryProfileSource({kind:'session-root',directory:f.path});const sourceId=readOrdinaryProfileSources()!.sources[0]!.sourceId;f.sources=f.sources.map(s=>s.kind==='session-root'?{...s,sourceId}:s);}finally{account.home=defaultAccountHome;setProfileTestHome(account.home);}
  }
  await held([parentSource,...locks(parent),...f.sources],(owner,token)=>{
   const facts=readCapturedFileSources(owner,token);expect(facts.aliases).toMatchObject([{state:'active',binding:{targetSessionId:f.id,holderRoot:holder}}]);
@@ -119,11 +120,11 @@ it('retains Task-to-observation identity after the actual Session producer commi
 
 it.each(['complete','missing-source','bom','oversize-bom'] as const)('reads the original account registry and requires every recorded source: %s',async mode=>{
  const {readCapturedFileSources}=await import('../../../src/runtime/verification/captured-file-sources.js');const {registerOrdinaryProfileSource,readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');
- account.home=mkdtempSync(join(root,'account-'));try{const f=await session();registerOrdinaryProfileSource({kind:'session-root',directory:f.path});const original=readOrdinaryProfileSources()!,registered=original.sources[0]!,path=join(account.home,'.xiaok','profile-sources');
+ account.home=mkdtempSync(join(root,'account-'));setProfileTestHome(account.home);try{const f=await session();registerOrdinaryProfileSource({kind:'session-root',directory:f.path});const original=readOrdinaryProfileSources()!,registered=original.sources[0]!,path=join(account.home,'.xiaok','profile-sources');
  const sources:capture.ProfileCaptureSource[]=[{sourceId:'registry',kind:'profile-registry',snapshotFormat:'profile-source-registry-v1',directory:directory(path)},...locks(path),...(mode!=='missing-source'?f.sources.map(s=>s.kind==='session-root'?{...s,sourceId:registered.sourceId}:s):[])];
  if(mode==='bom'||mode==='oversize-bom'){const file=join(path,'registry.json'),bytes=readFileSync(file);writeFileSync(file,Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),bytes,...(mode==='oversize-bom'?[Buffer.alloc(512*1024-bytes.length,32)]:[])]));if(mode==='oversize-bom')expect(()=>readOrdinaryProfileSources()).toThrow();else expect(readOrdinaryProfileSources()).toEqual(original);}
  await held(sources,(owner,token)=>{if(mode==='missing-source')expect(()=>readCapturedFileSources(owner,token)).toThrow('captured_file_registry_reference');else if(mode==='oversize-bom')expect(()=>readCapturedFileSources(owner,token)).toThrow();else expect(readCapturedFileSources(owner,token).sources.find(s=>s.kind==='profile-registry')!.registry).toEqual(original);});
- }finally{account.home=defaultAccountHome;}
+ }finally{account.home=defaultAccountHome;setProfileTestHome(account.home);}
 });
 
 it.each([['release_pending',true],['release_pending',false],['released',true],['released',false]] as const)('requires the actual holder source for %s (included=%s)',async(state,included)=>{
