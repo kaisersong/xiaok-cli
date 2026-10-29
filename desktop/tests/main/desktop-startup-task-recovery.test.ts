@@ -14,6 +14,7 @@ import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent
 import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
+import { withDesktopBootstrapWriter } from '../../electron/desktop-bootstrap-writer.js';
 
 it.each([false, true])('keeps actual authenticated agent IPC behind real initialization (failure=%s)', async fail => {
   const root = mkdtempSync(join(tmpdir(), 'desktop-startup-gate-'));
@@ -37,25 +38,34 @@ it.each([false, true])('keeps actual authenticated agent IPC behind real initial
   const disposeIpc = registerDesktopMultiAgentIpc({ handle: (name, handler) => { handlers.set(name, handler); } },
     { service, ready, profileId: 'profile', workspaceId: 'workspace', cwd: root }, { authorize: () => ({ actorId: 'fixture-user' }) });
   const register = vi.spyOn(service, 'registerThreadWithOwnership');
+  const followup = vi.spyOn(service, 'userFollowup');
   const request = Promise.resolve().then(() => handlers.get('desktop:listMultiAgentGroups')!({ sender, senderFrame: mainFrame }, { threadId: 'thread' }));
+  const execution = Promise.resolve().then(() => handlers.get('desktop:followupAgent')!({ sender, senderFrame: mainFrame },
+    { threadId: 'thread', groupId: 'fixture-group', agentId: 'fixture-agent', operationId: 'fixture-operation', expectedTurn: 0, message: 'Fixture' }));
   void request.catch(() => {});
+  void execution.catch(() => {});
   try {
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(register).not.toHaveBeenCalled();
+    expect(followup).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled(); expect(runner).not.toHaveBeenCalled();
     gate.close(); expect(await gate.drain(1)).toBe(false);
     release();
     if (fail) {
       await expect(request).rejects.toThrow('fixture_recovery_failure');
       await expect(recovery).rejects.toThrow('fixture_recovery_failure');
+      await expect(execution).rejects.toThrow('fixture_recovery_failure');
       expect(register).not.toHaveBeenCalled();
+      expect(followup).not.toHaveBeenCalled();
     } else {
       expect(await request).toEqual({ items: [], nextCursor: null }); await recovery;
-      expect(register).toHaveBeenCalledTimes(1);
+      await expect(execution).rejects.toThrow(); // Missing fixture group is checked only after initialization.
+      expect(register).toHaveBeenCalledTimes(2);
+      expect(followup).toHaveBeenCalledTimes(1);
     }
     expect(await gate.drain(0)).toBe(true);
   } finally {
-    release(); await Promise.allSettled([ready, recovery, request]); disposeIpc();
+    release(); await Promise.allSettled([ready, recovery, request, execution]); disposeIpc();
     await host.drain(); await service.dispose(); store.close(); rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
 });
@@ -96,8 +106,54 @@ it('refuses a recovery producer after shutdown has sealed admission', () => {
 
 it('wires the initial production window after renderer load, with no early recovery await', () => {
   const source = readFileSync(join(__dirname, '../../electron/main.ts'), 'utf8');
-  expect(source.indexOf('startDesktopTaskRecovery(desktopShutdownGate')).toBeGreaterThan(source.indexOf("debugMain('createWindow:loaded')"));
+  expect(source.indexOf('const taskRecovery = startDesktopTaskRecovery(desktopShutdownGate')).toBeGreaterThan(source.indexOf("debugMain('createWindow:loaded')"));
+  const construction = source.indexOf('const services = createDesktopServices(');
+  const initialization = source.indexOf('const taskInitialization = startDesktopTaskRecovery(');
+  expect(initialization).toBeGreaterThan(construction);
+  expect(initialization).toBeLessThan(source.indexOf('await services.reconcileArtifactWorkspace()'));
+  expect(source.slice(source.indexOf('const computerUseAppIdentity ='), construction)).toContain('if (!desktopShutdownGate.isOpen) return window;');
   expect(source.match(/await services\.recoverStaleTasks\(\)/g)).toHaveLength(1);
   const replacement = source.slice(source.indexOf('async function createReplacementWindow'), source.indexOf('function createInitialWindow()'));
   expect(replacement).not.toContain('startDesktopTaskRecovery');
 });
+
+it.each([[false, false], [false, true], [true, false], [true, true]])(
+  'owns real MA initialization after shutdown during renderer load (loadFailure=%s initFailure=%s)', async (loadFailure, initFailure) => {
+    const root = mkdtempSync(join(tmpdir(), 'desktop-startup-load-'));
+    const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
+    const service = new DesktopMultiAgentService({ store, coordinator: new DesktopExecutionCoordinator(), createSession: vi.fn() });
+    const host = new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),
+      materialRegistry: new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 }), runner: vi.fn() });
+    let releaseInitialization!: () => void, finishLoad!: () => void;
+    const initializationHeld = new Promise<void>(resolve => { releaseInitialization = resolve; });
+    const loadError = Error('fixture_load_failure'), initializationError = Error('fixture_initialization_failure');
+    const loading = new Promise<void>((resolve, reject) => { finishLoad = () => loadFailure ? reject(loadError) : resolve(); });
+    const inspect = host.inspectActiveTasks.bind(host);
+    host.inspectActiveTasks = async () => { await initializationHeld; if (initFailure) throw initializationError; return inspect(); };
+    const gate = new DesktopShutdownGate(), generic = vi.fn(async () => {}), window = {};
+    let ready!: Promise<void>, initialization!: Promise<void>;
+    const owner = new DesktopApplicationWindowOwner({ current: () => window, createView: async () => window,
+      bootstrap: () => withDesktopBootstrapWriter(gate, async () => {
+        ready = service.initialize(host);
+        initialization = startDesktopTaskRecovery(gate, () => ready, 'startup-multi-agent-initialization')!;
+        void initialization.catch(() => {});
+        await loading;
+        startDesktopTaskRecovery(gate, generic);
+        return window;
+      }) });
+    const opening = owner.open(); void opening.catch(() => {});
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      gate.close(); finishLoad();
+      if (loadFailure) await expect(opening).rejects.toBe(loadError); else expect(await opening).toBe(window);
+      expect(generic).not.toHaveBeenCalled();
+      expect(await gate.drain(1)).toBe(false);
+      releaseInitialization();
+      if (initFailure) await expect(initialization).rejects.toBe(initializationError); else await initialization;
+      expect(await gate.drain(0)).toBe(true);
+    } finally {
+      releaseInitialization(); finishLoad(); await Promise.allSettled([opening, ready, initialization]);
+      await host.drain(); await service.dispose(); store.close(); rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  },
+);
