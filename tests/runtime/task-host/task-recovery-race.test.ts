@@ -106,3 +106,31 @@ it('refuses same-task execution while an actual stale recovery write remains in 
     rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
 });
+
+it.each(['error', 'terminal'])('preserves a concurrent durable completion on actual %s write conflict', async conflictAt => {
+  const root = mkdtempSync(join(tmpdir(), 'task-recovery-conflict-'));
+  const store = new FileTaskSnapshotStore(join(root, 'tasks'));
+  const receipts: string[] = [];
+  const host = new InProcessTaskRuntimeHost({ snapshotStore: store,
+    materialRegistry: new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 }),
+    createTaskId: () => 'fictional-conflict', runner: vi.fn(),
+    onPersistedEvent: async input => { if (input.event.type === 'error' || input.event.type === 'task_terminal') receipts.push(input.event.type); } });
+  try {
+    await host.prepareTask({ prompt: 'Fictional task', materials: [] });
+    await store.save({ ...(await store.recoverTask('fictional-conflict'))!, status: 'running' });
+    const save = store.save.bind(store); let injected = false;
+    vi.spyOn(store, 'save').mockImplementation(async (next, previous) => {
+      if (!injected && next.events.at(-1)?.type === (conflictAt === 'error' ? 'error' : 'task_terminal')) {
+        injected = true;
+        const current = (await store.recoverTask('fictional-conflict'))!;
+        await save({ ...current, status: 'completed', events: [...current.events, { type: 'task_terminal', status: 'completed' }] }, current);
+      }
+      await save(next, previous); // Real store append-only validation must reject the conflicting write.
+    });
+    await expect(host.recoverTask('fictional-conflict')).rejects.toThrow('task events are not append-only');
+    const current = (await store.recoverTask('fictional-conflict'))!;
+    expect(current.status).toBe('completed');
+    expect(current.events.at(-1)).toEqual({ type: 'task_terminal', status: 'completed' });
+    await vi.waitFor(() => expect(receipts).toEqual(conflictAt === 'error' ? [] : ['error']));
+  } finally { await host.drain(); vi.restoreAllMocks(); rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
+});

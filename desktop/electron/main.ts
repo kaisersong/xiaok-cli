@@ -810,6 +810,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       platform: process.platform, executablePath: process.execPath, resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
     }) : undefined;
+  if (!desktopShutdownGate.isOpen) return window;
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
     harnessOptimizationUserActor: harnessUserActor,
@@ -839,6 +840,17 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     pluginProviderRuntime,
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
+  });
+  // Initialization starts inside the factory. Own its original completion before
+  // any later await, including renderer load failure or shutdown during loading.
+  const taskInitialization = startDesktopTaskRecovery(desktopShutdownGate, async () => {
+    debugMain('task-initialization:started');
+    await services.multiAgent?.ready;
+    debugMain('task-initialization:completed');
+  }, 'startup-multi-agent-initialization');
+  void taskInitialization?.catch(error => {
+    debugMain('task-initialization:failed');
+    console.error('[main] task initialization failed:', error);
   });
   desktopIngressOwners.push(services.goalShutdown.ingress);
   desktopDurableStores.push(services.goalShutdown.durable);
@@ -1976,17 +1988,16 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
-  // Historical multi-agent validation may require thousands of isolated reads.
-  // It must not hold the first frame hostage. Admission still uses the actual
-  // multiAgentReady promise; this writer retains recovery through app shutdown.
+  // Historical validation stays behind existing task/agent admission gates,
+  // while the first frame can load. Shutdown owns the full recovery operation.
   const taskRecovery = startDesktopTaskRecovery(desktopShutdownGate, async () => {
     debugMain('task-recovery:started');
     await services.recoverStaleTasks();
     debugMain('task-recovery:completed');
   });
-  void taskRecovery?.catch(err => {
+  void taskRecovery?.catch(error => {
     debugMain('task-recovery:failed');
-    console.error('[main] recoverStaleTasks failed (startup continues):', err);
+    console.error('[main] recoverStaleTasks failed (startup continues):', error);
   });
   if (desktopShutdownGate.isOpen) {
     const writer = acquireAutomationWriter('assistant:recover-accepting');

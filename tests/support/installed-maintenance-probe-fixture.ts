@@ -210,10 +210,10 @@ function readProbe(db:Database):ProbeRecord|undefined{
 function sourceTransport(record:()=>ProbeRecord|undefined){
  const containers=new Map<string,any>();let serial=0;
  return {
-  async create(body:ProbeRecord['body']){const r=record();if(!r||json(body)!==json(r.body))throw Error('probe_fixture_source_body');const Id=(++serial).toString(16).padStart(64,'0');containers.set(Id,{Id,Image:body.Image,Config:structuredClone(body),HostConfig:structuredClone(body.HostConfig),State:{Running:false,Pid:0,Status:'created',ExitCode:0}});return {Id};},
+  async create(body:ProbeRecord['body']){const r=record();if(!r||json(body)!==json(r.body))throw Error('probe_fixture_source_body');const Id=(++serial).toString(16).padStart(64,'0');containers.set(Id,{Id,Image:body.Image,Config:structuredClone(body),HostConfig:structuredClone(body.HostConfig),NetworkSettings:{SandboxID:'',SandboxKey:'',Ports:{},Networks:{none:{IPAMConfig:null,Links:null,Aliases:null,DriverOpts:null,GwPriority:0,NetworkID:'a'.repeat(64),EndpointID:'',Gateway:'',IPAddress:'',MacAddress:'',IPPrefixLen:0,IPv6Gateway:'',GlobalIPv6Address:'',GlobalIPv6PrefixLen:0,DNSNames:null}}},State:{Running:false,Pid:0,Status:'created',ExitCode:0}});return {Id};},
   async inspect(id:string){const found=containers.get(id);if(!found)throw Error('docker_engine_http_404');return structuredClone(found);},
-  async start(id:string){const found=containers.get(id);if(!found)throw Error('probe_fixture_source_missing');Object.assign(found.State,{Running:true,Pid:1,Status:'running'});},
-  async wait(id:string){const found=containers.get(id);if(!found)throw Error('probe_fixture_source_missing');Object.assign(found.State,{Running:false,Pid:0,Status:'exited'});return {StatusCode:0};},
+  async start(id:string){const found=containers.get(id);if(!found)throw Error('probe_fixture_source_missing');Object.assign(found.State,{Running:true,Pid:1,Status:'running'});Object.assign(found.NetworkSettings,{SandboxID:'source-only-running',SandboxKey:'source-only-sandbox'});found.NetworkSettings.Networks.none.EndpointID='source-only-running-endpoint';},
+  async wait(id:string){const found=containers.get(id);if(!found)throw Error('probe_fixture_source_missing');Object.assign(found.State,{Running:false,Pid:0,Status:'exited'});Object.assign(found.NetworkSettings,{SandboxID:'',SandboxKey:''});found.NetworkSettings.Networks.none.EndpointID='';return {StatusCode:0};},
   async logs(id:string){if(!containers.has(id))throw Error('probe_fixture_source_missing');const r=record();if(!r)throw Error('probe_fixture_source_record');return r.challenge;},
   async isContainerAbsent(id:string){return !containers.has(id);},async remove(id:string){containers.delete(id);},
  };

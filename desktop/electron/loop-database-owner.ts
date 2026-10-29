@@ -1,3 +1,4 @@
+import {assertOrdinarySourceWriterRoute} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import {existsSync,lstatSync,mkdirSync,realpathSync,statSync} from 'node:fs';
 import {basename,dirname,join,resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -18,6 +19,7 @@ export function createLoopDatabaseOwnerGroup(paths:readonly string[]){
  try{
   const result=paths.map(input=>{
    if(typeof input!=='string'||!input||input.includes('\0'))throw Error('loop_database_path');
+   assertOrdinarySourceWriterRoute();
    const location=input===':memory:'?input:filePath(input),identity=input===':memory:'?undefined:fileIdentity(location);
    let owner=byPath.get(location)??(identity?byIdentity.get(identity):undefined);
    if(!owner){
@@ -34,7 +36,9 @@ export function createLoopDatabaseOwnerGroup(paths:readonly string[]){
 export function openLoopDatabase(input:string|LoopDatabaseSource):LoopDatabaseLease {
  const standalone=typeof input==='string'?createLoopDatabaseOwnerGroup([input]):undefined;
  const source=standalone?.sources[0]??input,owner=source&&typeof source==='object'?sources.get(source):undefined;
- if(!owner)throw Error('loop_database_source');if(owner.stopped)throw Error('loop_database_closed');let closed=false;
+ if(!owner)throw Error('loop_database_source');if(owner.stopped)throw Error('loop_database_closed');
+ if(!standalone)assertOrdinarySourceWriterRoute();
+ let closed=false;
  return Object.freeze({get database(){if(closed||owner.stopped)throw Error('loop_database_closed');return owner.database;},recordComponent(component:LoopDatabaseComponent){if(closed||owner.stopped)throw Error('loop_database_closed');if(!['loop','completion','artifactScanner','healthScanner'].includes(component))throw Error('loop_database_component');if(!owner.components.has(component)){owner.components.add(component);owner.layoutRevision++;}},close(){closed=true;standalone?.close();}});
 }
 
