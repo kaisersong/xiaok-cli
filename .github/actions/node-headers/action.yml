@@ -32,7 +32,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/node-headers/${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.arch }}
-        key: node-headers-v1-${{ runner.os }}-${{ steps.meta.outputs.arch }}-${{ steps.meta.outputs.version }}
+        key: node-headers-v2-${{ runner.os }}-${{ steps.meta.outputs.arch }}-${{ steps.meta.outputs.version }}
     - name: Download (if needed), verify and export nodedir
       id: prepare
       shell: bash
