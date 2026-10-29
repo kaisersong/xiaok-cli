@@ -1,4 +1,5 @@
 import type { ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
+import { ModelTextRepetitionGuard, MODEL_TEXT_REPETITION_CODE } from '../../src/ai/runtime/model-text-repetition.js';
 import { randomUUID } from 'node:crypto';
 import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
@@ -23,6 +24,7 @@ export function validateProjectAgentModelSelection(modelId: unknown, runtimeType
 }
 
 function isBoundaryFailure(error: unknown): boolean {
+  if (error && typeof error === 'object' && (error as { code?: unknown }).code === MODEL_TEXT_REPETITION_CODE) return true;
   return error instanceof Error && (error.name === 'AbortError' || /KIMI_K3_|authorization|permission|task.cancelled|workspace_|deadline/i.test(error.message));
 }
 
@@ -77,26 +79,34 @@ export async function createProjectAgentModel(options: {
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         input.onInvocation?.(invocationId);
         const chunks: StreamChunk[] = [];
+        const textGuard = new ModelTextRepetitionGuard();
         let providerFailed = false;
         let providerError: unknown;
-        const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
+        const attempt = new AbortController();
+        const attemptSignal = prepared.options?.signal
+          ? AbortSignal.any([prepared.options.signal, attempt.signal]) : attempt.signal;
+        const iterator = streamDesktopTaskProviderConversation({ ...prepared,
+          options: { ...prepared.options, signal: attemptSignal },
+        })[Symbol.asyncIterator]();
         try {
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
           for (;;) {
             let next: IteratorResult<StreamChunk>;
             const raw = iterator.next();
-            const receipt = physicalRun?.observeRead(raw, () => [input.options?.signal?.reason]);
+            const receipt = physicalRun?.observeRead(raw, () => [attemptSignal.reason, input.options?.signal?.reason]);
             try { next = await raw; receipt?.consume(); }
             catch (error) { receipt?.classifyFailure(error); providerFailed = true; providerError = error; break; }
             if (next.done) break;
             const chunk = next.value;
             // Usage belongs to this actual request even when its visible result fails.
             if (chunk.type === 'usage') { yield chunk; continue; }
+            if (chunk.type === 'text') textGuard.append(chunk.delta);
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
         } catch (error) { providerFailed = true; providerError = error; }
         finally {
+          attempt.abort();
           let observedReturn = false;
           try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
           catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }

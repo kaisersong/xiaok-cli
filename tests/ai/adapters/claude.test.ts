@@ -259,7 +259,8 @@ describe('ClaudeAdapter', () => {
     for await (const _ of adapter.stream([], [], 'system', { signal: controller.signal } as never)) { /* consume */ }
 
     expect(capturedOptions?.signal).toBeDefined();
-    expect(capturedOptions?.signal?.aborted).toBe(false);
+    expect(capturedOptions?.signal?.aborted).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
     controller.abort();
     expect(capturedOptions?.signal?.aborted).toBe(true);
   });

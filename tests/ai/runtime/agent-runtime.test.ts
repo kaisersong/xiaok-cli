@@ -1434,6 +1434,7 @@ describe('AgentRuntime', () => {
       getModelName: () => 'mock',
       stream: (_messages, _tools, systemPrompt, options) => {
         const compact = systemPrompt.includes('TEXT ONLY');
+        expect(options?.signal?.aborted).toBe(false);
         captured.push({ compact, options });
         return compact
           ? mockStream([
@@ -1468,8 +1469,9 @@ describe('AgentRuntime', () => {
     const mainCall = captured.find((call) => !call.compact);
     expect(compactCall?.options?.cacheKey).toBe(context.cacheKey);
     expect(mainCall?.options?.cacheKey).toBe(context.cacheKey);
-    // Requests own independent timeout controllers, both inherit user cancellation.
-    expect(mainCall?.options?.signal?.aborted).toBe(false);
+    // A completed request retires its own transport; it never aborts the caller.
+    expect(mainCall?.options?.signal?.aborted).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
     controller.abort();
     expect(mainCall?.options?.signal?.aborted).toBe(true);
     expect(compactCall?.options?.signal?.aborted).toBe(true);
@@ -1488,6 +1490,7 @@ describe('AgentRuntime', () => {
       getModelName: () => 'mock',
       stream: (_messages, _tools, _systemPrompt, options) => {
         capturedSignal = options?.signal;
+        expect(capturedSignal?.aborted).toBe(false);
         return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
       },
     };
@@ -1503,7 +1506,8 @@ describe('AgentRuntime', () => {
     await runtime.run('hi', () => {}, controller.signal);
 
     expect(capturedSignal).toBeDefined();
-    expect(capturedSignal?.aborted).toBe(false);
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
     controller.abort();
     expect(capturedSignal?.aborted).toBe(true);
   });

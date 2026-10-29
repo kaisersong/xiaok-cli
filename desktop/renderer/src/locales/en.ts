@@ -1540,6 +1540,9 @@ export const en: LocaleStrings = {
     chatCompactThresholdLate: "Late",
     chatCompactKeepLabel: "Target context ratio",
     chatCompactKeepDesc: "The context window percentage compact tries to return to (5–95).",
+    harnessOptimizationTitle: "Execution configuration optimization",
+    harnessOptimizationUnavailable: "Not available yet. Research and report guidance are awaiting qualification.",
+    harnessOptimizationReadError: "Unable to read optimization status.",
     chatCompactSave: "Save",
     chatCompactSaving: "Saving…",
     chatCompactSaved: "Saved",
@@ -3338,6 +3341,7 @@ export const en: LocaleStrings = {
     modelAuthFailed: "Model authentication failed. The API key is invalid or expired. Reconfigure the provider in Settings.",
     modelServiceFailed: "The model service request failed. Check the model configuration or try again later.",
     modelConnectionFailed: "The model connection was interrupted and could not recover. Conversation and completed actions were saved. Reply below to continue, or switch models and try again.",
+    modelTextRepetition: "The model kept repeating its output, so this response was stopped. This task did not complete. Conversation and existing action records were saved; switch models to continue.",
     modelUsageLimitReached: (resetAt) => resetAt
       ? `The current model usage limit has been reached. It resets at ${resetAt}. Try again after the reset or switch to another available model.`
       : "The current model usage limit has been reached. Try again later or switch to another available model.",
