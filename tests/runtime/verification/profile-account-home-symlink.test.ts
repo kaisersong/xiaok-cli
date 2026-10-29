@@ -8,7 +8,7 @@ import {readOrdinaryProfileSources,registerOrdinaryProfileSource} from '../../..
 const fake=vi.hoisted(()=>({stats:new Map<string,{uid:number;mode:number}>(),errors:new Map<string,string>()}));
 vi.mock('node:fs',async load=>{
  const actual=await load<typeof import('node:fs')>();
- function wrap(fn:typeof actual.lstatSync){return (p:string,options?:unknown)=>{if(fn===actual.lstatSync&&fake.errors.has(String(p)))throw Object.assign(Error('mock fs failure'),{code:fake.errors.get(String(p))});const stat=fn(p,options as never),override=fake.stats.get(String(p));if(!override)return stat;return Object.assign(Object.create(Object.getPrototypeOf(stat)),stat,options&&(options as {bigint?:boolean}).bigint?{uid:BigInt(override.uid),mode:(BigInt(stat.mode)&~0o7777n)|BigInt(override.mode)}:{uid:override.uid,mode:(Number(stat.mode)&~0o7777)|override.mode});};}
+ function wrap(fn:typeof actual.lstatSync){return (p:string,options?:unknown)=>{const errorKey=fn===actual.statSync?'stat:'+String(p):String(p);if(fake.errors.has(errorKey))throw Object.assign(Error('mock fs failure'),{code:fake.errors.get(errorKey)});const stat=fn(p,options as never),override=fake.stats.get(String(p));if(!override)return stat;return Object.assign(Object.create(Object.getPrototypeOf(stat)),stat,options&&(options as {bigint?:boolean}).bigint?{uid:BigInt(override.uid),mode:(BigInt(stat.mode)&~0o7777n)|BigInt(override.mode)}:{uid:override.uid,mode:(Number(stat.mode)&~0o7777)|override.mode});};}
  return {...actual,lstatSync:wrap(actual.lstatSync),statSync:wrap(actual.statSync)};
 });
 vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>({...await load<typeof import('../../../src/runtime/verification/migration-markers.js')>(),readInstalledCurrentProfile:()=>({kind:'ordinary'})}));
@@ -30,6 +30,10 @@ describe.skipIf(process.platform==='win32')('profile account physical paths',()=
  it('rejects writable user link parents',()=>{const alias=link('dotfiles',dir('physical'));stat(root,uid,0o777);process.env.HOME=alias;reject(alias);});
  it('rejects user link parents owned by another non-root user',()=>{const alias=link('dotfiles',dir('physical'));stat(root,uid+1,0o755);process.env.HOME=alias;reject(alias);});
  it('rejects writable physical ancestors of system targets',()=>{dir('shared',0,0o777);const target=dir('shared/home'),alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=alias;reject(alias);});
+ it('rejects system target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const target=dir('shared/home'),alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=alias;reject(alias);});
+ it('rejects user target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const alias=link('dotfiles',dir('shared/home'));process.env.HOME=alias;reject(alias);});
+ it('reports unreadable link targets from statSync',()=>{const target=dir('physical'),alias=link('dotfiles',target);process.env.HOME=alias;fake.errors.set('stat:'+target,'EACCES');reject(alias,'unreadable');});
+ it('escapes NUL in invalid config path diagnostics',()=>{process.env.XIAOK_CONFIG_DIR=join(root,'bad\0path');expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});});
  it('rejects sticky system targets owned by a non-root user',()=>{const target=dir('shared',uid,0o1777);dir('shared/home');const alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=join(alias,'home');reject(alias);});
  it('reports unreadable path components',()=>{const home=dir('home');process.env.HOME=home;fake.errors.set(home,'EACCES');reject(home,'unreadable');});
  it('rejects writable system link parents',()=>{const target=dir('physical'),alias=link('var',target,0);stat(root,0,0o777);process.env.HOME=alias;reject(alias);});

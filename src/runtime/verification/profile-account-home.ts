@@ -30,15 +30,16 @@ function validateBase(base:string,display=base){
     const target=checked(shown,()=>readlinkSync(next));if(target.includes('\0')||target.split(sep).includes('..'))fail(shown,'symlink');
     const resolved=walk(isAbsolute(target)?target:join(physical,target),shown).path,targetStat=checked(shown,()=>statSync(resolved));
     if(!targetStat.isDirectory())fail(shown,'not_directory');
-    // Root links in protected root parents and private user links cannot let
-    // someone else redirect the registry. Only someone else's mutable redirect is a threat: this user already controls
-    // XIAOK_CONFIG_DIR. Registry identity is physical and assertCurrent re-checks it.
+    // Threat model: a path someone ELSE can modify redirecting the registry. This user already
+    // controls XIAOK_CONFIG_DIR; registry identity is physical and assertCurrent re-checks it.
+    // Every physical target ancestor must belong to root or this user to prevent
+    // child replacement; only root-owned sticky directories get a system mode exception.
     if(system){
-     for(let p=resolved;;p=dirname(p)){const stat=checked(shown,()=>statSync(p));if((stat.mode&0o022)!==0&&!(stat.uid===0&&(stat.mode&0o1000)!==0))fail(shown,'symlink');if(dirname(p)===p)break;}
+     for(let p=resolved;;p=dirname(p)){const stat=checked(shown,()=>statSync(p));if((stat.uid!==0&&stat.uid!==uid)||((stat.mode&0o022)!==0&&!(stat.uid===0&&(stat.mode&0o1000)!==0)))fail(shown,'symlink');if(dirname(p)===p)break;}
     }
     else{
      if(targetStat.uid!==uid||(targetStat.mode&0o022)!==0)fail(shown,'symlink');
-     for(let p=resolved;;p=dirname(p)){if((checked(shown,()=>statSync(p)).mode&0o022)!==0)fail(shown,'symlink');if(dirname(p)===p)break;}
+     for(let p=resolved;;p=dirname(p)){const stat=checked(shown,()=>statSync(p));if((stat.uid!==0&&stat.uid!==uid)||(stat.mode&0o022)!==0)fail(shown,'symlink');if(dirname(p)===p)break;}
     }
     physical=resolved;
     }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')fail(shown,'symlink_target_missing');throw error;}
@@ -61,5 +62,5 @@ export function resolveProfileAccountHome(){
 }
 export function inspectProfileAccountHome():{ok:true}|{ok:false;path:string;reason:ProfileAccountHomeError['reason']}{
  if(process.platform==='win32')return {ok:true};
- try{resolveProfileAccountHome();return {ok:true};}catch(error){if(error instanceof ProfileAccountHomeError)return {ok:false,path:error.path,reason:error.reason};if(error instanceof Error&&error.message==='profile_source_registry_identity')return {ok:false,path:process.env.XIAOK_CONFIG_DIR||process.env.HOME||userInfo().homedir,reason:'invalid_path'};throw error;}
+ try{resolveProfileAccountHome();return {ok:true};}catch(error){if(error instanceof ProfileAccountHomeError)return {ok:false,path:error.path.replace(/\0/g,'\\0'),reason:error.reason};if(error instanceof Error&&error.message==='profile_source_registry_identity')return {ok:false,path:(process.env.XIAOK_CONFIG_DIR||process.env.HOME||userInfo().homedir).replace(/\0/g,'\\0'),reason:'invalid_path'};throw error;}
 }
