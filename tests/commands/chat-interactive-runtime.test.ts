@@ -1157,7 +1157,8 @@ vi.mock('../../src/ui/model-selector.js', () => ({
   selectModel: mockSelectModel,
 }));
 
-describe('chat interactive runtime', () => {
+// Windows CI runners spend 7.6-9.9s median per case here; 20s keeps occasional slow cases (Node 24) from timing out.
+describe('chat interactive runtime', { timeout: 20_000 }, () => {
   const tempDirs: string[] = [];
   let originalConfigDir: string | undefined;
   let originalHome: string | undefined;
@@ -1311,7 +1312,7 @@ describe('chat interactive runtime', () => {
         }
       }
     } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
-  }, 15000);
+  }, 20_000);
 
   it.each([[24, 'ghostty'], [12, 'ghostty'], [24, 'wezterm'], [12, 'wezterm']] as const)('keeps pasted images within the actual chat content margin on a %s-row %s terminal', async (rows, terminal) => {
     const root = join(tmpdir(), `xiaok-image-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1375,7 +1376,7 @@ describe('chat interactive runtime', () => {
       for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
       harness.restore();
     }
-  }, 15000);
+  }, 20_000);
 
   it.each(['kimi','glm','minimax'])('continues first-run auto chat after selecting %s Coding Plan', async provider => {
     const rootDir=join(tmpdir(),`xiaok-first-login-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1417,7 +1418,7 @@ describe('chat interactive runtime', () => {
       for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
     }
-  },15000);
+  },20_000);
 
   it.each(['ask_user 非法参数', 'AskUserQuestion', 'ask_user Other abort', 'AskUserQuestion Other abort', 'ask_user menu abort', 'AskUserQuestion menu abort'])('keeps question input and the next turn usable for %s', async (scenario) => {
     const rootDir = join(tmpdir(), `xiaok-question-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1470,7 +1471,7 @@ describe('chat interactive runtime', () => {
       harness.restore();
       crashSpy.mockRestore();
     }
-  },10000);
+  },20_000);
 
   it.each(['slash exit', 'EOF'])('preserves history across repeated exit and resume with %s', async (exitMode) => {
     const rootDir = join(tmpdir(), `xiaok-exit-resume-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1603,7 +1604,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('runs a fork skill through the interactive slash flow and honors the skill model override', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1686,7 +1687,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('renders background subagent completion notices during an interactive chat turn', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1765,7 +1766,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('keeps footer/status visible during a tool interruption and restarts assistant lead formatting after the tool block', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1859,7 +1860,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('shows a transparent notice when a model enters tools without visible text', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-silent-tool-turn-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1938,7 +1939,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('shows a Thinking activity immediately even for fast replies', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1999,7 +2000,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it.each(['allow', 'deny'] as const)('restores the busy draft after a permission %s while Thinking continues', async (decision) => {
     const rootDir = join(tmpdir(), `xiaok-chat-permission-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2077,7 +2078,7 @@ describe('chat interactive runtime', () => {
           }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('queues input typed during a busy turn and submits it on the next loop', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-queued-input-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2170,7 +2171,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('keeps a visible live activity while tool blocks are rendering', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-tool-activity-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2244,7 +2245,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('keeps prompt, status, and live activity visible across consecutive tool blocks', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-multi-tool-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2352,7 +2353,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('keeps the completed intent summary once and keeps the next ordinary question out of intent mode', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-intent-followup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2438,7 +2439,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('keeps ordinary analysis prompts out of intent mode through the boundary resolver', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-boundary-plain-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2501,7 +2502,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('uses a mocked active LLM boundary decision for ambiguous inputs', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-boundary-llm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2598,7 +2599,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('does not classify queued input until the previous busy turn completes', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-boundary-queued-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2681,7 +2682,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('does not display hidden thinking blocks when resuming a saved session', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-resume-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2796,7 +2797,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('appends the first new turn after the replayed history when resuming a longer session', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-resume-layout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2903,7 +2904,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('shows multiple slash command rows in interactive chat', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2969,7 +2970,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('creates a skill through /skill-creator and hot-reloads it into the live slash menu', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-skill-creator-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3061,7 +3062,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('renders built-in slash command output in the visible transcript area', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3145,7 +3146,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('sets permission mode through the single /mode selector and preserves cancel and typed compatibility', async () => {
     const root = join(tmpdir(), `xiaok-mode-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3270,7 +3271,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('treats an absolute local path as ordinary input instead of a slash skill', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-absolute-path-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3331,7 +3332,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('shows an intent summary when a report-to-slides request starts with an absolute local path', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-path-first-intent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3394,7 +3395,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('keeps the busy footer visible after a follow-up local-path intent creates the transcript block before Thinking', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-path-intent-thinking-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3484,7 +3485,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('persists the selected model so the next chat launch can reuse it', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-model-persist-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3616,7 +3617,7 @@ describe('chat interactive runtime', () => {
         secondHarness.restore();
       }
     }
-  }, 10_000);
+  }, 20_000);
 
   it('does not persist official K3 runtime options when /models registers K3 for a custom Kimi endpoint', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-custom-kimi-k3-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3718,7 +3719,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('refreshes the resolved model policy atomically across /models switches', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-model-policy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -3982,7 +3983,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('runs bang local commands with terminal handoff and does not send them to the model', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-shell-escape-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4052,7 +4053,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it('supports shift-tab mode cycling plus ask-user flow in interactive chat', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4150,7 +4151,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it.each(['sync', 'async'] as const)('keeps the scroll-region footer active after stdout EPIPE by falling back to stderr (%s)', async (failureMode) => {
     const rootDir = join(tmpdir(), `xiaok-chat-stdout-epipe-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4248,7 +4249,7 @@ describe('chat interactive runtime', () => {
       handlerSpy.mockRestore();
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps AskUserQuestion menu hints singular while navigating near the footer and clears them after confirm', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-ask-user-question-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4365,7 +4366,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps welcome, submitted input, streamed output, thinking, and footer in the correct rows across the 3-turn layout scenario', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4456,7 +4457,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the footer stable and the latest long output above it in a 24-row terminal', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4531,7 +4532,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the footer and thinking rail visible when a second turn starts after output has already reached the footer boundary', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4624,7 +4625,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps footer chrome visible during a dense multi-command tool run after transcript output has already reached the footer boundary', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-dense-command-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4745,7 +4746,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the footer singular during a narrow complex report intent while changed and long ran blocks are visible', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-narrow-report-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4863,7 +4864,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('advances report-to-slides intent through stage 2 and only lists stage-relevant invoked skills', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-report-slides-stages-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -4987,7 +4988,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the footer visible when a follow-up turn starts right after a completed complex intent', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-report-followup-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -5087,7 +5088,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the busy footer anchored after a wrapped long reply finishes and the next turn starts immediately', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-wrapped-followup-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -6224,7 +6225,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the previous assistant tail visible after the next turn finishes', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -6308,7 +6309,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('does not clear the content region before writing the first submitted input', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -6380,7 +6381,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it('keeps the last line of a multiline assistant reply visible after the next submitted input', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -6458,7 +6459,7 @@ describe('chat interactive runtime', () => {
       }
       harness.restore();
     }
-  }, 15_000);
+  }, 20_000);
 });
 
 // EventEmitter returns real functions; guard the public callback shape without wrapping identity.
