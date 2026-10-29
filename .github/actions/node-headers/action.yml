@@ -1,0 +1,45 @@
+name: Node headers for node-gyp
+description: >-
+  Download the running Node's headers (and node.lib on Windows) with curl retries,
+  cache them per OS/arch/Node version, and export npm_config_nodedir so node-gyp
+  never downloads headers itself (issue #99).
+inputs:
+  dist-url:
+    description: Node release mirror
+    required: false
+    default: https://nodejs.org/download/release
+  fallback-dist-url:
+    description: Mirror tried when the primary one fails
+    required: false
+    default: https://npmmirror.com/mirrors/node
+outputs:
+  nodedir:
+    description: Native path of the prepared header directory
+    value: ${{ steps.prepare.outputs.nodedir }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve running Node version
+      id: meta
+      shell: bash
+      run: |
+        version="$(node -p process.version)"
+        arch="$(node -p process.arch)"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "arch=$arch" >> "$GITHUB_OUTPUT"
+        echo "dir=$HOME/.cache/node-headers/$version-$arch" >> "$GITHUB_OUTPUT"
+    - name: Restore cached Node headers
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/node-headers/${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.arch }}
+        key: node-headers-v2-${{ runner.os }}-${{ steps.meta.outputs.arch }}-${{ steps.meta.outputs.version }}
+    - name: Download (if needed), verify and export nodedir
+      id: prepare
+      shell: bash
+      env:
+        NODE_VERSION: ${{ steps.meta.outputs.version }}
+        NODE_ARCH: ${{ steps.meta.outputs.arch }}
+        HEADERS_DIR: ${{ steps.meta.outputs.dir }}
+        DIST_URL: ${{ inputs.dist-url }}
+        FALLBACK_DIST_URL: ${{ inputs.fallback-dist-url }}
+      run: bash "$GITHUB_ACTION_PATH/fetch-node-headers.sh"
