@@ -71,12 +71,6 @@ jobs:
       - name: Run the original complete Intent publication whole
         # No SOLPI_INTENT_POPULATION override: the original 99 opt-in stays a
         # natural skip, not a PASS or closure of the original 99 acceptance.
-        # Informational only: this pre-existing suite is not run by any master
-        # workflow and its original 40-45 s per-case deadlines time out on hosted
-        # runners independent of this change (old head 22ec5589 failed the same
-        # way). Deadlines stay unchanged; the JSON artifact still records every
-        # case identity. A failure here does not fail the job.
-        continue-on-error: true
         run: >-
           npm run test:full -- --config vitest.config.ts
           tests/runtime/verification/intent-publication-dependencies.test.ts
