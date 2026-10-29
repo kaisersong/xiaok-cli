@@ -1,3 +1,4 @@
+import { ModelTextRepetitionGuard } from './model-text-repetition.js';
 export function resolveModelRecoveryPolicy(env = process.env) {
     const number = (raw, fallback) => raw?.trim() && Number.isFinite(Number(raw)) && Number(raw) >= 0 ? Number(raw) : fallback;
     return { windowMs: number(env.XIAOK_MODEL_RECOVERY_WINDOW_MS, 30 * 60_000),
@@ -60,8 +61,8 @@ export async function* recoverModelStream(input) {
             throw exhausted();
         const owned = new AbortController();
         const signal = AbortSignal.any([input.signal, owned.signal]);
+        const textGuard = new ModelTextRepetitionGuard();
         let iterator;
-        let completed = false;
         try {
             iterator = input.open(signal)[Symbol.asyncIterator]();
             while (true) {
@@ -82,17 +83,13 @@ export async function* recoverModelStream(input) {
                 }
                 if (next.done || next.value.type !== 'usage')
                     input.signal.throwIfAborted();
-                if (next.done) {
-                    completed = true;
+                if (next.done)
                     return;
-                }
-                if (next.value.type === 'done')
-                    completed = true;
+                if (next.value.type === 'text')
+                    textGuard.append(next.value.delta);
                 yield next.value;
-                if (next.value.type === 'done') {
-                    completed = true;
+                if (next.value.type === 'done')
                     return;
-                }
             }
         }
         catch (error) {
@@ -116,8 +113,8 @@ export async function* recoverModelStream(input) {
             }
         }
         finally {
-            if (!completed)
-                owned.abort();
+            // Also release successful attempts; keep the external task signal live.
+            owned.abort();
             // An uncooperative model reader must not hold the retry owner forever.
             try {
                 const closing = iterator?.return?.();

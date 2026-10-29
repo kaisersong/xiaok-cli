@@ -1,3 +1,4 @@
+import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
 import type { MeetingMutationModelResult } from '../shared/meeting-mutation-ipc-contract.js';
@@ -320,6 +321,11 @@ export const PRELOAD_API_KEYS = [
   'downloadEmbeddingModel',
   'setEmbeddingModel',
   'getConnectorsConfig',
+  'getHarnessOptimizationConfig',
+  'saveHarnessOptimizationConfig',
+  'setHarnessOptimizationEnabled',
+  'revokeHarnessOptimizationGrants',
+  'resetOptimizationClockGuard',
   'saveConnectorsConfig',
   'listConnectorRuntimes',
   'testConnectorProvider',
@@ -677,6 +683,11 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   downloadEmbeddingModel: 'desktop:downloadEmbeddingModel',
   setEmbeddingModel: 'desktop:setEmbeddingModel',
   getConnectorsConfig: 'desktop:getConnectorsConfig',
+  getHarnessOptimizationConfig: 'desktop:getHarnessOptimizationConfig',
+  saveHarnessOptimizationConfig: 'desktop:saveHarnessOptimizationConfig',
+  setHarnessOptimizationEnabled: 'desktop:setHarnessOptimizationEnabled',
+  revokeHarnessOptimizationGrants: 'desktop:revokeHarnessOptimizationGrants',
+  resetOptimizationClockGuard: 'desktop:resetOptimizationClockGuard',
   saveConnectorsConfig: 'desktop:saveConnectorsConfig',
   listConnectorRuntimes: 'desktop:listConnectorRuntimes',
   testConnectorProvider: 'desktop:testConnectorProvider',
@@ -1392,6 +1403,11 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   downloadEmbeddingModel(modelId: string): Promise<void>;
   setEmbeddingModel(modelId: string): Promise<void>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
+  getHarnessOptimizationConfig(): Promise<HarnessOptimizationState>;
+  saveHarnessOptimizationConfig(input: Partial<Omit<HarnessOptimizationConfig, 'schemaVersion' | 'enabled' | 'configRevision' | 'publicGeneration' | 'researchGeneration'>>): Promise<HarnessOptimizationState>;
+  setHarnessOptimizationEnabled(enabled: boolean): Promise<unknown>;
+  revokeHarnessOptimizationGrants(input: { scope: 'all' | 'research'; manifestId?: string }): Promise<unknown>;
+  resetOptimizationClockGuard(input: { expectedHighWaterMark: number; correctionEventId?: string }): Promise<HarnessOptimizationState>;
   saveConnectorsConfig(input: ConnectorsConfig): Promise<ConnectorsConfigSnapshot>;
   listConnectorRuntimes(): Promise<ProviderRuntime[]>;
   testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult>;
@@ -1951,6 +1967,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,
+    getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig') as ReturnType<DesktopApi['getHarnessOptimizationConfig']>,
+    saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input) as ReturnType<DesktopApi['saveHarnessOptimizationConfig']>,
+    setHarnessOptimizationEnabled: enabled => ipcRenderer.invoke('desktop:setHarnessOptimizationEnabled', enabled),
+    revokeHarnessOptimizationGrants: input => ipcRenderer.invoke('desktop:revokeHarnessOptimizationGrants', input),
+    resetOptimizationClockGuard: input => ipcRenderer.invoke('desktop:resetOptimizationClockGuard', input) as ReturnType<DesktopApi['resetOptimizationClockGuard']>,
     saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input) as Promise<ConnectorsConfigSnapshot>,
     listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes') as Promise<ProviderRuntime[]>,
     testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind) as Promise<ConnectorTestResult>,

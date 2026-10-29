@@ -1,3 +1,4 @@
+import {setProfileTestHome} from '../../support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {chmodSync,mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -8,7 +9,7 @@ vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInsta
 import {FileGoalStore} from '../../../src/runtime/goal/file-store.js';
 import {createGoalState} from '../../../src/runtime/goal/reducer.js';
 let root:string;
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-goal-fence-')));boundary.home=join(root,'account');mkdirSync(boundary.home,{mode:0o750});chmodSync(boundary.home,0o750);mkdirSync(join(boundary.home,'.xiaok'),{mode:0o755});chmodSync(join(boundary.home,'.xiaok'),0o755);mkdirSync(join(boundary.home,'.xiaok/profile-sources'),{mode:0o700});});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-goal-fence-')));boundary.home=join(root,'account');setProfileTestHome(boundary.home);mkdirSync(boundary.home,{mode:0o750});chmodSync(boundary.home,0o750);mkdirSync(join(boundary.home,'.xiaok'),{mode:0o755});chmodSync(join(boundary.home,'.xiaok'),0o755);mkdirSync(join(boundary.home,'.xiaok/profile-sources'),{mode:0o700});});
 afterEach(()=>rmSync(root,{recursive:true,force:true}));
 type Fencable={fenceKnownWriter(source:'user'|'agent'|'scheduler'):Promise<void>};
 it('persists the original goal writer fence and rejects actual fresh CAS after owner reconstruction while preserving complete original bytes',async()=>{

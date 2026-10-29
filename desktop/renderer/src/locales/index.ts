@@ -1419,6 +1419,9 @@ export interface LocaleStrings {
     chatCompactThresholdLate: string;
     chatCompactKeepLabel: string;
     chatCompactKeepDesc: string;
+    harnessOptimizationTitle: string;
+    harnessOptimizationUnavailable: string;
+    harnessOptimizationReadError: string;
     chatCompactSave: string;
     chatCompactSaving: string;
     chatCompactSaved: string;
@@ -3221,6 +3224,7 @@ export interface LocaleStrings {
     modelAuthFailed: string;
     modelServiceFailed: string;
     modelConnectionFailed: string;
+    modelTextRepetition: string;
     modelUsageLimitReached: (resetAt?: string) => string;
     cuProcessing: string;
     cuSettingsOpened: string;

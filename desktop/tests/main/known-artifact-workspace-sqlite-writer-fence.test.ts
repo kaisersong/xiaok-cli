@@ -1,4 +1,5 @@
 // @vitest-environment node
+import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,rmSync,existsSync,statSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -12,7 +13,7 @@ vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInsta
 import {ArtifactWorkspaceStore,type ArtifactWorkspaceStoreOptions} from '../../electron/artifact-workspace-store.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 let root:string;const stores:ArtifactWorkspaceStore[]=[];
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-artifact-sqlite-')));fixture.home=join(root,'account');mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});fixture.denyAccount=false;fixture.reads=0;});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'known-artifact-sqlite-')));fixture.home=join(root,'account');setProfileTestHome(fixture.home);mkdirSync(fixture.home,{mode:0o750});mkdirSync(join(fixture.home,'.xiaok'),{mode:0o755});mkdirSync(join(fixture.home,'.xiaok','profile-sources'),{mode:0o700});fixture.denyAccount=false;fixture.reads=0;});
 afterEach(()=>{fixture.denyAccount=false;for(const store of stores.splice(0).reverse())store.close();rmSync(root,{recursive:true,force:true});});
 function open(options:ArtifactWorkspaceStoreOptions){const store=new ArtifactWorkspaceStore(options);stores.push(store);return store;}
 const fence=(directory:string)=>createKnownDirectoryWriterFence(directory,'sqlite-db').persist();
