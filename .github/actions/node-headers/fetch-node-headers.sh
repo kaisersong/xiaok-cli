@@ -10,8 +10,20 @@ is_windows=false
 case "${RUNNER_OS:-$(uname -s)}" in Windows|MINGW*|MSYS*|CYGWIN*) is_windows=true ;; esac
 lib_rel="win-$NODE_ARCH/node.lib"
 
+# Each attempt is bounded: abort a stalled transfer (<10 KB/s for 20 s) and
+# cap any single attempt at 90 s, so a cache miss can never hang the job (#100).
+# Try the primary mirror first, then FALLBACK_DIST_URL; files are verified
+# against SHASUMS256.txt either way.
+FALLBACK_DIST_URL="${FALLBACK_DIST_URL:-https://npmmirror.com/mirrors/node}"
+curl_once() { # url dest
+  curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
+    --speed-limit 10240 --speed-time 20 --max-time 90 -o "$2" "$1"
+}
 fetch() { # url dest
-  curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300 -o "$2" "$1"
+  local rel="${1#"$base"/}"
+  curl_once "$1" "$2" && return 0
+  echo "::warning::download failed from $DIST_URL, trying $FALLBACK_DIST_URL"
+  curl_once "$FALLBACK_DIST_URL/$NODE_VERSION/$rel" "$2"
 }
 verify() { # file name-in-SHASUMS
   local want

@@ -8,6 +8,10 @@ inputs:
     description: Node release mirror
     required: false
     default: https://nodejs.org/download/release
+  fallback-dist-url:
+    description: Mirror tried when the primary one fails
+    required: false
+    default: https://npmmirror.com/mirrors/node
 outputs:
   nodedir:
     description: Native path of the prepared header directory
@@ -37,4 +41,5 @@ runs:
         NODE_ARCH: ${{ steps.meta.outputs.arch }}
         HEADERS_DIR: ${{ steps.meta.outputs.dir }}
         DIST_URL: ${{ inputs.dist-url }}
+        FALLBACK_DIST_URL: ${{ inputs.fallback-dist-url }}
       run: bash "$GITHUB_ACTION_PATH/fetch-node-headers.sh"
