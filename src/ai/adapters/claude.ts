@@ -160,6 +160,8 @@ export class ClaudeAdapter implements ModelAdapter {
         attempt += 1;
       } finally {
         clearTimeout(timer);
+        // Every attempt owns its transport, including successful completion.
+        controller.abort();
       }
     }
     } finally { if (disclosure !== undefined) disposeProviderDisclosureContext(disclosure); }

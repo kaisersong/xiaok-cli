@@ -65,7 +65,6 @@ export async function* recoverModelStream(input: {
     const signal = AbortSignal.any([input.signal, owned.signal]);
     const textGuard = new ModelTextRepetitionGuard();
     let iterator: AsyncIterator<StreamChunk> | undefined;
-    let completed = false;
     try {
       iterator = input.open(signal)[Symbol.asyncIterator]();
       while (true) {
@@ -78,11 +77,10 @@ export async function* recoverModelStream(input: {
         try {next=await wait(raw,input.signal,Math.min(policy.idleMs>0?policy.idleMs:Infinity,budget),()=>owned.abort());receipt?.consume();}
         catch(error){receipt?.classifyFailure(error);throw error;}
         if (next.done || next.value.type !== 'usage') input.signal.throwIfAborted();
-        if (next.done) { completed = true; return; }
+        if (next.done) return;
         if (next.value.type === 'text') textGuard.append(next.value.delta);
-        if (next.value.type === 'done') completed = true;
         yield next.value;
-        if (next.value.type === 'done') { completed = true; return; }
+        if (next.value.type === 'done') return;
       }
     } catch (error) {
       if (input.signal.aborted) throw error;
@@ -97,7 +95,8 @@ export async function* recoverModelStream(input: {
       try { await wait(new Promise<void>(resolve => { timer = setTimeout(resolve, delayMs); }), input.signal, Infinity, () => {}); }
       finally { clearTimeout(timer); }
     } finally {
-      if (!completed) owned.abort();
+      // Also release successful attempts; keep the external task signal live.
+      owned.abort();
       // An uncooperative model reader must not hold the retry owner forever.
       try {
         const closing=iterator?.return?.();

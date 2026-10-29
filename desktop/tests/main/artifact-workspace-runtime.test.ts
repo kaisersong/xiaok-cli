@@ -256,6 +256,10 @@ describe('desktop tool loop invocation and consumer ordering', () => {
       maxIterations: 2,
       adapter: {
         async *stream(_messages, tools, _systemPrompt, options) {
+          // The request is live here; recovery aborts its owned signal on close.
+          expect(options?.cacheKey).toBe(cacheKey);
+          expect(options?.signal?.aborted).toBe(false);
+          expect(options?.signal).not.toBe(staleController.signal);
           streamCall += 1;
           streamOptions.push(options);
           streamTools.push(tools.map(tool => tool.name));
@@ -289,9 +293,11 @@ describe('desktop tool loop invocation and consumer ordering', () => {
     expect(compactOptions).toEqual([{ cacheKey, signal: currentController.signal }]);
     for (const options of streamOptions) {
       expect(options?.cacheKey).toBe(cacheKey);
-      expect(options?.signal?.aborted).toBe(false);
+      expect(options?.signal?.aborted).toBe(true);
       expect(options?.signal).not.toBe(staleController.signal);
     }
+    expect(currentController.signal.aborted).toBe(false);
+    expect(staleController.signal.aborted).toBe(false);
     currentController.abort();
     expect(streamOptions.every(options => options?.signal?.aborted)).toBe(true);
     const expectedMainTools = context.allToolDefs.map(tool => tool.name);
@@ -340,8 +346,11 @@ describe('desktop tool loop invocation and consumer ordering', () => {
       ...context,
       signal: controller.signal,
       adapter: {
-        async *stream() {
+        async *stream(_messages, _tools, _systemPrompt, options) {
+          expect(options?.signal?.aborted).toBe(false);
           controller.abort(sentinel);
+          expect(options?.signal?.aborted).toBe(true);
+          expect(options?.signal?.reason).toBe(sentinel);
           yield { type: 'usage' as const, usage: { inputTokens: 12, outputTokens: 3 } };
           throw sentinel;
         },
@@ -374,13 +383,16 @@ describe('desktop tool loop invocation and consumer ordering', () => {
       signal: controller.signal,
       maxIterations: 1,
       adapter: {
-        async *stream() {
+        async *stream(_messages, _tools, _systemPrompt, options) {
+          expect(options?.signal?.aborted).toBe(false);
           streamCall += 1;
           if (streamCall === 1) {
             yield { type: 'tool_use' as const, id: 'call-1', name: 'noop', input: {} };
             return;
           }
           controller.abort(sentinel);
+          expect(options?.signal?.aborted).toBe(true);
+          expect(options?.signal?.reason).toBe(sentinel);
           yield { type: 'usage' as const, usage: { inputTokens: 21, outputTokens: 5 } };
           throw sentinel;
         },

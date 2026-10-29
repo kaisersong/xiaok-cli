@@ -13,6 +13,8 @@ on:
     branches: [master]
     paths:
       - 'desktop/**'
+      - 'src/ai/runtime/**'
+      - 'src/ai/adapters/**'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - 'src/ai/runtime/**'
@@ -20,6 +22,8 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'src/ai/runtime/**'
+      - 'src/ai/adapters/**'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - 'src/ai/runtime/**'
@@ -64,6 +68,13 @@ jobs:
           tests/main/file-ipc-schema.test.ts
           tests/main/ipc-handler-test-injection.test.ts
           tests/main/shutdown-aware-ipc-main.test.ts
+          tests/main/desktop-text-repetition.test.ts
+          tests/main/desktop-task-stream-recovery.test.ts
+          tests/main/desktop-provider-stream-lifecycle.test.ts
+          tests/main/desktop-startup-task-recovery.test.ts
+          tests/main/project-stream-reconnect-regression.test.ts
+          tests/renderer/chat-helpers-error-sanitization.test.ts
+          tests/renderer/chat-shell-draft-prompt.test.tsx
           tests/main/conversation-activity-ipc.test.ts
           tests/main/artifact-export-package.test.ts
           tests/main/desktop-text-repetition.test.ts

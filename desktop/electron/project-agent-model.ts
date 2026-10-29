@@ -73,11 +73,7 @@ export async function createProjectAgentModel(options: {
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const invocationId = randomUUID();
-        // Per-request signal: a failed selected request (e.g. text repetition) cancels its own provider read.
-        const requestAbort = new AbortController();
-        const parentSignal = input.options?.signal;
-        const requestSignal = parentSignal ? AbortSignal.any([parentSignal, requestAbort.signal]) : requestAbort.signal;
-        const request = {...input, adapter, messages, systemPrompt, invocationId, options: {...input.options, signal: requestSignal}};
+        const request = {...input, adapter, messages, systemPrompt, invocationId};
         const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
@@ -86,13 +82,18 @@ export async function createProjectAgentModel(options: {
         const textGuard = new ModelTextRepetitionGuard();
         let providerFailed = false;
         let providerError: unknown;
-        const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
+        const attempt = new AbortController();
+        const attemptSignal = prepared.options?.signal
+          ? AbortSignal.any([prepared.options.signal, attempt.signal]) : attempt.signal;
+        const iterator = streamDesktopTaskProviderConversation({ ...prepared,
+          options: { ...prepared.options, signal: attemptSignal },
+        })[Symbol.asyncIterator]();
         try {
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
           for (;;) {
             let next: IteratorResult<StreamChunk>;
             const raw = iterator.next();
-            const receipt = physicalRun?.observeRead(raw, () => [input.options?.signal?.reason]);
+            const receipt = physicalRun?.observeRead(raw, () => [attemptSignal.reason, input.options?.signal?.reason]);
             try { next = await raw; receipt?.consume(); }
             catch (error) { receipt?.classifyFailure(error); providerFailed = true; providerError = error; break; }
             if (next.done) break;
@@ -105,7 +106,8 @@ export async function createProjectAgentModel(options: {
           }
         } catch (error) { providerFailed = true; providerError = error; }
         finally {
-          if (providerFailed && !requestSignal.aborted) requestAbort.abort(providerError);
+          // Per-attempt signal: release every selected request (success or failure, e.g. text repetition); keep the task signal live.
+          attempt.abort();
           let observedReturn = false;
           try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
           catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }
