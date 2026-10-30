@@ -297,11 +297,11 @@ describe('FileSessionStore', () => {
   });
 
 
-  it.each(['k3', 'k3-256k'] as const)(
+  it.each(['k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed'] as const)(
     'redacts %s durable messages without mutating live messages and rejects bound resume',
     async (model) => {
       const store = new FileSessionStore(rootDir);
-      const sessionId = `sess_kimi_${model.replace('-', '_')}_durable`;
+      const sessionId = `sess_kimi_${model.replace(/[^a-zA-Z0-9_-]/g, '_')}_durable`;
       const messages = preservedThinkingRoundTripMessages();
 
       await store.save({
@@ -389,11 +389,11 @@ describe('FileSessionStore', () => {
     });
   });
 
-  it.each(['k3', 'k3-256k'] as const)(
+  it.each(['k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed'] as const)(
     'loads and forks a user-only %s durable snapshot',
     async (model) => {
       const store = new FileSessionStore(rootDir);
-      const sessionId = `sess_kimi_${model.replace('-', '_')}_fresh`;
+      const sessionId = `sess_kimi_${model.replace(/[^a-zA-Z0-9_-]/g, '_')}_fresh`;
       await store.save({
         sessionId,
         cwd: '/workspace/kimi',

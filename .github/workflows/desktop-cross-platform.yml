@@ -74,6 +74,8 @@ jobs:
           tests/main/shutdown-aware-ipc-main.test.ts
           tests/main/desktop-text-repetition.test.ts
           tests/main/desktop-task-stream-recovery.test.ts
+          tests/main/kimi-packaged-smoke.test.ts
+          tests/main/kimi-harness-contract.test.ts
           tests/main/desktop-provider-stream-lifecycle.test.ts
           tests/main/desktop-startup-task-recovery.test.ts
           tests/main/project-stream-reconnect-regression.test.ts
