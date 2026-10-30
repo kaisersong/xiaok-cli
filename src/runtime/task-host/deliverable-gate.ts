@@ -1,4 +1,5 @@
 import type { TaskSnapshot } from './types.js';
+import { compactProjectCreationResponse } from './tool-result-response.js';
 
 export interface DeliverableGateResult {
   complete: boolean;
@@ -45,6 +46,7 @@ export async function runDeliverableGate(
   gateFunction: DeliverableGateFunction | undefined,
   signal: AbortSignal,
 ): Promise<boolean> {
+  if (hasStartedProjectHandoff(snapshot)) return true;
   if (!looksLikeMultiDeliverable(snapshot.prompt)) {
     return true;
   }
@@ -76,8 +78,32 @@ export async function runDeliverableGate(
 
 /** The same built-in, CPU-only check used by ordinary tasks and delivery facts. */
 export function isDeliveryPlanComplete(snapshot: TaskSnapshot): boolean {
+  if (hasStartedProjectHandoff(snapshot)) return true;
   if (!looksLikeMultiDeliverable(snapshot.prompt)) return true;
   return hasCompleteLastDeliveryPlan(snapshot);
+}
+
+/** This turn completes project creation/dispatch, never the project's deliverables. */
+function hasStartedProjectHandoff(snapshot: TaskSnapshot): boolean {
+  const prompt = snapshot.prompt.trim();
+  if (!/^(?:(?:请(?:你)?|帮我|麻烦(?:你)?|我要|我想(?:要)?|现在|直接)\s*)*(?:创建|新建|建立).{0,16}项目/iu.test(prompt)
+    || /(?:不要|不需要|不用|先不|暂不|别).{0,12}(?:创建|新建|建立|项目|后台)|是否|能否|如何|怎么|如果|除非|确认后|先确认|[?？]|当前会话|本轮|这轮|这一轮|同步交付|(?:另外|另行|同时|顺便).{0,16}(?:写|生成|交付|给我)|并(?:请)?给我/iu.test(prompt)) return false;
+  // Snapshots own only this task's events. A later failed attempt supersedes an
+  // earlier receipt; an assistant summary or another task's history is not evidence.
+  for (let index = snapshot.events.length - 1; index >= 0; index--) {
+    const event = snapshot.events[index]!;
+    if (event.type !== 'canvas_tool_result' || event.toolName !== 'create_project') continue;
+    if (!event.ok || event.response.length > 10_000) return false;
+    try {
+      const receipt = JSON.parse(event.response) as { ok?: unknown; created?: unknown } | null;
+      if (receipt?.ok !== true || receipt.created !== true) return false;
+    } catch { return false; }
+    const compact = compactProjectCreationResponse(event.response);
+    if (!compact) return false;
+    const card = JSON.parse(compact) as { planningStart?: { sent?: boolean } };
+    return card.planningStart?.sent === true;
+  }
+  return false;
 }
 
 function hasCompleteLastDeliveryPlan(snapshot: TaskSnapshot): boolean {

@@ -2243,6 +2243,89 @@ describe('OpenAIAdapter', () => {
     }]);
   });
 
+  it('retries a missing-reasoning response once without publishing its text or tool call', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    const create = vi.spyOn(instance.chat.completions, 'create');
+    create.mockResolvedValueOnce({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'UNADMITTED_PRIVATE_CANARY', tool_calls: [{ index: 0, id: 'discarded', function: { name: 'record', arguments: '{invalid' } }] }, finish_reason: null }] };
+      yield { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 2 } };
+    } } as never);
+    create.mockResolvedValueOnce({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+      yield { choices: [{ delta: { tool_calls: [{ index: 0, id: 'valid', function: { name: 'record', arguments: '{"label":"valid"}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 11, completion_tokens: 3 } };
+    } } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    const chunks = await collectAdapterChunks(adapter);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(chunks)).not.toMatch(/UNADMITTED_PRIVATE_CANARY|discarded/);
+    expect(chunks.filter(c => c.type === 'tool_use')).toEqual([{ type: 'tool_use', id: 'valid', name: 'record', input: { label: 'valid' } }]);
+    expect(chunks.filter(c => c.type === 'usage').map(c => c.usage)).toEqual([{ inputTokens: 10, outputTokens: 2 }, { inputTokens: 11, outputTokens: 3 }]);
+    expect(create.mock.calls[0]?.[0]).toEqual(create.mock.calls[1]?.[0]);
+  });
+
+  it('buffers content until a delayed official reasoning field arrives', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const chunks: StreamChunk[] = [];
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'hello ' }, finish_reason: null }] };
+      expect(chunks.filter(c => c.type === 'text')).toEqual([]);
+      yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+      yield { choices: [{ delta: { content: 'world' }, finish_reason: 'stop' }] };
+    } } as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    for await (const chunk of adapter.stream([], [], 'system')) chunks.push(chunk);
+    expect(chunks.filter(c => c.type === 'text').map(c => c.delta).join('')).toBe('hello world');
+  });
+
+  it('bounds missing-reasoning retries and prevents outer recovery from restarting them', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const create = vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'PRIVATE_CANARY' }, finish_reason: 'stop' }] };
+    } }) as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    const onRetry = vi.fn(); let failure: unknown;
+    try { for await (const _ of recoverModelStream({ signal: new AbortController().signal, onRetry,
+      policy: { windowMs: 1000, idleMs: 1000, initialDelayMs: 1, maxDelayMs: 1 }, open: signal => adapter.stream([], [], 'system', { signal }) })) { /* consume */ } } catch (error) { failure = error; }
+    expect(create).toHaveBeenCalledTimes(2); expect(onRetry).not.toHaveBeenCalled();
+    expect(normalizeRuntimeError(failure)).toEqual({ code: 'model_failed', message: 'KIMI_REASONING_ADMISSION_REQUIRED', retryable: false });
+    expect(JSON.stringify(failure)).not.toContain('PRIVATE_CANARY');
+  });
+
+  it('does not retry when the caller cancels the rejected provider response', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const controller = new AbortController(); const reason = new Error('caller cancelled');
+    const create = vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({ async *[Symbol.asyncIterator]() {
+      try { yield { choices: [{ delta: { content: 'PRIVATE_CANARY' }, finish_reason: 'stop' }] }; }
+      finally { controller.abort(reason); }
+    } }) as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    await expect(collectAdapterChunks(adapter, { signal: controller.signal })).rejects.toBe(reason);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds pre-admission content without retrying a capacity violation', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const create = vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'x'.repeat(2 * 1024 * 1024 + 1) }, finish_reason: null }] };
+    } } as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toThrow('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not admit a reasoning field arriving after a rejected terminal boundary', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' }); let lateReads = 0;
+    const create = vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'PRIVATE_CANARY' }, finish_reason: 'stop' }] };
+      lateReads += 1; yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+    } }) as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toThrow('KIMI_REASONING_ADMISSION_REQUIRED');
+    expect(create).toHaveBeenCalledTimes(2); expect(lateReads).toBe(0);
+  });
+
   it('rejects a completed strict K3 response without official reasoning_content presence', async () => {
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });

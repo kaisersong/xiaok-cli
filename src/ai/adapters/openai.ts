@@ -12,6 +12,7 @@ import type {
 } from '../../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createKimiReasoningAdmissionError, isKimiReasoningAdmissionError, KIMI_REASONING_ADMISSION_CODE } from '../runtime/kimi-reasoning-admission.js';
 import { createOpenAIStreamError } from '../runtime/openai-stream-error.js';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
@@ -594,6 +595,7 @@ export class OpenAIAdapter implements ModelAdapter {
       });
     };
     let attempt = 0;
+    let admissionRetries = 0;
     while (true) {
       throwIfCallerAborted(options?.signal);
       const controller = new AbortController();
@@ -602,6 +604,7 @@ export class OpenAIAdapter implements ModelAdapter {
         ? AbortSignal.any([controller.signal, options.signal])
         : controller.signal;
       let emittedAny = false;
+      let emittedOutput = false;
       let emittedBufferedUsage = false;
       const attemptState: StreamAttemptState = { outputChars: 0 };
       try {
@@ -615,6 +618,7 @@ export class OpenAIAdapter implements ModelAdapter {
           authorizeDispatch,
         )) {
           emittedAny = true;
+          if (chunk.type !== 'usage') emittedOutput = true;
           yield chunk;
         }
         if (options?.signal?.aborted) {
@@ -639,6 +643,18 @@ export class OpenAIAdapter implements ModelAdapter {
         const terminalError = options?.signal?.aborted
           ? (options.signal.reason ?? error)
           : error;
+        // Only this uncommitted protocol response gets one local retry. The
+        // terminal error stays non-retryable to every outer recovery owner.
+        if (strictProfile && !options?.signal?.aborted && !options?.semanticSummaryAttempt
+          && !emittedOutput && isKimiReasoningAdmissionError(error) && admissionRetries === 0) {
+          admissionRetries += 1;
+          usageLogger.warn('kimiReasoningAdmissionRetry', { code: KIMI_REASONING_ADMISSION_CODE, attempt: admissionRetries });
+          if (bufferedUsage && attemptState.latestProviderUsage) {
+            reportUsageSource('provider');
+            yield { type: 'usage', usage: attemptState.latestProviderUsage };
+          }
+          continue;
+        }
         // 已产出 chunk 后重试会重复输出，必须放弃重试
         if (
           options?.signal?.aborted
@@ -994,6 +1010,7 @@ export class OpenAIAdapter implements ModelAdapter {
     let streamTextChars = 0;
     let usageReceived = false;
     let officialReasoningSeen = false;
+    let pendingAdmissionText = '';
     const extractBufferedUsage = attemptState
       ? this.harnessContext.profile.extractUsage
       : undefined;
@@ -1071,8 +1088,18 @@ export class OpenAIAdapter implements ModelAdapter {
           yield reasoning;
         }
 
-        if (delta.content) {
-          for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
+        if (strictKimiK3 && !officialReasoningSeen) {
+          // Never publish possible private reasoning from an invalid dialect.
+          if (delta.content) {
+            if (pendingAdmissionText.length + delta.content.length > MAX_OPENAI_STREAM_TEXT_CHARS) {
+              throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+            }
+            pendingAdmissionText += delta.content;
+          }
+        } else if (delta.content || pendingAdmissionText) {
+          const content = pendingAdmissionText + (delta.content ?? '');
+          pendingAdmissionText = '';
+          for (const segment of drainLeadingRawThinkSegments(rawThinkParser, content)) {
             if (segment.type === 'thinking') {
               streamTextChars += segment.delta.length;
               if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
@@ -1122,7 +1149,7 @@ export class OpenAIAdapter implements ModelAdapter {
             throw new Error('memory_output_incomplete');
           }
           if (strictKimiK3 && !officialReasoningSeen) {
-            throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+            throw createKimiReasoningAdmissionError({ sawContent: pendingAdmissionText.length > 0, sawTools: toolBuffers.size > 0, terminal: 'finish' });
           }
           for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
             if (segment.type === 'thinking') {
@@ -1178,7 +1205,7 @@ export class OpenAIAdapter implements ModelAdapter {
             throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
           }
           if (!officialReasoningSeen) {
-            throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+            throw createKimiReasoningAdmissionError({ sawContent: pendingAdmissionText.length > 0, sawTools: toolBuffers.size > 0, terminal: 'eof' });
           }
           for (const toolCall of drainBufferedToolCalls(toolBuffers, true)) {
             yield toolCall;
