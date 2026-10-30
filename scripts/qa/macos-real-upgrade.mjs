@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { createReadStream, closeSync, existsSync, lstatSync, mkdirSync, openSync,
+import { constants, createReadStream, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync,
+  chmodSync, mkdtempSync, rmSync,
   readFileSync, readdirSync, readlinkSync, realpathSync, writeFileSync, appendFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir, arch, platform } from 'node:os';
+import { homedir, arch, platform, tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
@@ -14,9 +15,27 @@ const REPO = 'kaisersong/xiaok-cli';
 const APP_ID = 'com.xiaok.desktop';
 const TEAM = 'Y9YR86UG94';
 const DEFAULT_CDP_PORT = 9222; // Production default in both signed 1.5.14 and the new app.
-const OLD = Object.freeze({ tag: 'desktop-v1.5.14', version: '1.5.14', release: 418149835,
+const OLD14 = Object.freeze({ tag: 'desktop-v1.5.14', version: '1.5.14', release: 418149835,
   sha: 'dc221f9bac84d939b8fb543d4795396693fdc9b8', bytes: 228655718,
   zipSHA256: 'b7a3b6d6e23b5423d581f8b93ad05b82b34fc0fab429c14ea4c9736d358ebf37' });
+const OLD15 = Object.freeze({ tag: 'desktop-v1.5.15', version: '1.5.15', release: 419987808,
+  sha: '6770092945a42fb0e45ef0d68d0971bfc01b51a8', bytes: 231833178,
+  zipSHA256: '1e6e73ca880994d6c7f23ef4919b020099e350702581040113beeb43779cc3c9' });
+function selectOldPreset(version = '1.5.14') {
+  if (version === '1.5.14') return OLD14;
+  if (version === '1.5.15') return OLD15;
+  assert.fail('old_version_not_allowed');
+}
+const OLD = selectOldPreset(process.env.QA_OLD_VERSION);
+function canonicalVersion(version) {
+  assert(typeof version === 'string' && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version), 'version_not_canonical');
+  const parts = version.split('.').map(Number);
+  assert(parts.every(Number.isSafeInteger), 'version_integer_not_exact'); return parts;
+}
+function assertNewerVersion(next, previous) {
+  const newer = canonicalVersion(next), older = canonicalVersion(previous), index = newer.findIndex((part, i) => part !== older[i]);
+  assert(index >= 0 && newer[index] > older[index], 'new_version_must_follow_selected_old');
+}
 const NEW = Object.freeze({ tag: process.env.QA_NEW_TAG, sha: process.env.QA_NEW_SHA,
   release: process.env.QA_NEW_RELEASE_ID, zipSHA256: process.env.QA_NEW_ZIP_SHA256 });
 const START = performance.now();
@@ -26,8 +45,8 @@ const qaHome = homedir();
 const owned = new Map();
 const children = new Set();
 let root, evidence, app, appExecutable, oldChild, oldIdentity, monitorPromise;
-let monitorStopped = false, monitorError, latestProcesses = [], installedRequest = false;
-let primary, resultFacts = {}, commandId = 0, cleaning = false, shipItSHA256;
+let monitorStopped = false, monitorError, latestGuiApplications = [], installedRequest = false;
+let primary, resultFacts = {}, commandId = 0, cleaning = false, shipItSHA256, qaSourceBinding;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 const inside = (parent, value) => { const r = relative(parent, value); return r === '' || (!isAbsolute(r) && r !== '..' && !r.startsWith(`..${sep}`)); };
 function remaining() { if (!cleaning) assert(performance.now() < DEADLINE, 'qa_wall_budget_exhausted'); }
@@ -38,8 +57,7 @@ function validInputs() {
   assert(/^[0-9a-f]{40}$/.test(NEW.sha ?? ''), 'full_new_sha_required');
   assert(/^[1-9][0-9]{0,15}$/.test(NEW.release ?? ''), 'canonical_release_id_required');
   assert(/^[0-9a-f]{64}$/.test(NEW.zipSHA256 ?? ''), 'new_zip_sha256_required');
-  const numbers = NEW.tag.slice(9).split('.').map(Number);
-  assert(numbers[0] > 1 || (numbers[0] === 1 && (numbers[1] > 5 || (numbers[1] === 5 && numbers[2] > 14))), 'new_version_must_follow_1_5_14');
+  assertNewerVersion(NEW.tag.slice(9), OLD.version);
 }
 async function command(executable, args, { timeout = 60_000, allowFailure = false, quiet = false } = {}) {
   const id = ++commandId, started = performance.now();
@@ -189,8 +207,7 @@ function profileInventory() {
   }
   roots.forEach(walk); return entries;
 }
-async function sample() {
-  const rows = await processes(); latestProcesses = rows;
+async function observeOwnedProcesses(rows, phase) {
   for (const row of rows) {
     if (row.uid !== qaUid || row.pid === process.pid) continue;
     const inApp = inside(app, row.executable), descendant = owned.has(row.ppid);
@@ -201,15 +218,135 @@ async function sample() {
         if (ship) assert(shipItSHA256 && await fileHash(row.executable) === shipItSHA256, 'shipit_executable_not_original_signed_helper');
         owned.set(row.pid, { ...row, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: row.pid === oldChild?.pid }); event('owned-process-observed', owned.get(row.pid));
       }
-      else { const previous = owned.get(row.pid); assert(previous.birth === row.birth && previous.executable === row.executable && previous.uid === row.uid, 'owned_pid_identity_changed'); }
+      else {
+        const previous = owned.get(row.pid), matches = sameProcessIdentity(previous, row);
+        if (!matches) identityConflict(previous, row, phase, 'owned_pid_identity_changed');
+        assert(matches, 'owned_pid_identity_changed');
+      }
     }
   }
   const wrong = rows.filter(p => p.uid === qaUid && basename(p.executable) === 'xiaok' && p.executable.includes('.app/') && p.executable !== appExecutable);
   assert(wrong.length === 0, 'wrong_path_or_multiple_app');
-  assert(rows.filter(p => p.uid === qaUid && p.executable === appExecutable).length <= 1, 'multiple_same_path_apps');
 }
+async function sample(phase) {
+  const before = await processes(); await observeOwnedProcesses(before, phase);
+  const applications = await registeredApplications();
+  const after = await processes(); await observeOwnedProcesses(after, phase);
+  latestGuiApplications = selectGuiApplications(applications, before, after, { uid: qaUid, bundle: app, executable: appExecutable });
+  event('gui-identity-crosschecked', { applications: latestGuiApplications });
+}
+const QA_PATHS = Object.freeze(['.github/workflows/macos-real-upgrade-qa.yml', 'scripts/qa/macos-real-upgrade.mjs']);
+const gitBlobOID = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+function assertQaCommit(actual, github, workflow) {
+  assert(/^[0-9a-f]{40}$/.test(actual) && actual === github && actual === workflow, 'qa_checkout_workflow_sha_mismatch');
+}
+function parseGitTree(text) {
+  assert(text.endsWith('\0'), 'git_tree_shape');
+  const entries = new Map();
+  for (const line of text.slice(0, -1).split('\0')) {
+    const match = /^([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40})\t(.+)$/.exec(line);
+    assert(match && !entries.has(match[4]), 'git_tree_shape');
+    entries.set(match[4], { mode: match[1], type: match[2], oid: match[3] });
+  }
+  return entries;
+}
+function compareQaTrees(product, qa) {
+  const changed = [];
+  for (const path of [...new Set([...product.keys(), ...qa.keys()])].sort()) {
+    const before = product.get(path), after = qa.get(path);
+    if (QA_PATHS.includes(path)) {
+      for (const entry of [before, after]) assert(entry?.mode === '100644' && entry.type === 'blob', 'qa_regular_blob_required');
+      if (before.oid !== after.oid) changed.push(path);
+    } else assert.deepEqual(after, before, `non_qa_tree_changed:${path}`);
+  }
+  assert.deepEqual(changed, QA_PATHS, 'exact_two_qa_modifications_required');
+  return { changed, nonQaEntries: [...qa].filter(([path]) => !QA_PATHS.includes(path)).sort(([a], [b]) => a.localeCompare(b)) };
+}
+function checkedQaFile(file, expected) {
+  const signature = stat => ['dev', 'ino', 'uid', 'nlink', 'mode', 'size', 'mtimeNs', 'ctimeNs'].map(k => String(stat[k])).join(':');
+  const before = lstatSync(file, { bigint: true });
+  assert(before.isFile() && !before.isSymbolicLink() && (before.mode & 0o7777n) === 0o644n && Number(before.uid) === qaUid && realpathSync(file) === file, 'qa_checkout_regular_mode');
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    assert.equal(signature(fstatSync(fd, { bigint: true })), signature(before), 'qa_checkout_identity_changed');
+    const bytes = readFileSync(fd), oid = gitBlobOID(bytes);
+    assert.equal(signature(fstatSync(fd, { bigint: true })), signature(before), 'qa_checkout_identity_changed');
+    assert.equal(signature(lstatSync(file, { bigint: true })), signature(before), 'qa_checkout_identity_changed');
+    assert.equal(realpathSync(file), file, 'qa_checkout_identity_changed');
+    assert.equal(oid, expected.oid, 'qa_checkout_blob_mismatch');
+    return { file, blobOID: oid, sha256: createHash('sha256').update(bytes).digest('hex'), stableIdentity: signature(before), mode: '100644' };
+  } finally { closeSync(fd); }
+}
+async function bindQaSource() {
+  const git = async args => (await command('/usr/bin/git', args)).out.trimEnd();
+  const qaSHA = await git(['rev-parse', 'HEAD']); assertQaCommit(qaSHA, process.env.GITHUB_SHA, process.env.GITHUB_WORKFLOW_SHA);
+  const checkout = realpathSync(await git(['rev-parse', '--show-toplevel']));
+  assert(fileURLToPath(import.meta.url) === join(checkout, QA_PATHS[1]), 'qa_executed_script_not_checkout');
+  const origin = await git(['remote', 'get-url', 'origin']);
+  assert(['https://github.com/kaisersong/xiaok-cli', 'https://github.com/kaisersong/xiaok-cli.git'].includes(origin), 'qa_origin_not_fixed_repo');
+  assert(/^[0-9a-f]{40}$/.test(NEW.sha), 'full_new_sha_required');
+  await git(['fetch', '--no-tags', '--depth=1', 'origin', NEW.sha]);
+  assert.equal(await git(['cat-file', '-t', NEW.sha]), 'commit', 'product_commit_required');
+  // Keep the NUL terminator: trimming the raw tree would destroy the parser boundary.
+  const productRaw = (await command('/usr/bin/git', ['ls-tree', '-r', '-z', '--full-tree', NEW.sha])).out;
+  const qaRaw = (await command('/usr/bin/git', ['ls-tree', '-r', '-z', '--full-tree', qaSHA])).out;
+  const product = parseGitTree(productRaw), qa = parseGitTree(qaRaw), bridge = compareQaTrees(product, qa);
+  const files = QA_PATHS.map(path => checkedQaFile(join(checkout, path), qa.get(path)));
+  assert.equal(await git(['rev-parse', 'HEAD']), qaSHA, 'qa_head_changed');
+  const proof = { qaSHA, githubSHA: process.env.GITHUB_SHA, workflowSHA: process.env.GITHUB_WORKFLOW_SHA, productSHA: NEW.sha,
+    origin, changedPaths: bridge.changed, actualCheckoutFiles: files, nonQaTreeSHA256: createHash('sha256').update(JSON.stringify(bridge.nonQaEntries)).digest('hex'),
+    productTreeOutputSHA256: createHash('sha256').update(productRaw).digest('hex'), qaTreeOutputSHA256: createHash('sha256').update(qaRaw).digest('hex'),
+    claim: 'All non-QA path/mode/type/blob tuples equal; actual checked-out QA bytes equal the QA-head blobs. Not whole-tree equality or upgrade qualification.' };
+  save('qa-source-binding.json', proof); return proof;
+}
+function parseApplications(text) {
+  const rows = JSON.parse(text); assert(Array.isArray(rows), 'gui_snapshot_shape');
+  for (const row of rows) {
+    assert(row && Number.isSafeInteger(row.pid) && row.pid > 0 && typeof row.terminated === 'boolean' &&
+      ['bundleIdentifier', 'bundleURL', 'executableURL'].every(k => row[k] === null || typeof row[k] === 'string'), 'gui_snapshot_shape');
+  }
+  return rows;
+}
+function selectGuiApplications(applications, before, after, expected) {
+  const matched = [], seen = new Set();
+  for (const application of applications) {
+    if (application.terminated) continue;
+    if (application.bundleIdentifier !== APP_ID && application.bundleURL !== expected.bundle && application.executableURL !== expected.executable) continue;
+    const first = before.find(p => p.pid === application.pid), current = after.find(p => p.pid === application.pid);
+    if (!first || !current) continue; // Stale/start/exit race: not a positive ready or duplicate identity.
+    assert(first.uid === current.uid && first.birth === current.birth && first.executable === current.executable, 'gui_ps_identity_changed');
+    assert(current.uid === expected.uid && current.executable === expected.executable && application.bundleIdentifier === APP_ID &&
+      application.bundleURL === expected.bundle && application.executableURL === expected.executable, 'gui_application_identity');
+    assert(!seen.has(current.pid), 'duplicate_application_registration'); seen.add(current.pid);
+    matched.push({ ...current, application });
+  }
+  assert(matched.length <= 1, 'multiple_same_path_apps');
+  return matched;
+}
+async function registeredApplications() {
+  const source = `ObjC.import('AppKit');
+function nullable(value) { if (value === null || value === undefined) return null; const text = ObjC.unwrap(value); return typeof text === 'string' ? text : null; }
+const apps = $.NSWorkspace.sharedWorkspace.runningApplications, rows = [];
+for (let i = 0; i < apps.count; i++) {
+  const app = apps.objectAtIndex(i), bundle = app.bundleURL, executable = app.executableURL;
+  rows.push({ pid: Number(app.processIdentifier), terminated: Boolean(app.isTerminated), bundleIdentifier: nullable(app.bundleIdentifier),
+    bundleURL: bundle ? nullable(bundle.path) : null, executableURL: executable ? nullable(executable.path) : null });
+}
+JSON.stringify(rows);`;
+  const observed = await command('/usr/bin/osascript', ['-l', 'JavaScript', '-e', source], { quiet: true, timeout: 5000 });
+  const rows = parseApplications(observed.out);
+  event('running-applications-observed', { commandId: observed.id, applications: rows }); return rows;
+}
+function relaunchedGui(applications, previous, runnerPID) {
+  const rows = applications.filter(p => p.pid !== previous.pid);
+  assert(rows.length <= 1, 'multiple_relaunched_apps');
+  const row = rows[0];
+  if (row) assert(row.ppid !== runnerPID && row.birth !== previous.birth, 'not_os_owned_new_launch');
+  return row;
+}
+
 async function monitor() {
-  while (!monitorStopped) { try { await sample(); } catch (e) { monitorError = e; break; } await delay(250); }
+  while (!monitorStopped) { try { await sample('monitor'); } catch (e) { monitorError = e; break; } await delay(250); }
 }
 async function waitFor(predicate, timeout, code) {
   const end = Math.min(DEADLINE, performance.now() + timeout);
@@ -249,6 +386,94 @@ async function cacheDownload(expected) {
   assert(matches.length > 0 && matches.every(m => m.sha256 === NEW.zipSHA256), 'actual_updater_cache_hash_missing_or_wrong');
   save('updater-cache-downloads.json', matches);
 }
+
+const qaDiagnostics = [];
+function diagnosticError(phase, error) {
+  qaDiagnostics.push({ phase, message: error?.message ?? String(error), stack: error?.stack ?? null });
+}
+function diagnosticSave(name, value) {
+  try { save(name, value); } catch (error) { diagnosticError(`save:${name}`, error); }
+}
+function diagnosticEvent(kind, value) {
+  try { event(kind, value); return true; } catch (error) { diagnosticError(`event:${kind}`, error); return false; }
+}
+function sameProcessIdentity(previous, current) {
+  return Boolean(previous && current && previous.pid === current.pid && previous.uid === current.uid &&
+    previous.birth === current.birth && previous.executable === current.executable);
+}
+function identityConflict(previous, current, phase, reason) {
+  diagnosticEvent('owned-identity-conflict', { previous: previous ?? null, current: current ?? null, phase, reason, installedRequest,
+    comparisons: { pid: previous?.pid === current?.pid, uid: previous?.uid === current?.uid,
+      birth: previous?.birth === current?.birth, executable: previous?.executable === current?.executable } });
+}
+async function signalOwnedProcess(record, requestedSignal, { readProcesses = processes, sendSignal = (pid, signal) => process.kill(pid, signal) } = {}) {
+  const live = (await readProcesses()).find(p => p.pid === record.pid);
+  if (!live) return { kind: 'absent', pid: record.pid };
+  const known = owned.get(record.pid);
+  if (!sameProcessIdentity(record, known) || !sameProcessIdentity(record, live)) {
+    identityConflict(record, live, 'cleanup', 'identity_changed_not_signaled');
+    return { kind: 'rejected', failure: { pid: record.pid, reason: 'identity_changed_not_signaled' } };
+  }
+  const special = (primary !== undefined || monitorError !== undefined) && !installedRequest && record.pid === oldChild?.pid;
+  if (special && (!oldIdentity || !sameProcessIdentity(record, oldIdentity) || oldIdentity.pid !== oldChild.pid ||
+      record.uid !== qaUid || record.executable !== appExecutable)) {
+    identityConflict(oldIdentity, live, 'cleanup', 'failure_old_gui_identity_unconfirmed');
+    return { kind: 'rejected', failure: { pid: record.pid, reason: 'failure_old_gui_identity_unconfirmed' } };
+  }
+  const signal = special ? 'SIGKILL' : requestedSignal;
+  try {
+    // No await or I/O between this fresh identity decision and the exact per-PID signal.
+    assert(sendSignal(record.pid, signal) === true, 'signal_dispatch_unconfirmed');
+    const recorded = diagnosticEvent('cleanup-signal', { ...record, signal, directChildWaitClaim: record.directChild, adoptedProcessReapClaim: false });
+    if (special) diagnosticEvent('failure-old-gui-hard-stop', { previous: oldIdentity, current: live, requestedSignal, signal,
+      phase: 'cleanup', installedRequest, primary: primary?.message ?? null, monitorError: monitorError?.message ?? null,
+      signalSent: true, normalExitClaim: false, upgradeSuccessClaim: false });
+    return { kind: 'signalled', pid: record.pid, signal, ...(recorded ? {} : { failure: { pid: record.pid, reason: 'signal_evidence_unconfirmed' } }) };
+  } catch (error) {
+    if (special) diagnosticEvent('failure-old-gui-hard-stop', { previous: oldIdentity, current: live, requestedSignal, signal,
+      phase: 'cleanup', installedRequest, signalSent: false, reason: error.code ?? error.message, normalExitClaim: false, upgradeSuccessClaim: false });
+    return { kind: error.code === 'ESRCH' ? 'absent' : 'signal-error', pid: record.pid,
+      ...(error.code === 'ESRCH' ? {} : { failure: { pid: record.pid, reason: error.code ?? error.message } }) };
+  }
+}
+function successfulCodesign(receipt) {
+  return Boolean(receipt && (receipt.spawnError === undefined || receipt.spawnError === null) && receipt.timedOut === false &&
+    receipt.code === 0 && receipt.signal === null && receipt.actualWait === true && receipt.reaped === true && receipt.closeObserved === true);
+}
+function treeDelta(before, after) {
+  const old = new Map(before.map(entry => [entry.name, entry])), live = new Map(after.map(entry => [entry.name, entry]));
+  const delta = { added: [], removed: [], changed: [] };
+  for (const name of [...new Set([...old.keys(), ...live.keys()])].sort()) {
+    if (!old.has(name)) delta.added.push(live.get(name));
+    else if (!live.has(name)) delta.removed.push(old.get(name));
+    else if (JSON.stringify(old.get(name)) !== JSON.stringify(live.get(name))) delta.changed.push({ before: old.get(name), after: live.get(name) });
+  }
+  return delta;
+}
+async function assertOldLivePreinstall(oldTree) {
+  const live = await tree(app), diagnosticsStart = qaDiagnostics.length;
+  diagnosticSave('old-live-preinstall-tree.json', live);
+  diagnosticSave('old-live-preinstall-delta.json', treeDelta(oldTree, live));
+  let signature;
+  try {
+    const observed = await command('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', app], { allowFailure: true });
+    const { out, err, ...receipt } = observed;
+    signature = { ...receipt, verifiedSuccessfulProcess: successfulCodesign(receipt),
+      stdoutFile: `command-${receipt.id}.stdout`, stderrFile: `command-${receipt.id}.stderr`,
+      stdoutSHA256: createHash('sha256').update(out).digest('hex'), stderrSHA256: createHash('sha256').update(err).digest('hex') };
+  } catch (error) { diagnosticError('old-live-preinstall-codesign', error); signature = { verifiedSuccessfulProcess: false, failure: error.message }; }
+  diagnosticSave('old-live-preinstall-signature.json', signature);
+  // This original guard deliberately remains primary over all diagnostic failures.
+  assert.deepEqual(live, oldTree, 'old_bundle_changed_before_install');
+  if (monitorError) throw monitorError;
+  assert(signature.verifiedSuccessfulProcess, 'old_live_preinstall_signature_invalid_or_unknown');
+  assert(qaDiagnostics.length === diagnosticsStart, 'old_live_preinstall_diagnostic_evidence_unconfirmed');
+}
+
+function directAppExitFacts(child) {
+  return { directAppExited: child ? Boolean(child.qaClosed) && (child.exitCode !== null || child.signalCode !== null) : null,
+    directAppCloseObserved: Boolean(child?.qaClosed), directAppExitCode: child?.exitCode ?? null, directAppSignal: child?.signalCode ?? null };
+}
 async function cleanup() {
   const failures = [];
   cleaning = true;
@@ -256,20 +481,23 @@ async function cleanup() {
   monitorStopped = true; if (monitorPromise) await monitorPromise;
   if (monitorError) failures.push({ reason: monitorError.message });
   for (const signal of ['SIGTERM', 'SIGKILL']) {
-    if (app) { try { await sample(); } catch (e) { failures.push({ reason: e.message }); } }
-    for (const record of [...owned.values()].reverse()) {
-      const live = (await processes()).find(p => p.pid === record.pid); if (!live) continue;
-      if (live.uid !== record.uid || live.birth !== record.birth || live.executable !== record.executable) { failures.push({ pid: record.pid, reason: 'identity_changed_not_signaled' }); continue; }
-      try { process.kill(record.pid, signal); event('cleanup-signal', { ...record, signal, directChildWaitClaim: record.directChild, adoptedProcessReapClaim: false }); }
-      catch (e) { if (e.code !== 'ESRCH') failures.push({ pid: record.pid, reason: e.code ?? e.message }); }
+    if (app) { try { await sample('cleanup'); } catch (e) { failures.push({ reason: e.message }); } }
+    const records = [...owned.values()].reverse();
+    if ((primary !== undefined || monitorError !== undefined) && !installedRequest) {
+      // Stop the exact old GUI before graceful child cleanup can induce its quit path.
+      const oldIndex = records.findIndex(record => record.pid === oldChild?.pid);
+      if (oldIndex > 0) records.unshift(...records.splice(oldIndex, 1));
+    }
+    for (const record of records) {
+      const outcome = await signalOwnedProcess(record, signal);
+      if (outcome.failure) failures.push(outcome.failure);
     }
     await delay(2000);
   }
-  if (app) { try { await sample(); } catch (e) { failures.push({ reason: e.message }); } }
+  if (app) { try { await sample('cleanup'); } catch (e) { failures.push({ reason: e.message }); } }
   const after = await processes();
   const residual = after.filter(p => owned.has(p.pid));
-  const facts = { failures, residual, directAppExited: oldChild ? oldChild.exitCode !== null : null,
-    directAppCloseObserved: Boolean(oldChild?.qaClosed), adoptedProcessesReapedByRunner: false,
+  const facts = { failures, residual, ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
     profile: profileInventory(), externalApplications: externalApplications() };
   save('cleanup.json', facts);
   const shipItLogs = [];
@@ -289,12 +517,12 @@ function externalApplications() {
 }
 async function main() {
   validInputs();
-  assert(process.env.GITHUB_SHA === NEW.sha, 'workflow_source_not_published_new_sha');
   assert(platform() === 'darwin' && arch() === 'arm64' && qaUid !== 0, 'arm64_nonroot_mac_required');
   assert(process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted' && process.env.RUNNER_OS === 'macOS' && process.env.RUNNER_ARCH === 'ARM64', 'disposable_hosted_mac_required');
   const temp = realpathSync(process.env.RUNNER_TEMP); assert(lstatSync(temp).isDirectory() && lstatSync(temp).uid === qaUid, 'runner_temp_owner');
   root = join(temp, 'xiaok-real-upgrade-qa'); mkdirSync(root, { mode: 0o700 }); evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
-  save('inputs.json', { old: OLD, new: NEW, qaCodeSHA: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, root, home: qaHome, uid: qaUid });
+  qaSourceBinding = await bindQaSource();
+  save('inputs.json', { oldVersion: OLD.version, old: OLD, new: NEW, qaCodeSHA: qaSourceBinding.qaSHA, qaSourceBinding, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, root, home: qaHome, uid: qaUid });
   assert((await command('/usr/bin/uname', ['-m'])).out.trim() === 'arm64', 'actual_host_architecture');
   await command('/bin/launchctl', ['print', `gui/${qaUid}`], { quiet: true });
   assert(Number((await command('/usr/bin/stat', ['-f', '%u', '/dev/console'])).out.trim()) === qaUid, 'runner_gui_session_required');
@@ -325,7 +553,7 @@ async function main() {
   finally { closeSync(out); closeSync(err); }
   oldChild.qaClosed = false; oldChild.once('close', () => { oldChild.qaClosed = true; }); oldChild.once('error', e => { monitorError = e; }); oldChild.once('exit', (code, signal) => event('direct-old-app-exit', { pid: oldChild.pid, code, signal, waitedReapedByNode: true }));
   monitorPromise = monitor();
-  oldIdentity = await waitFor(async () => { await sample(); return owned.get(oldChild.pid); }, 30_000, 'old_app_identity_missing');
+  oldIdentity = await waitFor(async () => { await sample('old-ready'); return latestGuiApplications.find(p => p.pid === oldChild.pid); }, 30_000, 'old_app_identity_missing');
   const oldCDP = await waitFor(() => cdp(port, oldIdentity.pid), 120_000, 'runner_gui_old_window_unavailable');
   let downloaded;
   try {
@@ -336,14 +564,14 @@ async function main() {
       if (s.available) assert(s.version === NEW.tag.slice(9), 'updater_selected_unexpected_version');
       return s.available && s.downloaded === true && s.progress === 100 && s.version === NEW.tag.slice(9) ? s : false;
     }, 12 * 60_000, 'production_update_not_downloaded');
-    await cacheDownload(newZip); assert.deepEqual(await tree(app), oldTree, 'old_bundle_changed_before_install');
+    await cacheDownload(newZip); await assertOldLivePreinstall(oldTree);
     assert.deepEqual((await releaseFacts(NEW)).metadata, beforeNew.metadata, 'new_metadata_drift_before_install');
     installedRequest = true; event('one-real-quitAndInstall-request', { oldIdentity });
     try { const response = await oldCDP.evaluate('window.xiaokDesktop.quitAndInstall()'); event('install-ipc-response', { response }); assert(!response?.status || ['pending', 'already_handed_off'].includes(response.status), 'install_ipc_rejected'); }
     catch (e) { if (e.message !== 'cdp_closed') throw e; event('install-ipc-disconnected-during-quit', {}); }
   } finally { oldCDP.close(); }
   await waitFor(async () => oldChild.qaClosed && oldChild.exitCode === 0, 120_000, 'old_app_did_not_exit');
-  const restarted = await waitFor(async () => { await sample(); const rows = latestProcesses.filter(p => p.uid === qaUid && p.executable === appExecutable && p.pid !== oldIdentity.pid); assert(rows.length <= 1, 'multiple_relaunched_apps'); return rows[0]; }, 180_000, 'nsworkspace_did_not_relaunch_same_path');
+  const restarted = await waitFor(async () => { await sample('relaunch'); return relaunchedGui(latestGuiApplications, oldIdentity, process.pid); }, 180_000, 'nsworkspace_did_not_relaunch_same_path');
   assert(restarted.ppid !== process.pid && restarted.birth !== oldIdentity.birth, 'not_os_owned_new_launch'); event('os-owned-relaunch-observed', { ...restarted, directlySpawnedByRunner: false, reapClaim: false });
   assert([...owned.values()].some(p => p.shipIt), 'shipit_identity_not_observed');
   const newCDP = await waitFor(() => cdp(port, restarted.pid), 120_000, 'relaunched_app_production_default_cdp_unavailable');
@@ -365,14 +593,192 @@ async function main() {
   assert.deepEqual(afterOld.metadata, beforeOld.metadata, 'old_release_drift'); assert.deepEqual(afterNew.metadata, beforeNew.metadata, 'new_release_drift');
   resultFacts = { downloaded, current, oldIdentity, restarted, actualSamePathReplacement: true, treeMatchesPublishedNewZIP: true, productionFeedUnchanged: true, oneInstallRequest: true };
 }
+if (process.argv.length === 3 && process.argv[2] === '--self-test') {
+  await pureControls();
+} else {
+assert(process.argv.length === 2, 'qa_arguments');
 try { await main(); if (monitorError) throw monitorError; } catch (e) { primary = { message: e.message, stack: e.stack }; }
 finally {
   if (evidence) {
     try { await cleanup(); } catch (e) { primary ??= { message: e.message, stack: e.stack }; event('cleanup-failed', { message: e.message }); }
-    save('RESULT.json', { status: primary ? 'FAIL' : 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE', failure: primary ?? null, old: OLD, new: NEW, facts: resultFacts,
+    if (qaDiagnostics.length && !primary) primary = { message: 'qa_diagnostic_evidence_unconfirmed' };
+    save('RESULT.json', { oldVersion: OLD.version, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, qaDiagnostics, status: primary ? 'FAIL' : 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE', failure: primary ?? null, old: OLD, new: NEW, qaSourceBinding: qaSourceBinding ?? null, facts: resultFacts,
       elapsedSeconds: (performance.now() - START) / 1000, noProductBuildOrCopyReplacement: true, noFeedOverride: true, noModelSDKCUAGoalTask: true,
       profileDisposition: 'Retained until hosted disposable VM destruction; artifacts contain evidence only, not app binaries or caches.',
       notClaimed: ['Windows', 'Goal14', 'CUA3', 'held native qualification', 'signing or publication', 'reap of launchd-owned processes'] });
   }
 }
 if (primary) { console.error(primary.message); process.exitCode = 1; }
+}
+
+async function pureControls() {
+  let passed = 0;
+  const check = (name, action) => { action(); passed++; console.log(`PASS ${name}`); };
+  const path = '/qa/installed/xiaok.app', exe = `${path}/Contents/MacOS/xiaok`, uid = 501;
+  const old = { pid: 10, uid, birth: 'old-birth', executable: exe }, child = { ...old, pid: 11, birth: 'child-birth' };
+  const registration = { pid: 10, bundleIdentifier: APP_ID, bundleURL: path, executableURL: exe, terminated: false };
+  const choose = (apps, before = [old, child], after = before) => selectGuiApplications(apps, before, after, { uid, bundle: path, executable: exe });
+  await (async () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'xiaok-qa-owned-pure-'));
+    const saved = { root, evidence, app, appExecutable, oldChild, owned: new Map(owned) };
+    try {
+      root = temporary; evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
+      app = join(root, 'installed', 'xiaok.app'); appExecutable = join(app, 'Contents', 'MacOS', 'xiaok');
+      oldChild = { pid: old.pid }; owned.clear();
+      const rows = [{ ...old, uid: qaUid, executable: appExecutable, ppid: process.pid, pgid: old.pid },
+        { ...child, uid: qaUid, executable: appExecutable, ppid: old.pid, pgid: child.pid }];
+      await observeOwnedProcesses(rows);
+      assert.deepEqual([...owned.keys()], [old.pid, child.pid]);
+      assert.equal(owned.get(old.pid).directChild, true); assert.equal(owned.get(child.pid).directChild, false);
+      assert.equal(owned.get(child.pid).executable, appExecutable); assert.equal(owned.get(child.pid).ppid, old.pid);
+      const applications = [{ ...registration, bundleURL: app, executableURL: appExecutable }];
+      assert.deepEqual(selectGuiApplications(applications, rows, rows, { uid: qaUid, bundle: app, executable: appExecutable }).map(p => p.pid), [old.pid]);
+    } finally {
+      ({ root, evidence, app, appExecutable, oldChild } = saved);
+      owned.clear(); for (const [pid, record] of saved.owned) owned.set(pid, record);
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  })();
+  passed++; console.log('PASS same-executable child remains in actual owned cleanup while only old GUI is selected');
+  check('two live target GUI registrations reject', () => assert.throws(() => choose([registration, { ...registration, pid: 11 }]), /multiple_same_path_apps/));
+  check('terminated registration never counts as ready or duplicate', () => assert.deepEqual(choose([registration, { ...registration, pid: 11, terminated: true }]).map(p => p.pid), [10]));
+  check('missing current ps identity yields no match', () => assert.deepEqual(choose([registration], [old], []), []));
+  for (const [field, value] of [['bundleIdentifier', 'wrong.bundle'], ['bundleURL', '/other/xiaok.app'], ['executableURL', '/other/xiaok.app/Contents/MacOS/xiaok']]) {
+    check(`live contradictory registration ${field} rejects`, () => assert.throws(() => choose([{ ...registration, [field]: value }]), /gui_application_identity/));
+  }
+  check('live wrong UID rejects', () => assert.throws(() => choose([registration], [{ ...old, uid: 502 }], [{ ...old, uid: 502 }]), /gui_application_identity/));
+  check('live ps birth contradiction rejects', () => assert.throws(() => choose([registration], [old], [{ ...old, birth: 'reused' }]), /gui_ps_identity_changed/));
+  check('live ps executable contradiction rejects', () => assert.throws(() => choose([registration], [old], [{ ...old, executable: '/other' }]), /gui_ps_identity_changed/));
+  check('relaunch selection excludes old PID and requires fresh birth/non-runner parent', () => {
+    const newer = { ...child, ppid: 1 }, gui = choose([{ ...registration, pid: 11 }], [newer]);
+    assert.equal(relaunchedGui([old], old, 99), undefined); assert.equal(relaunchedGui(gui, old, 99).pid, 11);
+    assert.throws(() => relaunchedGui([{ ...newer, ppid: 99 }], old, 99), /not_os_owned_new_launch/);
+    assert.throws(() => relaunchedGui([{ ...newer, birth: old.birth }], old, 99), /not_os_owned_new_launch/);
+  });
+  check('bad observer data cannot be interpreted as an empty successful observation', () => {
+    assert.throws(() => parseApplications('not-json')); assert.throws(() => parseApplications('{}'));
+    assert.throws(() => parseApplications(JSON.stringify([{ ...registration, terminated: 'false' }])));
+  });
+  const one = '1'.repeat(40), two = '2'.repeat(40), three = '3'.repeat(40);
+  const entry = oid => ({ mode: '100644', type: 'blob', oid });
+  const product = new Map([...QA_PATHS.map(p => [p, entry(one)]), ['src/main.ts', entry(three)]]);
+  const qa = new Map([...QA_PATHS.map(p => [p, entry(two)]), ['src/main.ts', entry(three)]]);
+  check('independent QA/product commits with exactly two QA modifications pass', () => { assertQaCommit(one, one, one); assert.deepEqual(compareQaTrees(product, qa).changed, QA_PATHS); });
+  check('checkout or workflow SHA mismatch rejects', () => { assert.throws(() => assertQaCommit(one, two, one)); assert.throws(() => assertQaCommit(one, one, two)); });
+  check('third-file blob/mode changes or additions reject', () => {
+    for (const [path, changed] of [['src/main.ts', entry(one)], ['src/main.ts', { ...entry(three), mode: '100755' }], ['new.txt', entry(three)]]) {
+      const next = new Map(qa); next.set(path, changed); assert.throws(() => compareQaTrees(product, next), /non_qa_tree_changed/);
+    }
+  });
+  check('QA symlink/type or missing entries reject', () => {
+    const next = new Map(qa); next.set(QA_PATHS[0], { ...entry(two), mode: '120000' }); assert.throws(() => compareQaTrees(product, next), /qa_regular_blob_required/);
+    next.delete(QA_PATHS[0]); assert.throws(() => compareQaTrees(product, next), /qa_regular_blob_required/);
+  });
+  check('Git tree malformed/duplicate entries reject', () => { assert.throws(() => parseGitTree('bad')); assert.throws(() => parseGitTree(`100644 blob ${one}\ta\0` .repeat(2))); });
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), 'xiaok-qa-pure-'));
+  try {
+    const file = join(directory, 'qa.mjs'), bytes = Buffer.from('// frozen QA\n'); writeFileSync(file, bytes, { mode: 0o644 }); chmodSync(file, 0o644);
+    const expected = entry(gitBlobOID(bytes));
+    check('actual regular checkout bytes match the QA-head blob', () => assert.equal(checkedQaFile(file, expected).blobOID, expected.oid));
+    check('changed actual checkout bytes reject despite unchanged tree', () => { writeFileSync(file, '// modified\n'); assert.throws(() => checkedQaFile(file, expected), /qa_checkout_blob_mismatch/); });
+    check('actual executable mode is not an approved 100644 QA file', () => { writeFileSync(file, bytes); chmodSync(file, 0o755); assert.throws(() => checkedQaFile(file, expected), /qa_checkout_regular_mode/); });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+
+  const signalTemp = mkdtempSync(join(realpathSync(tmpdir()), 'xiaok-qa-signal-pure-'));
+  const savedSignalState = { root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest,
+    owned: new Map(owned), diagnostics: [...qaDiagnostics] };
+  const signalCheck = async (name, action) => { await action(); passed++; console.log(`PASS ${name}`); };
+  try {
+    root = signalTemp; evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
+    app = join(root, 'installed', 'xiaok.app'); appExecutable = join(app, 'Contents', 'MacOS', 'xiaok');
+    const gui = { pid: 50, ppid: process.pid, pgid: 50, uid: qaUid, birth: 'old-gui-birth', executable: appExecutable, directChild: true };
+    oldChild = { pid: gui.pid }; oldIdentity = { ...gui }; primary = { message: 'expected-primary' }; monitorError = undefined; installedRequest = false;
+    owned.clear(); owned.set(gui.pid, gui);
+    const invokeSignal = async (record, rows) => {
+      const actions = [];
+      const outcome = await signalOwnedProcess(record, 'SIGTERM', {
+        readProcesses: async () => { actions.push(['fresh-ps']); return rows; },
+        sendSignal: (pid, signal) => { actions.push(['signal', pid, signal]); return true; },
+      });
+      return { actions, outcome };
+    };
+    await signalCheck('failed preinstall old GUI is hard-stopped only after the fresh exact ps match', async () => {
+      const actual = await invokeSignal(gui, [gui]); assert.deepEqual(actual.actions, [['fresh-ps'], ['signal', gui.pid, 'SIGKILL']]);
+      assert.equal(actual.outcome.failure, undefined); assert.equal(actual.outcome.signal, 'SIGKILL');
+    });
+    await signalCheck('normal cleanup and explicit-install cleanup keep original TERM behavior', async () => {
+      primary = undefined; assert.equal((await invokeSignal(gui, [gui])).outcome.signal, 'SIGTERM');
+      primary = { message: 'expected-primary' }; installedRequest = true; assert.equal((await invokeSignal(gui, [gui])).outcome.signal, 'SIGTERM'); installedRequest = false;
+    });
+    await signalCheck('another owned same-executable PID receives no old-GUI special signal', async () => {
+      const other = { ...gui, pid: 51, ppid: gui.pid, directChild: false }; owned.set(other.pid, other);
+      assert.equal((await invokeSignal(other, [other])).outcome.signal, 'SIGTERM'); owned.delete(other.pid);
+    });
+    await signalCheck('missing old identity or fresh PID cannot signal the old GUI', async () => {
+      oldIdentity = undefined; let actual = await invokeSignal(gui, [gui]); assert.deepEqual(actual.actions, [['fresh-ps']]); assert(actual.outcome.failure);
+      oldIdentity = { ...gui }; actual = await invokeSignal(gui, []); assert.deepEqual(actual.actions, [['fresh-ps']]);
+    });
+    for (const [key, value] of [['uid', qaUid + 1], ['birth', 'different-birth'], ['executable', '/different-executable']]) {
+      await signalCheck(`live ${key} mismatch rejects without signal`, async () => {
+        const actual = await invokeSignal(gui, [{ ...gui, [key]: value }]); assert.deepEqual(actual.actions, [['fresh-ps']]); assert.equal(actual.outcome.failure.reason, 'identity_changed_not_signaled');
+      });
+    }
+    await signalCheck('a signal failure remains a cleanup failure', async () => {
+      const outcome = await signalOwnedProcess(gui, 'SIGTERM', { readProcesses: async () => [gui], sendSignal: () => { throw Object.assign(new Error('fixture-denied'), { code: 'EPERM' }); } });
+      assert.equal(outcome.failure.reason, 'EPERM');
+    });
+    await signalCheck('identity evidence-write failure retains original ownership rejection', async () => {
+      const previousEvidence = evidence, before = qaDiagnostics.length; evidence = join(root, 'missing', 'evidence');
+      try { await assert.rejects(observeOwnedProcesses([{ ...gui, birth: 'changed' }], 'pure-conflict'), /owned_pid_identity_changed/); }
+      finally { evidence = previousEvidence; }
+      assert.equal(qaDiagnostics.length, before + 1); assert.equal(owned.get(gui.pid), gui);
+    });
+    check('codesign success requires the complete successful process tuple', () => {
+      const good = { spawnError: undefined, timedOut: false, code: 0, signal: null, actualWait: true, reaped: true, closeObserved: true };
+      assert.equal(successfulCodesign(good), true);
+      for (const [key, value] of [['spawnError', 'ENOENT'], ['timedOut', true], ['code', 1], ['signal', 'SIGKILL'], ['actualWait', false], ['reaped', false], ['closeObserved', false]]) assert.equal(successfulCodesign({ ...good, [key]: value }), false);
+    });
+  } finally {
+    ({ root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest } = savedSignalState);
+    owned.clear(); for (const [pid, record] of savedSignalState.owned) owned.set(pid, record);
+    qaDiagnostics.splice(0, qaDiagnostics.length, ...savedSignalState.diagnostics);
+    rmSync(signalTemp, { recursive: true, force: true });
+  }
+
+
+  check('old version defaults to the unchanged immutable 1.5.14 preset', () => {
+    assert.equal(selectOldPreset(), OLD14); assert(Object.isFrozen(OLD14));
+    assert.deepEqual(OLD14, { tag: 'desktop-v1.5.14', version: '1.5.14', release: 418149835,
+      sha: 'dc221f9bac84d939b8fb543d4795396693fdc9b8', bytes: 228655718,
+      zipSHA256: 'b7a3b6d6e23b5423d581f8b93ad05b82b34fc0fab429c14ea4c9736d358ebf37' });
+  });
+  check('old15 selects exactly the published frozen asset identity', () => {
+    const selected = selectOldPreset('1.5.15'); assert(Object.isFrozen(selected));
+    assert.deepEqual(selected, { tag: 'desktop-v1.5.15', version: '1.5.15', release: 419987808,
+      sha: '6770092945a42fb0e45ef0d68d0971bfc01b51a8', bytes: 231833178,
+      zipSHA256: '1e6e73ca880994d6c7f23ef4919b020099e350702581040113beeb43779cc3c9' });
+    assert.throws(() => { selected.release = 1; }, TypeError);
+  });
+  check('unknown old versions cannot select or override a preset', () => {
+    for (const version of ['1.5.13', '1.5.16', '', '__proto__']) assert.throws(() => selectOldPreset(version), /old_version_not_allowed/);
+  });
+  check('new16 is strictly newer than either old preset; equal or older rejects', () => {
+    for (const version of ['1.5.14', '1.5.15']) assert.doesNotThrow(() => assertNewerVersion('1.5.16', selectOldPreset(version).version));
+    assert.throws(() => assertNewerVersion('1.5.15', '1.5.15'), /new_version_must_follow_selected_old/);
+    assert.throws(() => assertNewerVersion('1.5.14', '1.5.15'), /new_version_must_follow_selected_old/);
+    assert.doesNotThrow(() => assertNewerVersion('1.6.0', '1.5.15'));
+  });
+  check('version comparison refuses noncanonical or inexact integer components', () => {
+    for (const version of ['1.5', '01.5.16', '1.5.16.1', '1.5.x', '9007199254740992.0.0']) assert.throws(() => assertNewerVersion(version, '1.5.15'));
+  });
+
+  check('direct-child exit metadata distinguishes SIGKILL from normal exit and waits for close', () => {
+    assert.deepEqual(directAppExitFacts({ qaClosed: true, exitCode: null, signalCode: 'SIGKILL' }), {
+      directAppExited: true, directAppCloseObserved: true, directAppExitCode: null, directAppSignal: 'SIGKILL' });
+    assert.deepEqual(directAppExitFacts({ qaClosed: true, exitCode: 0, signalCode: null }), {
+      directAppExited: true, directAppCloseObserved: true, directAppExitCode: 0, directAppSignal: null });
+    assert.equal(directAppExitFacts({ qaClosed: false, exitCode: 0, signalCode: null }).directAppExited, false);
+    assert.equal(directAppExitFacts({ qaClosed: false, exitCode: null, signalCode: null }).directAppExited, false);
+  });
+  console.log(JSON.stringify({ status: 'PASS_PURE_QA_CONTROLS_ONLY', passed, AppKitOrAppExecuted: false }));
+}
