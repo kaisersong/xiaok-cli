@@ -272,6 +272,22 @@ describe('resolveRuntimeModelBinding', () => {
     });
   });
 
+  it.each(['first_party', 'custom'] as const)('preserves saved Vision wire with %s provider boundaries', (providerType) => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'deepseek',
+      modelId: 'deepseek-legacy-vision',
+      wireModel: 'deepseek-v4-flash-vision-exp',
+      baseUrl: providerType === 'first_party' ? 'https://api.deepseek.com/v1' : 'https://example.com/v1',
+      providerType,
+    });
+    const original = structuredClone(config);
+    const binding = resolveRuntimeModelBinding(config);
+    expect(binding.wireModel).toBe('deepseek-v4-flash-vision-exp');
+    expect(binding.capabilities).toEqual(providerType === 'first_party' ? ['tools', 'thinking', 'image_in'] : []);
+    expect(binding.runtimeOptions?.contextLimit).toBe(providerType === 'first_party' ? 1_000_000 : undefined);
+    expect(config).toEqual(original);
+  });
+
   it('does not inherit official provider capabilities for a custom provider with a colliding id', () => {
     // id 与官方撞名的 custom 拿到官方 profile，但模型运行在自定义 baseUrl 上，
     // 不能继承官方默认能力（评审 P2 #4）；无显式声明时按保守空集。

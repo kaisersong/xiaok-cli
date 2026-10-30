@@ -4,8 +4,12 @@ on:
     branches: [master]
     paths:
       - 'src/ai/adapters/openai.ts'
+      - 'src/ai/providers/**'
+      - 'src/ai/models.ts'
       - 'src/ai/runtime/**'
       - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/providers/**'
+      - 'tests/ai/models.test.ts'
       - 'tests/ai/adapters/openai-provider-sse-error.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
@@ -13,8 +17,12 @@ on:
   pull_request:
     paths:
       - 'src/ai/adapters/openai.ts'
+      - 'src/ai/providers/**'
+      - 'src/ai/models.ts'
       - 'src/ai/runtime/**'
       - 'tests/ai/adapters/openai.test.ts'
+      - 'tests/ai/providers/**'
+      - 'tests/ai/models.test.ts'
       - 'tests/ai/adapters/openai-provider-sse-error.test.ts'
       - 'tests/ai/runtime/**'
       - 'tests/e2e/kimi-error-recovery*'
@@ -43,6 +51,11 @@ jobs:
         run: >
           npm run test:sandbox:run --
           .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ai/providers/registry.test.js
+          .test-dist/tests/ai/providers/control-plane.test.js
+          .test-dist/tests/ai/providers/normalize.test.js
+          .test-dist/tests/ai/runtime/model-capabilities.test.js
+          .test-dist/tests/ai/models.test.js
           .test-dist/tests/ai/adapters/openai-provider-sse-error.test.js
           .test-dist/tests/ai/runtime/model-stream-recovery.test.js
           .test-dist/tests/ai/runtime/model-text-repetition.test.js
