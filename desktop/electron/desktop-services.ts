@@ -1,3 +1,4 @@
+import { isKimiCodingModel, isStrictKimiK3ProfileId } from '../../src/ai/providers/kimi-models.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
 import type { MaterialAccessImportInput } from './material-access-ipc-contract.js';
 import { assertPluginActionSource, capturePluginActionInput, capturePluginActionRequest, pluginActionCode } from './plugin-action-service.js';
@@ -5361,7 +5362,7 @@ function findApplicableCatalogModel(
 
   if (
     providerId === 'kimi'
-    && (catalogModel.model === 'k3' || catalogModel.model === 'k3-256k')
+    && isKimiCodingModel(catalogModel.model)
   ) {
     const provider = config.providers[providerId];
     if (
@@ -5390,7 +5391,7 @@ function resolveDesktopModelRuntimeMetadata(
   const transport = resolveProviderTransport(config, model.provider);
   const catalogModel = findApplicableCatalogModel(config, model.provider, modelId, model.model);
   const acceptsConfiguredRuntimeOptions = model.provider !== 'kimi' || (
-    (model.model === 'k3' || model.model === 'k3-256k')
+    isKimiCodingModel(model.model)
     && provider.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );
@@ -7157,11 +7158,6 @@ type DesktopHostHistoryRecord = {
   role: 'user' | 'assistant';
   content: string;
 };
-
-function isStrictKimiK3ProfileId(profileId: string | undefined): boolean {
-  return profileId === 'kimi-k3-coding-openai'
-    || profileId === 'kimi-k3-256k-coding-openai';
-}
 
 function resolveDesktopHarnessProfileId(
   binding: ReturnType<typeof resolveRuntimeModelBinding>,

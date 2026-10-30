@@ -3109,6 +3109,22 @@ describe('desktop services', () => {
     }
   });
 
+  it.each(['k3.1-pro', 'k3.1-pro-highspeed'])('persists %s catalog capabilities and native runtime choices', async modelName => {
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    await services.saveModelConfig({ providerId: 'kimi', modelName }, undefined, 'user');
+    const before = await services.getModelConfig();
+    const model = before.models.find(entry => entry.model === modelName)!;
+    expect(model).toBeDefined();
+    expect(model.runtimeOptions).toEqual({ contextLimit: 262_144, reasoningEffort: 'high' });
+    expect(model.runtimeConstraints).toEqual({ maxContextLimit: 1_048_576, reasoningEfforts: ['low', 'high', 'max'] });
+    const updated = await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' } }, 'user');
+    expect(updated.models.find(entry => entry.id === model.id)?.runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'max' });
+    await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'none' } }, 'user')).rejects.toThrow(/reasoningEffort/);
+    const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf8'));
+    expect(persisted.models[model.id].capabilities).toEqual(['tools', 'thinking', 'image_in']);
+    expect((await services.getModelConfig()).models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('max');
+  });
+
   it('updates the declared GLM effort while preserving its context limit', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),

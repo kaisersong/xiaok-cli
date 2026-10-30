@@ -1,3 +1,4 @@
+import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
 import { resolveSemanticSummaryAttempt } from '../../runtime/sol-pi/semantic-summary-attempt.js';
@@ -541,8 +542,7 @@ export class OpenAIAdapter implements ModelAdapter {
     try {
     assertKimiTransportAllowed(this.harnessContext.identity);
     const profileId = this.getOwnedHarnessProfileId();
-    const strictProfile = profileId === 'kimi-k3-coding-openai'
-      || profileId === 'kimi-k3-256k-coding-openai'
+    const strictProfile = isStrictKimiK3ProfileId(profileId)
       ? profileId
       : undefined;
     if (!strictProfile && options?.providerConversationAuthorization) {

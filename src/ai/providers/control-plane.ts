@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from './kimi-models.js';
 import { getSupportedModelReasoningEfforts } from './model-reasoning-effort.js';
 import type { ConfigInput } from '../../types.js';
 import { normalizeConfig } from './normalize.js';
@@ -64,7 +65,7 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
   }
 
   const catalogRuntimeModel = providerId === 'kimi'
-    && (catalogModel?.model === 'k3' || catalogModel?.model === 'k3-256k')
+    && isKimiCodingModel(catalogModel?.model)
     && (
       providerConfig.protocol !== 'openai_legacy'
       || !isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
@@ -72,7 +73,7 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
     ? undefined
     : catalogModel;
   const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || (
-    (wireModel === 'k3' || wireModel === 'k3-256k')
+    isKimiCodingModel(wireModel)
     && providerConfig.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );

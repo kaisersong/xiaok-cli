@@ -1,3 +1,4 @@
+import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { measureProviderStream } from '../../runtime/trace/observation-metrics.js';
 import type { Message, ModelAdapter } from '../../types.js';
 import {
@@ -110,8 +111,7 @@ function streamOwnedProviderConversation(
   if (!profileId) {
     const claimedProfileId = readClaimedHarnessProfileId(input.adapter);
     if (
-      claimedProfileId === 'kimi-k3-coding-openai'
-      || claimedProfileId === 'kimi-k3-256k-coding-openai'
+      isStrictKimiK3ProfileId(claimedProfileId)
     ) {
       throw new Error('KIMI_K3_PROFILE_CAPABILITY_REQUIRED');
     }

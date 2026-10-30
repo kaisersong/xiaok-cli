@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
 import { confirmChatPermission } from './chat-permission.js';
 import { getResumeHistoryMessages } from '../ui/resume-history.js';
@@ -4635,7 +4636,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
         const selectedProvider = config.providers[selected.provider];
         const catalogRuntimeEligible = selected.provider !== 'kimi'
-          || variant?.model !== 'k3'
+          || !isKimiCodingModel(variant?.model)
           || (
             selectedProvider?.protocol === 'openai_legacy'
             && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl)
