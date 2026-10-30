@@ -21,6 +21,8 @@ on:
       - 'tests/e2e/askuser-short-menu.py'
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
+      - 'tests/e2e/ghostty-vt-footer.mjs'
+      - 'tests/support/ghostty-vt*'
       - 'tests/e2e/memory-background-footer.py'
       - 'tests/e2e/mode-selector.py'
       - '.github/workflows/terminal-ui.yml'
@@ -44,6 +46,8 @@ on:
       - 'tests/e2e/askuser-short-menu.py'
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
+      - 'tests/e2e/ghostty-vt-footer.mjs'
+      - 'tests/support/ghostty-vt*'
       - 'tests/e2e/memory-background-footer.py'
       - 'tests/e2e/mode-selector.py'
       - '.github/workflows/terminal-ui.yml'
@@ -90,6 +94,7 @@ jobs:
           .test-dist/tests/ui/image-renderer.test.js
           .test-dist/tests/ui/scroll-region.test.js
           .test-dist/tests/ui/scroll-region-return.test.js
+          .test-dist/tests/ui/scroll-region-ghostty-reflow.test.js
           .test-dist/tests/ai/memory/background-diagnostics.test.js
           .test-dist/tests/ai/memory/layered-store.test.js
           .test-dist/tests/ai/memory/segment.test.js
@@ -116,6 +121,7 @@ jobs:
           python tests/e2e/askuser-short-menu.py
           python tests/e2e/thinking-draft-handoff.py
           python tests/e2e/footer-return.py
+          node tests/e2e/ghostty-vt-footer.mjs
           python tests/e2e/memory-background-footer.py
           python tests/e2e/mode-selector.py
           python tests/e2e/mode-persistence.py
@@ -127,6 +133,7 @@ jobs:
           path: |
             /tmp/xiaok-thinking-draft-*/
             /tmp/xiaok-footer-return-*/
+            /tmp/xiaok-ghostty-vt-footer-*/
             /tmp/xiaok-memory-footer-*/
             /tmp/xiaok-mode-selector-*/
             /tmp/xiaok-mode-persistence-*/
