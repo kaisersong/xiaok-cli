@@ -263,8 +263,9 @@ describe('ChatShell draft prompt navigation state', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('running'));
-    expect(within(screen.getByTestId('task-panel')).getByRole('button', { name: '暂停' })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: '暂停' }));
+    // Goal projection loads independently of recovered task streaming state.
+    const pauseButton = await within(screen.getByTestId('task-panel')).findByRole('button', { name: '暂停' });
+    fireEvent.click(pauseButton);
     await waitFor(() => expect(pauseGoal).toHaveBeenCalledWith('thread-goal-pause'));
     await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
   });

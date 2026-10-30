@@ -5,9 +5,10 @@ import type { DesktopShutdownGate } from './shutdown-aware-ipc-main.js';
 export function startDesktopTaskRecovery(
   gate: DesktopShutdownGate,
   recover: () => Promise<void>,
+  label = 'startup-task-recovery',
 ): Promise<void> | undefined {
   if (!gate.isOpen) return undefined;
-  const writer = gate.acquire('bootstrap_queue', 'startup-task-recovery');
+  const writer = gate.acquire('bootstrap_queue', label);
   return (async () => {
     try { await recover(); }
     finally { writer.release(); }
