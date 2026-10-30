@@ -62,6 +62,8 @@ jobs:
         run: >
           cd desktop && npm run test -- --run
           tests/renderer/file-path.test.ts
+          tests/renderer/chat-input-clipboard.test.tsx
+          tests/main/clipboard-file-paths.test.ts
           tests/main/skill-runtime-path-escape.test.ts
           tests/renderer/changed-files-tree-relativize.test.ts
           tests/main/cross-platform-path-guard.test.ts
