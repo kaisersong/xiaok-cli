@@ -21,7 +21,7 @@ import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
-import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
+import { isRepetitionStopEvent, sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
@@ -283,6 +283,8 @@ export function ChatShell() {
   // Native Codex events already arrive through the standard task stream.
   const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
     thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
+  const [repetitionStopped, setRepetitionStopped] = useState(false);
+  const repetitionRequestRef = useRef<{ text: string; files?: Array<{ filePath: string; name: string }> } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
@@ -409,6 +411,7 @@ export function ChatShell() {
 
     switch (event.type) {
       case 'task_started': {
+        setRepetitionStopped(false);
         setPlanSteps([]);
         break;
       }
@@ -655,7 +658,9 @@ export function ChatShell() {
           break;
         }
         lastLiveErrorRef.current = { taskKey: eventTaskKey, rawMessage: msg };
-        const partialText = streamRef.current.trim();
+        const repetitionStop = isRepetitionStopEvent(event as { message: string; retryable?: boolean; code?: string });
+        setRepetitionStopped(repetitionStop);
+        const partialText = streamRef.current;
         const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
           providerAuth: t.chatShell.modelAuthFailed,
           modelKeyMissing: t.chatShell.modelKeyMissing,
@@ -688,7 +693,7 @@ export function ChatShell() {
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: repetitionStop ? t.chatShell.modelTextRepetition : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -919,10 +924,12 @@ export function ChatShell() {
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
   const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+    setRepetitionStopped(false);
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
     if (addPromptAsUser && snapshot?.prompt) {
+      repetitionRequestRef.current = { text: snapshot.prompt, files: snapshot.materials?.flatMap(material => material.filePath ? [{ filePath: material.filePath, name: material.name || material.originalName || fileBasename(material.filePath) }] : []) };
       const display = parseScheduledTaskPromptDisplay(snapshot.prompt);
       if (display.notice) {
         msgs.push({
@@ -1035,6 +1042,8 @@ export function ChatShell() {
           lastProgress = null;
         } else if (ev.type === 'error') {
           const rawMessage = (ev as { type: 'error'; message: string }).message;
+          const repetitionStop = isRepetitionStopEvent(ev as { message: string; retryable?: boolean; code?: string });
+          setRepetitionStopped(repetitionStop);
           if (accumulated.trim()) {
             msgs.push({
               id: `msg-assistant-partial-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1056,7 +1065,7 @@ export function ChatShell() {
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: repetitionStop ? t.chatShell.modelTextRepetition : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }
@@ -1165,6 +1174,8 @@ export function ChatShell() {
     setStreamingText('');
     setResult(null);
     setMessages([]);
+    repetitionRequestRef.current = null;
+    setRepetitionStopped(false);
     setPlanSteps([]);
     setCurrentQuestion(null);
     setThread(null);
@@ -1398,6 +1409,8 @@ export function ChatShell() {
 
     toolStepsMsgIdRef.current = null;
 
+    setRepetitionStopped(false);
+    repetitionRequestRef.current = { text, files };
     // Add user message immediately (include file names in content)
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-user`,
@@ -1868,6 +1881,13 @@ export function ChatShell() {
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
+      {status === 'failed' && repetitionStopped && repetitionRequestRef.current && (
+        <button type="button" className="px-4 py-2 text-[var(--c-accent)]" onClick={() => {
+          setRepetitionStopped(false);
+          const request = repetitionRequestRef.current;
+          if (request) void handleSubmit(request.text, request.files);
+        }}>{t.chatShell.regenerateReply}</button>
+      )}
       <ChatView
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}

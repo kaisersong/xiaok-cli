@@ -1,4 +1,6 @@
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
+import { getUiCopy } from '../ui/locale.js';
+import { waitForTerminalCursorReport } from '../ui/terminal-cursor.js';
 import { confirmChatPermission } from './chat-permission.js';
 import { getResumeHistoryMessages } from '../ui/resume-history.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
@@ -1341,6 +1343,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
     runInteractiveBash: !opts.print && !opts.json && process.stdin.isTTY && process.stdout.isTTY && process.platform !== 'win32'
       ? async (input, context) => {
+        if (!await waitForTerminalCursorReport()) return `Error: ${getUiCopy().terminalRedrawPending}`;
+        // Claim only after the await: concurrent requests must recheck ownership.
         if (interactiveBashActive) return 'Error: 本地交互终端正被另一条命令使用，请稍后重试。';
         context?.signal?.throwIfAborted();
         interactiveBashActive = true;
@@ -3702,6 +3706,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     };
 
     inputReader.setToggleTranscriptHandler(async () => {
+      if (!await waitForTerminalCursorReport()) {
+        scrollRegion.writeAtContentCursor(`\n${getUiCopy().terminalRedrawPending}\n`);
+        return;
+      }
       await openTranscriptPager({
         buffer: transcriptBuffer,
         host: {

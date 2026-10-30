@@ -1,3 +1,4 @@
+import { normalizeEnhancedKeys } from './keyboard-protocol.js';
 import { stdin, stdout } from 'process';
 import type { YZJNamedChannel } from '../types.js';
 import { boldCyan, dim } from './render.js';
@@ -58,7 +59,7 @@ export async function selectYZJChannel(
     };
 
     const onData = (data: Buffer) => {
-      const key = data.toString('utf8');
+      const key = normalizeEnhancedKeys(data).toString('utf8');
       if (key === '\x03' || key === '\x1b') { done(null); return; }
       if (key === '\r' || key === '\n') { done(channels[selectedIdx]!); return; }
       if (key === '\x1b[A') {

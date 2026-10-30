@@ -1,3 +1,6 @@
+import { isModelTextRepetitionError, isModelTextRepetitionMessage, MODEL_TEXT_REPETITION_CODE } from '../../../shared/model-text-repetition-code';
+export { isModelTextRepetitionError };
+
 // 待设计师确认：缺少模型 Key 的保守文案，设置入口暂以文字呈现。
 const MODEL_KEY_MISSING_MESSAGE = '没有找到模型 API Key，任务没法开始。请到 设置 → 模型设置 里添加你的 API Key。'
 const MODEL_AUTH_ERROR_MESSAGE = '模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。'
@@ -64,7 +67,7 @@ export function sanitizeUserFacingErrorMessage(
 ): string {
   const text = errorText(error).trim()
   if (!text) return fallbackMessage
-  if (/^(?:Error:\s*)?MODEL_TEXT_REPETITION_DETECTED$/.test(text) && options?.modelTextRepetition) {
+  if (isModelTextRepetitionError(text) && options?.modelTextRepetition) {
     return options.modelTextRepetition
   }
   if (isModelKeyMissingError(text)) {
@@ -83,4 +86,11 @@ export function sanitizeUserFacingErrorMessage(
     return options?.providerService ?? MODEL_SERVICE_ERROR_MESSAGE
   }
   return text.replace(/^Error:\s*/i, '').trim() || fallbackMessage
+}
+
+/** Structured current events with anchored fallback for legacy persisted events. */
+export function isRepetitionStopEvent(event: { message: string; retryable?: boolean; code?: string }): boolean {
+  if (event.retryable === true) return false;
+  if (event.code !== undefined) return event.code === MODEL_TEXT_REPETITION_CODE;
+  return isModelTextRepetitionMessage(event.message);
 }

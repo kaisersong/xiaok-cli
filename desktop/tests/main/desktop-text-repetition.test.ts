@@ -57,7 +57,7 @@ describe('Desktop production text repetition failure', () => {
       await host.createTask({ prompt: '检查示例状态', materials: [] }); await host.drain();
       const { snapshot } = await host.recoverTask('repetition');
       expect(snapshot.status).toBe('failed');
-      expect(snapshot.events).toContainEqual({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED' });
+      expect(snapshot.events).toContainEqual({ type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED', retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' });
       expect(snapshot.events.some(e => e.type === 'result')).toBe(false);
       expect(snapshot.events.some(e => e.type === 'execution_health' && e.state === 'recovering')).toBe(false);
       if (mode !== 'project-selected') expect(snapshot.events.filter(e => e.type === 'assistant_delta').map(e => e.delta).join('')).toContain('此前记录已完成');

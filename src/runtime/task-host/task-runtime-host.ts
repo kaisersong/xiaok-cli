@@ -1,3 +1,4 @@
+import { isModelTextRepetitionError } from '../../ai/runtime/model-text-repetition.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {getCompoundFinalPublicationBinding,type CompoundFinalPublicationTicket} from '../sol-pi/compound-publication-producer.js';
 import {computeSessionHistoryDigest} from '../../ai/runtime/session-store/store.js';
@@ -1380,7 +1381,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         ],
         reason: message,
       };
-      await this.appendEvent(taskId, { type: 'error', message }, { runtimeOrigin: true });
+      await this.appendEvent(taskId, { type: 'error', message,
+        ...(isModelTextRepetitionError(executionError)
+          ? { retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' as const } : {}),
+      }, { runtimeOrigin: true });
       await this.updateSnapshot(taskId, { status: 'failed', salvage }, execution);
       await this.clearSourceActiveTask(taskId);
       this.closeSubscribers(taskId);

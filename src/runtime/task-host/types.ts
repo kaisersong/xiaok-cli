@@ -143,7 +143,7 @@ export type DesktopTaskEvent =
   | { type: 'result'; result: TaskResult }
   | { type: 'artifact_recorded'; artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string; mimeType?: string }
   | { type: 'salvage'; salvage: SalvageSummary }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; retryable?: boolean; code?: 'MODEL_TEXT_REPETITION_DETECTED' }
   // Canvas events (appended, do not replace existing progress events)
   | { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number; displayInputSummary?: string }
   | { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; eventId: string; ts?: number }

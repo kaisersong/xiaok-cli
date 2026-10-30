@@ -7,7 +7,7 @@ import { registerGoalNativeQueryIpc } from '../../electron/goal-native-query-typ
 import { registerGoalGetIpc } from '../../electron/goal-get-typed-ipc.js';
 import { registerGoalPauseCancelIpc } from '../../electron/goal-pause-cancel-typed-ipc.js';
 import { registerGoalQueuePendingIpc } from '../../electron/goal-queuepending-typed-ipc.js';
-import { registerTask7Ipc } from '../../electron/task7-typed-ipc.js';
+import { captureTask7Event, registerTask7Ipc } from '../../electron/task7-typed-ipc.js';
 import { TASK7_METHODS } from '../../shared/task7-ipc-contract.js';
 import { registerProjectPlanningIpc } from '../../electron/project-planning-typed-ipc.js';
 import { registerMeetingActions10Ipc } from '../../electron/meeting-actions10-typed-ipc.js';
@@ -1343,4 +1343,25 @@ describe('Small configuration complete4 transport bridge contracts', () => {
     await expect((api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).saveSkillDebugConfig!({ enabled: false })).rejects.toBe(failure);
     expect(ipc.invoke).toHaveBeenCalledTimes(1);
   });
+});
+
+it.each([undefined, false, true])('preserves optional task error retryable=%s across the IPC contract', retryable => {
+  const event = { type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED',
+    ...(typeof retryable === 'boolean' ? { retryable } : {}),
+  };
+  expect(captureTask7Event(event)).toEqual(event);
+});
+
+it('replays an old persisted error without retryable and validates its schema', () => {
+  const persisted = JSON.parse('{"type":"error","message":"model_failed: MODEL_TEXT_REPETITION_DETECTED"}');
+  const replayed = captureTask7Event(persisted);
+  expect(replayed).toEqual(persisted);
+  expect(replayed).not.toHaveProperty('retryable');
+  expect(() => captureTask7Event({ ...persisted, retryable: 'false' })).toThrow('task_event_projection_unavailable');
+});
+
+it('preserves repetition code and rejects unknown error codes', () => {
+  const event = { type: 'error', message: 'opaque', code: 'MODEL_TEXT_REPETITION_DETECTED', retryable: false };
+  expect(captureTask7Event(event)).toEqual(event);
+  expect(() => captureTask7Event({ ...event, code: 'OTHER' })).toThrow('task_event_projection_unavailable');
 });

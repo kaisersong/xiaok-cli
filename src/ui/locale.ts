@@ -45,6 +45,7 @@ const TOOL_LABELS: Record<UiLocale, Record<string, string>> = {
 
 const UI_COPY = {
   'zh-CN': {
+    terminalRedrawPending: '终端重绘尚未完成，请稍后重试。',
     approvalTitle: 'xiaok 想要执行以下操作',
     permissionReviewPage: (page: number, total: number) => `范围 ${page}/${total} · PgUp/PgDn 查看全部后允许`,
     permissionScreenTooSmall: '终端过小，无法完整审阅；请调整大小或按 Esc 拒绝',
@@ -77,6 +78,7 @@ const UI_COPY = {
     hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
   },
   en: {
+    terminalRedrawPending: 'Terminal redraw is not finished. Please try again shortly.',
     approvalTitle: 'xiaok wants to run',
     permissionReviewPage: (page: number, total: number) => `Scopes ${page}/${total} · PgUp/PgDn to review all before allowing`,
     permissionScreenTooSmall: 'Terminal too small to review; resize or press Esc to deny',

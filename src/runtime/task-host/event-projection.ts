@@ -1,3 +1,4 @@
+import { isModelTextRepetitionError } from '../../ai/runtime/model-text-repetition.js';
 import { formatTaskToolResultResponse } from './tool-result-response.js';
 import type { RuntimeEvent } from '../events.js';
 import type { ArtifactKind, DesktopTaskEvent, PlanStep, TaskUnderstanding } from './types.js';
@@ -165,6 +166,8 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
     return {
       type: 'error',
       message: event.error.message,
+      ...(isModelTextRepetitionError(event.error)
+        ? { retryable: false, code: 'MODEL_TEXT_REPETITION_DETECTED' as const } : {}),
     };
   }
   return null;

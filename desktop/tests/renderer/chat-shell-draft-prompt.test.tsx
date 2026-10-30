@@ -1056,8 +1056,7 @@ describe('ChatShell draft prompt navigation state', () => {
       });
     }
     await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('failed'));
-    expect(screen.getByTestId('chat-messages')).toHaveTextContent('模型连续重复输出');
-    expect(screen.getByTestId('chat-messages')).toHaveTextContent('本轮任务未完成');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('检测到重复输出，已停止');
     expect(screen.getByTestId('chat-messages')).toHaveTextContent('保留的执行前缀。');
     expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('MODEL_TEXT_REPETITION_DETECTED');
   });

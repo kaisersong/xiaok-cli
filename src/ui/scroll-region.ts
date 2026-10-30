@@ -21,6 +21,7 @@
  */
 
 import { getDisplayWidth, splitSymbols, stripAnsi, truncateAnsi } from './text-metrics.js';
+import { readTerminalCursor } from './terminal-cursor.js';
 
 export interface ScrollRegionConfig {
   /** Height of fixed footer (input bar + status bar) */
@@ -123,6 +124,8 @@ export class ScrollRegionManager {
     if (this.permissionScreenActive) throw new Error('Permission screen still owns output');
   }
 
+  private savedContentCursor = false;
+  private savedContentRow = 1;
   private config: ScrollRegionConfig;
   private lastActivityLine = '';
   private lastActivityRow: number | null = null;
@@ -176,6 +179,7 @@ export class ScrollRegionManager {
   constructor(
     private readonly stream: NodeJS.WriteStream = process.stdout,
     config?: ScrollRegionConfig,
+    private readonly readCursor = readTerminalCursor,
   ) {
     const rows = stream.rows ?? 24;
     const columns = stream.columns ?? 80;
@@ -543,37 +547,47 @@ export class ScrollRegionManager {
       this.permissionPendingSize = {rows, columns};
       return;
     }
+    // SSH can coalesce an out-and-back resize into the original dimensions.
+    // The terminal may still have reflowed the old footer, so remeasure it.
+    const measured = this.active && this.savedContentCursor && !this._contentStreaming
+      ? this.readCursor(this.stream, RESET_SCROLL_REGION + '\x1b8') : null;
+    if (measured?.rows && measured.columns) {
+      rows = measured.rows;
+      columns = measured.columns;
+    }
     const previousScrollBottom = this.getScrollBottom();
     const hadChrome = this._footerVisible || this.lastActivityRow !== null || this.hasActiveOverlayPrompt();
     const pulledHistoryRows = Math.min(Math.max(0, rows - this.config.rows), Math.max(0, this._totalRows - this._cursorRow));
-    // A shrinking terminal keeps the physical cursor in view and may clip the
-    // rows below it. It does not necessarily scroll by the whole height delta.
-    const rowShift = !hadChrome ? 0 : rows < this.config.rows
+    const rowShift = measured ? this.savedContentRow - measured.row : !hadChrome ? 0 : rows < this.config.rows
       ? Math.max(0, Math.min(this.config.rows, this._terminalCursorRow) - rows)
       : -pulledHistoryRows;
-    const visiblePreviousBottom = Math.max(1, Math.min(rows, previousScrollBottom - rowShift));
+    const visiblePreviousBottom = measured ? rows : Math.max(1, Math.min(rows, previousScrollBottom - rowShift));
     if (this.active) {
+      if (measured) {
+        // The restored anchor belongs to the terminal's reflowed transcript.
+        // Erase only its unused tail before DECSTBM homes the physical cursor.
+        this.stream.write(RESET_ALL + '\x1b[J');
+        this.lastActivityRow = null;
+        this.lastActivityRows = 0;
+      }
       this.stream.write(RESET_SCROLL_REGION);
-      this.stream.write(this.composeActivityClear(rowShift, rows));
-      this.clearRenderedFooterRows(rowShift, rows);
-      // The terminal has already moved its visible rows upward on shrink.
-      // Move content anchors too, including idle input (without activity).
-      this._cursorRow = Math.max(1, this._cursorRow - rowShift);
+      if (!measured) {
+        this.stream.write(this.composeActivityClear(rowShift, rows));
+        this.clearRenderedFooterRows(rowShift, rows);
+      }
+      this._cursorRow = measured ? measured.row : Math.max(1, this._cursorRow - rowShift);
+      if (measured) this._cursorCol = measured.column - 1;
       this._contentEndRow = Math.max(0, this._contentEndRow - rowShift);
       this._streamStartRow = Math.max(1, this._streamStartRow - rowShift);
       this._terminalCursorRow = Math.max(1, Math.min(rows, this._terminalCursorRow - rowShift));
     }
-
     this.config = { ...this.config, rows, columns };
     if (this.active) {
       this.reserveTranscriptRows(this.getScrollBottom(), visiblePreviousBottom);
-      // Reflow can move chrome away from its old absolute rows. Clear the
-      // unoccupied tail before restoring it, preserving the transcript cursor.
       const firstEmptyRow = this._cursorRow + (this._cursorCol > 0 ? 1 : 0);
-      for (let row = firstEmptyRow; row <= visiblePreviousBottom; row++) {
+      for (let row = firstEmptyRow; !measured && row <= visiblePreviousBottom; row++) {
         this.clearScreenRow(row);
       }
-      // Re-apply scroll region with new size
       this.setScrollRegion();
       if (this.hasActiveOverlayPrompt()) {
         this.renderPromptFrame({
@@ -592,6 +606,15 @@ export class ScrollRegionManager {
     }
   }
 
+  private saveContentCursor(): string {
+    // A deferred wrap must anchor on the following blank row, never on the
+    // answer's final character (CUP would clamp columns beyond the margin).
+    const wrapped = this._cursorCol >= this.config.columns;
+    this.savedContentRow = this._cursorRow + (wrapped ? 1 : 0);
+    this.savedContentCursor = true;
+    return `\x1b[${this.savedContentRow};${wrapped ? 1 : this._cursorCol + 1}H\x1b7`;
+  }
+
   /**
    * Activate scroll region mode.
    * Clears the screen and moves cursor to top,
@@ -601,6 +624,7 @@ export class ScrollRegionManager {
     if (this.active) return;
 
     this.active = true;
+    this.savedContentCursor = false;
     this.lastActivityLine = '';
     this.lastActivityRow = null;
     this.lastInputPrompt = '';
@@ -634,6 +658,7 @@ export class ScrollRegionManager {
     if (!this.active) return;
 
     this.active = false;
+    this.savedContentCursor = false;
 
     // Reset scroll region to full terminal
     this.stream.write(`\x1b[0m\x1b[?25h${RESET_SCROLL_REGION}`);
@@ -673,6 +698,7 @@ export class ScrollRegionManager {
     }
 
     this.active = true;
+    this.savedContentCursor = false;
     this.lastActivityLine = '';
     this.lastActivityRow = null;
     this.lastInputPrompt = options?.inputPrompt ?? '';
@@ -915,6 +941,7 @@ export class ScrollRegionManager {
       ? footerClearStartRow
       : Math.max(1, Math.min(previousOverlayStartRow, footerClearStartRow, transientClearStartRow));
     footerOutput += this.reserveTranscriptRows(nextScrollBottom, previousScrollBottom, false);
+    footerOutput += this.saveContentCursor();
     for (let row = clearStartRow; row <= inputEndRow; row += 1) {
       // Current editor rows are overwritten below and erased to end-of-line.
       // Clearing them first exposes a blank draft on every activity tick.
@@ -1095,6 +1122,7 @@ export class ScrollRegionManager {
       this.reserveTranscriptRows(scrollBottom, previousScrollBottom);
     }
     this.setScrollRegion(scrollBottom);
+    this.stream.write(this.saveContentCursor());
     for (let row = clearStartRow; row <= statusBarRow; row += 1) {
       this.clearScreenRow(row);
     }
@@ -1334,6 +1362,7 @@ export class ScrollRegionManager {
       this._cursorCol = 0;
       this._cursorUncertain = false;
     }
+    this.savedContentCursor = false;
     this._contentStreaming = true;
     this.clearSummaryChromeRows();
     this.clearActivity();
@@ -1640,6 +1669,7 @@ export class ScrollRegionManager {
 
   writeAtContentCursor(text: string, options?: { clearPromptChrome?: boolean }): void {
     this.restoreMainForContent();
+    this.savedContentCursor = false;
     if (!this.active) {
       this.stream.write(text);
       return;
@@ -1791,6 +1821,7 @@ export class ScrollRegionManager {
     text: string,
     logger?: { beginSuppress(): void; endSuppress(): void },
   ): void {
+    this.savedContentCursor = false;
     logger?.beginSuppress();
     try {
       this.stream.write(text);
