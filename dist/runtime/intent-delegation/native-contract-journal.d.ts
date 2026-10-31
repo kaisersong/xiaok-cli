@@ -1,3 +1,5 @@
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/stored-snapshot-types.js';
+import type { StoredSessionIntentLedgerInput } from './stored-intent-clone.js';
 import { type IntentBusinessContract } from '../verification/intent-business-contract.js';
 import { type GoalVerificationDefinition } from '../goal/verification-definition.js';
 import { type IntentPlanDraft, type IntentLedgerRecord, type SessionIntentLedger } from './types.js';
@@ -77,10 +79,21 @@ export type IntentNativeMutation = ({
     nativeAction: 'ownership';
 } & IntentOwnershipInput);
 export declare function freezeIntentNativeLedger(value: SessionIntentLedger | undefined): SessionIntentLedger | undefined;
-export declare const intentNativeLedgerHash: (v: SessionIntentLedger | undefined) => string;
+export declare function freezeIntentNativeLedger(value: StoredSessionSnapshot['intentDelegation']): StoredSessionSnapshot['intentDelegation'];
+export declare const intentNativeLedgerHash: (v: StoredSessionIntentLedgerInput | undefined) => string;
 export declare function parseIntentNativeContracts(raw: unknown, sessionId: string): IntentNativeContractRecord[];
-export declare function assertIntentNativeJournalRetained(previous: SessionIntentLedger | undefined, next: SessionIntentLedger | undefined, sessionId: string, nativeMutation?: boolean): void;
+export interface IntentNativeRetentionData {
+    readonly nativeContracts?: unknown;
+}
+export declare function assertIntentNativeJournalRetained(previous: IntentNativeRetentionData | undefined, next: IntentNativeRetentionData | undefined, sessionId: string, nativeMutation?: boolean): void;
+export interface IntentNativeAbsenceData {
+    readonly sessionId: string;
+    readonly intentDelegation?: {
+        readonly nativeContracts?: unknown;
+    };
+}
 export declare function assertNoIntentNativeJournal(snapshot: PersistedSessionSnapshot | undefined | null): void;
+export declare function assertNoIntentNativeJournal(snapshot: IntentNativeAbsenceData | undefined | null): void;
 export declare function captureIntentNativeRequest<K extends IntentNativeMutation['nativeAction']>(kind: K, raw: Omit<Extract<IntentNativeMutation, {
     nativeAction: K;
 }>, 'nativeAction'> & {
@@ -89,6 +102,6 @@ export declare function captureIntentNativeRequest<K extends IntentNativeMutatio
     input: IntentNativeMutation;
     lease: SessionExecutionLease;
 };
-/** Store-private reducer: source/lease must be checked by the actual lock owner. */
 export declare function applyIntentNativeMutation(previous: PersistedSessionSnapshot, input: IntentNativeMutation): PersistedSessionSnapshot;
+export declare function applyIntentNativeMutation(previous: StoredSessionSnapshot, input: IntentNativeMutation): StoredSessionSnapshot;
 export {};

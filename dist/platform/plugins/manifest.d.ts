@@ -6,6 +6,8 @@ export interface PluginManifestServer {
 }
 /** Structured hook entry in plugin.json */
 export interface PluginManifestHook {
+    /** Strict synchronous JSON control output, opt in only. */
+    outputFormat?: 'json';
     /** Hook type: 'command' (default), 'http', or 'prompt' */
     type?: HookType;
     /** Shell command (type=command) or URL (type=http) or LLM prompt (type=prompt) */

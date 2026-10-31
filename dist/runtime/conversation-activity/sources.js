@@ -11,10 +11,35 @@ export class ConversationActivitySources {
     projectConnected = false;
     projectFallback;
     disposed = false;
+    closing;
+    drainWork = new Set();
+    /** Reserve ownership before any synchronous producer prefix can reenter close. */
+    own(begin) {
+        let completed, failed;
+        const reservation = new Promise((resolve, reject) => { completed = resolve; failed = reject; });
+        this.drainWork.add(reservation);
+        void reservation.then(() => { this.drainWork.delete(reservation); }, () => {
+            this.drainWork.delete(reservation);
+        });
+        try {
+            const raw = begin();
+            void raw.then(completed, failed);
+            return raw;
+        }
+        catch (error) {
+            failed(error);
+            return reservation;
+        }
+    }
     constructor(options) {
         this.options = options;
     }
-    async startWatch(watchId) {
+    startWatch(watchId) {
+        if (this.disposed)
+            return Promise.resolve();
+        return this.own(() => this.startWatchNow(watchId));
+    }
+    async startWatchNow(watchId) {
         const watch = this.options.store.getWatch(watchId);
         if (!watch || watch.status !== 'active' || this.disposed)
             return;
@@ -33,7 +58,9 @@ export class ConversationActivitySources {
         const controller = new AbortController();
         this.controllers.set(watchId, controller);
         let retry = true;
-        void Promise.resolve().then(async () => {
+        void this.own(() => Promise.resolve().then(async () => {
+            if (this.disposed || controller.signal.aborted)
+                return;
             const host = this.options.taskHost(watch.workId);
             if (!host.subscribeTaskRecords) {
                 retry = false;
@@ -55,7 +82,7 @@ export class ConversationActivitySources {
                 this.controllers.delete(watchId);
             if (retry && !controller.signal.aborted && !this.disposed)
                 this.scheduleTaskRetry(watch);
-        }).catch(error => this.options.onError?.(error));
+        }).catch(error => this.options.onError?.(error)));
     }
     async readTask(watch, host, controller) {
         if (!await this.options.service.canReadSource(watch.watchId))
@@ -122,6 +149,11 @@ export class ConversationActivitySources {
     refreshProject(projectId, sourceChanged = false) {
         if (this.disposed)
             return Promise.resolve();
+        return this.own(() => this.refreshProjectNow(projectId, sourceChanged));
+    }
+    refreshProjectNow(projectId, sourceChanged = false) {
+        if (this.disposed)
+            return Promise.resolve();
         const existing = this.projectReads.get(projectId);
         if (existing) {
             if (sourceChanged)
@@ -149,7 +181,12 @@ export class ConversationActivitySources {
     projectWatches(projectId) {
         return this.options.store.listWatches().filter(watch => watch.source === 'kswarm' && watch.workId === projectId && watch.status === 'active');
     }
-    async projectConnectionChanged(status) {
+    projectConnectionChanged(status) {
+        if (this.disposed)
+            return Promise.resolve();
+        return this.own(() => this.projectConnectionChangedNow(status));
+    }
+    async projectConnectionChangedNow(status) {
         if (this.disposed)
             return;
         this.projectConnected = status === 'connected';
@@ -176,7 +213,7 @@ export class ConversationActivitySources {
             const ids = new Set(this.options.store.listWatches().filter(watch => watch.source === 'kswarm' && watch.status === 'active').map(watch => watch.workId));
             if (!ids.size)
                 return;
-            void Promise.all([...ids].map(id => this.refreshProject(id, true))).finally(() => this.scheduleProjectFallback());
+            void this.own(() => Promise.all([...ids].map(id => this.refreshProject(id, true))).then(() => undefined).finally(() => this.scheduleProjectFallback()));
         }, 30_000);
         this.projectFallback.unref?.();
     }
@@ -279,6 +316,11 @@ export class ConversationActivitySources {
         this.taskRetries.set(watch.watchId, timer);
     }
     refreshGroup(groupId, sourceChanged = false) {
+        if (this.disposed)
+            return Promise.resolve();
+        return this.own(() => this.refreshGroupNow(groupId, sourceChanged));
+    }
+    refreshGroupNow(groupId, sourceChanged = false) {
         if (this.disposed || !this.options.readGroup)
             return Promise.resolve();
         const existing = this.groupReads.get(groupId);
@@ -361,6 +403,30 @@ export class ConversationActivitySources {
                     break;
             }
         }
+    }
+    /** Seals scheduling synchronously and waits actual owned work; never fabricates a drain ACK. */
+    close() {
+        if (this.closing)
+            return this.closing;
+        let completed, failed;
+        this.closing = new Promise((resolve, reject) => { completed = resolve; failed = reject; });
+        const sealFailures = [];
+        try {
+            this.dispose();
+        }
+        catch (error) {
+            sealFailures.push(error);
+        }
+        const active = [...this.drainWork];
+        void Promise.allSettled(active).then(outcomes => {
+            const failures = [...sealFailures,
+                ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+            if (failures.length)
+                failed(new AggregateError([...new Set(failures)], 'activity_sources_drain_failed'));
+            else
+                completed();
+        }, failed);
+        return this.closing;
     }
     dispose() {
         this.disposed = true;

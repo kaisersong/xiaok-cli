@@ -1,3 +1,4 @@
+import { persistInstalledMaintenanceRequest } from '../verification/installed-maintenance-handoff.js';
 import { types as utilTypes } from 'node:util';
 import { consumeBlobTransactionContext } from '../verification/blob-budget.js';
 import { inspectExecutionPreparationCommand, executeExecutionPreparationCommand } from '../verification/execution-command-dispatch.js';
@@ -66,6 +67,11 @@ export function readDockerReservationHandoff(transaction, database, expected) {
 const capacityExecutions = new WeakMap();
 export function readDockerCapacityExecution(binding, database, allocations) { const known = capacityExecutions.get(binding); if (!known || known.database !== database || canonicalVerificationJson(known.allocations) !== canonicalVerificationJson(allocations))
     throw Error('docker_capacity_binding'); return known.plan; }
+const cleanupHandoffCommands = new WeakMap();
+export function inspectDockerCleanupHandoffCommand(command) { return cleanupHandoffCommands.get(command); }
+const cleanupDrains = new WeakMap();
+export function drainDockerRunnerCleanup(runner) { const drain = cleanupDrains.get(runner); if (!drain)
+    throw Error('docker_runner_database_identity'); return drain(); }
 const runnerDatabases = new WeakMap();
 export function assertDockerRunnerDeleted(runner, database, proof, proposal) { const known = runnerDatabases.get(runner); if (!known || known.database !== database)
     throw Error('docker_runner_database_identity'); known.assertCurrent(); const fact = known.deleted.get(proof); if (!fact || digest(fact) !== digest(proposal))
@@ -99,6 +105,18 @@ export function createDockerRunner(options) {
         throw Error('docker_runner_configuration');
     const journal = new ExecutionJournal({ database: db }), livePlans = new Map(), outputs = new WeakMap(), deleted = new WeakMap();
     let closed = false;
+    const cleanupWork = new Set();
+    let cleanupAdmissionClosed = false;
+    function handoff(r, action) {
+        const command = Object.freeze({}), facts = { source: runner, database: db, kind: 'raw', resourceId: r.expected.executionIdentity, expected: r.expected, allocations: [r.inputAllocation, r.outputAllocation], action, ...(action === 'ack' ? { evidence: canonicalVerificationJson({ resources: r, record: journal.read(r.expected), states: [budget.getState(r.inputAllocation), budget.getState(r.outputAllocation)] }) } : {}) };
+        cleanupHandoffCommands.set(command, facts);
+        try {
+            persistInstalledMaintenanceRequest(command);
+        }
+        finally {
+            cleanupHandoffCommands.delete(command);
+        }
+    }
     db.exec('CREATE TABLE IF NOT EXISTS docker_runner_resources(execution_id TEXT PRIMARY KEY,resources_json TEXT NOT NULL)');
     function current() { if (closed)
         throw Error('docker_runner_closed'); synchronous(assertCurrent()); }
@@ -177,6 +195,90 @@ export function createDockerRunner(options) {
     const reservationTransactions = new WeakMap();
     const transactionHandoffs = new WeakMap();
     const consumedCommands = new WeakSet();
+    async function cleanupExecution(expectedInput) {
+        // The intent must commit before irreversible I/O; an enclosing transaction may roll back.
+        if (db.inTransaction)
+            throw Error('docker_runner_outer_transaction');
+        const expected = snapshot(expectedInput), r = resource(expected);
+        let record = journal.read(expected);
+        if (record.state === 'created' || record.state === 'cancelling-created') {
+            handoff(r, 'request');
+            await cancelNeverStarted(r);
+            record = journal.read(expected);
+        }
+        if (record.state !== 'terminal')
+            throw Error('docker_runner_cleanup_unknown');
+        handoff(r, 'request');
+        if (record.cancelledBeforeStart && !record.containerId && !r.holderId) {
+            r.deleting = true;
+            runVerificationTransaction(db, () => persist(r));
+            for (const which of ['input', 'output']) {
+                if (!await engine.isVolumeAbsent(r[which]))
+                    throw Error('docker_runner_never_created_conflict');
+                current();
+                const allocation = which === 'input' ? r.inputAllocation : r.outputAllocation;
+                if (budget.getState(allocation) !== 'released') {
+                    const token = budget.reserve(allocation).token, proof = Object.freeze({});
+                    deleted.set(proof, allocation);
+                    budget.release(token, proof);
+                }
+            }
+            handoff(resource(expected), 'ack');
+            return;
+        }
+        if (!record.containerId || !r.holderId)
+            throw Error('docker_runner_cleanup_unknown');
+        r.deleting = true;
+        runVerificationTransaction(db, () => persist(r));
+        // Each exact deletion is reconciled after a lost response only under this
+        // durable cleanup intent and the same protected engine incarnation.
+        if (!r.workerRemoved) {
+            if (!await engine.isContainerAbsent(record.containerId)) {
+                const worker = await inspectExact(r, 'worker', record.containerId);
+                if (worker.State.Running || worker.State.Pid !== 0)
+                    throw Error('docker_runner_cleanup_unknown');
+                await engine.remove(record.containerId);
+            }
+            current();
+            if (!await engine.isContainerAbsent(record.containerId))
+                throw Error('docker_runner_cleanup_unknown');
+            r.workerRemoved = true;
+            runVerificationTransaction(db, () => persist(r));
+        }
+        if (!r.holderRemoved) {
+            if (!await engine.isContainerAbsent(r.holderId)) {
+                const holder = await inspectExact(r, 'holder', r.holderId);
+                if (holder.State.Running) {
+                    await engine.kill(r.holderId);
+                    await engine.wait(r.holderId, { timeoutMs: 30000 });
+                }
+                await engine.remove(r.holderId);
+            }
+            current();
+            if (!await engine.isContainerAbsent(r.holderId))
+                throw Error('docker_runner_cleanup_unknown');
+            r.holderRemoved = true;
+            runVerificationTransaction(db, () => persist(r));
+        }
+        for (const which of ['input', 'output']) {
+            const flag = which === 'input' ? 'inputRemoved' : 'outputRemoved', allocation = which === 'input' ? r.inputAllocation : r.outputAllocation;
+            if (!r[flag]) {
+                if (!await engine.isVolumeAbsent(r[which]))
+                    await engine.removeVolume(r[which]);
+                current();
+                if (!await engine.isVolumeAbsent(r[which]))
+                    throw Error('docker_runner_cleanup_unknown');
+                r[flag] = true;
+                runVerificationTransaction(db, () => persist(r));
+            }
+            if (budget.getState(allocation) !== 'released') {
+                const token = budget.reserve(allocation).token, proof = Object.freeze({});
+                deleted.set(proof, allocation);
+                budget.release(token, proof);
+            }
+        }
+        handoff(resource(expected), 'ack');
+    }
     const runner = Object.freeze({
         reserveCommand(command) { inspectExecutionPreparationCommand(command, runner, db); if (consumedCommands.has(command))
             throw Error('execution_command_consumed'); consumedCommands.add(command); const prepared = Object.freeze({}); dockerTransactionCommands.set(prepared, { raw: runner, budget, database: db, executionCommand: command }); try {
@@ -451,92 +553,24 @@ export function createDockerRunner(options) {
                 throw Error('docker_runner_terminal_unknown');
             return bytes;
         },
-        async cleanupExecution(expectedInput) {
-            // The intent must commit before irreversible I/O; an enclosing transaction may roll back.
-            if (db.inTransaction)
-                throw Error('docker_runner_outer_transaction');
-            const expected = snapshot(expectedInput), r = resource(expected);
-            let record = journal.read(expected);
-            if (record.state === 'created' || record.state === 'cancelling-created') {
-                await cancelNeverStarted(r);
-                record = journal.read(expected);
-            }
-            if (record.state !== 'terminal')
-                throw Error('docker_runner_cleanup_unknown');
-            if (record.cancelledBeforeStart && !record.containerId && !r.holderId) {
-                r.deleting = true;
-                runVerificationTransaction(db, () => persist(r));
-                for (const which of ['input', 'output']) {
-                    if (!await engine.isVolumeAbsent(r[which]))
-                        throw Error('docker_runner_never_created_conflict');
-                    current();
-                    const allocation = which === 'input' ? r.inputAllocation : r.outputAllocation;
-                    if (budget.getState(allocation) !== 'released') {
-                        const token = budget.reserve(allocation).token, proof = Object.freeze({});
-                        deleted.set(proof, allocation);
-                        budget.release(token, proof);
-                    }
-                }
-                return;
-            }
-            if (!record.containerId || !r.holderId)
-                throw Error('docker_runner_cleanup_unknown');
-            r.deleting = true;
-            runVerificationTransaction(db, () => persist(r));
-            // Each exact deletion is reconciled after a lost response only under this
-            // durable cleanup intent and the same protected engine incarnation.
-            if (!r.workerRemoved) {
-                if (!await engine.isContainerAbsent(record.containerId)) {
-                    const worker = await inspectExact(r, 'worker', record.containerId);
-                    if (worker.State.Running || worker.State.Pid !== 0)
-                        throw Error('docker_runner_cleanup_unknown');
-                    await engine.remove(record.containerId);
-                }
-                current();
-                if (!await engine.isContainerAbsent(record.containerId))
-                    throw Error('docker_runner_cleanup_unknown');
-                r.workerRemoved = true;
-                runVerificationTransaction(db, () => persist(r));
-            }
-            if (!r.holderRemoved) {
-                if (!await engine.isContainerAbsent(r.holderId)) {
-                    const holder = await inspectExact(r, 'holder', r.holderId);
-                    if (holder.State.Running) {
-                        await engine.kill(r.holderId);
-                        await engine.wait(r.holderId, { timeoutMs: 30000 });
-                    }
-                    await engine.remove(r.holderId);
-                }
-                current();
-                if (!await engine.isContainerAbsent(r.holderId))
-                    throw Error('docker_runner_cleanup_unknown');
-                r.holderRemoved = true;
-                runVerificationTransaction(db, () => persist(r));
-            }
-            for (const which of ['input', 'output']) {
-                const flag = which === 'input' ? 'inputRemoved' : 'outputRemoved', allocation = which === 'input' ? r.inputAllocation : r.outputAllocation;
-                if (!r[flag]) {
-                    if (!await engine.isVolumeAbsent(r[which]))
-                        await engine.removeVolume(r[which]);
-                    current();
-                    if (!await engine.isVolumeAbsent(r[which]))
-                        throw Error('docker_runner_cleanup_unknown');
-                    r[flag] = true;
-                    runVerificationTransaction(db, () => persist(r));
-                }
-                if (budget.getState(allocation) !== 'released') {
-                    const token = budget.reserve(allocation).token, proof = Object.freeze({});
-                    deleted.set(proof, allocation);
-                    budget.release(token, proof);
-                }
-            }
+        cleanupExecution(expectedInput) {
+            if (cleanupAdmissionClosed)
+                return Promise.reject(Error('docker_runner_cleanup_closed'));
+            const work = cleanupExecution(expectedInput);
+            cleanupWork.add(work);
+            void work.then(() => cleanupWork.delete(work), () => cleanupWork.delete(work));
+            return work;
         },
-        close() { if (!closed) {
+        close() { if (cleanupWork.size)
+            throw Error('docker_runner_cleanup_pending'); if (!closed) {
+            cleanupAdmissionClosed = true;
             closed = true;
             livePlans.clear();
             journal.close();
         } },
     });
+    cleanupDrains.set(runner, async () => { cleanupAdmissionClosed = true; const outcomes = await Promise.allSettled([...cleanupWork]), errors = outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : []); if (errors.length)
+        throw new AggregateError(errors, 'docker_runner_cleanup_shutdown_unknown'); });
     runnerDatabases.set(runner, { database: db, imageId, deleted, assertCurrent: current, readCapacity(expected) { const r = resource(expected); if (journal.read(expected).state !== 'terminal')
             throw Error('docker_capacity_not_terminal'); return snapshot(r.outputAllocation); } });
     return runner;

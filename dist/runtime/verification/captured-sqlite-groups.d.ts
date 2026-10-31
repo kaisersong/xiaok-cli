@@ -13,7 +13,7 @@ export type CapturedGroupsStreamEvent = Readonly<{
     kind: 'source-start';
     sourceId: string;
     snapshotHash: string;
-    userVersion: 1 | 2 | 3;
+    userVersion: 1 | 2 | 3 | 4;
 }> | Readonly<{
     kind: 'table-start';
     sourceId: string;

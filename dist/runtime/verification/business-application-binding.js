@@ -1,3 +1,4 @@
+import { ownDataArrayPrototypeJoin, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataNumberIsSafeInteger, ownDataObjectFreeze, ownDataObjectKeys, ownDataRegExpPrototypeTest } from './application-native-intrinsics.js';
 import { applicationDataDescriptors } from './application-value-data.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { parseGoalApplicationBinding, goalApplicationBindingHash } from './goal-application-binding.js';
@@ -24,7 +25,7 @@ export function businessApplicationBindingHash(raw) {
 }
 export function businessApplicationOwner(raw) {
     const binding = parseBusinessApplicationBinding(raw);
-    return binding.kind === 'goal' ? Object.freeze({ ownerKind: 'goal', ownerId: binding.goalId }) : binding.kind === 'loop' ? loopHostSubjectOwner(binding.subject) : intentHostSubjectOwner(binding.subject);
+    return binding.kind === 'goal' ? ownDataObjectFreeze({ ownerKind: 'goal', ownerId: binding.goalId }) : binding.kind === 'loop' ? loopHostSubjectOwner(binding.subject) : intentHostSubjectOwner(binding.subject);
 }
 export function businessApplicationEpoch(raw) {
     const binding = parseBusinessApplicationBinding(raw);
@@ -38,16 +39,16 @@ export function sameBusinessApplicationSubject(left, right) {
 }
 export function parseActiveBusinessApplicationBinding(raw) {
     const descriptors = applicationDataDescriptors(raw, 3, 'intent_application_data');
-    if (Object.keys(descriptors).sort().join(',') !== 'binding,bindingHash,revision')
+    if (ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(descriptors)), ',') !== 'binding,bindingHash,revision')
         throw Error('business_application_active');
     const bindingHash = descriptors.bindingHash.value, revision = descriptors.revision.value;
-    if (typeof bindingHash !== 'string' || !/^[a-f0-9]{64}$/.test(bindingHash) || !Number.isSafeInteger(revision) || revision < 1)
+    if (typeof bindingHash !== 'string' || !ownDataRegExpPrototypeTest(/^[a-f0-9]{64}$/, bindingHash) || !ownDataNumberIsSafeInteger(revision) || revision < 1)
         throw Error('business_application_active');
     const binding = parseBusinessApplicationBinding(descriptors.binding.value), value = { binding, bindingHash, revision };
-    const bindingBytes = Buffer.byteLength(json(binding));
-    if (Buffer.byteLength(json(value)) > (binding.kind === 'intent' ? bindingBytes + 256 : 65536))
+    const bindingBytes = ownDataBufferByteLength(json(binding));
+    if (ownDataBufferByteLength(json(value)) > (binding.kind === 'intent' ? bindingBytes + 256 : 65536))
         throw Error('business_application_limit');
     if (bindingHash !== businessApplicationBindingHash(binding))
         throw Error('business_application_hash');
-    return Object.freeze(value);
+    return ownDataObjectFreeze(value);
 }

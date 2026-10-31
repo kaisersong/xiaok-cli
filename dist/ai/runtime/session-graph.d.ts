@@ -29,6 +29,7 @@ export interface SessionGraphSnapshot {
     approvalRefs: string[];
     backgroundJobRefs: string[];
 }
+export type SessionGraphPersistenceFacts = Pick<SessionGraphSnapshot, 'compoundOperations' | 'semanticCompaction' | 'storeRevision' | 'historyDigest' | 'executionProtected'>;
 export declare class AgentSessionGraph {
     private snapshot;
     private revision;
@@ -53,7 +54,7 @@ export declare class AgentSessionGraph {
     recordBackgroundJob(jobId: string): void;
     exportSnapshot(): SessionGraphSnapshot;
     /** Durable writer receipt only; message revision and live queued input remain owned here. */
-    updatePersistenceFacts(snapshot: SessionGraphSnapshot): void;
+    updatePersistenceFacts(snapshot: SessionGraphPersistenceFacts): void;
     restoreSnapshot(snapshot: SessionGraphSnapshot): void;
     private touch;
 }

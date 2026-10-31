@@ -1,5 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import { type InstalledControllerLifetime } from './installed-controller-lifetime.js';
+/** Only the original Source's validated pending row can issue this classification. */
+export declare function isInstalledMetadataMappingNotReady(error: unknown, database: Database, authorityId: string): boolean;
 export interface InstalledMetadataOwnerSessions {
     readonly uid: number;
     readonly accountId: string;

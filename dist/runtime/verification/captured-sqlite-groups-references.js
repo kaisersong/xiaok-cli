@@ -1,5 +1,6 @@
 import { freezeCapturedData, parseCapturedSourceJson } from './captured-source-json.js';
 import { mergeProtectedObservationClosures } from '../../ai/runtime/protected-observation-closure.js';
+import { encodeMultiAgentRow } from '../multi-agent/row-codec.js';
 /** Historical typed declarations only. No current identity/ownership inference. */
 export function declareCapturedGroupsRow(row) {
     const references = [], unmapped = [], observationDeclarations = [];
@@ -46,6 +47,39 @@ export function declareCapturedGroupsRow(row) {
     function source(value, path) { const v = object(value, path); if (!v)
         return; fields(v, path, { sourceTaskId: 'task', groupId: 'group', threadId: 'thread', rootTurnId: 'root-turn', preparationId: 'preparation', bootId: 'boot' }); known(v, path, ['sourceTaskId', 'groupId', 'threadId', 'rootTurnId', 'rootEpoch', 'preparationId', 'bootId', 'phase', 'status', 'delivery']); if (v.delivery !== undefined)
         delivery(v.delivery, path + '.delivery'); }
+    // Member IDs are scoped by run; a bare memberId is not a unique identity.
+    function activityMemberIdentity(runId, memberId, path) {
+        if (typeof runId !== 'string' || !runId || typeof memberId !== 'string' || !memberId) {
+            unmapped.push(path);
+            return;
+        }
+        ref(encodeMultiAgentRow([runId, memberId]), 'agent-activity-member', path);
+    }
+    function activityRun(value, path) {
+        const v = object(value, path);
+        if (!v)
+            return;
+        fields(v, path, { runId: 'agent-activity-run', groupId: 'group', threadId: 'thread', bootId: 'boot', rootTaskId: 'task', terminalEventId: 'event' });
+        known(v, path, ['runId', 'groupId', 'threadId', 'bootId', 'kind', 'originId', 'rootTaskId', 'state', 'acceptedAt', 'startSequence', 'terminalEventId', 'sourceUnavailable', 'rootTerminal']);
+        // The producer caller determines originId's domain; retain it without guessing ownership.
+        if (v.originId !== undefined)
+            unmapped.push(path + '.originId');
+        if (v.rootTerminal !== undefined) {
+            const terminal = object(v.rootTerminal, path + '.rootTerminal');
+            if (terminal) {
+                fields(terminal, path + '.rootTerminal', { taskId: 'task', sessionId: 'session' });
+                known(terminal, path + '.rootTerminal', ['taskId', 'sessionId', 'eventIndex', 'outcome']);
+            }
+        }
+    }
+    function activityMember(value, path) {
+        const v = object(value, path);
+        if (!v)
+            return;
+        fields(v, path, { runId: 'agent-activity-run', groupId: 'group', agentId: 'agent', operationId: 'operation', turnId: 'agent-turn' });
+        activityMemberIdentity(v.runId, v.memberId, path + '.memberId');
+        known(v, path, ['memberId', 'runId', 'groupId', 'agentId', 'operationId', 'turnId', 'state', 'physicalSettled', 'outcome']);
+    }
     function control(value, path, commandFields = []) { const v = object(value, path); if (!v)
         return; fields(v, path, { operationId: 'operation', targetAgentId: 'agent', messageId: 'message', groupId: 'group', actorId: 'user-actor', resourceId: 'resource', bootId: 'boot' }); known(v, path, ['operationId', 'targetAgentId', 'messageId', 'groupId', 'actorId', 'resourceId', 'bootId', 'expectedTurn', 'state', 'resourcesReleased', 'cleanupPending', 'outcome', 'error', 'phase', 'cancellationError', 'displayNames', ...commandFields]); if (v.displayNames !== undefined) {
         const labels = object(v.displayNames, path + '.displayNames');
@@ -127,20 +161,26 @@ export function declareCapturedGroupsRow(row) {
             }
         known(v, path, ['groupId', 'operationId', 'requestHash', 'command', 'applyState', 'result', 'managedTurnReservation', 'followupInput', 'followupAcceptedResult', 'followupAckBytes', 'presentationReservation', 'fixedAckBytes']);
     }
-    const sql = { group_id: 'group', thread_id: 'thread', profile_id: 'profile', workspace_id: 'workspace', boot_id: 'boot', active_group_id: 'group', source_task_id: 'task', preparation_id: 'preparation', resource_id: 'resource', agent_id: 'agent', content_id: 'content', message_id: 'message', operation_id: 'operation', event_id: 'event' };
+    const sql = { run_id: 'agent-activity-run', group_id: 'group', thread_id: 'thread', profile_id: 'profile', workspace_id: 'workspace', boot_id: 'boot', active_group_id: 'group', source_task_id: 'task', preparation_id: 'preparation', resource_id: 'resource', agent_id: 'agent', content_id: 'content', message_id: 'message', operation_id: 'operation', event_id: 'event' };
     for (const [key, namespace] of Object.entries(sql)) {
         const cell = row.cells[key];
         if (cell?.type === 'text')
             ref(cell.value, namespace, key);
     }
-    const required = { thread_bindings: ['thread_id', 'profile_id', 'workspace_id'], boot_owners: ['boot_id'], groups: ['group_id', 'thread_id', 'boot_id'], agents: ['group_id', 'agent_id'], events: ['group_id', 'event_id', 'agent_id'], messages: ['message_id', 'group_id', 'receiver_id'], contents: ['content_id', 'group_id', 'agent_id'], operations: ['group_id', 'operation_id'], root_turns: ['source_task_id', 'group_id', 'preparation_id', 'boot_id'], managed_resources: ['resource_id', 'group_id', 'agent_id'], workspace_execution_authorizations: ['profile_id', 'workspace_id'] };
+    const required = { activity_runs: ['run_id', 'group_id'], activity_members: ['run_id', 'member_id', 'group_id'], thread_bindings: ['thread_id', 'profile_id', 'workspace_id'], boot_owners: ['boot_id'], groups: ['group_id', 'thread_id', 'boot_id'], agents: ['group_id', 'agent_id'], events: ['group_id', 'event_id', 'agent_id'], messages: ['message_id', 'group_id', 'receiver_id'], contents: ['content_id', 'group_id', 'agent_id'], operations: ['group_id', 'operation_id'], root_turns: ['source_task_id', 'group_id', 'preparation_id', 'boot_id'], managed_resources: ['resource_id', 'group_id', 'agent_id'], workspace_execution_authorizations: ['profile_id', 'workspace_id'] };
     for (const key of required[row.table] ?? []) {
         const cell = row.cells[key];
         if (cell?.type !== 'text' || !cell.value)
             unmapped.push(key);
     }
+    if (row.table === 'activity_members')
+        activityMemberIdentity(row.cells.run_id?.type === 'text' ? row.cells.run_id.value : undefined, row.cells.member_id?.type === 'text' ? row.cells.member_id.value : undefined, 'member_id');
     const body = row.json.data_json, path = 'data_json';
-    if (row.table === 'agents')
+    if (row.table === 'activity_runs')
+        activityRun(body, path);
+    else if (row.table === 'activity_members')
+        activityMember(body, path);
+    else if (row.table === 'agents')
         agent(body, path);
     else if (row.table === 'messages')
         message(body, path);
@@ -156,6 +196,10 @@ export function declareCapturedGroupsRow(row) {
             if (payload) {
                 const p = path + '.payload';
                 switch (v.kind) {
+                    case 'activity_run':
+                        activityRun(payload.run, p + '.run');
+                        known(payload, p, ['run']);
+                        break;
                     case 'status':
                     case 'cleanup':
                         agent(payload.agent, p + '.agent');

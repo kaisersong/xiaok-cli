@@ -1,4 +1,4 @@
-import type { Config, LegacyConfig } from '../../types.js';
+import type { ConfigInput } from '../../types.js';
 import type { ModelRuntimeOptions, ProtocolId } from './types.js';
 export interface ResolvedModelBinding {
     providerId: string;
@@ -17,4 +17,4 @@ export declare class MissingProviderApiKeyError extends Error {
     readonly code = "missing_provider_api_key";
     constructor(providerId: string, envHint: string);
 }
-export declare function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, requestedModelId?: string): ResolvedModelBinding;
+export declare function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedModelId?: string): ResolvedModelBinding;

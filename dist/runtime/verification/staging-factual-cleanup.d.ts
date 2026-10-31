@@ -1,8 +1,10 @@
+import { type InstalledCleanupCommandFacts } from './installed-maintenance-handoff.js';
 import { type createInstalledMaintenanceExecution } from './maintenance-execution.js';
 import type { Database } from 'better-sqlite3';
 import { type createControllerMaterialPipeline } from './material-pipeline.js';
 import { type createDockerRunner } from '../isolated-execution/docker-runner.js';
 import type { QuiescenceAuthority } from '../isolated-execution/physical-quiescence.js';
+export declare function inspectStagingCleanupHandoffCommand(command: object): InstalledCleanupCommandFacts | undefined;
 /** Host-only factual cleanup of an expired/retired staging copy. It cannot delete
  * original run archives or grant a semantic verdict. No public RPC is installed. */
 export declare function createStagingFactualCleanup(input: {

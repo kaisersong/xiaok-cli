@@ -2,7 +2,7 @@ import { type ManagedCompoundAdmission } from './compound-managed-admission.js';
 import type { Tool } from '../../types.js';
 import type { ToolRegistry } from '../../ai/tools/index.js';
 import type { AgentSessionState } from '../../ai/runtime/session.js';
-import { type SessionStore } from '../../ai/runtime/session-store/store.js';
+import { type SessionStore, type StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import { type SessionExecutionLease, type SessionExecutionAuthority } from '../../ai/runtime/session-store/execution-authority.js';
 import { type SessionExecutionChain } from '../../ai/runtime/session-store/execution-chain.js';
 import { createCompoundSessionJournal } from './compound-session-journal.js';
@@ -25,6 +25,7 @@ export interface CompoundParentAdmission {
     generation: number;
     store: SessionStore;
 }
+type CompoundTurnSnapshotData = Readonly<Pick<StoredSessionSnapshot, 'compoundOperations'>>;
 export interface BoundCompoundCoordinatorInput {
     owner: ObservationSessionOwner;
     recallTool: Tool;
@@ -46,7 +47,7 @@ export interface BoundCompoundCoordinatorInput {
         session: AgentSessionState;
         nativeInvocationId: string;
     }> | undefined;
-    assertTurnCurrent?(snapshot: import('../../ai/runtime/session-store/store.js').PersistedSessionSnapshot): void;
+    assertTurnCurrent?(snapshot: CompoundTurnSnapshotData): void;
 }
 /** Host-only common installation. It accepts an already durable exact parent
  * admission and authenticates the actual D1 owner/session; no tool context can
@@ -100,3 +101,4 @@ export declare function createCompoundChildInstallation(input: {
     hasInstalled: () => boolean;
     hasDrained: () => boolean;
 }>;
+export {};

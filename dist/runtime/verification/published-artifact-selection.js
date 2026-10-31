@@ -1,16 +1,22 @@
+import { ownDataArrayIsArray, ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataJSONParse, ownDataObjectFreeze, ownDataObjectKeys, ownDataRegExpPrototypeTest } from './application-native-intrinsics.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { applicationDataDescriptors, readApplicationOwnDataField } from './application-value-data.js';
 import { captureApplicationData } from './application-value-data.js';
-function fields(value, keys) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== keys.sort().join(','))
-    throw Error('published_artifact_shape'); }
-function identifier(value) { if (typeof value !== 'string' || !value || Buffer.byteLength(value) > 160 || /[\x00-\x1f\x7f]/.test(value))
-    throw Error('published_artifact_identity'); }
+const stringCharCodeAt = String.prototype.charCodeAt, apply = Reflect.apply;
+function fields(value, keys) {
+    if (!value || typeof value !== 'object' || ownDataArrayIsArray(value) || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(value)), ',') !== ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(keys), ','))
+        throw Error('published_artifact_shape');
+}
+function identifier(value) {
+    if (typeof value !== 'string' || !value || ownDataBufferByteLength(value) > 160 || ownDataRegExpPrototypeTest(/[\x00-\x1f\x7f]/, value))
+        throw Error('published_artifact_identity');
+}
 export function assertPublishedArtifactOwner(value) {
     applicationDataDescriptors(value, 3, 'published_artifact_shape');
     fields(value, ['profileId', 'ownerKind', 'ownerId']);
     identifier(value.profileId);
     identifier(value.ownerId);
-    if (!['task', 'intent', 'goal', 'loop', 'project'].includes(value.ownerKind))
+    if (!ownDataArrayPrototypeIncludes(['task', 'intent', 'goal', 'loop', 'project'], value.ownerKind))
         throw Error('published_artifact_owner');
 }
 export function assertPublishedArtifactSelection(value) {
@@ -30,15 +36,29 @@ export function assertPublishedArtifactSelection(value) {
     }
 }
 export function assertPublishedArtifactPath(value) {
-    if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\\') || value.split('/').some(part => !part || part === '.' || part === '..' || /[:\x00-\x1f\x7f]/.test(part)))
+    if (typeof value !== 'string' || !value || value.length > 4096)
         throw Error('published_artifact_path');
+    let segmentLength = 0, segmentStart = 0;
+    for (let index = 0; index <= value.length; index++) {
+        const character = index === value.length ? '/' : value[index], code = apply(stringCharCodeAt, character, [0]);
+        if (character === '\\' || code === 58 || code <= 31 || code === 127)
+            throw Error('published_artifact_path');
+        if (character === '/') {
+            if (segmentLength === 0 || segmentLength === 1 && value[segmentStart] === '.' || segmentLength === 2 && value[segmentStart] === '.' && value[segmentStart + 1] === '.')
+                throw Error('published_artifact_path');
+            segmentLength = 0;
+            segmentStart = index + 1;
+        }
+        else
+            segmentLength++;
+    }
 }
 /** A content selector only, never a material/archive grant or a filesystem path. */
 export function parsePublishedArtifactSelection(raw) {
-    const captured = JSON.parse(json(captureApplicationData(raw, { maximumBytes: 65536, maximumNodes: 65536, invalid: 'published_artifact_shape', limit: 'published_artifact_shape' })));
+    const captured = ownDataJSONParse(json(captureApplicationData(raw, { maximumBytes: 65536, maximumNodes: 65536, invalid: 'published_artifact_shape', limit: 'published_artifact_shape' })));
     assertPublishedArtifactSelection(captured);
     const selection = captured;
     if (selection.kind === 'inherited')
-        Object.freeze(selection.originOwner);
-    return Object.freeze(selection);
+        ownDataObjectFreeze(selection.originOwner);
+    return ownDataObjectFreeze(selection);
 }

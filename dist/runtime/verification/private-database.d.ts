@@ -5,6 +5,7 @@ export declare function readPrivateDatabaseNativeAccess(db: Database): Readonly<
     symbol: symbol;
     prepare: Function;
     open: Function;
+    inTransaction: Function | undefined;
     statement: Readonly<Record<string, Function>>;
     databasePrototype: object;
     cppPrototype: object;

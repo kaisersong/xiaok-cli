@@ -5,6 +5,7 @@ import { inspectSharedCapacityCommand, executeSharedCapacityCommand } from './sh
 import { createHash } from 'node:crypto';
 import { inspectCapacityMetadataCommand, executeCapacityMetadataCommand } from './capacity-ledger-command-dispatch.js';
 import { types } from 'node:util';
+import { captureOwnerBindingBatch } from './owner-binding-batch-input.js';
 import { canonicalVerificationJson as json, VERIFICATION_BUDGET } from './protocol.js';
 import { assertVerificationDatabaseBudget, runVerificationTransaction } from './storage-budget.js';
 const MiB = 1024 ** 2;
@@ -880,6 +881,19 @@ export function createSharedCapacityLedger(authority) {
             bindOwner(binding) { if (arguments.length !== 1)
                 throw Error('shared_capacity_arguments'); identity(); synchronous(assertCurrent()); if (!binding || typeof binding !== 'object')
                 throw Error('shared_capacity_owner'); const fixed = ownerIdentity(binding), token = Object.freeze({}); owners.set(token, { binding, identity: fixed }); return token; },
+            bindOwners(bindings) {
+                if (arguments.length !== 1)
+                    throw Error('shared_capacity_arguments');
+                identity();
+                synchronous(assertCurrent());
+                const captured = captureOwnerBindingBatch(bindings), facts = readSharedCapacityOwners(authority, captured);
+                if (facts.length !== captured.length)
+                    throw Error('shared_capacity_owner_changed');
+                const fixed = facts.map(raw => { const value = fields(raw, ['sessionKey', 'producerKey']); id(value.sessionKey); id(value.producerKey); return Object.freeze(value); });
+                identity();
+                synchronous(assertCurrent());
+                return Object.freeze(captured.map((binding, index) => { const token = Object.freeze({}); owners.set(token, { binding, identity: fixed[index] }); return token; }));
+            },
             reserve(token, raw) { if (arguments.length !== 2)
                 throw Error('shared_capacity_arguments'); const proposal = fields(raw, ['operationId', 'resourceId', 'generation', 'partition', 'bytes', 'bindingHash']); return write(() => reserveInTransaction(token, proposal)); },
             commit(token, operationId) { if (arguments.length !== 2)

@@ -139,7 +139,6 @@ export async function finishSemanticSummaryAttempt(attempt, status) {
     value.finished = true;
     return { ...nextSnapshot, ...receipt };
 }
-/** Commit only a host-built strict candidate; budget was already persisted independently. */
 export async function commitSemanticSummarySnapshot(attempt, candidate) {
     const value = current(attempt);
     if (!value.finished || value.committed)

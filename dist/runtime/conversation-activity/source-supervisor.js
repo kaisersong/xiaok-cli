@@ -26,6 +26,31 @@ export class ActivitySourceSupervisor {
     children = new Map();
     receipts = new Map();
     pending = new Map();
+    closing = false;
+    shutdown;
+    stopping = new Set();
+    // Actual handles created by this instance, never ledger/PID-derived handles.
+    childCloses = new Map();
+    trackChildClose(child) {
+        const closed = new Promise(resolve => child.once('close', () => {
+            this.childCloses.delete(child);
+            resolve();
+        }));
+        this.childCloses.set(child, closed);
+    }
+    /** Passive ownership barrier only; does not signal or certify service quiescence. */
+    sealAndDrainSpawned() {
+        this.closing = true;
+        return this.shutdown ??= (async () => {
+            const admissions = await Promise.allSettled([...this.pending.values(), ...this.stopping]);
+            // Admitted ensures may finish producing a handle; snapshot AFTER they settle.
+            // Never resolve this barrier just because a request's own timeout expired.
+            await Promise.all([...this.childCloses.values()]);
+            const failures = admissions.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+            if (failures.length)
+                throw new AggregateError(failures, 'activity_source_shutdown_failed');
+        })();
+    }
     constructor(root, ownerEpoch) {
         this.root = root;
         this.ownerEpoch = ownerEpoch;
@@ -76,6 +101,8 @@ export class ActivitySourceSupervisor {
         }
     }
     ensure(source) {
+        if (this.closing)
+            return Promise.reject(new Error('activity_source_closing'));
         const existing = this.pending.get(source.name);
         if (existing)
             return existing;
@@ -115,10 +142,16 @@ export class ActivitySourceSupervisor {
         }
         const logPath = join(this.root, source.name === 'kswarm' ? ACTIVITY_STORAGE_NAMES.kswarmLog : ACTIVITY_STORAGE_NAMES.brokerLog);
         const log = openSync(logPath, 'a', 0o600);
-        chmodPrivateActivityFile(logPath);
-        const child = spawn(source.executable, source.args ?? [source.entryPath], { cwd: source.cwd, env: { ...process.env, ...source.env }, detached: true,
-            stdio: ['ignore', log, log], windowsHide: true });
-        closeSync(log);
+        let child;
+        try {
+            chmodPrivateActivityFile(logPath);
+            child = spawn(source.executable, source.args ?? [source.entryPath], { cwd: source.cwd, env: { ...process.env, ...source.env }, detached: true,
+                stdio: ['ignore', log, log], windowsHide: true });
+            this.trackChildClose(child);
+        }
+        finally {
+            closeSync(log);
+        }
         let failure;
         child.once('error', error => { failure = error; });
         child.unref();
@@ -142,7 +175,14 @@ export class ActivitySourceSupervisor {
         const receipt = [...this.receipts.values()].find(item => !item.external && item.pid === pid);
         return Boolean(receipt && this.alive(pid) && await birth(pid) === receipt.birth);
     }
-    async stopOwned(name, expectedOwnerEpoch) {
+    stopOwned(name, expectedOwnerEpoch) {
+        if (this.closing)
+            return Promise.reject(new Error('activity_source_closing'));
+        const pending = this.stopOwnedSource(name, expectedOwnerEpoch).finally(() => { this.stopping.delete(pending); });
+        this.stopping.add(pending);
+        return pending;
+    }
+    async stopOwnedSource(name, expectedOwnerEpoch) {
         if (expectedOwnerEpoch !== this.ownerEpoch)
             throw new Error('activity_source_stale_lease');
         const ledger = JSON.parse(readFileSync(join(this.root, ACTIVITY_STORAGE_NAMES.supervision), 'utf8'));
