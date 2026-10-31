@@ -381,6 +381,10 @@ function interpretExitCode(
 // Executors
 // ---------------------------------------------------------------------------
 
+// Producer-only identity: semantic timeout, with original physical closure proved.
+// Never infer this from a message, exit code, public result, or caller declaration.
+const joinedCommandTimeouts = new WeakSet<Error>();
+
 function executeCommand(
   config: CommandHookConfig,
   timeoutMs: number,
@@ -401,6 +405,7 @@ function executeCommand(
     });
     const remember = (error: unknown) => { errors.add(error); };
     let rootExited = false, treeTerminationRequested = false, treePending = false, settled = false;
+    let timeoutError: Error | undefined, processGroupGone = false, windowsTreeJoined = false;
     let terminal: { code: number | null; signal: NodeJS.Signals | null } | undefined;
     const finish = () => {
       const closed = terminal;
@@ -408,6 +413,12 @@ function executeCommand(
       settled = true;
       if (closed.signal && !errors.size) remember(new Error(`hook terminated by ${closed.signal}`));
       const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
+      // Child 'close' is the original stdio barrier. It alone is not tree proof.
+      // Retain every other error, even if a later close/termination succeeds.
+      if (timeoutError && unknown.length === 1 && unknown[0] === timeoutError
+        && (process.platform === 'win32' ? windowsTreeJoined : processGroupGone)) {
+        joinedCommandTimeouts.add(timeoutError);
+      }
       if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
       else if (errors.size) reject(signal.reason);
       else resolve({ exitCode: closed.code ?? 1, stdout, stderr });
@@ -442,6 +453,7 @@ function executeCommand(
             killer.on('error', remember);
             killer.once('close', code => {
               if (code !== 0) remember(new Error(`hook_windows_tree_termination_failed:${String(code)}`));
+              else windowsTreeJoined = true;
               treePending = false;
               finish();
             });
@@ -457,9 +469,11 @@ function executeCommand(
     };
     const abort = () => { remember(signal.reason); terminate(); };
     signal.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(() => { remember(new Error(`hook timeout after ${timeoutMs}ms`)); terminate(); }, timeoutMs);
+    const timer = setTimeout(() => { timeoutError = new Error(`hook timeout after ${timeoutMs}ms`); remember(timeoutError); terminate(); }, timeoutMs);
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdout.on('error', remember);
+    child.stderr.on('error', remember);
     child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') remember(error); });
     child.on('error', remember);
     child.once('exit', () => { rootExited = true; });
@@ -468,7 +482,10 @@ function executeCommand(
       clearTimeout(timer); signal.removeEventListener('abort', abort);
       if (process.platform !== 'win32' && child.pid) {
         try { process.kill(-child.pid, 0); remember(new Error('hook_process_group_unconfirmed')); }
-        catch (error) { if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code === 'ESRCH' && Number.isSafeInteger(child.pid) && child.pid > 0) processGroupGone = true;
+          else remember(error);
+        }
       }
       terminal = { code, signal: terminationSignal };
       finish();
@@ -565,7 +582,8 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
   const own = <T>(work: Promise<T>): Promise<T> => {
     pending.add(work);
     void work.then(() => pending.delete(work), error => {
-      pending.delete(work); if (error !== closeReason) failures.add(error);
+      pending.delete(work);
+      if (error !== closeReason && !(error instanceof Error && joinedCommandTimeouts.has(error))) failures.add(error);
     });
     return work;
   };
