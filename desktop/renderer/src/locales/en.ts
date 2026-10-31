@@ -2054,6 +2054,7 @@ export const en: LocaleStrings = {
     connectorChangeKey: "Change",
     connectorCancelEdit: "Cancel",
     connectorTestConnection: "Test connection",
+    connectorTestSaveFirst: "Save or refresh to confirm the current configuration before testing.",
     // System One decision model (tools pane)
     systemOneTitle: "SystemOne Decision Model",
     systemOneDesc: "System One (Jev) is an auxiliary decision model, not a xiaok inference model: it uses its own POST /v1/systemone endpoint, returns typed answers with probabilities instead of free text, and never takes part in default chat model selection.",

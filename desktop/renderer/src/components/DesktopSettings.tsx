@@ -4763,20 +4763,32 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange, ds }: ApiK
 
 interface TestButtonProps {
   kind: 'search' | 'fetch';
+  config: ConnectorsConfig;
+  savedConfig?: ConnectorsConfig;
+  canTest: boolean;
 }
 
-function TestButton({ kind, ds }: TestButtonProps & { ds: LocaleStrings['desktopSettings'] }) {
+function TestButton({ kind, config, savedConfig, canTest, ds }: TestButtonProps & { ds: LocaleStrings['desktopSettings'] }) {
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; latencyMs: number; detail?: string; error?: string } | null>(null);
+  const [outcome, setOutcome] = useState<{
+    config: ConnectorsConfig;
+    savedConfig: ConnectorsConfig | undefined;
+    result: { success: boolean; latencyMs: number; detail?: string; error?: string };
+  } | null>(null);
+  // A result belongs to the exact draft and confirmed main snapshot tested.
+  // Changing away and back must not revive an old or late provider response.
+  const result = canTest && outcome?.config === config && outcome.savedConfig === savedConfig
+    ? outcome.result : null;
 
   const handleTest = async () => {
+    if (!canTest || testing) return;
     setTesting(true);
-    setResult(null);
+    setOutcome(null);
     try {
       const r = await api.testConnectorProvider(kind);
-      setResult(r);
+      setOutcome({ config, savedConfig, result: r });
     } catch (e) {
-      setResult({ success: false, latencyMs: 0, error: connectorsErrorMessage(e, ds) });
+      setOutcome({ config, savedConfig, result: { success: false, latencyMs: 0, error: connectorsErrorMessage(e, ds) } });
     } finally {
       setTesting(false);
     }
@@ -4787,13 +4799,14 @@ function TestButton({ kind, ds }: TestButtonProps & { ds: LocaleStrings['desktop
       <button
         type="button"
         onClick={handleTest}
-        disabled={testing}
+        disabled={testing || !canTest}
         className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
         aria-label={`test-${kind}`}
       >
         {testing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
         {ds.connectorTestConnection}
       </button>
+      {!canTest && <span className="text-xs text-[var(--c-text-secondary)]" role="status">{ds.connectorTestSaveFirst}</span>}
       {result && (
         result.success
           ? <span className="text-xs text-green-600">{result.latencyMs}ms {result.detail ? `· ${result.detail}` : ''}</span>
@@ -4912,6 +4925,7 @@ function ToolsPane() {
   const [readError, setReadError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [snapshot, setSnapshot] = useState<ConnectorsConfigSnapshot | null>(null);
+  const [testConfigConfirmed, setTestConfigConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -4928,6 +4942,7 @@ function ToolsPane() {
       if (generation !== readGeneration.current) return;
       if (!snap) throw Error('connectors_projection_unavailable');
       setSnapshot(snap);
+      setTestConfigConfirmed(true);
       setDraft(current => current ?? snap.config);
       setReadError('');
     } catch (failure) {
@@ -4945,7 +4960,11 @@ function ToolsPane() {
   const handleSave = async () => {
     if (!draft) return;
     const submitted = draft;
+    // Reads begun before this mutation cannot confirm its eventual outcome.
+    readGeneration.current++;
+    setRefreshing(false);
     setSaving(true);
+    setTestConfigConfirmed(false);
     setError('');
     setSuccess('');
     try {
@@ -4956,6 +4975,7 @@ function ToolsPane() {
         setRefreshing(false);
         setReadError('');
         setSnapshot(next);
+        setTestConfigConfirmed(true);
         if (draftRef.current === submitted) {
           setDraft(next.config);
           setSuccess(t.desktopSettings.connectorSaved);
@@ -4989,6 +5009,8 @@ function ToolsPane() {
 
   const search = draft.search;
   const fetchCfg = draft.fetch;
+  const canTest = testConfigConfirmed && !saving && !refreshing
+    && JSON.stringify(draft) === JSON.stringify(snapshot?.config);
 
   return (
     <>
@@ -5070,7 +5092,7 @@ function ToolsPane() {
             );
           })}
         </div>
-        <TestButton kind="search" ds={t.desktopSettings} />
+        <TestButton kind="search" config={draft} savedConfig={snapshot?.config} canTest={canTest} ds={t.desktopSettings} />
       </Section>
 
       <Section key="connectors-fetch">
@@ -5128,7 +5150,7 @@ function ToolsPane() {
             );
           })}
         </div>
-        <TestButton kind="fetch" ds={t.desktopSettings} />
+        <TestButton kind="fetch" config={draft} savedConfig={snapshot?.config} canTest={canTest} ds={t.desktopSettings} />
       </Section>
 
       <Section>
