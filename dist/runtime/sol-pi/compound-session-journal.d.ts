@@ -1,7 +1,7 @@
 import { type CompoundProviderAttemptInput, type ProviderTransportState } from './compound-provider-attempt.js';
 import { type DirectOperationAdvance, type DirectOperationRecord } from './compound-direct-operation.js';
 import { type CompoundTreeAllocationInput } from './compound-tree-budget.js';
-import type { SessionStore, PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
+import type { SessionStore, StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import { type SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 import { type CompoundAdvance, type CompoundOperationInput, type CompoundOperationLedger, type CompoundOperationRecord } from './compound-operation.js';
 type Delivery = Pick<CompoundOperationInput, 'inputHash' | 'toolName' | 'permissionGeneration'> & {
@@ -29,7 +29,7 @@ export declare function createCompoundSessionJournal(options: {
         allocationId: string;
         created: boolean;
     }>;
-    reserveProviderAttempt(input: CompoundProviderAttemptInput, lease: SessionExecutionLease, beforeCommit?: (candidate: PersistedSessionSnapshot) => void): Promise<{
+    reserveProviderAttempt(input: CompoundProviderAttemptInput, lease: SessionExecutionLease, beforeCommit?: (candidate: StoredSessionSnapshot) => void): Promise<{
         reservationId: string;
         created: boolean;
         bindingHash: string;

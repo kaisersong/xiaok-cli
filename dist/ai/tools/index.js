@@ -263,6 +263,10 @@ export class ToolRegistry {
     getToolDefinitions() {
         return [...this.tools.values()].filter(tool => this.admitsNativeReadonly(tool)).map((tool) => this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition);
     }
+    /** Tightening only: seal the actual normalized options owned by this registry. */
+    sealRegistryOptions() {
+        Object.defineProperty(this, 'options', { value: Object.freeze(this.options), writable: false, configurable: false });
+    }
     /** Subclasses must run complete readonly admission before publishing any state. */
     preflightToolRegistration(tool) {
         if (this.#nativeReadonlyOnly) {
@@ -565,6 +569,7 @@ export class ToolRegistry {
             return stop(`[dry-run] ${name}(${JSON.stringify(input)})`, 'handled');
         }
         const initialPolicyRevision = this.permissionManager.getRevision();
+        let continuationPolicyRevision = initialPolicyRevision;
         const decision = await this.permissionManager.check(registeredName, cloneToolInput(input));
         context?.signal?.throwIfAborted();
         if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision())
@@ -712,11 +717,20 @@ export class ToolRegistry {
                 context?.signal?.throwIfAborted();
                 return stop(`Error: ${permissionRequest?.message ?? `权限不足: ${name}`}`, 'denied');
             }
-            const approved = permissionRequest?.decision === 'allow'
-                ? true
-                : await this.options.onPrompt(registeredName, cloneToolInput(input), { tool, context });
+            let approved;
+            if (permissionRequest?.decision === 'allow')
+                approved = true;
+            else {
+                const promptToken = Object.freeze({});
+                const result = await this.permissionManager.runPromptAuthorization(promptToken, registeredName, cloneToolInput(input), () => this.options.onPrompt(registeredName, cloneToolInput(input), { tool, context }));
+                context?.signal?.throwIfAborted();
+                if (authorityChanged() || result.continuationRevision === undefined)
+                    return stop(changedError, 'invalidated');
+                approved = result.value;
+                continuationPolicyRevision = result.continuationRevision;
+            }
             context?.signal?.throwIfAborted();
-            if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision())
+            if (authorityChanged() || continuationPolicyRevision !== this.permissionManager.getRevision())
                 return stop(changedError, 'invalidated');
             permissionGrant = snapshotToolPermissionGrant(approved);
             if (approved !== true && !permissionGrant) {
@@ -804,7 +818,7 @@ export class ToolRegistry {
             preHookResult = await this.options.hooksRunner?.runPreHooks(registeredName, cloneToolInput(input));
         }
         context?.signal?.throwIfAborted();
-        if (authorityChanged() || initialPolicyRevision !== this.permissionManager.getRevision())
+        if (authorityChanged() || continuationPolicyRevision !== this.permissionManager.getRevision())
             return stop(changedError, 'invalidated');
         if (preHookResult && !preHookResult.ok) {
             return stop(`Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`, 'blocked');

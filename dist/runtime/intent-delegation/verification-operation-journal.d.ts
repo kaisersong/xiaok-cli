@@ -23,6 +23,23 @@ export interface IntentVerificationOperation {
     materialObservation: Readonly<MaterialRequestObservation> | null;
     verificationObservation: VerificationOperationRequestObservation | null;
 }
+/** Public comparison facts, not a complete execution row or material authority. */
+export interface IntentVerificationOperationRowData {
+    readonly registration: {
+        readonly obligations: readonly {
+            readonly obligation: {
+                readonly obligationId: unknown;
+                readonly definitionHash: unknown;
+            };
+        }[];
+    };
+    readonly obligationId: unknown;
+    readonly bindingHash: unknown;
+    readonly invocation: unknown;
+    readonly route: string;
+    readonly materialRequestId: unknown;
+    readonly verificationRequestId: unknown;
+}
 export type IntentVerificationOperationAction = {
     kind: 'begin-materials';
     observation: VerificationObligationObservation;
@@ -45,4 +62,5 @@ export type IntentVerificationOperationAction = {
     verificationObservation: VerificationOperationRequestObservation;
 };
 export declare function parseIntentVerificationOperation(raw: unknown, row: IntentVerificationExecution, binding: Readonly<IntentApplicationBinding>): IntentVerificationOperation | null;
+export declare function parseIntentVerificationOperation(raw: unknown, row: IntentVerificationOperationRowData, binding: Readonly<IntentApplicationBinding>): IntentVerificationOperation | null;
 export declare function applyIntentVerificationOperation(row: IntentVerificationExecution, binding: Readonly<IntentApplicationBinding>, raw: IntentVerificationOperationAction): IntentVerificationOperation;

@@ -1,7 +1,7 @@
 import { assertInstalledStackCapacityComponent } from './installed-execution-stack.js';
 import { readBlobCapacityIssuer } from './blob-capacity-issuer.js';
 import { readInstalledCapacityAuthority, assertInstalledCapacityAuthorityLifetime, claimInstalledCapacityLayer, finishInstalledSharedCapacityLayer, failInstalledCapacityLayer } from './installed-controller.js';
-import { readMaintenanceExecution, assertMaintenanceProbeDeleted } from './maintenance-execution.js';
+import { assertMaintenanceExecutionDatabase, assertMaintenanceProbeDeleted } from './maintenance-execution.js';
 import { createSharedBlobCapacity } from './shared-blob-capacity.js';
 import { createAuthorityBlobBudget } from './authority-blob-budget.js';
 import { assertControllerMaterialPipelineDatabase, assertMaterialPipelineDeleted } from './material-pipeline.js';
@@ -74,7 +74,7 @@ export function registerInstalledCapacityIssuer(owner, slot, component, engine, 
     else if (slot === 'runs')
         assertProtectedRunLedgerDatabase(component, db);
     else if (slot === 'maintenance-probe')
-        readMaintenanceExecution(component, db);
+        assertMaintenanceExecutionDatabase(component, db);
     else
         throw Error('installed_capacity_slot');
     const old = entry.slots.get(slot);

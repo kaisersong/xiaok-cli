@@ -356,6 +356,18 @@ async function runChat(initialInput, opts) {
         }
         return finalization;
     };
+    const finalizeChatWithDiagnostics = async () => {
+        try {
+            await finalizeChat();
+        }
+        catch (error) {
+            try {
+                log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
+            }
+            catch { }
+            throw error;
+        }
+    };
     let signalExit;
     let finishTerminal = () => { };
     let writeSignalExitNotice = async () => { };
@@ -4999,7 +5011,7 @@ async function runChat(initialInput, opts) {
         }
         finally {
             try {
-                await finalizeChat();
+                await finalizeChatWithDiagnostics();
             }
             finally {
                 finishTerminal();

@@ -17,6 +17,14 @@ import { readInstalledCurrentOwner } from '../verification/installed-owner-state
 import { intentHostSubjectOwner } from '../verification/intent-host-subject.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 import { authorizeProductValidationMaterials, consumeProductValidationMaterials } from '../verification/product-material-authorization.js';
+function verificationRows(value) { if (!Array.isArray(value))
+    throw Error('intent_verification_row_data'); return value; }
+function verificationRow(value) { if (value === null || typeof value !== 'object')
+    throw Error('intent_verification_row_data'); }
+function verificationStageRows(value) { if (!Array.isArray(value))
+    throw Error('intent_verification_current'); return value; }
+function verificationStageRow(value) { if (value === null || typeof value !== 'object')
+    throw Error('intent_verification_current'); }
 /** Fixed product host. Native enrollment is real; durable rows never grant business completion. */
 export function createIntentVerificationHost(options) {
     const { sessionId, instanceId } = options, workspace = resolve(options.workspaceRoot), admission = options.assertAdmission, clock = options.now ?? Date.now, reviewMaterials = options.reviewMaterials ?? (async () => { });
@@ -76,10 +84,10 @@ export function createIntentVerificationHost(options) {
         throw Error('intent_verification_candidate'); return row; }
     function route(ledger, row) { const original = candidate(ledger, row.candidateId); assertIntentParentRoutesCurrent(ledger, original); const binding = intentPublicationTarget(ledger, original); if (json(readInstalledCurrentOwner(intentHostSubjectOwner(binding.subject))) !== row.route)
         throw Error('intent_verification_route'); return binding; }
-    function fresh(ledger, row, signal) { exact(ledger, signal); route(ledger, row); const original = candidate(ledger, row.candidateId), native = parseIntentNativeContracts(ledger.nativeContracts, sessionId).find(n => n.intentId === original.intentId); if (!native || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || ledger.activeIntentId !== original.intentId || (original.stageId === null ? ledger.intents.find(r => r.intentId === original.intentId)?.overallStatus !== 'publication_pending' || ledger.intents.find(r => r.intentId === original.intentId).stages.some(s => s.status !== 'completed') : ledger.intents.find(r => r.intentId === original.intentId)?.activeStageId !== original.stageId) || json(readIntentPublicationFileFacts(ledger, workspace, original)) !== json(original.fileObservations))
+    function fresh(ledger, row, signal) { exact(ledger, signal); route(ledger, row); const original = candidate(ledger, row.candidateId), native = parseIntentNativeContracts(ledger.nativeContracts, sessionId).find(n => n.intentId === original.intentId); if (!native || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || ledger.activeIntentId !== original.intentId || (original.stageId === null ? ledger.intents.find(r => r.intentId === original.intentId)?.overallStatus !== 'publication_pending' || verificationStageRows(ledger.intents.find(r => r.intentId === original.intentId).stages).some(s => { verificationStageRow(s); return s.status !== 'completed'; }) : ledger.intents.find(r => r.intentId === original.intentId)?.activeStageId !== original.stageId) || json(readIntentPublicationFileFacts(ledger, workspace, original)) !== json(original.fileObservations))
         throw Error('intent_verification_current'); exact(ledger, signal); route(ledger, row); signal.throwIfAborted(); if (closed)
         throw Error('intent_verification_closed'); }
-    function afterWrite(before, row) { const expected = captureIntentData(before), rows = expected.verificationExecutions ?? []; expected.verificationExecutions = rows.some(r => r.id === row.id) ? rows.map(r => r.id === row.id ? row : r) : [...rows, row]; expected.updatedAt = Math.max(expected.updatedAt, row.updatedAt); if (intentNativeLedgerHash(load()) !== intentNativeLedgerHash(expected))
+    function afterWrite(before, row) { const expected = captureIntentData(before), rows = verificationRows(expected.verificationExecutions ?? []); expected.verificationExecutions = rows.some(r => { verificationRow(r); return r.id === row.id; }) ? rows.map(r => { verificationRow(r); return r.id === row.id ? row : r; }) : [...rows, row]; expected.updatedAt = Math.max(expected.updatedAt, row.updatedAt); if (intentNativeLedgerHash(load()) !== intentNativeLedgerHash(expected))
         throw Error('intent_verification_basis'); return load(); }
     const get = (id) => { const row = parseIntentVerificationExecutions(load()).find(r => r.id === id); if (!row)
         throw Error('intent_verification_missing'); return row; };

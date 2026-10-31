@@ -10,6 +10,30 @@ export interface MetadataSessionRelationDefinition {
     readonly boundKeyTypes: readonly 'text'[];
 }
 export declare const metadataSessionRelationManifest: Readonly<{
+    readonly "groups:activity-run": {
+        readonly queryId: "groups:activity_runs";
+        readonly whereEqual: readonly ["run_id"];
+        readonly orderBy: readonly ["run_id"];
+        readonly rowidTieBreak: true;
+        readonly cardinality: "zero-or-one";
+        readonly boundKeyTypes: readonly ["text"];
+    };
+    readonly "groups:group-activity_runs": {
+        readonly queryId: "groups:activity_runs";
+        readonly whereEqual: readonly ["group_id"];
+        readonly orderBy: readonly ["run_id"];
+        readonly rowidTieBreak: true;
+        readonly cardinality: "many";
+        readonly boundKeyTypes: readonly ["text"];
+    };
+    readonly "groups:group-activity_members": {
+        readonly queryId: "groups:activity_members";
+        readonly whereEqual: readonly ["group_id"];
+        readonly orderBy: readonly ["run_id", "member_id"];
+        readonly rowidTieBreak: true;
+        readonly cardinality: "many";
+        readonly boundKeyTypes: readonly ["text"];
+    };
     readonly "groups:group": {
         readonly queryId: "groups:groups";
         readonly whereEqual: readonly ["group_id"];

@@ -100,6 +100,8 @@ export interface MultiAgentCoordinatorOptions {
     idleTimeoutMs?: number;
     turnTimeoutMs?: number;
     onEvent?: (event: MultiAgentEvent) => void;
+    /** Constructor-owned completion of factual host publication, after native cleanup. */
+    onPhysicalResourcesClosed?: (witness: object) => Promise<void>;
     idGenerator?: () => string;
 }
 export interface SpawnAgentInput {
@@ -136,6 +138,8 @@ export declare class MultiAgentCoordinator {
     private readonly idleTimeoutMs;
     private readonly turnTimeoutMs;
     private readonly onEvent?;
+    private readonly onPhysicalResourcesClosed?;
+    private readonly physicalCloseWitnesses;
     private nextMessageOrdinal;
     private disposed;
     private readonly executionMode;
@@ -206,6 +210,8 @@ export declare class MultiAgentCoordinator {
     private withInboxContext;
     private takeInboxInput;
     private notifyParent;
+    /** Only the creating Core can inspect its original physical-close witness. */
+    inspectPhysicalCloseWitness(witness: object): MultiAgentSnapshot;
     private closeRecord;
     private assertMutationSource;
     private assertRuntimeCapacity;

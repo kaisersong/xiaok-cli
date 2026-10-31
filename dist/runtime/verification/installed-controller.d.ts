@@ -8,6 +8,7 @@ import { createUserArchiveOperations } from './user-archive-operations.js';
 import { createInstalledControllerLifetime } from './installed-controller-lifetime.js';
 import { createApprovedSourceCapabilities } from './approved-source-capabilities.js';
 import { createApprovedVerificationOperations } from './approved-verification-operation.js';
+export declare function readInstalledMaintenanceSeal(lifetime: object, stack: object): string;
 /** Read-only error classification; only an actual root close failure can enter this set. */
 export declare function isInstalledControllerShutdownUnresolved(error: unknown): boolean;
 type InstalledCapacityLayer = 'installed-owner' | 'shared' | 'ledger' | 'authority-budget' | 'blob-budget';
@@ -16,6 +17,7 @@ type InstalledCapacityAuthorityFacts = Readonly<{
     authorityId: string;
 }>;
 export declare function claimInstalledCapacityStackConstruction(assembly: object, owner: object): object;
+export declare function assertInstalledStackConstructionKind(assembly: object, kind: 'normal' | 'maintenance'): void;
 /** Narrow capacity facts only; this token is not accepted by assembly APIs. */
 export declare function readInstalledCapacityAuthority(token: object): InstalledCapacityAuthorityFacts;
 export declare function assertInstalledCapacityReplacement(authority: object, _receipt: object, _facts: Readonly<import('./shared-capacity-ledger.js').CapacityMetadataReplacementFacts>): void;
@@ -80,6 +82,7 @@ export declare function assertInstalledBlackboxExecution(token: object, database
 export declare function assertInstalledVerificationCurrent(token: object): void;
 export declare function readInstalledVerificationClock(token: object): Readonly<import("./receiver-store.js").ReceiverClockEvidence>;
 export declare function ensureInstalledVerificationQualification(token: object, signal: AbortSignal): Promise<void>;
+export declare function prepareInstalledMetadataTarget(assembly: object, owner: object, token: object, closure: object, signal: AbortSignal): Promise<object>;
 export declare function recordInstalledVerificationResult(token: object, result: {
     expected: QuiescenceExpectation;
     output: object;

@@ -1,6 +1,26 @@
 import { cloneIntentRecord, createIntentLedgerRecord as createIntentLedgerRecordFromPlan } from './types.js';
 const ACTIVE_STATUSES = new Set(['running']);
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'skipped']);
+function dispatchSteps(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_dispatch_steps_data');
+    return value;
+}
+function dispatchStages(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_dispatch_stages_data');
+    return value;
+}
+function dispatchDependencies(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_dispatch_dependencies_data');
+    return value;
+}
+function dispatchOrder(value) {
+    if (typeof value !== 'number')
+        throw Error('intent_dispatch_order_data');
+    return value;
+}
 export function createIntentLedgerRecord(plan, now) {
     return createIntentLedgerRecordFromPlan(plan, now);
 }
@@ -10,7 +30,7 @@ export function activateIntentStep(intent, stepId, now = Date.now()) {
     }
     const next = cloneIntentRecord(intent);
     const activeStage = requireActiveStage(next);
-    const running = activeStage.steps.find((step) => ACTIVE_STATUSES.has(step.status));
+    const running = dispatchSteps(activeStage.steps).find((step) => ACTIVE_STATUSES.has(step.status));
     if (running) {
         throw new Error(`cannot activate step while another step is running: ${running.stepId}`);
     }
@@ -35,7 +55,7 @@ export function applyIntentStepUpdate(intent, input) {
     const next = cloneIntentRecord(intent);
     const activeStage = requireActiveStage(next);
     const step = requireStep(activeStage.steps, input.stepId);
-    const currentRunning = activeStage.steps.find((candidate) => ACTIVE_STATUSES.has(candidate.status));
+    const currentRunning = dispatchSteps(activeStage.steps).find((candidate) => ACTIVE_STATUSES.has(candidate.status));
     if (currentRunning && currentRunning.stepId !== input.stepId) {
         throw new Error(`step update rejected while ${currentRunning.stepId} is running`);
     }
@@ -64,6 +84,7 @@ export function applyIntentStepUpdate(intent, input) {
     }
     activeStage.status = 'completed';
     activeStage.structuralValidation = 'passed';
+    dispatchSteps(activeStage.steps);
     activeStage.semanticValidation = activeStage.steps.some((candidate) => candidate.key === 'validate') ? 'passed' : 'pending';
     const nextStage = findNextStage(next.stages, activeStage.stageId);
     if (!nextStage) {
@@ -91,21 +112,21 @@ export function recordStageArtifact(intent, artifact, now = Date.now()) {
     return next;
 }
 function requireActiveStage(intent) {
-    const stage = intent.stages.find((candidate) => candidate.stageId === intent.activeStageId);
+    const stage = dispatchStages(intent.stages).find((candidate) => candidate.stageId === intent.activeStageId);
     if (!stage) {
         throw new Error(`active stage not found: ${intent.activeStageId}`);
     }
     return stage;
 }
 function requireStep(steps, stepId) {
-    const step = steps.find((candidate) => candidate.stepId === stepId);
+    const step = dispatchSteps(steps).find((candidate) => candidate.stepId === stepId);
     if (!step) {
         throw new Error(`unknown step: ${stepId}`);
     }
     return step;
 }
 function assertDependenciesCompleted(steps, step) {
-    const missingDependency = step.dependsOn.find((dependencyId) => {
+    const missingDependency = dispatchDependencies(step.dependsOn).find((dependencyId) => {
         const dependency = steps.find((candidate) => candidate.stepId === dependencyId);
         return !dependency || dependency.status !== 'completed';
     });
@@ -116,26 +137,27 @@ function assertDependenciesCompleted(steps, step) {
 function findNextStep(steps, completedStepId) {
     const current = requireStep(steps, completedStepId);
     return [...steps]
-        .filter((step) => step.order > current.order && !TERMINAL_STATUSES.has(step.status))
-        .sort((left, right) => left.order - right.order)
-        .find((step) => step.dependsOn.every((dependencyId) => {
+        .filter((step) => dispatchOrder(step.order) > dispatchOrder(current.order) && !TERMINAL_STATUSES.has(step.status))
+        .sort((left, right) => dispatchOrder(left.order) - dispatchOrder(right.order))
+        .find((step) => dispatchDependencies(step.dependsOn).every((dependencyId) => {
         const dependency = steps.find((candidate) => candidate.stepId === dependencyId);
         return dependency?.status === 'completed';
     }));
 }
 function findNextStage(stages, completedStageId) {
-    const current = stages.find((stage) => stage.stageId === completedStageId);
+    const current = dispatchStages(stages).find((stage) => stage.stageId === completedStageId);
     if (!current) {
         return undefined;
     }
     return [...stages]
-        .filter((stage) => stage.order > current.order && stage.dependsOnStageIds.every((dependencyId) => {
+        .filter((stage) => dispatchOrder(stage.order) > dispatchOrder(current.order) && dispatchDependencies(stage.dependsOnStageIds).every((dependencyId) => {
         const dependency = stages.find((candidate) => candidate.stageId === dependencyId);
         return dependency?.status === 'completed';
     }))
-        .sort((left, right) => left.order - right.order)[0];
+        .sort((left, right) => dispatchOrder(left.order) - dispatchOrder(right.order))[0];
 }
 function mirrorStageToIntent(intent, activeStage) {
+    dispatchSteps(activeStage.steps);
     intent.steps = activeStage.steps.map((step) => ({
         ...step,
         dependsOn: [...step.dependsOn],
