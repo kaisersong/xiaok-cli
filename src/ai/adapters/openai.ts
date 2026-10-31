@@ -12,6 +12,7 @@ import type {
 } from '../../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createKimiTerminalBoundaryError, isKimiTerminalBoundaryError, getKimiTerminalBoundaryDiagnostic } from '../runtime/kimi-terminal-boundary.js';
 import { createOpenAIStreamError } from '../runtime/openai-stream-error.js';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
@@ -149,7 +150,7 @@ function drainBufferedToolCalls(
       input = parsed as Record<string, unknown>;
     } catch {
       if (strictKimiK3) {
-        throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+        throw createKimiTerminalBoundaryError({ boundaryKind: 'invalid_tool_call', sawOfficialReasoning: true, toolCallCount: toolBuffers.size });
       }
       input = { _raw: buffer.argsBuffer };
     }
@@ -636,12 +637,15 @@ export class OpenAIAdapter implements ModelAdapter {
       } catch (error) {
         if (disclosure !== undefined) assertProviderDisclosureActive(disclosure);
         clearTimeout(timer);
+        const boundaryDiagnostic = getKimiTerminalBoundaryDiagnostic(error);
+        if (boundaryDiagnostic) usageLogger.warn('kimiTerminalBoundaryRejected', boundaryDiagnostic);
         const terminalError = options?.signal?.aborted
           ? (options.signal.reason ?? error)
           : error;
         // 已产出 chunk 后重试会重复输出，必须放弃重试
         if (
           options?.signal?.aborted
+          || isKimiTerminalBoundaryError(error)
           || options?.semanticSummaryAttempt !== undefined
           || emittedAny
           || !isRetryableError(error)
@@ -1036,8 +1040,8 @@ export class OpenAIAdapter implements ModelAdapter {
 
         const choice = chunk.choices[0];
         if (!choice) continue;
-        const delta = choice.delta;
-        if (!delta) continue;
+        // Some compatible providers omit delta on the metadata-only finish frame.
+        const delta = choice.delta ?? {};
         if (
           strictKimiK3
           && Object.prototype.hasOwnProperty.call(delta, 'reasoning_content')
@@ -1175,7 +1179,7 @@ export class OpenAIAdapter implements ModelAdapter {
       if (!emittedDone) {
         if (strictKimiK3) {
           if (toolBuffers.size === 0) {
-            throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+            throw createKimiTerminalBoundaryError({ boundaryKind: 'missing_finish', sawOfficialReasoning: officialReasoningSeen, toolCallCount: 0 });
           }
           if (!officialReasoningSeen) {
             throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');

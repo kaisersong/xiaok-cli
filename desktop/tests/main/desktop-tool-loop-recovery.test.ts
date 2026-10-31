@@ -5,8 +5,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import { runDesktopToolLoop } from '../../electron/desktop-services.js';
+import { createKimiTerminalBoundaryError } from '../../../src/ai/runtime/kimi-terminal-boundary.js';
 
 describe('ordinary Desktop production tool loop recovery', () => {
+  it.each(['missing_finish','invalid_tool_call'] as const)('preserves completed tools across Kimi %s',async boundaryKind=>{
+    const root=mkdtempSync(join(tmpdir(),'desktop-kimi-eof-'));let turn=0,calls=0;const requests:any[]=[],events:any[]=[];
+    const registry=new ToolRegistry({autoMode:true},[{definition:{name:'record',description:'',inputSchema:{type:'object',properties:{}}},async execute(){calls++;return 'completed-tool-evidence';}}]);
+    try{
+      const run=runDesktopToolLoop({adapter:{async *stream(messages:any){requests.push(structuredClone(messages));turn++;
+        if(turn===1)yield {type:'tool_use' as const,id:'already-completed',name:'record',input:{}};
+        else if(turn===2){yield {type:'text' as const,delta:'partial response'};throw createKimiTerminalBoundaryError({boundaryKind,sawOfficialReasoning:true,toolCallCount:boundaryKind==='missing_finish'?0:1});}
+        else yield {type:'text' as const,delta:'finished after model read recovery'};
+        yield {type:'done' as const};
+      }},registry,allToolDefs:registry.getToolDefinitions(),messages:[{role:'user',content:[{type:'text',text:'Finish the fictional task'}]}],systemPrompt:'',signal:new AbortController().signal,taskDeadline:Date.now()+30000,
+        sessionId:'fictional',turnId:'turn',taskId:'task',intentId:'intent',stepId:'step',materials:[],emitRuntimeEvent:async e=>{events.push(e);},skillInvocation:null,skillCatalog:{} as never,dataRoot:root,taskStartTime:Date.now(),
+        strategies:{compact:{enabled:false,shouldCompact:()=>false,doCompact:async()=>{}},buildApiView:m=>m,processToolResult:r=>r,trackAutoProgress:false,trackReferenceReads:false,emitSkillArtifactTrace:false}});
+      if(boundaryKind==='missing_finish'){
+        expect((await run).reply).toContain('finished after model read recovery');expect(turn).toBe(3);
+        expect(JSON.stringify(requests[2])).toContain('completed-tool-evidence');
+        expect(events.some(e=>e.type==='execution_health'&&e.state==='recovering')).toBe(true);
+      }else{await expect(run).rejects.toMatchObject({retryable:false,boundaryKind});expect(turn).toBe(2);}
+      expect(calls).toBe(1);
+    }finally{registry.dispose();rmSync(root,{recursive:true,force:true});}
+  });
   it.each([false, true])('continues a disconnected tool turn; partial tool emitted=%s', async partialTool => {
     const root = mkdtempSync(join(tmpdir(), 'desktop-request-recovery-')); const executed: string[] = [], requests: any[] = [], events: any[] = []; let turn = 0;
     const registry = new ToolRegistry({ autoMode: true }, [{ definition: { name: 'record', description: '', inputSchema: { type: 'object', properties: {} } },

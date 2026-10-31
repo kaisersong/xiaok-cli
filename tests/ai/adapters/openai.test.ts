@@ -31,6 +31,60 @@ import { resolveRegisteredStrictKimiK3Profile } from '../../../src/ai/runtime/mo
 import { recoverModelStream } from '../../../src/ai/runtime/model-stream-recovery.js';
 import { normalizeRuntimeError } from '../../../src/ai/runtime/runtime-errors.js';
 
+describe('strict Kimi terminal frame recovery', () => {
+  it.each([undefined, null])('accepts an admitted metadata-only finish frame (delta=%s)', async delta => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({apiKey:'test'});
+    vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator]() {
+      yield {choices:[{delta:{reasoning_content:'',content:'complete answer'},finish_reason:null}]};
+      yield {choices:[{delta,finish_reason:'stop'}]};
+    }} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    const chunks=await collectAdapterChunks(adapter);
+    expect(chunks).toContainEqual({type:'text',delta:'complete answer'});
+    expect(chunks.at(-1)).toEqual({type:'done'});
+  });
+
+  it('does not admit metadata-only completion without official reasoning',async()=>{
+    const OpenAI = (await import('openai')).default;const instance=new OpenAI({apiKey:'test'});
+    vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){yield {choices:[{finish_reason:'stop'}]};}} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toThrow('KIMI_REASONING_ADMISSION_REQUIRED');
+  });
+
+  it('classifies admitted EOF as an incomplete provider read without accepting it as done',async()=>{
+    const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'test'});
+    const create=vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){yield {choices:[{delta:{reasoning_content:'',content:'partial'},finish_reason:null}]};}} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toMatchObject({code:'KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED',boundaryKind:'missing_finish',retryable:true,sawOfficialReasoning:true,toolCallCount:0});
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps malformed tool arguments permanent and content-free',async()=>{
+    const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'test'});
+    const create=vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){yield {choices:[{delta:{reasoning_content:'',tool_calls:[{index:0,id:'call-fictional',function:{name:'write',arguments:'{"PRIVATE_ARGUMENT_CANARY":'}}]},finish_reason:'tool_calls'}]};}} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    let failure:unknown;try{await collectAdapterChunks(adapter);}catch(error){failure=error;}
+    expect(failure).toMatchObject({code:'KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED',boundaryKind:'invalid_tool_call',retryable:false});
+    expect(JSON.stringify(failure)).not.toContain('PRIVATE_ARGUMENT_CANARY');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the existing read recovery owner retry admitted EOF',async()=>{
+    const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'test'});let calls=0;
+    vi.spyOn(instance.chat.completions,'create').mockImplementation(()=>localChatCompletionReturn(instance,async()=>({async *[Symbol.asyncIterator](){
+      calls++;yield {choices:[{delta:{reasoning_content:'',content:calls===1?'partial':'finished'},finish_reason:null}]};
+      if(calls>1)yield {choices:[{delta:{},finish_reason:'stop'}]};
+    }}) as never));
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    const chunks:StreamChunk[]=[];const retry=vi.fn();
+    for await(const chunk of recoverModelStream({signal:new AbortController().signal,policy:{windowMs:1000,idleMs:500,initialDelayMs:1,maxDelayMs:2},onRetry:retry,open:signal=>streamTestAdapter(adapter,[],[],'system',{signal})}))chunks.push(chunk);
+    expect(calls).toBe(2);expect(retry).toHaveBeenCalledTimes(1);
+    expect(chunks.filter(c=>c.type==='done')).toHaveLength(1);
+    expect(chunks).toContainEqual({type:'text',delta:'finished'});
+  });
+});
+
 // Actual public SDK exports and TEST-only factory; no constructor is dispatched during hoist.
 const localOpenAISDK = await vi.hoisted(async () => {
   const actual = await vi.importActual<typeof import('openai')>('openai');
