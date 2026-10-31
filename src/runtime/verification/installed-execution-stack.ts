@@ -1,4 +1,8 @@
-import {claimInstalledCapacityStackConstruction,assertInstalledAssemblyLifetime,resolveInstalledVerificationOwner,createInstalledVerificationCapacityBinding,readInstalledApprovedRecipe,readInstalledVerificationPlan,readInstalledVerificationSignal,registerInstalledCaseExecution,recordInstalledCaseResult,recordInstalledCaseCancellation,assertInstalledInputCleanup,assertInstalledTranscriptRead,assertInstalledTranscriptDelete,assertInstalledRunDelete,assertInstalledRunStart,assertInstalledRunRead} from './installed-controller.js';
+import {attachInstalledMacEngineForMaintenance} from './maintenance-engine-attachment.js';
+import {createInstalledMaintenanceExecution,assertMaintenanceExecutionConstruction,activateInstalledMaintenanceExecution,hasUnresolvedMaintenanceExecutionConstruction} from './maintenance-execution.js';
+import {createInstalledMaintenanceStaging,assertMaintenanceStagingConstruction,activateInstalledMaintenanceStaging} from './maintenance-staging.js';
+import {readInstalledMaintenanceBatch} from './installed-maintenance-handoff.js';
+import {claimInstalledCapacityStackConstruction,assertInstalledStackConstructionKind,assertInstalledAssemblyLifetime,resolveInstalledVerificationOwner,createInstalledVerificationCapacityBinding,readInstalledApprovedRecipe,readInstalledVerificationPlan,readInstalledVerificationSignal,registerInstalledCaseExecution,recordInstalledCaseResult,recordInstalledCaseCancellation,assertInstalledInputCleanup,assertInstalledTranscriptRead,assertInstalledTranscriptDelete,assertInstalledRunDelete,assertInstalledRunStart,assertInstalledRunRead} from './installed-controller.js';
 import {assertInstalledSharedCapacity,registerInstalledCapacityIssuer,type createInstalledSharedCapacity} from './installed-shared-capacity.js';
 import {assertInstalledRootBrokerClient} from './root-broker-client.js';
 import {createStagingFactualCleanup} from './staging-factual-cleanup.js';
@@ -22,7 +26,23 @@ type RunAccess=Parameters<typeof createProtectedRunLedger>[0]['access'];
 type TranscriptAccess=Parameters<typeof createExecutionTranscriptStore>[0]['access'];
 type StackIdentity={lifetime:Readonly<InstalledControllerLifetime>;closed:boolean};
 const installedStacks=new WeakMap<object,StackIdentity>();
-const capacityConstructions=new WeakMap<object,{owner:object;lifetime:InstalledControllerLifetime;components:Map<string,object>;engine?:object}>();
+type CapacityConstruction={owner:object;lifetime:InstalledControllerLifetime;components:Map<string,object>;engine?:object;kind:'normal'|'maintenance';phase:'constructing'|'active'|'draining'|'drained'|'failed-unknown';executionClaimed?:boolean;materialsClaimed?:boolean};
+const capacityConstructions=new WeakMap<object,CapacityConstruction>();
+const componentOwners=new WeakMap<object,CapacityConstruction>();
+const unresolvedConstructions=new Set<CapacityConstruction>();
+export function readInstalledCleanupOwner(component:object,slot:'execution'|'materials'){
+ const facts=componentOwners.get(component);if(!facts)return undefined;
+ if(facts.components.get(slot)!==component||!['active','draining'].includes(facts.phase))throw Error('maintenance_handoff_source');assertInstalledControllerLifetime(facts.lifetime);return {lifetime:facts.lifetime,kind:facts.kind};
+}
+export function assertInstalledStackDrained(stack:object,lifetime:InstalledControllerLifetime):void{const facts=installedStacks.get(stack);if(!facts||facts.lifetime!==lifetime||!facts.closed)throw Error('installed_stack_drain_unknown');assertInstalledControllerLifetime(lifetime);}
+export function isInstalledConstructionPending(ticket:object):boolean{const state=capacityConstructions.get(ticket);return !state||state.phase==='constructing'||state.phase==='failed-unknown';}
+function maintenanceConstruction(ticket:object,lifetime:InstalledControllerLifetime,owner:object){const state=capacityConstructions.get(ticket);if(!state||state.kind!=='maintenance'||state.lifetime!==lifetime||state.owner!==owner||state.phase!=='constructing')throw Error('installed_capacity_construction');assertInstalledControllerLifetime(lifetime);return state;}
+export function claimInstalledMaintenanceExecutionConstruction(ticket:object,lifetime:InstalledControllerLifetime,owner:object):void{const state=maintenanceConstruction(ticket,lifetime,owner);if(state.executionClaimed)throw Error('installed_capacity_construction');state.executionClaimed=true;}
+export function claimInstalledMaintenanceMaterialsConstruction(ticket:object,lifetime:InstalledControllerLifetime,owner:object):void{const state=maintenanceConstruction(ticket,lifetime,owner);if(state.materialsClaimed||!state.components.has('execution'))throw Error('installed_capacity_construction');state.materialsClaimed=true;}
+export function bindInstalledMaintenanceExecutionConstruction(ticket:object,value:object,raw:object):void{const state=capacityConstructions.get(ticket);if(!state)throw Error('installed_capacity_construction');maintenanceConstruction(ticket,state.lifetime,state.owner);assertMaintenanceExecutionConstruction(value,raw,ticket,state.lifetime.database);if(state.components.has('execution')||state.components.has('maintenance-probe'))throw Error('installed_capacity_construction');state.components.set('execution',raw);state.components.set('maintenance-probe',value);registerInstalledCapacityIssuer(state.owner,'execution',raw,undefined,ticket);registerInstalledCapacityIssuer(state.owner,'maintenance-probe',value,undefined,ticket);componentOwners.set(raw,state);}
+export function bindInstalledMaintenanceMaterialsConstruction(ticket:object,value:object,materials:object):void{const state=capacityConstructions.get(ticket);if(!state)throw Error('installed_capacity_construction');maintenanceConstruction(ticket,state.lifetime,state.owner);assertMaintenanceStagingConstruction(value,materials,ticket,state.lifetime.database);if(state.components.has('materials'))throw Error('installed_capacity_construction');state.components.set('materials',materials);registerInstalledCapacityIssuer(state.owner,'materials',materials,undefined,ticket);componentOwners.set(materials,state);}
+export function assertInstalledMaintenanceConstructionReady(ticket:object):void{const state=capacityConstructions.get(ticket);if(!state||state.kind!=='maintenance'||state.phase!=='constructing'||state.components.size!==3||!['execution','maintenance-probe','materials'].every(slot=>state.components.has(slot)))throw Error('installed_capacity_construction');assertInstalledControllerLifetime(state.lifetime);}
+
 export function assertInstalledStackCapacityComponent(ticket:object,owner:object,slot:string,component:object,engine?:object):void{const state=capacityConstructions.get(ticket);if(!state||state.owner!==owner||state.components.get(slot)!==component||slot==='qualification'&&state.engine!==engine)throw Error('installed_capacity_construction');assertInstalledControllerLifetime(state.lifetime);}
 
 export function assertInstalledExecutionStack(value:object,lifetime:Readonly<InstalledControllerLifetime>):void{const facts=installedStacks.get(value);if(!facts||facts.lifetime!==lifetime)throw Error('installed_stack_identity');if(facts.closed)throw Error('installed_stack_closed');assertInstalledControllerLifetime(lifetime);}
@@ -31,9 +51,10 @@ export function assertInstalledExecutionStack(value:object,lifetime:Readonly<Ins
  * admission before closing its lifetime. No default authorization callbacks. */
 export async function createInstalledExecutionStack(input:{assembly:object;lifetime:Readonly<InstalledControllerLifetime>;sharedCapacity:ReturnType<typeof createInstalledSharedCapacity>;broker:ReturnType<typeof createInstalledRootBrokerClient>;signal?:AbortSignal}){
  const lifetime=input.lifetime;assertInstalledControllerLifetime(lifetime);const {assembly,signal}=input;assertInstalledAssemblyLifetime(assembly,lifetime);
+ assertInstalledStackConstructionKind(assembly,'normal');
  const sharedOwner=input.sharedCapacity,actualBroker=input.broker;assertInstalledSharedCapacity(sharedOwner,lifetime,true);assertInstalledRootBrokerClient(actualBroker,lifetime);
- const construction=claimInstalledCapacityStackConstruction(assembly,sharedOwner),constructionFacts:{owner:object;lifetime:InstalledControllerLifetime;components:Map<string,object>;engine?:object}={owner:sharedOwner,lifetime,components:new Map()};capacityConstructions.set(construction,constructionFacts);
- function bindCapacity(slot:'qualification'|'materials'|'execution'|'transcripts'|'runs',component:object,engine?:Awaited<ReturnType<typeof initializeInstalledMacEngine>>){if(constructionFacts.components.has(slot))throw Error('installed_capacity_construction');constructionFacts.components.set(slot,component);if(engine)constructionFacts.engine=engine;registerInstalledCapacityIssuer(sharedOwner,slot,component,engine,construction);}
+ const construction=claimInstalledCapacityStackConstruction(assembly,sharedOwner),constructionFacts:CapacityConstruction={owner:sharedOwner,lifetime,components:new Map(),kind:'normal',phase:'constructing'};capacityConstructions.set(construction,constructionFacts);
+ function bindCapacity(slot:'qualification'|'materials'|'execution'|'transcripts'|'runs',component:object,engine?:Awaited<ReturnType<typeof initializeInstalledMacEngine>>){if(constructionFacts.components.has(slot))throw Error('installed_capacity_construction');constructionFacts.components.set(slot,component);if(engine)constructionFacts.engine=engine;registerInstalledCapacityIssuer(sharedOwner,slot,component,engine,construction);componentOwners.set(component,constructionFacts);}
 
  const capacityOwner=(peer:ControllerPeer,invocation:ValidationMaterialInvocation)=>createInstalledVerificationCapacityBinding(assembly,peer,invocation),resolveOwnerKey=(peer:ControllerPeer,invocation:ValidationMaterialInvocation)=>resolveInstalledVerificationOwner(assembly,peer,invocation),readApprovedRecipeBinding:Parameters<typeof createInstalledExecutionController>[0]['readApprovedRecipeBinding']=binding=>readInstalledApprovedRecipe(assembly,binding);
  const cleanup=(id:string)=>assertInstalledInputCleanup(assembly,id),read:TranscriptAccess['assertRead']=(...args)=>assertInstalledTranscriptRead(assembly,...args),remove:TranscriptAccess['assertDelete']=(...args)=>assertInstalledTranscriptDelete(assembly,...args),db=lifetime.database,admission=new AbortController(),identity:StackIdentity={lifetime,closed:false};
@@ -44,7 +65,7 @@ export async function createInstalledExecutionStack(input:{assembly:object;lifet
  let qualification:ReturnType<typeof createInstalledEngineQualification>|undefined,materials:ReturnType<typeof createControllerMaterialPipeline>|undefined,execution:ReturnType<typeof createInstalledExecutionController>|undefined,transcripts:ReturnType<typeof createExecutionTranscriptStore>|undefined,runs:ReturnType<typeof createProtectedRunLedger>|undefined;
  const budget=sharedOwner.budget;
 
- async function drainOwners(){const errors:unknown[]=[];for(const close of [()=>materialCleanup?.close(),()=>blackbox?.close(),()=>execution?.close(),()=>runs?.close(),()=>transcripts?.close(),()=>qualification?.close()])try{await close();}catch(error){errors.push(error);}if(errors.length)throw new AggregateError(errors,'installed_stack_shutdown_unknown');identity.closed=true;}
+ async function drainOwners(){constructionFacts.phase='draining';const errors:unknown[]=[];for(const close of [()=>materialCleanup?.close(),()=>blackbox?.close(),()=>execution?.close(),()=>runs?.close(),()=>transcripts?.close(),()=>qualification?.close()])try{await close();}catch(error){errors.push(error);}if(errors.length){constructionFacts.phase='failed-unknown';unresolvedConstructions.add(constructionFacts);throw new AggregateError(errors,'installed_stack_shutdown_unknown');}identity.closed=true;constructionFacts.phase='drained';}
 
  try{
   // Broker and shared capacity are borrowed; root closes them after all owners drain.
@@ -94,6 +115,23 @@ export async function createInstalledExecutionStack(input:{assembly:object;lifet
   const result=Object.freeze({publicPort:Object.freeze({invoke(method:string,payload:unknown,peer:ControllerPeer,callerSignal:AbortSignal){const work=invoke(method,payload,peer,callerSignal);active.add(work);void work.then(()=>active.delete(work),()=>active.delete(work));return work;}}),privateHost:Object.freeze({materialCleanup,engine,broker:actualBroker,budget,qualification:actualQualification,materials:actualMaterials,execution:actualExecution,transcripts:actualTranscripts,runs:actualRuns,blackbox:actualBlackbox}),
    close(){return closing??=(async()=>{admission.abort();await Promise.allSettled([...active]);await drainOwners();})();},
   });
-  installedStacks.set(result,identity);return result;
+  constructionFacts.phase='active';installedStacks.set(result,identity);return result;
  }catch(error){admission.abort();try{await drainOwners();}catch(cleanupError){throw new AggregateError([error,cleanupError],'installed_stack_construction_cleanup_unknown');}throw error;}
+}
+
+/** Fixed root-only mapped-resource owner. No qualification, new admission, or caller factories. */
+export async function createInstalledMaintenanceStack(input:{assembly:object;lifetime:InstalledControllerLifetime;sharedCapacity:ReturnType<typeof createInstalledSharedCapacity>;broker:ReturnType<typeof createInstalledRootBrokerClient>;batch:object;signal?:AbortSignal}){
+ const {assembly,lifetime,sharedCapacity,broker,batch,signal}=input;assertInstalledAssemblyLifetime(assembly,lifetime);assertInstalledSharedCapacity(sharedCapacity,lifetime,true);assertInstalledRootBrokerClient(broker,lifetime);readInstalledMaintenanceBatch(batch,lifetime);
+ assertInstalledStackConstructionKind(assembly,'maintenance');
+ const ticket=claimInstalledCapacityStackConstruction(assembly,sharedCapacity),facts:CapacityConstruction={owner:sharedCapacity,lifetime,components:new Map(),kind:'maintenance',phase:'constructing'};capacityConstructions.set(ticket,facts);
+ let attachment:Awaited<ReturnType<typeof attachInstalledMacEngineForMaintenance>>|undefined,execution:ReturnType<typeof createInstalledMaintenanceExecution>|undefined,staging:ReturnType<typeof createInstalledMaintenanceStaging>|undefined,closing:Promise<void>|undefined;
+ const identity:StackIdentity={lifetime,closed:false};let partialUnknown=false,partialError:unknown;
+ async function drain(){facts.phase='draining';const errors:unknown[]=partialUnknown?[partialError]:[];for(const stop of [()=>staging?.close(),()=>execution?.close(),()=>attachment?.close()])try{await stop();}catch(error){errors.push(error);}if(errors.length){facts.phase='failed-unknown';unresolvedConstructions.add(facts);throw new AggregateError(errors,'installed_maintenance_shutdown_unknown');}facts.phase='drained';identity.closed=true;}
+ try{
+  attachment=await attachInstalledMacEngineForMaintenance({lifetime,signal});
+  execution=createInstalledMaintenanceExecution({lifetime,attachment,sharedCapacity,construction:ticket});
+  staging=createInstalledMaintenanceStaging({lifetime,broker,sharedCapacity,attachment,execution,construction:ticket});
+  assertInstalledMaintenanceConstructionReady(ticket);activateInstalledMaintenanceExecution(execution,ticket);activateInstalledMaintenanceStaging(staging,ticket);facts.phase='active';
+  const result=Object.freeze({privateHost:Object.freeze({execution,staging}),close(){return closing??=drain();}});installedStacks.set(result,identity);return result;
+ }catch(error){partialUnknown=hasUnresolvedMaintenanceExecutionConstruction(error,ticket);partialError=error;try{await drain();}catch(cleanup){throw new AggregateError([error,cleanup],'installed_maintenance_construction_unknown',{cause:error});}throw error;}
 }
