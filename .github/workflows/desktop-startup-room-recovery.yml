@@ -58,8 +58,9 @@ jobs:
           tests/main/kswarm-proxy-ipc-registry.test.ts
 
       - name: Desktop deadline boundaries at the declared Node floor
+        working-directory: desktop
         run: >
-          cd desktop && npm run test -- --environment node --run
+          node node_modules/vitest/vitest.mjs run --environment node
           tests/main/workflow-deadline-policy.test.ts
           tests/main/workflow-deadline-late-summary.test.ts
           tests/main/kswarm-execution-clock.test.ts
