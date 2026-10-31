@@ -7,12 +7,20 @@ export interface PermissionManagerOptions {
     denyRules?: string[];
 }
 export declare class PermissionManager {
+    #private;
     private mode;
     private readonly cwd;
     private allowRules;
     private denyRules;
     private revision;
     private readonly revisionListeners;
+    /** One native prompt transaction. No caller-supplied revision/receipt is accepted. */
+    runPromptAuthorization<T>(token: object, name: string, input: Record<string, unknown>, prompt: () => Promise<T>): Promise<{
+        value: T;
+        continuationRevision?: number;
+    }>;
+    private claimPromptRule;
+    private recordPolicyMutation;
     constructor(options: PermissionManagerOptions);
     getMode(): PermissionMode;
     setMode(mode: PermissionMode): void;

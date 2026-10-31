@@ -1,3 +1,4 @@
+import { ownAttachmentLifecycle } from './attachment-lifecycle.js';
 export async function attachCliConversationActivities(options, deps = { importCli: () => import('./cli.js') }) {
     if (options.print || !options.isTTY || options.conversationActivity === '0')
         return undefined;
@@ -36,6 +37,13 @@ export async function attachCliConversationActivities(options, deps = { importCl
     }
 }
 export const ACTIVITY_STARTUP_WAIT_MS = 2000;
+/** Own the actual attachment through startup timeout and early shutdown. */
+export function beginCliConversationActivityAttachment(options, budget = {}, deps) {
+    return ownAttachmentLifecycle(attachCliConversationActivities(options, deps), {
+        waitMs: budget.waitMs ?? ACTIVITY_STARTUP_WAIT_MS,
+        onDeferred: () => options.onDebug?.('cli_activity_startup_deferred', ''),
+    });
+}
 export async function attachCliConversationActivitiesWithinBudget(options, budget = {}, deps) {
     const pending = attachCliConversationActivities(options, deps);
     const timedOut = Symbol('activity_startup_timeout');

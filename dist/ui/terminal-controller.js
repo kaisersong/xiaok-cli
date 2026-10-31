@@ -156,6 +156,8 @@ export function createTerminalController({ prompt }) {
                 type: 'permission',
                 toolName: request.toolName,
                 targetLines: request.targetLines,
+                reviewScopes: request.reviewScopes,
+                reviewRules: request.reviewRules,
                 options: request.options,
                 selectedIndex: 0,
             };

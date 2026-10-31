@@ -1,3 +1,5 @@
+import { ownDataMathCeil, ownDataSetPrototypeAdd } from './application-native-intrinsics.js';
+import { capturedArrayIterator, createCapturedSet } from './application-iteration-intrinsics.js';
 import { createPublishedArtifactIndex, publishedArtifactLookupKeys, assertPublishedArtifactIndexOwner, findIndexedPublishedArtifacts, verifyIndexedPublishedArtifact } from './published-artifact-index.js';
 import { parseIntentApplicationBinding } from './intent-application-binding.js';
 import { intentHostSubjectOwner } from './intent-host-subject.js';
@@ -5,10 +7,10 @@ import { assertPublishedArtifactOwner } from './published-artifact-selection.js'
 /** Compare declared candidate artifacts with actual exported verification bytes.
  * This content check grants neither read access nor completion authority. */
 export function assertIntentApplicationArtifacts(applicationOwner, raw, payloadOwner, sections) {
-    const binding = parseIntentApplicationBinding(raw), keys = new Set();
-    for (const descriptor of binding.body.artifacts)
-        for (const key of publishedArtifactLookupKeys(applicationOwner, descriptor.selection, true))
-            keys.add(key);
+    const binding = parseIntentApplicationBinding(raw), keys = createCapturedSet();
+    for (const descriptor of capturedArrayIterator(binding.body.artifacts))
+        for (const key of capturedArrayIterator(publishedArtifactLookupKeys(applicationOwner, descriptor.selection, true)))
+            ownDataSetPrototypeAdd(keys, key);
     assertIndexedIntentApplicationArtifacts(applicationOwner, binding, payloadOwner, createPublishedArtifactIndex(payloadOwner, sections, keys));
 }
 export function assertIndexedIntentApplicationArtifacts(applicationOwner, raw, payloadOwner, index) {
@@ -18,7 +20,7 @@ export function assertIndexedIntentApplicationArtifacts(applicationOwner, raw, p
     if (applicationOwner.ownerKind !== mapped.ownerKind || applicationOwner.ownerId !== mapped.ownerId)
         throw Error('intent_application_artifact_owner');
     assertPublishedArtifactIndexOwner(index, payloadOwner);
-    for (const descriptor of binding.body.artifacts) {
+    for (const descriptor of capturedArrayIterator(binding.body.artifacts)) {
         const selection = descriptor.selection, target = selection.kind === 'local' ? applicationOwner : selection.originOwner;
         if (target.profileId !== applicationOwner.profileId)
             throw Error('intent_application_artifact_owner');
@@ -27,7 +29,7 @@ export function assertIndexedIntentApplicationArtifacts(applicationOwner, raw, p
             throw Error('intent_application_artifact_not_unique');
         const artifact = matches[0];
         if (artifact.sha256 !== descriptor.sha256 || artifact.size !== descriptor.size || typeof artifact.bytesBase64 !== 'string'
-            || artifact.bytesBase64.length !== 4 * Math.ceil(descriptor.size / 3))
+            || artifact.bytesBase64.length !== 4 * ownDataMathCeil(descriptor.size / 3))
             throw Error('intent_application_artifact_content');
         try {
             verifyIndexedPublishedArtifact(index, artifact);

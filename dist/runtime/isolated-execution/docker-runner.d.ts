@@ -1,3 +1,4 @@
+import { type InstalledCleanupCommandFacts } from '../verification/installed-maintenance-handoff.js';
 import type { BlobTransactionWriteContext } from '../verification/blob-transaction-command-dispatch.js';
 import { type ExecutionWriteContext } from '../verification/execution-command-dispatch.js';
 import type { CapacityWriteContext, PreparedCapacityCommandFacts } from '../verification/capacity-command.js';
@@ -25,6 +26,8 @@ interface ReservationHandoffSource {
 /** Only a reservation made by this live private transaction can be attached. */
 export declare function readDockerReservationHandoff(transaction: object, database: Database, expected: QuiescenceExpectation): ReservationHandoffSource;
 export declare function readDockerCapacityExecution(binding: object, database: Database, allocations: readonly Readonly<BlobReservationProposal>[]): HostIssuedMountPlan;
+export declare function inspectDockerCleanupHandoffCommand(command: object): InstalledCleanupCommandFacts | undefined;
+export declare function drainDockerRunnerCleanup(runner: object): Promise<void>;
 export declare function assertDockerRunnerDeleted(runner: object, database: Database, proof: object, proposal: Readonly<BlobReservationProposal>): void;
 export declare function readDockerArchiveCapacitySource(runner: object, database: Database, expected: QuiescenceExpectation): Readonly<BlobReservationProposal>;
 export declare function assertDockerRunnerDatabase(runner: object, database: Database, expectedImageId?: string): void;

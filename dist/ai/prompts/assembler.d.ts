@@ -37,9 +37,15 @@ export interface AssembledPrompt {
     rendered: string;
     segments: PromptSegment[];
 }
+export interface LegacyAssemblerInput extends Omit<AssemblerOptions, 'enterpriseId' | 'devApp' | 'budget'> {
+    enterpriseId?: undefined;
+    devApp?: undefined;
+    budget?: undefined;
+}
+export type AssemblerInput = AssemblerOptions | LegacyAssemblerInput;
 /**
  * Assemble the system prompt from static sections (cacheable) and dynamic
  * sections (per-turn). Mirrors Claude Code's 7-layer static prefix +
  * dynamic suffix architecture.
  */
-export declare function assembleSystemPrompt(opts: AssemblerOptions): Promise<AssembledPrompt>;
+export declare function assembleSystemPrompt(opts: AssemblerInput): Promise<AssembledPrompt>;

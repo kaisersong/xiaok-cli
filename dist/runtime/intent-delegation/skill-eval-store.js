@@ -46,6 +46,11 @@ export class SessionSkillEvalStore {
             if (matchingObservations.length === 0 && input.intent) {
                 const stepContext = findIntentStepContext(input.intent, input.stepId);
                 if (stepContext) {
+                    assertSkillEvalText(stepContext.stage.stageId, 'skill_eval_stage_id_data');
+                    assertSkillEvalText(stepContext.step.stepId, 'skill_eval_step_id_data');
+                    assertSkillEvalIntentType(input.intent.intentType);
+                    assertSkillEvalRole(stepContext.step.role);
+                    assertSkillEvalText(stepContext.stage.deliverable, 'skill_eval_deliverable_data');
                     next.observations.push({
                         observationId: `${input.stepId}:skill_eval`,
                         sessionId: input.intent.sessionId,
@@ -56,7 +61,7 @@ export class SessionSkillEvalStore {
                         stageRole: stepContext.step.role,
                         deliverable: stepContext.stage.deliverable,
                         deliverableFamily: inferDeliverableFamily(stepContext.stage.deliverable),
-                        selectedSkillName: (stepContext.step.skillName && !stepContext.step.skillName.startsWith('generic_llm::')
+                        selectedSkillName: (isDedicatedSkillName(stepContext.step.skillName)
                             ? stepContext.step.skillName
                             : input.skillName),
                         actualSkillName: input.skillName,
@@ -155,15 +160,20 @@ export class SessionSkillEvalStore {
 }
 export function ensureObservationsForIntentState(state, intent, now = Date.now()) {
     const next = cloneSessionSkillEvalState(state);
-    for (const stage of intent.stages) {
-        for (const step of stage.steps) {
-            if (!step.skillName || step.skillName.startsWith('generic_llm::')) {
+    for (const stage of skillEvalStages(intent.stages)) {
+        for (const step of skillEvalSteps(stage.steps)) {
+            if (!isDedicatedSkillName(step.skillName)) {
                 continue;
             }
             const existing = next.observations.find((observation) => observation.stepId === step.stepId);
             if (existing) {
                 continue;
             }
+            assertSkillEvalText(stage.stageId, 'skill_eval_stage_id_data');
+            assertSkillEvalText(step.stepId, 'skill_eval_step_id_data');
+            assertSkillEvalIntentType(intent.intentType);
+            assertSkillEvalRole(step.role);
+            assertSkillEvalText(stage.deliverable, 'skill_eval_deliverable_data');
             next.observations.push({
                 observationId: `${step.stepId}:skill_eval`,
                 sessionId: intent.sessionId,
@@ -185,6 +195,35 @@ export function ensureObservationsForIntentState(state, intent, now = Date.now()
     next.updatedAt = now;
     return next;
 }
+function skillEvalStages(value) {
+    if (!Array.isArray(value))
+        throw Error('skill_eval_stages_data');
+    return value;
+}
+function skillEvalSteps(value) {
+    if (!Array.isArray(value))
+        throw Error('skill_eval_steps_data');
+    return value;
+}
+function assertSkillEvalText(value, error) {
+    if (typeof value !== 'string')
+        throw Error(error);
+}
+function assertSkillEvalIntentType(value) {
+    if (value !== 'generate' && value !== 'revise' && value !== 'summarize' && value !== 'analyze')
+        throw Error('skill_eval_intent_type_data');
+}
+function assertSkillEvalRole(value) {
+    if (value !== 'collect' && value !== 'inspect_current' && value !== 'normalize' && value !== 'identify_delta' && value !== 'extract' && value !== 'compare' && value !== 'compose' && value !== 'rewrite' && value !== 'structure' && value !== 'conclude' && value !== 'validate' && value !== 'finalize')
+        throw Error('skill_eval_role_data');
+}
+function isDedicatedSkillName(value) {
+    if (!value)
+        return false;
+    if (typeof value !== 'string')
+        throw Error('skill_eval_skill_name_data');
+    return !value.startsWith('generic_llm::');
+}
 function mapStepStatus(status) {
     if (status === 'completed')
         return 'completed';
@@ -194,11 +233,13 @@ function mapStepStatus(status) {
         return 'blocked';
     if (status === 'running')
         return 'running';
-    return 'planned';
+    if (status === 'planned' || status === 'skipped')
+        return 'planned';
+    throw Error('skill_eval_status_data');
 }
 function findIntentStepContext(intent, stepId) {
-    for (const stage of intent.stages) {
-        const step = stage.steps.find((candidate) => candidate.stepId === stepId);
+    for (const stage of skillEvalStages(intent.stages)) {
+        const step = skillEvalSteps(stage.steps).find((candidate) => candidate.stepId === stepId);
         if (step) {
             return { stage, step };
         }

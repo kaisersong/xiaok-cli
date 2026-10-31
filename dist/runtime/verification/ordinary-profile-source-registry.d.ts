@@ -42,6 +42,12 @@ export interface OrdinaryProfileSources {
     readonly legacyInventoryRequired: true;
     readonly sources: readonly Readonly<OrdinaryProfileSource>[];
 }
+type SourceStat = (path: string) => {
+    dev: bigint;
+    ino: bigint;
+} | undefined;
+/** Missing paths and changed physical identities are stale; IO failures are not. */
+export declare function isStaleOrdinaryProfileSource(row: Readonly<OrdinaryProfileSource>, statFn?: SourceStat): boolean;
 export declare function parseOrdinaryProfileSources(raw: unknown, uid: number): Readonly<OrdinaryProfileSources>;
 export declare function readOrdinaryProfileSources(): Readonly<OrdinaryProfileSources> | undefined;
 export declare function registerOrdinaryProfileSource(input: OrdinaryProfileSourceInput): void;
@@ -49,3 +55,4 @@ export declare function registerOrdinaryProfileSource(input: OrdinaryProfileSour
 export declare function registerOrdinarySQLiteLayout(input: Extract<OrdinaryProfileSourceInput, {
     kind: 'sqlite-db';
 }>, layout: OrdinarySQLiteLayout, expectedPhysicalIdentity?: string): void;
+export {};

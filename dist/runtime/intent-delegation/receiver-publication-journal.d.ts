@@ -1,7 +1,7 @@
 import { type IntentBusinessProjection } from './business-projection.js';
 import { type PublicationChallenge, type PublicationObservation, type PublicationRequestRecovery } from '../verification/publication-client.js';
 import { type IntentPublicationCandidate } from './publication-candidate-journal.js';
-import type { PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
+import type { PersistedSessionSnapshot, StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 export interface IntentReceiverAttempt {
     requestId: string;
     candidateId: string;
@@ -52,6 +52,8 @@ export interface IntentReceiverMutation {
     now: number;
     action: IntentReceiverAction;
 }
-export declare function parseIntentReceiverAttempts(raw: unknown, candidate: IntentPublicationCandidate): IntentReceiverAttempt[];
+export type IntentReceiverCandidateFactsData = Pick<IntentPublicationCandidate, 'id' | 'bindingHash' | 'sourceHash' | 'createdAt' | 'applicationAttempts'>;
+export declare function parseIntentReceiverAttempts(raw: unknown, candidate: IntentReceiverCandidateFactsData): IntentReceiverAttempt[];
 export declare function assertIntentReceiverRetained(before: IntentPublicationCandidate, after: IntentPublicationCandidate): void;
 export declare function applyIntentReceiverMutation(previous: PersistedSessionSnapshot, input: IntentReceiverMutation): PersistedSessionSnapshot;
+export declare function applyIntentReceiverMutation(previous: StoredSessionSnapshot, input: IntentReceiverMutation): StoredSessionSnapshot;

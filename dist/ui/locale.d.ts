@@ -1,7 +1,12 @@
+import type { ProfileAccountHomeError } from '../runtime/verification/profile-account-home.js';
 export type UiLocale = 'zh-CN' | 'en';
 export declare function getToolActivityLabel(toolName: string, locale?: UiLocale): string;
 export declare function getUiCopy(locale?: UiLocale): {
+    readonly sessionStorageDisabled: (path: string, reason: ProfileAccountHomeError["reason"]) => string;
     readonly approvalTitle: "xiaok 想要执行以下操作";
+    readonly permissionReviewPage: (page: number, total: number) => string;
+    readonly permissionScreenTooSmall: "终端过小，无法完整审阅；请调整大小或按 Esc 拒绝";
+    readonly permissionUnsafeScope: "范围显示无法安全核对；只能拒绝或按 Esc 取消";
     readonly mandatoryReview: "这个操作有风险，每次都会询问";
     readonly exactCommandScope: "当前执行目录中的这条完整命令";
     readonly exactCommandApprovalHint: "授权范围：相同执行目录和完整命令；脚本、写入目标或命令改变后会重新询问。";
@@ -50,7 +55,11 @@ export declare function getUiCopy(locale?: UiLocale): {
     readonly ranCollapseNotice: "… 更多命令已折叠（完成后按 Ctrl+O 查看）";
     readonly hint: "数字直选  ↑↓ 切换  Enter 确认  Esc 取消";
 } | {
+    readonly sessionStorageDisabled: (path: string, reason: ProfileAccountHomeError["reason"]) => string;
     readonly approvalTitle: "xiaok wants to run";
+    readonly permissionReviewPage: (page: number, total: number) => string;
+    readonly permissionScreenTooSmall: "Terminal too small to review; resize or press Esc to deny";
+    readonly permissionUnsafeScope: "Scope display cannot be verified; deny or press Esc to cancel";
     readonly mandatoryReview: "This operation carries risk and requires approval every time";
     readonly exactCommandScope: "this exact command in the current execution directory";
     readonly exactCommandApprovalHint: "Scope: the same execution directory and complete command; script, output target or command changes require approval again.";

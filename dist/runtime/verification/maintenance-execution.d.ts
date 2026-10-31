@@ -1,3 +1,5 @@
+import { type InstalledCleanupCommandFacts } from './installed-maintenance-handoff.js';
+export { hasUnresolvedMaintenanceExecutionConstruction } from './maintenance-execution-construction.js';
 import type { Database } from 'better-sqlite3';
 import { type InstalledControllerLifetime } from './installed-controller-lifetime.js';
 import { type MaintenanceEngineAttachment } from './maintenance-engine-attachment.js';
@@ -8,9 +10,13 @@ declare const receiptBrand: unique symbol;
 export interface MaintenanceQuiescenceReceipt {
     readonly [receiptBrand]: true;
 }
+export declare function inspectMaintenanceProbeHandoffCommand(command: object): Readonly<InstalledCleanupCommandFacts> | undefined;
 export declare function readMaintenanceExecution(value: object, database: Database): Readonly<{
     disposeUnstarted(): void;
+    failConstruction: (error: unknown) => unknown;
     assertCurrent: () => void;
+    assertConstructionCurrent: () => void;
+    activate(): void;
     raw: Readonly<{
         reserveCommand(command: object): void;
         commitPreparedCommand(prepared: object, blobContext: import("./blob-transaction-command-dispatch.js").BlobTransactionWriteContext): void;
@@ -97,9 +103,13 @@ declare function build(input: {
     lifetime: InstalledControllerLifetime;
     attachment: MaintenanceEngineAttachment;
     sharedCapacity: ReturnType<typeof createInstalledSharedCapacity>;
+    construction?: object;
 }): Readonly<{
     disposeUnstarted(): void;
+    failConstruction: (error: unknown) => unknown;
     assertCurrent: () => void;
+    assertConstructionCurrent: () => void;
+    activate(): void;
     raw: Readonly<{
         reserveCommand(command: object): void;
         commitPreparedCommand(prepared: object, blobContext: import("./blob-transaction-command-dispatch.js").BlobTransactionWriteContext): void;
@@ -181,6 +191,9 @@ declare function build(input: {
     }>;
     close(): Promise<void>;
 }>;
+export declare function assertMaintenanceExecutionConstruction(value: object, raw: object, construction: object, database: Database): void;
+export declare function assertMaintenanceExecutionDatabase(value: object, database: Database): void;
+export declare function activateInstalledMaintenanceExecution(value: object, construction: object): void;
 export declare function createInstalledMaintenanceExecution(input: Parameters<typeof build>[0]): Readonly<{
     inspectExecution: (rawExpected: QuiescenceExpectation) => Promise<MaintenanceQuiescenceReceipt>;
     cleanupExecution: (rawExpected: QuiescenceExpectation) => Promise<MaintenanceQuiescenceReceipt>;
@@ -190,4 +203,3 @@ export declare function createInstalledMaintenanceExecution(input: Parameters<ty
         assertDeleted(proof: object, proposal: Readonly<BlobReservationProposal>): void;
     }>;
 }>;
-export {};

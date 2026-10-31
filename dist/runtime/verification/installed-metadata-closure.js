@@ -747,3 +747,11 @@ export function readInstalledMetadataClosure(lifetime, handle) { if (arguments.l
     throw Error('installed_metadata_closure_arguments'); return stored(lifetime, handle).facts; }
 export async function checkInstalledMetadataClosure(lifetime, handle) { if (arguments.length !== 2)
     throw Error('installed_metadata_closure_arguments'); const value = stored(lifetime, handle); await checkInstalledProfileSourceCapture(lifetime, value.owner, value.token); current(value); }
+/** Exact original capture linkage, never a caller-provided closure DTO. */
+export function assertInstalledMetadataClosureCapture(lifetime, handle, owner, token) {
+    if (arguments.length !== 4)
+        throw Error('installed_metadata_closure_arguments');
+    const value = stored(lifetime, handle);
+    if (value.owner !== owner || value.token !== token)
+        throw Error('installed_metadata_closure_capture');
+}

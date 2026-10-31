@@ -47,9 +47,9 @@ function location() {
     const account = userInfo(), uid = process.getuid?.();
     if (!uid || uid !== process.geteuid?.() || account.uid !== uid)
         fail('user');
-    const home = resolve(account.homedir);
+    const home = account.homedir, base = join(home, '.xiaok');
     chain(home);
-    const original = directory(home, uid), paths = [join(home, '.xiaok'), join(home, '.xiaok', 'profile-sources'), join(home, '.xiaok', 'profile-sources', 'writer-fences')];
+    const original = directory(home, uid), paths = [base, join(base, 'profile-sources'), join(base, 'profile-sources', 'writer-fences')];
     const observed = [];
     let absent = false;
     for (let i = 0; i < paths.length; i++) {
@@ -64,7 +64,8 @@ function location() {
             break;
         }
     }
-    function current() { if (identity(directory(home, uid)) !== identity(original))
+    function current() { if (userInfo().homedir !== home)
+        fail('directory_changed'); if (identity(directory(home, uid)) !== identity(original))
         fail('directory_changed'); for (const item of observed) {
         const stat = directory(item.path, uid, item.path === paths[2] ? 0o700 : undefined);
         if (identity(stat) !== item.identity || stat.mode !== item.mode)
@@ -169,7 +170,17 @@ export function createKnownDirectoryWriterFence(rootDir, kind) {
             let loc = location();
             const before = scope(loc);
             if (loc.absent) {
-                directory(loc.parent, loc.uid);
+                for (const path of [dirname(loc.parent), loc.parent]) {
+                    try {
+                        mkdirSync(path, { mode: 0o700 });
+                    }
+                    catch (error) {
+                        if (error.code !== 'EEXIST')
+                            throw error;
+                    }
+                    directory(path, loc.uid);
+                }
+                loc.current();
                 try {
                     mkdirSync(loc.root, { mode: 0o700 });
                 }

@@ -130,6 +130,8 @@ export declare class ToolRegistry {
     }): ToolRegistry;
     private createObservationFork;
     getToolDefinitions(): ToolDefinition[];
+    /** Tightening only: seal the actual normalized options owned by this registry. */
+    protected sealRegistryOptions(): void;
     /** Subclasses must run complete readonly admission before publishing any state. */
     protected preflightToolRegistration(tool: Tool): void;
     registerTool(tool: Tool, description?: ToolDescriptionMetadata): void;

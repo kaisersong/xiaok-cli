@@ -37,6 +37,16 @@ export declare function createProfileSourceCustodyRegistry(input: {
         manifestBytes: number;
         capturedBytes: number;
     }>>;
+    startPhysicalObservation(handle: string, peer: SourceCustodyPeer, signal: AbortSignal): Promise<Readonly<{
+        observationId: `${string}-${string}-${string}-${string}-${string}`;
+        manifestHash: string;
+        reviewHash: string;
+        inventoryHash: string;
+        observationHash: string;
+        observationBytes: number;
+    }>>;
+    readPhysicalObservation(handle: string, id: string, offset: number, length: number, peer: SourceCustodyPeer, signal: AbortSignal): Promise<Buffer<ArrayBuffer>>;
+    releasePhysicalObservation(handle: string, id: string, peer: SourceCustodyPeer, signal: AbortSignal): Promise<void>;
     readManifest(handle: string, offset: number, length: number, peer: SourceCustodyPeer, signal: AbortSignal): Promise<Buffer<ArrayBuffer>>;
     readFile(handle: string, sourceId: string, entryIndex: number, offset: number, length: number, peer: SourceCustodyPeer, signal: AbortSignal): Promise<Buffer<ArrayBufferLike>>;
     readSqlitePage(handle: string, sourceId: string, pageNo: number, peer: SourceCustodyPeer, signal: AbortSignal): Promise<Buffer<ArrayBufferLike>>;

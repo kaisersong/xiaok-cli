@@ -1,4 +1,5 @@
 import type { CliConversationActivities } from './cli.js';
+import { ownAttachmentLifecycle, type AttachmentLifecycle } from './attachment-lifecycle.js';
 
 type AttachOptions = Parameters<typeof CliConversationActivities.attach>[0];
 interface LoaderOptions {
@@ -51,6 +52,18 @@ export async function attachCliConversationActivities(
 
 
 export const ACTIVITY_STARTUP_WAIT_MS = 2000;
+
+/** Own the actual attachment through startup timeout and early shutdown. */
+export function beginCliConversationActivityAttachment(
+  options: LoaderOptions,
+  budget: { waitMs?: number } = {},
+  deps?: LoaderDependencies,
+): AttachmentLifecycle<CliConversationActivities> {
+  return ownAttachmentLifecycle(attachCliConversationActivities(options, deps), {
+    waitMs: budget.waitMs ?? ACTIVITY_STARTUP_WAIT_MS,
+    onDeferred: () => options.onDebug?.('cli_activity_startup_deferred', ''),
+  });
+}
 
 export async function attachCliConversationActivitiesWithinBudget(
   options: LoaderOptions,

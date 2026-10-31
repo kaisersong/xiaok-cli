@@ -42,6 +42,12 @@ export interface ScrollPromptFrame {
 export declare class ScrollRegionManager {
     private readonly stream;
     private active;
+    private permissionScreenActive;
+    private invalidatePermissionScreen;
+    private permissionPendingSize;
+    /** The main buffer must not be repainted or scrolled while its modal is elsewhere. */
+    suspendForPermissionScreen(onContent?: () => void): () => void;
+    private restoreMainForContent;
     private config;
     private lastActivityLine;
     private lastActivityRow;

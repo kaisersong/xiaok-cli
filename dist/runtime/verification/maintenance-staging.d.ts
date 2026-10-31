@@ -3,18 +3,19 @@ import { type createInstalledRootBrokerClient } from './root-broker-client.js';
 import { type createInstalledSharedCapacity } from './installed-shared-capacity.js';
 import { type MaintenanceEngineAttachment } from './maintenance-engine-attachment.js';
 import { type createInstalledMaintenanceExecution } from './maintenance-execution.js';
-/** Host-only recovery of the original staging copy. No material authorization,
- * stage/read input, normal quiescence, or execution port escapes this facade. */
+export declare function assertMaintenanceStagingConstruction(value: object, materials: object, construction: object, database: import('better-sqlite3').Database): void;
+export declare function activateInstalledMaintenanceStaging(value: object, construction: object): void;
 export declare function createInstalledMaintenanceStaging(input: {
     lifetime: InstalledControllerLifetime;
     broker: ReturnType<typeof createInstalledRootBrokerClient>;
     sharedCapacity: ReturnType<typeof createInstalledSharedCapacity>;
     attachment: MaintenanceEngineAttachment;
     execution: ReturnType<typeof createInstalledMaintenanceExecution>;
+    construction?: object;
 }): Readonly<{
-    cleanupResource: (resourceId: string, signal?: AbortSignal) => Promise<void>;
-    sweepOnce: () => Promise<void>;
-    getStatus: () => Readonly<{
+    cleanupResource(resourceId: string, signal?: AbortSignal): Promise<void>;
+    sweepOnce(): Promise<void>;
+    getStatus(): Readonly<{
         started: boolean;
         running: boolean;
         lastOutcome: "deleted" | "idle" | "deferred";

@@ -209,14 +209,14 @@ export declare function createApprovedPublicationOperations(input: {
         businessRevision: number;
         currentVerification: "unavailable" | "valid" | "needs_revalidation";
         publication: Readonly<{
-            status: "unknown" | "cancelled" | "committed";
+            status: "unknown" | "committed" | "cancelled";
             current: boolean;
             operationId: string;
             fullTupleHash: string;
         }>;
     }>>;
     recoverExpired(raw: unknown, p: ControllerPeer, signal: AbortSignal): Promise<Readonly<{
-        status: "unknown" | "cancelled" | "committed";
+        status: "unknown" | "committed" | "cancelled";
         owner: VerificationOwner;
         operationId: string;
         fullTupleHash: string;
@@ -224,7 +224,7 @@ export declare function createApprovedPublicationOperations(input: {
         currentVerification: "unavailable" | "valid" | "needs_revalidation";
     }>>;
     approve(raw: unknown, p: ControllerPeer, signal: AbortSignal): Promise<Readonly<{
-        status: "unknown" | "cancelled" | "committed";
+        status: "unknown" | "committed" | "cancelled";
         owner: VerificationOwner;
         operationId: string;
         fullTupleHash: string;
@@ -232,7 +232,7 @@ export declare function createApprovedPublicationOperations(input: {
         currentVerification: "unavailable" | "valid" | "needs_revalidation";
     }>>;
     reconcile(raw: unknown, p: ControllerPeer, signal: AbortSignal): Promise<Readonly<{
-        status: "unknown" | "cancelled" | "committed";
+        status: "unknown" | "committed" | "cancelled";
         owner: VerificationOwner;
         operationId: string;
         fullTupleHash: string;

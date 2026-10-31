@@ -1,3 +1,7 @@
+import { captureIntentSnapshot } from './intent-snapshot-data.js';
+import { hasProtectedIntentProducerHistory } from './protected-history-data.js';
+export { hasProtectedIntentProducerHistory } from './protected-history-data.js';
+export { captureIntentSnapshot } from './intent-snapshot-data.js';
 import { assertIntentVerificationRetained } from './verification-execution-journal.js';
 import { assertIntentPublicationRetained } from './publication-candidate-journal.js';
 import { assertIntentNativeJournalRetained, assertNoIntentNativeJournal } from './native-contract-journal.js';
@@ -6,12 +10,6 @@ import { readInstalledCurrentOwner } from '../verification/installed-owner-state
 import { createIntentLedgerRecord, cloneIntentRecord } from './types.js';
 import { captureIntentData } from './data.js';
 export { captureIntentData } from './data.js';
-export function captureIntentSnapshot(snapshot) {
-    const descriptor = Object.getOwnPropertyDescriptor(snapshot, 'intentDelegation');
-    if (descriptor && !('value' in descriptor))
-        throw Error('intent_commit_accessor');
-    return { ...snapshot, intentDelegation: descriptor?.value === undefined ? undefined : captureIntentData(descriptor.value) };
-}
 const id = (v) => typeof v === 'string' && v.length > 0 && Buffer.byteLength(v) <= 160 && !/[\x00-\x1f\x7f]/.test(v);
 export function parseIntentExecutionInput(raw) {
     const v = captureIntentData(raw);
@@ -19,12 +17,29 @@ export function parseIntentExecutionInput(raw) {
         throw Error('intent_execution_input');
     return v;
 }
-function terminals(record) {
-    const values = record.executionTerminals ?? [];
-    if (!Array.isArray(values))
-        throw Error('intent_execution_records');
+function isCommitObject(value) {
+    return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+function propertyData(value, error) {
+    if (!isCommitObject(value))
+        throw Error(error);
+    return value;
+}
+function arrayData(value, error) {
+    if (!Array.isArray(value))
+        throw Error(error);
+    return value;
+}
+function forkJournalLength(value, error) {
+    return value === undefined || value === null ? undefined : arrayData(value, error).length;
+}
+function reportLength(value) {
+    return value === undefined || value === null ? undefined : arrayData(value, 'intent_producer_records').length;
+}
+function assertTerminalEntries(values, record) {
     const keys = new Set();
-    for (const v of values) {
+    for (const raw of values) {
+        const v = propertyData(raw, 'intent_execution_input');
         parseIntentExecutionInput({ ...v, sessionId: record.sessionId, intentId: record.intentId });
         if (Object.keys(v).sort().join(',') !== 'identity,kind,recordedAt,requestSource,status')
             throw Error('intent_execution_record');
@@ -32,9 +47,13 @@ function terminals(record) {
         if (keys.has(key))
             throw Error('intent_execution_duplicate');
         keys.add(key);
-        if (v.kind === 'step' && !record.stages.some((s) => s.steps.some((step) => step.stepId === v.identity)))
+        if (v.kind === 'step' && !arrayData(record.stages, 'intent_execution_step').some(s => arrayData(propertyData(s, 'intent_execution_step').steps, 'intent_execution_step').some(step => propertyData(step, 'intent_execution_step').stepId === v.identity)))
             throw Error('intent_execution_step');
     }
+}
+function terminals(record) {
+    const values = arrayData(record.executionTerminals ?? [], 'intent_execution_records');
+    assertTerminalEntries(values, record);
     return values;
 }
 function records(ledger) {
@@ -58,8 +77,8 @@ function mirrors(ledger, sessionId) {
     if (ledger.latestPlan !== null && (!ledger.latestPlan || !isDeepStrictEqual(ledger.latestPlan, map.get(ledger.latestPlan.intentId))))
         throw Error('intent_commit_mirror');
     for (const record of map.values()) {
-        const stage = record.stages.find((s) => s.stageId === record.activeStageId);
-        if (record.sessionId !== sessionId || !stage || record.activeStepId !== stage.activeStepId || !isDeepStrictEqual(record.steps, stage.steps))
+        const stage = arrayData(record.stages, 'intent_commit_mirror').find(s => propertyData(s, 'intent_commit_mirror').stageId === record.activeStageId);
+        if (record.sessionId !== sessionId || !stage || record.activeStepId !== propertyData(stage, 'intent_commit_mirror').activeStepId || !isDeepStrictEqual(record.steps, propertyData(stage, 'intent_commit_mirror').steps))
             throw Error('intent_commit_mirror');
     }
 }
@@ -71,17 +90,18 @@ function baseline(ledger) {
     delete value.publicationCandidates;
     delete value.verificationExecutions;
     for (const record of [...value.intents, ...(value.latestPlan ? [value.latestPlan] : [])]) {
-        delete record.executionTerminals;
-        delete record.updatedAt;
+        const mutable = record;
+        delete mutable.executionTerminals;
+        delete mutable.updatedAt;
     }
     return value;
 }
 /** Initial protected data must be the original constructor draft, not arbitrary history. */
 function assertInitialDraft(ledger) {
-    const pick = (value, keys) => Object.fromEntries(keys.split(' ').filter(k => value[k] !== undefined).map(k => [k, value[k]]));
+    const pick = (value, keys) => { const data = propertyData(value, 'intent_initial_draft'); return Object.fromEntries(keys.split(' ').filter(k => data[k] !== undefined).map(k => [k, data[k]])); };
     const draftRecords = ledger.intents.map(record => {
         const plan = pick(record, 'intentId instanceId sessionId rawIntent normalizedIntent providedSourcePaths intentType deliverable finalDeliverable explicitConstraints delegationBoundary riskTier intentMode segmentationConfidence templateId');
-        plan.stages = record.stages.map(stage => ({ ...pick(stage, 'stageId order label intentType deliverable templateId riskTier dependsOnStageIds'), steps: stage.steps.map(step => ({ ...pick(step, 'stepId key order role skillName dependsOn riskTier'), status: 'planned' })) }));
+        plan.stages = arrayData(record.stages, 'intent_initial_draft').map(stage => ({ ...pick(stage, 'stageId order label intentType deliverable templateId riskTier dependsOnStageIds'), steps: arrayData(propertyData(stage, 'intent_initial_draft').steps, 'intent_initial_draft').map(step => ({ ...pick(step, 'stepId key order role skillName dependsOn riskTier'), status: 'planned' })) }));
         plan.steps = plan.stages[0]?.steps ?? [];
         if (!Number.isSafeInteger(record.createdAt) || record.createdAt < 0)
             throw Error('intent_initial_draft');
@@ -97,16 +117,12 @@ function assertInitialDraft(ledger) {
     if (!isDeepStrictEqual(ledger, expected))
         throw Error('intent_initial_draft');
 }
-export function hasProtectedIntentProducerHistory(ledger) {
-    return (ledger?.nativeContracts?.length ?? 0) > 0 || [...(ledger?.intents ?? []), ...(ledger?.latestPlan ? [ledger.latestPlan] : [])].some(row => row.producerReports?.some(report => report.protectionMode !== 'ordinary'));
-}
-/** Called inside both actual store locks. This is a deny boundary, not a grant. */
 export function assertIntentSessionCommit(previous, next, forkSource, executionPrimitive = false, producerPrimitive = false, nativePrimitive = false, publicationPrimitive = false, verificationPrimitive = false, receiverPrimitive = false) {
     assertIntentVerificationRetained(previous?.intentDelegation, next.intentDelegation, verificationPrimitive);
-    if (forkSource?.intentDelegation?.verificationExecutions?.length)
+    if (forkJournalLength(forkSource?.intentDelegation?.verificationExecutions, 'intent_verification_fork'))
         throw Error('intent_verification_fork');
     assertIntentPublicationRetained(previous?.intentDelegation, next.intentDelegation, receiverPrimitive === 'projection' ? 'projection' : receiverPrimitive ? 'receiver' : publicationPrimitive && !verificationPrimitive);
-    if (forkSource?.intentDelegation?.publicationCandidates?.length)
+    if (forkJournalLength(forkSource?.intentDelegation?.publicationCandidates, 'intent_candidate_fork'))
         throw Error('intent_candidate_fork');
     assertIntentNativeJournalRetained(previous?.intentDelegation, next.intentDelegation, next.sessionId, nativePrimitive);
     if (forkSource)
@@ -132,11 +148,11 @@ export function assertIntentSessionCommit(previous, next, forkSource, executionP
             throw Error('intent_execution_immutable');
     for (const [key, value] of incoming) {
         const prior = old.get(key)?.producerReports ?? [], after = value.producerReports ?? [];
-        if (!producerPrimitive && !isDeepStrictEqual(prior, after) || prior.some((v, i) => !isDeepStrictEqual(v, after[i])))
+        if (!producerPrimitive && !isDeepStrictEqual(prior, after) || arrayData(prior, 'intent_producer_records').some((v, i) => !isDeepStrictEqual(v, arrayData(after, 'intent_producer_records')[i])))
             throw Error('intent_producer_requires_primitive');
     }
     for (const [key, value] of old)
-        if (value.producerReports?.length && !incoming.has(key))
+        if (reportLength(value.producerReports) && !incoming.has(key))
             throw Error('intent_producer_immutable');
     const nextMirror = next.intentDelegation?.latestPlan;
     if (nextMirror && !isDeepStrictEqual(nextMirror.producerReports ?? [], incoming.get(nextMirror.intentId)?.producerReports ?? []))
@@ -181,7 +197,6 @@ export function assertIntentSessionCommit(previous, next, forkSource, executionP
     else if (next.intentDelegation && !nativePrimitive)
         assertInitialDraft(next.intentDelegation);
 }
-/** Store-private call path constructs from locked current state, never supplied nextSnapshot. */
 export function appendIntentExecutionTerminal(previous, input) {
     const next = captureIntentSnapshot(previous), ledger = next.intentDelegation;
     if (!ledger || next.sessionId !== input.sessionId)
@@ -190,7 +205,7 @@ export function appendIntentExecutionTerminal(previous, input) {
     const record = ledger.intents.find(i => i.intentId === input.intentId);
     if (!record)
         throw Error('intent_execution_missing');
-    if (input.kind === 'step' && !record.stages.some(s => s.steps.some(step => step.stepId === input.identity)))
+    if (input.kind === 'step' && !arrayData(record.stages, 'intent_execution_step').some(s => arrayData(propertyData(s, 'intent_execution_step').steps, 'intent_execution_step').some(step => propertyData(step, 'intent_execution_step').stepId === input.identity)))
         throw Error('intent_execution_step');
     const original = terminals(record), existing = original.find(v => v.kind === input.kind && v.identity === input.identity);
     if (existing) {

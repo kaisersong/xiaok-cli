@@ -92,18 +92,25 @@ export function createReadTool(options = {}) {
             context?.signal?.throwIfAborted();
             const { file_path, offset = 1, limit, max_chars = MODEL_OUTPUT_CAP } = input;
             let resolvedPath;
-            try {
-                resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, options.outsideCwdGuard);
+            const outsideCwdGuard = options.outsideCwdGuard;
+            if (allowOutsideCwd && outsideCwdGuard) {
+                // An active sandbox guard owns every path; its rejection cannot become a reference exception.
+                resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, outsideCwdGuard);
             }
-            catch (error) {
-                let reference;
+            else {
                 try {
-                    reference = realpathSync(resolve(file_path));
+                    resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
                 }
-                catch { /* Preserve the original denial. */ }
-                if (!reference || !readOnlyPaths.has(reference))
-                    throw error;
-                resolvedPath = reference;
+                catch (error) {
+                    let reference;
+                    try {
+                        reference = realpathSync(resolve(file_path));
+                    }
+                    catch { /* Preserve the original denial. */ }
+                    if (!reference || !readOnlyPaths.has(reference))
+                        throw error;
+                    resolvedPath = reference;
+                }
             }
             if (!existsSync(resolvedPath))
                 return `Error: 文件不存在: ${resolvedPath}`;

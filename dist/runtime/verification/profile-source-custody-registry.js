@@ -1,8 +1,8 @@
-import { encodeBoundedProfileCaptureJson } from './profile-capture-json.js';
+import { encodeBoundedProfileCaptureJson, countBoundedProfileCaptureJson } from './profile-capture-json.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { authorizeProfileSources } from './profile-source-authorization.js';
 import { parseProfileSourceReview } from './profile-source-review.js';
-import { startProfileSourceCapture, readProfileSourceCapture, readProfileCaptureMetadataBytes, readProfileDirectoryEntries, readProfileDirectoryFileRange, readProfileSqliteCapture, readProfileSqlitePage } from './profile-source-capture.js';
+import { startProfileSourceCapture, readProfileSourceCapture, readProfileCaptureMetadataBytes, readProfileDirectoryEntries, readProfileDirectoryFileRange, readProfileSqliteCapture, readProfileSqlitePage, readProfileSqlitePhysicalFiles } from './profile-source-capture.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 const LIMIT = 128 * 1024 ** 2;
 /** Root-only composition component. It executes the native approval itself;
@@ -47,6 +47,9 @@ export function createProfileSourceCustodyRegistry(input) {
         await e.owner?.close();
         e.manifest?.fill(0);
         e.manifest = undefined;
+        e.observation?.buffer.fill(0);
+        e.observation = undefined;
+        e.observationReservedBytes = 0;
         e.chargedBytes = 0;
         e.metadataBytes = 0;
         e.physical = undefined;
@@ -69,19 +72,26 @@ export function createProfileSourceCustodyRegistry(input) {
         throw new AggregateError([error, closeError], 'source_custody_unknown');
     } throw error; }
     function occupied() { return entries.size; }
+    function manifestRemaining() { return LIMIT - [...entries.values()].reduce((sum, e) => sum + (e.manifest?.length ?? 0) + (e.observation?.buffer.length ?? 0) + e.observationReservedBytes, 0); }
+    function heldEntry(handle) { if (typeof handle !== 'string')
+        throw Error('source_custody_handle'); const e = handles.get(handle); if (!e || e.state !== 'held')
+        throw Error('source_custody_handle'); return e; }
+    function observationEntry(handle, id) { const e = heldEntry(handle); if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id) || e.observation?.id !== id && e.endedObservationId !== id)
+        throw Error('source_custody_observation'); return e; }
+    function physicalBody(e, files) { return { version: 1, manifestHash: createHash('sha256').update(e.manifest).digest('hex'), reviewHash: e.receipt.reviewHash, inventoryHash: e.review.inventoryHash, files }; }
     async function checked(handle, peer, signal, read) { const e = handles.get(handle); if (!e || e.state !== 'held')
         throw Error('source_custody_handle'); if (e.busy)
         throw Error('source_custody_concurrent'); e.busy = true; const unlink = linked(e, signal); try {
         await current(e, peer);
         await e.owner.checkCurrent();
         await current(e, peer);
-        const result = read(e);
+        const result = await read(e);
         await e.owner.checkCurrent();
         await current(e, peer);
         return result;
     }
     catch (error) {
-        return failed(e, error);
+        return await failed(e, error);
     }
     finally {
         unlink();
@@ -97,7 +107,7 @@ export function createProfileSourceCustodyRegistry(input) {
         } }); },
         authorize(raw, peer, signal) { return track(async () => { const review = parseProfileSourceReview(raw); if (tombstones.has(review.challengeId))
             throw Error('source_custody_replay'); if (occupied() + nativeRunning >= 4 || tombstones.size >= 4096)
-            throw Error('source_custody_admission'); const e = { review, peer: Object.freeze({ ...peer }), state: 'authorizing', controller: new AbortController(), chargedBytes: 0, metadataBytes: 0, busy: true }; tombstones.add(review.challengeId); entries.set(review.challengeId, e); const unlink = linked(e, signal); try {
+            throw Error('source_custody_admission'); const e = { review, peer: Object.freeze({ ...peer }), state: 'authorizing', controller: new AbortController(), chargedBytes: 0, metadataBytes: 0, observationReservedBytes: 0, busy: true }; tombstones.add(review.challengeId); entries.set(review.challengeId, e); const unlink = linked(e, signal); try {
             sample(e);
             e.incarnation = await observe(e.peer, e.controller.signal);
             if (!e.incarnation)
@@ -163,7 +173,7 @@ export function createProfileSourceCustodyRegistry(input) {
                     throw Error('source_custody_snapshot');
             await e.owner.checkCurrent();
             await current(e, peer);
-            e.manifest = encodeBoundedProfileCaptureJson({ facts, databases: e.review.sourceSet.sources.filter(s => s.kind === 'sqlite-db').map(s => ({ sourceId: s.sourceId, capture: readProfileSqliteCapture(e.owner, e.token, s.sourceId) })), directories: e.review.sourceSet.sources.filter(s => s.kind !== 'sqlite-db').map(s => ({ sourceId: s.sourceId, entries: readProfileDirectoryEntries(e.owner, e.token, s.sourceId) })) }, LIMIT - [...entries.values()].reduce((sum, v) => sum + (v.manifest?.length ?? 0), 0));
+            e.manifest = encodeBoundedProfileCaptureJson({ facts, databases: e.review.sourceSet.sources.filter(s => s.kind === 'sqlite-db').map(s => ({ sourceId: s.sourceId, capture: readProfileSqliteCapture(e.owner, e.token, s.sourceId) })), directories: e.review.sourceSet.sources.filter(s => s.kind !== 'sqlite-db').map(s => ({ sourceId: s.sourceId, entries: readProfileDirectoryEntries(e.owner, e.token, s.sourceId) })) }, manifestRemaining());
             e.handle = randomUUID();
             handles.set(e.handle, e);
             e.state = 'held';
@@ -178,6 +188,54 @@ export function createProfileSourceCustodyRegistry(input) {
             unlink();
             e.busy = false;
         } }); },
+        startPhysicalObservation(handle, peer, signal) {
+            return track(async () => {
+                const e = heldEntry(handle);
+                if (e.busy)
+                    throw Error('source_custody_concurrent');
+                if (e.observation)
+                    throw Error('source_custody_observation_active');
+                return checked(handle, peer, signal, async (e) => {
+                    const expected = e.review.sourceSet.sources.filter(s => s.kind === 'sqlite-db').flatMap(s => readProfileSqliteCapture(e.owner, e.token, s.sourceId).physicalFiles.map(f => ({ sourceId: s.sourceId, ...f })));
+                    const reserved = countBoundedProfileCaptureJson(physicalBody(e, expected.map(f => ({ ...f, sha256: '0'.repeat(64) }))), manifestRemaining());
+                    e.observationReservedBytes = reserved;
+                    const token = await e.owner.capturePhysicalSqliteFiles(e.token), files = readProfileSqlitePhysicalFiles(e.owner, token);
+                    if (files.length !== expected.length || files.some((f, i) => { const { sha256, ...identity } = f; return !/^[a-f0-9]{64}$/.test(sha256) || json(identity) !== json(expected[i]); }))
+                        throw Error('source_custody_physical_mapping');
+                    const buffer = encodeBoundedProfileCaptureJson(physicalBody(e, files), reserved);
+                    if (buffer.length !== reserved) {
+                        buffer.fill(0);
+                        throw Error('source_custody_physical_size');
+                    }
+                    const id = randomUUID(), hash = createHash('sha256').update(buffer).digest('hex');
+                    e.observation = { id, buffer, hash };
+                    e.observationReservedBytes = 0;
+                    return Object.freeze({ observationId: id, manifestHash: createHash('sha256').update(e.manifest).digest('hex'), reviewHash: e.receipt.reviewHash, inventoryHash: e.review.inventoryHash, observationHash: hash, observationBytes: buffer.length });
+                });
+            });
+        },
+        readPhysicalObservation(handle, id, offset, length, peer, signal) {
+            return track(async () => {
+                const e = observationEntry(handle, id);
+                if (!e.observation || e.observation.id !== id)
+                    throw Error('source_custody_observation');
+                if (!Number.isSafeInteger(offset) || offset < 0 || offset > e.observation.buffer.length || !Number.isSafeInteger(length) || length < 1 || length > 256 * 1024)
+                    throw Error('source_custody_range');
+                return checked(handle, peer, signal, e => Buffer.from(e.observation.buffer.subarray(offset, offset + length)));
+            });
+        },
+        releasePhysicalObservation(handle, id, peer, signal) {
+            return track(async () => {
+                observationEntry(handle, id);
+                return checked(handle, peer, signal, e => {
+                    if (e.observation?.id === id) {
+                        e.observation.buffer.fill(0);
+                        e.observation = undefined;
+                        e.endedObservationId = id;
+                    }
+                });
+            });
+        },
         readManifest(handle, offset, length, peer, signal) { return track(() => checked(handle, peer, signal, e => { if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 256 * 1024 || offset > e.manifest.length)
             throw Error('source_custody_range'); return Buffer.from(e.manifest.subarray(offset, offset + length)); })); },
         readFile(handle, sourceId, entryIndex, offset, length, peer, signal) { return track(() => checked(handle, peer, signal, e => { if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 256 * 1024)

@@ -40,7 +40,7 @@ export function openPrivateVerificationDatabase(inputRoot) {
             fingerprints.push({ target, key, descriptor: privateDescriptor(target, key) });
     for (const key of Object.keys(statement))
         fingerprints.push({ target: statementPrototype, key, descriptor: privateDescriptor(statementPrototype, key) });
-    const access = privateFreeze({ cpp, symbol: privateCppSymbol, prepare, open: privateDescriptor(cpp, 'open').get, statement: privateFreeze(statement), databasePrototype, cppPrototype, statementPrototype, fingerprints: privateFreeze(fingerprints.map(entry => privateFreeze({ ...entry, descriptor: entry.descriptor ? privateFreeze({ ...entry.descriptor }) : undefined }))) });
+    const access = privateFreeze({ cpp, symbol: privateCppSymbol, prepare, open: privateDescriptor(cpp, 'open').get, inTransaction: privateDescriptor(cpp, 'inTransaction')?.get, statement: privateFreeze(statement), databasePrototype, cppPrototype, statementPrototype, fingerprints: privateFreeze(fingerprints.map(entry => privateFreeze({ ...entry, descriptor: entry.descriptor ? privateFreeze({ ...entry.descriptor }) : undefined }))) });
     try {
         db.pragma('journal_mode=DELETE');
         db.pragma('synchronous=FULL');
