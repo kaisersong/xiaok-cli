@@ -2531,7 +2531,7 @@ describe('desktop services', () => {
           if (path === '/projects/proj-1' && method === 'GET') {
             return new Response(JSON.stringify({
               project: { id: 'proj-1', name: 'Project', goal: 'Write report', status: 'active' },
-              tasks: [{ id: 'task-1', title: '撰写报告', status: 'done' }],
+              tasks: [{ id: 'task-1', projectId: 'proj-1', title: '撰写报告', brief: 'Produce Markdown', acceptanceCriteria: 'Complete report', requiredOutputs: ['markdown'], status: method === 'GET' && requests.some(r => r.method === 'POST' && r.path.endsWith('/review')) ? 'done' : 'submitted' }],
             }), { status: 200 });
           }
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -2596,7 +2596,7 @@ describe('desktop services', () => {
           if (path === '/projects/proj-1' && method === 'GET') {
             return new Response(JSON.stringify({
               project: { id: 'proj-1', name: 'Project', goal: 'Write report', status: 'active' },
-              tasks: [{ id: 'task-1', title: '撰写报告', status: 'done' }],
+              tasks: [{ id: 'task-1', projectId: 'proj-1', title: '撰写报告', brief: 'Produce Markdown', acceptanceCriteria: 'Complete report', requiredOutputs: ['markdown'], status: method === 'GET' && requests.some(r => r.method === 'POST' && r.path.endsWith('/review')) ? 'done' : 'submitted' }],
             }), { status: 200 });
           }
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -2659,7 +2659,7 @@ describe('desktop services', () => {
     let settled = false;
     const services = createDesktopServices({
       executionCoordinator: coordinator, dataRoot: join(rootDir, 'data'), now: () => 300,
-      kswarmService: { ...mockKSwarmService(), request: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }) },
+      kswarmService: { ...mockKSwarmService(), request: async () => new Response(JSON.stringify({ project: {id:'proj-queued',status:'active'}, tasks:[{id:'task-queued',projectId:'proj-queued',status:'submitted',title:'Queued review',brief:'Review current output'}] }), { status: 200 }) },
       runner: async ({ sessionId, emitRuntimeEvent }) => {
         emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: JSON.stringify({ passed: true, feedback: '通过。', planRevisionNeeded: false }) });
       },
@@ -2685,7 +2685,7 @@ describe('desktop services', () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'), now: () => 300,
       kswarmService: { ...mockKSwarmService(), request: async (path: string) => {
-        if (path === '/projects/proj-timeout') return Response.json({ project: { id: 'proj-timeout', status: 'active', name: 'Timeout project' }, tasks: [] });
+        if (path === '/projects/proj-timeout') return Response.json({ project: { id: 'proj-timeout', status: 'active', name: 'Timeout project' }, tasks: [{id:'task-timeout',projectId:'proj-timeout',status:'submitted',title:'Timed review',brief:'Review current output'}] });
         throw new Error('fixture_route_unavailable');
       } },
       runner: async ({ signal }) => {
