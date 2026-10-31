@@ -1,12 +1,18 @@
+import { ownDataArrayIsArray, ownDataArrayPrototypeEvery, ownDataArrayPrototypeForEach, ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataNumberIsSafeInteger, ownDataObjectFreeze, ownDataObjectKeys, ownDataObjectValues, ownDataRegExpPrototypeTest, ownDataStringPrototypeSplit } from '../verification/application-native-intrinsics.js';
 import { captureIntentData } from './data.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
-const id = (v) => typeof v === 'string' && v.length > 0 && Buffer.byteLength(v) <= 160 && !/[\x00-\x1f\x7f]/.test(v);
-function shape(v, keys) { if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).sort().join(',') !== keys.split(' ').sort().join(','))
-    throw Error('intent_producer_shape'); }
-function freeze(v) { if (v && typeof v === 'object') {
-    Object.values(v).forEach(freeze);
-    Object.freeze(v);
-} return v; }
+const id = (v) => typeof v === 'string' && v.length > 0 && ownDataBufferByteLength(v) <= 160 && !ownDataRegExpPrototypeTest(/[\x00-\x1f\x7f]/, v);
+function shape(v, keys) {
+    if (!v || typeof v !== 'object' || ownDataArrayIsArray(v) || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(v)), ',') !== ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataStringPrototypeSplit(keys, ' ')), ','))
+        throw Error('intent_producer_shape');
+}
+function freeze(v) {
+    if (v && typeof v === 'object') {
+        ownDataArrayPrototypeForEach(ownDataObjectValues(v), freeze);
+        ownDataObjectFreeze(v);
+    }
+    return v;
+}
 export function parseIntentProducerAction(raw) {
     const value = captureIntentData(raw);
     json(raw);
@@ -16,11 +22,11 @@ export function parseIntentProducerAction(raw) {
     if (a.origin.kind !== 'model-report' || !id(a.origin.providerInvocationId) || !id(a.origin.toolInvocationId))
         throw Error('intent_producer_origin');
     if (a.kind === 'step-report') {
-        if (!id(a.stepId) || !['running', 'blocked', 'completed', 'failed'].includes(a.status) || typeof a.breadcrumb !== 'string' || ![a.receiptNote, a.blockedReason].every(v => v === null || typeof v === 'string'))
+        if (!id(a.stepId) || !ownDataArrayPrototypeIncludes(['running', 'blocked', 'completed', 'failed'], a.status) || typeof a.breadcrumb !== 'string' || !ownDataArrayPrototypeEvery([a.receiptNote, a.blockedReason], v => v === null || typeof v === 'string'))
             throw Error('intent_producer_step');
     }
     else if (a.kind === 'artifact-report') {
-        if (!id(a.stageId) || !['markdown', 'report', 'slides', 'summary', 'analysis', 'document', 'unknown'].includes(a.kindOfArtifact) || !['inline', 'file_ref'].includes(a.storage) || typeof a.label !== 'string' || ![a.path, a.inlineValue, a.summary].every(v => v === null || typeof v === 'string') || ![a.reportedStructuralValidation, a.reportedSemanticValidation].every(v => ['pending', 'passed', 'failed'].includes(v)) || (a.storage === 'inline' ? (a.inlineValue === null || a.path !== null) : (a.path === null || a.inlineValue !== null)))
+        if (!id(a.stageId) || !ownDataArrayPrototypeIncludes(['markdown', 'report', 'slides', 'summary', 'analysis', 'document', 'unknown'], a.kindOfArtifact) || !ownDataArrayPrototypeIncludes(['inline', 'file_ref'], a.storage) || typeof a.label !== 'string' || !ownDataArrayPrototypeEvery([a.path, a.inlineValue, a.summary], v => v === null || typeof v === 'string') || !ownDataArrayPrototypeEvery([a.reportedStructuralValidation, a.reportedSemanticValidation], v => ownDataArrayPrototypeIncludes(['pending', 'passed', 'failed'], v)) || (a.storage === 'inline' ? (a.inlineValue === null || a.path !== null) : (a.path === null || a.inlineValue !== null)))
             throw Error('intent_producer_artifact');
     }
     else
@@ -31,7 +37,7 @@ export function parseIntentProducerReport(raw) {
     const value = captureIntentData(raw);
     json(raw);
     shape(value, 'protectionMode action requestSource now artifactId');
-    if (!['ordinary', 'protected'].includes(value.protectionMode) || !['user', 'agent', 'scheduler'].includes(value.requestSource) || !Number.isSafeInteger(value.now) || value.now < 0)
+    if (!ownDataArrayPrototypeIncludes(['ordinary', 'protected'], value.protectionMode) || !ownDataArrayPrototypeIncludes(['user', 'agent', 'scheduler'], value.requestSource) || !ownDataNumberIsSafeInteger(value.now) || value.now < 0)
         throw Error('intent_producer_report');
     value.action = parseIntentProducerAction(value.action);
     if (value.action.kind === 'step-report' ? value.artifactId !== null : !id(value.artifactId))

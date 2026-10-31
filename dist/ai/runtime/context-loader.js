@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { resolveAutoContextMaxChars, truncateContextContent } from './context-budget.js';
 import { getCurrentBranch, getRecentCommitSubjects, isGitDirty, } from '../../utils/git.js';
 const PROMPT_DOC_NAMES = ['AGENTS.md', 'CLAUDE.md'];
 const DEFAULT_GIT_PROVIDER = {
@@ -20,19 +21,8 @@ function collectSearchDirs(cwd) {
     }
     return dirs.reverse();
 }
-function truncateContent(content, maxChars) {
-    if (content.length <= maxChars) {
-        return { content, truncated: false };
-    }
-    const suffix = '\n...(已截断)';
-    const sliceLength = Math.max(0, maxChars - suffix.length);
-    return {
-        content: content.slice(0, sliceLength) + suffix,
-        truncated: true,
-    };
-}
 export async function loadAutoContext(options) {
-    const maxChars = options.maxChars ?? 8_000;
+    const maxChars = resolveAutoContextMaxChars(options.maxChars);
     const docs = [];
     let remainingChars = maxChars;
     for (const dir of collectSearchDirs(options.cwd)) {
@@ -45,7 +35,7 @@ export async function loadAutoContext(options) {
             if (!raw) {
                 continue;
             }
-            const truncated = truncateContent(raw, remainingChars);
+            const truncated = truncateContextContent(raw, remainingChars);
             docs.push({
                 name,
                 path,

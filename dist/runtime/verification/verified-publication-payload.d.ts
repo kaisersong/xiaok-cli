@@ -4,9 +4,6 @@ import type { Database } from 'better-sqlite3';
 import type { createIndependentVerifierRecipes, RecipeEvaluation } from './independent-recipes.js';
 import type { VerificationOwner } from './proof-authority.js';
 import { type VerificationDependency, type VerificationTuple } from './protocol.js';
-/** Private installed-controller composition. References and read results confer no ACL.
- * The exact connection is shared with proof/outbox. No caller bytes are accepted.
- */
 export declare function createVerifiedPublicationPayloads(input: {
     database: Database;
     recipes: Pick<ReturnType<typeof createIndependentVerifierRecipes>, 'exportVerifiedArtifacts'>;
@@ -41,7 +38,7 @@ export declare function createVerifiedPublicationPayloads(input: {
         byteLength: number;
     }>;
     capture(payloadId: string, rawOwner: VerificationOwner): Readonly<{
-        readBytes: () => Buffer<ArrayBuffer>;
+        readBytes: () => Buffer<ArrayBufferLike>;
         assertCurrent: () => void;
     }>;
     read(payloadId: string, rawOwner: VerificationOwner): Buffer;

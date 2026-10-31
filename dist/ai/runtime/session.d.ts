@@ -1,11 +1,12 @@
 import type { ProtectedObservationClosure, ProtectedObservationReference } from './protected-observation-closure.js';
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
 import { type CompactionPlan } from './usage.js';
-import { type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
+import { type CompactionRecord, type SessionGraphSnapshot, type SessionGraphPersistenceFacts } from './session-graph.js';
 export type { CompactionRecord } from './session-graph.js';
 export type { CompactionPlan } from './usage.js';
 export interface AgentSessionSnapshot extends SessionGraphSnapshot {
 }
+export type SessionPersistenceFacts = SessionGraphPersistenceFacts & Pick<AgentSessionSnapshot, 'sessionId' | 'cwd' | 'messages'>;
 export type CompactionApplyOutcome = {
     status: 'compacted';
     record: CompactionRecord;
@@ -54,7 +55,7 @@ export declare class AgentSessionState {
     applyCompaction(plan: CompactionPlan, summaryText?: string): CompactionApplyOutcome;
     forceCompact(summaryText?: string): CompactionRecord | null;
     exportSnapshot(): AgentSessionSnapshot;
-    updatePersistenceFacts(snapshot: AgentSessionSnapshot): void;
+    updatePersistenceFacts(snapshot: SessionPersistenceFacts): void;
     /** Same-owner installation after a successful durable CAS. This is not a restore
      * and must not invalidate the live observation provenance generation. */
     installCommittedSnapshot(input: {

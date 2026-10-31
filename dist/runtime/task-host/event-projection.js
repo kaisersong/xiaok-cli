@@ -354,7 +354,7 @@ function resultFromReceipt(note, turnId) {
     const summary = readReceiptSummary(output, note);
     return {
         summary,
-        structuredOutput: output,
+        structuredOutput: parsed && isRecord(parsed.reviewDecision) ? parsed : output,
         artifacts: artifactSummariesFromReceipt(output.artifacts, turnId),
     };
 }

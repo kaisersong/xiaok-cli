@@ -22,7 +22,6 @@ function canonical(value) {
         return Object.fromEntries(Object.keys(value).sort().filter(k => value[k] !== undefined).map(k => [k, canonical(value[k])]));
     return value;
 }
-/** Canonical full durable snapshot; distinct from provider history digest. */
 export function computeSessionSnapshotHash(snapshot) {
     return createHash('sha256').update(JSON.stringify(canonical(snapshot))).digest('hex');
 }

@@ -25,6 +25,6 @@ export declare function startConversationActivityOwner(config: ActivityOwnerConf
 }): Promise<{
     host: ConversationActivityOwnerHost;
     supervisor: ActivitySourceSupervisor;
-    stop(): Promise<void>;
+    stop: () => Promise<void>;
 }>;
 export declare function serveConversationActivityOwner(configFile: string): Promise<void>;

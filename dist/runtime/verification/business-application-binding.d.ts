@@ -24,7 +24,7 @@ export declare function businessApplicationBindingHash(raw: unknown): string;
 export declare function businessApplicationOwner(raw: unknown): Readonly<{
     ownerKind: "intent";
     ownerId: string;
-}> | Pick<import("./proof-authority.js").VerificationOwner, "ownerId" | "ownerKind"> | Readonly<{
+}> | Pick<import("./proof-authority.js").VerificationOwner, "ownerKind" | "ownerId"> | Readonly<{
     ownerKind: "goal";
     ownerId: string;
 }>;

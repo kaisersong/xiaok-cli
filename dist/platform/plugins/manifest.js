@@ -19,6 +19,11 @@ export function parsePluginManifest(raw, pluginDir) {
             if (entry && typeof entry === 'object') {
                 const e = entry;
                 const hook = { command: String(e['command'] ?? '') };
+                if (e['outputFormat'] !== undefined) {
+                    if (e['outputFormat'] !== 'json')
+                        throw new Error('hook_output_format_invalid');
+                    hook.outputFormat = 'json';
+                }
                 if (typeof e['type'] === 'string')
                     hook.type = e['type'];
                 if (typeof e['url'] === 'string')

@@ -1,6 +1,8 @@
+import { readCompoundDeletionBytes } from './compound-deletion-read.js';
+export { readCompoundDeletionBytes } from './compound-deletion-read.js';
 import { getManagedTurnDispatch } from '../../../runtime/sol-pi/compound-managed-turn.js';
 import { validateSemanticCompactionLedger } from '../../../runtime/sol-pi/semantic-compaction-ledger.js';
-import { constants, openSync, closeSync, fstatSync, readSync, realpathSync, lstatSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { validateCompoundOperationLedger } from '../../../runtime/sol-pi/compound-operation.js';
@@ -14,35 +16,6 @@ export function createCompoundDeletionBudget(initialBytes = 0) {
     const visit = (_path) => { if (++entries > 4096)
         fail('entry_budget'); };
     return Object.freeze({ visit, read(path) { visit(path); const bytes = readCompoundDeletionBytes(path, remaining); remaining -= bytes.length; return bytes; } });
-}
-export function readCompoundDeletionBytes(file, remaining = MAX_BYTES) {
-    const before = lstatSync(file, { bigint: true });
-    if (!before.isFile() || before.isSymbolicLink() || before.size > BigInt(remaining))
-        fail('budget');
-    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-        const stat = fstatSync(fd);
-        if (!stat.isFile() || stat.size > remaining)
-            fail('budget');
-        const opened = fstatSync(fd, { bigint: true });
-        if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.mtimeNs !== before.mtimeNs)
-            fail('changed');
-        const bytes = Buffer.alloc(stat.size + 1);
-        let size = 0;
-        while (size < bytes.length) {
-            const n = readSync(fd, bytes, size, bytes.length - size, null);
-            if (!n)
-                break;
-            size += n;
-        }
-        const after = fstatSync(fd, { bigint: true }), path = lstatSync(file, { bigint: true });
-        if (size !== stat.size || size > remaining || after.size !== before.size || after.mtimeNs !== before.mtimeNs || path.dev !== before.dev || path.ino !== before.ino || path.size !== before.size || path.mtimeNs !== before.mtimeNs)
-            fail('changed');
-        return bytes.subarray(0, size);
-    }
-    finally {
-        closeSync(fd);
-    }
 }
 /** Called under the existing root mutation + target execution guard. Keeps
  * descendant execution guards until the caller's receipt/delete transaction

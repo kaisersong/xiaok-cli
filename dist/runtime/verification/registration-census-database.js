@@ -34,7 +34,9 @@ export function createRegistrationCensusDatabase(db) {
     }
     const prepare = (sql) => apply(native.prepare, native.cpp, [sql, db, false, false]);
     const call = (key, stmt, args = []) => apply(native.statement[key], stmt, args);
-    function raw(sql, args = []) { assertNativeSqliteArrayConstruction(); const stmt = prepare(sql); call('raw', stmt, [true]); const rows = call('all', stmt, args); assertNativeSqliteArrayConstruction(); return rows; }
+    // Only counter() calls raw, after the complete function_list fence and builtin check.
+    // Its fixed header-read tail closes once before any counter result is returned.
+    function raw(sql, args = []) { const stmt = prepare(sql); call('raw', stmt, [true]); const rows = call('all', stmt, args); return rows; }
     function records(sql, args = []) {
         assertNativeSqliteColumnConstruction();
         const stmt = prepare(sql);
@@ -42,6 +44,9 @@ export function createRegistrationCensusDatabase(db) {
         assertNativeSqliteColumnConstruction();
         const columns = call('columns', stmt), rows = call('all', stmt, args);
         assertNativeSqliteColumnConstruction();
+        return copyRecords(columns, rows);
+    }
+    function copyRecords(columns, rows) {
         const result = [];
         for (let i = 0; i < rows.length; i++) {
             if (rows[i].length !== columns.length)
@@ -56,6 +61,17 @@ export function createRegistrationCensusDatabase(db) {
         }
         return result;
     }
+    // Private fixed-query reader: schema() already checked the realm before the
+    // first call, or the preceding call checked it after all(). Keep both guards
+    // after native SQL boundaries; prepare/step can reconnect a changed schema.
+    function tableColumns(table) {
+        const stmt = prepare('PRAGMA main.table_xinfo(' + table + ')');
+        call('raw', stmt, [true]);
+        assertNativeSqliteColumnConstruction();
+        const columns = call('columns', stmt), rows = call('all', stmt);
+        assertNativeSqliteColumnConstruction();
+        return copyRecords(columns, rows);
+    }
     function counter() {
         current();
         const funcs = records('PRAGMA function_list');
@@ -67,7 +83,9 @@ export function createRegistrationCensusDatabase(db) {
         const stmt = prepare('SELECT total_changes() AS n');
         call('safeIntegers', stmt, [true]);
         call('raw', stmt, [true]);
-        const changes = call('get', stmt)?.[0];
+        const row = call('get', stmt);
+        assertNativeSqliteArrayConstruction();
+        const changes = row?.[0];
         if (typeof changes !== 'bigint' || changes < 0n)
             fail();
         return { schema, data, changes };
@@ -85,16 +103,56 @@ export function createRegistrationCensusDatabase(db) {
             if (row.schema === 'main' && tables.includes(lower(String(row.name))) && (row.type !== 'table' && row.type !== 'view' || row.type === 'view' && ['verification_profiles', 'verification_storage_features'].includes(lower(String(row.name)))))
                 fail();
         const columns = { __proto__: null }, present = new Set();
-        for (const table of tables) {
-            const entry = master.find(row => row.type === 'table' && lower(String(row.name)) === table);
-            if (!entry)
-                continue;
-            if (entry.name === table)
-                present.add(table);
-            const value = records('PRAGMA main.table_xinfo(' + table + ')');
-            if (value.some(c => c.hidden !== 0 || c.name === '__proto__'))
-                fail();
-            columns[table] = value;
+        // table_list stays fully guarded: SQLite may connect arbitrary views/vtabs.
+        // Only private native metadata copying/control flow separates one table read
+        // from the next. SQL callback/reconnect boundaries keep their original guards.
+        // Non-text SQLite schema names may be Buffers with caller-modified coercion.
+        // Such rows keep the complete original per-query fences and evaluation order.
+        const adjacentMetadata = master.every(row => typeof row.name === 'string');
+        // table_list may have entered callbacks. Use its final positive classification,
+        // not only the earlier master row, before trusting an existing main snapshot.
+        const transactionMetadata = adjacentMetadata && typeof native.inTransaction === 'function' && apply(native.inTransaction, native.cpp, []) === true && tables.every(table => !master.some(row => row.type === 'table' && lower(row.name) === table) || kinds.some(row => row.schema === 'main' && row.name === table && row.type === 'table'));
+        if (adjacentMetadata)
+            assertNativeSqliteColumnConstruction();
+        if (transactionMetadata) {
+            // No transaction is created here. Fixed ordinary-table metadata only, using
+            // the existing read snapshot acquired by successful guarded table_list.
+            // Native addon/VFS/extension provenance remains the trusted-native boundary.
+            const pending = [];
+            // This layout belongs only to this synchronous transaction metadata batch.
+            let layout;
+            for (const table of tables) {
+                const entry = master.find(row => row.type === 'table' && lower(String(row.name)) === table);
+                if (!entry)
+                    continue;
+                if (entry.name === table)
+                    present.add(table);
+                const stmt = prepare('PRAGMA main.table_xinfo(' + table + ')');
+                call('raw', stmt, [true]);
+                const names = layout ?? call('columns', stmt), rows = call('all', stmt);
+                layout = names;
+                append(pending, { table, columns: names, rows });
+            }
+            assertNativeSqliteColumnConstruction();
+            for (let i = 0; i < pending.length; i++) {
+                const item = pending[i], value = copyRecords(item.columns, item.rows);
+                if (value.some(c => c.hidden !== 0 || c.name === '__proto__'))
+                    fail();
+                columns[item.table] = value;
+            }
+        }
+        else {
+            for (const table of tables) {
+                const entry = master.find(row => row.type === 'table' && lower(String(row.name)) === table);
+                if (!entry)
+                    continue;
+                if (entry.name === table)
+                    present.add(table);
+                const value = adjacentMetadata ? tableColumns(table) : records('PRAGMA main.table_xinfo(' + table + ')');
+                if (value.some(c => c.hidden !== 0 || c.name === '__proto__'))
+                    fail();
+                columns[table] = value;
+            }
         }
         return { master, columns, present };
     }
