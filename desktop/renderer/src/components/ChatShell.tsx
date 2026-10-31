@@ -1,4 +1,4 @@
-import { ObservationControls } from './ObservationControls';
+import { ObservationControls, type ObservationCommandHandle } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
@@ -273,6 +273,7 @@ export function ChatShell() {
   const location = useLocation();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
+  const observationCommands = useRef<ObservationCommandHandle>(null);
   const [observationDraft, setObservationDraft] = useState<string|null>(null);
   useEffect(()=>setObservationDraft(null),[taskId]);
   const [agentHistory, setAgentHistory] = useState<{ threadId: string; groupId?: string } | null>(null);
@@ -1374,6 +1375,11 @@ export function ChatShell() {
   }, [queuedPrompt, status, taskId]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
+    if (text.trim().split(/\s+/)[0] === '/observation') {
+      if (files?.length) return false;
+      await observationCommands.current?.execute('status');
+      return;
+    }
     if (!taskId || admissionPending.current === renderScope) return false;
     if (observationDraft && files?.length) {
       // Reuse the ordinary task error message position; no Goal panel is required.
@@ -1867,8 +1873,9 @@ export function ChatShell() {
       approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
-      <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
       <ChatView
+        localCommands={[{name: 'observation', description: t.observation.commandHint}]}
+        inputAccessory={<ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
