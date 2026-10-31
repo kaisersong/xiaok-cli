@@ -1,4 +1,4 @@
-import {createNativeWorkflowReadPort,closeNativeWorkflowReadPort,assertNativeWorkflowReadPort,type NativeWorkflowReadPort} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
+import {createNativeWorkflowReadPort,closeNativeWorkflowReadPort,assertNativeWorkflowReadPort,readNativeWorkflowRun,type NativeWorkflowReadPort} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
 import { buildSidecarEnv } from './sidecar-env.js';
 import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
@@ -720,6 +720,14 @@ export async function getKSwarmWorkflowReadPort(service:KSwarmService):Promise<N
  if(!response.ok)throw Error('kswarm_workflow_read_unavailable');
  if(assertWorkflowReadService(service)!==entry)throw Error('kswarm_workflow_read_instance_changed');
  return entry.port;
+}
+
+/** Fixed Main read, including JSON body, owned by the registered port's drain. */
+export async function readKSwarmWorkflowRunForExecution(service:KSwarmService,projectId:string,workflowRunId:string):Promise<unknown> {
+ const entry=assertWorkflowReadService(service);
+ const value=await readNativeWorkflowRun(entry.port,projectId,workflowRunId);
+ if(assertWorkflowReadService(service)!==entry)throw Error('kswarm_workflow_read_instance_changed');
+ return value;
 }
 
 const instanceClosers = new WeakMap<KSwarmService, () => Promise<void>>();

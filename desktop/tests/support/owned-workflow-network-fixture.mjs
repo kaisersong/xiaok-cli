@@ -187,7 +187,7 @@ try{
  let disposed=false;
  const close=async()=>{if(disposed)return;disposed=true;if(poTarget)return closePoOwners();try{hub.closePersistence();}catch{}
   await stopOwnedServer();await brokerHTTP?.close();broker?.close();rmSync(root,{recursive:true,force:true});};
- return {root,base,brokerBase,workspace,project,original,issued,forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
+ return {root,base,brokerBase,workspace,project,original,issued,getReceivedHandoffs:()=>structuredClone(receivedHandoffs),forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
 }catch(error){
  if(options.issuer==='po_generated'||options.issuer==='po_generated_project')return closePoOwners(error);
  clearTimeout(deadline);try{hub.closePersistence();}catch{}
