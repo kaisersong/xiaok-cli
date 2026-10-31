@@ -98,7 +98,7 @@ jobs:
         env:
           XIAOK_WORKFLOW_TEST_REPO_ROOT: ${{ github.workspace }}
         run: >
-          cd desktop && npm run test -- --environment node --run
+          cd desktop && npm run test -- --maxWorkers=2 --environment node --run
           tests/main/workflow-approved-deadline.test.ts
           tests/main/workflow-deadline-policy.test.ts
           tests/main/workflow-budget-read-lifecycle.test.ts

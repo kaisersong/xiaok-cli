@@ -5,12 +5,12 @@ import {setTimeout as realDelay} from 'node:timers/promises';
 import {createOwnedWorkflowNetworkFixture} from '../support/owned-workflow-network-fixture.mjs';
 vi.mock('electron',()=>({app:{isPackaged:false}}));
 const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
+// Cold module compilation must not consume the owned server's real 5s protection lease.
+const ksModule=await import('../../electron/kswarm-service.ts');
+const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return {promise,resolve};}
 async function waitFor(test:()=>boolean){const started=performance.now();while(!test()){if(performance.now()-started>2000)throw Error('fixture_condition_timeout');await realDelay(10);}}
 for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-setup','late-prepared','retry-budget','worker-then-reviewer'] as const)it(`actual approved workflow budget: ${mode}`,async()=>{
- // Cold module compilation must not consume the owned server's real 5s protection lease.
- const ksModule=await import('../../electron/kswarm-service.ts');
- const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
  const fixture=await createOwnedWorkflowNetworkFixture(null,{issuer:mode==='expired-approved'?'po_generated_project':'po_generated',tasks:[{title:'Fictional report',assignedAgent:'xiaok-worker',requiredOutputs:['markdown']}]});
  const previous={config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,recovery:process.env.XIAOK_MODEL_RECOVERY_WINDOW_MS};let ks:any,desktop:any,lease:any;const release=deferred();let calls=0,closed=0,settled=false,providerSignal:AbortSignal|undefined;let outcome:Promise<any>|undefined;let mock:any,prepareMock:any,retryTimerMock:any;let retryWaits=0,providerFailed=false;
  try{
