@@ -149,6 +149,10 @@ jobs:
         with:
           name: resume-tty-failure-${{ matrix.node }}
           path: |
+            /tmp/xiaok-permission-fallback-*/failure-snapshot.json
+            /tmp/xiaok-permission-fallback-*/failure-pane.txt
+            /tmp/xiaok-permission-fallback-*/failure-stderr.txt
+            /tmp/xiaok-permission-fallback-*/owned-pids.json
             /tmp/xiaok-remember-*/
             /tmp/xiaok-exact-*/
             /tmp/xiaok-yolo-*/

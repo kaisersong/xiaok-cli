@@ -9,6 +9,51 @@ import shlex
 import shutil
 import time
 import tempfile
+import traceback
+
+
+def record_failure(root: Path, config: Path, tty, state, error: BaseException) -> None:
+    # Only this script's synthetic local-SSE fixture is inspected. Never dump
+    # config, environment, session messages, credentials, or the complete state.
+    ledger = state.get('intentDelegation') if isinstance(state, dict) else None
+    ownership = ledger.get('ownership') if isinstance(ledger, dict) else None
+    snapshot = {'primaryErrorType': type(error).__name__, 'primaryError': str(error)[:2048],
+                'pythonTraceback': traceback.format_exc(limit=8)[-8192:],
+                'ownershipState': ownership.get('state') if isinstance(ownership, dict) else None,
+                'actualExitKnown': False, 'diagnosticErrors': []}
+    if not isinstance(snapshot['ownershipState'], (str, type(None))):
+        snapshot['ownershipState'] = 'unavailable'
+    try:
+        pane = tty.tmux('display-message', '-p', '-t', tty.session,
+                        '#{pane_dead}\t#{pane_dead_status}\t#{pane_dead_signal}', check=False)
+        snapshot['paneQueryExit'] = pane.returncode
+        fields = pane.stdout.strip('\n').split('\t')
+        if pane.returncode == 0 and len(fields) == 3:
+            snapshot.update({'paneDead': fields[0], 'paneDeadStatus': fields[1], 'paneDeadSignal': fields[2],
+                             'actualExitKnown': fields[0] == '1' and bool(fields[1] or fields[2])})
+            if fields[0] == '1':
+                snapshot['actualExitCode'] = int(fields[1]) if fields[1].isdigit() else None
+                snapshot['actualExitSignal'] = fields[2] or None
+    except Exception as diagnostic_error:
+        snapshot['diagnosticErrors'].append(type(diagnostic_error).__name__)
+    try:
+        pane = tty.tmux('capture-pane', '-p', '-t', tty.session, check=False)
+        (root / 'failure-pane.txt').write_text(pane.stdout[-65536:])
+        snapshot['captureQueryExit'] = pane.returncode
+    except Exception as diagnostic_error:
+        snapshot['diagnosticErrors'].append(type(diagnostic_error).__name__)
+    try:
+        # This stderr is redirected by TmuxHarness into this owned config only.
+        with (config / 'cli-stderr.log').open('rb') as stream:
+            size = stream.seek(0, 2); stream.seek(max(0, size - 65536))
+            stderr = stream.read(65536).decode('utf-8', errors='replace')
+        (root / 'failure-stderr.txt').write_text(stderr)
+        snapshot['stderrBytesTotal'] = size
+        print('FIXTURE_CLI_STDERR_TAIL\n' + stderr, flush=True)
+    except Exception as diagnostic_error:
+        snapshot['diagnosticErrors'].append(type(diagnostic_error).__name__)
+    (root / 'failure-snapshot.json').write_text(json.dumps(snapshot, ensure_ascii=False, indent=2))
+    print('FAILURE_SNAPSHOT ' + json.dumps(snapshot, ensure_ascii=False), flush=True)
 
 
 def run(project: Path, entry: Path) -> None:
@@ -45,6 +90,7 @@ def run(project: Path, entry: Path) -> None:
         helpers.resolve_tmux_binary(), auto_mode=False,
         env_overrides={'XIAOK_DISABLE_GLOBAL_PLUGINS': '1'})
     owned = []
+    state = None
 
     def wait_for(predicate, name, timeout=20):
         screen = tty.wait_for(predicate, timeout=timeout)
@@ -90,6 +136,10 @@ def run(project: Path, entry: Path) -> None:
             'deniedNotExecuted': not denied.exists(), 'approvedContent': approved.read_text(),
             'modelRequests': len(server.requests), 'ownershipReleased': True}, indent=2))
         print('PASS: timeout -> real local prompt; rejection performs no write; approval writes; next turn and exit work')
+    except BaseException as error:
+        try: record_failure(root, config, tty, state, error)
+        except Exception as diagnostic_error: print('FAILURE_DIAGNOSTIC_UNAVAILABLE ' + type(diagnostic_error).__name__, flush=True)
+        raise
     finally:
         tty.stop(); server.close()
         if hook_pids.exists(): owned += [int(p) for p in hook_pids.read_text().splitlines()]

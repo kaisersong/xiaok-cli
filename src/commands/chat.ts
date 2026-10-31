@@ -5057,7 +5057,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (commandDirective === 'exit') break;
     }
   } finally {
-    try { await finalizeChat(); } finally { finishTerminal(); }
+    try { await finalizeChat(); }
+    catch (error) {
+      try { log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) }); } catch {}
+      throw error;
+    } finally { finishTerminal(); }
 
   }
   } finally {
