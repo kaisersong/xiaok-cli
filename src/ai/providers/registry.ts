@@ -98,19 +98,18 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'deepseek-default',
       model: 'deepseek-flash',
-      label: 'DeepSeek V4.1 Flash',
+      label: 'DeepSeek V4.1 Flash (1017)',
       capabilities: ['tools', 'thinking', 'image_in'],
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
-      { modelId: 'deepseek-flash', model: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { modelId: 'deepseek-flash', model: 'deepseek-flash', label: 'DeepSeek V4.1 Flash (1017)', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
       // 官方 pricing 脚注(1)：legacy 名字 deepseek-v4-flash 与
       // deepseek-v4-flash-vision-exp 的对应模型已退役，请求仍受理，但由
-      // DeepSeek-V4.1-Flash-1017 服务并按 Flash 价格计费；保留条目让存量
-      // 配置无需迁移即可解析。expires-on-0910 为 2026-09-10 版本的临时
+      // DeepSeek-V4.1-Flash-1017 服务并按 Flash 价格计费。Vision 旧名仅保留
+      // 查询兼容，不再展示为可选型号。expires-on-0910 为 2026-09-10 版本的临时
       // preview ID（现在同样由 1017 服务）。
       { modelId: 'deepseek-v4.1-flash-expires-on-0910', model: 'deepseek-v4.1-flash-expires-on-0910', label: 'DeepSeek V4.1 Flash Preview (0910)', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
-      { modelId: 'deepseek-v4-flash-vision-exp', model: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision Exp', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
     ],
@@ -196,6 +195,12 @@ export function getProviderProfile(providerId: string): ProviderProfile | undefi
   return PROVIDER_REGISTRY[providerId as FirstPartyProviderId];
 }
 
+// 已退役型号仅供存量配置查询；不加入 availableModels，避免继续引导用户选择。
+function resolveRetiredModelAlias(profile: ProviderProfile, wireModel: string): ProviderModelVariant | undefined {
+  if (profile.id !== 'deepseek' || wireModel !== 'deepseek-v4-flash-vision-exp') return undefined;
+  return { ...profile.defaultModel, modelId: wireModel, model: wireModel };
+}
+
 function variantMetadataKey(variant: ProviderModelVariant): string {
   return JSON.stringify({
     capabilities: [...(variant.capabilities ?? [])].sort(),
@@ -236,7 +241,7 @@ export function resolveProviderModelVariant(
       left.modelId.localeCompare(right.modelId)
       || left.label.localeCompare(right.label)
     ));
-  if (matches.length <= 1) return matches[0];
+  if (matches.length <= 1) return matches[0] ?? resolveRetiredModelAlias(profile, wireModel);
 
   const metadataKeys = new Set(matches.map(variantMetadataKey));
   if (metadataKeys.size > 1) {
@@ -283,7 +288,7 @@ export function findCatalogModel(
   if (exact) return exact;
 
   const byWire = variants.filter((variant) => variant.model === wireModel);
-  if (byWire.length === 0) return undefined;
+  if (byWire.length === 0) return resolveRetiredModelAlias(profile, wireModel);
   // 元数据不一致时无法确定该采用哪一条，退化为未命中。
   if (new Set(byWire.map(variantMetadataKey)).size > 1) return undefined;
   // variantMetadataKey 不含 label / modelId，因此这些条目对元数据而言等价。

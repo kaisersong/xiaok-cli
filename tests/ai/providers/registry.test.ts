@@ -256,12 +256,12 @@ describe('catalog only lists models the providers actually serve', () => {
     expect(getProviderProfile('minimax')?.baseUrl).toBe('https://api.minimax.io/v1');
   });
 
-  it('claims image input for the canonical DeepSeek Flash and the Vision Exp model', () => {
+  it('claims image input for the canonical DeepSeek Flash', () => {
     const profile = getProviderProfile('deepseek');
     const variants = [profile!.defaultModel, ...(profile!.availableModels ?? [])];
 
     for (const variant of variants) {
-      if (variant.modelId === 'deepseek-v4-flash-vision-exp' || variant.model === 'deepseek-flash') {
+      if (variant.model === 'deepseek-flash') {
         // 官方 pricing（2026-10-18）FEATURES：deepseek-flash Vision ✓。
         expect(variant.capabilities, variant.modelId).toContain('image_in');
       } else {
@@ -277,7 +277,7 @@ describe('catalog only lists models the providers actually serve', () => {
     const profile=getProviderProfile('deepseek');
     // defaultModel 与 availableModels 的 deepseek-flash 共 wireModel，元数据逐字一致。
     const flash: ProviderModelVariant = {
-      modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
+      modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash (1017)',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
     };
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-flash')).toEqual(flash);
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-v4.1-flash-expires-on-0910')).toEqual({
@@ -285,19 +285,22 @@ describe('catalog only lists models the providers actually serve', () => {
     });
   });
 
-  it('registers the exact DeepSeek V4 Flash Vision Exp model metadata', () => {
+  it('removes the retired Vision model from choices while preserving legacy catalog lookups', () => {
     const profile = getProviderProfile('deepseek');
-    const variant = profile?.availableModels?.find(
-      (candidate) => candidate.modelId === 'deepseek-v4-flash-vision-exp',
-    );
-
-    expect(variant).toEqual({
+    const wireModel = 'deepseek-v4-flash-vision-exp';
+    expect(profile?.availableModels?.some((variant) => variant.model === wireModel)).toBe(false);
+    const expected = {
       modelId: 'deepseek-v4-flash-vision-exp',
       model: 'deepseek-v4-flash-vision-exp',
-      label: 'DeepSeek V4 Flash Vision Exp',
+      label: 'DeepSeek V4.1 Flash (1017)',
       capabilities: ['tools', 'thinking', 'image_in'],
       runtimeOptions: { contextLimit: 1_000_000 },
-    });
+    };
+    expect(resolveVariant(profile!, wireModel)).toEqual(expected);
+    expect(findCatalogModel(profile, wireModel, wireModel)).toEqual(expected);
+    expect(findCatalogModel(profile, 'deepseek-legacy-vision', wireModel)).toEqual(expected);
+    expect(resolveVariant(profile!, 'deepseek-unknown')).toBeUndefined();
+    expect(findCatalogModel(profile, 'deepseek-unknown', 'deepseek-unknown')).toBeUndefined();
   });
 });
 
@@ -554,7 +557,6 @@ describe('official context windows per provider', () => {
       'deepseek-flash': 1_000_000,
       'deepseek-v4-pro': 1_000_000,
       'deepseek-v4-flash': 1_000_000,
-      'deepseek-v4-flash-vision-exp': 1_000_000,
     },
     // https://platform.minimax.io/docs/guides/text-generation
     minimax: {
