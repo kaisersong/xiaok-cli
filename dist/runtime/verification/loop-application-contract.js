@@ -1,13 +1,13 @@
+import { ownDataArrayIsArray, ownDataArrayPrototypeForEach, ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSome, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataCryptoCreateHash, ownDataHashPrototypeDigest, ownDataHashPrototypeUpdate, ownDataJSONParse, ownDataObjectFreeze, ownDataObjectKeys, ownDataObjectValues, ownDataStringPrototypeTrim } from './application-native-intrinsics.js';
 import { parseLoopContractV1 } from '../loop/contract.js';
-import { createHash } from 'node:crypto';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { readApplicationOwnDataField } from './application-value-data.js';
 import { captureApplicationData } from './application-value-data.js';
 function boundedCapture(raw) { return captureApplicationData(raw, { maximumBytes: 65536, maximumNodes: 65536, invalid: 'loop_contract_shape', limit: 'loop_contract_limit' }); }
 function freeze(value) {
     if (value && typeof value === 'object') {
-        Object.values(value).forEach(freeze);
-        Object.freeze(value);
+        ownDataArrayPrototypeForEach(ownDataObjectValues(value), freeze);
+        ownDataObjectFreeze(value);
     }
     return value;
 }
@@ -16,9 +16,9 @@ function freeze(value) {
  * Desktop path continues to use the same underlying parser without this gate. */
 export function parseStrictLoopContractV1(raw) {
     const encoded = json(boundedCapture(raw));
-    if (Buffer.byteLength(encoded) > 65536)
+    if (ownDataBufferByteLength(encoded) > 65536)
         throw Error('loop_contract_limit');
-    const captured = JSON.parse(encoded);
+    const captured = ownDataJSONParse(encoded);
     const parsed = parseLoopContractV1(captured, { registeredCriteria: ['task_completed', 'file_exists', 'command_exit_zero'] });
     // The legacy parser normalizes optional fields and ignores some nested extras.
     // A signed contract cannot silently lose any of its reviewed fields.
@@ -27,13 +27,15 @@ export function parseStrictLoopContractV1(raw) {
     return freeze(parsed);
 }
 export const LOOP_DIAGNOSTIC_SCANNERS = ['artifact-evidence-regression', 'kswarm-service-health'];
+const privateLOOP_DIAGNOSTIC_SCANNERS = ownDataObjectFreeze([...LOOP_DIAGNOSTIC_SCANNERS]);
 export const LOOP_ASSISTANT_DATA_SCOPES = ['threads', 'projects', 'tasks', 'artifacts', 'automations', 'meetings'];
+const privateLOOP_ASSISTANT_DATA_SCOPES = ownDataObjectFreeze([...LOOP_ASSISTANT_DATA_SCOPES]);
 function shape(value, keys) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== keys.sort().join(','))
+    if (!value || typeof value !== 'object' || ownDataArrayIsArray(value) || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(value)), ',') !== ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(keys), ','))
         throw Error('loop_contract_shape');
 }
 function text(value, allowEmpty = false) {
-    if (typeof value !== 'string' || (!allowEmpty && !value.trim()))
+    if (typeof value !== 'string' || (!allowEmpty && !ownDataStringPrototypeTrim(value)))
         throw Error('loop_contract_text');
 }
 /** Complete producer business description only. Explicit recipes, OS permissions
@@ -41,10 +43,10 @@ function text(value, allowEmpty = false) {
  * The final native review also checks its whole ASCII-safe envelope size. */
 export function parseLoopBusinessContract(raw) {
     const encoded = json(boundedCapture(raw));
-    if (Buffer.byteLength(encoded) > 65536)
+    if (ownDataBufferByteLength(encoded) > 65536)
         throw Error('loop_contract_limit');
-    const captured = JSON.parse(encoded);
-    if (!captured || typeof captured !== 'object' || Array.isArray(captured))
+    const captured = ownDataJSONParse(encoded);
+    if (!captured || typeof captured !== 'object' || ownDataArrayIsArray(captured))
         throw Error('loop_contract_shape');
     const kind = readApplicationOwnDataField(captured, 'kind', 'loop_contract_shape');
     if (kind.kind !== 'data')
@@ -52,7 +54,7 @@ export function parseLoopBusinessContract(raw) {
     const value = captured;
     if (kind.value === 'builtin-diagnostic') {
         shape(value, ['version', 'kind', 'scanner', 'objective', 'completionCriterion']);
-        if (!LOOP_DIAGNOSTIC_SCANNERS.includes(value.scanner))
+        if (!ownDataArrayPrototypeIncludes(privateLOOP_DIAGNOSTIC_SCANNERS, value.scanner))
             throw Error('loop_contract_scanner');
         text(value.objective);
         text(value.completionCriterion);
@@ -68,13 +70,13 @@ export function parseLoopBusinessContract(raw) {
     }
     else if (kind.value === 'assistant') {
         shape(value, ['version', 'kind', 'assistantKind', 'profileId', 'locale', 'timeZone', 'dataScopes', 'objective', 'completionCriterion']);
-        if (!['evening', 'morning'].includes(value.assistantKind) || value.profileId !== 'default-personal-assistant'
-            || !['zh', 'en'].includes(value.locale))
+        if (!ownDataArrayPrototypeIncludes(['evening', 'morning'], value.assistantKind) || value.profileId !== 'default-personal-assistant'
+            || !ownDataArrayPrototypeIncludes(['zh', 'en'], value.locale))
             throw Error('loop_contract_assistant');
         text(value.timeZone);
         text(value.objective);
         text(value.completionCriterion);
-        if (!Array.isArray(value.dataScopes) || value.dataScopes.some(v => !LOOP_ASSISTANT_DATA_SCOPES.includes(v)))
+        if (!ownDataArrayIsArray(value.dataScopes) || ownDataArrayPrototypeSome(value.dataScopes, v => !ownDataArrayPrototypeIncludes(privateLOOP_ASSISTANT_DATA_SCOPES, v)))
             throw Error('loop_contract_data_scopes');
         // Preserve exact scope order and multiplicity from the stored profile. This
         // snapshot describes the candidate; it is not a current permission grant.
@@ -86,5 +88,5 @@ export function parseLoopBusinessContract(raw) {
     return freeze(value);
 }
 export function loopBusinessContractHash(raw) {
-    return createHash('sha256').update('xiaok-loop-business-contract-v1\0').update(json(parseLoopBusinessContract(raw))).digest('hex');
+    return ownDataHashPrototypeDigest(ownDataHashPrototypeUpdate(ownDataHashPrototypeUpdate(ownDataCryptoCreateHash('sha256'), 'xiaok-loop-business-contract-v1\0'), json(parseLoopBusinessContract(raw))), 'hex');
 }

@@ -1,3 +1,4 @@
+import { desktopObservationSessionId, assertInitializedSnapshot, readDesktopTaskProtection } from './protected-observation-reader.js';
 import { assertCompoundHostStorage } from '../sol-pi/compound-host-storage.js';
 import { getCompoundExecutionDomainBinding } from '../sol-pi/compound-execution-domain.js';
 import { getConfigDir } from '../../utils/config.js';
@@ -13,17 +14,7 @@ import { Worker } from 'node:worker_threads';
 import { AgentSessionState } from '../../ai/runtime/session.js';
 import { FileSessionStore, isConfirmedFileSessionPrecommitRejection } from '../../ai/runtime/session-store/file-store.js';
 import { mergeProtectedObservationClosures } from '../../ai/runtime/protected-observation-closure.js';
-export function desktopObservationSessionId(taskId) {
-    if (!taskId || typeof taskId !== 'string')
-        throw new Error('SOL_PI_DESKTOP_TASK_ID_INVALID');
-    return `desktop-observation-${createHash('sha256').update(taskId).digest('hex')}`;
-}
-function assertInitializedSnapshot(snapshot) {
-    if (snapshot.executionProtected !== true || !Number.isSafeInteger(snapshot.storeRevision) || snapshot.storeRevision < 1
-        || snapshot.historyDigest !== computeSessionHistoryDigest(snapshot))
-        throw Error('SOL_PI_DESKTOP_INITIALIZATION_REQUIRED');
-    toDurableSessionSnapshot(snapshot);
-}
+export { desktopObservationSessionId } from './protected-observation-reader.js';
 export class DesktopTaskObservationStore {
     root;
     sessions;
@@ -107,17 +98,8 @@ export class DesktopTaskObservationStore {
     async loadSessionSnapshot(taskId) {
         return this.alias(taskId)?.snapshot ?? await this.sessions.load(desktopObservationSessionId(taskId));
     }
-    async readProtection(taskId) {
-        try {
-            const snapshot = this.alias(taskId)?.snapshot ?? await this.sessions.load(desktopObservationSessionId(taskId));
-            if (snapshot && (!snapshot.protectedObservationClosure || snapshot.executionProtected !== undefined))
-                assertInitializedSnapshot(snapshot);
-            return { closure: mergeProtectedObservationClosures(undefined, snapshot?.protectedObservationClosure),
-                ...(snapshot?.executionProtected ? { executionProtected: true } : {}) };
-        }
-        catch (cause) {
-            throw Object.assign(new Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE', { cause }), { code: 'SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE' });
-        }
+    readProtection(taskId) {
+        return readDesktopTaskProtection(taskId, { loadAlias: id => this.alias(id), loadSession: id => this.sessions.load(id) });
     }
     async read(taskId) { return (await this.readProtection(taskId)).closure; }
     readProtectionSync(taskId) {

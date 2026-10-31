@@ -10,6 +10,7 @@ import { canonicalVerificationJson as json } from './protocol.js';
 import { ARTIFACT_WORKSPACE_QUERIES } from './artifact-workspace-source-schema.js';
 import { capturedSqliteEncoding, encodeCapturedSqliteCell } from './source-sqlite-cell.js';
 const captures = new WeakMap();
+const physicalObservations = new WeakMap();
 const owners = new WeakMap();
 function fields(value, keys) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== keys.sort().join(','))
     throw Error('source_sqlite_protocol'); }
@@ -41,7 +42,7 @@ export async function startSqliteSourceCustody(input) {
         throw Error('source_sqlite_arguments');
     signal.throwIfAborted();
     const child = spawn(executable, args, { cwd: '/', env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' }, stdio: 'pipe' });
-    let ended = false, closing = false, failure, buffer = Buffer.alloc(0), stderrBytes = 0, first, firstSeen = false, busy = false, closePromise;
+    let ended = false, closing = false, failure, buffer = Buffer.alloc(0), stderrBytes = 0, first, firstSeen = false, busy = false, physicalBusy = false, closePromise;
     let waiter;
     let resolveClosed;
     const closed = new Promise(resolve => { resolveClosed = resolve; });
@@ -119,6 +120,18 @@ export async function startSqliteSourceCustody(input) {
         failure ??= Error('source_sqlite_partial_frame'); for (const closeReader of readers)
         closeReader(); for (const bytes of retained)
         bytes.fill(0); retained.length = 0; })(); return closePromise; }
+    async function rejectAfterClose(error, fallback) {
+        poison(error instanceof Error ? error : Error(fallback));
+        try {
+            await close();
+        }
+        catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], 'source_sqlite_close_unknown', { cause: error });
+        }
+        throw error;
+    }
+    function publicCurrent() { current(); if (physicalBusy)
+        throw Error('source_sqlite_physical_active'); }
     let header;
     function parseHeader(value) { fields(value, ['state', 'count', 'pid', 'nonce', 'snapshots']); if (value.state !== 'held' || value.count !== sources.length || value.pid !== child.pid || typeof value.nonce !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.nonce) || !Array.isArray(value.snapshots) || value.snapshots.length !== sources.length)
         throw Error('source_sqlite_header'); value.snapshots.forEach((snapshot, index) => { fields(snapshot, ['index', 'pageSize', 'pageCount', 'physicalFiles']); if (!Array.isArray(snapshot.physicalFiles) || snapshot.physicalFiles.length < 1 || snapshot.physicalFiles.length > 4)
@@ -142,22 +155,85 @@ export async function startSqliteSourceCustody(input) {
         firstSeen = true;
     }
     catch (error) {
-        poison(error instanceof Error ? error : Error('source_sqlite_header'));
-        await close();
-        throw error;
+        return rejectAfterClose(error, 'source_sqlite_header');
     }
     async function check() { const answer = parseHeader(await receive('CHECK')); if (json(answer) !== json(header))
         throw Error('source_sqlite_changed'); current(); }
     let captured = false;
     const owner = Object.freeze({
+        /** A fresh observation of every original physical file, never retirement or
+         * evidence that a previous reviewed logical snapshot remains unchanged. */
+        async capturePhysicalFiles(maximumPhysicalBytes = 128 * 1024 ** 2) {
+            current();
+            if (arguments.length > 1 || !Number.isSafeInteger(maximumPhysicalBytes) || maximumPhysicalBytes < 0 || maximumPhysicalBytes > 128 * 1024 ** 2)
+                throw Error('source_sqlite_physical_limit');
+            if (busy || readers.size)
+                throw Error('source_sqlite_concurrent');
+            const expected = header.snapshots.flatMap(snapshot => snapshot.physicalFiles.map(file => ({ index: snapshot.index, ...file })));
+            if (expected.reduce((total, file) => total + BigInt(file.byteLength), 0n) > BigInt(maximumPhysicalBytes))
+                throw Error('source_sqlite_physical_limit');
+            busy = true;
+            physicalBusy = true;
+            try {
+                await check();
+                const start = await receive('RAW');
+                fields(start, ['state', 'nonce', 'count', 'files']);
+                if (start.state !== 'physical-start' || start.nonce !== header.nonce || start.count !== sources.length || json(start.files) !== json(expected))
+                    throw Error('source_sqlite_physical_manifest');
+                const facts = [];
+                for (const file of expected) {
+                    const begin = await receive('RAW-NEXT');
+                    fields(begin, ['state', 'nonce', 'index', 'suffix', 'device', 'inode', 'byteLength']);
+                    if (begin.state !== 'physical-file' || begin.nonce !== header.nonce || json({ index: begin.index, suffix: begin.suffix, device: begin.device, inode: begin.inode, byteLength: begin.byteLength }) !== json(file))
+                        throw Error('source_sqlite_physical_file');
+                    const length = Number(file.byteLength), hash = createHash('sha256');
+                    let offset = 0;
+                    while (offset < length) {
+                        const chunk = await receive('RAW-NEXT');
+                        fields(chunk, ['state', 'nonce', 'index', 'suffix', 'offset', 'bytes']);
+                        if (chunk.state !== 'physical-chunk' || chunk.nonce !== header.nonce || chunk.index !== file.index || chunk.suffix !== file.suffix || chunk.offset !== offset || typeof chunk.bytes !== 'string' || chunk.bytes.length < 2 || chunk.bytes.length > 65536 * 2 || chunk.bytes.length % 2 || !/^[a-f0-9]+$/.test(chunk.bytes))
+                            throw Error('source_sqlite_physical_chunk');
+                        const bytes = Buffer.from(chunk.bytes, 'hex');
+                        try {
+                            if (bytes.length > length - offset)
+                                throw Error('source_sqlite_physical_chunk');
+                            hash.update(bytes);
+                            offset += bytes.length;
+                        }
+                        finally {
+                            bytes.fill(0);
+                        }
+                    }
+                    const end = await receive('RAW-NEXT');
+                    fields(end, ['state', 'nonce', 'index', 'suffix', 'byteLength']);
+                    if (end.state !== 'physical-file-complete' || end.nonce !== header.nonce || end.index !== file.index || end.suffix !== file.suffix || end.byteLength !== file.byteLength)
+                        throw Error('source_sqlite_physical_incomplete');
+                    facts.push(Object.freeze({ ...file, sha256: hash.digest('hex') }));
+                }
+                const end = await receive('RAW-NEXT');
+                fields(end, ['state', 'nonce', 'count', 'fileCount']);
+                if (end.state !== 'physical-complete' || end.nonce !== header.nonce || end.count !== sources.length || end.fileCount !== expected.length)
+                    throw Error('source_sqlite_physical_incomplete');
+                await check();
+                current();
+                const token = Object.freeze({});
+                physicalObservations.set(token, { owner, facts: Object.freeze(facts) });
+                return token;
+            }
+            catch (error) {
+                return rejectAfterClose(error, 'source_sqlite_physical_capture');
+            }
+            finally {
+                busy = false;
+                physicalBusy = false;
+            }
+        },
         async checkCurrent() { current(); if (busy)
             throw Error('source_sqlite_concurrent'); busy = true; try {
             await check();
         }
         catch (error) {
-            poison(error instanceof Error ? error : Error('source_sqlite_changed'));
-            await close();
-            throw error;
+            return rejectAfterClose(error, 'source_sqlite_changed');
         }
         finally {
             busy = false;
@@ -199,20 +275,29 @@ export async function startSqliteSourceCustody(input) {
             return token;
         }
         catch (error) {
-            poison(error instanceof Error ? error : Error('source_sqlite_capture'));
-            await close();
-            throw error;
+            return rejectAfterClose(error, 'source_sqlite_capture');
         }
         finally {
             busy = false;
         } },
         close,
     });
-    owners.set(owner, { current, readers });
+    owners.set(owner, { current: publicCurrent, readers });
     return owner;
 }
 export function readSqliteSourceCapture(owner, token) { const entry = owners.get(owner), capture = captures.get(token); if (!entry || !capture || capture.owner !== owner)
     throw Error('source_sqlite_capture_brand'); entry.current(); return capture.facts; }
+/** Immutable observed hashes only; a later physical action requires a new
+ * actual observation and its separate native authorization/currentness gate. */
+export function readSqliteSourcePhysicalFiles(owner, token) {
+    if (arguments.length !== 2)
+        throw Error('source_sqlite_physical_arguments');
+    const entry = owners.get(owner), observation = physicalObservations.get(token);
+    if (!entry || !observation || observation.owner !== owner)
+        throw Error('source_sqlite_physical_brand');
+    entry.current();
+    return observation.facts;
+}
 /** Opens a parsing representation only. The captured hash always describes the
  * original pager bytes; changing WAL header flags here neither changes those
  * bytes nor creates a reviewed source identity. No database handle escapes. */

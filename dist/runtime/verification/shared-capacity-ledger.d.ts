@@ -167,6 +167,7 @@ export declare function createSharedCapacityLedger(authority: object): Readonly<
     }>;
     querySessionAttribution(raw: CapacityAttributionInput): Readonly<CapacityAttributionRecord> | undefined;
     bindOwner(binding: object): CapacityOwner;
+    bindOwners(bindings: readonly object[]): readonly CapacityOwner[];
     reserve(token: CapacityOwner, raw: CapacityProposal): Readonly<{
         record: Readonly<CapacityRecord>;
         created: false;

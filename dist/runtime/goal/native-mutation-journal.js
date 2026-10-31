@@ -1,3 +1,4 @@
+import { createKnownDirectoryWriterFence } from '../verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../verification/ordinary-source-writer-observation.js';
 import { parseGoalForkSourceSnapshot } from '../verification/owner-enrollment-review.js';
 import { createHash } from 'node:crypto';
@@ -129,12 +130,14 @@ function validateRecords(sessionId, raw) {
 }
 /** Main/CLI-owned recovery facts, not authorization. The byte/count bounds are
  * per session, including all terminal records; no whole-profile bound is claimed. */
+const knownGoalNativeWriters = new WeakMap();
 export class FileGoalNativeJournal {
     rootDir;
     atomicWrite;
     constructor(rootDir, atomicWrite = writeFileAtomicallySync) {
         this.rootDir = rootDir;
         this.atomicWrite = atomicWrite;
+        knownGoalNativeWriters.set(this, createKnownDirectoryWriterFence(rootDir, 'goal-file-root'));
     }
     load(sessionId) {
         id(sessionId);
@@ -168,6 +171,9 @@ export class FileGoalNativeJournal {
         return parseGoalNativeJournalDocument(JSON.parse(encoded), sessionId);
     }
     put(raw) {
+        const writer = knownGoalNativeWriters.get(this);
+        if (!writer)
+            throw Error('known_writer_fence_owner');
         // Capture before filesystem locking, the writer or any host callback.
         const value = JSON.parse(json(raw));
         shape(value, ['sessionId', 'requestSource', 'expectedRevision', 'next']);
@@ -185,6 +191,7 @@ export class FileGoalNativeJournal {
         mkdirSync(this.rootDir, { recursive: true });
         const release = acquireSaveLock(join(this.rootDir, '.goal-native.save.lock'));
         try {
+            writer.assertOpen();
             observeOrdinaryDirectoryWriter(this.rootDir, 'goal-file-root');
             assertOrdinarySourceWriterRoute();
             const records = this.load(value.sessionId), index = records.findIndex(row => row.id === next.id), before = records[index];

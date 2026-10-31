@@ -80,6 +80,7 @@ export declare function assertInstalledBlackboxExecution(token: object, database
 export declare function assertInstalledVerificationCurrent(token: object): void;
 export declare function readInstalledVerificationClock(token: object): Readonly<import("./receiver-store.js").ReceiverClockEvidence>;
 export declare function ensureInstalledVerificationQualification(token: object, signal: AbortSignal): Promise<void>;
+export declare function prepareInstalledMetadataTarget(assembly: object, owner: object, token: object, closure: object, signal: AbortSignal): Promise<object>;
 export declare function recordInstalledVerificationResult(token: object, result: {
     expected: QuiescenceExpectation;
     output: object;

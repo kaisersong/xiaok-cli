@@ -105,6 +105,10 @@ function shouldMatch(config, eventName, payload) {
 function normalizeConfig(raw) {
     if (typeof raw === 'string')
         return { type: 'command', command: raw };
+    if (raw.outputFormat !== undefined && raw.outputFormat !== 'json')
+        throw new Error('hook_output_format_invalid');
+    if (raw.outputFormat === 'json' && raw.async)
+        throw new Error('hook_json_async_unsupported');
     const config = !raw.type ? { ...raw, type: 'command' } : raw;
     if (config.events && config.events.length > 0) {
         const filtered = config.events.filter((event) => {
@@ -133,11 +137,44 @@ function buildPayload(eventName, data, ctx) {
         ...data,
     });
 }
-function interpretExitCode(result, eventName) {
+function interpretExitCode(result, eventName, config) {
     // Parse structured JSON from stdout
     const trimmed = result.stdout.trim();
     let parsed = {};
-    if (trimmed.startsWith('{')) {
+    if (config.outputFormat === 'json') {
+        try {
+            const value = JSON.parse(trimmed);
+            if (!value || typeof value !== 'object' || Array.isArray(value))
+                throw new Error('invalid object');
+            parsed = value;
+            const fields = [
+                ['updatedInput', field => field !== null && typeof field === 'object' && !Array.isArray(field)],
+                ['preventContinuation', field => typeof field === 'boolean'],
+                ['additionalContext', field => typeof field === 'string'],
+                ['message', field => typeof field === 'string'],
+                ['reason', field => typeof field === 'string'],
+                ['decision', field => field === 'allow' || field === 'deny'],
+                ['ok', field => typeof field === 'boolean'],
+            ];
+            for (const [key, valid] of fields) {
+                if (Object.hasOwn(parsed, key) && !valid(parsed[key]))
+                    throw new Error('invalid field');
+            }
+        }
+        catch {
+            if (BLOCKING_EVENTS.has(eventName))
+                return {
+                    ok: false, preventContinuation: true, decision: 'deny',
+                    errorCode: 'hook_invalid_json_output', message: 'hook_invalid_json_output',
+                };
+            return { message: 'hook_invalid_json_output' };
+        }
+        // Prompt control is consumed only after the declared output is validated.
+        if (config.type === 'prompt' && parsed['ok'] === false) {
+            result = { ...result, exitCode: 2, stderr: parsed['reason'] ?? 'Blocked by prompt hook' };
+        }
+    }
+    else if (trimmed.startsWith('{')) {
         try {
             parsed = JSON.parse(trimmed);
         }
@@ -283,6 +320,8 @@ async function executePrompt(config, payloadJson, promptExecutor) {
     {
         const response = await promptExecutor(fullPrompt, config.model);
         const trimmed = response.trim();
+        if (config.outputFormat === 'json')
+            return { exitCode: 0, stdout: trimmed, stderr: '' };
         // Parse LLM response — expect {ok: true} or {ok: false, reason: "..."}
         if (trimmed.startsWith('{')) {
             try {
@@ -396,7 +435,7 @@ export function createHooksRunner(config = {}) {
                 else {
                     result = await ownRaw(executeCommand(hook, timeout, payloadJson, signal, extraEnv));
                 }
-                const interpreted = interpretExitCode(result, eventName);
+                const interpreted = interpretExitCode(result, eventName, hook);
                 if (interpreted.ok === false || (eventName === 'PermissionRequest' && interpreted.decision === 'deny')) {
                     // Blocking result — return immediately
                     return {
@@ -404,6 +443,7 @@ export function createHooksRunner(config = {}) {
                         message: interpreted.message,
                         preventContinuation: true,
                         decision: interpreted.decision,
+                        ...(interpreted.errorCode ? { errorCode: interpreted.errorCode } : {}),
                     };
                 }
                 if (eventName === 'PermissionRequest' && result.exitCode !== 0)
@@ -476,6 +516,8 @@ export function createHooksRunner(config = {}) {
         },
         async runPostHooks(toolName, input) {
             const result = await runHooks('PostToolUse', { tool_name: toolName, tool_input: input });
+            if (result.errorCode === 'hook_invalid_json_output')
+                throw new Error(result.errorCode);
             return result.message ? [result.message] : [];
         },
     };

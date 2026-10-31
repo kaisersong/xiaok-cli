@@ -1,3 +1,4 @@
+import { createKnownDirectoryWriterFence } from '../../../runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../../../runtime/verification/ordinary-source-writer-observation.js';
 import { constants, openSync, closeSync, fstatSync, readSync, lstatSync, existsSync, realpathSync, mkdirSync, unlinkSync, opendirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -164,8 +165,14 @@ function verifyHolder(binding) {
 }
 /** Caller holds the shared FileSessionStore root mutation lock and actual target
  * execution lease. This low-level identity transaction does not issue grants. */
+function assertAliasWriterOpen(root, binding) {
+    createKnownDirectoryWriterFence(root, 'session-root').assertOpen();
+    createKnownDirectoryWriterFence(join(binding.holderRoot, '.canonical-session-aliases'), 'session-alias-holder').assertOpen();
+}
 export function registerSessionAliasLocked(root, input) {
-    const binding = captureSessionAlias(input), rows = readSessionAliases(root), existing = rows.find(row => row.aliasId === binding.aliasId);
+    const binding = captureSessionAlias(input);
+    assertAliasWriterOpen(root, binding);
+    const rows = readSessionAliases(root), existing = rows.find(row => row.aliasId === binding.aliasId);
     if (existing) {
         if (!isDeepStrictEqual(captureSessionAlias(existing), binding))
             fail('conflict');
@@ -190,7 +197,9 @@ export function registerSessionAliasLocked(root, input) {
     return Object.freeze({ markerPath: path, binding: Object.freeze(binding) });
 }
 export function releaseSessionAliasLocked(root, input) {
-    const binding = captureSessionAlias(input), rows = readSessionAliases(root), existing = rows.find(row => row.aliasId === binding.aliasId);
+    const binding = captureSessionAlias(input);
+    assertAliasWriterOpen(root, binding);
+    const rows = readSessionAliases(root), existing = rows.find(row => row.aliasId === binding.aliasId);
     if (!existing || !isDeepStrictEqual(captureSessionAlias(existing), binding))
         fail('conflict');
     verifyHolder(binding);

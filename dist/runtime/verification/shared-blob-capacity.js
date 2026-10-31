@@ -5,6 +5,7 @@ import { inspectBlobSharedWholeCommand, executeBlobSharedWholeCommand, inspectBl
 import { consumeSharedCapacityCommandContext } from './shared-capacity-ledger.js';
 import { readInstalledMetadataOwner, readInstalledMetadataOwners } from './installed-metadata-source.js';
 import { captureOwnerBindingBatch } from './owner-binding-batch-input.js';
+import { inspectMetadataPreparationOwner, readMetadataPreparationOwners } from './installed-metadata-target-prepare.js';
 import { createControllerMetadataCapacity } from './controller-metadata-capacity.js';
 import { readApprovedBlackboxCapacityLineage } from './approved-blackbox-stager.js';
 import { inspectLegacyBlobInventory } from './shared-blob-migration.js';
@@ -94,25 +95,29 @@ export function executeSharedBlobLedgerCommand(command, context) { const importe
 const sharedAuthorityContexts = new WeakMap();
 export function readSharedCapacityOwner(authority, binding) { const context = sharedAuthorityContexts.get(authority); if (!context)
     throw Error('capacity_authority_configuration'); const actual = readInstalledCapacityAuthority(authority); if (actual.database !== context.database || actual.authorityId !== context.authorityId)
-    throw Error('shared_blob_database'); const value = context.bindings.get(binding); return value ? { sessionKey: value.sessionKey, producerKey: value.producerKey } : readInstalledMetadataOwner(binding, context.database, context.authorityId); }
+    throw Error('shared_blob_database'); const value = context.bindings.get(binding); return value ? { sessionKey: value.sessionKey, producerKey: value.producerKey } : inspectMetadataPreparationOwner(binding) ? readMetadataPreparationOwners(authority, [binding])[0] : readInstalledMetadataOwner(binding, context.database, context.authorityId); }
 export function readSharedCapacityOwners(authority, bindings) {
     if (arguments.length !== 2)
         throw Error('capacity_authority_configuration');
     const context = sharedAuthorityContexts.get(authority);
     if (!context)
         throw Error('capacity_authority_configuration');
-    const captured = captureOwnerBindingBatch(bindings), missing = [], known = captured.map(binding => {
+    const captured = captureOwnerBindingBatch(bindings), missing = [], prepared = [], known = captured.map(binding => {
         const actual = readInstalledCapacityAuthority(authority);
         if (actual.database !== context.database || actual.authorityId !== context.authorityId)
             throw Error('shared_blob_database');
         const value = context.bindings.get(binding);
-        if (!value)
-            missing.push(binding);
+        if (!value) {
+            if (inspectMetadataPreparationOwner(binding))
+                prepared.push(binding);
+            else
+                missing.push(binding);
+        }
         return value;
     });
-    const native = missing.length ? readInstalledMetadataOwners(missing, context.database, context.authorityId) : [];
-    let index = 0;
-    return Object.freeze(known.map(value => value ? Object.freeze({ sessionKey: value.sessionKey, producerKey: value.producerKey }) : native[index++]));
+    const native = missing.length ? readInstalledMetadataOwners(missing, context.database, context.authorityId) : [], archive = prepared.length ? readMetadataPreparationOwners(authority, prepared) : [];
+    let index = 0, archiveIndex = 0;
+    return Object.freeze(known.map((value, i) => value ? Object.freeze({ sessionKey: value.sessionKey, producerKey: value.producerKey }) : inspectMetadataPreparationOwner(captured[i]) ? archive[archiveIndex++] : native[index++]));
 }
 export function assertSharedCapacityReleased(authority, receipt, record) { const context = sharedAuthorityContexts.get(authority); if (!context)
     throw Error('capacity_authority_configuration'); const p = context.releaseProofs.get(receipt); if (!p || 'blob-' + hash({ authorityId: context.authorityId, resourceId: p.resourceId, allocation: p }) !== record.operationId || hash(p) !== record.bindingHash)

@@ -12,4 +12,4 @@ export interface LoopHostSubject {
 export declare function parseLoopHostSubject(raw: unknown): Readonly<LoopHostSubject>;
 export declare function loopHostSubjectHash(raw: unknown): string;
 /** Shared exact identity mapping; this does not register the owner. */
-export declare function loopHostSubjectOwner(raw: unknown): Pick<import("./proof-authority.js").VerificationOwner, "ownerId" | "ownerKind">;
+export declare function loopHostSubjectOwner(raw: unknown): Pick<import("./proof-authority.js").VerificationOwner, "ownerKind" | "ownerId">;

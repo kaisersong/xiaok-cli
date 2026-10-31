@@ -7,9 +7,10 @@ import { createHash } from 'node:crypto';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { PROFILE_DIRECTORY_SOURCE_FORMATS } from './profile-source-descriptor.js';
 import { startDirectorySourceCustody, readDirectorySourceCapture, readDirectorySourceFile, readDirectorySourceFileRange, readDirectorySourceMetadataBytes } from './source-directory-process.js';
-import { startSqliteSourceCustody, readSqliteSourceCapture, readSqliteSourceSchema, readSqliteSourceRows, readSqliteSourcePage, captureInstalledSqliteSource, assertSqliteSessionFtsIntegrity } from './source-sqlite-process.js';
+import { startSqliteSourceCustody, readSqliteSourceCapture, readSqliteSourcePhysicalFiles, readSqliteSourceSchema, readSqliteSourceRows, readSqliteSourcePage, captureInstalledSqliteSource, assertSqliteSessionFtsIntegrity } from './source-sqlite-process.js';
 import { assertSqliteSourceIntegrity, readSqliteSourceLosslessRows } from './source-sqlite-process.js';
 const owners = new WeakMap(), captures = new WeakMap(), LIMIT = 128 * 1024 ** 2;
+const physicalObservations = new WeakMap();
 const hash = (value) => createHash('sha256').update(json(value)).digest('hex');
 /** Actual all-leaf capture owner. This is facts, not an approval, full historical
  * inventory, native-effect drain or capacity issuer. No caller callback can
@@ -64,7 +65,7 @@ export async function startProfileSourceCapture(input) {
         abort();
     const dirBatches = [], sqlBatches = [];
     let assertCaptures;
-    let failure, closing = false, busy = false, consumed = false, closePromise;
+    let failure, closing = false, busy = false, physicalBusy = false, consumed = false, closePromise;
     function current() { if (failure)
         throw failure; if (closing)
         throw Error('profile_capture_closed'); controller.signal.throwIfAborted(); if (assertCaptures)
@@ -76,6 +77,8 @@ export async function startProfileSourceCapture(input) {
             controller.abort(failure);
             throw failure;
         } }
+    function publicCurrent() { if (physicalBusy)
+        throw Error('profile_capture_physical_active'); current(); }
     async function close() { if (closePromise)
         return closePromise; closing = true; signal.removeEventListener('abort', abort); closePromise = (async () => { const results = await Promise.allSettled([...sqlBatches.map(b => b.owner.close()), ...dirBatches.map(b => b.owner.close())]); const errors = results.filter((r) => r.status === 'rejected').map(r => r.reason); if (errors.length)
         throw new AggregateError(errors, 'profile_capture_close_unknown'); })(); return closePromise; }
@@ -127,7 +130,8 @@ export async function startProfileSourceCapture(input) {
         await batch.owner.checkCurrent(); for (const batch of sqlBatches)
         await batch.owner.checkCurrent(); current(); }
     const owner = Object.freeze({
-        async checkCurrent() { current(); if (busy)
+        async checkCurrent() { if (physicalBusy)
+            throw Error('profile_capture_concurrent'); current(); if (busy)
             throw Error('profile_capture_concurrent'); busy = true; try {
             await check();
         }
@@ -138,7 +142,7 @@ export async function startProfileSourceCapture(input) {
             busy = false;
         } },
         async capture() {
-            current();
+            publicCurrent();
             if (busy || consumed)
                 throw Error('profile_capture_consumed');
             busy = true;
@@ -227,11 +231,85 @@ export async function startProfileSourceCapture(input) {
             finally {
                 busy = false;
             }
+        },
+        /** Local held-file observations only: no writer, target or installed authority. */
+        async capturePhysicalSqliteFiles(captureToken, maximumPhysicalBytes = LIMIT) {
+            publicCurrent();
+            if (arguments.length < 1 || arguments.length > 2)
+                throw Error('profile_capture_physical_arguments');
+            const capture = captures.get(captureToken);
+            if (!capture || capture.owner !== owner)
+                throw Error('profile_capture_brand');
+            if (busy)
+                throw Error('profile_capture_concurrent');
+            // Check every lower parser before starting the first batch. A valid reader
+            // in the last batch must never be poisoned by partially admitted RAW work.
+            if (capture.readerActive || [...capture.records.values()].some(r => r.sqlite && hasSqliteSourceParser(r.sqlite.owner, r.sqlite.token)))
+                throw Error('profile_capture_reader_busy');
+            if (!Number.isSafeInteger(maximumPhysicalBytes) || maximumPhysicalBytes < 0 || maximumPhysicalBytes > LIMIT || BigInt(capture.facts.physicalFileBytes) > BigInt(maximumPhysicalBytes))
+                throw Error('profile_capture_physical_limit');
+            const physical = new Map();
+            let reserved = 0n;
+            const reserve = (device, inode, size) => { const key = json([device, inode]), old = physical.get(key); if (old !== undefined) {
+                if (old !== size)
+                    throw Error('profile_capture_physical_changed');
+                return;
+            } reserved += BigInt(size); if (reserved > BigInt(maximumPhysicalBytes))
+                throw Error('profile_capture_physical_limit'); physical.set(key, size); };
+            for (const r of capture.records.values())
+                if (r.directory)
+                    for (const e of r.directory.entries)
+                        if ((e.mode & 0o170000) === 0o100000)
+                            reserve(e.device, e.inode, e.physicalSize);
+            // Reserve the original union once, retaining overlapping directory refs.
+            // Each lower receives its exact manifest envelope, never a fresh 128 MiB.
+            const plans = sqlBatches.map(batch => { let bytes = 0n; const expected = batch.sources.flatMap((source, index) => { const r = capture.records.get(source.sourceId); if (!r.sqlite || r.sqlite.owner !== batch.owner || r.sqlite.index !== index)
+                throw Error('profile_capture_physical_mapping'); return r.sqlite.facts.physicalFiles.map(file => { reserve(file.device, file.inode, file.byteLength); bytes += BigInt(file.byteLength); return { ...file, index }; }); }); if (bytes > BigInt(LIMIT))
+                throw Error('profile_capture_physical_limit'); return { batch, expected, bytes: Number(bytes) }; });
+            if (reserved !== BigInt(capture.facts.physicalFileBytes))
+                throw Error('profile_capture_physical_manifest');
+            physicalBusy = true;
+            busy = true;
+            try {
+                const files = [], observedHashes = new Map();
+                for (const { batch, expected, bytes } of plans) {
+                    current();
+                    const token = await batch.owner.capturePhysicalFiles(bytes), observed = readSqliteSourcePhysicalFiles(batch.owner, token);
+                    if (observed.length !== expected.length)
+                        throw Error('profile_capture_physical_mapping');
+                    for (let i = 0; i < observed.length; i++) {
+                        const row = observed[i], { sha256, ...identity } = row;
+                        if (json(identity) !== json(expected[i]))
+                            throw Error('profile_capture_physical_mapping');
+                        const key = json([row.device, row.inode]), old = observedHashes.get(key);
+                        if (old !== undefined && old !== sha256)
+                            throw Error('profile_capture_physical_changed');
+                        observedHashes.set(key, sha256);
+                        files.push(Object.freeze({ sourceId: batch.sources[row.index].sourceId, suffix: row.suffix, device: row.device, inode: row.inode, byteLength: row.byteLength, sha256 }));
+                    }
+                    current();
+                }
+                await check();
+                current();
+                const token = Object.freeze({});
+                physicalObservations.set(token, { owner, capture: captureToken, files: Object.freeze(files) });
+                return token;
+            }
+            catch (error) {
+                return reject(error);
+            }
+            finally {
+                physicalBusy = false;
+                busy = false;
+            }
         }, close,
     });
-    owners.set(owner, { current, check: owner.checkCurrent.bind(owner) });
+    owners.set(owner, { current: publicCurrent, check: owner.checkCurrent.bind(owner) });
     return owner;
 }
+export function readProfileSqlitePhysicalFiles(owner, token) { if (arguments.length !== 2)
+    throw Error('profile_capture_physical_arguments'); const value = physicalObservations.get(token); if (!value || value.owner !== owner)
+    throw Error('profile_capture_physical_brand'); captured(owner, value.capture); return value.files; }
 function captured(owner, token) { const original = owners.get(owner), value = captures.get(token); if (!original || !value || value.owner !== owner)
     throw Error('profile_capture_brand'); original.current(); return value; }
 export function readProfileSourceCapture(owner, token) { return captured(owner, token).facts; }
@@ -332,31 +410,88 @@ export async function startInstalledProfileSourceCapture(lifetime, broker, handl
     installedProfileImports.add(handle);
     const records = new Map(), bodies = [];
     let failure;
-    let closing = false, consumed = false, token, closePromise;
+    let closing = false, consumed = false, checking = false, physicalActive = false, physicalWork, token, closePromise;
     function current() { if (failure)
         throw failure; if (closing)
         throw Error('profile_capture_closed'); signal.throwIfAborted(); assertInstalledRootBrokerClient(broker, lifetime); broker.describeProfileCapture(handle); for (const r of records.values())
         if (r.sqlite)
             readSqliteSourceCapture(r.sqlite.owner, r.sqlite.token); }
-    const owner = Object.freeze({ async checkCurrent() { try {
-            current();
-            await broker.checkProfileCapture(handle, signal);
-            current();
+    function publicCurrent() { current(); if (physicalActive)
+        throw Error('profile_capture_physical_active'); }
+    async function checkBase() { current(); await broker.checkProfileCapture(handle, signal); current(); }
+    const owner = Object.freeze({
+        async checkCurrent() { if (physicalActive || checking)
+            throw Error('profile_capture_concurrent'); checking = true; try {
+            publicCurrent();
+            await checkBase();
+            publicCurrent();
         }
         catch (error) {
             failure = error;
             throw error;
-        } }, async capture() { current(); if (consumed || !token)
-            throw Error('profile_capture_consumed'); consumed = true; await owner.checkCurrent(); return token; }, close() { if (closePromise)
-            return closePromise; closing = true; return closePromise = (async () => { const results = await Promise.allSettled([...records.values()].flatMap(r => r.sqlite ? [r.sqlite.owner.close()] : [])); for (const bytes of bodies)
+        }
+        finally {
+            checking = false;
+        } },
+        async capture() { publicCurrent(); if (checking)
+            throw Error('profile_capture_concurrent'); if (consumed || !token)
+            throw Error('profile_capture_consumed'); consumed = true; await owner.checkCurrent(); return token; },
+        async capturePhysicalSqliteFiles(captureToken, maximumPhysicalBytes = LIMIT) {
+            publicCurrent();
+            if (arguments.length < 1 || arguments.length > 2)
+                throw Error('profile_capture_physical_arguments');
+            const capture = captured(owner, captureToken), installed = installedProfileOwners.get(owner);
+            if (!installed || installed.lifetime !== lifetime || installed.broker !== broker || installed.handle !== handle)
+                throw Error('profile_capture_installed_brand');
+            if (checking || physicalActive)
+                throw Error('profile_capture_concurrent');
+            if (capture.readerActive || [...capture.records.values()].some(r => r.sqlite && hasSqliteSourceParser(r.sqlite.owner, r.sqlite.token)))
+                throw Error('profile_capture_reader_busy');
+            if (!Number.isSafeInteger(maximumPhysicalBytes) || maximumPhysicalBytes < 0 || maximumPhysicalBytes > LIMIT || BigInt(capture.facts.physicalFileBytes) > BigInt(maximumPhysicalBytes))
+                throw Error('profile_capture_physical_limit');
+            const expected = [...capture.records.values()].filter(r => r.sqlite).flatMap(r => r.sqlite.facts.physicalFiles.map(f => ({ sourceId: r.source.sourceId, ...f })));
+            physicalActive = true;
+            const work = (async () => { try {
+                await checkBase();
+                const observed = await installed.broker.observeProfilePhysicalSqliteFiles(installed.handle, signal), files = installed.broker.readProfilePhysicalSqliteFiles(observed);
+                current();
+                if (files.length !== expected.length)
+                    throw Error('profile_capture_physical_mapping');
+                const mapped = files.map((file, index) => { const original = expected[index], { sha256, ...identity } = file; if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256) || json(identity) !== json(original))
+                    throw Error('profile_capture_physical_mapping'); return Object.freeze({ ...original, sha256 }); });
+                await checkBase();
+                current();
+                const result = Object.freeze({});
+                physicalObservations.set(result, { owner, capture: captureToken, files: Object.freeze(mapped) });
+                return result;
+            }
+            catch (error) {
+                failure = error;
+                throw error;
+            } })();
+            physicalWork = work;
+            try {
+                return await work;
+            }
+            finally {
+                physicalActive = false;
+                if (physicalWork === work)
+                    physicalWork = undefined;
+            }
+        },
+        close() { if (closePromise)
+            return closePromise; closing = true; return closePromise = (async () => { if (physicalWork)
+            await Promise.allSettled([physicalWork]); const results = await Promise.allSettled([...records.values()].flatMap(r => r.sqlite ? [r.sqlite.owner.close()] : [])); for (const bytes of bodies)
             bytes.fill(0); bodies.length = 0; let error; try {
-            await broker.releaseProfileCapture(handle);
+            if (!broker.isProfileCaptureReleased(handle))
+                await broker.releaseProfileCapture(handle);
         }
         catch (reason) {
             error = reason;
         } const errors = results.filter((r) => r.status === 'rejected').map(r => r.reason); if (error)
             errors.push(error); if (errors.length)
-            throw new AggregateError(errors, 'profile_capture_remote_close_unknown'); })(); } });
+            throw new AggregateError(errors, 'profile_capture_remote_close_unknown'); })(); }
+    });
     try {
         current();
         const manifest = await broker.loadProfileCaptureManifest(handle, signal);
@@ -398,7 +533,7 @@ export async function startInstalledProfileSourceCapture(lifetime, broker, handl
         }
         await owner.checkCurrent();
         token = Object.freeze({});
-        owners.set(owner, { current, check: owner.checkCurrent.bind(owner) });
+        owners.set(owner, { current: publicCurrent, check: owner.checkCurrent.bind(owner) });
         captures.set(token, { owner, facts: manifest.facts, records });
         installedProfileOwners.set(owner, { lifetime, broker, handle });
         return owner;

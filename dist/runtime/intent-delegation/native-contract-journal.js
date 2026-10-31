@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 import { parseIntentBusinessContract, intentBusinessContractHash } from '../verification/intent-business-contract.js';
 import { parseGoalVerificationDefinition } from '../goal/verification-definition.js';
-import { captureIntentData } from './intent-commit-boundary.js';
+import { captureIntentData } from './data.js';
 import { createEmptySessionIntentLedger, createIntentLedgerRecord } from './types.js';
 import { assertSessionWriteOwnership, resumeSessionOwnership, takeoverSessionOwnership, releaseSessionOwnership } from './ownership.js';
 const id = (v) => typeof v === 'string' && v.length > 0 && Buffer.byteLength(v) <= 160 && !/[\x00-\x1f\x7f]/.test(v);
@@ -86,8 +86,13 @@ export function assertIntentNativeJournalRetained(previous, next, sessionId, nat
 export function assertNoIntentNativeJournal(snapshot) {
     if (snapshot && snapshot.intentDelegation && Object.hasOwn(snapshot.intentDelegation, 'nativeContracts')) {
         parseIntentNativeContracts(snapshot.intentDelegation.nativeContracts, snapshot.sessionId);
-        if (snapshot.intentDelegation.nativeContracts?.length)
-            throw Error('intent_native_journal_retained');
+        const current = snapshot.intentDelegation.nativeContracts;
+        if (current !== undefined && current !== null) {
+            if (!Array.isArray(current))
+                throw Error('intent_native_journal');
+            if (current.length)
+                throw Error('intent_native_journal_retained');
+        }
     }
 }
 export function captureIntentNativeRequest(kind, raw) {

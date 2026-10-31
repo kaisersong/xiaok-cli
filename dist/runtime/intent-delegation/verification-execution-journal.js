@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { captureIntentData } from './data.js';
 import { intentNativeLedgerHash } from './native-contract-journal.js';
-import { parseIntentPublicationCandidates, intentPublicationTarget, intentPublicationRouteVector, applyIntentPublicationMutation } from './publication-candidate-journal.js';
+import { parseIntentPublicationCandidates, intentPublicationTarget, intentPublicationRouteVector, applyIntentPublicationMutation, intentPublicationFactArray, intentPublicationFactObject } from './publication-candidate-journal.js';
 import { assertSessionWriteOwnership } from './ownership.js';
 import { parseValidationMaterialDraft } from '../verification/product-material-authorization.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
@@ -27,7 +27,11 @@ function target(ledger, candidateId, obligationId, registration) {
         throw Error('intent_verification_obligation');
     return { candidate, binding, definition };
 }
-/** Durable identity and source facts only. No returned row grants native/execution/publication. */
+function assertVerificationOperationRowData(row) {
+    parseOwnerEnrollmentRegistration(row.registration);
+    if (typeof row.route !== 'string')
+        throw Error('intent_verification_route');
+}
 export function parseIntentVerificationExecutions(ledger) {
     const rows = captureIntentData(ledger?.verificationExecutions ?? []);
     if (!Array.isArray(rows))
@@ -60,12 +64,15 @@ export function parseIntentVerificationExecutions(ledger) {
             throw Error('intent_verification_registration');
         if (row.phase !== 'enrolled' && row.operation !== null)
             throw Error('intent_operation_phase');
+        assertVerificationOperationRowData(row);
         parseIntentVerificationOperation(row.operation, row, binding);
         validateFact(row.enrollmentObservation, row, binding);
         if (row.phase !== phaseForFact(row.enrollmentObservation, row.phase === 'reserved'))
             throw Error('intent_verification_state');
         if (row.bindingHash !== candidate.bindingHash || row.sourceHash !== candidate.sourceHash || !candidate.applicationAttempts.some(a => a.phase === 'ready' && a.route === row.route))
             throw Error('intent_verification_original');
+        if (typeof row.createdAt !== 'number')
+            throw Error('intent_verification_state');
         const draft = parseValidationMaterialDraft(row.draft, row.createdAt);
         if (draft.purpose !== 'isolated-command' || json(draft.invocation) !== json(row.invocation))
             throw Error('intent_verification_draft');
@@ -167,7 +174,7 @@ export function captureIntentVerificationOperation(raw) {
 }
 function currentCandidate(previous, ledger, input, candidate) {
     const attempt = candidate.applicationAttempts.at(-1);
-    if (attempt.phase !== 'ready' || !attempt.route || input.now < attempt.updatedAt || ledger.activeIntentId !== candidate.intentId || (candidate.stageId === null ? ledger.intents.find(r => r.intentId === candidate.intentId)?.overallStatus !== 'publication_pending' || ledger.intents.find(r => r.intentId === candidate.intentId).stages.some(s => s.status !== 'completed') : ledger.intents.find(r => r.intentId === candidate.intentId)?.activeStageId !== candidate.stageId) || intentPublicationRouteVector(ledger, candidate.id) !== attempt.route)
+    if (attempt.phase !== 'ready' || !attempt.route || input.now < attempt.updatedAt || ledger.activeIntentId !== candidate.intentId || (candidate.stageId === null ? ledger.intents.find(r => r.intentId === candidate.intentId)?.overallStatus !== 'publication_pending' || intentPublicationFactArray(ledger.intents.find(r => r.intentId === candidate.intentId).stages, 'intent_verification_candidate_current').some(s => intentPublicationFactObject(s, 'intent_verification_candidate_current').status !== 'completed') : ledger.intents.find(r => r.intentId === candidate.intentId)?.activeStageId !== candidate.stageId) || intentPublicationRouteVector(ledger, candidate.id) !== attempt.route)
         throw Error('intent_verification_candidate_current');
     applyIntentPublicationMutation(previous, { sessionId: input.sessionId, instanceId: input.instanceId, expectedLedgerHash: input.expectedLedgerHash, requestSource: 'user', now: input.now, fileObservations: candidate.fileObservations, ...(candidate.body.kind === 'intent-parent' ? { publicationAction: 'reserve-parent', references: candidate.body.stages } : { publicationAction: 'reserve', artifactSelections: candidate.body.artifacts.map(a => ({ artifactId: a.artifactId, obligationId: a.selection.obligationId, path: a.selection.path })) }) });
     return attempt.route;
