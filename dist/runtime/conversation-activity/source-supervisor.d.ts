@@ -26,6 +26,13 @@ export declare class ActivitySourceSupervisor {
     private readonly children;
     private readonly receipts;
     private readonly pending;
+    private closing;
+    private shutdown?;
+    private readonly stopping;
+    private readonly childCloses;
+    private trackChildClose;
+    /** Passive ownership barrier only; does not signal or certify service quiescence. */
+    sealAndDrainSpawned(): Promise<void>;
     constructor(root: string, ownerEpoch: string);
     private save;
     private healthy;
@@ -34,4 +41,5 @@ export declare class ActivitySourceSupervisor {
     private ensureSource;
     protectedPid(pid: number): Promise<boolean>;
     stopOwned(name: string, expectedOwnerEpoch: string): Promise<void>;
+    private stopOwnedSource;
 }

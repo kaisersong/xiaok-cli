@@ -7,6 +7,17 @@ import type { ToolRegistry } from '../tools/index.js';
 import type { WorktreeAllocationRecord } from '../../platform/worktrees/manager.js';
 import type { WorktreeManager } from '../../platform/worktrees/manager.js';
 import { type ManagedAgentRunContext } from './multi-agent-coordinator.js';
+/** Fork consumption only; not a host-context or authorization producer. */
+type SubAgentForkControls = Pick<ToolExecutionContext, 'signal' | 'settingsStore'>;
+type SubAgentForkHistory = Pick<ToolExecutionContext, 'session' | 'messages'>;
+/** Full snapshots retain their protected closure; history fields are paired.
+ * A signal in forkContext is consumed by the one-shot wrapper only.
+ * Preserve the complete host shape for existing inline callers without weakening it.
+ */
+export type SubAgentForkContext = ToolExecutionContext | (SubAgentForkControls & (SubAgentForkHistory | {
+    session?: undefined;
+    messages?: undefined;
+}));
 export interface ExecuteNamedSubAgentOptions {
     observationExecutionPlan?: DelegatedObservationExecutionPlan;
     onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
@@ -23,7 +34,7 @@ export interface ExecuteNamedSubAgentOptions {
     }): ToolRegistry;
     buildSystemPrompt(cwd: string): Promise<string>;
     worktreeManager?: WorktreeManager;
-    forkContext?: ToolExecutionContext;
+    forkContext?: SubAgentForkContext;
     parentDepth?: number;
     runtimeAgentId?: string;
     collaborationPrompt?: string;
@@ -42,3 +53,4 @@ export declare function resolveSubAgentCwd(manager: WorktreeManager | undefined,
     cwd: string;
     allocation?: WorktreeAllocationRecord;
 }>;
+export {};

@@ -1,6 +1,21 @@
 import { DELEGATION_TEMPLATES } from './templates.js';
 import { matchSkillsForTask } from './matcher.js';
 import { extractProvidedSourcePaths, stripProvidedSourcePaths, } from './path-contract.js';
+function retainedIntentTemplateWitness(template, witness) {
+    return template && witness?.template === template ? witness : undefined;
+}
+function findIntentTemplateWitness(intentType) {
+    let witness;
+    const template = DELEGATION_TEMPLATES.find((candidate) => {
+        const candidateIntentType = candidate.intentType;
+        if (candidateIntentType === intentType) {
+            witness = { template: candidate, intentType: candidateIntentType };
+            return true;
+        }
+        return false;
+    });
+    return retainedIntentTemplateWitness(template, witness);
+}
 const CONTINUATION_PATTERNS = [
     /^(继续|继续做|继续写|继续生成)/u,
     /再改一版/u,
@@ -68,13 +83,14 @@ export function createIntentPlan(input) {
     }
     const continuationMode = detectContinuationMode(rawIntent, extracted.finalDeliverable, input.activeIntent);
     const topLevelIntentType = resolveTopLevelIntentType(rawIntent, extracted.stageSpecs, input.activeIntent, continuationMode);
-    const topLevelTemplate = DELEGATION_TEMPLATES.find((candidate) => candidate.intentType === topLevelIntentType);
-    if (!topLevelTemplate) {
+    const topLevelLookup = findIntentTemplateWitness(topLevelIntentType);
+    if (!topLevelLookup) {
         return { kind: 'non_intent', reason: 'non_substantial' };
     }
+    const { template: topLevelTemplate, intentType: matchedIntentType } = topLevelLookup;
     const intentId = continuationMode === 'new_intent' && identity ? identity.value : buildStableId('intent', normalizedIntent, input.sessionId);
     const instancePlanId = buildStableId('plan', normalizedIntent, input.instanceId);
-    const riskTier = deriveRiskTier(topLevelIntentType, continuationMode, extracted.intentMode);
+    const riskTier = deriveRiskTier(matchedIntentType, continuationMode, extracted.intentMode);
     const stages = buildStages({
         intentId,
         rawIntent,
@@ -93,7 +109,7 @@ export function createIntentPlan(input) {
             rawIntent,
             normalizedIntent,
             providedSourcePaths,
-            intentType: topLevelIntentType,
+            intentType: matchedIntentType,
             deliverable: extracted.deliverable,
             finalDeliverable: extracted.finalDeliverable,
             explicitConstraints: extracted.constraints,

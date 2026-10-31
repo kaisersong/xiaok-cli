@@ -13,6 +13,9 @@ export declare class ActivityOwnerMcp {
     private readonly connecting;
     private readonly timers;
     private disposed;
+    private closing?;
+    private readonly ownedConnections;
+    private readonly connectionCloseFailures;
     constructor(options: {
         root: string;
         store: ConversationActivityStore;

@@ -1,7 +1,13 @@
 import { type IntentPublicationCandidate, type IntentArtifactSelection, type IntentFileObservation } from './publication-candidate-journal.js';
 import type { SessionStore } from '../../ai/runtime/session-store/store.js';
 import type { SessionExecutionAuthority, SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
-import type { SessionIntentLedger } from './types.js';
+type PublicationLedgerData = NonNullable<ReturnType<NonNullable<SessionStore['getIntentNativeLedgerSync']>>>;
+interface PublicationArtifactData {
+    readonly stageId?: unknown;
+    readonly storage?: unknown;
+    readonly path?: unknown;
+    readonly artifactId?: unknown;
+}
 export interface IntentParentCandidateWrite {
     ticket: object;
     lease: SessionExecutionLease;
@@ -14,8 +20,8 @@ export declare function consumeIntentParentCandidateWrite(store: SessionStore, r
         requestSource: "user";
         now: number;
         instanceId: string;
-        expectedLedgerHash: string;
         fileObservations: IntentFileObservation[];
+        expectedLedgerHash: string;
         references: readonly import("../verification/intent-application-binding.js").IntentStagePublicationReference[];
     };
     lease: SessionExecutionLease;
@@ -35,7 +41,7 @@ export declare function createIntentPublicationHost(options: {
     }): Promise<{
         intentId: string;
         stageId: string;
-        artifacts: import("./types.js").StageArtifactRecord[];
+        artifacts: PublicationArtifactData[];
         originalSelections: {
             obligationId: string;
             path: string;
@@ -44,11 +50,11 @@ export declare function createIntentPublicationHost(options: {
             artifactSelections: ({
                 obligationId: string;
                 path: string;
-                artifactId: string;
+                artifactId: unknown;
             } | {
                 obligationId: null;
                 path: null;
-                artifactId: string;
+                artifactId: unknown;
             })[];
         };
     }>;
@@ -81,4 +87,5 @@ export declare function createIntentPublicationHost(options: {
     close(): Promise<void>;
     waitForClosedResources(): Promise<void>;
 }>;
-export declare function readIntentPublicationFileFacts(ledger: SessionIntentLedger, workspace: string, row?: Pick<IntentPublicationCandidate, 'intentId' | 'stageId'>): IntentFileObservation[];
+export declare function readIntentPublicationFileFacts(ledger: Pick<PublicationLedgerData, 'intents' | 'activeIntentId'>, workspace: string, row?: Pick<IntentPublicationCandidate, 'intentId' | 'stageId'>): IntentFileObservation[];
+export {};

@@ -14,7 +14,7 @@ export function createToolSearchTool(registry) {
         },
         async execute(input) {
             const query = typeof input.query === 'string' ? input.query : '';
-            const tools = registry.searchTools(query);
+            const tools = registry.searchToolDiscoveries ? registry.searchToolDiscoveries(query).map(({ coreDefinition, metadata }) => metadata ? { ...coreDefinition, ...metadata } : coreDefinition) : registry.searchTools(query);
             return JSON.stringify(tools, null, 2);
         },
     };

@@ -131,7 +131,17 @@ export declare function createInstalledExecutionStack(input: {
             readProfileFile(handle: object, sourceId: string, entryIndex: number, offset: number, length: number, signal?: AbortSignal): Promise<Buffer<ArrayBuffer>>;
             readProfileSqlitePage(handle: object, sourceId: string, pageNo: number, signal?: AbortSignal): Promise<Buffer<ArrayBuffer>>;
             checkProfileCapture(handle: object, signal?: AbortSignal): Promise<void>;
+            isProfileCaptureReleased(handle: object): boolean;
             releaseProfileCapture(handle: object, signal?: AbortSignal): Promise<void>;
+            observeProfilePhysicalSqliteFiles(handle: object, signal?: AbortSignal): Promise<object>;
+            readProfilePhysicalSqliteFiles(token: object): readonly Readonly<{
+                sourceId: string;
+                suffix: string;
+                device: string;
+                inode: string;
+                byteLength: string;
+                sha256: string;
+            }>[];
             authorizePublicationOperation(raw: unknown, signal?: AbortSignal): Promise<Readonly<{
                 version: 1;
                 purpose: "completion-publication";

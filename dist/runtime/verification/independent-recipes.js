@@ -1,31 +1,78 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { ownDataArrayIsArray, ownDataArrayPrototypeForEach, ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataBufferFrom, ownDataBufferPrototypeToString, ownDataCryptoCreateHash, ownDataHashPrototypeDigest, ownDataHashPrototypeUpdate, ownDataJSONParse, ownDataObjectFreeze, ownDataObjectKeys, ownDataObjectValues, ownDataRegExpPrototypeTest, ownDataSetPrototypeAdd, ownDataSetPrototypeHas, ownDataSetPrototypeSizeGetter, ownDataStringPrototypeToLowerCase } from './application-native-intrinsics.js';
+import { capturedArrayIterator, capturedArrayMap, createCapturedMap, createCapturedSet, createCapturedWeakMap, createCapturedWeakSet, setFromDenseArray } from './application-iteration-intrinsics.js';
+import { randomUUID } from 'node:crypto';
 import { canonicalVerificationJson } from './protocol.js';
-const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
-function freeze(raw) { const json = canonicalVerificationJson(raw); if (Buffer.byteLength(json) > 1024 ** 2)
-    throw Error('recipe_definition_limit'); const value = JSON.parse(json); const visit = (x) => { if (x && typeof x === 'object') {
-    Object.values(x).forEach(visit);
-    Object.freeze(x);
-} }; visit(value); return value; }
-function id(x) { if (typeof x !== 'string' || !x.length || Buffer.byteLength(x) > 160 || /[\x00-\x1f\x7f]/.test(x))
-    throw Error('recipe_identifier'); }
-function digest(x) { if (typeof x !== 'string' || !/^[a-f0-9]{64}$/.test(x))
-    throw Error('recipe_hash'); }
-function path(x) { if (typeof x !== 'string' || x.length > 4096 || x.includes('\\') || x.split('/').some(v => !v || v === '.' || v === '..' || /[:\x00-\x1f]/.test(v)))
-    throw Error('recipe_path'); }
-function keys(value, expected) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== [...expected].sort().join(','))
-    throw Error('recipe_fields'); }
-function base64(x) { if (typeof x !== 'string' || x.length > 2 * 1024 ** 2)
-    throw Error('recipe_input'); const bytes = Buffer.from(x, 'base64'); if (bytes.toString('base64') !== x)
-    throw Error('recipe_input'); return bytes; }
-function sync(result) { if (result !== undefined) {
-    void Promise.resolve(result).catch(() => { });
-    throw Error('recipe_sync_authority');
-} }
-function bytes(raw) { if (!Buffer.isBuffer(raw) || raw.length > 16 * 1024 ** 2)
-    throw Error('recipe_output_limit'); return Buffer.from(raw); }
-function dataRecord(raw, expected) { keys(raw, expected); for (const d of Object.values(Object.getOwnPropertyDescriptors(raw)))
-    if (!('value' in d))
-        throw Error('recipe_accessor'); return raw; }
+const hash = (bytes) => ownDataHashPrototypeDigest(ownDataHashPrototypeUpdate(ownDataCryptoCreateHash('sha256'), bytes), 'hex');
+function freeze(raw) {
+    const json = canonicalVerificationJson(raw);
+    if (ownDataBufferByteLength(json) > 1024 ** 2)
+        throw Error('recipe_definition_limit');
+    const value = ownDataJSONParse(json);
+    const visit = (x) => {
+        if (x && typeof x === 'object') {
+            ownDataArrayPrototypeForEach(ownDataObjectValues(x), visit);
+            ownDataObjectFreeze(x);
+        }
+    };
+    visit(value);
+    return value;
+}
+function id(x) {
+    if (typeof x !== 'string' || !x.length || ownDataBufferByteLength(x) > 160 || ownDataRegExpPrototypeTest(/[\x00-\x1f\x7f]/, x))
+        throw Error('recipe_identifier');
+}
+function digest(x) {
+    if (typeof x !== 'string' || !ownDataRegExpPrototypeTest(/^[a-f0-9]{64}$/, x))
+        throw Error('recipe_hash');
+}
+function path(x) {
+    if (typeof x !== 'string' || x.length > 4096)
+        throw Error('recipe_path');
+    let segmentLength = 0, segmentStart = 0;
+    for (let index = 0; index <= x.length; index++) {
+        const character = index === x.length ? '/' : x[index];
+        if (character === '\\' || ownDataRegExpPrototypeTest(/[:\x00-\x1f]/, character))
+            throw Error('recipe_path');
+        if (character === '/') {
+            if (segmentLength === 0 || segmentLength === 1 && x[segmentStart] === '.' || segmentLength === 2 && x[segmentStart] === '.' && x[segmentStart + 1] === '.')
+                throw Error('recipe_path');
+            segmentLength = 0;
+            segmentStart = index + 1;
+        }
+        else
+            segmentLength++;
+    }
+}
+function keys(value, expected) {
+    if (!value || typeof value !== 'object' || ownDataArrayIsArray(value) || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(value)), ',') !== ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort([...capturedArrayIterator(expected)]), ','))
+        throw Error('recipe_fields');
+}
+function base64(x) {
+    if (typeof x !== 'string' || x.length > 2 * 1024 ** 2)
+        throw Error('recipe_input');
+    const bytes = ownDataBufferFrom(x, 'base64');
+    if (ownDataBufferPrototypeToString(bytes, 'base64') !== x)
+        throw Error('recipe_input');
+    return bytes;
+}
+function sync(result) {
+    if (result !== undefined) {
+        void Promise.resolve(result).catch(() => { });
+        throw Error('recipe_sync_authority');
+    }
+}
+function bytes(raw) {
+    if (!Buffer.isBuffer(raw) || raw.length > 16 * 1024 ** 2)
+        throw Error('recipe_output_limit');
+    return Buffer.from(raw);
+}
+function dataRecord(raw, expected) {
+    keys(raw, expected);
+    for (const d of Object.values(Object.getOwnPropertyDescriptors(raw)))
+        if (!('value' in d))
+            throw Error('recipe_accessor');
+    return raw;
+}
 function blackboxSnapshot(raw) {
     const v = dataRecord(raw, ['binding', 'caseId', 'inputHash', 'expected', 'receipt', 'exitCode', 'outputTruncated', 'stdout', 'sideEffects']);
     const metadata = freeze({ binding: v.binding, caseId: v.caseId, inputHash: v.inputHash, expected: v.expected, exitCode: v.exitCode, outputTruncated: v.outputTruncated });
@@ -57,88 +104,90 @@ function failedRunSnapshot(raw) {
     const v = dataRecord(raw, ['bytes', 'exitCode', 'expected', 'receipt', 'sourceRunId', 'runNonce']);
     return { ...freeze({ exitCode: v.exitCode, expected: v.expected, sourceRunId: v.sourceRunId, runNonce: v.runNonce }), bytes: bytes(v.bytes), receipt: v.receipt };
 }
-function structure(kind, data) { try {
-    if (kind === 'bytes')
+function structure(kind, data) {
+    try {
+        if (kind === 'bytes')
+            return true;
+        if (kind === 'pdf-signature')
+            return data.subarray(0, 5).equals(Buffer.from('%PDF-'));
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(data);
+        if (kind === 'json')
+            JSON.parse(text);
         return true;
-    if (kind === 'pdf-signature')
-        return data.subarray(0, 5).equals(Buffer.from('%PDF-'));
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(data);
-    if (kind === 'json')
-        JSON.parse(text);
-    return true;
+    }
+    catch {
+        return false;
+    }
 }
-catch {
-    return false;
-} }
 export function parseIndependentRecipeDefinition(raw) {
     const spec = freeze(raw);
     let ids;
     if (spec.kind === 'artifact-content') {
         keys(spec, ['kind', 'checks']);
-        if (!Array.isArray(spec.checks) || !spec.checks.length || spec.checks.length > 4096)
+        if (!ownDataArrayIsArray(spec.checks) || !spec.checks.length || spec.checks.length > 4096)
             throw Error('recipe_checks');
-        for (const c of spec.checks) {
+        for (const c of capturedArrayIterator(spec.checks)) {
             keys(c, ['id', 'path', 'sha256', 'structure']);
             id(c.id);
             path(c.path);
             digest(c.sha256);
-            if (!['bytes', 'utf8', 'json', 'pdf-signature'].includes(c.structure))
+            if (!ownDataArrayPrototypeIncludes(['bytes', 'utf8', 'json', 'pdf-signature'], c.structure))
                 throw Error('recipe_structure');
         }
-        ids = spec.checks.map(x => x.id);
+        ids = capturedArrayMap(spec.checks, x => x.id);
     }
     else if (spec.kind === 'blackbox') {
         keys(spec, ['kind', 'cases']);
-        if (!Array.isArray(spec.cases) || !spec.cases.length || spec.cases.length > 4096)
+        if (!ownDataArrayIsArray(spec.cases) || !spec.cases.length || spec.cases.length > 4096)
             throw Error('recipe_checks');
-        for (const c of spec.cases) {
+        for (const c of capturedArrayIterator(spec.cases)) {
             keys(c, ['id', 'inputBase64', 'expectedOutputBase64', 'sideEffects']);
             id(c.id);
             base64(c.inputBase64);
             base64(c.expectedOutputBase64);
-            if (!Array.isArray(c.sideEffects) || c.sideEffects.length > 4096)
+            if (!ownDataArrayIsArray(c.sideEffects) || c.sideEffects.length > 4096)
                 throw Error('recipe_side_effects');
-            const names = new Set();
-            for (const effect of c.sideEffects) {
+            const names = createCapturedSet();
+            for (const effect of capturedArrayIterator(c.sideEffects)) {
                 keys(effect, ['path', 'sha256']);
                 path(effect.path);
                 digest(effect.sha256);
-                if (names.has(effect.path.toLowerCase()))
+                if (ownDataSetPrototypeHas(names, ownDataStringPrototypeToLowerCase(effect.path)))
                     throw Error('recipe_duplicate_path');
-                names.add(effect.path.toLowerCase());
+                ownDataSetPrototypeAdd(names, ownDataStringPrototypeToLowerCase(effect.path));
             }
         }
-        ids = spec.cases.map(x => x.id);
+        ids = capturedArrayMap(spec.cases, x => x.id);
     }
     else if (spec.kind === 'diagnostic-coverage') {
         const multi = 'sources' in spec;
         keys(spec, multi ? ['kind', 'sources'] : ['kind', 'checkId', 'sourceRunId', 'runNonce', 'archiveHash', 'diagnosisPath', ...('sourceScope' in spec ? ['sourceScope'] : [])]);
-        if (multi && (!Array.isArray(spec.sources) || spec.sources.length < 2 || spec.sources.length > 4096))
+        if (multi && (!ownDataArrayIsArray(spec.sources) || spec.sources.length < 2 || spec.sources.length > 4096))
             throw Error('recipe_sources');
-        const sources = multi ? spec.sources : [spec], runs = new Set(), paths = new Set();
-        for (const source of sources) {
+        const sources = multi ? spec.sources : [spec], runs = createCapturedSet(), paths = createCapturedSet();
+        for (const source of capturedArrayIterator(sources)) {
             if (multi)
                 keys(source, ['checkId', 'sourceRunId', 'runNonce', 'archiveHash', 'diagnosisPath', ...('sourceScope' in source ? ['sourceScope'] : [])]);
-            if ('sourceScope' in source && !['protected-execution-run', 'whole-task'].includes(source.sourceScope))
+            if ('sourceScope' in source && !ownDataArrayPrototypeIncludes(['protected-execution-run', 'whole-task'], source.sourceScope))
                 throw Error('recipe_source_scope');
             id(source.checkId);
             id(source.sourceRunId);
             id(source.runNonce);
             digest(source.archiveHash);
             path(source.diagnosisPath);
-            const run = canonicalVerificationJson([source.sourceRunId, source.runNonce]), name = source.diagnosisPath.toLowerCase();
-            if (runs.has(run) || paths.has(name))
+            const run = canonicalVerificationJson([source.sourceRunId, source.runNonce]), name = ownDataStringPrototypeToLowerCase(source.diagnosisPath);
+            if (ownDataSetPrototypeHas(runs, run) || ownDataSetPrototypeHas(paths, name))
                 throw Error('recipe_duplicate_source');
-            runs.add(run);
-            paths.add(name);
+            ownDataSetPrototypeAdd(runs, run);
+            ownDataSetPrototypeAdd(paths, name);
         }
-        ids = sources.map(source => source.checkId);
+        ids = capturedArrayMap(sources, source => source.checkId);
     }
     else
         throw Error('recipe_kind');
-    if (new Set(ids).size !== ids.length)
+    if (ownDataSetPrototypeSizeGetter(setFromDenseArray(ids)) !== ids.length)
         throw Error('recipe_duplicate_check');
-    return Object.freeze({ spec, definitionHash: hash(canonicalVerificationJson(spec)), requiredCheckIds: Object.freeze([...ids]) });
+    return ownDataObjectFreeze({ spec, definitionHash: hash(canonicalVerificationJson(spec)), requiredCheckIds: ownDataObjectFreeze([...capturedArrayIterator(ids)]) });
 }
 /** Fixed controller-side comparisons, not engine qualification. Its ports must be the
  * protected artifact exporter, fresh-case isolated runner, and original-run archive store.
@@ -148,7 +197,7 @@ export function createIndependentVerifierRecipes(input) {
     const { verifierHash, assertCurrent, readArtifact, runBlackbox, readFailedRun } = input;
     digest(verifierHash);
     const assertFailedRunComplete = input.assertFailedRunComplete.bind(input);
-    const assertQuiescent = input.quiescence.assertQuiescent.bind(input.quiescence), plans = new WeakMap(), evaluations = new WeakMap();
+    const assertQuiescent = input.quiescence.assertQuiescent.bind(input.quiescence), plans = createCapturedWeakMap(), evaluations = createCapturedWeakMap();
     function live(binding) { sync(assertCurrent(binding)); }
     function physical(receipt, expected) { sync(assertQuiescent(receipt, expected)); }
     return Object.freeze({
@@ -182,7 +231,7 @@ export function createIndependentVerifierRecipes(input) {
                 }
             }
             else if (spec.kind === 'blackbox') {
-                const executions = new Set(), receipts = new WeakSet();
+                const executions = createCapturedSet(), receipts = createCapturedWeakSet();
                 for (const test of spec.cases) {
                     live(binding);
                     const caseInvocationId = randomUUID(), caseInput = base64(test.inputBase64), inputHash = hash(caseInput);
@@ -210,8 +259,12 @@ export function createIndependentVerifierRecipes(input) {
             }
             else {
                 let total = 0;
-                const remaining = () => { const n = Math.min(16 * 1024 ** 2, 256 * 1024 ** 2 - total); if (n <= 0)
-                    throw Error('recipe_total_limit'); return n; };
+                const remaining = () => {
+                    const n = Math.min(16 * 1024 ** 2, 256 * 1024 ** 2 - total);
+                    if (n <= 0)
+                        throw Error('recipe_total_limit');
+                    return n;
+                };
                 for (const source of ('sources' in spec ? spec.sources : [spec])) {
                     live(binding);
                     const archiveLimit = remaining();
@@ -221,16 +274,18 @@ export function createIndependentVerifierRecipes(input) {
                         throw Error('recipe_total_limit');
                     const original = failedRunSnapshot(rawOriginal);
                     total += original.bytes.length;
-                    const complete = () => { if ('scope' in original) {
-                        if (original.scope !== source.sourceScope)
-                            throw Error('recipe_source_scope');
-                        sync(assertFailedRunComplete(original.receipt, Object.freeze({ sourceRunId: source.sourceRunId, runNonce: source.runNonce, archiveHash: source.archiveHash, scope: source.sourceScope })));
-                    }
-                    else {
-                        if (source.sourceScope)
-                            throw Error('recipe_source_scope');
-                        physical(original.receipt, original.expected);
-                    } };
+                    const complete = () => {
+                        if ('scope' in original) {
+                            if (original.scope !== source.sourceScope)
+                                throw Error('recipe_source_scope');
+                            sync(assertFailedRunComplete(original.receipt, Object.freeze({ sourceRunId: source.sourceRunId, runNonce: source.runNonce, archiveHash: source.archiveHash, scope: source.sourceScope })));
+                        }
+                        else {
+                            if (source.sourceScope)
+                                throw Error('recipe_source_scope');
+                            physical(original.receipt, original.expected);
+                        }
+                    };
                     complete();
                     const diagnosisLimit = remaining(), rawDiagnosis = await readArtifact(binding, source.diagnosisPath, Object.freeze({ maxBytes: diagnosisLimit }));
                     live(binding);
@@ -248,14 +303,18 @@ export function createIndependentVerifierRecipes(input) {
                             const lines = text.slice(0, -1).split('\n');
                             if (lines.length < 3 || lines.length > 65538)
                                 throw Error('records');
-                            const parsed = lines.map(x => { const value = JSON.parse(x); if (JSON.stringify(value) !== x)
-                                throw Error('noncanonical_record'); return value; });
+                            const parsed = lines.map(x => {
+                                const value = JSON.parse(x);
+                                if (JSON.stringify(value) !== x)
+                                    throw Error('noncanonical_record');
+                                return value;
+                            });
                             const header = parsed[0], footer = parsed.at(-1);
                             keys(header, ['kind', 'version', 'runId', 'runNonce', 'recordCount']);
                             keys(footer, ['kind', 'recordCount']);
                             if (header.kind !== 'header' || header.version !== 1 || header.runId !== source.sourceRunId || header.runNonce !== source.runNonce || header.recordCount !== parsed.length - 2 || footer.kind !== 'footer' || footer.recordCount !== header.recordCount)
                                 throw Error('binding');
-                            const errors = new Map();
+                            const errors = createCapturedMap();
                             for (let index = 0; index < header.recordCount; index++) {
                                 const record = parsed[index + 1];
                                 if (record.kind === 'error') {
@@ -282,7 +341,7 @@ export function createIndependentVerifierRecipes(input) {
                                 id(error.errorId);
                                 digest(error.recordHash);
                             }
-                            if (new Set(candidate.diagnosedErrors.map((e) => e.errorId)).size !== candidate.diagnosedErrors.length)
+                            if (setFromDenseArray(candidate.diagnosedErrors.map((e) => e.errorId)).size !== candidate.diagnosedErrors.length)
                                 throw Error('duplicate_diagnosis');
                             passed = errors.size > 0 && errors.size === candidate.diagnosedErrors.length && candidate.diagnosedErrors.every((e) => errors.get(e.errorId) === e.recordHash);
                         }

@@ -3,6 +3,8 @@ import type { SurfaceState } from './surface-state.js';
 export interface PermissionModalRequest {
     toolName: string;
     targetLines: string[];
+    reviewScopes?: string[];
+    reviewRules?: string[];
     options: string[];
 }
 export interface TerminalController {

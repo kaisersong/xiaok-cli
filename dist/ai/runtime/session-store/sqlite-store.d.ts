@@ -9,7 +9,7 @@ import { type SessionMigrationInput, type SessionMigrationMarker } from './migra
 import { type SessionExecutionLease } from './execution-authority.js';
 import { type SessionCompareAndSave, type SessionCommitReceipt } from './store.js';
 import type { Message } from '../../../types.js';
-import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
+import type { StoredSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 export interface SessionRow {
     semantic_compaction_json: string | null;
     compound_operations_json: string | null;
@@ -53,12 +53,12 @@ export declare class SQLiteSessionStore implements SessionStore {
     private readonly db;
     constructor(dbPath: string);
     private readonly commitNotifications;
-    onCommit(listener: (snapshot: PersistedSessionSnapshot) => void): () => void;
+    onCommit(listener: (snapshot: StoredSessionSnapshot) => void): () => void;
     createSessionId(): string;
     /** Rejects foreign root/source leases before any external recovery side effect. */
     assertIntentNativeLease(sessionId: string, requestSource: 'user' | 'scheduler', lease: SessionExecutionLease): void;
-    getIntentNativeLedger(sessionId: string): Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined>;
-    getIntentNativeLedgerSync(sessionId: string): import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined;
+    getIntentNativeLedger(sessionId: string): Promise<StoredSessionSnapshot['intentDelegation']>;
+    getIntentNativeLedgerSync(sessionId: string): StoredSessionSnapshot['intentDelegation'];
     recordIntentReceiverPublication(raw: IntentReceiverWriteInput): Promise<IntentPublicationCandidate>;
     recordIntentVerificationOperation(raw: RecordIntentVerificationOperationInput & {
         lease: SessionExecutionLease;
@@ -104,7 +104,7 @@ export declare class SQLiteSessionStore implements SessionStore {
     recordIntentExecutionTerminal(raw: IntentExecutionTerminalInput & {
         lease: SessionExecutionLease;
     }): Promise<void>;
-    save(snapshot: PersistedSessionSnapshot, options?: {
+    save(snapshot: StoredSessionSnapshot, options?: {
         lease?: SessionExecutionLease;
     }): Promise<void>;
     compareAndSave(input: SessionCompareAndSave): Promise<SessionCommitReceipt>;
@@ -117,22 +117,22 @@ export declare class SQLiteSessionStore implements SessionStore {
         sessionId: string;
         lease: SessionExecutionLease;
     }): Promise<{
-        snapshot: PersistedSessionSnapshot;
+        snapshot: StoredSessionSnapshot;
         snapshotHash: string;
         storeRevision: number;
         historyDigest: string;
     }>;
     markSessionMigrated(input: SessionMigrationInput): Promise<SessionMigrationMarker>;
     private markSessionMigratedLocked;
-    loadLast(): Promise<PersistedSessionSnapshot | null>;
-    load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
-    loadSync(sessionId: string): PersistedSessionSnapshot | null;
+    loadLast(): Promise<StoredSessionSnapshot | null>;
+    load(sessionId: string): Promise<StoredSessionSnapshot | null>;
+    loadSync(sessionId: string): StoredSessionSnapshot | null;
     private readSnapshot;
     list(): Promise<SessionListEntry[]>;
-    fork(sessionId: string): Promise<PersistedSessionSnapshot>;
+    fork(sessionId: string): Promise<StoredSessionSnapshot>;
     searchMessages(query: string, limit?: number): SessionMessageSearchHit[];
     dispose(): void;
 }
 export declare function extractMessageText(message: Message): string;
 /** Original SQLite row normalization; no source reads or migration filtering. */
-export declare function parseSQLiteSessionSnapshot(row: SessionRow, messages: readonly SessionMessageRow[]): PersistedSessionSnapshot;
+export declare function parseSQLiteSessionSnapshot(row: SessionRow, messages: readonly SessionMessageRow[]): StoredSessionSnapshot;

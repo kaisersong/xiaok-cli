@@ -19,13 +19,6 @@ export interface TaskSnapshotReadOptions {
     signal: AbortSignal;
     trackPending(raw: Promise<unknown>): void;
 }
-/**
- * A legacy-readable checkpoint plus an append-only mutation journal.
- *
- * Running tasks append only the event suffix and changed top-level fields.
- * Terminal transitions materialize the complete historical TaskSnapshot so
- * older readers keep seeing completed tasks without understanding journals.
- */
 export declare class FileTaskSnapshotStore {
     private readonly rootDir;
     private readonly diagnostics;
@@ -40,6 +33,8 @@ export declare class FileTaskSnapshotStore {
     save(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<void>;
     /** Permanently rejects new writes, then waits for accepted physical IO. */
     closeAndDrain(): Promise<void>;
+    /** User-only cooperative fence; it grants no all-writer or migration authority. */
+    fenceKnownWriter(requestSource: 'user' | 'agent' | 'scheduler'): Promise<void>;
     private enqueueWrite;
     /** Main-only exact-write receipt; it grants no completion/verification authority. */
     saveWithReceipt(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<TaskSnapshotWriteReceipt>;
