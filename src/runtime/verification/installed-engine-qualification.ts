@@ -35,24 +35,45 @@ export function assertInstalledQualificationDeleted(value:object,database:Databa
 /** Fixed commands run only in a container created from the installed immutable
  * image. The challenge is host-generated, never copied from project output. */
 function probe(challenge:string){return `set -eu
+probe_stage=uid
+trap 'probe_status=$?; trap - 0; if [ "$probe_status" -ne 0 ]; then printf "qualification_probe_failure stage=%s exit=%s\\n" "$probe_stage" "$probe_status" >&2 || :; if [ "$probe_stage" = loopback_only ]; then printf "qualification_probe_interfaces=%s\\n" "$(ls -1 /sys/class/net 2>/dev/null)" >&2 || :; fi; fi; exit "$probe_status"' 0
+probe_stage=uid
 [ "$(id -u)" = 10000 ]
+probe_stage=cap_eff
 grep -Eq '^CapEff:[[:space:]]+0000000000000000$' /proc/self/status
+probe_stage=no_new_privs
 grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status
+probe_stage=seccomp
 grep -Eq '^Seccomp:[[:space:]]+2$' /proc/self/status
+probe_stage=pids_max
 [ "$(cat /sys/fs/cgroup/pids.max)" = 64 ]
+probe_stage=memory_max
 [ "$(cat /sys/fs/cgroup/memory.max)" = 268435456 ]
+probe_stage=memory_swap_max
 [ "$(cat /sys/fs/cgroup/memory.swap.max)" = 0 ]
+probe_stage=cpu_max
 [ "$(cat /sys/fs/cgroup/cpu.max)" = '100000 100000' ]
+probe_stage=loopback_only
 [ "$(ls /sys/class/net)" = lo ]
+probe_stage=docker_socket_absent
 [ ! -S /var/run/docker.sock ]
+probe_stage=engine_socket_absent
 [ ! -S /run/xiaok-engine/docker.sock ]
+probe_stage=host_state_absent
 [ ! -e '/Library/Application Support/xiaok-verification' ]
+probe_stage=root_mount_readonly
 awk '$2=="/" { if ($4 !~ /(^|,)ro(,|$)/) exit 1; found=1 } END { if (!found) exit 1 }' /proc/mounts
+probe_stage=root_write_denied
 if touch /xiaok-forbidden-write 2>/tmp/ro-error; then exit 1; fi
+probe_stage=root_write_error
 grep -q 'Read-only file system' /tmp/ro-error
+probe_stage=unshare_available
 command -v unshare >/dev/null
+probe_stage=unshare_denied
 if unshare -U /bin/true 2>/tmp/unshare-error; then exit 1; fi
+probe_stage=unshare_error
 grep -q 'Operation not permitted' /tmp/unshare-error
+probe_stage=challenge_output
 printf '%s' '${challenge}'
 `;}
 interface ProbeRecord {expected:ExecutionRecord['expected'];body:ReturnType<typeof buildDockerWorkerRequest>;allocation:BlobReservationProposal;engineHash:string;deleted:boolean;challenge:string;mountedExpected?:QuiescenceExpectation;mountedDeleted?:boolean}
