@@ -1,3 +1,8 @@
+import {fileURLToPath} from 'node:url';
+import {sep} from 'node:path';
+const ephemeralSQLiteTest=fileURLToPath(new URL('./.test-dist/tests/runtime/verification/known-sqlite-session-writer-fence.test.js',import.meta.url))
+  .split(sep).join('/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export default {
   cacheDir: '.test-cache/vitest-sandbox',
   test: {
@@ -22,5 +27,7 @@ export default {
     hookTimeout: 30_000,
     fileParallelism: false,
     pool: 'threads',
+    // The ephemeral SQLite cases must change cwd in an isolated Node process.
+    poolMatchGlobs: [[ephemeralSQLiteTest, 'forks']],
   },
 };

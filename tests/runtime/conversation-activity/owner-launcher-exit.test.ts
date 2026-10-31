@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ vi.mock('../../../src/runtime/conversation-activity/owner-runtime.js', () => ({
   activityOwnerConfigDigest: (config: ActivityOwnerConfig) => JSON.stringify(config),
 }));
 let root: string;
-beforeEach(() => { vi.useFakeTimers(); root = mkdtempSync(join(tmpdir(), 'owner-exit-')); });
+beforeEach(() => { vi.useFakeTimers(); root = realpathSync(mkdtempSync(join(tmpdir(), 'owner-exit-'))); });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); rmSync(root, { recursive: true, force: true }); });
 function launch(event: 'exit' | 'error' = 'exit', successAt?: number) {
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };

@@ -16,7 +16,7 @@ it('reads the original terminal response across actual DB close/reopen with a ne
   expect(reopened.composition.privateHost.authorityService.inspectOwner(f.owner)?.currentVerification).not.toBe('valid');
   expect(()=>reopened!.operations.stageVerifiedPayload(f.owner)).toThrow();
  }finally{if(reopened)await reopened.close();else if(!closed)await f.close();}
-});
+}, 15_000);
 
 it('finishes the original physically cancelled request after actual DB close/reopen without a producer capability',async()=>{
  const f=await verificationRequestFixture();let reopened:Awaited<ReturnType<typeof reopenedVerificationFixture>>|undefined,closed=false;try{

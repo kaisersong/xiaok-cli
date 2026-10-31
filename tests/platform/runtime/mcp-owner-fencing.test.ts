@@ -58,14 +58,16 @@ describe('MCP registration instance fencing', () => {
   });
 
   it('rejects late permission results for the old MCP instance after same-name replacement', async () => {
-    let approve!: () => void;
+    let approve!: () => void, entered!: () => void;
+    const permissionEntered = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>((resolve) => { approve = resolve; });
     const old = tool('mcp__fixture__replace', 'old');
     const next = tool(old.definition.name, 'next');
-    const f = fixture([old], [], async () => { await gate; return 'allow'; });
+    const f = fixture([old], [], async () => { entered(); await gate; return 'allow'; });
     try {
       const registry = f.factory.createRegistry(process.cwd());
       const pending = registry.executeTool(old.definition.name, {});
+      await permissionEntered;
       f.update([next]);
       approve();
       expect(await pending).toContain('tool authorization changed');

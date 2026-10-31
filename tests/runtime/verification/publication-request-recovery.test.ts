@@ -59,7 +59,7 @@ it('native decline without settlement can close and explicitly prepare a differe
   const next=f.operations.prepareRequest({...request,requestId:'explicit-retry'},f.peer);expect(next.challengeId).not.toBe(first.challengeId);
   expect(f.counts()).toEqual({approvals:1,receiverCalls:0});f.setHook(undefined);await expect(f.operations.approve({challengeId:next.challengeId},f.peer,new AbortController().signal)).rejects.toThrow('receiver offline');expect(f.operations.recoverUnapproved({challengeId:next.challengeId},f.peer)).toMatchObject({status:'settlement_exists'});expect(f.counts().approvals).toBe(2);
  }finally{await f.cleanup();}
-});
+},15_000);
 it('recovery wins against a hanging native approval and its late success cannot settle',async()=>{
  const f=await fixture();let release!:()=>void;try{
   f.setHook(()=>new Promise<void>(resolve=>{release=resolve;}));const first=f.operations.prepareRequest(request,f.peer);

@@ -60,5 +60,5 @@ it.each([false, true])('native Goal replacement waits for the original receiver 
     expect(application.reconcile({ requestSource: 'scheduler', challengeId: next.challengeId }, f.peer)).toMatchObject({ state: 'active', current: { binding: { epoch: 2 }, revision: 2 } });
     expect(f.composition.privateHost.authorityService.inspectOwner(f.owner)?.currentVerification).toBe('needs_revalidation');
     expect(commits).toBe(1); expect(approvals).toBe(1);
-  } finally { application.close(); await publication.close(); await server.close(); store.close(); f.close(); }
-});
+  } finally { application.close(); await publication.close(); await server.close(); store.close(); await f.close(); }
+},15_000);

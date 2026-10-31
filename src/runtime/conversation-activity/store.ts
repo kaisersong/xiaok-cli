@@ -113,7 +113,8 @@ export class ConversationActivityStore {
     try {
       // A separate rollback-journal database supplies an OS-managed exclusive lock.
       // It is held for this owner's lifetime and released by process exit, never mtime.
-      this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
+      // Briefly arbitrate cold journal setup; a live owner still keeps its exclusive lock.
+      this.owner.exec('PRAGMA busy_timeout=10; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
       this.secureSidecars();
     } catch (error) {
       // Preserve the existing public owner-held mapping and retain its real cause.

@@ -56,13 +56,15 @@ describe('registry lifecycle ownership', () => {
   });
 
   it('does not start a tool whose permission check settled after registry disposal', async () => {
-    let allow!: () => void;
+    let allow!: () => void, entered!: () => void;
+    const permissionEntered = new Promise<void>(resolve => { entered = resolve; });
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const execute = tool('write');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { entered(); await waiting; return 'allow'; },
     } as any }, [execute]);
     const result = registry.executeTool('write', {});
+    await permissionEntered;
     registry.dispose();
     allow();
     expect(await result).toContain('tool authorization changed');
@@ -132,13 +134,15 @@ describe('registry lifecycle ownership', () => {
   });
 
   it('does not invoke an MCP tool removed during its asynchronous permission check', async () => {
-    let allow!: () => void;
+    let allow!: () => void, entered!: () => void;
+    const permissionEntered = new Promise<void>(resolve => { entered = resolve; });
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const removed = tool('mcp__one__removed');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { entered(); await waiting; return 'allow'; },
     } as any }, [removed]);
     const result = registry.executeTool(removed.definition.name, {});
+    await permissionEntered;
     registry.unregisterTool(removed.definition.name);
     allow();
     expect(await result).toContain('tool authorization changed');

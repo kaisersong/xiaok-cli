@@ -160,12 +160,40 @@ it.each([':memory:',''])('keeps the original nonpersistent workspace %j out of d
  const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js'),before=readOrdinaryProfileSources();const store=new ArtifactWorkspaceStore({dbPath});
  try{expect(store.getOrCreateWorkspace({conversationId:'temporary',workspaceRootId:'root'}).id).toBeTruthy();}finally{store.close();}expect(readOrdinaryProfileSources()).toEqual(before);
 });
-it('retains original source identity on replacement and permits reopening after the original file is restored',async()=>{
- const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');const path=fixture(),before=readOrdinaryProfileSources(),backup=path+'.original',replacement=path+'.replacement';renameSync(path,backup);
- let wrong:ArtifactWorkspaceStore|undefined;
- try{expect(()=>{wrong=new ArtifactWorkspaceStore({dbPath:path});}).toThrow('profile_source_registry_identity');}finally{wrong?.close();}
- expect(readOrdinaryProfileSources()).toEqual(before);renameSync(path,replacement);renameSync(backup,path);
- const reopened=new ArtifactWorkspaceStore({dbPath:path});try{expect(reopened.listWorkspaces()).toHaveLength(1);}finally{reopened.close();}expect(readOrdinaryProfileSources()).toEqual(before);
+it('rebinds a stale ordinary source while rejecting its old physical descriptor and restoring original data',async()=>{
+ const {readOrdinaryProfileSources,isStaleOrdinaryProfileSource}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');
+ const path=fixture(),before=readOrdinaryProfileSources()!,backup=path+'.original',replacement=path+'.replacement';
+ const original=before.sources.find(row=>row.directory.canonicalPath===dirname(path)&&row.database?.basename===basename(path))!;
+ const descriptor=(row:typeof original):ProfileCaptureSource=>({sourceId:row.sourceId,kind:'sqlite-db',snapshotFormat:'artifact-workspace-sqlite-v1',directory:row.directory,database:row.database!});
+ const capture=async(source:ProfileCaptureSource)=>{
+  let owner:Awaited<ReturnType<typeof startProfileSourceCapture>>|undefined;
+  try{
+   owner=await startProfileSourceCapture({uid:process.getuid!(),directoryHelper,sqliteHelper,sources:[source],signal:new AbortController().signal});
+   const token=await owner.capture();
+   const {iterateCapturedSQLiteArtifactWorkspaceSources:read}=await import('../../../src/runtime/verification/captured-sqlite-artifact-workspace.js');
+   expect([...read(owner,token)].some(event=>event.kind==='source-end')).toBe(true);
+  }finally{await owner?.close();}
+ };
+ renameSync(path,backup);
+ let bodyFailure:{error:unknown}|undefined;
+ try{
+ const replacedStore=new ArtifactWorkspaceStore({dbPath:path});try{expect(replacedStore.listWorkspaces()).toHaveLength(0);}finally{replacedStore.close();}
+ const changed=readOrdinaryProfileSources()!,next=changed.sources.find(row=>row.namespaceId===original.namespaceId)!;
+ expect(next.sourceId).not.toBe(original.sourceId);expect(next.database).toEqual({basename:basename(path),device:String(statSync(path,{bigint:true}).dev),inode:String(statSync(path,{bigint:true}).ino)});
+ expect(isStaleOrdinaryProfileSource(original)).toBe(true);expect(isStaleOrdinaryProfileSource(next)).toBe(false);
+ expect(BigInt(changed.generation)).toBe(BigInt(before.generation)+1n);
+ expect(changed.sources.filter(row=>row.namespaceId!==original.namespaceId)).toEqual(before.sources.filter(row=>row.namespaceId!==original.namespaceId));
+ await expect(capture(descriptor(original))).rejects.toThrow(/^source_sqlite_ended$/);
+ await capture(descriptor(next));
+ renameSync(path,replacement);renameSync(backup,path);
+ const reopened=new ArtifactWorkspaceStore({dbPath:path});try{expect(reopened.listWorkspaces()).toHaveLength(1);}finally{reopened.close();}
+ const restored=readOrdinaryProfileSources()!;expect(restored.sources).toEqual(before.sources);expect(BigInt(restored.generation)).toBe(BigInt(before.generation)+2n);
+ expect(isStaleOrdinaryProfileSource(original)).toBe(false);expect(isStaleOrdinaryProfileSource(next)).toBe(true);
+ }catch(error){bodyFailure={error};throw error;}
+ finally{
+  try{if(existsSync(backup)){if(existsSync(path))renameSync(path,replacement);renameSync(backup,path);}}
+  catch(error){if(bodyFailure)throw new AggregateError([bodyFailure.error,error],'fixture_original_restore_failed');throw error;}
+ }
 });
 it('carries the real registered live WAL source through review parsing and native capture without losing its latest commit',async()=>{
  const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');const {parseProfileSourceReview}=await import('../../../src/runtime/verification/profile-source-review.js');const {canonicalVerificationJson}=await import('../../../src/runtime/verification/protocol.js');const {iterateCapturedSQLiteArtifactWorkspaceSources:read}=await import('../../../src/runtime/verification/captured-sqlite-artifact-workspace.js');

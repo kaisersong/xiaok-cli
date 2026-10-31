@@ -1,7 +1,9 @@
 import {it,expect,afterEach} from 'vitest';
 import {mkdirSync,mkdtempSync,writeFileSync,symlinkSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {fileURLToPath} from 'node:url';
-const sourceRoot=fileURLToPath(new URL('../../../',import.meta.url));import {join} from 'node:path';
+import {basename,join,resolve} from 'node:path';
+const testRoot=fileURLToPath(new URL('../../../',import.meta.url));
+const sourceRoot=basename(testRoot)==='.test-dist'?resolve(testRoot,'..'):testRoot;
 import {isRegisteredRecipeManifest,selectRecipeManifestPath} from '../../../src/runtime/sol-pi/recipe-environment-registration.js';
 import {selectRegisteredRecipeManifest} from '../../../scripts/evals/sol-pi/paired-environment.mjs';
 const qualified=['8fff26fce52fc249b30c4d18c758f0c93aca9ec03d36d2a029cb56d231e3cb35','03e80e3e4a52a5125131dce25c21096202e73088745c06e33e84baa4619b98f8'] as const;

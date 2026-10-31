@@ -13,6 +13,6 @@ describe('Desktop observation owner not-ready boundaries', () => {
   });
   it('cannot silently clear protected inherited owner at a legacy Desktop entry', async () => {
     const owner = { hasDependencies: () => true, ownsDisclosure: () => false, prepareProviderDisclosure: () => undefined };
-    await expect(withObservationExecutionOwner(owner, () => runDesktopToolLoop({} as Parameters<typeof runDesktopToolLoop>[0]))).rejects.toThrow(/HANDOFF/);
+    await expect(withObservationExecutionOwner(owner, () => runDesktopToolLoop({signal:new AbortController().signal} as Parameters<typeof runDesktopToolLoop>[0]))).rejects.toThrow(/HANDOFF/);
   });
 });

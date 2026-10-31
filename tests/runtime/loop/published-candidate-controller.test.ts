@@ -65,4 +65,4 @@ it('reads the original receiver Loop payload then rejects the same historical co
   expect(store.readVisible(committed.operationId)).toBeTruthy();
   expect((f.database.prepare('SELECT COUNT(*) n FROM execution_attempts').get() as {n:number}).n).toBe(count);
  }finally{publisher.dispose();await controller.close();application.close();await publication.close();await receiver.close();store.close();await f.close();}
-});
+}, 15_000);

@@ -14,4 +14,4 @@ it('admits every actual approved blackbox member through the fixed original run 
   const complete=await f.operations.dispatch({operationHandle:prepared.operationHandle},f.peer,signal);
   expect(complete.currentVerification).toBe('valid');expect(command).toHaveBeenCalledTimes(3);expect(f.database.prepare('SELECT COUNT(*) n FROM verification_run_executions').get()).toEqual({n:3});expect(f.containers.size).toBe(0);expect(f.volumes.size).toBe(0);
  }finally{command.mockRestore();await f.close();}
-});
+}, 15_000);

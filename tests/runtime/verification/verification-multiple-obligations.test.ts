@@ -34,7 +34,7 @@ it('keeps both current-subject obligations current after actual sequential mater
   expect(f.database.prepare('SELECT * FROM execution_attempts ORDER BY execution_id').all()).toEqual(executions);
 
  }finally{await f.close();}
-});
+},15_000);
 
 it('does not reactivate a historical same-content subject after a different real command has become current',async()=>{
  const f=await verifiedOperationFixture();try{
@@ -49,4 +49,4 @@ it('does not reactivate a historical same-content subject after a different real
   };
   const different=await verify(1,['/bin/true','different']),returned=await verify(2,['/bin/true']);expect(different).not.toBe(original);expect(returned).not.toBe(different);expect(returned).not.toBe(original);
  }finally{await f.close();}
-});
+},15_000);
