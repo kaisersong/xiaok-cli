@@ -1,8 +1,16 @@
-import {installedControllerFixture} from '../../support/installed-controller-fixture.js';
+import {installedControllerFixture,installedControllerStartupFixture} from '../../support/installed-controller-fixture.js';
 import {it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
+import {createRequire} from 'node:module';
+import {rmSync} from 'node:fs';
+import {join} from 'node:path';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 import * as sharedModule from '../../../src/runtime/verification/installed-shared-capacity.js';
+import * as metadataModule from '../../../src/runtime/verification/installed-metadata-capacity.js';
+import * as metadataProtocol from '../../../src/runtime/verification/metadata-capacity-protocol.js';
+import * as metadataDispatch from '../../../src/runtime/verification/capacity-ledger-command-dispatch.js';
+import * as publicModule from '../../../src/runtime/verification/controller-public-daemon.js';
+import {isInstalledControllerShutdownUnresolved} from '../../../src/runtime/verification/installed-controller.js';
 import {parseMetadataCapacityAllocation} from '../../../src/runtime/verification/metadata-capacity-protocol.js';
 import {createInstalledMetadataCapacity} from '../../../src/runtime/verification/installed-metadata-capacity.js';
 import {createInstalledControllerMetadataSource,readInstalledMetadataSource} from '../../../src/runtime/verification/installed-metadata-source.js';
@@ -16,7 +24,7 @@ async function seedSessions(f:Awaited<ReturnType<typeof fixture>>){
  const enrollment={ownerKind:'task' as const,ownerId:'metadata-owner',invocations:Array.from({length:20},(_,n)=>({sessionIdentity:'session-'+n,compoundOperationId:'op',validationInvocationId:'v'}))};
  const challenge=f.composition.privateHost.enrollment.prepare({enrollment,registration},f.peer);await f.composition.privateHost.enrollment.authorize(challenge.challengeId,f.peer,new AbortController().signal);
 }
-function capacityRows(f:Awaited<ReturnType<typeof fixture>>){return Object.fromEntries(['shared_capacity_reservations','shared_capacity_session_attributions','controller_metadata_resources','controller_metadata_intents'].map(table=>[table,f.database.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()]));}
+function capacityRows(f:Pick<Awaited<ReturnType<typeof fixture>>,'database'>){return Object.fromEntries(['shared_capacity_reservations','shared_capacity_session_attributions','controller_metadata_resources','controller_metadata_intents'].map(table=>[table,f.database.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()]));}
 function bootState(f:Awaited<ReturnType<typeof fixture>>,resourceId:string){
  const row=f.database.prepare('SELECT revision,record_json FROM controller_metadata_resources WHERE resource_id=?').get(resourceId) as {revision:number;record_json:string};expect(row.revision).toBeGreaterThan(0);
  const allocation=parseMetadataCapacityAllocation(JSON.parse(row.record_json));expect(allocation.state).toBe('confirmed');expect(allocation.resourceRevision).toBe(row.revision);expect(allocation.writerGeneration).toBe(f.lifetime.serviceEpoch);const rows=capacityRows(f),counts={reservations:rows.shared_capacity_reservations.length,intents:rows.controller_metadata_intents.length,resources:rows.controller_metadata_resources.length,attributions:rows.shared_capacity_session_attributions.length},partitions=f.database.prepare('SELECT partition_name,COUNT(*) n FROM shared_capacity_reservations GROUP BY partition_name ORDER BY partition_name').all() as Array<{partition_name:string;n:number}>;expect(counts.reservations).toBe(2);expect(counts.resources).toBe(1);return {revision:row.revision,allocation,rows,counts,partitions};
@@ -83,4 +91,95 @@ it('inspects and consumes the original fixed metadata command inside the same re
   expect(()=>f.database.transaction(()=>actual.reserveMetadataCommand({})).immediate()).toThrow('shared_capacity_reentrant_transaction');
   expect(f.database.prepare('SELECT COUNT(*) n FROM shared_capacity_reservations').get()).toEqual({n:originalReservations.n+2});expect(f.database.inTransaction).toBe(false);
  }finally{a.mockRestore();b.mockRestore();await f.close();}
+});
+
+it.each(['confirmed','intent-failure'] as const)('cold initial metadata allocation precedes public readiness through the same original startup: %s',async mode=>{
+ let enter!:()=>void,release!:()=>void;
+ const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+ const sharedSpy=vi.spyOn(sharedModule,'createInstalledSharedCapacity');
+ let f:Awaited<ReturnType<typeof installedControllerStartupFixture>>|undefined;
+ const observers:Array<{mockRestore():void}>=[];
+ const transactionEntries:boolean[]=[],failureSnapshots:Array<{reservations:number;resources:number;intents:number;publicCalls:number}>=[];
+ let qualificationCalls=0,publicCalls=0,failuresReached=0;
+ let primary:{error:unknown}|undefined,originalSqlFailure:{error:unknown}|undefined;
+ let expectedStartupFailure:unknown,knownClosed=false;
+ try{
+  f=await installedControllerStartupFixture({onQualified(){qualificationCalls++;enter();return gate;}});
+  const actual=f,startupCandidate=actual.startupPromise;
+  if(!startupCandidate)throw Error('cold_fixture_startup_promise_missing');
+  const startup=startupCandidate;
+  await Promise.race([entered,startup.then(()=>{throw Error('cold_fixture_qualification_gate_not_reached');})]);
+  expect(qualificationCalls).toBe(1);expect(sharedSpy).toHaveBeenCalledTimes(1);
+  const sharedResult=sharedSpy.mock.results[0];
+  if(sharedResult?.type!=='return'||!sharedResult.value)throw Error('cold_fixture_actual_shared_owner_missing');
+  const shared=sharedResult.value as ReturnType<typeof sharedModule.createInstalledSharedCapacity>;
+  const zero=capacityRows(actual);expect(Object.values(zero).map(rows=>rows.length)).toEqual([0,0,0,0]);
+  const requests:Array<ReturnType<typeof metadataProtocol.parseMetadataCapacityPrepare>>=[];
+  const parse=metadataProtocol.parseMetadataCapacityPrepare;
+  observers.push(vi.spyOn(metadataProtocol,'parseMetadataCapacityPrepare').mockImplementation(raw=>{const request=parse(raw);requests.push(request);return request;}));
+  const schema=()=>actual.database.prepare('SELECT type,name,tbl_name,sql FROM main.sqlite_master ORDER BY type,name').all();
+  let before:{rows:ReturnType<typeof capacityRows>;cap:unknown;pages:unknown;schema:unknown}|undefined;
+  const createMetadata=metadataModule.createInstalledMetadataCapacity;
+  observers.push(vi.spyOn(metadataModule,'createInstalledMetadataCapacity').mockImplementation(input=>{
+   const owner=createMetadata(input);expect(input.lifetime).toBe(actual.lifetime);expect(input.sharedCapacity).toBe(shared);
+   expect(before).toBeUndefined();before={rows:capacityRows(actual),cap:actual.database.pragma('max_page_count',{simple:true}),pages:actual.database.pragma('page_count',{simple:true}),schema:schema()};
+   expect(before.rows).toEqual(zero);return owner;
+  }));
+  const execute=metadataDispatch.executeCapacityMetadataCommand;
+  observers.push(vi.spyOn(metadataDispatch,'executeCapacityMetadataCommand').mockImplementation((...args)=>{
+   transactionEntries.push(actual.database.inTransaction);
+   try{return execute(...args);}catch(error){originalSqlFailure={error};throw error;}
+  }));
+  const startPublic=publicModule.startPublicController;
+  observers.push(vi.spyOn(publicModule,'startPublicController').mockImplementation(input=>{
+   publicCalls++;expect(mode).toBe('confirmed');expect(requests).toHaveLength(1);expect(requests[0]!.expectedRevision).toBe(0);
+   const row=actual.database.prepare('SELECT revision,record_json FROM controller_metadata_resources').get() as {revision:number;record_json:string};
+   const allocation=parseMetadataCapacityAllocation(JSON.parse(row.record_json));
+   expect(row.revision).toBe(1);expect(allocation.state).toBe('confirmed');expect(allocation.resourceRevision).toBe(1);expect(allocation.writerGeneration).toBe(actual.lifetime.serviceEpoch);
+   expect(actual.database.pragma('max_page_count',{simple:true})).toBe(allocation.usableMaximumPageCount);
+   expect(capacityRows(actual).shared_capacity_reservations).toHaveLength(2);expect(capacityRows(actual).controller_metadata_intents).toHaveLength(1);
+   return startPublic(input);
+  }));
+  if(mode==='intent-failure'){
+   actual.database.function('metadata_failure_reached',(reservations:number,resources:number,intents:number)=>{
+    failuresReached++;failureSnapshots.push({reservations,resources,intents,publicCalls});return 0;
+   });
+   // The original SQL fault follows the original allocation/resource writes.
+   actual.database.exec("CREATE TRIGGER reject_metadata BEFORE INSERT ON controller_metadata_intents BEGIN SELECT metadata_failure_reached((SELECT COUNT(*) FROM shared_capacity_reservations),(SELECT COUNT(*) FROM controller_metadata_resources),(SELECT COUNT(*) FROM controller_metadata_intents));SELECT RAISE(ABORT,'metadata fail'); END");
+  }
+  release();
+  if(mode==='confirmed'){
+   const installed=await startup;expect(publicCalls).toBe(1);expect(before).toBeDefined();
+   expect(sharedSpy).toHaveBeenCalledTimes(1);expect(originalSqlFailure).toBeUndefined();
+   expect(actual.startupPromise).toBe(startup);await actual.close(true);expect(actual.database.open).toBe(false);knownClosed=true;
+   // close() joined that exact result, not a second start or replacement owner.
+   expect(await startup).toBe(installed);
+  }else{
+   let rejected:{error:unknown}|undefined;try{await startup;}catch(error){rejected={error};}
+   expect(failuresReached).toBe(1);expect(requests).toHaveLength(1);expect(requests[0]!.expectedRevision).toBe(0);
+   expect(transactionEntries).toEqual([true]);expect(failureSnapshots).toEqual([{reservations:2,resources:1,intents:0,publicCalls:0}]);
+   expect(rejected).toBeDefined();expect(originalSqlFailure).toBeDefined();expect(rejected!.error).toBe(originalSqlFailure!.error);
+   expect(rejected!.error).toMatchObject({message:'metadata fail'});expect(isInstalledControllerShutdownUnresolved(rejected!.error)).toBe(false);expect(publicCalls).toBe(0);
+   if(!before)throw Error('cold_fixture_initialization_not_observed');
+   // Read the actual connection cap before closing; a reopened connection has
+   // its own max_page_count and must not stand in for this rollback proof.
+   expect(actual.database.open).toBe(true);expect(capacityRows(actual)).toEqual(before.rows);expect(actual.database.inTransaction).toBe(false);
+   expect(actual.database.pragma('max_page_count',{simple:true})).toBe(before.cap);expect(actual.database.pragma('page_count',{simple:true})).toBe(before.pages);expect(schema()).toEqual(before.schema);
+   expectedStartupFailure=rejected!.error;
+   await expect(actual.close(true)).rejects.toBe(expectedStartupFailure);expect(actual.database.open).toBe(false);knownClosed=true;
+   const NativeDatabase=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+   const reopened=new NativeDatabase(join(actual.state,'authority.sqlite'),{readonly:true,fileMustExist:true});
+   try{expect(reopened.readonly).toBe(true);expect(capacityRows({database:reopened})).toEqual(before.rows);expect(reopened.prepare('SELECT type,name,tbl_name,sql FROM main.sqlite_master ORDER BY type,name').all()).toEqual(before.schema);expect(reopened.pragma('page_count',{simple:true})).toBe(before.pages);}
+   finally{reopened.close();}
+  }
+ }catch(error){primary={error};throw error;}
+ finally{
+  release();const errors:unknown[]=[];
+  if(f)try{await f.close(true);knownClosed=!f.database.open;}catch(error){
+   if(error===expectedStartupFailure&&!f.database.open&&!isInstalledControllerShutdownUnresolved(error))knownClosed=true;else errors.push(error);
+  }
+  for(const observer of observers.reverse())observer.mockRestore();sharedSpy.mockRestore();
+  if(f&&knownClosed&&!errors.length)rmSync(f.root,{recursive:true,force:true});
+  if(errors.length)throw new AggregateError([...(primary?[primary.error]:[]),...errors],'cold_fixture_cleanup_unknown',{cause:primary?.error});
+ }
 });
