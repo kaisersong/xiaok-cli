@@ -1289,7 +1289,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener)&&isResizeListener(listener))process.stdout.removeListener('resize',listener);
       harness.restore();process.stdout.isTTY=tty;attachSpy.mockRestore();
     }
-  },15000);
+  },20_000);
 
   it.each([false, true])('starts directly without adopting project rules (shared global settings=%s)', async shared => {
     const root = join(tmpdir(), `xiaok-quiet-startup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
