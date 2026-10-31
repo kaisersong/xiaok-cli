@@ -56,3 +56,49 @@ jobs:
           tests/main/collaboration-room-service.test.ts
           tests/main/kswarm-project-agent-ipc-registry.test.ts
           tests/main/kswarm-proxy-ipc-registry.test.ts
+
+  approved-workflow-deadline:
+    name: Approved workflow deadline (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.14.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: cd desktop && npm ci --ignore-scripts
+      - name: Prepare pinned workflow issuer and broker
+        shell: bash
+        run: |
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git -C ../kswarm fetch --depth 1 origin 7d1d16299c39c7f3b8fda86af8531914870b3382
+          git -C ../kswarm checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker checkout --detach FETCH_HEAD
+          npm ci --ignore-scripts --omit=dev --prefix ../kswarm
+          npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
+      - name: Real issuer, Main runner, queue, retry and read-port boundaries
+        env:
+          XIAOK_WORKFLOW_TEST_REPO_ROOT: ${{ github.workspace }}
+        run: >
+          cd desktop && npm run test -- --environment node --run
+          tests/main/workflow-approved-deadline.test.ts
+          tests/main/workflow-deadline-policy.test.ts
+          tests/main/workflow-budget-read-lifecycle.test.ts
+          tests/main/workflow-deadline-late-summary.test.ts
+          tests/main/kswarm-execution-clock.test.ts
+          tests/main/desktop-tool-loop-recovery.test.ts
+          tests/main/workflow-read-port-provenance.test.ts
+          tests/main/workflow-read-port-close-reentry.test.ts
+          tests/main/workflow-stored-restrictions-partial-denial.test.ts
+          tests/main/workflow-stored-restrictions-denials.test.ts
+          tests/main/workflow-stored-restrictions-effects.test.ts
