@@ -11,7 +11,7 @@ import { type SessionMigrationInput, type SessionMigrationMarker } from './migra
 import { type SessionExecutionContext, type SessionExecutionLease } from './execution-authority.js';
 import { type SessionCompareAndSave, type SessionCommitReceipt } from './store.js';
 import { type NativeSessionIdentity } from './identity.js';
-import type { PersistedSessionSnapshot, StoredSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
+import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 import { type AtomicWriteFile } from '../../../utils/atomic-file.js';
 export interface SessionDeletionReceiptPort {
     begin(input: {
@@ -42,12 +42,12 @@ export declare class FileSessionStore implements SessionStore {
     fenceKnownWriter(requestSource: 'user' | 'agent' | 'scheduler'): Promise<void>;
     private assertKnownWriterAdmission;
     private readonly commitNotifications;
-    onCommit(listener: (snapshot: StoredSessionSnapshot) => void): () => void;
+    onCommit(listener: (snapshot: PersistedSessionSnapshot) => void): () => void;
     createSessionId(): string;
     /** Rejects foreign root/source leases before any external recovery side effect. */
     assertIntentNativeLease(sessionId: string, requestSource: 'user' | 'scheduler', lease: SessionExecutionLease): void;
-    getIntentNativeLedger(sessionId: string): Promise<StoredSessionSnapshot['intentDelegation']>;
-    getIntentNativeLedgerSync(sessionId: string): StoredSessionSnapshot['intentDelegation'];
+    getIntentNativeLedger(sessionId: string): Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined>;
+    getIntentNativeLedgerSync(sessionId: string): import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined;
     recordIntentReceiverPublication(raw: IntentReceiverWriteInput): Promise<IntentPublicationCandidate>;
     recordIntentVerificationOperation(raw: RecordIntentVerificationOperationInput & {
         lease: SessionExecutionLease;
@@ -100,7 +100,7 @@ export declare class FileSessionStore implements SessionStore {
         lease: SessionExecutionLease;
     }): Promise<void>;
     private observedMutation;
-    save(snapshot: StoredSessionSnapshot, options?: {
+    save(snapshot: PersistedSessionSnapshot, options?: {
         lease?: SessionExecutionLease;
     }): Promise<void>;
     compareAndSave(input: SessionCompareAndSave): Promise<SessionCommitReceipt>;
@@ -112,14 +112,14 @@ export declare class FileSessionStore implements SessionStore {
         holderId: string;
     }): Promise<{
         binding: SessionAliasBinding;
-        snapshot: StoredSessionSnapshot;
+        snapshot: PersistedSessionSnapshot;
     } | null>;
     loadSessionAliasSync(holder: {
         holderRoot: string;
         holderId: string;
     }): {
         binding: SessionAliasBinding;
-        snapshot: StoredSessionSnapshot;
+        snapshot: PersistedSessionSnapshot;
     } | null;
     getSessionAliases(sessionId: string): Promise<import("./aliases.js").SessionAliasRow[]>;
     registerSessionAlias(input: SessionAliasBinding & {
@@ -147,7 +147,7 @@ export declare class FileSessionStore implements SessionStore {
         sessionId: string;
         lease: SessionExecutionLease;
     }): Promise<{
-        snapshot: StoredSessionSnapshot;
+        snapshot: PersistedSessionSnapshot;
         snapshotHash: string;
         storeRevision: number;
         historyDigest: string;
@@ -161,14 +161,14 @@ export declare class FileSessionStore implements SessionStore {
     private deletionDirectory;
     private readDeletionJournal;
     private writeDeletionJournal;
-    loadLast(): Promise<StoredSessionSnapshot | null>;
-    load(sessionId: string): Promise<StoredSessionSnapshot | null>;
+    loadLast(): Promise<PersistedSessionSnapshot | null>;
+    load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
     /** Main admission fences may need a canonical read without yielding between
      * their final permission check and a native request. Same parser as load. */
-    loadSync(sessionId: string): StoredSessionSnapshot | null;
+    loadSync(sessionId: string): PersistedSessionSnapshot | null;
     readIdentity(sessionId: string): NativeSessionIdentity | null;
     list(): Promise<SessionListEntry[]>;
-    fork(sessionId: string): Promise<StoredSessionSnapshot>;
+    fork(sessionId: string): Promise<PersistedSessionSnapshot>;
     private forkAccepted;
     private readSnapshot;
     private getFilePath;

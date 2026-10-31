@@ -1,3 +1,5 @@
+import { ownDataMathCeil, ownDataSetPrototypeAdd } from './application-native-intrinsics.js';
+import { capturedArrayIterator, createCapturedSet } from './application-iteration-intrinsics.js';
 import { createPublishedArtifactIndex, publishedArtifactLookupKeys, assertPublishedArtifactIndexOwner, findIndexedPublishedArtifacts, verifyIndexedPublishedArtifact } from './published-artifact-index.js';
 import { parseLoopApplicationBinding } from './loop-application-binding.js';
 import { loopHostSubjectOwner } from './loop-host-subject.js';
@@ -5,10 +7,10 @@ import { assertPublishedArtifactOwner } from './published-artifact-selection.js'
 /** Compare declared candidate artifacts with actual exported verification bytes.
  * This content check grants neither read access nor completion authority. */
 export function assertLoopApplicationArtifacts(applicationOwner, raw, payloadOwner, sections) {
-    const binding = parseLoopApplicationBinding(raw), keys = new Set();
-    for (const descriptor of binding.body.artifacts)
-        for (const key of publishedArtifactLookupKeys(applicationOwner, descriptor.selection, true))
-            keys.add(key);
+    const binding = parseLoopApplicationBinding(raw), keys = createCapturedSet();
+    for (const descriptor of capturedArrayIterator(binding.body.artifacts))
+        for (const key of capturedArrayIterator(publishedArtifactLookupKeys(applicationOwner, descriptor.selection, true)))
+            ownDataSetPrototypeAdd(keys, key);
     assertIndexedLoopApplicationArtifacts(applicationOwner, binding, payloadOwner, createPublishedArtifactIndex(payloadOwner, sections, keys));
 }
 export function assertIndexedLoopApplicationArtifacts(applicationOwner, raw, payloadOwner, index) {
@@ -18,7 +20,7 @@ export function assertIndexedLoopApplicationArtifacts(applicationOwner, raw, pay
     if (applicationOwner.ownerKind !== mapped.ownerKind || applicationOwner.ownerId !== mapped.ownerId)
         throw Error('loop_application_artifact_owner');
     assertPublishedArtifactIndexOwner(index, payloadOwner);
-    for (const descriptor of binding.body.artifacts) {
+    for (const descriptor of capturedArrayIterator(binding.body.artifacts)) {
         const selection = descriptor.selection, target = selection.kind === 'local' ? applicationOwner : selection.originOwner;
         if (target.profileId !== applicationOwner.profileId)
             throw Error('loop_application_artifact_owner');
@@ -27,7 +29,7 @@ export function assertIndexedLoopApplicationArtifacts(applicationOwner, raw, pay
             throw Error('loop_application_artifact_not_unique');
         const artifact = matches[0];
         if (artifact.sha256 !== descriptor.sha256 || artifact.size !== descriptor.size || typeof artifact.bytesBase64 !== 'string'
-            || artifact.bytesBase64.length !== 4 * Math.ceil(descriptor.size / 3))
+            || artifact.bytesBase64.length !== 4 * ownDataMathCeil(descriptor.size / 3))
             throw Error('loop_application_artifact_content');
         try {
             verifyIndexedPublishedArtifact(index, artifact);

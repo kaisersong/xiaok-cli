@@ -1,13 +1,13 @@
 import { type SessionDeletionJournal } from './file-session-parser.js';
 import { type SessionMigrationMarker } from './migration.js';
 import type { CompoundDeletionBudget } from './compound-deletion-census.js';
-import type { StoredSessionSnapshot } from './store.js';
+import type { PersistedSessionSnapshot } from './store.js';
 export declare class FileSessionReader {
     private readonly rootDir;
     constructor(rootDir?: string);
-    load(sessionId: string): Promise<StoredSessionSnapshot | null>;
-    loadSync(sessionId: string): StoredSessionSnapshot | null;
-    readSessionSnapshot(sessionId: string, preserveIntent?: boolean): StoredSessionSnapshot | null;
+    load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
+    loadSync(sessionId: string): PersistedSessionSnapshot | null;
+    readSessionSnapshot(sessionId: string, preserveIntent?: boolean): PersistedSessionSnapshot | null;
     getFilePath(sessionId: string): string;
     migrationPath(sessionId: string): string;
     readSessionMigration(sessionId: string): SessionMigrationMarker | null;
@@ -18,6 +18,6 @@ export declare class FileSessionReader {
         holderId: string;
     }): {
         binding: import("./aliases.js").SessionAliasBinding;
-        snapshot: StoredSessionSnapshot;
+        snapshot: PersistedSessionSnapshot;
     } | null;
 }

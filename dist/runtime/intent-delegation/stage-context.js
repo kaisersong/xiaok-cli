@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { toDurableSessionSnapshot } from '../../ai/runtime/session-store/store.js';
-import { assertCapturedMessageSchema } from '../../ai/runtime/provider-private-projection.js';
+import { assertCapturedMessageSchema } from '../../ai/runtime/provider-private-data.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 /** Original durable message conversion; a digest is a fact, never a grant. */
 export function intentStageMessages(snapshot) {

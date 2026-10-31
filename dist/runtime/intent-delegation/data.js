@@ -1,12 +1,13 @@
 import { ownDataBufferByteLength, ownDataString } from '../verification/application-native-intrinsics.js';
 import { types } from 'node:util';
-import { capturedSetAdd, capturedSetDelete, capturedSetHas, createCapturedSet } from '../verification/application-iteration-intrinsics.js';
+import { capturedArrayIterator, capturedSetAdd, capturedSetDelete, capturedSetHas, createCapturedSet } from '../verification/application-iteration-intrinsics.js';
 const arrayIsArray = Array.isArray;
 const numberIsFinite = Number.isFinite;
 const numberIsSafeInteger = Number.isSafeInteger;
 const getPrototypeOf = Object.getPrototypeOf;
 const getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
 const ownKeys = Reflect.ownKeys;
+const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const hasOwn = Object.prototype.hasOwnProperty;
 const objectCreate = Object.create;
 const defineProperty = Object.defineProperty;
@@ -29,20 +30,19 @@ export function captureIntentData(raw) {
         if (array ? prototype !== arrayPrototype : prototype !== objectPrototype && prototype !== null)
             throw Error('intent_commit_data');
         const keys = ownKeys(value), descriptors = getOwnPropertyDescriptors(value);
-        for (let i = 0; i < keys.length; i++)
-            if (typeof keys[i] !== 'string')
+        for (const key of capturedArrayIterator(keys))
+            if (typeof key !== 'string')
                 throw Error('intent_commit_accessor');
         capturedSetAdd(seen, value);
         try {
             if (array) {
-                const lengthDescriptor = apply(hasOwn, descriptors, ['length']) ? descriptors.length : undefined;
+                const lengthEntry = getOwnPropertyDescriptor(descriptors, 'length'), lengthDescriptor = lengthEntry && apply(hasOwn, lengthEntry, ['value']) ? lengthEntry.value : undefined;
                 const length = lengthDescriptor && apply(hasOwn, lengthDescriptor, ['value']) ? lengthDescriptor.value : undefined;
                 if (!numberIsSafeInteger(length) || length < 0 || keys.length !== length + 1)
                     throw Error('intent_commit_array');
                 const result = [];
                 for (let index = 0; index < length; index++) {
-                    const key = ownDataString(index);
-                    const descriptor = apply(hasOwn, descriptors, [key]) ? descriptors[key] : undefined;
+                    const entry = getOwnPropertyDescriptor(descriptors, ownDataString(index)), descriptor = entry && apply(hasOwn, entry, ['value']) ? entry.value : undefined;
                     if (!descriptor || !apply(hasOwn, descriptor, ['value']))
                         throw Error('intent_commit_data');
                     defineProperty(result, ownDataString(index), { __proto__: null, value: copy(descriptor.value, depth + 1), enumerable: true, writable: true, configurable: true });
@@ -50,11 +50,8 @@ export function captureIntentData(raw) {
                 return result;
             }
             const result = objectCreate(objectPrototype);
-            for (let i = 0; i < keys.length; i++) {
-                const key = keys[i];
-                if (typeof key !== 'string')
-                    throw Error('intent_commit_accessor');
-                const descriptor = apply(hasOwn, descriptors, [key]) ? descriptors[key] : undefined;
+            for (const key of capturedArrayIterator(keys)) {
+                const entry = getOwnPropertyDescriptor(descriptors, key), descriptor = entry && apply(hasOwn, entry, ['value']) ? entry.value : undefined;
                 if (!descriptor || !apply(hasOwn, descriptor, ['value']))
                     throw Error('intent_commit_accessor');
                 if (descriptor.value !== undefined)
@@ -70,12 +67,4 @@ export function captureIntentData(raw) {
     if (ownDataBufferByteLength(stringify(result)) > 16 * 1024 * 1024)
         throw Error('intent_commit_limit');
     return result;
-}
-/** Ordinary nullable-array length DATA only; not native admission or a journal validator. */
-export function nativeJournalLengthData(value) {
-    if (value === undefined || value === null)
-        return undefined;
-    if (!Array.isArray(value))
-        throw Error('intent_native_journal');
-    return value.length;
 }

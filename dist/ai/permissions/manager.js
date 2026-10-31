@@ -1,5 +1,5 @@
 import { posix, win32 } from 'node:path';
-import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation, getExactCommandApprovalRule, isExactCommandApprovalRule } from './policy-engine.js';
+import { PermissionPolicyEngine, matches, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 function readBashCommand(input) {
@@ -75,7 +75,6 @@ export class PermissionManager {
     }
     async check(toolName, input) {
         const policy = new PermissionPolicyEngine({
-            cwd: this.cwd,
             globalAllow: this.allowRules,
             globalDeny: this.denyRules,
             projectAllow: [],
@@ -102,15 +101,8 @@ export class PermissionManager {
         if (isScreenAutomationFallbackInvocation(toolName, input)) {
             return 'deny';
         }
-        if (this.mode === 'yolo')
-            return 'allow';
         if (toolName === 'bash') {
             const command = readBashCommand(input);
-            if (evaluation.action === 'allow' && this.allowRules.some(isExactCommandApprovalRule)) {
-                const exact = getExactCommandApprovalRule(input, this.cwd);
-                if (exact && this.allowRules.includes(exact))
-                    return 'allow';
-            }
             const conservative = this.mode !== 'auto' || hasMatchingCommandAllowRule(this.allowRules, command);
             if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command))
                 return 'prompt';
@@ -146,8 +138,29 @@ export class PermissionManager {
         }
         return 'prompt';
     }
+    matches(rules, toolName, input) {
+        return matches(rules, toolName, input);
+    }
+    buildRuleRegex(pattern) {
+        if (pattern.endsWith(' *')) {
+            const prefix = pattern.slice(0, -2);
+            return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}(?: [\\s\\S]*)?$`);
+        }
+        return new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}$`);
+    }
+    getRuleTarget(input) {
+        if (typeof input.command === 'string') {
+            return input.command;
+        }
+        if (typeof input.file_path === 'string') {
+            return input.file_path;
+        }
+        if (typeof input.path === 'string') {
+            return input.path;
+        }
+        return '';
+    }
 }
-/** Resolve lexical paths conservatively across POSIX, drive and UNC forms. */
 function isOutsideWorkspace(target, cwd, effectiveDir = cwd) {
     if (/^[~]|[$`]/.test(target))
         return true;

@@ -1,11 +1,4 @@
-import { resolve, posix, win32 } from 'path';
-function resolvePluginMcpArgument(arg, pluginDir) {
-    if (arg.startsWith('-') || posix.isAbsolute(arg) || win32.isAbsolute(arg)
-        || /^[a-z][a-z0-9+.-]*:/i.test(arg) || arg.startsWith('~'))
-        return arg;
-    const relativeFile = /[\\/]/.test(arg) || /\.(?:[cm]?js|py)$/i.test(arg);
-    return relativeFile ? resolve(pluginDir, arg) : arg;
-}
+import { resolve } from 'path';
 export function parsePluginManifest(raw, pluginDir) {
     const toResolvedList = (value) => Array.isArray(value)
         ? value.filter((entry) => typeof entry === 'string').map((entry) => resolve(pluginDir, entry))
@@ -19,6 +12,11 @@ export function parsePluginManifest(raw, pluginDir) {
             if (entry && typeof entry === 'object') {
                 const e = entry;
                 const hook = { command: String(e['command'] ?? '') };
+                if (e['outputFormat'] !== undefined) {
+                    if (e['outputFormat'] !== 'json')
+                        throw new Error('hook_output_format_invalid');
+                    hook.outputFormat = 'json';
+                }
                 if (typeof e['type'] === 'string')
                     hook.type = e['type'];
                 if (typeof e['url'] === 'string')
@@ -65,9 +63,8 @@ export function parsePluginManifest(raw, pluginDir) {
             const buildBase = () => {
                 if (type === 'stdio') {
                     const rawArgs = Array.isArray(entry.args) ? entry.args.filter((a) => typeof a === 'string') : undefined;
-                    // Bare subcommands/values are not files. Keep bundled script paths
-                    // relative to the plugin while preserving flags, URIs and absolute paths.
-                    const resolvedArgs = rawArgs?.map((arg) => resolvePluginMcpArgument(arg, pluginDir));
+                    // Resolve relative paths in args against the plugin directory
+                    const resolvedArgs = rawArgs?.map((arg) => arg.startsWith('/') || arg.startsWith('-') ? arg : resolve(pluginDir, arg));
                     return {
                         name,
                         type: 'stdio',

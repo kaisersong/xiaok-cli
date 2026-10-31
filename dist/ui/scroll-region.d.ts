@@ -42,6 +42,12 @@ export interface ScrollPromptFrame {
 export declare class ScrollRegionManager {
     private readonly stream;
     private active;
+    private permissionScreenActive;
+    private invalidatePermissionScreen;
+    private permissionPendingSize;
+    /** The main buffer must not be repainted or scrolled while its modal is elsewhere. */
+    suspendForPermissionScreen(onContent?: () => void): () => void;
+    private restoreMainForContent;
     private config;
     private lastActivityLine;
     private lastActivityRow;
@@ -76,8 +82,6 @@ export declare class ScrollRegionManager {
     private _contentEndRow;
     /** Actual terminal cursor row (1-based), tracked by counting \n writes. */
     private _cursorRow;
-    /** Actual terminal cursor, which usually sits in the editor rather than content. */
-    private _terminalCursorRow;
     /** Actual terminal cursor column (0-based), for wrapping calculation. */
     private _cursorCol;
     /** Internal flag: cursor position may be unreliable (just after screen clear). */

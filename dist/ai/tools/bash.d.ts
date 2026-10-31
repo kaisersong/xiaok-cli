@@ -1,9 +1,8 @@
-import type { Tool } from '../../types.js';
-export interface BashApprovalOptions {
-    /** Live host authority; never derived from model tool input. */
-    isYolo?: () => boolean;
-}
-export declare function createBashTool(options?: BashApprovalOptions): Tool;
-export declare const bashTool: Tool;
+import type { Tool, ToolExecutionContext } from '../../types.js';
+export type BashToolExecutionContext = Pick<ToolExecutionContext, 'signal' | 'assertPermissionApproval' | 'compoundPhase' | 'toolInvocationId' | 'runtimeFactSink' | 'observationCollector' | 'executionProgress'> | ToolExecutionContext;
+export type BashTool = Omit<Tool, 'execute'> & {
+    execute(input: Record<string, unknown>, context?: BashToolExecutionContext): Promise<string>;
+};
+export declare const bashTool: BashTool;
 /** Installed only by the interactive CLI host, before sandbox wrapping. */
-export declare function createInteractiveBashTool(run: Tool['execute'], options?: BashApprovalOptions): Tool;
+export declare function createInteractiveBashTool(run: Tool['execute']): Tool;

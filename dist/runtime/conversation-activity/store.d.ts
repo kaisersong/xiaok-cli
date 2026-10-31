@@ -8,8 +8,6 @@ export declare class ConversationActivityStore {
     private readonly now;
     private readonly maxSourceEvents;
     private closed;
-    private file;
-    private secureSidecars;
     constructor(file: string, options?: {
         now?: () => number;
         maxSourceEvents?: number;

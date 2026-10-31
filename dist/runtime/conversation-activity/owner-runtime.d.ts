@@ -20,11 +20,9 @@ export interface ActivityOwnerConfig {
 }
 export declare function activityOwnerConfigDigest(config: ActivityOwnerConfig): string;
 /** Private configuration is supplied by the verified native bootstrap owner. */
-export declare function startConversationActivityOwner(config: ActivityOwnerConfig, options?: {
-    idle?(): void;
-}): Promise<{
+export declare function startConversationActivityOwner(config: ActivityOwnerConfig): Promise<{
     host: ConversationActivityOwnerHost;
     supervisor: ActivitySourceSupervisor;
-    stop(): Promise<void>;
+    stop: () => Promise<void>;
 }>;
 export declare function serveConversationActivityOwner(configFile: string): Promise<void>;

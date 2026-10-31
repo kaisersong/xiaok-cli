@@ -18,8 +18,17 @@ export declare function captureIntentProducerRequest(raw: IntentProducerActionIn
     lease: SessionExecutionLease;
 };
 export declare function intentProducerLedgerHash(ledger: unknown): string;
-export declare function intentProducerRouteVector(ledger: PersistedSessionSnapshot['intentDelegation']): string;
-export declare function assertIntentProducerRoutesCurrent(ledger: PersistedSessionSnapshot['intentDelegation'], original: string): void;
+export interface IntentProducerRouteData {
+    readonly intents: readonly {
+        readonly intentId: string;
+    }[];
+    readonly latestPlan?: {
+        readonly intentId: string;
+    } | null;
+    readonly activeIntentId?: string;
+}
+export declare function intentProducerRouteVector(ledger: IntentProducerRouteData | undefined): string;
+export declare function assertIntentProducerRoutesCurrent(ledger: IntentProducerRouteData | undefined, original: string): void;
 /** Called only by actual SessionStore primitive under its original lease/save lock.
  * These are model reports, never proof of a producer side effect or current business. */
 export declare function applyIntentProducerAction(previous: PersistedSessionSnapshot, input: IntentProducerActionInput, originalRoutes: string): PersistedSessionSnapshot;

@@ -46,6 +46,8 @@ export class MultiAgentCoordinator {
     idleTimeoutMs;
     turnTimeoutMs;
     onEvent;
+    onPhysicalResourcesClosed;
+    physicalCloseWitnesses = new WeakMap();
     nextMessageOrdinal = 0;
     disposed = false;
     executionMode;
@@ -66,6 +68,7 @@ export class MultiAgentCoordinator {
         this.turnTimeoutMs = options.turnTimeoutMs !== undefined && Number.isFinite(options.turnTimeoutMs) && options.turnTimeoutMs > 0
             ? Math.min(2 ** 31 - 1, Math.max(10, Math.floor(options.turnTimeoutMs))) : undefined;
         this.onEvent = options.onEvent;
+        this.onPhysicalResourcesClosed = options.onPhysicalResourcesClosed;
         const root = {
             id: ROOT_AGENT_ID,
             taskName: 'root',
@@ -396,8 +399,10 @@ export class MultiAgentCoordinator {
             throw Error('multi_agent_cleanup_not_started');
         const records = [...this.records.values()].filter(record => record.id !== ROOT_AGENT_ID);
         await Promise.all(records.map(record => record.cleanup));
-        if ([...this.records.values()].filter(record => record.id !== ROOT_AGENT_ID).length !== records.length || records.some(record => this.records.get(record.id) !== record || !record.resourcesReleased || record.cleanupError))
-            throw Error('multi_agent_cleanup_unconfirmed');
+        if ([...this.records.values()].filter(record => record.id !== ROOT_AGENT_ID).length !== records.length || records.some(record => this.records.get(record.id) !== record || !record.resourcesReleased || record.cleanupError)) {
+            const failures = records.flatMap(record => record.cleanupFailures ?? []);
+            throw failures.length ? new AggregateError(failures, 'multi_agent_cleanup_unconfirmed', { cause: failures[0] }) : Error('multi_agent_cleanup_unconfirmed');
+        }
     }
     schedule(record, externalController) {
         if (record.execution || this.isClosed(record) || record.cleanupError)
@@ -418,7 +423,8 @@ export class MultiAgentCoordinator {
                     }
                 }
                 catch (error) {
-                    record.cleanupError = error instanceof Error ? error.message : String(error);
+                    (record.cleanupFailures ??= []).push(error);
+                    record.cleanupError = (error instanceof Error ? error.message : String(error)) || 'multi_agent_suspend_failed';
                     const queuedCount = record.queue.length;
                     record.queue.length = 0;
                     const failure = `MULTI_AGENT_SUSPEND_FAILED: ${record.cleanupError}; cancelled queued followups=${queuedCount}`;
@@ -550,51 +556,73 @@ export class MultiAgentCoordinator {
         this.publish(parent, 'message_sent', message);
         this.notifyWaiters();
     }
+    /** Only the creating Core can inspect its original physical-close witness. */
+    inspectPhysicalCloseWitness(witness) {
+        const known = this.physicalCloseWitnesses.get(witness);
+        if (!known || this.records.get(known.record.id) !== known.record || known.record.cleanup !== known.cleanup
+            || known.record.turn !== known.turn || !known.record.closing || known.record.cleanupError
+            || known.record.cleanupFailures?.length)
+            throw Error('multi_agent_physical_close_witness_invalid');
+        return structuredClone(known.snapshot);
+    }
     async closeRecord(record, preserveFailure = false) {
-        if (!preserveFailure && record.status !== 'closed') {
-            record.status = 'closed';
-            this.publish(record, 'status');
-            this.notifyWaiters();
-        }
         if (!record.cleanup) {
+            let complete;
+            // Publish the unique owner before abort, native callbacks or synchronous observers.
+            record.cleanup = new Promise(resolve => { complete = resolve; });
             record.closing = true;
             record.queue.length = 0;
             record.inbox.length = 0;
-            record.stopWatchdog?.();
-            record.endedAt ??= Date.now();
-            record.controller?.abort();
-            const execution = record.execution;
+            if (!preserveFailure)
+                record.status = 'closed';
+            const noteFailure = (error) => {
+                (record.cleanupFailures ??= []).push(error);
+                const detail = error instanceof Error ? error.message : String(error);
+                record.cleanupError = record.cleanupError ? `${record.cleanupError}; ${detail}` : detail || 'multi_agent_cleanup_failed';
+                this.publish(record, 'status');
+                this.notifyParent(record, `MULTI_AGENT_CLEANUP_FAILED: ${record.canonicalName}: ${detail}`, 'error');
+                this.notifyWaiters();
+            };
             const cleanupStep = async (operation) => {
                 try {
                     await operation();
                 }
                 catch (error) {
-                    const detail = error instanceof Error ? error.message : String(error);
-                    record.cleanupError = record.cleanupError ? `${record.cleanupError}; ${detail}` : detail;
-                    this.publish(record, 'status');
-                    this.notifyParent(record, `MULTI_AGENT_CLEANUP_FAILED: ${record.canonicalName}: ${detail}`, 'error');
-                    this.notifyWaiters();
+                    noteFailure(error);
                 }
             };
+            record.stopWatchdog?.();
+            record.endedAt ??= Date.now();
+            record.controller?.abort();
+            const execution = record.execution;
             const existingSession = record.session;
             const deactivateExisting = cleanupStep(() => existingSession?.deactivate?.());
-            const cleanup = (async () => {
+            const cleanup = async () => {
                 await deactivateExisting;
                 await cleanupStep(() => execution);
-                // A child may be using its parent's worktree. Grace-period expiry is
-                // not physical settlement; wait for the child cleanup itself.
-                await Promise.all([...this.records.values()]
-                    .filter((child) => child.parentId === record.id)
-                    .map((child) => child.cleanup));
+                const children = [...this.records.values()].filter(child => child.parentId === record.id);
+                await Promise.all(children.map(child => child.cleanup));
+                for (const child of children) {
+                    if (!child.resourcesReleased || child.cleanupError || child.cleanupFailures?.length) {
+                        noteFailure(new AggregateError(child.cleanupFailures ?? [], 'multi_agent_descendant_cleanup_unconfirmed'));
+                    }
+                }
                 const session = record.session;
                 if (session) {
                     if (session !== existingSession)
                         await cleanupStep(() => session.deactivate?.());
                     await cleanupStep(() => session.dispose());
                 }
-                record.createSession = undefined;
-                record.resourcesReleased = !record.cleanupError;
+                if (!record.cleanupError && !record.cleanupFailures?.length) {
+                    const witness = Object.freeze({});
+                    const snapshot = { ...this.snapshot(record), executionActive: false, resourcesReleased: true,
+                        runtimeResident: false, preparedReservation: false };
+                    this.physicalCloseWitnesses.set(witness, { record, cleanup: record.cleanup, turn: record.turn, snapshot });
+                    await cleanupStep(() => this.onPhysicalResourcesClosed?.(witness));
+                }
+                record.resourcesReleased = !record.cleanupError && !record.cleanupFailures?.length;
                 if (record.resourcesReleased) {
+                    record.createSession = undefined;
                     record.session = undefined;
                     record.runtimeResident = false;
                     record.preparedReservation = false;
@@ -602,10 +630,15 @@ export class MultiAgentCoordinator {
                 record.cleanupSettled = true;
                 this.publish(record, 'status');
                 this.notifyWaiters();
-            })();
-            record.cleanup = cleanup;
+            };
+            void cleanup().then(complete, error => { noteFailure(error); record.cleanupSettled = true; complete(); });
             this.notifyWaiters();
             this.publish(record, 'status');
+        }
+        else if (!preserveFailure && record.status !== 'closed') {
+            record.status = 'closed';
+            this.publish(record, 'status');
+            this.notifyWaiters();
         }
         await this.waitForCleanup(record.cleanup);
     }
@@ -686,8 +719,6 @@ export class MultiAgentCoordinator {
         for (const record of records) {
             record.closing = true;
             record.queue.length = 0;
-            record.stopWatchdog?.();
-            record.controller?.abort();
         }
         this.notifyWaiters();
     }
@@ -787,15 +818,14 @@ export class MultiAgentCoordinator {
             record.endedAt = Date.now();
             record.error = `${code}: ${record.canonicalName} (${record.phase}${record.currentTool ? `:${record.currentTool}` : ''}); stop waiting. Execution may still be settling; do not automatically retry.`;
             record.queue.length = 0;
-            this.publish(record, 'status');
-            this.notifyParent(record, record.error, 'error');
-            controller.abort();
             const subtree = [...this.records.values()]
                 .filter((candidate) => candidate.id === record.id || this.isDescendantOf(candidate, record.id))
                 .sort((left, right) => right.depth - left.depth);
             this.freezeRecords(subtree);
             for (const child of subtree)
                 void this.closeRecord(child, child.id === record.id);
+            this.publish(record, 'status');
+            this.notifyParent(record, record.error, 'error');
             this.notifyWaiters();
         };
         const armIdle = () => {

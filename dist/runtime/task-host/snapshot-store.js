@@ -1,3 +1,4 @@
+import { createKnownDirectoryWriterFence } from '../verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../verification/ordinary-source-writer-observation.js';
 import { assertCapturedJsonUniqueKeys } from '../verification/captured-source-json.js';
 import { createCapturedTaskDeclarationAccumulator } from './captured-task-declarations.js';
@@ -25,6 +26,7 @@ const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
  * Terminal transitions materialize the complete historical TaskSnapshot so
  * older readers keep seeing completed tasks without understanding journals.
  */
+const knownTaskWriters = new WeakMap();
 export class FileTaskSnapshotStore {
     rootDir;
     diagnostics;
@@ -39,6 +41,7 @@ export class FileTaskSnapshotStore {
         this.rootDir = rootDir;
         this.diagnostics = diagnostics;
         this.observations = new DesktopTaskObservationStore(rootDir);
+        knownTaskWriters.set(this, { fence: createKnownDirectoryWriterFence(rootDir, 'task-root') });
     }
     async save(snapshot, expectedPrevious) {
         const original = JSON.parse(JSON.stringify(snapshot));
@@ -49,6 +52,31 @@ export class FileTaskSnapshotStore {
     async closeAndDrain() {
         this.writerClosed = true;
         await this.writerQueue;
+    }
+    /** User-only cooperative fence; it grants no all-writer or migration authority. */
+    fenceKnownWriter(requestSource) {
+        const owner = knownTaskWriters.get(this);
+        if (!owner || arguments.length !== 1)
+            return Promise.reject(Error('known_writer_fence_owner'));
+        if (requestSource !== 'user')
+            return Promise.reject(Error('known_writer_fence_request_source'));
+        if (!['darwin', 'linux'].includes(process.platform))
+            return Promise.reject(Error('known_writer_fence_platform'));
+        if (owner.pending)
+            return owner.pending;
+        this.writerClosed = true;
+        const accepted = this.writerQueue;
+        const work = Promise.resolve().then(async () => { await accepted; const release = acquireSaveLock(join(this.rootDir, '.task-store.save.lock')); try {
+            owner.fence.persist();
+        }
+        finally {
+            release();
+        } });
+        owner.pending = work;
+        void work.then(() => { if (owner.pending === work)
+            owner.pending = undefined; }, () => { if (owner.pending === work)
+            owner.pending = undefined; });
+        return work;
     }
     enqueueWrite(taskId, action) {
         if (this.writerClosed)
@@ -76,6 +104,7 @@ export class FileTaskSnapshotStore {
             try {
                 try {
                     assertCurrent();
+                    knownTaskWriters.get(this).fence.assertOpen();
                     observeOrdinaryDirectoryWriter(resolved, 'task-root');
                     assertOrdinarySourceWriterRoute();
                     assertCurrent();
@@ -233,41 +262,6 @@ export class FileTaskSnapshotStore {
                 return true;
         }
         return false;
-    }
-    /** Main-only confirmation history; caller-supplied task lists are never authority. */
-    async readPreviousUserTask(threadId, currentTaskId) {
-        const current = await this.recoverTask(currentTaskId);
-        if (!current || current.context?.threadId !== threadId)
-            return null;
-        let latest = null;
-        let directory;
-        try {
-            directory = await opendir(this.snapshotDir());
-        }
-        catch (error) {
-            if (error.code === 'ENOENT')
-                return null;
-            throw error;
-        }
-        for await (const entry of directory) {
-            if (!entry.name.endsWith('.json'))
-                continue;
-            if (!entry.isFile() || entry.isSymbolicLink())
-                throw new Error('task_history_owner_unknown');
-            const snapshot = parseCheckpoint(await readFile(join(this.snapshotDir(), entry.name), 'utf8')).snapshot;
-            if (snapshot.taskId === currentTaskId || snapshot.context?.threadId !== threadId
-                || snapshot.executionScope && (snapshot.executionScope.kind !== 'goal_turn' || snapshot.executionScope.origin !== 'user'))
-                continue;
-            if (snapshot.createdAt === current.createdAt)
-                return null;
-            if (snapshot.createdAt > current.createdAt)
-                continue;
-            if (!latest || snapshot.createdAt > latest.createdAt)
-                latest = snapshot;
-            else if (snapshot.createdAt === latest.createdAt)
-                return null;
-        }
-        return latest ? this.recoverTask(latest.taskId) : null;
     }
     async clearActiveTask(taskId) {
         await this.enqueueWrite(undefined, () => this.updateIndex(index => {

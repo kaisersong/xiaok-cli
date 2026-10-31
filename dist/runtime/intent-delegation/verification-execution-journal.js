@@ -27,7 +27,11 @@ function target(ledger, candidateId, obligationId, registration) {
         throw Error('intent_verification_obligation');
     return { candidate, binding, definition };
 }
-/** Durable identity and source facts only. No returned row grants native/execution/publication. */
+function assertVerificationOperationRowData(row) {
+    parseOwnerEnrollmentRegistration(row.registration);
+    if (typeof row.route !== 'string')
+        throw Error('intent_verification_route');
+}
 export function parseIntentVerificationExecutions(ledger) {
     const rows = captureIntentData(ledger?.verificationExecutions ?? []);
     if (!Array.isArray(rows))
@@ -60,12 +64,15 @@ export function parseIntentVerificationExecutions(ledger) {
             throw Error('intent_verification_registration');
         if (row.phase !== 'enrolled' && row.operation !== null)
             throw Error('intent_operation_phase');
+        assertVerificationOperationRowData(row);
         parseIntentVerificationOperation(row.operation, row, binding);
         validateFact(row.enrollmentObservation, row, binding);
         if (row.phase !== phaseForFact(row.enrollmentObservation, row.phase === 'reserved'))
             throw Error('intent_verification_state');
         if (row.bindingHash !== candidate.bindingHash || row.sourceHash !== candidate.sourceHash || !candidate.applicationAttempts.some(a => a.phase === 'ready' && a.route === row.route))
             throw Error('intent_verification_original');
+        if (typeof row.createdAt !== 'number')
+            throw Error('intent_verification_state');
         const draft = parseValidationMaterialDraft(row.draft, row.createdAt);
         if (draft.purpose !== 'isolated-command' || json(draft.invocation) !== json(row.invocation))
             throw Error('intent_verification_draft');

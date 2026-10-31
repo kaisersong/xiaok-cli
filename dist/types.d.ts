@@ -268,6 +268,10 @@ export interface Config {
         };
     };
 }
+export type ConfigV2Input = Omit<Config, 'intentBoundary'> & {
+    intentBoundary?: Config['intentBoundary'];
+};
+export type ConfigInput = ConfigV2Input | LegacyConfig;
 export declare const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig;
 export declare const DEFAULT_CONFIG: Config;
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */
@@ -295,13 +299,3 @@ export type PermissionChoice = {
 } | {
     action: 'deny';
 };
-export interface MemoryCompactionRequest {
-    requestSource: 'user' | 'scheduler' | 'agent';
-    force?: boolean;
-}
-export interface MemoryCompactionResult {
-    status: 'completed' | 'unchanged';
-    l1: number;
-    l2: number;
-    l3: number;
-}

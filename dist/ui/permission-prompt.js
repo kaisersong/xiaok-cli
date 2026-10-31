@@ -1,4 +1,4 @@
-import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches, getExactCommandApprovalRule, isExactCommandApprovalRule } from '../ai/permissions/policy-engine.js';
+import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
@@ -82,12 +82,11 @@ function isMandatoryReview(toolName, input) {
 function rememberedRules(toolName, input, rule) {
     if (toolName !== 'bash' || typeof input.command !== 'string')
         return [rule];
-    const exact = () => { const rule = getExactCommandApprovalRule(input); return rule ? [rule] : []; };
     if (isMandatoryReview(toolName, input))
-        return exact();
+        return [];
     const parsed = parseCommandSegments(input.command);
     if (!parsed.valid)
-        return exact();
+        return [];
     const rules = [...new Set(parsed.segments.map(command => deriveRule(toolName, { command })))];
     // Use the execution policy itself to verify that these scopes cover the full
     // command. An unrepresentable command must not offer ineffective persistence.
@@ -100,9 +99,7 @@ export function buildPermissionPromptOptions(rule, toolName = '', input = {}) {
             { label: '允许一次', choice: { action: 'allow_once' } },
             { label: '拒绝', choice: { action: 'deny' } },
         ];
-    const displayRule = isExactCommandApprovalRule(rules[0])
-        ? getUiCopy('zh-CN').exactCommandScope
-        : compactRuleForOption(rules.join(' + '));
+    const displayRule = compactRuleForOption(rules.join(' + '));
     const scopes = rules.length > 1 ? { rules } : {};
     return [
         { label: '允许一次', choice: { action: 'allow_once' } },
@@ -135,8 +132,6 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
             lines.push(dim(copy.writeTarget(escapeProjectRuleDisplay(path))));
     }
     if (typeof input.command === 'string') {
-        if (rules.some(isExactCommandApprovalRule))
-            lines.push(dim(copy.exactCommandApprovalHint));
         for (const rule of rules)
             if (rule.endsWith(' *)'))
                 lines.push(dim(copy.commandApprovalScope(rule)));
@@ -173,8 +168,13 @@ export async function showPermissionPrompt(toolName, input, config) {
         let resolved = false;
         let renderWithRenderer = useRenderer;
         let directPromptStarted = false;
+        let completeRendererModal;
         transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
         const degradeRenderer = (context, _error) => {
+            try {
+                renderer?.closeModal();
+            }
+            catch { }
             renderWithRenderer = false;
             try {
                 stdout.write(`\n${dim(`[xiaok] UI 已降级：${context}`)}\n`);
@@ -182,24 +182,19 @@ export async function showPermissionPrompt(toolName, input, config) {
             catch { }
         };
         const renderAll = () => {
+            const reviewRules = rememberedRules(toolName, input, rule);
+            const reviewScopes = typeof input.command === 'string'
+                ? reviewRules.filter(scope => scope.endsWith(' *)')) : [];
             const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })), 'zh-CN', config?.permissionMode);
             if (renderWithRenderer && renderer) {
                 try {
-                    if (renderer.hasActiveScrollRegion()) {
-                        const currentState = renderer.getState();
-                        renderer.renderInput({
-                            prompt: currentState.prompt || 'Type your message...',
-                            input: '',
-                            cursor: 0,
-                            footerLines: currentState.footerLines,
-                            overlayLines: [],
-                        });
-                    }
-                    renderer.openPermissionModal({
+                    completeRendererModal = renderer.openPermissionModal({
                         toolName,
+                        reviewRules,
+                        reviewScopes,
                         targetLines: lines.slice(2, lines.length - (promptOptions.length + 1)),
                         options: promptOptions.map((option) => option.label),
-                    });
+                    }, () => done({ action: 'deny' }));
                     for (let index = 0; index < selectedIdx; index += 1) {
                         renderer.handleKey('\x1b[B');
                     }
@@ -207,6 +202,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                 }
                 catch (error) {
                     degradeRenderer('permission_prompt_renderer', error);
+                    throw error; // A failed review surface must never fall through to approval.
                 }
             }
             if (!directPromptStarted) {
@@ -221,23 +217,8 @@ export async function showPermissionPrompt(toolName, input, config) {
         const clearAll = () => {
             if (renderWithRenderer && renderer) {
                 try {
-                    const currentState = renderer.getState();
-                    if (renderer.hasActiveScrollRegion()) {
-                        const preserveFooter = !(process.platform === 'win32' && process.env.TMUX);
-                        if (process.platform === 'win32' && process.env.TMUX) {
-                            renderer.clearVisibleContent();
-                        }
-                        renderer.renderInput({
-                            prompt: currentState.prompt || 'Type your message...',
-                            input: '',
-                            cursor: 0,
-                            footerLines: preserveFooter ? currentState.footerLines : [],
-                            overlayLines: [],
-                        });
-                    }
-                    else {
-                        renderer.closeModal();
-                    }
+                    completeRendererModal?.();
+                    completeRendererModal = undefined;
                     return;
                 }
                 catch (error) {
@@ -259,8 +240,21 @@ export async function showPermissionPrompt(toolName, input, config) {
                 return;
             resolved = true;
             config?.signal?.removeEventListener('abort', onAbort);
-            clearAll();
-            stopPermissionInput(onData);
+            let cleanupFailed = false;
+            try {
+                clearAll();
+            }
+            catch {
+                cleanupFailed = true;
+            }
+            try {
+                stopPermissionInput(onData, onEnd);
+            }
+            catch {
+                cleanupFailed = true;
+            }
+            if (cleanupFailed)
+                choice = { action: 'deny' };
             const summary = formatPermissionDecisionSummary(choice);
             if (summary) {
                 stdout.write(`${dim(summary)}\n`);
@@ -270,6 +264,11 @@ export async function showPermissionPrompt(toolName, input, config) {
         const handleKey = (key) => {
             if (resolved)
                 return;
+            if (key === '\x1b[5~' || key === '\x1b[6~') {
+                if (renderWithRenderer)
+                    renderer?.pagePermissionModal(key === '\x1b[5~' ? -1 : 1);
+                return;
+            }
             // Ctrl-C / Esc → 拒绝
             if (key === '\x03' || key === '\x1b') {
                 done({ action: 'deny' });
@@ -277,6 +276,8 @@ export async function showPermissionPrompt(toolName, input, config) {
             }
             // Enter → 选择当前项
             if (key === '\r' || key === '\n') {
+                if (promptOptions[selectedIdx].choice.action !== 'deny' && renderWithRenderer && renderer && !renderer.canApprovePermissionModal())
+                    return;
                 transcriptLogger?.record({
                     type: 'permission_prompt_decision',
                     action: promptOptions[selectedIdx].choice.action,
@@ -288,6 +289,8 @@ export async function showPermissionPrompt(toolName, input, config) {
             // Number keys → 直接选择对应项
             const num = /^[1-9]$/.test(key) ? Number(key) : 0;
             if (num >= 1 && num <= promptOptions.length) {
+                if (promptOptions[num - 1].choice.action !== 'deny' && renderWithRenderer && renderer && !renderer.canApprovePermissionModal())
+                    return;
                 transcriptLogger?.record({
                     type: 'permission_prompt_decision',
                     action: promptOptions[num - 1].choice.action,
@@ -306,8 +309,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                     }
                     catch (error) {
                         degradeRenderer('permission_prompt_nav_up', error);
-                        clearAll();
-                        renderAll();
+                        done({ action: 'deny' });
                     }
                 }
                 else {
@@ -326,8 +328,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                     }
                     catch (error) {
                         degradeRenderer('permission_prompt_nav_down', error);
-                        clearAll();
-                        renderAll();
+                        done({ action: 'deny' });
                     }
                 }
                 else {
@@ -341,21 +342,34 @@ export async function showPermissionPrompt(toolName, input, config) {
             const input = data.toString();
             // stdin batches can contain multiple complete keys. Unknown/pasted text
             // remains ignored as a whole; multi-digit numbers stay a single token.
-            const keys = input.match(/\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
+            const keys = input.match(/\x1b\[[56]~|\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
             if (keys.join('') !== input)
                 return;
             for (const key of keys) {
                 if (resolved)
                     break;
-                handleKey(key);
+                try {
+                    handleKey(key);
+                }
+                catch {
+                    done({ action: 'deny' });
+                }
             }
         };
         const onAbort = () => done({ action: 'deny' });
-        renderAll();
-        startPermissionInput(onData);
-        config?.signal?.addEventListener('abort', onAbort, { once: true });
-        if (config?.signal?.aborted)
-            onAbort();
+        const onEnd = () => done({ action: 'deny' });
+        try {
+            renderAll();
+            if (resolved)
+                return;
+            startPermissionInput(onData, onEnd);
+            config?.signal?.addEventListener('abort', onAbort, { once: true });
+            if (config?.signal?.aborted)
+                onAbort();
+        }
+        catch {
+            done({ action: 'deny' });
+        }
     });
 }
 /** Escape repository text without changing its stored identity. */

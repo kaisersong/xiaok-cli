@@ -1,4 +1,4 @@
-export type PermissionMode = 'default' | 'auto' | 'plan' | 'yolo';
+export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
 export interface PermissionManagerOptions {
     mode: PermissionMode;
@@ -24,4 +24,7 @@ export declare class PermissionManager {
     addSessionDenyRule(rule: string): void;
     static nextMode(mode: PermissionMode): PermissionMode;
     check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision>;
+    private matches;
+    private buildRuleRegex;
+    private getRuleTarget;
 }

@@ -5,8 +5,7 @@ import { type HooksRunner } from '../../runtime/hooks-runner.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { type WorkspaceToolOptions } from './read.js';
-import { type BashApprovalOptions } from './bash.js';
-export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[], metadataSink?: Map<Tool, ToolDescriptionMetadata>, bashApproval?: BashApprovalOptions): Tool[];
+export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[], metadataSink?: Map<Tool, ToolDescriptionMetadata>): Tool[];
 /** Host-owned routing boundary. It is not a model parameter or permission grant. */
 export interface CompoundRegistryExecutionPort {
     publishCurrentHistory?(): Promise<void>;

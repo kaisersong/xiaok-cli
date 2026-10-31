@@ -1,6 +1,7 @@
 import { createTerminalController } from './terminal-controller.js';
 import { TerminalRenderer } from './terminal-renderer.js';
 import { formatPermissionPromptLines } from './permission-prompt.js';
+import { PermissionScreen } from './permission-screen.js';
 function getTerminalSize(stream) {
     return {
         columns: stream.columns ?? process.stdout.columns ?? 80,
@@ -12,7 +13,72 @@ export class ReplRenderer {
     controller;
     terminalRenderer;
     scrollRegion = null;
-    inputOverlayKind = 'generic';
+    permissionScreen = null;
+    permissionInvalidated = false;
+    permissionNeedsScreen = false;
+    onPermissionInvalidated;
+    permissionCompletion;
+    invalidatePermissionScreen = () => {
+        const complete = this.permissionCompletion;
+        if (!complete)
+            return;
+        this.permissionInvalidated = true;
+        const deny = this.onPermissionInvalidated;
+        this.onPermissionInvalidated = undefined;
+        // Retire and restore this owner before notifying its real pending promise.
+        // done() only calls its own now-retired completion closure, never closeModal.
+        try {
+            complete();
+        }
+        finally {
+            deny?.();
+        }
+    };
+    releasePermissionScreen = null;
+    repaintPermissionScreen = () => {
+        if (this.permissionScreen) {
+            try {
+                this.render();
+            }
+            catch {
+                this.invalidatePermissionScreen();
+            }
+        }
+    };
+    canApprovePermissionModal() {
+        // A resize invalidates earlier page review before accepting a key.
+        if (this.permissionInvalidated || !this.permissionCompletion
+            || this.controller.getState().modal?.type !== 'permission')
+            return false;
+        if (this.permissionNeedsScreen && !this.permissionScreen)
+            return false;
+        if (this.permissionScreen) {
+            this.render();
+            return this.permissionScreen?.canApprove() ?? false;
+        }
+        // A valid inline modal intentionally has no alternate screen.
+        return !this.permissionNeedsScreen;
+    }
+    pagePermissionModal(delta) {
+        if (!this.permissionScreen)
+            return;
+        this.permissionScreen.page(delta);
+        this.render();
+    }
+    finishPermissionScreen() {
+        if (!this.permissionScreen)
+            return;
+        this.stream.removeListener('resize', this.repaintPermissionScreen);
+        this.permissionScreen = null;
+        const release = this.releasePermissionScreen;
+        this.releasePermissionScreen = null;
+        try {
+            this.stream.write('\x1b[0m\x1b[?1049l\x1b[?25h');
+        }
+        finally {
+            release?.();
+        }
+    }
     constructor(stream = process.stdout) {
         this.stream = stream;
         this.controller = createTerminalController({ prompt: '' });
@@ -23,6 +89,7 @@ export class ReplRenderer {
         this.controller.setTerminalSize(columns, rows);
     }
     setScrollRegion(region) {
+        this.invalidatePermissionScreen();
         this.scrollRegion = region;
     }
     hasActiveScrollRegion() {
@@ -65,6 +132,20 @@ export class ReplRenderer {
     render() {
         this.syncTerminalSize();
         const state = this.controller.getState();
+        if (state.modal?.type === 'permission' && this.permissionScreen) {
+            try {
+                this.permissionScreen.render(state.modal, this.getScrollPromptFrame());
+            }
+            catch (error) {
+                try {
+                    this.invalidatePermissionScreen();
+                }
+                catch { }
+                throw error;
+            }
+            return;
+        }
+        this.finishPermissionScreen();
         if (this.scrollRegion?.isActive()) {
             const permissionModal = state.modal?.type === 'permission' ? state.modal : null;
             const overlayLines = permissionModal
@@ -72,7 +153,7 @@ export class ReplRenderer {
                 : state.overlay?.type === 'lines'
                     ? state.overlay.lines
                     : [];
-            this.scrollRegion.renderPromptFrame(this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : this.inputOverlayKind));
+            this.scrollRegion.renderPromptFrame(this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : 'generic'));
             return;
         }
         this.terminalRenderer.render(this.controller.getState());
@@ -80,8 +161,8 @@ export class ReplRenderer {
     getState() {
         return this.controller.getState();
     }
-    renderInput(frame, overlayKind = 'generic') {
-        this.inputOverlayKind = overlayKind;
+    renderInput(frame) {
+        this.invalidatePermissionScreen();
         this.controller.closeModal();
         this.controller.setPrompt(frame.prompt);
         this.controller.replaceInput(frame.input, frame.cursor);
@@ -90,31 +171,73 @@ export class ReplRenderer {
         this.render();
     }
     renderOverlayAtCursor(lines) {
-        this.inputOverlayKind = 'generic';
+        this.invalidatePermissionScreen();
         this.controller.setOverlayLines(lines);
         this.render();
     }
-    openPermissionModal(request) {
-        this.controller.openPermissionModal(request);
-        this.render();
+    openPermissionModal(request, onInvalidated) {
+        // A replacement must finish the previous real request before owning input.
+        this.invalidatePermissionScreen();
+        this.permissionInvalidated = false;
+        this.permissionNeedsScreen = this.scrollRegion?.isActive() ?? false;
+        this.onPermissionInvalidated = onInvalidated;
+        const complete = () => {
+            if (this.permissionCompletion !== complete)
+                return;
+            this.permissionCompletion = undefined;
+            this.onPermissionInvalidated = undefined;
+            this.permissionInvalidated = true;
+            if (this.permissionScreen && this.scrollRegion) {
+                const frame = this.scrollRegion.getPromptFrameState();
+                this.controller.setPrompt(frame.placeholder);
+                this.controller.setFooterLines([frame.summaryLine ?? '', frame.statusLine]);
+            }
+            this.controller.closeModal();
+            this.render();
+        };
+        this.permissionCompletion = complete;
+        try {
+            this.controller.openPermissionModal(request);
+            if (this.scrollRegion?.isActive() && !this.permissionScreen) {
+                this.releasePermissionScreen = this.scrollRegion.suspendForPermissionScreen(this.invalidatePermissionScreen);
+                this.permissionScreen = new PermissionScreen(this.stream);
+                this.stream.on('resize', this.repaintPermissionScreen);
+                this.stream.write('\x1b[?1049h');
+            }
+            this.render();
+            return complete;
+        }
+        catch (error) {
+            try {
+                this.invalidatePermissionScreen();
+            }
+            catch { }
+            throw error;
+        }
     }
     handleKey(key) {
         this.controller.handleKey(key);
         this.render();
     }
     clearOverlay() {
-        this.inputOverlayKind = 'generic';
+        this.invalidatePermissionScreen();
         this.controller.clearOverlay();
         this.render();
     }
     closeModal() {
+        if (this.permissionCompletion) {
+            this.invalidatePermissionScreen();
+            return;
+        }
         this.controller.closeModal();
         this.render();
     }
     clearVisibleContent() {
+        this.invalidatePermissionScreen();
         this.scrollRegion?.clearVisibleViewport();
     }
     clearPromptLine() {
+        this.invalidatePermissionScreen();
         this.controller.setPrompt('');
         this.controller.replaceInput('', 0);
         this.controller.setFooterLines([]);
@@ -123,6 +246,7 @@ export class ReplRenderer {
         this.render();
     }
     prepareBlockOutput() {
+        this.invalidatePermissionScreen();
         this.terminalRenderer.clearAll();
     }
     /**
@@ -130,6 +254,7 @@ export class ReplRenderer {
      * so the next TerminalRenderer render uses cursor movement not newlines.
      */
     prepareForInput() {
+        this.invalidatePermissionScreen();
         this.terminalRenderer.setExpectedLineCount(2); // input bar + status bar
     }
 }

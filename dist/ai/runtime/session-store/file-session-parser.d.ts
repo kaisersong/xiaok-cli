@@ -1,7 +1,7 @@
 import { type IntentHostSubject } from '../../../runtime/verification/intent-host-subject.js';
-import type { PersistedSessionSnapshot, StoredSessionSnapshot } from './store.js';
+import type { PersistedSessionSnapshot } from './store.js';
 export declare const SESSION_SCHEMA_VERSION = 1;
-export interface PersistedSessionDocument extends StoredSessionSnapshot {
+export interface PersistedSessionDocument extends PersistedSessionSnapshot {
     schemaVersion: typeof SESSION_SCHEMA_VERSION;
 }
 export interface SessionDeletionJournal {
@@ -13,7 +13,7 @@ export interface SessionDeletionJournal {
     snapshotHash: string;
     closure: NonNullable<PersistedSessionSnapshot['protectedObservationClosure']>;
 }
-export declare function parseFileSessionSnapshot(raw: string, sessionId: string, preserveIntent?: boolean): StoredSessionSnapshot;
+export declare function parseFileSessionSnapshot(raw: string, sessionId: string, preserveIntent?: boolean): PersistedSessionSnapshot;
 /** Statements contained in one captured file; the full collector must verify
  * their native registrations and references before forming any attribution. */
 export declare function readCapturedFileSession(raw: string, sessionId: string): Readonly<{

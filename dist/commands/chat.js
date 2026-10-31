@@ -1,6 +1,4 @@
-import { readNativeLookupRows, readNativeJournalLength, readNativeLookupSubjects, readIntentText } from '../runtime/intent-delegation/chat-intent-data.js';
 import { confirmChatPermission } from './chat-permission.js';
-import { getResumeHistoryMessages } from '../ui/resume-history.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import { parseIntentReceiverCommand, intentReceiverHelp } from './chat-intent-receiver.js';
 import { createIntentReceiverPublicationHost } from '../runtime/intent-delegation/receiver-publication-host.js';
@@ -38,7 +36,6 @@ import { parseObservationPolicyFile, prepareObservationConfig, createProductObse
 import { createProductObservationSubagentTool } from '../runtime/sol-pi/product-subagent-tool.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
-import { isPermissionMode, loadLastPermissionMode, saveLastPermissionMode, resolveInitialPermissionMode } from './chat-permission-mode.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
@@ -51,7 +48,7 @@ import { createGoalTools } from '../ai/tools/goal.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
-import { attachCliConversationActivitiesWithinBudget, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
+import { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -92,7 +89,6 @@ import { ToolExplorer } from '../ui/tool-explorer.js';
 import { TurnLayout } from '../ui/turn-layout.js';
 import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
-import { selectPermissionMode } from '../ui/mode-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand } from './chat-shell-escape.js';
@@ -106,9 +102,8 @@ import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
 import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
 import { openTranscriptPager, spawnPagerProcess } from '../ui/transcript-pager.js';
-import { detectImageProtocol, readImageDimensions, renderInlineImageBlock, formatImageFallbackLine } from '../ui/image-renderer.js';
+import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
-import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
 import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
@@ -418,9 +413,8 @@ async function runChat(initialInput, opts) {
             return;
         }
         // 检测 CI 环境
-        const rememberMode = isTTY() && initialInput === undefined && !opts.print && !opts.json;
-        const initialPermissionMode = resolveInitialPermissionMode({ auto: opts.auto, yolo: opts.yolo, interactive: isTTY() }, rememberMode ? loadLastPermissionMode() : null);
-        if (!isTTY() && !opts.auto && !opts.yolo) {
+        const autoMode = opts.auto || !isTTY();
+        if (!isTTY() && !opts.auto) {
             console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
         }
         // 加载配置和凭据
@@ -548,6 +542,7 @@ async function runChat(initialInput, opts) {
         const transcriptBuffer = new TranscriptBuffer({
             onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
         });
+        let nextInlineImageId = 1;
         let terminalUiSuspended = false;
         let terminalUiFailureNoted = false;
         let terminalUiFallbackStream = null;
@@ -630,10 +625,10 @@ async function runChat(initialInput, opts) {
         const captureNativeInputOrigin = (text) => { const token = {}; nativeInputOrigins.set(token, text); return token; };
         let preparedNativeContinuation;
         let nativeExecutionTurn = false;
-        const hasActiveNativeIntent = () => { const actual = sessionStore.getIntentNativeLedgerSync(sessionId); return !!(actual && readNativeLookupRows(actual.nativeContracts)?.some(row => row.intentId === actual.activeIntentId)); };
+        const hasActiveNativeIntent = () => { const actual = sessionStore.getIntentNativeLedgerSync(sessionId); return !!actual?.nativeContracts?.some(row => row.intentId === actual.activeIntentId); };
         const assertNoGoalForNativeIntent = () => { if (isGoalArmed() || goalTurnDrafts.size || settledGoalTurns.length || pendingGoalCompleteSummary || pendingGoalBlockedClaim || goalPublicationWork || currentGoalState?.pendingCompletionIntentId)
             throw Error('intent_goal_execution_conflict'); };
-        const assertIntentNativeExecutionReady = () => { const actual = sessionStore.getIntentNativeLedgerSync(sessionId); if (actual && readNativeLookupRows(actual.nativeContracts)?.some(row => row.intentId === actual.activeIntentId))
+        const assertIntentNativeExecutionReady = () => { const actual = sessionStore.getIntentNativeLedgerSync(sessionId); if (actual?.nativeContracts?.some(row => row.intentId === actual.activeIntentId))
             throw Error('intent_native_execution_current_required'); };
         const nativeRuntimeRequests = new WeakMap();
         const runRuntimeTurnBody = async (request, onChunk, externalSignal, onRuntimeActivity) => {
@@ -782,7 +777,7 @@ async function runChat(initialInput, opts) {
             }
         };
         releaseAfterBootstrap = releaseDrainedSessionOwnership;
-        if (readNativeJournalLength(persistedIntentLedger?.nativeContracts)) {
+        if (persistedIntentLedger?.nativeContracts?.length) {
             if (ownershipMode === 'fork')
                 throw Error('intent_native_fork_requires_original_contract');
             const authority = intentAuthority(), lease = await authority.acquire({ invocationId: `intent-native-ownership-${randomUUID()}`, kind: 'direct-mutation' });
@@ -1177,7 +1172,7 @@ async function runChat(initialInput, opts) {
         const persistedPermissionRules = mergeRules(persistedPermissionSettings);
         const permissionManager = new PermissionManager({
             cwd,
-            mode: initialPermissionMode,
+            mode: autoMode ? 'auto' : 'default',
             allowRules: persistedPermissionRules.allowRules,
             denyRules: persistedPermissionRules.denyRules,
         });
@@ -1192,27 +1187,8 @@ async function runChat(initialInput, opts) {
         if (persistedSandboxAllowedPaths.length > 0) {
             platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
         }
-        const modePreferenceLog = createLogger('cli:permission-mode', { stderr: false });
-        let modeSaveFailed = false;
-        const rememberPermissionMode = (mode) => {
-            try {
-                saveLastPermissionMode(mode);
-                modeSaveFailed = false;
-                return true;
-            }
-            catch {
-                modeSaveFailed = true;
-                modePreferenceLog.warn('permission_mode_save_failed');
-                return false;
-            }
-        };
-        // Explicit interactive startup flags also count as the latest user selection.
-        if (rememberMode && (opts.auto || opts.yolo))
-            rememberPermissionMode(initialPermissionMode);
         inputReader.setModeCycleHandler(() => {
             const nextMode = PermissionManager.nextMode(permissionManager.getMode());
-            if (!rememberPermissionMode(nextMode))
-                return null;
             permissionManager.setMode(nextMode);
             statusBar.updateMode(nextMode);
             return nextMode;
@@ -1380,7 +1356,7 @@ async function runChat(initialInput, opts) {
         });
         const lifecycleHookDenied = () => {
             const actual = sessionStore.getIntentNativeLedgerSync(sessionId);
-            return !!(intentVerificationDefinition || readNativeJournalLength(actual?.nativeContracts) || productObservation?.summary.compoundExecution);
+            return !!(intentVerificationDefinition || actual?.nativeContracts?.length || productObservation?.summary.compoundExecution);
         };
         const runLifecycleHooks = async (event, payload) => {
             if (lifecycleHookDenied())
@@ -1510,7 +1486,7 @@ async function runChat(initialInput, opts) {
                             throw Error('intent_native_history_writer_required');
                         await sessionStore.save({ ...snapshot,
                             sessionId, cwd, model: adapter.getModelName(), createdAt: sessionCreatedAt, updatedAt: Date.now(),
-                            forkedFromSessionId, lineage: sessionLineage, intentDelegation: (readNativeJournalLength(currentIntentLedger.nativeContracts) ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+                            forkedFromSessionId, lineage: sessionLineage, intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
                             skillEval: currentSkillEvalState, skillExecution: currentSkillExecutionState });
                     } });
                 // Isolate both executable tools and provider schemas. The shared registry
@@ -1608,7 +1584,7 @@ async function runChat(initialInput, opts) {
             skillEval: currentSkillEvalState,
             skillExecution: currentSkillExecutionState,
         }));
-        if (intentVerificationDefinition || readNativeJournalLength(currentIntentLedger.nativeContracts)) {
+        if (intentVerificationDefinition || currentIntentLedger.nativeContracts?.length) {
             intentNativeHost = createIntentNativeContractHost({ store: sessionStore, authority: intentAuthority(), sessionId, instanceId, assertAdmission: () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
                     throw Error('intent_native_product_revoked'); } });
             intentPublicationHost = createIntentPublicationHost({ store: sessionStore, authority: intentAuthority(), sessionId, instanceId, workspaceRoot: cwd, assertAdmission: () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
@@ -1738,68 +1714,14 @@ async function runChat(initialInput, opts) {
                 }
             }
         }
-        const activityStartupNotices = createActivityStartupNotices({
-            configDir: getConfigDir(),
-            onDebug: (event, detail) => log.debug(event, detail),
-        });
-        let activityStartupDeferred = false;
-        let finishActivityStartup;
-        let failActivityStartup;
-        let lateActivityClose;
-        void trackOwnedWrite(new Promise((resolve, reject) => {
-            finishActivityStartup = resolve;
-            failActivityStartup = reject;
-        }));
-        const acceptActivityOwner = (instance) => {
-            if (modelIngressClosed)
-                lateActivityClose = Promise.resolve().then(() => instance.close());
-            else
-                cliActivities = instance;
-        };
-        const settleActivityStartup = () => {
-            if (lateActivityClose)
-                void lateActivityClose.then(() => finishActivityStartup(), failActivityStartup);
-            else
-                finishActivityStartup();
-        };
-        try {
-            const attachedActivities = await attachCliConversationActivitiesWithinBudget({
-                startupNotices: activityStartupNotices,
-                print: Boolean(opts.print),
-                isTTY: isTTY(),
-                conversationActivity: process.env.XIAOK_CONVERSATION_ACTIVITY,
-                attachOptions: { cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform,
-                    changed: () => flushSubAgentNotices(),
-                    onError: error => log.debug('cli_activity_unavailable', String(error)) },
-                onDebug: (event, detail) => {
-                    if (event === 'cli_activity_startup_deferred')
-                        activityStartupDeferred = true;
-                    try {
-                        log.debug(event, detail);
-                    }
-                    catch { /* Diagnostics cannot abandon the pending activity owner. */ }
-                },
-            }, {
-                onLate: acceptActivityOwner,
-                onSettled: () => {
-                    settleActivityStartup();
-                    try {
-                        flushSubAgentNotices();
-                    }
-                    catch (error) {
-                        finalizationErrors.push(error);
-                    }
-                },
-            });
-            // A late owner may already have arrived before the budget's undefined return.
-            if (attachedActivities)
-                acceptActivityOwner(attachedActivities);
-            if (!activityStartupDeferred)
-                settleActivityStartup();
-        }
-        catch (error) {
-            failActivityStartup(error);
-            throw error;
+        if (!opts.print && isTTY() && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0') {
+            try {
+                cliActivities = await CliConversationActivities.attach({ cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform, changed: () => flushSubAgentNotices(),
+                    onError: error => log.debug('cli_activity_unavailable', String(error)) });
+            }
+            catch (error) {
+                log.debug('cli_activity_owner_unavailable', String(error));
+            }
         }
         // 触发 SessionStart hook
         void trackDetached(() => runLifecycleHooks('SessionStart', {
@@ -1814,8 +1736,6 @@ async function runChat(initialInput, opts) {
             const summaryLine = getCurrentIntentSummaryLine();
             const statusLine = statusBar.getStatusLine();
             const lines = [];
-            if (modeSaveFailed)
-                lines.push('权限模式保存失败，请检查配置目录权限。');
             if (summaryLine) {
                 lines.push(summaryLine);
             }
@@ -2465,13 +2385,13 @@ async function runChat(initialInput, opts) {
             }
             currentIntentLedger = await intentLedgerStore.updateIntent(sessionId, intentId, {
                 overallStatus: 'completed',
-                latestReceipt: readIntentText(intent.latestReceipt ?? `Completed ${intent.finalDeliverable || intent.deliverable}`, 'latestReceipt'),
+                latestReceipt: intent.latestReceipt ?? `Completed ${intent.finalDeliverable || intent.deliverable}`,
                 blockedReason: '',
             });
         };
         const createConfiguredIntentBoundaryResolver = () => {
             const originalBoundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
-            const boundaryConfig = intentVerificationDefinition || readNativeJournalLength(currentIntentLedger.nativeContracts) ? { ...originalBoundaryConfig, llmClassifier: 'off' } : originalBoundaryConfig;
+            const boundaryConfig = intentVerificationDefinition || currentIntentLedger.nativeContracts?.length ? { ...originalBoundaryConfig, llmClassifier: 'off' } : originalBoundaryConfig;
             const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
             return resolverFactory({
                 config: boundaryConfig,
@@ -2498,12 +2418,12 @@ async function runChat(initialInput, opts) {
             preparedNativeContinuation = undefined;
             nativeExecutionTurn = false;
             const turnToken = beginPreparedIntentTurnContext();
-            const canonical = sessionStore.getIntentNativeLedgerSync(sessionId), activeNative = canonical === undefined ? undefined : readNativeLookupRows(canonical.nativeContracts)?.find(row => row.intentId === canonical.activeIntentId);
+            const canonical = sessionStore.getIntentNativeLedgerSync(sessionId), activeNative = canonical?.nativeContracts?.find(row => row.intentId === canonical.activeIntentId);
             if ((intentVerificationDefinition || activeNative) && !user) {
                 intentTurnState.setPlan(turnToken, undefined);
                 return;
             }
-            const stale = activeNative !== undefined && readNativeLookupSubjects(activeNative.subjects).some(row => row.attempts.at(-1)?.phase === 'stale') && !readNativeLookupSubjects(activeNative.subjects).some(row => row.attempts.at(-1)?.phase === 'enrolling');
+            const stale = activeNative?.subjects.some(row => row.attempts.at(-1)?.phase === 'stale') && !activeNative?.subjects.some(row => row.attempts.at(-1)?.phase === 'enrolling');
             if (activeNative && !stale) {
                 assertNoGoalForNativeIntent();
                 const selection = prepareIntentNativeContinuation(canonical, input, hasAttachments);
@@ -2597,14 +2517,14 @@ async function runChat(initialInput, opts) {
             const turnIntentPlan = snapshot.currentTurnIntentPlan;
             const turnToken = snapshot.activeTurnToken;
             const actual = sessionStore.getIntentNativeLedgerSync(sessionId);
-            const activeNative = actual === undefined ? undefined : readNativeLookupRows(actual.nativeContracts)?.find(row => row.intentId === actual.activeIntentId);
+            const activeNative = actual?.nativeContracts?.find(row => row.intentId === actual.activeIntentId);
             if (preparedNativeContinuation) {
                 if (preparedNativeContinuation.turnToken !== turnToken || intentNativeLedgerHash(actual) !== preparedNativeContinuation.selection.basis)
                     return false;
                 currentIntentLedger = actual;
                 return true;
             }
-            const staleGeneration = activeNative !== undefined && readNativeLookupSubjects(activeNative.subjects).some(s => s.attempts.at(-1).phase === 'stale') && !readNativeLookupSubjects(activeNative.subjects).some(s => s.attempts.at(-1).phase === 'enrolling');
+            const staleGeneration = activeNative?.subjects.some(s => s.attempts.at(-1).phase === 'stale') && !activeNative.subjects.some(s => s.attempts.at(-1).phase === 'enrolling');
             if (activeNative && !(staleGeneration && intentVerificationDefinition && turnIntentPlan?.continuationMode === 'new_intent'))
                 return false;
             if (!turnIntentPlan || !turnToken) {
@@ -2617,7 +2537,7 @@ async function runChat(initialInput, opts) {
                 currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId);
                 return false;
             }
-            if (readNativeLookupRows(currentIntentLedger.nativeContracts)?.some(row => row.intentId === currentIntentLedger.activeIntentId))
+            if (currentIntentLedger.nativeContracts?.some(row => row.intentId === currentIntentLedger.activeIntentId))
                 return false;
             const beforeIntentCount = currentIntentLedger.intents.length;
             currentIntentLedger = await bootstrapTurnIntentPlan(intentLedgerStore, sessionId, currentIntentLedger, turnIntentPlan);
@@ -2656,7 +2576,7 @@ async function runChat(initialInput, opts) {
         };
         const writeOrchestrationBlock = (block) => {
             if (!block) {
-                return false;
+                return;
             }
             endStreamingPhaseForInterrupt();
             if (scrollRegion.isActive()) {
@@ -2669,31 +2589,21 @@ async function runChat(initialInput, opts) {
                 }
                 catch (error) {
                     suspendInteractiveUi('write_orchestration_block', error);
-                    return false;
                 }
                 mdRenderer.beginNewSegment();
                 resetStreamingSegment();
-                return true;
+                return;
             }
             process.stdout.write(separatedBlock);
             mdRenderer.beginNewSegment();
             resetStreamingSegment();
-            return true;
         };
         flushSubAgentNotices = () => {
             const canWrite = interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
                 && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
                 && !scrollRegion.isContentStreaming();
             subAgentNotices.flush(canWrite, writeOrchestrationBlock);
-            const activityCanWrite = canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready';
-            cliActivities?.flush(activityCanWrite, writeOrchestrationBlock);
-            if (activityCanWrite) {
-                const notice = activityStartupNotices.take();
-                if (notice) {
-                    if (writeOrchestrationBlock(notice.text))
-                        notice.markShown();
-                }
-            }
+            cliActivities?.flush(canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready', writeOrchestrationBlock);
         };
         const persistSessionBody = async (options = {}) => {
             if (options.refreshIntentLedger ?? true) {
@@ -2727,7 +2637,7 @@ async function runChat(initialInput, opts) {
                 updatedAt: Date.now(),
                 forkedFromSessionId,
                 lineage: sessionLineage,
-                intentDelegation: (readNativeJournalLength(currentIntentLedger.nativeContracts) ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+                intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
                 skillEval: currentSkillEvalState,
                 skillExecution: currentSkillExecutionState,
             });
@@ -3311,7 +3221,7 @@ async function runChat(initialInput, opts) {
                 model: getActiveProviderLabel(),
                 cwd: process.cwd(),
                 sessionId,
-                mode: opts.dryRun ? 'dry-run' : permissionManager.getMode(),
+                mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
                 version: cliVersion,
             });
             // Initialize scroll region to match welcome screen position.
@@ -3398,7 +3308,7 @@ async function runChat(initialInput, opts) {
                     replayedRows += countTerminalRowsForOutput(chunk, historyColumns);
                 };
                 writeHistoryChunk('\n');
-                for (const msg of getResumeHistoryMessages(historyMessages, persistedSession?.compactions)) {
+                for (const msg of historyMessages) {
                     if (msg.role === 'user') {
                         for (const block of msg.content) {
                             recordHistoryBlockInBuffer('user', block);
@@ -3472,17 +3382,18 @@ async function runChat(initialInput, opts) {
                     });
                     if (terminalUiSuspended)
                         continue;
-                    const rendered = renderInlineImageBlock({
+                    const rendered = renderImageLines({
                         data,
                         mediaType: block.source.media_type,
                         protocol,
                         columns: process.stdout.columns ?? 80,
-                        maxRows: Math.min(14, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
+                        maxRows: Math.min(12, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
+                        imageId: nextInlineImageId++,
                     });
                     const placeholder = formatImageFallbackLine(dims);
                     try {
                         if (rendered.protocol === null) {
-                            const line = rendered.text;
+                            const line = `${rendered.lines[0]}\n`;
                             if (scrollRegion.isActive()) {
                                 scrollRegion.writeAtContentCursor(line);
                             }
@@ -3491,8 +3402,9 @@ async function runChat(initialInput, opts) {
                             }
                             continue;
                         }
-                        scrollRegion.writeRawBlock(rendered.text, rendered.rows, {
-                            cursorStationary: rendered.cursorStationary,
+                        const stationary = rendered.protocol === 'kitty';
+                        scrollRegion.writeRawBlock(stationary ? rendered.lines[0] : `${rendered.lines.join('\n')}\n`, rendered.rows, {
+                            cursorStationary: stationary,
                             logger: transcriptLogger,
                             placeholder,
                         });
@@ -4242,7 +4154,7 @@ async function runChat(initialInput, opts) {
                             model: getActiveProviderLabel(),
                             cwd: process.cwd(),
                             sessionId,
-                            mode: opts.dryRun ? 'dry-run' : permissionManager.getMode(),
+                            mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
                             version: cliVersion,
                         });
                         scrollRegion.setWelcomeRows(contentRows);
@@ -4474,7 +4386,7 @@ async function runChat(initialInput, opts) {
                         return 'continue';
                     }
                     if (trimmed === '/yzjchannel') {
-                        if (intentVerificationDefinition || readNativeJournalLength(sessionStore.getIntentNativeLedgerSync(sessionId)?.nativeContracts)) {
+                        if (intentVerificationDefinition || sessionStore.getIntentNativeLedgerSync(sessionId)?.nativeContracts?.length) {
                             writeCommandOutput(trimmed, 'intent_native_execution_current_required：此原 Intent 会话不能开启未绑定的后台模型入口。\n');
                             return 'continue';
                         }
@@ -4523,25 +4435,13 @@ async function runChat(initialInput, opts) {
                         return 'continue';
                     }
                     if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
-                        let [, requestedMode] = trimmed.split(/\s+/, 2);
+                        const [, requestedMode] = trimmed.split(/\s+/, 2);
                         if (!requestedMode) {
-                            if (scrollRegion.isActive() && !terminalUiSuspended) {
-                                scrollRegion.clearOverlayPromptState();
-                                replRenderer.prepareForInput();
-                            }
-                            const selected = await selectPermissionMode(permissionManager.getMode(), { renderer: replRenderer });
-                            if (!selected) {
-                                writeCommandOutput(trimmed, '已取消模式切换。\n\n');
-                                return 'continue';
-                            }
-                            requestedMode = selected;
-                        }
-                        if (!isPermissionMode(requestedMode)) {
-                            writeCommandOutput(trimmed, '未知权限模式，请执行 /mode 选择。\n\n');
+                            writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
                             return 'continue';
                         }
-                        if (!rememberPermissionMode(requestedMode)) {
-                            writeCommandOutput(trimmed, '权限模式保存失败，本次未切换；请检查配置目录权限。\n\n');
+                        if (!['default', 'auto', 'plan'].includes(requestedMode)) {
+                            writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
                             return 'continue';
                         }
                         permissionManager.setMode(requestedMode);
@@ -5065,7 +4965,6 @@ export function registerChatCommands(program) {
         .command('chat', { isDefault: true })
         .description('启动 AI skill 任务交付工作台（默认命令）')
         .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
-        .option('--yolo', '自动批准 CLI 工具调用；仍保留显式拒绝、安全硬阻断和敏感范围限制，交互模式下记住本次选择')
         .option('--dry-run', '打印工具调用但不执行')
         .option('--observation-policy <file>', '按显式用户策略启用本次观察归档与召回（新会话）')
         .option('--intent-verification <file>', '冻结 Intent 原始验收 JSON；/intent native 管理登记；/intent publish draft|approve <JSON>|parent|status|recover|retry <候选ID> 管理候选；/intent verify help 配置独立验证；/intent receiver help 原发布与阶段投影（不自动启动模型）')
@@ -5081,11 +4980,6 @@ export function registerChatCommands(program) {
         .option('--skill-debug', '显示 skill 执行详情（stage、context 检查、耗时）')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')
         .action(async (input, opts) => {
-        if (shouldBlockChatOnOldNode({ platform: process.platform, version: process.version, print: Boolean(opts.print), json: Boolean(opts.json) })) {
-            process.stderr.write(oldNodeMessage(process.version) + '\n');
-            process.exitCode = 1;
-            return;
-        }
         setCrashContext({ command: 'chat', args: process.argv.slice(2), cwd: process.cwd() });
         try {
             await runChat(input, opts);

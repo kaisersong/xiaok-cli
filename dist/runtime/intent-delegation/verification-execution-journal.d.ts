@@ -1,8 +1,10 @@
 import { type IntentVerificationOperation, type IntentVerificationOperationAction } from './verification-operation-journal.js';
 import { type OwnerEnrollmentReview } from '../verification/owner-enrollment-review.js';
 import type { OwnerEnrollmentRequestRecovery } from '../verification/owner-enrollment-request.js';
+import { type IntentPublicationReaderLedgerData } from './publication-candidate-journal.js';
 import { type ValidationMaterialDraft, type ValidationMaterialInvocation } from '../verification/product-material-authorization.js';
 import type { SessionIntentLedger } from './types.js';
+import type { StoredSessionIntentLedgerInput } from './stored-intent-clone.js';
 import type { PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 export interface IntentVerificationExecution {
@@ -93,7 +95,12 @@ export type IntentVerificationMutation = (RecordIntentVerificationOperationInput
     publicationAction: 'verification';
 });
 /** Durable identity and source facts only. No returned row grants native/execution/publication. */
+export interface IntentVerificationReaderLedgerData extends IntentPublicationReaderLedgerData {
+    readonly verificationExecutions?: unknown;
+}
 export declare function parseIntentVerificationExecutions(ledger: SessionIntentLedger | undefined): IntentVerificationExecution[];
+export declare function parseIntentVerificationExecutions(ledger: StoredSessionIntentLedgerInput | undefined): IntentVerificationExecution[];
+export declare function parseIntentVerificationExecutions(ledger: IntentVerificationReaderLedgerData | undefined): IntentVerificationExecution[];
 export declare function captureIntentVerificationReserve(raw: ReserveIntentVerificationInput & {
     lease: SessionExecutionLease;
 }): {
@@ -128,3 +135,4 @@ export declare function captureIntentVerificationOperation(raw: RecordIntentVeri
 };
 export declare function applyIntentVerificationMutation(previous: PersistedSessionSnapshot, input: IntentVerificationMutation): PersistedSessionSnapshot;
 export declare function assertIntentVerificationRetained(before: SessionIntentLedger | undefined, after: SessionIntentLedger | undefined, primitive?: boolean): void;
+export declare function assertIntentVerificationRetained(before: StoredSessionIntentLedgerInput | undefined, after: StoredSessionIntentLedgerInput | undefined, primitive?: boolean): void;

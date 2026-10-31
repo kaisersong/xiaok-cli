@@ -4,6 +4,26 @@ export class ConversationActivityService {
     subscribers = new Set();
     timer;
     disposed = false;
+    closing;
+    drainWork = new Set();
+    /** Reserve ownership before any synchronous producer prefix can reenter close. */
+    own(begin) {
+        let completed, failed;
+        const reservation = new Promise((resolve, reject) => { completed = resolve; failed = reject; });
+        this.drainWork.add(reservation);
+        void reservation.then(() => { this.drainWork.delete(reservation); }, () => {
+            this.drainWork.delete(reservation);
+        });
+        try {
+            const raw = begin();
+            void raw.then(completed, failed);
+            return raw;
+        }
+        catch (error) {
+            failed(error);
+            return reservation;
+        }
+    }
     reporting;
     notifying;
     retentionTicks = 0;
@@ -276,10 +296,12 @@ export class ConversationActivityService {
             return Promise.resolve();
         if (this.reporting)
             return this.reporting;
-        const pending = this.generateReports().finally(() => { if (this.reporting === pending)
-            this.reporting = undefined; });
-        this.reporting = pending;
-        return pending;
+        return this.own(() => {
+            const pending = this.generateReports().finally(() => { if (this.reporting === pending)
+                this.reporting = undefined; });
+            this.reporting = pending;
+            return pending;
+        });
     }
     async generateReports() {
         const authorized = new Set();
@@ -312,10 +334,12 @@ export class ConversationActivityService {
             return Promise.resolve();
         if (this.notifying)
             return this.notifying;
-        const pending = this.deliverNotifications().finally(() => { if (this.notifying === pending)
-            this.notifying = undefined; });
-        this.notifying = pending;
-        return pending;
+        return this.own(() => {
+            const pending = this.deliverNotifications().finally(() => { if (this.notifying === pending)
+                this.notifying = undefined; });
+            this.notifying = pending;
+            return pending;
+        });
     }
     async deliverNotifications() {
         while (!this.disposed) {
@@ -371,6 +395,30 @@ export class ConversationActivityService {
             void this.notifyPending().catch(error => this.options.onError?.(error));
         }, 1000);
         this.timer.unref?.();
+    }
+    /** Seals scheduling synchronously and waits actual owned work; never fabricates a drain ACK. */
+    close() {
+        if (this.closing)
+            return this.closing;
+        let completed, failed;
+        this.closing = new Promise((resolve, reject) => { completed = resolve; failed = reject; });
+        const sealFailures = [];
+        try {
+            this.dispose();
+        }
+        catch (error) {
+            sealFailures.push(error);
+        }
+        const active = [...this.drainWork];
+        void Promise.allSettled(active).then(outcomes => {
+            const failures = [...sealFailures,
+                ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+            if (failures.length)
+                failed(new AggregateError([...new Set(failures)], 'activity_service_drain_failed'));
+            else
+                completed();
+        }, failed);
+        return this.closing;
     }
     dispose() {
         this.disposed = true;

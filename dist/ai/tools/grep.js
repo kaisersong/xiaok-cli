@@ -1,3 +1,4 @@
+import { isNativeReadonlyExecutionContext } from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
 import fg from 'fast-glob';
 import { readFileSync, statSync } from 'fs';
@@ -110,7 +111,7 @@ export const grepTool = {
             required: ['pattern'],
         },
     },
-    async execute(input) {
+    async execute(input, toolContext) {
         const { pattern, path: searchPath = process.cwd(), glob: fileGlob, context = 0, head_limit = 50, offset = 0, output_mode = 'lines', type, max_chars = 12_000, } = input;
         // 优先使用 rg（ripgrep），回退到 grep，再回退到纯 Node 搜索。
         const hasRg = canRunCommand('rg');
@@ -125,8 +126,9 @@ export const grepTool = {
                 ...(output_mode === 'count' ? ['-c'] : []),
                 ...(type ? ['-t', type] : []),
                 ...(fileGlob ? ['-g', fileGlob] : []),
-                pattern,
-                searchPath,
+                ...(isNativeReadonlyExecutionContext(toolContext) ? ['--no-config', '--no-pre'] : []),
+                '-e', pattern,
+                '--', searchPath,
             ]
             : hasGrep
                 ? [
@@ -134,9 +136,9 @@ export const grepTool = {
                     ...(context > 0 ? ['-C', String(context)] : []),
                     ...(output_mode === 'files' ? ['-l'] : []),
                     ...(output_mode === 'count' ? ['-c'] : []),
-                    pattern,
                     ...(fileGlob ? ['--include', fileGlob] : []),
-                    searchPath,
+                    '-e', pattern,
+                    '--', searchPath,
                 ]
                 : [];
         const output = hasRg || hasGrep

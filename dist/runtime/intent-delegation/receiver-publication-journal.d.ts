@@ -52,6 +52,7 @@ export interface IntentReceiverMutation {
     now: number;
     action: IntentReceiverAction;
 }
-export declare function parseIntentReceiverAttempts(raw: unknown, candidate: IntentPublicationCandidate): IntentReceiverAttempt[];
+export type IntentReceiverCandidateFactsData = Pick<IntentPublicationCandidate, 'id' | 'bindingHash' | 'sourceHash' | 'createdAt' | 'applicationAttempts'>;
+export declare function parseIntentReceiverAttempts(raw: unknown, candidate: IntentReceiverCandidateFactsData): IntentReceiverAttempt[];
 export declare function assertIntentReceiverRetained(before: IntentPublicationCandidate, after: IntentPublicationCandidate): void;
 export declare function applyIntentReceiverMutation(previous: PersistedSessionSnapshot, input: IntentReceiverMutation): PersistedSessionSnapshot;

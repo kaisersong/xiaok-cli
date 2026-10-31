@@ -21,7 +21,7 @@ import { evaluateProtectedOutputGuard } from '../../runtime/guards/protected-out
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
-import { bashTool, createBashTool } from './bash.js';
+import { bashTool } from './bash.js';
 import { grepTool } from './grep.js';
 import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
@@ -38,14 +38,14 @@ import { buildCapabilityToolDefinition, buildToolSearchEntry, dedupeToolSearchCa
 registerBuiltinToolIdentity(bashTool, 'command');
 registerBuiltinToolIdentity(grepTool, 'readonly');
 registerBuiltinToolIdentity(globTool, 'readonly');
-export function buildToolList(skillTool, workspace, extraTools = [], metadataSink, bashApproval) {
+export function buildToolList(skillTool, workspace, extraTools = [], metadataSink) {
     const readTool = createReadTool(workspace);
     metadataSink?.set(readTool, BUILTIN_READ_DESCRIPTION);
     const tools = [
         readTool,
         createWriteTool(workspace),
         createEditTool(workspace),
-        createBashTool(bashApproval),
+        bashTool,
         grepTool,
         globTool,
         webFetchTool,
@@ -158,7 +158,7 @@ export class ToolRegistry {
         }
         if (!tools) {
             const sink = new Map();
-            tools = buildToolList(undefined, undefined, [], sink, { isYolo: () => this.permissionManager.getMode() === 'yolo' });
+            tools = buildToolList(undefined, undefined, [], sink);
             metadata = sink;
             if (this.#nativeReadonlyOnly)
                 tools = tools.filter(tool => this.admitsNativeReadonly(tool));

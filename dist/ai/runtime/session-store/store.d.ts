@@ -1,3 +1,5 @@
+import type { StoredSessionSnapshot } from './stored-snapshot-types.js';
+export type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 import { type CompoundOperationLedger } from '../../../runtime/sol-pi/compound-operation.js';
 import { type SemanticCompactionLedger } from '../../../runtime/sol-pi/semantic-compaction-ledger.js';
 import type { SessionExecutionLease } from './execution-authority.js';
@@ -45,8 +47,13 @@ export declare class KimiK3DurableResumeUnsupportedError extends Error {
 }
 export declare function isKimiK3DurableModel(model: string | undefined): model is 'k3' | 'k3-256k';
 export declare function toDurableSessionSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export declare function toDurableSessionSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot;
 export declare function assertKimiK3DurableResumeSupported(snapshot: PersistedSessionSnapshot): void;
+export declare function assertKimiK3DurableResumeSupported(snapshot: StoredSessionSnapshot): void;
+export declare function assertKimiK3DurableResumeSupported(snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>): void;
 export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: PersistedSessionSnapshot): void;
+export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: StoredSessionSnapshot): void;
+export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>): void;
 export interface SessionCompareAndSave {
     beforeCommit?: () => void;
     expectedStoreRevision: number;
@@ -58,8 +65,9 @@ export interface SessionCommitReceipt {
     storeRevision: number;
     historyDigest: string;
 }
-export declare function computeSessionHistoryDigest(snapshot: Pick<PersistedSessionSnapshot, 'messages'>): string;
-export declare function prepareSessionStoreCommit(previous: PersistedSessionSnapshot | null, next: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export declare function computeSessionHistoryDigest(snapshot: Pick<StoredSessionSnapshot, 'messages'>): string;
+export declare function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): PersistedSessionSnapshot;
+export declare function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): StoredSessionSnapshot;
 /** Host notifications report durable facts; exceptions propagate without rolling back commits. */
 export declare class SessionCommitNotifications {
     private readonly listeners;

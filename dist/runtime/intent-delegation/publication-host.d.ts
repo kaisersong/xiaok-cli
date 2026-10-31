@@ -14,8 +14,8 @@ export declare function consumeIntentParentCandidateWrite(store: SessionStore, r
         requestSource: "user";
         now: number;
         instanceId: string;
-        expectedLedgerHash: string;
         fileObservations: IntentFileObservation[];
+        expectedLedgerHash: string;
         references: readonly import("../verification/intent-application-binding.js").IntentStagePublicationReference[];
     };
     lease: SessionExecutionLease;

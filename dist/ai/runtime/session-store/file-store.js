@@ -140,7 +140,6 @@ function assertOrdinaryIntentFields(ledger) {
 const ordinaryReleasePermits = new WeakMap();
 const knownSessionWriters = new WeakMap();
 const acceptedSessionForks = new WeakMap();
-import { nativeJournalLengthData } from '../../../runtime/intent-delegation/data.js';
 export class FileSessionStore {
     rootDir;
     atomicWrite;
@@ -624,7 +623,7 @@ export class FileSessionStore {
                     snapshot = applyIntentProducerAction(previous, terminal, producerRoutes);
                 }
                 else {
-                    const existing = previous.intentDelegation?.intents.find(i => i.intentId === terminal.intentId)?.executionTerminals?.find((e) => e.kind === terminal.kind && e.identity === terminal.identity && e.status === terminal.status && e.recordedAt === terminal.recordedAt);
+                    const existing = previous.intentDelegation?.intents.find(i => i.intentId === terminal.intentId)?.executionTerminals?.find(e => e.kind === terminal.kind && e.identity === terminal.identity && e.status === terminal.status && e.recordedAt === terminal.recordedAt);
                     this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...(existing ? {} : { kind: 'direct-mutation' }) });
                     snapshot = appendIntentExecutionTerminal(previous, terminal);
                 }
@@ -664,7 +663,7 @@ export class FileSessionStore {
             }
             const { sessionId, cwd, intentDelegation, ...rest } = durableSnapshot;
             const document = { schemaVersion: SESSION_SCHEMA_VERSION, sessionId, cwd, intentDelegation, ...rest };
-            const durability = protectedObservationClosure || durableSnapshot.executionProtected || nativeJournalLengthData(durableSnapshot.intentDelegation?.nativeContracts) ? { requireDirectorySync: true } : undefined;
+            const durability = protectedObservationClosure || durableSnapshot.executionProtected || durableSnapshot.intentDelegation?.nativeContracts?.length ? { requireDirectorySync: true } : undefined;
             try {
                 assertSynchronousSessionHook(cas?.beforeCommit);
             }

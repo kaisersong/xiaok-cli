@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
+import { promptAutoContextBudget } from '../runtime/context-budget.js';
 import { formatSkillsContext } from '../skills/loader.js';
 import { getCliDelegationSection } from './sections/cli-delegation.js';
 import { getIntroSection, getSystemSection, getDoingTasksSection, getIntentDelegationSection, getActionsSection, getUsingToolsSection, getToneAndStyleSection, getOutputEfficiencySection, getSessionGuidanceSection, getDecompositionSection, getVerificationSection, getParallelExecutionSection, } from './sections/index.js';
@@ -127,18 +128,19 @@ export async function assembleSystemPrompt(opts) {
     // 9. Auto context (CLAUDE.md, AGENTS.md, git)
     const autoContext = opts.autoContext ?? await loadAutoContext({
         cwd: opts.cwd,
-        maxChars: Math.max(1_200, opts.budget * 2),
+        ...promptAutoContextBudget(() => opts.budget),
     });
     const autoContextSection = formatLoadedContext(autoContext);
     // 10. Yunzhijia API overview (budget-managed)
     const base = [...segments.map((segment) => segment.text), ...dynamicSections].join('\n\n');
-    let remaining = opts.budget - estimateTokens(base);
+    const budget = opts.budget;
+    let remaining = budget === undefined ? undefined : budget - estimateTokens(base);
     let apiOverview = '';
     if (existsSync(API_OVERVIEW_PATH)) {
         apiOverview = readFileSync(API_OVERVIEW_PATH, 'utf-8');
     }
     const includeYzjContext = shouldInjectYzjContext(opts);
-    if (includeYzjContext && apiOverview && remaining > 50) {
+    if (includeYzjContext && apiOverview && remaining !== undefined && remaining > 50) {
         const truncated = truncateToTokens(apiOverview, remaining);
         dynamicSections.push(truncated);
         remaining -= estimateTokens(truncated);

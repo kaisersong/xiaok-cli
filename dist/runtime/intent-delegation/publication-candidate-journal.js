@@ -174,6 +174,119 @@ function parseOriginalApplicationRoute(text, target) {
             throw Error('intent_candidate_route');
     }
 }
+export function intentPublicationFactObject(value, code) {
+    if (!isIntentPublicationFactObject(value))
+        throw Error(code);
+    return value;
+}
+function isIntentPublicationFactObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+export function intentPublicationFactArray(value, code) {
+    if (!Array.isArray(value))
+        throw Error(code);
+    return value;
+}
+function readIntentPublicationRowCore(ledger, input, ids, subjects, requests, checkParentSource) {
+    // Explicit DATA error replaces the original Object.hasOwn null/primitive error.
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+        throw Error('intent_candidate_shape');
+    const rowInput = input;
+    shape(rowInput, 'version id intentId stageId candidateRevision contractHash body bodyHash bindingHash sourceHash fileObservations createdAt applicationAttempts' + (Object.hasOwn(rowInput, 'receiverAttempts') ? ' receiverAttempts' : '') + (Object.hasOwn(rowInput, 'businessProjection') ? ' businessProjection' : ''));
+    const row = rowInput;
+    if (row.version !== 1 || !id(row.id) || !id(row.intentId) || (row.stageId !== null && !id(row.stageId)) || ids.has(row.id) || subjects.has(json([row.intentId, row.stageId])) || row.candidateRevision !== 1 || ![row.contractHash, row.bodyHash, row.bindingHash, row.sourceHash].every(digest) || !Number.isSafeInteger(row.createdAt) || row.createdAt < 0)
+        throw Error('intent_candidate_journal');
+    ids.add(row.id);
+    subjects.add(json([row.intentId, row.stageId]));
+    files(row.fileObservations);
+    const target = intentPublicationTarget(ledger, {
+        id: row.id, intentId: row.intentId, stageId: row.stageId,
+        candidateRevision: row.candidateRevision, contractHash: row.contractHash, body: row.body,
+    });
+    if (checkParentSource && row.stageId === null && (row.body.kind !== 'intent-parent' || json(deriveIntentParentBody(ledger, row.intentId, row.body.stages)) !== json(row.body)))
+        throw Error('intent_parent_source');
+    if (hash(row.body) !== row.bodyHash || intentApplicationBindingHash(target) !== row.bindingHash || row.sourceHash !== hash({ contract: target.contract, body: target.body, fileObservations: row.fileObservations }))
+        throw Error('intent_candidate_hash');
+    if (!Array.isArray(row.applicationAttempts) || row.applicationAttempts.length < 1 || row.applicationAttempts.length > 32)
+        throw Error('intent_candidate_attempts');
+    for (let attemptIndex = 0; attemptIndex < row.applicationAttempts.length; attemptIndex++) {
+        const a = row.applicationAttempts[attemptIndex], previousAttempt = row.applicationAttempts[attemptIndex - 1];
+        if (previousAttempt && (previousAttempt.phase !== 'retired' || !['not_prepared', 'not_approved'].includes(previousAttempt.retirementReason) || a.createdAt < previousAttempt.updatedAt || a.route !== null && a.route !== previousAttempt.route))
+            throw Error('intent_candidate_attempt_sequence');
+        if (attemptIndex === 0 && a.createdAt !== row.createdAt || a.phase === 'reserved' && a.updatedAt !== a.createdAt || !['reserved', 'preparing'].includes(a.phase) && a.revision < 3 || a.phase === 'preparing' && (a.revision === 2 ? a.observation !== null : a.observation?.state !== 'pending'))
+            throw Error('intent_candidate_attempt_revision');
+        shape(a, 'requestId revision phase route observation retirementReason createdAt updatedAt');
+        if (!id(a.requestId) || requests.has(a.requestId) || !Number.isSafeInteger(a.revision) || a.revision < 1 || !['reserved', 'preparing', 'ready', 'retired', 'stale', 'needs_reauthorization'].includes(a.phase) || (a.phase === 'reserved' ? (a.route !== null || a.revision !== 1 || a.observation !== null) : (typeof a.route !== 'string' || json(JSON.parse(a.route)) !== a.route || a.revision < 2)) || !Number.isSafeInteger(a.createdAt) || a.createdAt < row.createdAt || !Number.isSafeInteger(a.updatedAt) || a.updatedAt < a.createdAt || ![null, 'not_prepared', 'not_approved', 'registration_changed', 'source_changed'].includes(a.retirementReason))
+            throw Error('intent_candidate_attempt');
+        if (a.observation !== null) {
+            const f = a.observation;
+            shape(f, 'state challengePhase challengeId reviewHash registrationHash deadline current pendingTransitionId');
+            if (!['not_prepared', 'not_approved', 'pending', 'reauthorization_required', 'registration_changed', 'committed'].includes(f.state) || ![null, 'prepared', 'authorizing', 'approved', 'committed', 'failed', 'retired', 'not_approved'].includes(f.challengePhase) || f.challengeId !== null && !id(f.challengeId) || f.reviewHash !== null && !digest(f.reviewHash) || f.registrationHash !== null && !digest(f.registrationHash))
+                throw Error('intent_candidate_observation');
+            if (f.current !== null) {
+                shape(f.current, 'bindingHash revision');
+                if (!digest(f.current.bindingHash) || !Number.isSafeInteger(f.current.revision) || f.current.revision < 1)
+                    throw Error('intent_candidate_observation');
+            }
+            if (f.pendingTransitionId !== null && !id(f.pendingTransitionId))
+                throw Error('intent_candidate_observation');
+            if (f.state === 'not_prepared') {
+                if ([f.challengePhase, f.challengeId, f.reviewHash, f.registrationHash, f.deadline, f.current, f.pendingTransitionId].some(v => v !== null))
+                    throw Error('intent_candidate_observation');
+            }
+            else {
+                if (!id(f.challengeId) || !digest(f.reviewHash) || f.registrationHash !== intentOriginalRegistrationHash(intentContractOriginalRegistration({ subject: target.subject, contract: target.contract })))
+                    throw Error('intent_candidate_observation');
+                shape(f.deadline, 'domainId qualificationEpoch notBefore validUntil');
+                const d = f.deadline;
+                if (!id(d.domainId) || ![d.qualificationEpoch, d.notBefore, d.validUntil].every(v => Number.isSafeInteger(v) && v >= 0) || d.validUntil <= d.notBefore || d.validUntil - d.notBefore > 300000)
+                    throw Error('intent_candidate_observation');
+                const phases = { not_approved: ['failed', 'retired', 'not_approved'], pending: ['prepared', 'authorizing', 'approved'], reauthorization_required: ['approved'], registration_changed: ['approved'], committed: ['committed'] };
+                if (!phases[f.state]?.includes(f.challengePhase) || f.state === 'not_approved' && (f.current !== null || f.pendingTransitionId !== null))
+                    throw Error('intent_candidate_observation');
+            }
+        }
+        if (a.phase === 'reserved') {
+            if (a.retirementReason !== null)
+                throw Error('intent_candidate_observation');
+        }
+        else {
+            const disposition = applicationDisposition(a.observation, a.retirementReason === 'source_changed', row.bindingHash);
+            if (a.phase !== disposition.phase || a.retirementReason !== disposition.retirementReason)
+                throw Error('intent_candidate_observation');
+        }
+        if (a.route !== null)
+            parseOriginalApplicationRoute(a.route, target);
+        requests.add(a.requestId);
+    }
+    // A selected typed view must not silently replace a nonidentical raw body.
+    // This is an explicit NEW rejection policy, not an equality assertion/cast.
+    if (json(target.body) !== json(row.body))
+        throw Error('intent_candidate_body_data');
+    return {
+        version: 1, id: row.id, intentId: row.intentId, stageId: row.stageId,
+        candidateRevision: 1, contractHash: row.contractHash, body: target.body,
+        bodyHash: row.bodyHash, bindingHash: row.bindingHash, sourceHash: row.sourceHash,
+        fileObservations: row.fileObservations, createdAt: row.createdAt,
+        applicationAttempts: row.applicationAttempts,
+        ...(Object.hasOwn(row, 'receiverAttempts') ? { receiverAttempts: row.receiverAttempts } : {}),
+        ...(Object.hasOwn(row, 'businessProjection') ? { businessProjection: row.businessProjection } : {}),
+    };
+}
+/** Selects one original row, never replaces the ledger, history or hash input.
+ * This validates the existing row prefix, not full projection/receiver source or authority. */
+export function readIntentPublicationRowFacts(ledger, intentId, stageId) {
+    if (ledger.publicationCandidates === undefined)
+        return undefined;
+    const rows = intentPublicationFactArray(ledger.publicationCandidates, 'intent_candidate_journal');
+    const selected = rows.find(value => {
+        const row = intentPublicationFactObject(value, 'intent_candidate_shape');
+        return row.intentId === intentId && row.stageId === stageId;
+    });
+    if (selected === undefined)
+        return undefined;
+    return readIntentPublicationRowCore(ledger, captureIntentData(selected), new Set(), new Set(), new Set(), false);
+}
 export function parseIntentPublicationCandidates(ledger) {
     if (!ledger || ledger.publicationCandidates === undefined)
         return [];
@@ -182,71 +295,9 @@ export function parseIntentPublicationCandidates(ledger) {
         throw Error('intent_candidate_journal');
     const ids = new Set(), subjects = new Set(), requests = new Set();
     for (const row of raw) {
-        shape(row, 'version id intentId stageId candidateRevision contractHash body bodyHash bindingHash sourceHash fileObservations createdAt applicationAttempts' + (Object.hasOwn(row, 'receiverAttempts') ? ' receiverAttempts' : '') + (Object.hasOwn(row, 'businessProjection') ? ' businessProjection' : ''));
-        if (row.version !== 1 || !id(row.id) || !id(row.intentId) || (row.stageId !== null && !id(row.stageId)) || ids.has(row.id) || subjects.has(json([row.intentId, row.stageId])) || row.candidateRevision !== 1 || ![row.contractHash, row.bodyHash, row.bindingHash, row.sourceHash].every(digest) || !Number.isSafeInteger(row.createdAt) || row.createdAt < 0)
-            throw Error('intent_candidate_journal');
-        ids.add(row.id);
-        subjects.add(json([row.intentId, row.stageId]));
-        files(row.fileObservations);
-        const target = intentPublicationTarget(ledger, row);
-        if (row.stageId === null && (row.body.kind !== 'intent-parent' || json(deriveIntentParentBody(ledger, row.intentId, row.body.stages)) !== json(row.body)))
-            throw Error('intent_parent_source');
-        if (hash(row.body) !== row.bodyHash || intentApplicationBindingHash(target) !== row.bindingHash || row.sourceHash !== hash({ contract: target.contract, body: target.body, fileObservations: row.fileObservations }))
-            throw Error('intent_candidate_hash');
-        if (!Array.isArray(row.applicationAttempts) || row.applicationAttempts.length < 1 || row.applicationAttempts.length > 32)
-            throw Error('intent_candidate_attempts');
-        for (let attemptIndex = 0; attemptIndex < row.applicationAttempts.length; attemptIndex++) {
-            const a = row.applicationAttempts[attemptIndex], previousAttempt = row.applicationAttempts[attemptIndex - 1];
-            if (previousAttempt && (previousAttempt.phase !== 'retired' || !['not_prepared', 'not_approved'].includes(previousAttempt.retirementReason) || a.createdAt < previousAttempt.updatedAt || a.route !== null && a.route !== previousAttempt.route))
-                throw Error('intent_candidate_attempt_sequence');
-            if (attemptIndex === 0 && a.createdAt !== row.createdAt || a.phase === 'reserved' && a.updatedAt !== a.createdAt || !['reserved', 'preparing'].includes(a.phase) && a.revision < 3 || a.phase === 'preparing' && (a.revision === 2 ? a.observation !== null : a.observation?.state !== 'pending'))
-                throw Error('intent_candidate_attempt_revision');
-            shape(a, 'requestId revision phase route observation retirementReason createdAt updatedAt');
-            if (!id(a.requestId) || requests.has(a.requestId) || !Number.isSafeInteger(a.revision) || a.revision < 1 || !['reserved', 'preparing', 'ready', 'retired', 'stale', 'needs_reauthorization'].includes(a.phase) || (a.phase === 'reserved' ? (a.route !== null || a.revision !== 1 || a.observation !== null) : (typeof a.route !== 'string' || json(JSON.parse(a.route)) !== a.route || a.revision < 2)) || !Number.isSafeInteger(a.createdAt) || a.createdAt < row.createdAt || !Number.isSafeInteger(a.updatedAt) || a.updatedAt < a.createdAt || ![null, 'not_prepared', 'not_approved', 'registration_changed', 'source_changed'].includes(a.retirementReason))
-                throw Error('intent_candidate_attempt');
-            if (a.observation !== null) {
-                const f = a.observation;
-                shape(f, 'state challengePhase challengeId reviewHash registrationHash deadline current pendingTransitionId');
-                if (!['not_prepared', 'not_approved', 'pending', 'reauthorization_required', 'registration_changed', 'committed'].includes(f.state) || ![null, 'prepared', 'authorizing', 'approved', 'committed', 'failed', 'retired', 'not_approved'].includes(f.challengePhase) || f.challengeId !== null && !id(f.challengeId) || f.reviewHash !== null && !digest(f.reviewHash) || f.registrationHash !== null && !digest(f.registrationHash))
-                    throw Error('intent_candidate_observation');
-                if (f.current !== null) {
-                    shape(f.current, 'bindingHash revision');
-                    if (!digest(f.current.bindingHash) || !Number.isSafeInteger(f.current.revision) || f.current.revision < 1)
-                        throw Error('intent_candidate_observation');
-                }
-                if (f.pendingTransitionId !== null && !id(f.pendingTransitionId))
-                    throw Error('intent_candidate_observation');
-                if (f.state === 'not_prepared') {
-                    if ([f.challengePhase, f.challengeId, f.reviewHash, f.registrationHash, f.deadline, f.current, f.pendingTransitionId].some(v => v !== null))
-                        throw Error('intent_candidate_observation');
-                }
-                else {
-                    if (!id(f.challengeId) || !digest(f.reviewHash) || f.registrationHash !== intentOriginalRegistrationHash(intentContractOriginalRegistration({ subject: target.subject, contract: target.contract })))
-                        throw Error('intent_candidate_observation');
-                    shape(f.deadline, 'domainId qualificationEpoch notBefore validUntil');
-                    const d = f.deadline;
-                    if (!id(d.domainId) || ![d.qualificationEpoch, d.notBefore, d.validUntil].every(v => Number.isSafeInteger(v) && v >= 0) || d.validUntil <= d.notBefore || d.validUntil - d.notBefore > 300000)
-                        throw Error('intent_candidate_observation');
-                    const phases = { not_approved: ['failed', 'retired', 'not_approved'], pending: ['prepared', 'authorizing', 'approved'], reauthorization_required: ['approved'], registration_changed: ['approved'], committed: ['committed'] };
-                    if (!phases[f.state]?.includes(f.challengePhase) || f.state === 'not_approved' && (f.current !== null || f.pendingTransitionId !== null))
-                        throw Error('intent_candidate_observation');
-                }
-            }
-            if (a.phase === 'reserved') {
-                if (a.retirementReason !== null)
-                    throw Error('intent_candidate_observation');
-            }
-            else {
-                const disposition = applicationDisposition(a.observation, a.retirementReason === 'source_changed', row.bindingHash);
-                if (a.phase !== disposition.phase || a.retirementReason !== disposition.retirementReason)
-                    throw Error('intent_candidate_observation');
-            }
-            if (a.route !== null)
-                parseOriginalApplicationRoute(a.route, target);
-            requests.add(a.requestId);
-        }
-        parseIntentBusinessProjection(row.businessProjection, row, ledger);
-        for (const attempt of parseIntentReceiverAttempts(row.receiverAttempts, row)) {
+        const facts = readIntentPublicationRowCore(ledger, row, ids, subjects, requests, true);
+        parseIntentBusinessProjection(row.businessProjection, facts, ledger);
+        for (const attempt of parseIntentReceiverAttempts(row.receiverAttempts, facts)) {
             if (requests.has(attempt.requestId))
                 throw Error('intent_receiver_identity');
             requests.add(attempt.requestId);
@@ -260,18 +311,51 @@ export function applyIntentPublicationMutation(previous, input) {
         return applyIntentReceiverMutation(previous, input);
     if (input.publicationAction === 'verification')
         return applyIntentVerificationMutation(previous, input);
+    return applyIntentPublicationCapture(previous, input);
+}
+function captureRecords(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_candidate_records_data');
+    return value;
+}
+function captureStages(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_candidate_stages_data');
+    return value;
+}
+function captureSteps(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_candidate_steps_data');
+    return value;
+}
+function captureRows(value) {
+    return intentPublicationFactArray(value, 'intent_candidate_rows_data');
+}
+function captureFact(value) {
+    return intentPublicationFactObject(value, 'intent_candidate_fact_data');
+}
+function captureText(value) {
+    if (typeof value !== 'string')
+        throw Error('intent_candidate_text_data');
+    return value;
+}
+function assertCaptureSummaryData(value) {
+    if (value !== null && value !== undefined)
+        captureFact(value);
+}
+export function applyIntentPublicationCapture(previous, input) {
     const next = captureIntentData(previous), ledger = next.intentDelegation;
     if (!ledger || next.sessionId !== input.sessionId)
         throw Error('intent_candidate_session');
     assertSessionWriteOwnership(ledger, input.instanceId, 'capture intent application candidate');
     if (intentNativeLedgerHash(ledger) !== input.expectedLedgerHash)
         throw Error('intent_candidate_stale');
-    const rows = parseIntentPublicationCandidates(ledger), record = ledger.intents.find(r => r.intentId === ledger.activeIntentId), stage = record?.stages.find(s => s.stageId === record.activeStageId), native = parseIntentNativeContracts(ledger.nativeContracts, input.sessionId).find(n => n.intentId === record?.intentId);
+    const rows = parseIntentPublicationCandidates(ledger), record = captureRecords(ledger.intents).find(r => r.intentId === ledger.activeIntentId), stage = record === null || record === undefined ? undefined : captureStages(record.stages).find(s => s.stageId === record.activeStageId), native = parseIntentNativeContracts(ledger.nativeContracts, input.sessionId).find(n => n.intentId === record?.intentId);
     if (input.publicationAction === 'observe') {
         const index = rows.findIndex(r => r.id === input.candidateId), row = rows[index], attempt = row?.applicationAttempts.at(-1);
         if (!row || !attempt || attempt.phase !== 'preparing' || attempt.requestId !== input.expectedRequestId || attempt.revision !== input.expectedRevision || input.now < attempt.updatedAt)
             throw Error('intent_candidate_stale');
-        const fact = input.observation === null && input.sourceChanged ? null : observationFact(input.observation, ledger, row), changed = captureIntentData(row), active = record?.intentId === row.intentId && record.overallStatus === 'publication_pending' && (row.stageId === null ? record.stages.every(s => s.status === 'completed') : stage?.stageId === row.stageId && stage.status === 'publication_pending');
+        const fact = input.observation === null && input.sourceChanged ? null : observationFact(input.observation, ledger, row), changed = captureIntentData(row), active = record?.intentId === row.intentId && record.overallStatus === 'publication_pending' && (row.stageId === null ? captureStages(record.stages).every(s => s.status === 'completed') : stage !== undefined && stage.stageId === row.stageId && stage.status === 'publication_pending');
         const routeChanged = intentPublicationRouteVector(ledger, row.id) !== attempt.route;
         const disposition = applicationDisposition(fact, input.sourceChanged || !active || routeChanged, row.bindingHash);
         changed.applicationAttempts[changed.applicationAttempts.length - 1] = { ...attempt, revision: attempt.revision + 1, ...disposition, observation: fact, updatedAt: input.now };
@@ -281,7 +365,7 @@ export function applyIntentPublicationMutation(previous, input) {
         return next;
     }
     const parentAction = input.publicationAction === 'reserve-parent' || ('candidateId' in input && rows.find(r => r.id === input.candidateId)?.stageId === null);
-    if (!record || !stage || !native || record.overallStatus !== 'publication_pending' || (parentAction ? record.stages.some(s => s.status !== 'completed') : stage.status !== 'publication_pending') || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || input.now < ledger.updatedAt)
+    if (!record || !stage || !native || record.overallStatus !== 'publication_pending' || (parentAction ? captureStages(record.stages).some(s => s.status !== 'completed') : stage.status !== 'publication_pending') || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || input.now < ledger.updatedAt)
         throw Error('intent_candidate_current');
     if (input.publicationAction === 'claim' || input.publicationAction === 'retry') {
         const index = rows.findIndex(r => r.id === input.candidateId), original = rows[index];
@@ -293,7 +377,7 @@ export function applyIntentPublicationMutation(previous, input) {
         const route = readInstalledCurrentOwner(intentHostSubjectOwner({ version: 1, sessionId: input.sessionId, intentId: record.intentId, stageId: original.stageId }));
         if (!['migrated', 'protected-unregistered'].includes(route.kind) || json(route) !== (input.publicationAction === 'claim' ? input.route : attempt.route))
             throw Error('intent_candidate_route');
-        const fresh = applyIntentPublicationMutation(previous, { sessionId: input.sessionId, instanceId: input.instanceId, expectedLedgerHash: input.expectedLedgerHash, requestSource: 'user', now: input.now, fileObservations: original.fileObservations, ...(original.body.kind === 'intent-parent' ? { publicationAction: 'reserve-parent', references: original.body.stages } : { publicationAction: 'reserve', artifactSelections: original.body.artifacts.map(a => ({ artifactId: a.artifactId, obligationId: a.selection.obligationId, path: a.selection.path })) }) });
+        const fresh = applyIntentPublicationCapture(previous, { sessionId: input.sessionId, instanceId: input.instanceId, expectedLedgerHash: input.expectedLedgerHash, requestSource: 'user', now: input.now, fileObservations: original.fileObservations, ...(original.body.kind === 'intent-parent' ? { publicationAction: 'reserve-parent', references: original.body.stages } : { publicationAction: 'reserve', artifactSelections: original.body.artifacts.map(a => ({ artifactId: a.artifactId, obligationId: a.selection.obligationId, path: a.selection.path })) }) });
         const changed = captureIntentData(original);
         if (input.publicationAction === 'retry')
             changed.applicationAttempts.push({ requestId: randomUUID(), revision: 1, phase: 'reserved', route: null, observation: null, retirementReason: null, createdAt: input.now, updatedAt: input.now });
@@ -329,23 +413,24 @@ export function applyIntentPublicationMutation(previous, input) {
         parseIntentPublicationCandidates(ledger);
         return next;
     }
-    const originals = (record.artifacts ?? []).filter(a => a.stageId === stage.stageId);
-    if (originals.length !== input.artifactSelections.length || input.fileObservations.length !== originals.filter(a => a.storage === 'file_ref').length)
+    const originals = captureRows(record.artifacts ?? []).filter(a => captureFact(a).stageId === stage.stageId);
+    if (originals.length !== input.artifactSelections.length || input.fileObservations.length !== originals.filter(a => captureFact(a).storage === 'file_ref').length)
         throw Error('intent_candidate_selection');
-    const reports = (record.producerReports ?? []).filter(r => { const a = r.action; return a.kind === 'artifact-report' ? a.stageId === stage.stageId : stage.steps.some(s => s.stepId === a.stepId); });
-    const artifacts = originals.map(a => {
-        const selection = input.artifactSelections.find(s => s.artifactId === a.artifactId);
+    const reports = captureRows(record.producerReports ?? []).filter(value => { const r = captureFact(value), a = captureFact(r.action); return a.kind === 'artifact-report' ? a.stageId === stage.stageId : captureSteps(stage.steps).some(s => s.stepId === a.stepId); });
+    const artifacts = originals.map(value => {
+        const a = captureFact(value), selection = input.artifactSelections.find(s => s.artifactId === a.artifactId);
         if (!selection)
             throw Error('intent_candidate_selection');
         const obligation = native.contract.stages.find(s => s.stageId === stage.stageId).verification.obligations.find(o => o.obligationId === selection.obligationId), recipe = obligation?.recipe, paths = recipe?.kind === 'artifact-content' ? recipe.checks.map(c => c.path) : recipe?.kind === 'blackbox' ? ['verification-report.json'] : recipe?.kind === 'diagnostic-coverage' ? ('sources' in recipe ? recipe.sources : [recipe]).map(s => s.diagnosisPath) : [];
         if (!paths.includes(selection.path))
             throw Error('intent_candidate_selection');
-        const file = input.fileObservations.find(f => f.artifactId === a.artifactId), bytes = a.storage === 'inline' ? Buffer.from(a.inlineValue ?? '', 'utf8') : null;
+        const file = input.fileObservations.find(f => f.artifactId === a.artifactId), bytes = a.storage === 'inline' ? Buffer.from(captureText(a.inlineValue ?? ''), 'utf8') : null;
         if (a.storage === 'file_ref' && !file)
             throw Error('intent_candidate_files');
         return { artifactId: a.artifactId, stageId: a.stageId, kind: a.kind, label: a.label, summary: a.summary ?? null, createdAt: a.createdAt, content: a.storage === 'inline' ? { kind: 'inline', text: a.inlineValue ?? '' } : { kind: 'file', originalPath: a.path }, selection: { kind: 'local', obligationId: selection.obligationId, path: selection.path }, sha256: bytes ? createHash('sha256').update(bytes).digest('hex') : file.sha256, size: bytes ? bytes.length : file.size };
     });
-    const prior = rows.find(r => r.intentId === record.intentId && r.stageId === stage.stageId), candidateId = prior?.id ?? randomUUID(), body = { kind: 'intent-stage', stageId: stage.stageId, summary: [...reports].reverse().find(r => r.action.kind === 'step-report')?.action, executionReports: (record.executionTerminals ?? []).filter(t => t.kind === 'step' && stage.steps.some(s => s.stepId === t.identity)), producerReports: reports, artifacts };
+    const prior = rows.find(r => r.intentId === record.intentId && r.stageId === stage.stageId), candidateId = prior?.id ?? randomUUID(), summaryReport = [...reports].reverse().find(r => captureFact(captureFact(r).action).kind === 'step-report'), body = { kind: 'intent-stage', stageId: stage.stageId, summary: summaryReport === undefined ? undefined : captureFact(summaryReport).action, executionReports: captureRows(record.executionTerminals ?? []).filter(value => { const t = captureFact(value); return t.kind === 'step' && captureSteps(stage.steps).some(s => s.stepId === t.identity); }), producerReports: reports, artifacts };
+    assertCaptureSummaryData(body.summary);
     body.summary = body.summary?.breadcrumb ?? stage.deliverable;
     const binding = createIntentApplicationBinding({ version: 1, kind: 'intent', subject: { version: 1, sessionId: input.sessionId, intentId: record.intentId, stageId: stage.stageId }, candidateId, candidateRevision: 1, contract: native.contract, body });
     // Full ASCII binding plus worst legal review metadata overhead, without truncation.
@@ -359,6 +444,8 @@ export function applyIntentPublicationMutation(previous, input) {
             throw Error('intent_candidate_conflict');
         return next;
     }
+    if (!id(stage.stageId))
+        throw Error('intent_candidate_stage_data');
     const row = { version: 1, id: candidateId, intentId: record.intentId, stageId: stage.stageId, candidateRevision: 1, contractHash: native.contractHash, body: binding.body, bodyHash: hash(binding.body), bindingHash: intentApplicationBindingHash(binding), sourceHash, fileObservations: input.fileObservations, createdAt: input.now, applicationAttempts: [{ requestId: randomUUID(), revision: 1, phase: 'reserved', route: null, observation: null, retirementReason: null, createdAt: input.now, updatedAt: input.now }] };
     ledger.publicationCandidates = [...rows, row];
     ledger.updatedAt = input.now;
@@ -409,7 +496,7 @@ export function assertIntentPublicationRetained(previous, next, primitive = fals
 }
 export function intentPublicationRouteVector(ledger, candidateId) {
     const candidate = candidateId === undefined ? undefined : parseIntentPublicationCandidates(ledger).find(row => row.id === candidateId);
-    const record = ledger?.intents.find(r => r.intentId === (candidate?.intentId ?? ledger.activeIntentId));
+    const record = ledger === undefined || ledger === null ? undefined : captureRecords(ledger.intents).find(r => r.intentId === (candidate?.intentId ?? ledger.activeIntentId));
     if (!ledger || !record || candidateId !== undefined && !candidate)
         throw Error('intent_candidate_current');
     const route = readInstalledCurrentOwner(intentHostSubjectOwner({ version: 1, sessionId: ledger.sessionId, intentId: record.intentId, stageId: candidate ? candidate.stageId : record.activeStageId }));

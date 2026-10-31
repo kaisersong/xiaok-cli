@@ -1,5 +1,5 @@
 import { ConversationActivityStore } from './store.js';
-import { ConversationActivityOwnerClient } from './owner-client.js';
+import type { ConversationActivityOwnerClient } from './owner-client.js';
 import { type ConversationActivityApi } from './service.js';
 import { ConversationMcpActivities } from './mcp.js';
 import type { PlatformRuntimeContext } from '../../platform/runtime/context.js';
@@ -13,7 +13,6 @@ export declare class CliConversationActivities {
     private readonly actor;
     private readonly pending;
     private unsubscribe?;
-    private stopDisconnect?;
     private refreshPending?;
     private through;
     private disposed;
@@ -26,8 +25,6 @@ export declare class CliConversationActivities {
         identityPath: string;
         platform: PlatformRuntimeContext;
         changed(): void;
-        onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void;
-        onOwnerReplaced?(): void;
         onError?(error: unknown): void;
     }): Promise<CliConversationActivities>;
     constructor(options: {
@@ -35,8 +32,6 @@ export declare class CliConversationActivities {
         sessionId: string;
         platform: PlatformRuntimeContext;
         changed(): void;
-        onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void;
-        onOwnerReplaced?(): void;
         onError?(error: unknown): void;
         ownerClient?: ConversationActivityOwnerClient;
         dataRoot?: string;
@@ -47,5 +42,3 @@ export declare class CliConversationActivities {
     close(): Promise<void>;
     dispose(): void;
 }
-/** A short, read-only attachment provides positive evidence of replacement. */
-export declare function probeReplacementOwner(dataRoot: string, disconnectedEpoch: string, cancelled?: () => boolean): Promise<boolean>;
