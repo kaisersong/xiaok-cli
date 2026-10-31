@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -431,9 +431,9 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
       });
       expect(detail.project.deliverable ?? null).toBeNull();
       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
-      expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path).sort()).toEqual([
-        'artifacts/workflow-report.html',
-        'artifacts/workflow-report.pdf',
+      expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path)).toEqual([
+        join(realpathSync(tempWorkFolder), 'artifacts', 'workflow-report.html'),
+        join(realpathSync(tempWorkFolder), 'artifacts', 'workflow-report.pdf'),
       ]);
     } catch (error) {
       let brokerReplay = '';
