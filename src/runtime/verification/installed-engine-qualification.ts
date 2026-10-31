@@ -20,6 +20,7 @@ import {runVerificationTransaction,assertVerificationDatabaseBudget} from './sto
 import {ExecutionJournal,type ExecutionRecord} from '../isolated-execution/execution-journal.js';
 import {DockerEngineTransport} from '../isolated-execution/docker-engine-transport.js';
 import {buildDockerWorkerRequest,WORKER_POLICY_SHA256} from '../isolated-execution/docker-request.js';
+import {buildNetdeviceTransmitDisabledCheck,assertDockerNoneNetworkAttachment} from './netdevice-transmit-disabled.js';
 const hash=(v:unknown)=>createHash('sha256').update(json(v)).digest('hex');
 type EngineHandle=Awaited<ReturnType<typeof initializeInstalledMacEngine>>;
 const installedQualifications=new WeakMap<object,{engine:EngineHandle;database:Database;deleted:WeakMap<object,BlobReservationProposal>;mounted:object;baseCurrent():void;assertCurrent():void;assertDrained():void}>();
@@ -43,15 +44,7 @@ grep -Eq '^Seccomp:[[:space:]]+2$' /proc/self/status
 [ "$(cat /sys/fs/cgroup/memory.max)" = 268435456 ]
 [ "$(cat /sys/fs/cgroup/memory.swap.max)" = 0 ]
 [ "$(cat /sys/fs/cgroup/cpu.max)" = '100000 100000' ]
-# The original test consumes substitution stdout, not the ls exit status.
-probe_interfaces=$(ls /sys/class/net) || :
-if [ "$probe_interfaces" = lo ]; then
-  :
-else
-  probe_interface_status=$?
-  (printf 'qualification_probe_interfaces stage=loopback_only exit=%s begin\\n%s\\nqualification_probe_interfaces end\\n' "$probe_interface_status" "$probe_interfaces") >&2 || :
-  exit "$probe_interface_status"
-fi
+${buildNetdeviceTransmitDisabledCheck()}
 [ ! -S /var/run/docker.sock ]
 [ ! -S /run/xiaok-engine/docker.sock ]
 [ ! -e '/Library/Application Support/xiaok-verification' ]
@@ -91,7 +84,9 @@ export function createInstalledEngineQualification(input:{engine:EngineHandle;da
  function assertCurrent(){currentClock();}
  function persist(record:ProbeRecord){persistQualificationRecord(db,record);}
  function read(){const row=db.prepare('SELECT record_json FROM verification_engine_qualification WHERE id=1').get() as {record_json:string}|undefined;if(!row)return undefined;if(Buffer.byteLength(row.record_json)>65536)throw Error('qualification_record');const record=JSON.parse(row.record_json) as ProbeRecord;if(record.engineHash!==engineHash)throw Error('qualification_engine_changed');journal.read(record.expected);return record;}
- async function inspectExact(record:ProbeRecord,id:string){const actual=await transport.inspect(id);baseCurrent();if(actual.Image!==installed.imageDigest||hash(actual.Config.Cmd)!==hash(record.body.Cmd)||hash(actual.Config.Labels)!==hash(record.body.Labels))throw Error('qualification_container_identity');
+  // Physical cleanup keeps the original exact attempt/policy identity check.
+  // Terminal attachment eligibility below is not permission to kill an owned container.
+  async function inspectExact(record:ProbeRecord,id:string){const actual=await transport.inspect(id);baseCurrent();if(actual.Image!==installed.imageDigest||hash(actual.Config.Cmd)!==hash(record.body.Cmd)||hash(actual.Config.Labels)!==hash(record.body.Labels))throw Error('qualification_container_identity');
   for(const [key,value] of Object.entries(record.body.HostConfig)){const found=actual.HostConfig[key];if(key==='RestartPolicy'&&hash(found)===hash({Name:'no',MaximumRetryCount:0}))continue;if(hash(found)!==hash(value))throw Error('qualification_container_policy');}
   return actual;
  }
@@ -145,7 +140,7 @@ export function createInstalledEngineQualification(input:{engine:EngineHandle;da
    const challenge=randomUUID(),command=['/bin/sh','-c',probe(challenge)],scopeDigest=hash({engineHash,policy:WORKER_POLICY_SHA256,challenge}),operation=randomUUID();
    const transactionCommand=Object.freeze({}),preparedFacts={database:db,budget,engine:installed,journal,challenge,command,scopeDigest,operation,engineHash,capacityOwner,record:undefined as ProbeRecord|undefined};qualificationTransactionCommands.set(transactionCommand,preparedFacts);try{budget.executeTransactionCommand(transactionCommand);if(!preparedFacts.record)throw Error('qualification_database');record=preparedFacts.record;}finally{qualificationTransactionCommands.delete(transactionCommand);}
    signal?.throwIfAborted();journal.beginDispatch(record.expected);
-   const created=await transport.create(record.body);journal.bindContainer(record.expected,created.Id);signal?.throwIfAborted();journal.markStartRequested(record.expected);await transport.start(created.Id);journal.markRunning(record.expected);await transport.wait(created.Id,{timeoutMs:30000,signal});const terminal=await inspectExact(record,created.Id);if(terminal.State.Running||terminal.State.Pid!==0||terminal.State.Status!=='exited')throw Error('qualification_terminal_unknown');journal.recordPhysicalTerminal(record.expected,created.Id,terminal.State.ExitCode);const logs=await transport.logs(created.Id);if(terminal.State.ExitCode!==0||logs!==challenge)throw Error('qualification_probe_failed');await inspectInstalledMacEngineHandle(installed);terminalReady.set(record.expected.executionIdentity,terminalIdentity(record));await retire(record);mountedQualificationRecords.set(api,{database:db,engine:installed,record});let mountedReport:Awaited<ReturnType<typeof mounted.run>>;try{mountedReport=await mounted.run({signal,qualification:api});}finally{mountedQualificationRecords.delete(api);}record.mountedDeleted=true;persist(record);await inspectInstalledMacEngineHandle(installed);const c=broker.clock(),wallSample=Date.now();qualification=Object.freeze({id:randomUUID(),escapeHash:hash({body:record.body,logs,terminal,mountedEvidence:mountedReport.evidenceHash}),expires:c.upperBound+30000,domain:c.domainId,clockEpoch:c.qualificationEpoch,engineInspection:hash(terminal),osIdentity:hash({observation:installed.observation,os:initialOs}),wallSample,wallDeadline:wallSample+30000});return Object.freeze({qualificationId:qualification.id,engineBinding:{engineId:installed.observation.engineId,incarnation:engineHash},isolationPolicyHash:WORKER_POLICY_SHA256,evidenceHashes:{osIdentity:hash({observation:installed.observation,os:initialOs}),engineInspection:hash(terminal),escapeSuite:qualification.escapeHash}});
+   const created=await transport.create(record.body);journal.bindContainer(record.expected,created.Id);signal?.throwIfAborted();journal.markStartRequested(record.expected);await transport.start(created.Id);journal.markRunning(record.expected);await transport.wait(created.Id,{timeoutMs:30000,signal});const terminal=await inspectExact(record,created.Id);if(terminal.State.Running||terminal.State.Pid!==0||terminal.State.Status!=='exited')throw Error('qualification_terminal_unknown');assertDockerNoneNetworkAttachment(terminal.NetworkSettings);journal.recordPhysicalTerminal(record.expected,created.Id,terminal.State.ExitCode);const logs=await transport.logs(created.Id);if(terminal.State.ExitCode!==0||logs!==challenge)throw Error('qualification_probe_failed');await inspectInstalledMacEngineHandle(installed);terminalReady.set(record.expected.executionIdentity,terminalIdentity(record));await retire(record);mountedQualificationRecords.set(api,{database:db,engine:installed,record});let mountedReport:Awaited<ReturnType<typeof mounted.run>>;try{mountedReport=await mounted.run({signal,qualification:api});}finally{mountedQualificationRecords.delete(api);}record.mountedDeleted=true;persist(record);await inspectInstalledMacEngineHandle(installed);const c=broker.clock(),wallSample=Date.now();qualification=Object.freeze({id:randomUUID(),escapeHash:hash({body:record.body,logs,terminal,mountedEvidence:mountedReport.evidenceHash}),expires:c.upperBound+30000,domain:c.domainId,clockEpoch:c.qualificationEpoch,engineInspection:hash(terminal),osIdentity:hash({observation:installed.observation,os:initialOs}),wallSample,wallDeadline:wallSample+30000});return Object.freeze({qualificationId:qualification.id,engineBinding:{engineId:installed.observation.engineId,incarnation:engineHash},isolationPolicyHash:WORKER_POLICY_SHA256,evidenceHashes:{osIdentity:hash({observation:installed.observation,os:initialOs}),engineInspection:hash(terminal),escapeSuite:qualification.escapeHash}});
   }catch(primary){
    if(record&&!delegated.has(record.expected.executionIdentity)){
     try{const state=journal.read(record.expected).state;if(!['prepared','created','cancelling-created','terminal'].includes(state))journal.markUnknown(record.expected);await retire(record);}
