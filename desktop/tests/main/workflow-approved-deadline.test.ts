@@ -8,13 +8,15 @@ const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(ne
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return {promise,resolve};}
 async function waitFor(test:()=>boolean){const started=performance.now();while(!test()){if(performance.now()-started>2000)throw Error('fixture_condition_timeout');await realDelay(10);}}
 for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-setup','late-prepared','retry-budget','worker-then-reviewer'] as const)it(`actual approved workflow budget: ${mode}`,async()=>{
+ // Cold module compilation must not consume the owned server's real 5s protection lease.
+ const ksModule=await import('../../electron/kswarm-service.ts');
+ const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
  const fixture=await createOwnedWorkflowNetworkFixture(null,{issuer:mode==='expired-approved'?'po_generated_project':'po_generated',tasks:[{title:'Fictional report',assignedAgent:'xiaok-worker',requiredOutputs:['markdown']}]});
  const previous={config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,recovery:process.env.XIAOK_MODEL_RECOVERY_WINDOW_MS};let ks:any,desktop:any,lease:any;const release=deferred();let calls=0,closed=0,settled=false,providerSignal:AbortSignal|undefined;let outcome:Promise<any>|undefined;let mock:any,prepareMock:any,retryTimerMock:any;let retryWaits=0,providerFailed=false;
  try{
  const config=join(fixture.root,'config');writeFileSync(join(config,'config.json'),JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{baseUrl:'http://127.0.0.1:1/v1',apiKey:'fixture',model:'fixture-model'}},channels:{}}));
  process.env.XIAOK_CONFIG_DIR=config;process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';globalThis.fetch=fixture.forwardedFetch;
- const ksModule=await import('../../electron/kswarm-service.ts');ks=ksModule.createKSwarmService({spawnProcess:(()=>{throw Error('foreign_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('foreign_kill_denied');}});
- const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
+ ks=ksModule.createKSwarmService({spawnProcess:(()=>{throw Error('foreign_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('foreign_kill_denied');}});
  if(mode==='delayed-setup'){let shifted=false;
   globalThis.fetch=async(input,init)=>{const response=await fixture.forwardedFetch(input,init);if(new URL(String(input)).pathname==='/agents'&&!shifted){shifted=true;vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(fixture.issued.workflowRun.startedAt+14*60000);}return response;};
  }
@@ -44,7 +46,7 @@ for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-
  await realDelay(650);
  if(mode==='active-eleven'||mode==='worker-then-reviewer'){
   expect(settled).toBe(false);release.resolve();await waitFor(()=>settled);const result=await outcome;
-  expect(result.ok).toBe(true);expect(readFileSync(file,'utf8')).toContain('Verified evidence');expect(calls).toBe(2);expect(closed).toBe(2);
+  expect(result.ok,JSON.stringify({error:result.error?.stack??String(result.error),server:fixture.getOwnedServerState()})).toBe(true);expect(fixture.getOwnedServerState().protectionTriggered).toBe(false);expect(readFileSync(file,'utf8')).toContain('Verified evidence');expect(calls).toBe(2);expect(closed).toBe(2);
   if(mode==='worker-then-reviewer'){
    const {submitKSwarmWorkflowNodeResultToBroker}=await import('../../electron/kswarm-runtime-bridge.ts');
    const sent=await submitKSwarmWorkflowNodeResultToBroker({brokerUrl:fixture.brokerBase,fetchImpl:fixture.nativeFetch,participantId:'xiaok-desktop',logicalParticipantId:fixture.issued.dispatches[0].targetParticipantId,handoff:fixture.issued.dispatches[0],output:result.value.output});expect(sent.ok).toBe(true);await sent.json();

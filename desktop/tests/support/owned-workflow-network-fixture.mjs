@@ -27,7 +27,7 @@ export async function createOwnedWorkflowNetworkFixture(permissions=null,options
 const nativeFetch=globalThis.fetch;
 const root=realpathSync(mkdtempSync(join(tmpdir(),'workflow-real-get-')));
 const data=join(root,'data');mkdirSync(data);mkdirSync(join(root,'config'));
-let child,childClosed,deadline,broker,brokerHTTP,recipient,recipientFailure,poTarget,original,serverStartedAt;
+let child,childClosed,deadline,broker,brokerHTTP,recipient,recipientFailure,poTarget,original,serverStartedAt,serverStartedMonotonic,protectionTriggered=false;
 const receivedHandoffs=[];
 let handoffArrived;
 const net=createServer();await new Promise((resolve,reject)=>{net.once('error',reject);net.listen(0,'127.0.0.1',resolve);});
@@ -123,7 +123,7 @@ try{
  childClosed=new Promise(resolve=>child.once('close',resolve));
  // Own child is unconditionally stopped before existing 8s recovery/worker timer.
  let logs='';child.stdout.on('data',bytes=>{logs+=bytes.toString();});child.stderr.on('data',bytes=>{logs+=bytes.toString();});
- const deadlineChild=child;serverStartedAt=Date.now();deadline=setTimeout(()=>{if(deadlineChild.exitCode===null)deadlineChild.kill('SIGKILL');},5000);
+ const deadlineChild=child;serverStartedAt=Date.now();serverStartedMonotonic=performance.now();protectionTriggered=false;deadline=setTimeout(()=>{if(deadlineChild.exitCode===null){protectionTriggered=true;deadlineChild.kill('SIGKILL');}},5000);
  let ready=false;
  for(let attempt=0;attempt<30;attempt++){
   if(child.exitCode!==null)throw Error(`owned server exited ${child.exitCode}: ${logs}`);
@@ -187,7 +187,7 @@ try{
  let disposed=false;
  const close=async()=>{if(disposed)return;disposed=true;if(poTarget)return closePoOwners();try{hub.closePersistence();}catch{}
   await stopOwnedServer();await brokerHTTP?.close();broker?.close();rmSync(root,{recursive:true,force:true});};
- return {root,base,brokerBase,workspace,project,original,issued,getReceivedHandoffs:()=>structuredClone(receivedHandoffs),forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
+ return {root,base,brokerBase,workspace,project,original,issued,getReceivedHandoffs:()=>structuredClone(receivedHandoffs),getOwnedServerState:()=>({protectionTriggered,elapsedMs:performance.now()-serverStartedMonotonic,exitCode:child?.exitCode,signalCode:child?.signalCode}),forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
 }catch(error){
  if(options.issuer==='po_generated'||options.issuer==='po_generated_project')return closePoOwners(error);
  clearTimeout(deadline);try{hub.closePersistence();}catch{}
