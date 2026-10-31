@@ -89,7 +89,7 @@ export type FailedRunObservation = {
 };
 export declare function parseIndependentRecipeDefinition(raw: IndependentRecipeSpec): Readonly<{
     spec: IndependentRecipeSpec;
-    definitionHash: string;
+    definitionHash: any;
     requiredCheckIds: readonly string[];
 }>;
 /** Fixed controller-side comparisons, not engine qualification. Its ports must be the

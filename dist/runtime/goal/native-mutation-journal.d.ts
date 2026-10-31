@@ -42,8 +42,6 @@ export declare function parseGoalNativeMutation(raw: unknown): GoalNativeMutatio
 export declare function goalNativeStateHash(state: GoalState | null): string;
 /** Deterministic draft only. Calling this function never activates a Goal. */
 export declare function goalNativeCandidate(raw: unknown): GoalState;
-/** Main/CLI-owned recovery facts, not authorization. The byte/count bounds are
- * per session, including all terminal records; no whole-profile bound is claimed. */
 export declare class FileGoalNativeJournal {
     private readonly rootDir;
     private readonly atomicWrite;

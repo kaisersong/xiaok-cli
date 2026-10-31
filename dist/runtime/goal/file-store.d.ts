@@ -19,6 +19,8 @@ export declare class FileGoalStore implements GoalStore {
     finalizeCompletionAttempt(sessionId: string, attemptId: string): Promise<GoalCompletionIntent>;
     private editCompletionJournal;
     updateCompletionIntent(sessionId: string, update: GoalCompletionIntentUpdate): Promise<void>;
+    /** User-only cooperative fence; other producers and legacy history stay unknown. */
+    fenceKnownWriter(requestSource: 'user' | 'agent' | 'scheduler'): Promise<void>;
     private withQueue;
     private commitLocked;
     private readRaw;
