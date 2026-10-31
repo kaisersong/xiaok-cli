@@ -321,6 +321,11 @@ export class ToolRegistry {
     return [...this.tools.values()].filter(tool => this.admitsNativeReadonly(tool)).map((tool) => this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition);
   }
 
+  /** Tightening only: seal the actual normalized options owned by this registry. */
+  protected sealRegistryOptions(): void {
+    Object.defineProperty(this, 'options', { value: Object.freeze(this.options), writable: false, configurable: false });
+  }
+
   /** Subclasses must run complete readonly admission before publishing any state. */
   protected preflightToolRegistration(tool: Tool): void {
     if (this.#nativeReadonlyOnly) {
