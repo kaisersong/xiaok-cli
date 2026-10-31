@@ -2,19 +2,19 @@ import {expect,it,vi} from 'vitest';
 import {readKSwarmEnrollmentSnapshot} from '../../../src/runtime/verification/kswarm-enrollment-store.js';
 import {readProfileCapacityOwnerBinding} from '../../../src/runtime/verification/profile-owner-registry.js';
 it.each(['eponymous','upper-eponymous','upper-virtual','generated'] as const)('rejects %s producer profiles before actual pre-identity row/function callbacks',async mode=>{
- const f=await installedControllerFixture({completionOwnerSchema:2});try{const input=proposal();input.enrollment.invocations.push(invocation);await enroll(f,input);const rows=f.database.prepare('SELECT uid,account_id,profile_id,state FROM main.verification_profiles').all() as Array<{uid:number;account_id:string;profile_id:string;state:string}>;let calls=0;
+ const f=await installedControllerFixture({completionOwnerSchema:2});let poisoned=false;try{const input=proposal();input.enrollment.invocations.push(invocation);await enroll(f,input);const rows=f.database.prepare('SELECT uid,account_id,profile_id,state FROM main.verification_profiles').all() as Array<{uid:number;account_id:string;profile_id:string;state:string}>;let calls=0;
  if(mode==='generated'){f.database.function('identity_computed',{deterministic:true},()=>{calls++;return 501;});f.database.exec('DROP TABLE main.verification_profiles;CREATE TABLE main.verification_profiles(seed INTEGER,uid INTEGER GENERATED ALWAYS AS (identity_computed()) VIRTUAL,account_id TEXT,profile_id TEXT,state TEXT)');for(const row of rows)f.database.prepare('INSERT INTO main.verification_profiles(seed,account_id,profile_id,state) VALUES(?,?,?,?)').run(1,row.account_id,row.profile_id,row.state);calls=0;}
  else{f.database.exec('DROP TABLE main.verification_profiles');const definition={columns:['uid','account_id','profile_id','state'],rows:function*(){calls++;for(const row of rows)yield [row.uid,row.account_id,row.profile_id,row.state];}};if(mode==='upper-virtual'){f.database.table('uppercase_profiles',()=>definition);f.database.exec('CREATE VIRTUAL TABLE main.VERIFICATION_PROFILES USING uppercase_profiles');}else f.database.table(mode==='eponymous'?'verification_profiles':'VERIFICATION_PROFILES',definition);}
- const host=f.composition.privateHost.enrollment;for(const work of [()=>host.resolveOwnerKey(f.peer,invocation),()=>host.createCapacityOwnerBinding(f.peer,invocation)]){let error:unknown;try{work();}catch(e){error=e;}expect(calls).toBe(0);expect(error).toBeInstanceOf(Error);}
- }finally{await f.close();}
+ poisoned=mode!=='generated';const host=f.composition.privateHost.enrollment;for(const work of [()=>host.resolveOwnerKey(f.peer,invocation),()=>host.createCapacityOwnerBinding(f.peer,invocation)]){let error:unknown;try{work();}catch(e){error=e;}expect(calls).toBe(0);expect(error).toBeInstanceOf(Error);}
+ }finally{if(poisoned)await expectRetainedProducerSchemaClose(f);else await f.close();}
 });
 it('rejects virtual KSwarm producer receipts at snapshot and pre-identity readers before row callbacks',async()=>{
- const f=await installedControllerFixture({completionOwnerSchema:2});try{const input=proposal();input.enrollment.invocations.push(invocation);const result=await enroll(f,input),original=f.database.prepare('SELECT * FROM main.owner_enrollment_kswarm_subjects').get() as Record<string,any>,columns=Object.keys(original);let calls=0;f.database.table('receipt_probe',()=>({columns,rows:function*(){calls++;yield columns.map(column=>original[column]);}}));f.database.exec('DROP TABLE main.owner_enrollment_kswarm_subjects;CREATE VIRTUAL TABLE main.owner_enrollment_kswarm_subjects USING receipt_probe');const host=f.composition.privateHost.enrollment;
+ const f=await installedControllerFixture({completionOwnerSchema:2});let poisoned=false;try{const input=proposal();input.enrollment.invocations.push(invocation);const result=await enroll(f,input),original=f.database.prepare('SELECT * FROM main.owner_enrollment_kswarm_subjects').get() as Record<string,any>,columns=Object.keys(original);let calls=0;f.database.table('receipt_probe',()=>({columns,rows:function*(){calls++;yield columns.map(column=>original[column]);}}));f.database.exec('DROP TABLE main.owner_enrollment_kswarm_subjects;CREATE VIRTUAL TABLE main.owner_enrollment_kswarm_subjects USING receipt_probe');poisoned=true;const host=f.composition.privateHost.enrollment;
  for(const work of [()=>readKSwarmEnrollmentSnapshot(f.database,result.owner),()=>host.resolveOwnerKey(f.peer,invocation),()=>host.createCapacityOwnerBinding(f.peer,invocation),()=>host.openOwner(mapped(),f.peer),()=>f.composition.public.invoke('completion.inspect',result,f.peer)]){let error:unknown;try{work();}catch(e){error=e;}expect(calls).toBe(0);expect(error).toBeInstanceOf(Error);}
- }finally{await f.close();}
+ }finally{if(poisoned)await expectRetainedProducerSchemaClose(f);else await f.close();}
 });
 import {createHash,generateKeyPairSync} from 'node:crypto';
-import {installedControllerFixture} from '../../support/installed-controller-fixture.js';
+import {installedControllerFixture,isInstalledControllerShutdownUnresolved} from '../../support/installed-controller-fixture.js';
 import {parseInstalledDeploymentManifest} from '../../../src/runtime/verification/deployment-manifest.js';
 import * as subjects from '../../../src/runtime/verification/kswarm-host-subject.js';
 import {completionConsumerOwner} from '../../../src/runtime/verification/completion-consumer-owner.js';
@@ -259,3 +259,17 @@ it.each(['existing','current','principal'] as const)('namespace identity: reject
  expect(()=>host.createCapacityOwnerBinding(f.peer,invocation)).toThrow('enrollment_kswarm_sql_integrity');expect(()=>readProfileCapacityOwnerBinding(issued,f.database)).toThrow('enrollment_kswarm_sql_integrity');expect(f.database.prepare('SELECT owner_key FROM main.verification_registered_invocations WHERE invocation_json=?').get(json(invocation))).toEqual({owner_key:json(result.owner)});
  }finally{attack=undefined;await f.close();}
 });
+
+// This case deliberately leaves a producer namespace invalid. The original
+// close must fail closed and retain its actual lifetime, not remove the DB.
+async function expectRetainedProducerSchemaClose(f:Awaited<ReturnType<typeof installedControllerFixture>>){
+ let failure:unknown;try{await f.close();}catch(error){failure=error;}
+ expect(failure).toBeInstanceOf(AggregateError);
+ if(!(failure instanceof AggregateError))throw Error('expected_original_schema_shutdown_failure',{cause:failure});
+ expect(failure.message).toBe('installed_controller_shutdown_unknown');
+ expect(failure.errors).toHaveLength(1);
+ expect(failure.errors[0]).toBeInstanceOf(Error);
+ expect(failure.errors[0]?.message).toBe('native_sqlite_census_schema');
+ expect(isInstalledControllerShutdownUnresolved(failure)).toBe(true);
+ expect(f.database.open).toBe(true);
+}
