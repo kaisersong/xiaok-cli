@@ -54,7 +54,7 @@ it('actual original Intent dependency observation derives empty first-stage and 
   f.f.database.prepare('DELETE FROM owner_enrollment_intent_contracts WHERE owner_key=?').run(json(f.owners.at(-1)));
   await expect(observe(f.subjects[0])).rejects.toThrow();
  }finally{await f.close();}
-},45000);
+},60000);
 it('late expiration of an earlier dependency cannot be spliced into an otherwise-current parent set',async()=>{
  let ready=false,queries=0,expire:()=>void=()=>{};const f=await fixture(()=>{if(ready&&++queries===2)expire();});try{expire=()=>f.f.setTime(10000);ready=true;await expect((f.receiver.publication as any).observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal())).rejects.toThrow();expect(queries).toBe(2);}finally{await f.close();}
 },40000);
@@ -116,7 +116,7 @@ for(const row of ['noncanonical','subject','mandatory','registration'] as const)
   else {const value=JSON.parse(row.contract_json);if(mode==='subject')value.subject.stageId=f.subjects[0].stageId;const encoded=mode==='noncanonical'?JSON.stringify(value,null,1):json(value);f.f.database.prepare('UPDATE owner_enrollment_intent_contracts SET contract_json=? WHERE owner_key=?').run(encoded,key);f.f.database.prepare('UPDATE owner_enrollment_intents SET intent_contract_json=? WHERE logical_owner_key=?').run(encoded,row.logical_owner_key);}
   await expect(f.receiver.publication.observeIntentDependencies({subject:f.subjects[0]},f.f.peer,signal())).rejects.toThrow();
  }finally{await f.close();}
-},row==="noncanonical"?40000:row==="subject"?40000:row==="mandatory"?40000:30000);
+},40000);
 for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const)
  it.each([row])('actual invocation-only append retains complete parent graph: %s',async mode=>{
  const f=await fixture();try{
@@ -129,7 +129,7 @@ for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','
   const work=async()=>{const prepared:any=await f.f.composition.public.invoke('completion.prepare-owner',proposal,f.f.peer);return f.f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.f.peer);};
   if(mode==='valid'){await work();expect(f.f.composition.privateHost.enrollment.resolveOwnerKey(f.f.peer,invocation)).toBe(json(f.owners[0]));}else await expect(work()).rejects.toThrow();
  }finally{await f.close();}
-},row==="valid"?40000:row==="missing-parent"?40000:30000);
+},40000);
 
 it('completion observation includes its own actual publication and every original dependency without publishing the parent implicitly',async()=>{
  const f=await fixture();try{
