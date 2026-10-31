@@ -689,14 +689,25 @@ describe('desktop services', () => {
   });
 
   it('runs a task workflow node without reporting system plan artifacts as deliverables', async () => {
-    const workFolder = join(rootDir, 'workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({
+      project: { id: 'proj-workflow', name: 'Workflow project', goal: 'Verify workflow' },
+      issuer: 'po_generated',
+      tasks: [{
+        title: 'Write final report',
+        acceptanceCriteria: '必须包含真实 workflow run ID。',
+        requiredOutputs: ['markdown'],
+      }],
+    });
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const artifactsDir = join(workFolder, 'artifacts');
     const finalArtifactPath = join(artifactsDir, 'workflow-final-report.md');
     const planArtifactPath = join(artifactsDir, 'plan-v1.md');
     let receivedPrompt = '';
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner: async ({ prompt, emitRuntimeEvent, sessionId }) => {
         receivedPrompt = prompt;
@@ -721,43 +732,33 @@ describe('desktop services', () => {
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-workflow',
-        workflowRunId: 'wf-proj-workflow-po-generated-task-workflow-1',
-        workflowId: 'po-generated-task-workflow',
-        nodeId: 'worker-produce-deliverable',
-        nodeKind: 'agent_task',
-        nodeTitle: 'Worker 生成任务交付物',
-        attempt: 1,
-        handoffId: 'wfhd-1',
-        project: { id: 'proj-workflow', name: 'Workflow project', goal: 'Verify workflow', status: 'active', workFolder },
-        input: {
-          sourceTask: {
-            id: 'proj-workflow__item-1',
-            title: 'Write final report',
-            acceptanceCriteria: '必须包含真实 workflow run ID。',
-            requiredOutputs: ['markdown'],
-          },
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
-    expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-workflow-po-generated-task-workflow-1');
+    expect(receivedPrompt).toContain(`真实 workflow run ID 是 ${owned.handoff.workflowRunId}`);
     expect(result.output?.artifacts).toEqual([
       { path: 'artifacts/workflow-final-report.md', kind: 'markdown', label: 'workflow-final-report.md' },
     ]);
     expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/workflow-final-report.md']);
+    } finally { await owned.close(services); }
   });
 
   it('runs a project workflow node as a whole-project deliverable producer', async () => {
-    const workFolder = join(rootDir, 'project-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({
+      project: { id: 'proj-project-workflow', name: 'Workflow project', goal: 'Deliver whole project' },
+      issuer: 'po_generated_project',
+      tasks: [{ title: '收集资料' }, { title: '生成最终报告' }],
+    });
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const artifactsDir = join(workFolder, 'artifacts');
     const finalArtifactPath = join(artifactsDir, 'project-final-report.md');
     let receivedPrompt = '';
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner: async ({ prompt, emitRuntimeEvent, sessionId }) => {
         receivedPrompt = prompt;
@@ -781,35 +782,19 @@ describe('desktop services', () => {
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-project-workflow',
-        workflowRunId: 'wf-proj-project-workflow-po-generated-project-workflow-1',
-        workflowId: 'po-generated-project-workflow',
-        nodeId: 'worker-produce-project-deliverable',
-        nodeKind: 'agent_task',
-        nodeTitle: 'Worker 生成项目交付物',
-        attempt: 1,
-        handoffId: 'wfhd-project-1',
-        project: { id: 'proj-project-workflow', name: 'Workflow project', goal: 'Deliver whole project', status: 'active', workFolder },
-        input: {
-          taskSnapshot: [
-            { id: 'item-1', title: '收集资料', status: 'pending' },
-            { id: 'item-2', title: '生成最终报告', status: 'pending' },
-          ],
-          instruction: '执行整个项目并生成最终交付物。',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
     expect(receivedPrompt).toContain('执行整个项目');
     expect(receivedPrompt).toContain('最终项目交付物');
-    expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-project-workflow-po-generated-project-workflow-1');
+    expect(receivedPrompt).toContain(`真实 workflow run ID 是 ${owned.handoff.workflowRunId}`);
     expect(receivedPrompt).not.toContain('sourceTask 是唯一工作范围');
     expect(result.output?.artifacts).toEqual([
       { path: 'artifacts/project-final-report.md', kind: 'markdown', label: 'project-final-report.md' },
     ]);
     expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/project-final-report.md']);
+    } finally { await owned.close(services); }
   });
 
   it('runs a script-generated workflow agent node from the node prompt instead of project diagnosis', async () => {
