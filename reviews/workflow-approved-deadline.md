@@ -45,3 +45,9 @@ gpt-6-astra 初稿 BLOCK 两项已修并补 RED→GREEN：合法 500.5ms caller 
 - 既有 Desktop loop/read recovery、stream lifecycle/owner、held restriction 测试 44 项通过；既有 Native read-port 5 files / 18 tests 在 Node 环境并指定 `XIAOK_WORKFLOW_TEST_REPO_ROOT` 后通过。默认 jsdom 的两项 collection 环境错误保留诊断，未修改 baseline。
 - `npm run build:main`、`npm run typecheck`（desktop）通过；`npm run governance:check` 无新增违规。
 - 以上为源码验证；本机包、重启与真实项目推进另行记录。
+
+## CI 执行机制
+
+`desktop-startup-room-recovery.yml` 在声明的 Desktop 最低 Node 22.14.0 与 Node 24 的跨平台 job 执行 4 files / 37 项不依赖侧库服务的 deadline/loop 边界；真实 issuer→Main 及 read-port 的 11 files / 66 项在 Node 22.22.0 与 Node 24 单独执行，固定 KSwarm `7d1d16299c39c7f3b8fda86af8531914870b3382`、broker `2dd1f40dc5e0fc5438a2086d13963cc67489db45`。KSwarm 自身 Node floor 为 22.22，未降低检查或伪造版本。
+
+初稿错误地将完整服务 fixture 放在 22.14，独立评审 BLOCK；真实运行复现服务启动失败。拆分后，官方 Node 22.14.0 本地 37/37、Node 22.22.0 本地完整 66/66 通过；云端 CI 另验。

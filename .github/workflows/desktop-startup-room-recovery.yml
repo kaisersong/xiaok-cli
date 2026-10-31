@@ -57,13 +57,21 @@ jobs:
           tests/main/kswarm-project-agent-ipc-registry.test.ts
           tests/main/kswarm-proxy-ipc-registry.test.ts
 
+      - name: Desktop deadline boundaries at the declared Node floor
+        run: >
+          cd desktop && npm run test -- --environment node --run
+          tests/main/workflow-deadline-policy.test.ts
+          tests/main/workflow-deadline-late-summary.test.ts
+          tests/main/kswarm-execution-clock.test.ts
+          tests/main/desktop-tool-loop-recovery.test.ts
+
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.14.0', '24']
+        node: ['22.22.0', '24']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
