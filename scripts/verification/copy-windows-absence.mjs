@@ -100,15 +100,17 @@ function publish(directory, record) {
   }
 }
 export function copyWindowsAbsence(root, options={}) {
-  const {check=false,archs=architectures,desktop=false,requireAll=false} = options;
+  const {check=false,archs=architectures,desktop=false,requireAll=false,target=desktop?'desktop':'cli'} = options;
   if(![check,desktop,requireAll].every(value => typeof value === 'boolean') ||
+     !['cli','desktop','sandbox'].includes(target) || (desktop && target !== 'desktop') ||
      !Array.isArray(archs) || !archs.length || archs.some(arch => !architectures.includes(arch)) ||
      new Set(archs).size !== archs.length ||
      (requireAll && (archs.length !== 2 || !architectures.every(arch => archs.includes(arch)))))
     throw Error('Invalid Windows absence copy arguments');
   const selected = [...archs], host = nativeHost(); // Before any filesystem operation.
   root = path.resolve(root);
-  const moduleDirectory = desktop ? path.join(root,'desktop','dist','main','src','runtime','verification') : path.join(root,'dist','runtime','verification');
+  const moduleDirectory = target === 'sandbox' ? path.join(root,'.test-dist','src','runtime','verification')
+    : target === 'desktop' ? path.join(root,'desktop','dist','main','src','runtime','verification') : path.join(root,'dist','runtime','verification');
   const reader = path.join(moduleDirectory,'windows-installation-absence.js');
   if(!exists(reader)) {
     if(requireAll || check) throw Error('Windows absence reader missing: ' + moduleDirectory);
@@ -165,9 +167,9 @@ export function copyWindowsAbsence(root, options={}) {
   unchanged(current.source);unchanged(current.core);
 }
 function parse(args) {
-  let desktop=false, root=sourceRoot, archs=architectures, check=false, requireAll=false;
+  let desktop=false, root=sourceRoot, archs=architectures, check=false, requireAll=false, target;
   const seen = new Set();
-  if(args[0] === 'cli' || args[0] === 'desktop') desktop=args.shift() === 'desktop';
+  if(['cli','desktop','sandbox'].includes(args[0])) { target=args.shift(); desktop=target === 'desktop'; }
   for(let i=0;i<args.length;i++) {
     const flag=args[i];
     if(!['--root','--arch','--check','--require-all'].includes(flag) || seen.has(flag))
@@ -182,7 +184,7 @@ function parse(args) {
       else {if(!architectures.includes(value)) throw Error('Invalid Windows absence copy arguments');archs=[value];}
     }
   }
-  return {root,options:{desktop,archs,check,requireAll}};
+  return {root,options:{desktop,archs,check,requireAll,...(target ? {target} : {})}};
 }
 if(process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const {root,options} = parse(process.argv.slice(2));copyWindowsAbsence(root,options);
