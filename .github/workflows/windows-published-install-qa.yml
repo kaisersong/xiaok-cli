@@ -1,0 +1,50 @@
+name: Published Windows installed-path QA
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        default: '1.5.15'
+        type: string
+      tag:
+        required: true
+        default: 'desktop-v1.5.15'
+        type: string
+      fullSHA:
+        required: true
+        default: '6770092945a42fb0e45ef0d68d0971bfc01b51a8'
+        type: string
+      expectedInstallerSHA256:
+        default: 'b98433d1ea78b5076eb3bbf4afdfcf444fa34515e7b8618405eb804ea2cb57a2'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  installed-path-qa:
+    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/xiaok-cli
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify published installer and exercise installed Kimi smoke
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QA_VERSION: ${{ inputs.version }}
+          QA_TAG: ${{ inputs.tag }}
+          QA_RELEASE_SHA: ${{ inputs.fullSHA }}
+          QA_INSTALLER_SHA256: ${{ inputs.expectedInstallerSHA256 }}
+        run: |
+          & ./scripts/qa/windows-published-install.ps1 -Version $env:QA_VERSION -Tag $env:QA_TAG -FullSHA $env:QA_RELEASE_SHA -ExpectedInstallerSHA256 $env:QA_INSTALLER_SHA256
+      - name: Preserve actual QA receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-windows-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/xiaok-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}/evidence/
+          if-no-files-found: warn
