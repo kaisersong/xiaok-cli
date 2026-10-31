@@ -1,0 +1,56 @@
+name: Manual real macOS updater QA
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: Run the real old-app updater on this disposable hosted VM
+        type: boolean
+        default: false
+        required: true
+      new_tag:
+        description: Published desktop tag approved by the coordinator
+        type: string
+        default: desktop-v1.5.16
+        required: true
+      new_sha:
+        description: Exact full source SHA of that published tag
+        type: string
+        required: true
+      new_release_id:
+        description: Exact canonical published GitHub release ID
+        type: string
+        required: true
+      new_zip_sha256:
+        description: Exact published arm64 Mac ZIP SHA256
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: macos-real-upgrade-qa
+  cancel-in-progress: false
+jobs:
+  real-upgrade:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Upgrade the signed old app using its unchanged production updater
+        run: node scripts/qa/macos-real-upgrade.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QA_NEW_TAG: ${{ inputs.new_tag }}
+          QA_NEW_SHA: ${{ inputs.new_sha }}
+          QA_NEW_RELEASE_ID: ${{ inputs.new_release_id }}
+          QA_NEW_ZIP_SHA256: ${{ inputs.new_zip_sha256 }}
+      - name: Preserve actual results, logs and ownership receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-real-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/xiaok-real-upgrade-qa/evidence
+          if-no-files-found: error
