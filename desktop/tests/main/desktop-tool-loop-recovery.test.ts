@@ -13,7 +13,7 @@ describe('ordinary Desktop production tool loop recovery', () => {
     const registry=new ToolRegistry({autoMode:true},[{definition:{name:'record',description:'',inputSchema:{type:'object',properties:{}}},async execute(){calls++;return 'completed-tool-evidence';}}]);
     try{
       const run=runDesktopToolLoop({adapter:{async *stream(messages:any){requests.push(structuredClone(messages));turn++;
-        if(turn===1)yield {type:'tool_use' as const,id:'already-completed',name:'record',input:{}};
+        if(turn===1){yield {type:'tool_input_progress' as const};yield {type:'tool_use' as const,id:'already-completed',name:'record',input:{}};}
         else if(turn===2){yield {type:'text' as const,delta:'partial response'};throw createKimiTerminalBoundaryError({boundaryKind,sawOfficialReasoning:true,toolCallCount:boundaryKind==='missing_finish'?0:1});}
         else yield {type:'text' as const,delta:'finished after model read recovery'};
         yield {type:'done' as const};
@@ -25,7 +25,7 @@ describe('ordinary Desktop production tool loop recovery', () => {
         expect(JSON.stringify(requests[2])).toContain('completed-tool-evidence');
         expect(events.some(e=>e.type==='execution_health'&&e.state==='recovering')).toBe(true);
       }else{await expect(run).rejects.toMatchObject({retryable:false,boundaryKind});expect(turn).toBe(2);}
-      expect(calls).toBe(1);
+      expect(calls).toBe(1);expect(JSON.stringify(requests)).not.toContain('tool_input_progress');
     }finally{registry.dispose();rmSync(root,{recursive:true,force:true});}
   });
   it.each([false, true])('continues a disconnected tool turn; partial tool emitted=%s', async partialTool => {
