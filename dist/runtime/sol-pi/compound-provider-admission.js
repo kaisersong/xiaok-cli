@@ -1,3 +1,8 @@
+function compoundIntentStageRows(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_stage_context_stages');
+    return value;
+}
 import { assertIntentStagePrefix, intentStageMessages, intentStageMessagesHash } from '../intent-delegation/stage-context.js';
 import { parseIntentPublicationCandidates } from '../intent-delegation/publication-candidate-journal.js';
 import { hasProtectedIntentProducerHistory } from '../intent-delegation/intent-commit-boundary.js';
@@ -74,7 +79,7 @@ export function prepareCompoundRootIntentStageView(session, logicalInvocationId)
     const ledger = state.store.getIntentNativeLedgerSync?.(state.sessionId);
     if (!ledger || !hasProtectedIntentProducerHistory(ledger))
         return ordinary();
-    const record = ledger.intents.find(r => r.intentId === ledger.activeIntentId), stage = record?.stages.find(r => r.stageId === record.activeStageId);
+    const record = ledger.intents.find(r => r.intentId === ledger.activeIntentId), stage = record ? compoundIntentStageRows(record.stages).find(r => r.stageId === record.activeStageId) : undefined;
     if (!record || !stage || stage.order === 0)
         return ordinary();
     const candidates = parseIntentPublicationCandidates(ledger).filter(c => c.intentId === record.intentId && c.businessProjection?.nextStageContext?.stageId === stage.stageId);

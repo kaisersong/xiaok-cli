@@ -164,6 +164,20 @@ export async function startInstalledMacRootBroker() {
                         shape(p, ['challengeId', 'reviewHash']);
                         return Buffer.from(canonicalVerificationJson(await sourceRegistry.capture({ challengeId: p.challengeId, reviewHash: p.reviewHash }, peer, signal)));
                     }
+                    if (request.method === 'sources.physical.start') {
+                        shape(p, ['handle']);
+                        return Buffer.from(canonicalVerificationJson(await sourceRegistry.startPhysicalObservation(p.handle, peer, signal)));
+                    }
+                    if (request.method === 'sources.physical.page') {
+                        shape(p, ['handle', 'observationId', 'offset', 'length']);
+                        const bytes = await sourceRegistry.readPhysicalObservation(p.handle, p.observationId, p.offset, p.length, peer, signal);
+                        return Buffer.from(canonicalVerificationJson({ offset: p.offset, bytes: bytes.toString('base64') }));
+                    }
+                    if (request.method === 'sources.physical.release') {
+                        shape(p, ['handle', 'observationId']);
+                        await sourceRegistry.releasePhysicalObservation(p.handle, p.observationId, peer, signal);
+                        return Buffer.from('{}');
+                    }
                     if (request.method === 'sources.manifest') {
                         shape(p, ['handle', 'offset', 'length']);
                         const bytes = await sourceRegistry.readManifest(p.handle, p.offset, p.length, peer, signal);

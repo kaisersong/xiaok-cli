@@ -112,6 +112,39 @@ export async function startConversationActivityOwner(config, options = {}) {
             return; void sources.projectConnectionChanged('disconnected'); reconnect = setTimeout(connect, 1000); reconnect.unref(); });
         socket.on('error', () => socket?.close());
     };
+    let shutdown;
+    const stop = () => {
+        if (shutdown)
+            return shutdown;
+        closed = true;
+        ready = false;
+        const step = (run) => {
+            try {
+                return Promise.resolve(run());
+            }
+            catch (error) {
+                return Promise.reject(error);
+            }
+        };
+        // Seal real IPC admission; managed daemon lifetime is unchanged.
+        const hostDrain = step(() => host.sealAndDrain());
+        const sourceDrain = step(() => { if (reconnect)
+            clearTimeout(reconnect); socket?.close(); return sources.close(); });
+        const mcpDrain = step(() => mcp.close());
+        shutdown = (async () => {
+            const outcomes = await Promise.allSettled([hostDrain, sourceDrain, mcpDrain]);
+            const failures = outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+            if (failures.length)
+                throw new AggregateError(failures, 'activity_owner_shutdown_failed');
+            await host.service.close();
+            const readers = await Promise.allSettled([step(() => tasks.close()), step(() => groups?.close()), step(() => identity.close())]);
+            const readerFailures = readers.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+            if (readerFailures.length)
+                throw new AggregateError(readerFailures, 'activity_owner_readers_close_failed');
+            await host.stop();
+        })();
+        return shutdown;
+    };
     try {
         await host.start();
         for (const source of config.managedSources ?? [])
@@ -123,16 +156,15 @@ export async function startConversationActivityOwner(config, options = {}) {
         ready = true;
     }
     catch (error) {
-        await mcp.close();
-        sources.dispose();
-        tasks.close();
-        groups?.close();
-        identity.close();
-        await host.stop();
+        try {
+            await stop();
+        }
+        catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], 'activity_owner_start_and_cleanup_failed');
+        }
         throw error;
     }
-    return { host, supervisor, async stop() { closed = true; if (reconnect)
-            clearTimeout(reconnect); socket?.close(); await mcp.close(); sources.dispose(); tasks.close(); groups?.close(); identity.close(); await host.stop(); } };
+    return { host, supervisor, stop };
 }
 export async function serveConversationActivityOwner(configFile) {
     process.umask(0o077);

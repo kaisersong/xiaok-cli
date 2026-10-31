@@ -1,36 +1,62 @@
-import { captureApplicationData, readApplicationOwnDataField } from './application-value-data.js';
-import { createHash } from 'node:crypto';
+import { ownDataArrayIsArray, ownDataArrayPrototypeForEach, ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSome, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataBufferCompare, ownDataBufferFrom, ownDataCryptoCreateHash, ownDataHashPrototypeDigest, ownDataHashPrototypeUpdate, ownDataNumberIsFinite, ownDataNumberIsSafeInteger, ownDataObjectFreeze, ownDataObjectKeys, ownDataObjectValues, ownDataReflectOwnKeys, ownDataRegExpPrototypeTest, ownDataSetPrototypeAdd, ownDataSetPrototypeHas, ownDataStringPrototypeTrim } from './application-native-intrinsics.js';
+import { capturedArrayIterator, createCapturedSet } from './application-iteration-intrinsics.js';
+import { applicationDataDescriptors, captureApplicationData, readApplicationOwnDataField } from './application-value-data.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { parseLoopHostSubject } from './loop-host-subject.js';
 import { parseLoopBusinessContract, loopBusinessContractHash } from './loop-application-contract.js';
 import { parsePublishedArtifactSelection } from './published-artifact-selection.js';
+const ownHas = Object.prototype.hasOwnProperty, apply = Reflect.apply, ownKeys = Reflect.ownKeys, getOwn = Object.getOwnPropertyDescriptor, reflectGet = Reflect.get, nativeJsonParse = JSON.parse;
+function enumerableDataField(descriptors, key) {
+    const wrapper = getOwn(descriptors, key);
+    if (!wrapper || !apply(ownHas, wrapper, ['value']))
+        return false;
+    const descriptor = apply(reflectGet, undefined, [wrapper, 'value', wrapper]);
+    return !!descriptor && apply(ownHas, descriptor, ['value']) && apply(reflectGet, undefined, [descriptor, 'enumerable', descriptor]) === true;
+}
 export const LOOP_EVIDENCE_ANOMALY_KINDS = ['completed_without_evidence', 'artifact_kind_mismatch', 'legacy_unclassified_completion', 'source_unavailable', 'validation_failed'];
+const privateLOOP_EVIDENCE_ANOMALY_KINDS = ownDataObjectFreeze([...LOOP_EVIDENCE_ANOMALY_KINDS]);
 export const LOOP_HEALTH_DIAGNOSTIC_KINDS = ['service_not_running', 'port_occupied_by_unknown_process', 'health_unreachable', 'health_http_error', 'health_parse_error', 'health_identity_mismatch', 'health_capability_mismatch', 'broker_unavailable', 'spawn_path_missing', 'spawn_exit', 'source_hash_warning'];
+const privateLOOP_HEALTH_DIAGNOSTIC_KINDS = ownDataObjectFreeze([...LOOP_HEALTH_DIAGNOSTIC_KINDS]);
 const HASH_FIELDS = ['triggerHash', 'contractHash', 'candidatePayloadHash'];
 const CANDIDATE_FIELDS = ['version', 'kind', 'subject', 'candidateId', 'candidateRevision', 'originalTriggerJson', 'logicalRunKey', 'contract', 'body'];
-function shape(value, keys) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== [...keys].sort().join(','))
-    throw Error('loop_application_shape'); }
-function id(value) { if (typeof value !== 'string' || !value || Buffer.byteLength(value) > 160 || /[\x00-\x1f\x7f]/.test(value))
-    throw Error('loop_application_identity'); }
-function text(value, allowEmpty = false) { if (typeof value !== 'string' || (!allowEmpty && !value.trim()))
-    throw Error('loop_application_text'); }
-function integer(value, min = 0) { if (!Number.isSafeInteger(value) || value < min)
-    throw Error('loop_application_number'); }
-function digest(value) { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
-    throw Error('loop_application_hash'); }
-function array(value) { if (!Array.isArray(value))
-    throw Error('loop_application_array'); }
-function strings(value) { array(value); value.forEach(item => text(item, true)); }
-function freeze(value) { if (value && typeof value === 'object') {
-    Object.values(value).forEach(freeze);
-    Object.freeze(value);
-} return value; }
-function hash(domain, value) { return createHash('sha256').update(domain + '\0').update(value).digest('hex'); }
-function capture(raw) { return JSON.parse(json(captureApplicationData(raw, { maximumBytes: 65536, maximumNodes: 65536, invalid: 'loop_application_shape', limit: 'loop_application_limit' }))); }
+function shape(value, keys) {
+    if (!value || typeof value !== 'object' || ownDataArrayIsArray(value) || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(value)), ',') !== ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort([...keys]), ','))
+        throw Error('loop_application_shape');
+}
+function id(value) {
+    if (typeof value !== 'string' || !value || ownDataBufferByteLength(value) > 160 || ownDataRegExpPrototypeTest(/[\x00-\x1f\x7f]/, value))
+        throw Error('loop_application_identity');
+}
+function text(value, allowEmpty = false) {
+    if (typeof value !== 'string' || (!allowEmpty && !ownDataStringPrototypeTrim(value)))
+        throw Error('loop_application_text');
+}
+function integer(value, min = 0) {
+    if (!ownDataNumberIsSafeInteger(value) || value < min)
+        throw Error('loop_application_number');
+}
+function digest(value) {
+    if (typeof value !== 'string' || !ownDataRegExpPrototypeTest(/^[a-f0-9]{64}$/, value))
+        throw Error('loop_application_hash');
+}
+function array(value) {
+    if (!ownDataArrayIsArray(value))
+        throw Error('loop_application_array');
+}
+function strings(value) { array(value); ownDataArrayPrototypeForEach(value, item => text(item, true)); }
+function freeze(value) {
+    if (value && typeof value === 'object') {
+        ownDataArrayPrototypeForEach(ownDataObjectValues(value), freeze);
+        ownDataObjectFreeze(value);
+    }
+    return value;
+}
+function hash(domain, value) { return ownDataHashPrototypeDigest(ownDataHashPrototypeUpdate(ownDataHashPrototypeUpdate(ownDataCryptoCreateHash('sha256'), domain + '\0'), value), 'hex'); }
+function capture(raw, limits = { maximumBytes: 65536, maximumNodes: 65536, invalid: 'loop_application_shape', limit: 'loop_application_limit' }) { return apply(nativeJsonParse, JSON, [json(captureApplicationData(raw, limits))]); }
 function artifactDescriptors(raw) {
     array(raw);
-    const seen = new Set();
-    for (const entry of raw) {
+    const seen = createCapturedSet();
+    for (const entry of capturedArrayIterator(raw)) {
         shape(entry, ['selection', 'sha256', 'size']);
         entry.selection = parsePublishedArtifactSelection(entry.selection);
         digest(entry.sha256);
@@ -38,34 +64,38 @@ function artifactDescriptors(raw) {
         if (entry.size > 16 * 1024 ** 2)
             throw Error('loop_application_artifact_size');
         const key = json(entry.selection);
-        if (seen.has(key))
+        if (ownDataSetPrototypeHas(seen, key))
             throw Error('loop_application_artifact_duplicate');
-        seen.add(key);
+        ownDataSetPrototypeAdd(seen, key);
     }
 }
-function evidenceRefs(raw) { array(raw); if (!raw.length)
-    throw Error('loop_application_evidence'); for (const ref of raw) {
-    shape(ref, ['kind', 'id']);
-    text(ref.kind);
-    text(ref.id);
-} }
+function evidenceRefs(raw) {
+    array(raw);
+    if (!raw.length)
+        throw Error('loop_application_evidence');
+    for (const ref of capturedArrayIterator(raw)) {
+        shape(ref, ['kind', 'id']);
+        text(ref.kind);
+        text(ref.id);
+    }
+}
 function anomalies(raw, scanner) {
     array(raw);
-    const seen = new Set();
-    for (const item of raw) {
+    const seen = createCapturedSet();
+    for (const item of capturedArrayIterator(raw)) {
         shape(item, ['id', 'ownerKind', 'ownerId', 'kind', 'status', 'firstSeenAt', 'lastSeenAt', 'lastResolvedAt', 'seenCount', 'ignoredUntil', 'message', 'evidenceIds']);
         id(item.id);
         id(item.ownerId);
-        if (seen.has(item.id))
+        if (ownDataSetPrototypeHas(seen, item.id))
             throw Error('loop_application_anomaly_duplicate');
-        seen.add(item.id);
-        if (!['task', 'loop_stage', 'loop_run', 'project', 'goal'].includes(item.ownerKind) || !['open', 'resolved', 'ignored'].includes(item.status))
+        ownDataSetPrototypeAdd(seen, item.id);
+        if (!ownDataArrayPrototypeIncludes(['task', 'loop_stage', 'loop_run', 'project', 'goal'], item.ownerKind) || !ownDataArrayPrototypeIncludes(['open', 'resolved', 'ignored'], item.status))
             throw Error('loop_application_anomaly');
         if (scanner === 'artifact-evidence-regression') {
-            if (!LOOP_EVIDENCE_ANOMALY_KINDS.includes(item.kind))
+            if (!ownDataArrayPrototypeIncludes(privateLOOP_EVIDENCE_ANOMALY_KINDS, item.kind))
                 throw Error('loop_application_anomaly');
         }
-        else if (item.ownerKind !== 'loop_run' || item.ownerId !== 'kswarm-service' || ![...LOOP_HEALTH_DIAGNOSTIC_KINDS, 'source_unavailable'].includes(item.kind))
+        else if (item.ownerKind !== 'loop_run' || item.ownerId !== 'kswarm-service' || !ownDataArrayPrototypeIncludes([...privateLOOP_HEALTH_DIAGNOSTIC_KINDS, 'source_unavailable'], item.kind))
             throw Error('loop_application_anomaly');
         integer(item.firstSeenAt);
         integer(item.lastSeenAt);
@@ -79,7 +109,7 @@ function anomalies(raw, scanner) {
     }
 }
 function candidateBody(input, subject, contract) {
-    if (!input || typeof input !== 'object' || Array.isArray(input))
+    if (!input || typeof input !== 'object' || ownDataArrayIsArray(input))
         throw Error('loop_application_body');
     const kindField = readApplicationOwnDataField(input, 'kind', 'loop_application_body');
     if (kindField.kind !== 'data')
@@ -94,7 +124,7 @@ function candidateBody(input, subject, contract) {
         if (raw.nextActionSummary !== null)
             text(raw.nextActionSummary, true);
         const artifact = raw.scanner === 'artifact-evidence-regression', actions = artifact ? ['none', 'inspect_anomalies', 'inspect_source'] : ['none', 'inspect_kswarm_health', 'inspect_kswarm_health_source'];
-        if (!actions.includes(raw.nextActionKind))
+        if (!ownDataArrayPrototypeIncludes(actions, raw.nextActionKind))
             throw Error('loop_application_next_action');
         shape(raw.diagnostic, artifact ? ['kind', 'scannedOwnerCount', 'openAnomalyCount', 'resolvedAnomalyCount', 'anomalies'] : ['kind', 'openAnomalyCount', 'resolvedAnomalyCount', 'anomalies', 'diagnosticKinds', 'findings', 'suggestedActions', 'logPaths']);
         const d = raw.diagnostic;
@@ -105,9 +135,9 @@ function candidateBody(input, subject, contract) {
         if (artifact)
             integer(d.scannedOwnerCount);
         else {
-            for (const key of ['diagnosticKinds', 'findings', 'suggestedActions', 'logPaths'])
+            for (const key of capturedArrayIterator(['diagnosticKinds', 'findings', 'suggestedActions', 'logPaths']))
                 strings(d[key]);
-            if (d.diagnosticKinds.some((kind) => ![...LOOP_HEALTH_DIAGNOSTIC_KINDS, 'source_unavailable'].includes(kind)))
+            if (ownDataArrayPrototypeSome(d.diagnosticKinds, (kind) => !ownDataArrayPrototypeIncludes([...privateLOOP_HEALTH_DIAGNOSTIC_KINDS, 'source_unavailable'], kind)))
                 throw Error('loop_application_diagnostic');
         }
         anomalies(d.anomalies, raw.scanner);
@@ -116,7 +146,7 @@ function candidateBody(input, subject, contract) {
         shape(raw, ['kind', 'taskId', 'executeStageId', 'summary', 'evidenceIds', 'artifacts']);
         if (contract.kind !== 'user-template' || subject.stage === null || subject.stage.stageKind !== 'execute' || subject.stage.stageId !== raw.executeStageId)
             throw Error('loop_application_body_binding');
-        [raw.taskId, raw.executeStageId].forEach(id);
+        ownDataArrayPrototypeForEach([raw.taskId, raw.executeStageId], id);
         text(raw.summary, true);
         strings(raw.evidenceIds);
     }
@@ -124,7 +154,7 @@ function candidateBody(input, subject, contract) {
         shape(raw, ['kind', 'taskId', 'executeStageId', 'verifyStageId', 'summary', 'evidenceIds', 'artifacts']);
         if (contract.kind !== 'user-template' || subject.stage !== null && (subject.stage.stageKind !== 'verify' || subject.stage.stageId !== raw.verifyStageId))
             throw Error('loop_application_body_binding');
-        [raw.taskId, raw.executeStageId, raw.verifyStageId].forEach(id);
+        ownDataArrayPrototypeForEach([raw.taskId, raw.executeStageId, raw.verifyStageId], id);
         if (raw.executeStageId === raw.verifyStageId)
             throw Error('loop_application_stage_identity');
         text(raw.summary, true);
@@ -137,20 +167,20 @@ function candidateBody(input, subject, contract) {
         text(raw.summary);
         array(raw.candidates);
         let previous = null;
-        for (const c of raw.candidates) {
+        for (const c of capturedArrayIterator(raw.candidates)) {
             shape(c, ['id', 'runId', 'kind', 'title', 'content', 'scope', 'projectId', 'confidence', 'evidenceRefs', 'dedupeKey']);
             id(c.id);
             id(c.runId);
-            if (previous !== null && Buffer.compare(Buffer.from(previous), Buffer.from(c.id)) >= 0)
+            if (previous !== null && ownDataBufferCompare(ownDataBufferFrom(previous), ownDataBufferFrom(c.id)) >= 0)
                 throw Error('loop_application_candidate_order');
             previous = c.id;
-            if (c.runId !== subject.runId || !['memory', 'knowledge', 'follow_up'].includes(c.kind) || !['global', 'project'].includes(c.scope))
+            if (c.runId !== subject.runId || !ownDataArrayPrototypeIncludes(['memory', 'knowledge', 'follow_up'], c.kind) || !ownDataArrayPrototypeIncludes(['global', 'project'], c.scope))
                 throw Error('loop_application_candidate_binding');
             if (c.projectId !== null)
                 text(c.projectId);
             if (c.scope === 'project' && c.projectId === null)
                 throw Error('loop_application_candidate_project');
-            if (typeof c.confidence !== 'number' || !Number.isFinite(c.confidence) || c.confidence < 0 || c.confidence > 1)
+            if (typeof c.confidence !== 'number' || !ownDataNumberIsFinite(c.confidence) || c.confidence < 0 || c.confidence > 1)
                 throw Error('loop_application_candidate_confidence');
             text(c.title);
             text(c.content);
@@ -165,7 +195,7 @@ function candidateBody(input, subject, contract) {
         array(raw.recommendations);
         if (raw.recommendations.length > 3)
             throw Error('loop_application_recommendations');
-        for (const r of raw.recommendations) {
+        for (const r of capturedArrayIterator(raw.recommendations)) {
             shape(r, ['title', 'reasonCode', 'evidenceRefs']);
             text(r.title);
             text(r.reasonCode);
@@ -177,13 +207,13 @@ function candidateBody(input, subject, contract) {
     artifactDescriptors(raw.artifacts);
     return raw;
 }
-function candidate(raw) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+function candidate(raw, parsedTrigger, triggerWasParsed = false) {
+    if (!raw || typeof raw !== 'object' || ownDataArrayIsArray(raw))
         throw Error('loop_application_shape');
     const rawRecord = raw;
     // Preserve the historical whole-candidate shape gate before inspecting trigger data.
-    const inputKeys = Reflect.ownKeys(raw);
-    if (inputKeys.some(k => typeof k !== 'string') || Object.keys(raw).sort().join(',') !== [...CANDIDATE_FIELDS].sort().join(','))
+    const inputKeys = ownDataReflectOwnKeys(raw);
+    if (ownDataArrayPrototypeSome(inputKeys, k => typeof k !== 'string') || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(raw)), ',') !== ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort([...CANDIDATE_FIELDS]), ','))
         throw Error('loop_application_shape');
     if (rawRecord.version !== 1 || rawRecord.kind !== 'loop')
         throw Error('loop_application_kind');
@@ -191,14 +221,15 @@ function candidate(raw) {
     id(rawRecord.candidateId);
     integer(rawRecord.candidateRevision, 1);
     text(rawRecord.originalTriggerJson);
-    let trigger;
-    try {
-        trigger = JSON.parse(rawRecord.originalTriggerJson);
-    }
-    catch {
-        throw Error('loop_application_trigger');
-    }
-    if (!trigger || typeof trigger !== 'object' || Array.isArray(trigger))
+    let trigger = parsedTrigger;
+    if (!triggerWasParsed)
+        try {
+            trigger = JSON.parse(rawRecord.originalTriggerJson);
+        }
+        catch {
+            throw Error('loop_application_trigger');
+        }
+    if (!trigger || typeof trigger !== 'object' || ownDataArrayIsArray(trigger))
         throw Error('loop_application_trigger');
     const triggerKind = readApplicationOwnDataField(trigger, 'kind', 'loop_application_trigger');
     if (triggerKind.kind !== 'data' || typeof triggerKind.value !== 'string' || !triggerKind.value || json(trigger) !== rawRecord.originalTriggerJson)
@@ -222,40 +253,73 @@ function candidateHashes(value) {
 /** Pure immutable proposal only. The actual LoopStore capture, native approval,
  * registered subject and receiver publication remain separate requirements. */
 export function createLoopApplicationBinding(raw) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    if (!raw || typeof raw !== 'object' || ownDataArrayIsArray(raw))
         throw Error('loop_application_shape');
-    const triggerField = readApplicationOwnDataField(raw, 'originalTriggerJson', 'loop_application_shape');
-    if (triggerField.kind !== 'data' || typeof triggerField.value !== 'string')
+    const root = applicationDataDescriptors(raw, CANDIDATE_FIELDS.length, 'loop_application_shape'), rootKeys = ownKeys(root);
+    if (rootKeys.length !== CANDIDATE_FIELDS.length)
         throw Error('loop_application_shape');
-    if (Buffer.byteLength(triggerField.value) > 65536)
+    for (const field of capturedArrayIterator(CANDIDATE_FIELDS))
+        if (!apply(ownHas, root, [field]) || !enumerableDataField(root, field))
+            throw Error('loop_application_shape');
+    const rootValue = (field) => {
+        const item = readApplicationOwnDataField(raw, field, 'loop_application_shape');
+        if (item.kind !== 'data')
+            throw Error('loop_application_shape');
+        return item.value;
+    };
+    const shallow = { version: rootValue('version'), kind: rootValue('kind'), subject: rootValue('subject'), candidateId: rootValue('candidateId'), candidateRevision: rootValue('candidateRevision'), originalTriggerJson: rootValue('originalTriggerJson'), logicalRunKey: rootValue('logicalRunKey'), contract: rootValue('contract'), body: rootValue('body') };
+    if (shallow.version !== 1 || shallow.kind !== 'loop')
+        throw Error('loop_application_kind');
+    const shallowSubject = capture(shallow.subject, { maximumBytes: 4096, maximumNodes: 4096, invalid: 'loop_application_shape', limit: 'loop_application_limit' });
+    const subject = parseLoopHostSubject(shallowSubject);
+    id(shallow.candidateId);
+    integer(shallow.candidateRevision, 1);
+    text(shallow.originalTriggerJson);
+    if (ownDataBufferByteLength(shallow.originalTriggerJson) > 65536)
         throw Error('loop_application_limit');
+    let captured, captureError;
+    try {
+        captured = capture(raw);
+    }
+    catch (error) {
+        captureError = error;
+    }
+    if (captured && (captured.version !== shallow.version || captured.kind !== shallow.kind || captured.candidateId !== shallow.candidateId || captured.candidateRevision !== shallow.candidateRevision || captured.originalTriggerJson !== shallow.originalTriggerJson || json(captured.subject) !== json(shallowSubject)))
+        throw Error('loop_application_shape');
     let originalTrigger;
     try {
-        originalTrigger = JSON.parse(triggerField.value);
+        originalTrigger = JSON.parse(captured?.originalTriggerJson ?? shallow.originalTriggerJson);
     }
     catch {
         throw Error('loop_application_trigger');
     }
-    if (!originalTrigger || typeof originalTrigger !== 'object' || Array.isArray(originalTrigger))
+    if (!originalTrigger || typeof originalTrigger !== 'object' || ownDataArrayIsArray(originalTrigger))
         throw Error('loop_application_trigger');
     const triggerKind = readApplicationOwnDataField(originalTrigger, 'kind', 'loop_application_trigger');
     if (triggerKind.kind !== 'data' || typeof triggerKind.value !== 'string' || !triggerKind.value)
         throw Error('loop_application_trigger');
-    const value = candidate(capture(raw));
-    return parseLoopApplicationBinding({ ...value, ...candidateHashes(value) });
+    if (json(originalTrigger) !== (captured?.originalTriggerJson ?? shallow.originalTriggerJson))
+        throw Error('loop_application_trigger');
+    if (captureError !== undefined)
+        throw captureError;
+    const value = candidate(captured, originalTrigger, true);
+    if (json(value.subject) !== json(subject))
+        throw Error('loop_application_shape');
+    return parseBinding({ ...value, ...candidateHashes(value) }, originalTrigger, true);
 }
-export function parseLoopApplicationBinding(raw) {
+function parseBinding(raw, parsedTrigger, triggerWasParsed = false) {
     const value = capture(raw);
     shape(value, [...CANDIDATE_FIELDS, ...HASH_FIELDS]);
     const base = { ...value };
-    for (const field of HASH_FIELDS)
+    for (const field of capturedArrayIterator(HASH_FIELDS))
         delete base[field];
-    const parsed = candidate(base), hashes = candidateHashes(parsed);
-    for (const field of HASH_FIELDS) {
+    const parsed = candidate(base, parsedTrigger, triggerWasParsed), hashes = candidateHashes(parsed);
+    for (const field of capturedArrayIterator(HASH_FIELDS)) {
         digest(value[field]);
         if (value[field] !== hashes[field])
             throw Error('loop_application_hash_binding');
     }
     return freeze({ ...parsed, ...hashes });
 }
+export function parseLoopApplicationBinding(raw) { return parseBinding(raw); }
 export function loopApplicationBindingHash(raw) { return hash('xiaok-loop-application-binding-v1', json(parseLoopApplicationBinding(raw))); }

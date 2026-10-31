@@ -17,6 +17,14 @@ export interface ProfileCaptureFacts {
         snapshotHash: string;
     }>[];
 }
+export interface ProfileSqlitePhysicalFile {
+    readonly sourceId: string;
+    readonly suffix: '' | '-journal' | '-wal' | '-shm';
+    readonly device: string;
+    readonly inode: string;
+    readonly byteLength: string;
+    readonly sha256: string;
+}
 /** Actual all-leaf capture owner. This is facts, not an approval, full historical
  * inventory, native-effect drain or capacity issuer. No caller callback can
  * substitute for a child. The root broker must separately bind original review,
@@ -32,8 +40,11 @@ export declare function startProfileSourceCapture(input: {
 }): Promise<Readonly<{
     checkCurrent(): Promise<undefined>;
     capture(): Promise<Readonly<{}>>;
+    /** Local held-file observations only: no writer, target or installed authority. */
+    capturePhysicalSqliteFiles(captureToken: object, maximumPhysicalBytes?: number): Promise<Readonly<{}>>;
     close: () => Promise<void>;
 }>>;
+export declare function readProfileSqlitePhysicalFiles(owner: object, token: object): readonly Readonly<ProfileSqlitePhysicalFile>[];
 export declare function readProfileSourceCapture(owner: object, token: object): Readonly<ProfileCaptureFacts>;
 /** Original factory CHECK only. JSON and caller methods cannot supply currentness. */
 export declare function checkProfileSourceCapture(owner: object, token: object): Promise<void>;
@@ -60,6 +71,7 @@ export declare function readProfileSqlitePage(owner: object, token: object, sour
 export declare function startInstalledProfileSourceCapture(lifetime: InstalledControllerLifetime, broker: ReturnType<typeof createInstalledRootBrokerClient>, handle: object, signal: AbortSignal): Promise<Readonly<{
     checkCurrent(): Promise<void>;
     capture(): Promise<object>;
+    capturePhysicalSqliteFiles(captureToken: object, maximumPhysicalBytes?: number): Promise<Readonly<{}>>;
     close(): Promise<void>;
 }>>;
 export declare function readProfileCaptureMetadataBytes(owner: object, token: object): number;

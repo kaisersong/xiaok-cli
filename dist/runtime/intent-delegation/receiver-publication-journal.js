@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { captureIntentData } from './data.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 import { parsePublicationChallenge, parsePublicationObservation } from '../verification/publication-client.js';
-import { parseIntentPublicationCandidates, intentPublicationRouteVector } from './publication-candidate-journal.js';
+import { parseIntentPublicationCandidates, intentPublicationRouteVector, intentPublicationFactArray, intentPublicationFactObject } from './publication-candidate-journal.js';
 import { intentNativeLedgerHash } from './native-contract-journal.js';
 import { assertSessionWriteOwnership } from './ownership.js';
 const shape = (v, keys) => { if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).sort().join(',') !== keys.split(' ').sort().join(','))
@@ -85,7 +85,7 @@ export function applyIntentReceiverMutation(previous, input) {
     if (input.action.kind === 'project') {
         if (input.requestSource !== 'user')
             throw Error('intent_receiver_source');
-        const c = ledger.publicationCandidates?.find(c => c.id === input.candidateId), r = c?.receiverAttempts?.at(-1);
+        const c = parseIntentPublicationCandidates(ledger).find(c => c.id === input.candidateId), r = c?.receiverAttempts?.at(-1);
         if (!r || intentPublicationRouteVector(ledger, input.candidateId) !== r.route)
             throw Error('intent_receiver_route');
         const context = input.action.projection.nextStageContext;
@@ -105,7 +105,7 @@ export function applyIntentReceiverMutation(previous, input) {
         throw Error('intent_receiver_source');
     if (a.kind === 'reserve') {
         const record = ledger.intents.find(r => r.intentId === candidate.intentId), app = candidate.applicationAttempts.at(-1);
-        if (input.requestSource !== 'user' || rows.length >= 32 || last && !['not_prepared', 'not_approved'].includes(last.status) || app?.phase !== 'ready' || a.route !== app.route || intentPublicationRouteVector(ledger, candidate.id) !== a.route || ledger.activeIntentId !== candidate.intentId || (candidate.stageId === null ? !record || record.stages.some(s => s.status !== 'completed') : record?.activeStageId !== candidate.stageId) || record?.overallStatus !== 'publication_pending')
+        if (input.requestSource !== 'user' || rows.length >= 32 || last && !['not_prepared', 'not_approved'].includes(last.status) || app?.phase !== 'ready' || a.route !== app.route || intentPublicationRouteVector(ledger, candidate.id) !== a.route || ledger.activeIntentId !== candidate.intentId || (candidate.stageId === null ? !record || intentPublicationFactArray(record.stages, 'intent_receiver_current').some(s => intentPublicationFactObject(s, 'intent_receiver_current').status !== 'completed') : record?.activeStageId !== candidate.stageId) || record?.overallStatus !== 'publication_pending')
             throw Error('intent_receiver_current');
         rows.push({ requestId: randomUUID(), candidateId: candidate.id, applicationRequestId: app.requestId, bindingHash: candidate.bindingHash, sourceHash: candidate.sourceHash, route: a.route, originalSource: 'user', ordinal: rows.length + 1, revision: 1, status: 'preparing', challenge: null, observation: null, retirement: null, createdAt: input.now, updatedAt: input.now });
     }

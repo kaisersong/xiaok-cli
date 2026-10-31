@@ -1,4 +1,11 @@
+import { createRequire } from 'node:module';
 import { VERIFICATION_BUDGET } from './protocol.js';
+// Capture the actual installed driver's error class; text properties alone
+// cannot classify an ordinary callback error as settled SQLite exhaustion.
+const NativeSqliteError = createRequire(import.meta.url)('better-sqlite3').SqliteError;
+const headroomNotReadyErrors = new WeakMap();
+function headroomNotReady(database, message, cause) { const error = cause === undefined ? Error(message) : Error(message, { cause }); headroomNotReadyErrors.set(error, database); return error; }
+export function isVerificationHeadroomNotReady(error, database) { return !!error && typeof error === 'object' && headroomNotReadyErrors.get(error) === database; }
 /** Byte check for the shared control database. Whole-profile/archive reservation is a separate owner. */
 export function assertVerificationDatabaseBudget(db, options) {
     const limit = options.limitBytes ?? VERIFICATION_BUDGET.controlDatabaseBytes;
@@ -45,6 +52,8 @@ export function assertVerificationDatabaseBudget(db, options) {
         ['shared_blob_bindings', ['resource_id', 'allocation_hash', 'binding_json'], false],
         ['controller_metadata_resources', ['resource_id', 'physical_identity', 'record_json'], false],
         ['controller_metadata_intents', ['request_id', 'resource_id', 'request_json', 'record_json'], false],
+        ['metadata_prepare_archive_intents', ['intent_id', 'capture_key', 'record_json', 'fee_state'], false],
+        ['metadata_prepare_archive_slots', ['stage_payload', 'ready_payload'], false],
         ['shared_capacity_session_attributions', ['operation_id', 'beneficiary_session_key', 'beneficiary_producer_key', 'physical_tuple_hash', 'attribution_json', 'attribution_hash'], false],
         ['shared_metadata_replacements', ['replacement_id', 'intent_id', 'request_hash', 'request_json', 'state'], false],
         ['shared_metadata_replacement_claims', ['operation_id', 'replacement_id', 'role'], false],
@@ -127,17 +136,20 @@ export function assertVerificationDatabaseBudget(db, options) {
     // no eviction of unknown operations to make room. Page cap remains a final bound.
     const requiredBytes = Math.max(logicalBytes, allocatedBytes) + pendingCaptureBytes + pendingUploadBytes + options.additionalBytes * 2 + (rows + 1) * 4096;
     if (requiredBytes > limit)
-        throw Error('verification_control_budget');
+        throw headroomNotReady(db, 'verification_control_budget');
     if (requiredBytes > physicalLimit)
-        throw Error('verification_capacity_exhausted');
+        throw headroomNotReady(db, 'verification_capacity_exhausted');
 }
 export function runVerificationTransaction(db, work) {
     try {
         return db.transaction(work).immediate();
     }
     catch (error) {
-        if (error?.code === 'SQLITE_FULL')
+        if (error?.code === 'SQLITE_FULL') {
+            if (error instanceof NativeSqliteError && db.open && !db.inTransaction)
+                throw headroomNotReady(db, 'verification_capacity_exhausted', error);
             throw new Error('verification_capacity_exhausted', { cause: error });
+        }
         throw error;
     }
 }

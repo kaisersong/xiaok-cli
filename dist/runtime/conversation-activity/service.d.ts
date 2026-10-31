@@ -21,6 +21,10 @@ export declare class ConversationActivityService {
     private readonly subscribers;
     private timer;
     private disposed;
+    private closing?;
+    private readonly drainWork;
+    /** Reserve ownership before any synchronous producer prefix can reenter close. */
+    private own;
     private reporting;
     private notifying;
     private retentionTicks;
@@ -82,6 +86,8 @@ export declare class ConversationActivityService {
     notifyPending(): Promise<void>;
     private deliverNotifications;
     start(): void;
+    /** Seals scheduling synchronously and waits actual owned work; never fabricates a drain ACK. */
+    close(): Promise<void>;
     dispose(): void;
 }
 export type ConversationActivityApi = Pick<ConversationActivityService, 'prepareAssociation' | 'bindWork' | 'forgetUnboundAssociation' | 'canReadSource' | 'acceptEvent' | 'acceptRetainedPage' | 'reconcileSnapshot' | 'confirmFreshness' | 'sourceUnavailable' | 'listActivities' | 'getWork' | 'markRead' | 'unreadThreads' | 'updateReporting' | 'stopWatch' | 'handleThreadDeletion' | 'start' | 'dispose'> & {

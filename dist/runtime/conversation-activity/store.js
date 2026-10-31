@@ -13,6 +13,56 @@ const id = (value) => typeof value === 'string' && value.length > 0 && value.len
 const digest = (value) => createHash('sha256').update(encode(value)).digest('hex');
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)])) : value;
+const activityStoreCleanupDiagnostics = [];
+const retainedActivityStoreConstructions = new Set();
+let cleanupSequence = 0, cleanupDiagnosticsDropped = 0, cleanupDiagnosticLogFailures = 0;
+function recordActivityStoreCleanupFailure(phase, stage, relation = 'secondary') {
+    const sequence = ++cleanupSequence;
+    try {
+        if (activityStoreCleanupDiagnostics.length === 32) {
+            activityStoreCleanupDiagnostics.shift();
+            cleanupDiagnosticsDropped += 1;
+        }
+        activityStoreCleanupDiagnostics.push(Object.freeze({ sequence, phase, stage, relation }));
+    }
+    catch {
+        cleanupDiagnosticsDropped += 1;
+    }
+    // Stable metadata only; original SQL/error/cause objects remain host-private.
+    try {
+        console.error('[conversation-activity] activity_store_cleanup_failed', { sequence, phase, stage, relation, dropped: cleanupDiagnosticsDropped, logFailures: cleanupDiagnosticLogFailures, retainedConstructions: retainedActivityStoreConstructions.size });
+    }
+    catch {
+        cleanupDiagnosticLogFailures += 1;
+    }
+}
+function closeFailedActivityStoreConstruction(data, owner, dataPhase = 'data-close') {
+    const retained = Object.freeze({ data, owner });
+    retainedActivityStoreConstructions.add(retained); // Keep actual handles, never PID-derived replacements.
+    let dataClosed = data === undefined, ownerClosed = owner === undefined;
+    if (data) {
+        try {
+            data.close();
+            dataClosed = true;
+        }
+        catch {
+            recordActivityStoreCleanupFailure(dataPhase, 'constructor-cleanup');
+        }
+    }
+    // The owner lock is dependent on actual writer close, not an independent disposer.
+    if (dataClosed && owner) {
+        try {
+            owner.close();
+            ownerClosed = true;
+        }
+        catch {
+            recordActivityStoreCleanupFailure('owner-close', 'constructor-cleanup');
+        }
+    }
+    if (dataClosed && ownerClosed)
+        retainedActivityStoreConstructions.delete(retained);
+    // No retry, forced release, public handle, or false physical-close ACK.
+}
 /** Single host owner. IPC and source admission belong to the service above this store. */
 export class ConversationActivityStore {
     db;
@@ -21,6 +71,8 @@ export class ConversationActivityStore {
     now;
     maxSourceEvents;
     closed = false;
+    // Failure-derived latch; no reset/force/grant API. Reads remain available.
+    writeState = 'writable';
     file;
     secureSidecars() {
         if (this.readOnly)
@@ -59,7 +111,7 @@ export class ConversationActivityStore {
                     throw new Error('conversation_activity_schema_unsupported');
             }
             catch (error) {
-                this.db.close();
+                closeFailedActivityStoreConstruction(this.db, undefined, 'readonly-close');
                 throw error;
             }
             return;
@@ -82,9 +134,11 @@ export class ConversationActivityStore {
             this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
             this.secureSidecars();
         }
-        catch {
-            this.owner.close();
-            throw new Error('conversation_activity_owner_held');
+        catch (error) {
+            // Preserve the existing public owner-held mapping and retain its real cause.
+            const primary = new Error('conversation_activity_owner_held', { cause: error });
+            closeFailedActivityStoreConstruction(undefined, this.owner);
+            throw primary;
         }
         let opened;
         try {
@@ -131,8 +185,7 @@ export class ConversationActivityStore {
             this.secureSidecars();
         }
         catch (error) {
-            opened?.close();
-            this.owner.close();
+            closeFailedActivityStoreConstruction(opened, this.owner);
             throw error;
         }
     }
@@ -141,19 +194,56 @@ export class ConversationActivityStore {
             throw new Error('conversation_activity_readonly');
         if (this.closed)
             throw new Error('conversation_activity_store_closed');
-        this.db.exec('BEGIN IMMEDIATE');
+        if (this.writeState !== 'writable')
+            throw new Error('conversation_activity_write_unconfirmed');
         try {
-            const result = fn();
+            this.db.exec('BEGIN IMMEDIATE');
+        }
+        catch (primary) {
+            // Only the thrown call is known. Do not infer BEGIN opened a transaction,
+            // or issue ROLLBACK against a transaction whose ownership is unconfirmed.
+            this.writeState = 'unconfirmed';
+            recordActivityStoreCleanupFailure('begin', 'begin-threw', 'primary-state-unknown');
+            throw primary;
+        }
+        let result;
+        let stage = 'body-failed';
+        try {
+            result = fn();
+            stage = 'commit-threw'; // COMMIT may throw; do not infer whether it committed.
             this.db.exec('COMMIT');
-            return result;
         }
-        catch (error) {
-            this.db.exec('ROLLBACK');
-            throw error;
+        catch (primary) {
+            if (stage === 'commit-threw') {
+                this.writeState = 'unconfirmed';
+                recordActivityStoreCleanupFailure('commit', stage, 'primary-state-unknown');
+            }
+            try {
+                this.db.exec('ROLLBACK');
+            }
+            catch {
+                this.writeState = 'unconfirmed'; // Before logging/reentrant diagnostics.
+                recordActivityStoreCleanupFailure('rollback', stage);
+            }
+            try {
+                this.secureSidecars();
+            }
+            catch {
+                this.writeState = 'unconfirmed';
+                recordActivityStoreCleanupFailure('secure-sidecars', stage);
+            }
+            throw primary; // Exact original identity, including a non-Error thrown value.
         }
-        finally {
+        // COMMIT returned. Cleanup failures must not enter the rollback catch above.
+        try {
             this.secureSidecars();
         }
+        catch (primary) {
+            this.writeState = 'committed-unverified';
+            recordActivityStoreCleanupFailure('secure-sidecars', 'commit-returned', 'primary-after-commit');
+            throw primary;
+        }
+        return result;
     }
     prepareAssociation(input) {
         if (![input.operationId, input.creationIdempotencyKey, ...Object.values(input.origin)].every(id))

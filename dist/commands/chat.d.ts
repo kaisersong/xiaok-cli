@@ -3,6 +3,8 @@ import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-r
 import { type PersistedSessionSnapshot } from '../ai/runtime/session-store.js';
 import { type ShellEscapeExecutor } from './chat-shell-escape.js';
 import type { SessionIntentLedger } from '../runtime/intent-delegation/types.js';
+import type { StoredSessionSnapshot } from '../ai/runtime/session-store/stored-snapshot-types.js';
+import type { NormalizedStoredSessionIntentLedger } from '../runtime/intent-delegation/stored-intent-clone.js';
 type IntentBoundaryResolverFactory = typeof createIntentBoundaryResolver;
 export declare function __setIntentBoundaryResolverFactoryForTests(factory: IntentBoundaryResolverFactory | undefined): void;
 export declare function __setShellEscapeExecutorForTests(executor: ShellEscapeExecutor | undefined): void;
@@ -10,6 +12,9 @@ type ChatIntentOwnershipMode = 'new' | 'resume' | 'fork' | 'takeover';
 export declare function initializeChatIntentLedger(intentLedger: PersistedSessionSnapshot['intentDelegation'] | null, sessionId: string, instanceId: string, ownershipMode: ChatIntentOwnershipMode, options?: {
     confirmHighRiskTakeover?: boolean;
 }): SessionIntentLedger;
+export declare function initializeChatIntentLedger(intentLedger: StoredSessionSnapshot['intentDelegation'] | null, sessionId: string, instanceId: string, ownershipMode: ChatIntentOwnershipMode, options?: {
+    confirmHighRiskTakeover?: boolean;
+}): NormalizedStoredSessionIntentLedger;
 export declare function registerChatCommands(program: Command): void;
 export declare function summarizeToolInputForTranscript(input: unknown): string;
 export {};
