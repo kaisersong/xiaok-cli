@@ -1,5 +1,7 @@
 import type {Database} from 'better-sqlite3';
 import type {VerificationOwner} from './proof-authority.js';
+import {readIntentSqlContract} from './intent-sql-parsing-context.js';
+import {intentHostSubjectOwner} from './intent-host-subject.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {captureRegistrationSnapshot} from './registration-value-snapshot.js';
 import {isDeepStrictEqual as initialIsDeepStrictEqual,types} from 'node:util';
@@ -34,6 +36,15 @@ function nonIntentSeed(raw:VerificationOwner):VerificationOwner|undefined {
  if(!p||!k||!o||!nativeOwn(p,'value')||!nativeOwn(k,'value')||!nativeOwn(o,'value')||typeof p.value!=='string'||typeof o.value!=='string')return undefined;
  const kind=k.value;if(kind!=='task'&&kind!=='goal'&&kind!=='loop'&&kind!=='project'&&kind!=='kswarm')return undefined;
  return {profileId:p.value,ownerKind:kind,ownerId:o.value};
+}
+function intentSeed(raw:VerificationOwner):VerificationOwner|undefined {
+ if(!raw||typeof raw!=='object'||isProxy(raw)||(prototype(raw)!==objectPrototype&&prototype(raw)!==null)||nativeKeys(raw).length!==3)return undefined;
+ const p=descriptor(raw,'profileId'),k=descriptor(raw,'ownerKind'),o=descriptor(raw,'ownerId');
+ if(!p||!k||!o||!nativeOwn(p,'value')||!nativeOwn(k,'value')||!nativeOwn(o,'value')||typeof p.value!=='string'||typeof o.value!=='string'||k.value!=='intent')return undefined;
+ // Primitive string indices avoid a caller-replaced startsWith before entry().
+ const prefix='intent-subject-v1:';if(o.value.length<prefix.length)return undefined;
+ for(let i=0;i<prefix.length;i++)if(o.value[i]!==prefix[i])return undefined;
+ return {profileId:p.value,ownerKind:'intent',ownerId:o.value};
 }
 function append<T>(array:T[],value:T):void{define(array,array.length,{__proto__:null,value,enumerable:true,writable:true,configurable:true} as PropertyDescriptor);}
 // Only private native result arrays, after the complete closing intrinsic
@@ -134,8 +145,8 @@ export function createRegistrationCensusDatabase(db:Database){
     }return result;
    },finish(){if(fold){fold.enabled=false;fold.ready=false;}if(!isDeepStrictEqual(counter(),before)||!isDeepStrictEqual(schema(),structure)||!isDeepStrictEqual(counter(),before))fail();}};
  };
- function collectFixedRegistrationData(raw:VerificationOwner):{vector:Record<string,any>[];evidence:unknown}|undefined {
-  const owner=nonIntentSeed(raw);if(!owner)return undefined; // Only decline before all SQL.
+ function collectRegistrationData(raw:VerificationOwner,intent:boolean):{vector:Record<string,any>[];evidence:unknown}|undefined {
+  const owner=intent?intentSeed(raw):nonIntentSeed(raw);if(!owner)return undefined; // Only decline before all SQL.
   const fold:FoldState={enabled:true,ready:false}; // First entry fully checked; enabled only true -> false; never escapes.
  function registrationRows<T extends Record<string,any>>(rows:readonly T[]):T[]{
   if(rows.length<2)return [...rows];
@@ -147,7 +158,13 @@ export function createRegistrationCensusDatabase(db:Database){
   return captureRegistrationSnapshot(sorted);
  }
    const census=beginCensus(fold),root=json(owner),pending=[root],identities=new Map<string,VerificationOwner>(),dependencies=new Map<string,Record<string,any>[]>();
-   while(pending.length){const frontier:string[]=[];while(pending.length){const key=pending.pop()!;if(identities.has(key))continue;if(typeof key!=='string')fold.enabled=false;const identity=JSON.parse(key);if(!nonIntentSeed(identity))fold.enabled=false;identities.set(key,identity);if(identities.size>4096)throw Error('application_registration_changed');frontier.push(key);}const found=census.groups('verification_owner_dependencies',frontier);for(const key of frontier){const edges=found.get(key)!;dependencies.set(key,edges);for(const edge of edges)pending.push(edge.child_key);}}
+   if(intent){
+    const receipt=census.groups('owner_enrollment_intent_contracts',[root]).get(root)![0];
+    // Strict parsing and subject mapping are not adjacent private native reads.
+    fold.ready=false;
+    if(receipt){const binding=readIntentSqlContract(db,receipt.contract_json);for(const stageId of [null,...binding.contract.stages.map(stage=>stage.stageId)])pending.push(json({...intentHostSubjectOwner({...binding.subject,stageId}),profileId:owner.profileId}));}
+   }
+   while(pending.length){const frontier:string[]=[];while(pending.length){const key=pending.pop()!;if(identities.has(key))continue;if(typeof key!=='string')fold.enabled=false;const identity=JSON.parse(key);if(!nonIntentSeed(identity)&&!(intent&&intentSeed(identity)))fold.enabled=false;identities.set(key,identity);if(identities.size>4096)throw Error('application_registration_changed');frontier.push(key);}const found=census.groups('verification_owner_dependencies',frontier);for(const key of frontier){const edges=found.get(key)!;dependencies.set(key,edges);for(const edge of edges)pending.push(edge.child_key);}}
    const keys=[...identities.keys()],profileRows=new Map(keys.map(key=>[key,census.records('SELECT * FROM main.verification_profiles WHERE profile_id=? OR uid IN (SELECT uid FROM main.verification_registered_owners WHERE owner_key=?) ORDER BY uid',[identities.get(key)!.profileId,key])])),logicalByOwner=new Map<string,string[]>(),logicalKeys=new Set<string>();
    for(const key of keys){const profileValues=profileRows.get(key)!;for(let i=0;i<profileValues.length;i++){const p=descriptor(profileValues[i]!,'account_id'),u=descriptor(profileValues[i]!,'uid');if(!p||!u||!nativeOwn(p,'value')||!nativeOwn(u,'value')||typeof p.value!=='string'||!nativeSafeInteger(u.value))fold.enabled=false;}const identity=identities.get(key)!,logical=profileValues.map(p=>json({uid:p.uid,accountGeneration:p.account_id.toUpperCase(),ownerKind:identity.ownerKind,ownerId:identity.ownerId}));logicalByOwner.set(key,logical);for(const value of logical)logicalKeys.add(value);}
    const grouped=new Map<keyof typeof REGISTRATION_TABLE_KEYS,Map<string,Record<string,any>[]>>();
@@ -161,5 +178,5 @@ export function createRegistrationCensusDatabase(db:Database){
    }
    census.finish();const vector=registrationVector(vectors);return {vector,evidence:census.evidence};
  }
- return freeze({begin:()=>beginCensus(),collectFixedRegistrationData});
+ return freeze({begin:()=>beginCensus(),collectFixedRegistrationData:(raw:VerificationOwner)=>collectRegistrationData(raw,false),collectIntentRegistrationData:(raw:VerificationOwner)=>collectRegistrationData(raw,true)});
 }
