@@ -1973,6 +1973,7 @@ export interface LocaleStrings {
     connectorChangeKey: string;
     connectorCancelEdit: string;
     connectorTestConnection: string;
+    connectorTestSaveFirst: string;
     // System One decision model (tools pane)
     systemOneTitle: string;
     systemOneDesc: string;
