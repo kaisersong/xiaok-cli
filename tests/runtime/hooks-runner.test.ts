@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { win32 } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
@@ -242,13 +243,17 @@ describe('hooks runner', () => {
 
 describe('Windows owned hook tree and pipe drain', () => {
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  let restoreClock = () => {};
   beforeEach(() => {
     vi.useFakeTimers();
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => Date.now());
+    restoreClock = () => clock.mockRestore();
     vi.mocked(spawn).mockReset();
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     vi.stubEnv('SystemRoot', 'C:\\Windows');
   });
   afterEach(() => {
+    restoreClock();
     if (platform) Object.defineProperty(process, 'platform', platform);
     vi.mocked(spawn).mockReset();
     vi.unstubAllEnvs();
@@ -377,6 +382,7 @@ describe('Windows owned hook tree and pipe drain', () => {
     try {
       const f = start();await vi.advanceTimersByTimeAsync(0);f.child.pid = 54321;
       await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      if (probe === 'alive') await vi.advanceTimersByTimeAsync(250);
       expect(await f.running).toEqual({ ok: false, message: probe === 'ESRCH'
         ? 'Error: hook timeout after 50ms'
         : 'AggregateError: hook_transport_failed; hook timeout after 50ms' });
@@ -389,6 +395,206 @@ describe('Windows owned hook tree and pipe drain', () => {
         if (probe === 'EPERM') expect(error.errors[0].errors).toContain(failure);
         else expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_unconfirmed');
       }
+    } finally { kill.mockRestore(); }
+  });
+
+  function posixProbe(probe: () => void) {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    return vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+      if (signal === 0) probe();
+      return true;
+    });
+  }
+  function gone() { throw Object.assign(Error('original_group_absent'), { code: 'ESRCH' }); }
+
+  it('joins transient post-close group presence without repeating termination or retargeting a reused PID', async () => {
+    let present = true;
+    const kill = posixProbe(() => { if (!present) gone(); });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);
+      f.child.emit('close', 1, null);f.child.pid = 54321;
+      let settled = false;void f.running.then(() => { settled = true; });
+      const closing = f.runner.closeAndDrain();
+      expect(f.runner.closeAndDrain()).toBe(closing);
+      await vi.advanceTimersByTimeAsync(9);expect(settled).toBe(false);
+      present = false;await vi.advanceTimersByTimeAsync(1);
+      expect(await f.running).toEqual({ ok: false, message: 'Error: hook timeout after 50ms' });
+      await expect(closing).resolves.toBeUndefined();
+      expect(kill.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([[-43210, 'SIGTERM']]);
+      expect(kill.mock.calls.every(([pid]) => pid === -43210)).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it.each([false, true])('expires permanent presence at the original absolute cleanup deadline despite owner abort: %s', async ownerAbort => {
+    const kill = posixProbe(() => {});
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      let settled = false;void f.running.then(() => { settled = true; });
+      const closing = ownerAbort ? f.runner.closeAndDrain().then(() => undefined, error => error) : undefined;
+      await vi.advanceTimersByTimeAsync(249);expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);await f.running;
+      const error = closing ? await closing : await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors.map((value: Error) => value.message)).toEqual([
+        'hook timeout after 50ms', 'hook_process_group_unconfirmed',
+      ]);
+      const calls = kill.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1000);expect(kill).toHaveBeenCalledTimes(calls);
+      expect(kill.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([[-43210, 'SIGTERM']]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it.each(['EPERM', 'EIO'])('retains an original reprobe error immediately and clears both cleanup timers: %s', async code => {
+    const failure = Object.assign(Error('original_reprobe_failure'), { code });
+    let probes = 0;
+    const kill = posixProbe(() => { if (++probes === 2) throw failure; });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      await vi.advanceTimersByTimeAsync(10);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors).toContain(failure);
+      expect(error.errors[0].errors).toHaveLength(2);
+      expect(probes).toBe(2);expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(250);expect(probes).toBe(2);
+    } finally { kill.mockRestore(); }
+  });
+
+  it.each([250, 251])('does not backdate an ESRCH syscall which completes at or beyond the deadline: %s', async elapsed => {
+    let clock = 1000, probes = 0;
+    vi.mocked(performance.now).mockImplementation(() => clock);
+    const kill = posixProbe(() => { if (++probes === 2) { clock = 1000 + elapsed;gone(); } });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      await vi.advanceTimersByTimeAsync(10);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_unconfirmed');
+      expect(probes).toBe(2);expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it('does not probe or accept absence when a delayed reprobe starts at the deadline', async () => {
+    let clock = 1000, probes = 0;
+    vi.mocked(performance.now).mockImplementation(() => clock);
+    const kill = posixProbe(() => { if (++probes > 1) gone(); });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      clock = 1250;await vi.advanceTimersByTimeAsync(10);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_unconfirmed');
+      expect(probes).toBe(1);expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it.each([NaN, Infinity, -1, Number.MAX_SAFE_INTEGER])('fails closed on an invalid cleanup clock without probing: %s', async value => {
+    vi.mocked(performance.now).mockReturnValue(value);
+    const kill = posixProbe(gone);
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, result => result);
+      expect(error.errors[0].errors.map((item: Error) => item.message)).toContain('hook_process_group_clock_invalid');
+      expect(kill.mock.calls.filter(([, signal]) => signal === 0)).toHaveLength(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it('retains a thrown clock error by identity without claiming absence', async () => {
+    const failure = Error('original_monotonic_clock_failure');
+    vi.mocked(performance.now).mockImplementation(() => { throw failure; });
+    const kill = posixProbe(gone);
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, result => result);
+      expect(error.errors[0].errors).toContain(failure);
+      expect(kill.mock.calls.filter(([, signal]) => signal === 0)).toHaveLength(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it('rejects a clock rollback on reprobe rather than extending the cleanup window', async () => {
+    let clock = 1000;
+    vi.mocked(performance.now).mockImplementation(() => clock);
+    const kill = posixProbe(() => {});
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      clock = 999;await vi.advanceTimersByTimeAsync(10);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_clock_invalid');
+      expect(kill.mock.calls.filter(([, signal]) => signal === 0)).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it('bounds permanent presence with the independent hard stop even if the clock is frozen', async () => {
+    vi.mocked(performance.now).mockReturnValue(1000);
+    const kill = posixProbe(() => {});
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);f.child.emit('close', 1, null);
+      let settled = false;void f.running.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(249);expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook_process_group_unconfirmed');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it('removes the original abort listener and business timer at close and screens an already queued abort', async () => {
+    const captured: { listener?: EventListenerOrEventListenerObject | null; signal?: AbortSignal } = {};
+    const originalAdd = AbortSignal.prototype.addEventListener;
+    const add = vi.spyOn(AbortSignal.prototype, 'addEventListener').mockImplementation(function(this: AbortSignal, type, listener, options) {
+      if (type === 'abort') { captured.listener = listener; captured.signal = this; }
+      originalAdd.call(this, type, listener, options);
+    });
+    const remove = vi.spyOn(AbortSignal.prototype, 'removeEventListener');
+    let present = true;
+    const kill = posixProbe(() => { if (!present) gone(); });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(0);
+      const { listener: capturedAbort, signal: originalSignal } = captured;
+      if (!capturedAbort || !originalSignal) throw Error('original_abort_listener_not_observed');
+      f.child.emit('close', 0, null);f.child.pid = 54321;
+      expect(remove).toHaveBeenCalledWith('abort', capturedAbort);
+      const closing = f.runner.closeAndDrain();
+      // Exercise even an already queued callback, after listener removal.
+      if (typeof capturedAbort === 'function') capturedAbort.call(originalSignal, new Event('abort'));
+      else capturedAbort.handleEvent(new Event('abort'));
+      await vi.advanceTimersByTimeAsync(60); // Past the original 50ms business timeout.
+      expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+      expect(kill.mock.calls.every(([pid]) => pid === -43210)).toBe(true);
+      present = false;await vi.advanceTimersByTimeAsync(10);
+      await f.running;await expect(closing).resolves.toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); remove.mockRestore(); add.mockRestore(); }
+  });
+
+  it('does not qualify another transport error merely because the original group eventually disappears', async () => {
+    let present = true;
+    const failure = Error('original_pipe_failure');
+    const kill = posixProbe(() => { if (!present) gone(); });
+    try {
+      const f = start();await vi.advanceTimersByTimeAsync(50);
+      f.child.emit('error', failure);f.child.emit('close', 1, null);
+      present = false;await vi.advanceTimersByTimeAsync(10);await f.running;
+      const error = await f.runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].errors).toContain(failure);
+      expect(error.errors[0].errors.map((value: Error) => value.message)).toContain('hook timeout after 50ms');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { kill.mockRestore(); }
+  });
+
+  it('does not invent a process group or timeout closure fact when the original spawn had no PID', async () => {
+    const kill = posixProbe(gone);
+    try {
+      const child = createMockChild({ noExit: true });
+      const spawnMock = vi.mocked(spawn) as any;spawnMock.mockReturnValueOnce(child);
+      const runner = createHooksRunner({ pre: [{ command: 'owned-hook', tools: ['write'] }], timeoutMs: 50 });
+      const running = runner.runPreHooks('write', {});
+      await vi.advanceTimersByTimeAsync(50);await running;
+      const error = await runner.closeAndDrain().then(() => undefined, value => value);
+      expect(error.errors[0].message).toBe('hook timeout after 50ms');
+      expect(kill).not.toHaveBeenCalled();expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(vi.getTimerCount()).toBe(0);
     } finally { kill.mockRestore(); }
   });
 
