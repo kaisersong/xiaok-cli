@@ -116,12 +116,12 @@ it.skipIf(process.platform==='win32'||!process.getuid?.())('keeps writer fences 
  expect(existsSync(join(home,'.xiaok','profile-sources','writer-fences'))).toBe(true);
 });
 
-it.skipIf(process.platform==='win32')('rejects writable bases and symlinks anywhere in the selected home/config chain',()=>{
+it.skipIf(process.platform==='win32')('rejects writable bases and symlinks to writable targets in the selected home/config chain',()=>{
  const unsafe=join(root,'unsafe');mkdirSync(unsafe);chmodSync(unsafe,0o777);
  try{process.env.HOME=unsafe;expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
  process.env.HOME=root;process.env.XIAOK_CONFIG_DIR=unsafe;expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
  }finally{chmodSync(unsafe,0o700);}
- const alias=join(root,'alias');symlinkSync(unsafe,alias,'dir');
+ chmodSync(unsafe,0o777);const alias=join(root,'alias');symlinkSync(unsafe,alias,'dir');
  process.env.XIAOK_CONFIG_DIR=join(alias,'config');expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
  delete process.env.XIAOK_CONFIG_DIR;process.env.HOME=alias;expect(()=>resolveProfileAccountHome()).toThrow('profile_source_registry_account');
 });
