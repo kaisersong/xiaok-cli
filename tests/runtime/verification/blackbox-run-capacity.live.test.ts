@@ -16,6 +16,8 @@ it.skipIf(!socket||!image)('rejects fourth large original case before dispatch a
  });
  db=f.database;const runs=f.runs;let failure:{error:unknown}|undefined;
  try{
+  // Reserve through the actual startup metadata owner before large captures.
+  f.reserveControllerMetadata(32*1024**2);
   f.start();
   for(let i=0;i<3;i++){const result=await f.caseResult('case-'+i);expect(result.stdout.length).toBe(3670016);expect(result.outputTruncated).toBe(false);}
   await expect(f.caseResult('case-3')).rejects.toThrow('protected_run_archive_limit');
