@@ -387,7 +387,7 @@ it.each(['match','missing-task','duplicate-task','duplicate-session','missing-na
  if(['missing-native','foreign-native'].includes(mode))expect(facts.unresolved.some((v:any)=>v.reason==='native-source-absent')).toBe(true);
  expect(facts.sources.find((v:any)=>v.sourceId==='codex-routes').sessions.map((v:any)=>v.sessionId).sort()).toEqual(expected);expect(facts.unresolved.some((v:any)=>v.reason==='legacy-inventory-required')).toBe(true);expect(facts).not.toHaveProperty('ready');expect(facts).not.toHaveProperty('capacityOwner');await closureCall(api,'checkInstalledMetadataClosure',f.lifetime,handle);
  }finally{await f.close();}
-});
+},15000);
 
 
 it('keeps two original same-thread routes sources and their native consumers physically separate',async()=>{

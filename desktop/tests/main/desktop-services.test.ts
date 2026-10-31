@@ -1191,6 +1191,19 @@ describe('desktop services', () => {
     const previousPythonCommand = process.env.XIAOK_PYTHON_CMD;
     process.env.XIAOK_PYTHON_CMD = process.execPath;
     let managedPythonCommand: string | undefined;
+    const pythonRuntime = await import('../../electron/python-runtime.js');
+    const resolveLaunch = pythonRuntime.resolvePythonServerLaunch;
+    // The owned stdio fixture runs under Node, while real managed Python needs -B.
+    // Exercise and assert the real launch builder, translating only that flag
+    // for this exact test server before its real subprocess/MCP handshake.
+    const launchFixture = vi.spyOn(pythonRuntime, 'resolvePythonServerLaunch').mockImplementation(options => {
+      const launch = resolveLaunch(options);
+      if (options.preferredPython === process.execPath && options.args[0] === serverPath) {
+        expect(launch.args).toEqual(['-B', serverPath]);
+        return { ...launch, args: launch.args.slice(1) };
+      }
+      return launch;
+    });
     try {
       const services = createDesktopServices({
         dataRoot: join(rootDir, 'data'),
@@ -1221,6 +1234,7 @@ describe('desktop services', () => {
 
       registration.dispose();
     } finally {
+      launchFixture.mockRestore();
       if (previousPythonCommand === undefined) delete process.env.XIAOK_PYTHON_CMD;
       else process.env.XIAOK_PYTHON_CMD = previousPythonCommand;
     }

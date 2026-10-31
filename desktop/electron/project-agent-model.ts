@@ -82,6 +82,7 @@ export async function createProjectAgentModel(options: {
         const textGuard = new ModelTextRepetitionGuard();
         let providerFailed = false;
         let providerError: unknown;
+        let usageFailure: { error: unknown } | undefined;
         const attempt = new AbortController();
         const attemptSignal = prepared.options?.signal
           ? AbortSignal.any([prepared.options.signal, attempt.signal]) : attempt.signal;
@@ -99,7 +100,15 @@ export async function createProjectAgentModel(options: {
             if (next.done) break;
             const chunk = next.value;
             // Usage belongs to this actual request even when its visible result fails.
-            if (chunk.type === 'usage') { yield chunk; continue; }
+            if (chunk.type === 'usage') {
+              try { await input.onPhysicalUsage?.(chunk, invocationId); }
+              catch (error) {
+                usageFailure = { error };
+                physicalRun?.noteReturnFailure(error);
+                throw error;
+              }
+              yield chunk; continue;
+            }
             if (chunk.type === 'text') textGuard.append(chunk.delta);
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
@@ -118,6 +127,7 @@ export async function createProjectAgentModel(options: {
           providerError = new Error('project_agent_model_incomplete_response');
         }
         if (providerFailed) {
+          if (usageFailure) throw usageFailure.error;
           if (isBoundaryFailure(providerError)) throw providerError;
           const current = resolveRuntimeModelBinding(await options.loadConfig());
           if (current.modelId === binding.modelId && current.providerId === binding.providerId && current.wireModel === binding.wireModel) throw providerError;

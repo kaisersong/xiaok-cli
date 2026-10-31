@@ -60,8 +60,12 @@ describe('Desktop bundled MCP v2 contract', () => {
     // Sibling source moved on (report 2.3.0 / slide 3.3.0); the invariant this test
     // protects is that the deployed copies are replaced, i.e. the manifests carry a
     // version at least as new as the last one Desktop pinned.
-    expect(readPluginManifest('kai-report-creator').version).toBe('2.4.0');
-    expect(readPluginManifest('kai-slide-creator').version).toBe('3.4.0');
-    expect(readPluginManifest('cua-computer-use').version).toBe('0.3.1');
+    for (const [name, minimum] of [['kai-report-creator', '2.4.0'], ['kai-slide-creator', '3.4.0'], ['cua-computer-use', '0.3.1']]) {
+      const version = readPluginManifest(name).version;
+      expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+      const actual = String(version).split('.').map(Number), floor = minimum.split('.').map(Number);
+      const firstDifference = actual.findIndex((part, index) => part !== floor[index]);
+      expect(firstDifference < 0 || actual[firstDifference] > floor[firstDifference], `${name} must replace versions older than ${minimum}`).toBe(true);
+    }
   });
 });

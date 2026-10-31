@@ -108,3 +108,26 @@ it('ignores inherited descriptor get/set poison during ownership check and resto
  expect(Object.getOwnPropertyDescriptor(f.os,'userInfo')).toEqual(f.info);
  expect(Object.getOwnPropertyDescriptor(f.os,'homedir')).toEqual(f.home);
 });
+
+it('isolates HOME and config precedence and restores only changed environment keys',async()=>{
+ const {installTestAccountEnvironment}=await import('./profile-account.setup.mjs');
+ const env={HOME:'/original',USERPROFILE:'/foreign-profile',XIAOK_CONFIG_DIR:'/old-config'};
+ let cleanup!:()=>void;
+ installTestAccountEnvironment(env,'/isolated',fn=>{cleanup=fn;},'darwin');
+ expect(env).toEqual({HOME:'/isolated',USERPROFILE:'/foreign-profile'});
+ cleanup();expect(env).toEqual({HOME:'/original',USERPROFILE:'/foreign-profile',XIAOK_CONFIG_DIR:'/old-config'});
+ cleanup();
+});
+it('does not change environment when cleanup registration fails',async()=>{
+ const {installTestAccountEnvironment}=await import('./profile-account.setup.mjs');
+ const env={HOME:'/original',XIAOK_CONFIG_DIR:'/old-config'};
+ expect(()=>installTestAccountEnvironment(env,'/isolated',()=>{throw Error('hook denied');},'win32')).toThrow('hook denied');
+ expect(env).toEqual({HOME:'/original',XIAOK_CONFIG_DIR:'/old-config'});
+});
+it('refuses to overwrite environment changes owned by another test',async()=>{
+ const {installTestAccountEnvironment}=await import('./profile-account.setup.mjs');
+ const env={HOME:'/original'};let cleanup!:()=>void;
+ installTestAccountEnvironment(env,'/isolated',fn=>{cleanup=fn;},'darwin');env.HOME='/other-owner';
+ expect(cleanup).toThrow('test_profile_environment_restore_failed');expect(env.HOME).toBe('/other-owner');
+ env.HOME='/isolated';cleanup();expect(env.HOME).toBe('/original');
+});

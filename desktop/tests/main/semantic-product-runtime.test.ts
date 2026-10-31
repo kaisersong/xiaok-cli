@@ -1,3 +1,4 @@
+import {recipeRuntimeUnavailable} from '../support/qualified-recipe-runtime.js';
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, realpathSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
@@ -38,7 +39,8 @@ vi.mock('node:https',async()=>{
 const cleanups:Array<()=>void|Promise<void>>=[];
 afterEach(async()=>{for(const close of cleanups.splice(0).reverse())await close();vi.unstubAllGlobals();network.bodies=[];network.beforeSend=()=>{};});
 const environmentRoot=join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1');
-it.skipIf(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(environmentRoot,'manifest.json')))
+const runtimeUnavailable=recipeRuntimeUnavailable();
+it.skipIf(runtimeUnavailable)
 ('actual Desktop loop boundary sends one bounded SDK summary, commits CAS, and uses exact packed anchors in its next request',async()=>{
  const root=realpathSync(mkdtempSync(join(tmpdir(),'semantic-runtime-')));cleanups.push(()=>rmSync(root,{recursive:true,force:true}));
  const file=join(root,'input.txt');writeFileSync(file,'allowed source');const expiresAt=Date.now()+240000;
@@ -70,8 +72,7 @@ it.skipIf(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(
  expect(session.exportSnapshot().compactions).toHaveLength(1);
 },120000);
 
-it.each(['stable','new-input'] as const)('actual managed group semantic boundary: %s',async(mode)=>{
- if(process.platform!=='darwin'||process.arch!=='arm64'||!existsSync(join(environmentRoot,'manifest.json')))throw Error('actual product capacity environment required');
+it.skipIf(runtimeUnavailable).each(['stable','new-input'] as const)('actual managed group semantic boundary: %s',async(mode)=>{
  const {DesktopMultiAgentStore}=await import('../../electron/desktop-multi-agent-store.js');
  const {DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.js');
  const {DesktopMultiAgentService}=await import('../../electron/desktop-multi-agent-service.js');

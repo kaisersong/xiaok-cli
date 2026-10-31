@@ -119,7 +119,7 @@ describe('DesktopSettings voice pane', () => {
         downloaded: false,
         status: 'not_downloaded',
       },
-    ]);
+    ].map(model => ({ ...model, cacheDir: '/fixture/model-cache', path: '/fixture/model-cache/' + model.fileName, packageId: model.id, packageType: 'single-file', packageState: model.status === 'downloaded' ? 'verified' : model.status === 'incomplete' ? 'incomplete' : 'missing', manifestTrusted: model.status === 'downloaded', runtimeAutoDownloadAllowed: false })));
     meetingMocks.meetingDownloadModel.mockResolvedValue({ ok: true });
     meetingMocks.meetingUninstallModel.mockResolvedValue({ ok: true });
   });

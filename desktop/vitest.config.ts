@@ -25,6 +25,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Real SQLite, native workers and child-process fixtures share host capacity.
+    maxWorkers: 2,
     environment: 'jsdom',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     globalSetup: ['../tests/support/profile-account.global.mjs'],

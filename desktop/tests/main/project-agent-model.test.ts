@@ -31,3 +31,10 @@ describe('project agent model selection and request fallback',()=>{
  });
 
 });
+
+it('selected project provider accounts physical usage without falling back when its durable sink fails',async()=>{
+ const failure=Error('network timeout while persisting selected usage'),s=setup('vision',async function*(){yield {type:'usage',usage:{inputTokens:17,outputTokens:19}};yield {type:'text',delta:'answer'};yield {type:'done'};});
+ let writes=0;
+ await expect(collect((await s.create()).stream({...input(),onPhysicalUsage:async()=>{writes++;throw failure;}}))).rejects.toBe(failure);
+ expect(writes).toBe(1);expect(s.calls).toEqual(['vision']);
+});

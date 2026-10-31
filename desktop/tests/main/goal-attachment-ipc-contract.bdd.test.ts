@@ -13,6 +13,7 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
 }));
+import { createGoalState } from '../../../src/runtime/goal/reducer.js';
 import { registerDesktopIpc } from '../../electron/ipc.js';
 
 const requestId = '1e46092d-627b-4ee3-8e4a-70c1bc17497e';
@@ -31,7 +32,7 @@ async function setup(kind: 'typed' | 'packaged') {
     invoke: vi.fn((channel: string, input: unknown) => Promise.resolve().then(() => {
       const handler = handlers.get(channel);
       if (!handler) throw new Error(`missing fixture handler: ${channel}`);
-      return handler({}, input);
+      return handler({ sender: window.webContents }, input);
     })),
     on: (channel: string, listener: (...args: unknown[]) => void) => { emitter.on(channel, listener); },
     off: (channel: string, listener: (...args: unknown[]) => void) => { emitter.off(channel, listener); },
@@ -52,7 +53,7 @@ async function setup(kind: 'typed' | 'packaged') {
     goalRef: { goalId: 'goal', revision: 1 },
     executionScope: { kind: 'goal_turn', origin: 'user', threadId: 'thread', goalId: 'goal', epoch: 1, goalTurnId: 'turn' },
     attachmentSource: { kind: 'request', requestId } };
-  const result = { goal: { state: { goalId: 'goal', revision: 1 } }, preparedTask: prepared };
+  const result = { goal: { state: { ...createGoalState({ sessionId: 'thread', objective: 'answer', expectedEvidenceKinds: ['answer'], now: 100 }), goalId: 'goal', revision: 1 }, activation: 'armed', currentCompletion: { kind: 'ordinary' } }, preparedTask: prepared };
   // This fixture measures the real IPC parser and both preload implementations.
   // Actual coordinator/SQLite source derivation is covered by P1/P4, not this stub.
   const service = {
@@ -63,11 +64,11 @@ async function setup(kind: 'typed' | 'packaged') {
     subscribeGoalTaskPrepared: (handler: (payload: unknown) => void) => { publish = handler; return () => {}; },
   };
   let publish!: (payload: unknown) => void;
-  const window = { isDestroyed: () => false, once: vi.fn(), webContents: { id: 1,
+  const window = { isDestroyed: () => false, once: vi.fn(), webContents: { id: 1, isDestroyed: () => false,
     send: (channel: string, payload: unknown) => emitter.emit(channel, {}, payload) } };
   await registerDesktopIpc({ handle: (channel: string, handler: (event: unknown, input: unknown) => unknown) => {
     handlers.set(channel, handler);
-  } } as never, window as never, service as never);
+  } } as never, window as never, service as never, { multiAgentAuthorize: (event: { sender: unknown }) => event.sender === window.webContents });
   return { api: api!, service, result, prepared, publish: (payload: unknown) => publish(payload), emitter,
     invoke: (method: Method, input: unknown) => (api![method] as (value: unknown) => Promise<unknown>)(input) };
 }

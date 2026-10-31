@@ -1,4 +1,6 @@
+// @vitest-environment node
 import type {KSwarmService} from '../../electron/kswarm-service.js';
+import {realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
@@ -9,7 +11,7 @@ it('actual factory admits its port; fake/copied/replaced/sealed services reject 
  const fixture=await createOwnedWorkflowNetworkFixture(null);const previousFetch=globalThis.fetch;let ks:KSwarmService|undefined;let callbacks=0;
  const priorEntry=process.env.KSWARM_SERVER_PATH;
  try{
-  globalThis.fetch=fixture.forwardedFetch;process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');
+  globalThis.fetch=fixture.forwardedFetch;process.env.KSWARM_SERVER_PATH=realpathSync(resolve(repositoryRoot,'..','kswarm','src/server/index.js'));
   const module=await import('../../electron/kswarm-service.ts');
   const checks=await import('../../../src/runtime/task-host/workflow-restriction-checkpoint.ts');
   const arbitrary={request:async()=>{callbacks++;throw Error('foreign_callback_must_never_run');}};

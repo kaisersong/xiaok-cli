@@ -6065,6 +6065,7 @@ async function streamDesktopToolLoopFinalization(input: {
   stepId: string;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
   onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
+  onPhysicalUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const local = !input.modelPhysicalScope;
   const modelPhysicalScope = input.modelPhysicalScope ?? createDesktopModelPhysicalScope();
@@ -6083,6 +6084,7 @@ async function streamDesktopToolLoopFinalization(input: {
       await input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:input.turnId,state:'recovering'});
     },
     onInvocation: (id: string) => { providerInvocationId = id; },
+    onPhysicalUsage: input.onPhysicalUsage,
     beforeRequest: input.beforeRequest,
     adapter: input.adapter,
     messages: input.apiMessages,
@@ -6202,6 +6204,7 @@ interface ToolLoopContext {
   strategies: ToolLoopStrategies;
   maxIterations?: number;
   onUsage?: (inputTokens: number, outputTokens: number, usageId?: string) => void | Promise<void>;
+  onPhysicalUsage?: (inputTokens: number, outputTokens: number, usageId: string) => void | Promise<void>;
   mailbox?: DesktopMailboxPort;
   roomExecution?:{authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined;takePendingImages?:()=>MessageBlock[]};
   onActivity?: (activity: { phase: 'model' | 'thinking' | 'tool'; toolName?: string }) => void;
@@ -6692,6 +6695,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       systemPrompt: ctx.systemPrompt,
       options: streamOptions,
       invocationId: providerInvocationId,
+      onPhysicalUsage: (chunk, id) => ctx.onPhysicalUsage?.(chunk.usage?.inputTokens ?? 0, chunk.usage?.outputTokens ?? 0, id),
       deadline: ctx.taskDeadline,
       summaryOnly: summaryRecoveryMode,
       canRecover: ctx.canResumeSummary,
@@ -7115,6 +7119,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       intentId: ctx.intentId,
       stepId: ctx.stepId,
       emitRuntimeEvent: ctx.emitRuntimeEvent,
+      onPhysicalUsage: (chunk, id) => ctx.onPhysicalUsage?.(chunk.usage?.inputTokens ?? 0, chunk.usage?.outputTokens ?? 0, id),
       onUsage: async (chunk, invocationId) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
@@ -8304,7 +8309,11 @@ export function createDesktopModelRunnerWithRegistry(
       maxIterations: maxToolLoopIterations,
       onUsage: async (inputTokens, outputTokens, usageId) => {
         if (rootContext) await runnerOptions.multiAgent!.service.recordUsage(rootContext, { usageId: usageId!, inputTokens, outputTokens });
-        pendingUsageWrites.push(emitUsage({ inputTokens, outputTokens }));
+      },
+      onPhysicalUsage: async (inputTokens, outputTokens) => {
+        const writing = emitUsage({ inputTokens, outputTokens });
+        pendingUsageWrites.push(writing);
+        await writing;
       },
       strategies: {
         compact: {

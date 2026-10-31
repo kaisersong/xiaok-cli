@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Archive, ArrowRight, Clock3, MoreHorizontal, Trash2, MessageSquare, Plus, Users, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -9,6 +9,8 @@ import { XIAOK_WORKER_SEED_ID } from '../../../../shared/kswarm-seed-contract';
 export function CollaborationRoomsPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const formatTime = useMemo(() => new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone}), [locale, timeZone]);
   const { agents } = useKSwarm();
   const [result, setResult] = useState<RoomListResult | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -102,7 +104,6 @@ export function CollaborationRoomsPage() {
   const activeRooms = sortedRooms.filter(room => room.status === 'active');
   const archivedRooms = sortedRooms.filter(room => room.status === 'archived' || room.status === 'archiving');
   const visibleRooms = category === 'active' ? activeRooms : archivedRooms;
-  const formatTime = new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false});
   const handleRoomMenuKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {setMenuRoomId(null); deleteTrigger.current?.focus();}
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

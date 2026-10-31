@@ -180,10 +180,17 @@ describe('R4 actual post-seal owner CPU/IO and crash boundary', () => {
     let inspectWriteMonotonicMs: number | undefined;
     try {
       const heartbeat = await f.wait('heartbeat'); expect(heartbeat.elapsed).toBeLessThan(200);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // The explicit 2s task budget includes the real coordinator and Worker startup.
+      await new Promise(resolve => setTimeout(resolve, 2100));
       inspectWriteMonotonicMs = performance.now();
       f.child.stdin!.write('inspect\n');
-      expect(await f.wait('inspection')).toMatchObject({ inFlight: true });
+      const inspection = await f.wait('inspection');
+      expect(inspection).toMatchObject({ inFlight: true });
+      expect(inspection.trace?.overflow).toBe(0); expect(inspection.trace?.observerErrors).toBe(0);
+      const opens = inspection.trace!.entries.filter(entry => entry.stage === 'fifo-open-call');
+      expect(opens).toHaveLength(1);
+      expect(inspection.trace!.entries.some(entry => entry.token === opens[0].token
+        && ['fifo-open-resolve', 'fifo-open-reject', 'fifo-open-sync-throw'].includes(entry.stage))).toBe(false);
       expect(f.events.filter(event => event.stage === 'native-worker-start')).toHaveLength(1);
       expect(f.events.filter(event => event.stage === 'native-worker-exit')).toHaveLength(1);
       const observer = open(f.root);

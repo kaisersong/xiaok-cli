@@ -11,6 +11,8 @@ type Input = Request & {
   beforeRequest?: () => Promise<void>;
   prepareRequest?: DesktopTaskRequestPreparer;
   onInvocation?: (id: string) => void;
+  /** Main-owned accounting for an already-admitted physical provider read. */
+  onPhysicalUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
   onRecovery?: (notice: ModelRecoveryNotice & { summaryOnly: boolean }) => void | Promise<void>;
   canRecover?: () => boolean;
   summaryOnly?: boolean;
@@ -42,6 +44,7 @@ export function assertDesktopModelPhysicalIdle(scope: DesktopModelPhysicalScope)
 
 /** Recover provider reads, never task/tool execution or authorization/persistence. */
 export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: ModelStreamPhysicalRun): AsyncGenerator<StreamChunk> {
+  let usageFailure: { error: unknown } | undefined;
   const deadline = new AbortController();
   const signal = input.options?.signal ? AbortSignal.any([input.options.signal, deadline.signal]) : deadline.signal;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -57,7 +60,7 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
   let summaryOnly = Boolean(input.summaryOnly);
   try {
     yield* recoverModelStream({ signal, policy: input.policy, physicalRun,
-      shouldRetry: () => prepared,
+      shouldRetry: () => prepared && !usageFailure,
       onRetry: async notice => {
         if (!summaryOnly && !sawTool && prefix.trim() && input.canRecover?.()) summaryOnly = true;
         // These fragments were visible, but no tool from this interrupted request ran.
@@ -70,17 +73,18 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
         await input.onRecovery?.({ ...notice, summaryOnly });
       },
       open: requestSignal => {
+        const attemptInvocationId = invocationId;
         let closeFailure: { error: unknown } | undefined;
         let originalBodyFailure: { error: unknown } | undefined;
         const source = (async function*() {
         prepared = false;
         await input.beforeRequest?.();
         requestSignal.throwIfAborted();
-        const request = { ...input, messages, tools: summaryOnly ? [] : input.tools, invocationId,
+        const request = { ...input, messages, tools: summaryOnly ? [] : input.tools, invocationId: attemptInvocationId,
           options: { ...input.options, signal: requestSignal } };
         const current = input.prepareRequest ? await input.prepareRequest(request) : request;
         requestSignal.throwIfAborted();
-        input.onInvocation?.(invocationId);
+        input.onInvocation?.(attemptInvocationId);
         prepared = true;
         const claimOwner = physicalRun && physicalClaimOwners.get(physicalRun);
         if (physicalRun && !claimOwner) throw Error('desktop_model_physical_claim_invalid');
@@ -99,6 +103,14 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
             catch (error) { receipt?.classifyFailure(error); throw error; }
             if (next.done) break;
             const chunk = next.value;
+            if (chunk.type === 'usage') {
+              try { await input.onPhysicalUsage?.(chunk, attemptInvocationId); }
+              catch (error) {
+                usageFailure = { error };
+                providerRun?.noteReturnFailure(error);
+                throw error;
+              }
+            }
             if (chunk.type !== 'usage') requestSignal.throwIfAborted();
             if (chunk.type === 'text') { prefix = (prefix + chunk.delta).slice(-12000); text += chunk.delta; }
             if (chunk.type === 'done' && summaryOnly && !text.trim()) throw new Error('summary_recovery_empty');

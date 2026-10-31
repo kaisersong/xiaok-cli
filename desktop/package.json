@@ -15,6 +15,7 @@
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:all": "node scripts/dev-runner.mjs",
     "test": "vitest run",
+    "test:qualified-runtime": "vitest run --config vitest.qualified-runtime.config.ts",
     "test:smoke": "vitest run --reporter=verbose tests/renderer tests/main",
     "verify:welcome-home-layout": "node scripts/verify-welcome-home-layout.mjs",
     "typecheck": "node scripts/typecheck-baseline.mjs",

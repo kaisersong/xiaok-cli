@@ -16,7 +16,7 @@ function ownRaw<T>() {
 }
 function actualStopProbe(clients: OwnClient[]): StopProbe {
   const actual = readFileSync(new URL('../../electron/main.ts', import.meta.url)), snapshot = readFileSync(new URL('../fixtures/r299-main-candidate.txt', import.meta.url));
-  if (!actual.equals(snapshot) || createHash('sha256').update(actual).digest('hex') !== '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f') throw Error('r334_actual_Main_binding_NOT_READY');
+  if (!actual.equals(snapshot) || createHash('sha256').update(actual).digest('hex') !== 'fbed2b46d513114a5549836b2ce174712cde4fb708dea25d009fca8e26263363') throw Error('r334_actual_Main_binding_NOT_READY');
   const tree = ts.createSourceFile('actual-main.ts', actual.toString('utf8'), ts.ScriptTarget.ES2022, true);
   const initial = tree.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === 'createInitialWindowResources');
   if (initial.length !== 1 || !initial[0]?.body) throw Error('actual_Main_initial_missing');

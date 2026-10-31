@@ -10,7 +10,8 @@ const readFileSync = (path: string, encoding: 'utf8'): string =>
 describe('chat terminal layout', () => {
   it('returns the stable K3 durable-resume error without writing a crash report', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
-    const actionCatch = source.lastIndexOf('} catch (error) {');
+    const actionStart = source.indexOf('.action(async (input: string | undefined');
+    const actionCatch = source.indexOf('} catch (error) {', actionStart);
     const expectedGuard = source.indexOf(
       'error instanceof KimiK3DurableResumeUnsupportedError',
       actionCatch,
@@ -20,7 +21,7 @@ describe('chat terminal layout', () => {
       expectedGuard,
     );
     const crashReport = source.indexOf(
-      "await import('../utils/crash-reporter.js')",
+      'await handleFatalError(error);',
       actionCatch,
     );
 
@@ -28,7 +29,9 @@ describe('chat terminal layout', () => {
     expect(actionCatch).toBeGreaterThan(-1);
     expect(expectedGuard).toBeGreaterThan(actionCatch);
     expect(stableOutput).toBeGreaterThan(expectedGuard);
-    expect(crashReport).toBeGreaterThan(stableOutput);
+    const stableExit = source.indexOf('process.exit(1);', stableOutput);
+    expect(stableExit).toBeGreaterThan(stableOutput);
+    expect(crashReport).toBeGreaterThan(stableExit);
   });
 
   it('preflights strict K3 fork before mutation and delegates cross-profile model switching to the runtime', () => {

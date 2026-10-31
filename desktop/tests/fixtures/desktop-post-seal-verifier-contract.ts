@@ -21,7 +21,9 @@ export interface VerifierContract {
 export async function compileVerifierEntry(file: 'delivery-verifier-worker.ts' | 'delivery-verifier.ts') {
   const source = join(taskHostDirectory, file);
   expect(existsSync(source), `missing production fixed entry ${file}; downstream protocol assertions not yet executed`).toBe(true);
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-compiled-'));
+  const artifactRoot = fileURLToPath(new URL('../../../.artifacts/', import.meta.url));
+  mkdirSync(artifactRoot, { recursive: true });
+  const root = mkdtempSync(join(artifactRoot, 'post-seal-compiled-'));
   const output = join(root, file.replace('.ts', '.mjs'));
   const result = await build({ entryPoints: [source], outfile: output, bundle: true, platform: 'node', format: 'esm', metafile: true });
   return { root, output, metafile: result.metafile! };

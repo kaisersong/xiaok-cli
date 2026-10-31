@@ -122,6 +122,12 @@ export interface LocalRoomWorkspaceInstructions {
   sourceChanged: unknown;
   candidateText: unknown;
   candidateHash: unknown;
+  roomId: unknown;
+  description: unknown;
+  directoryNotes: unknown;
+  snapshotDigest: unknown;
+  publishedBy: unknown;
+  publishedAt: unknown;
 }
 export const ROOM_WORKSPACE_INSTRUCTIONS_SENSITIVITY = {
   revision: 'metadata',
@@ -131,6 +137,12 @@ export const ROOM_WORKSPACE_INSTRUCTIONS_SENSITIVITY = {
   sourceChanged: 'metadata',
   candidateText: 'content',
   candidateHash: 'metadata',
+  roomId: 'forbidden',
+  description: 'forbidden',
+  directoryNotes: 'forbidden',
+  snapshotDigest: 'forbidden',
+  publishedBy: 'forbidden',
+  publishedAt: 'forbidden',
 } as const satisfies Record<keyof LocalRoomWorkspaceInstructions, Sensitivity>;
 
 export interface LocalRoomWorkspaceClaim {
@@ -142,6 +154,30 @@ export interface LocalRoomWorkspaceClaim {
   agentName: unknown;
   executorInstanceId: unknown;
   projectId: unknown;
+  roomId: unknown;
+  logicalAgentId: unknown;
+  contextScope: unknown;
+  parentClaimId: unknown;
+  projectMappingRevision: unknown;
+  taskId: unknown;
+  protocolVersion: unknown;
+  workspaceId: unknown;
+  originHostId: unknown;
+  hostPrincipal: unknown;
+  hostIncarnation: unknown;
+  bindingId: unknown;
+  generation: unknown;
+  workspaceRevision: unknown;
+  instructionsDigest: unknown;
+  membershipRevision: unknown;
+  createdAt: unknown;
+  acquireDigest: unknown;
+  taskName: unknown;
+  mappingRevision: unknown;
+  roomSequence: unknown;
+  updatedAt: unknown;
+  lastHeartbeatAt: unknown;
+  terminationEvidence: unknown;
 }
 export const ROOM_WORKSPACE_CLAIM_SENSITIVITY = {
   claimId: 'metadata',
@@ -152,6 +188,30 @@ export const ROOM_WORKSPACE_CLAIM_SENSITIVITY = {
   agentName: 'content',
   executorInstanceId: 'metadata',
   projectId: 'metadata',
+  roomId: 'forbidden',
+  logicalAgentId: 'forbidden',
+  contextScope: 'forbidden',
+  parentClaimId: 'forbidden',
+  projectMappingRevision: 'forbidden',
+  taskId: 'forbidden',
+  protocolVersion: 'forbidden',
+  workspaceId: 'forbidden',
+  originHostId: 'forbidden',
+  hostPrincipal: 'forbidden',
+  hostIncarnation: 'forbidden',
+  bindingId: 'forbidden',
+  generation: 'forbidden',
+  workspaceRevision: 'forbidden',
+  instructionsDigest: 'forbidden',
+  membershipRevision: 'forbidden',
+  createdAt: 'forbidden',
+  acquireDigest: 'forbidden',
+  taskName: 'forbidden',
+  mappingRevision: 'forbidden',
+  roomSequence: 'forbidden',
+  updatedAt: 'forbidden',
+  lastHeartbeatAt: 'forbidden',
+  terminationEvidence: 'forbidden',
 } as const satisfies Record<keyof LocalRoomWorkspaceClaim, Sensitivity>;
 
 export interface LocalRoomWorkspaceArtifact {
@@ -169,6 +229,17 @@ export interface LocalRoomWorkspaceArtifact {
   producerType: unknown;
   projectId: unknown;
   synchronization: unknown;
+  roomId: unknown;
+  workspaceId: unknown;
+  originHostId: unknown;
+  workspaceRevision: unknown;
+  contextScope: unknown;
+  producerClaimId: unknown;
+  handoff: unknown;
+  observedAt: unknown;
+  commitTicketId: unknown;
+  confirmationTicketId: unknown;
+  sourceSequence: unknown;
 }
 export const ROOM_WORKSPACE_ARTIFACT_SENSITIVITY = {
   artifactId: 'metadata',
@@ -185,6 +256,17 @@ export const ROOM_WORKSPACE_ARTIFACT_SENSITIVITY = {
   producerType: 'metadata',
   projectId: 'metadata',
   synchronization: 'metadata',
+  roomId: 'forbidden',
+  workspaceId: 'forbidden',
+  originHostId: 'forbidden',
+  workspaceRevision: 'forbidden',
+  contextScope: 'forbidden',
+  producerClaimId: 'forbidden',
+  handoff: 'forbidden',
+  observedAt: 'forbidden',
+  commitTicketId: 'forbidden',
+  confirmationTicketId: 'forbidden',
+  sourceSequence: 'forbidden',
 } as const satisfies Record<keyof LocalRoomWorkspaceArtifact, Sensitivity>;
 
 export interface LocalRoomWorkspaceProjectMapping {

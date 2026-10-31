@@ -49,3 +49,13 @@ describe('check-test-env-isolation.mjs is not text matching', () => {
     expect(result.status).toBe(0);
   });
 });
+
+it('executes the isolation canary even when the target lane filters unrelated names', () => {
+  const result = check('filtered.config.mjs', `export default { test: { ${canary}, testNamePattern: /qualified-only/, environment: 'node', setupFiles: ['./tests/support/setup-host-env.ts'] } };`);
+  expect(result.status).toBe(0); expect(result.out).toContain('test env isolation check passed');
+});
+it('does not accept an unrelated prerequisite failure as the strict leak control', () => {
+  const setup = join(tmp, 'unavailable.global.mjs'); writeFileSync(setup, "export default function(){throw Error('missing_qualified_runtime');}");
+  const result = check('unavailable.config.mjs', `export default { test: { ${canary}, globalSetup: [${JSON.stringify(setup)}], setupFiles: ['./tests/support/setup-host-env.ts'] } };`);
+  expect(result.status).toBe(1); expect(result.out).toContain('strict-mode control did not fail');
+});

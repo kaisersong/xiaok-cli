@@ -14,6 +14,7 @@ const finalize = (services as unknown as { __testFinalization(input: {
   streamOptions: ReturnType<typeof request>['options']; signal: AbortSignal;
   sessionId: string; turnId: string; intentId: string; stepId: string;
   emitRuntimeEvent(event: { type: string; state?: string }): void | Promise<void>;
+  onPhysicalUsage?(chunk: Extract<StreamChunk, { type: 'usage' }>, id: string): void | Promise<void>;
   onUsage?(chunk: Extract<StreamChunk, { type: 'usage' }>, id: string): void;
 }): Promise<{ reply: string }> }).__testFinalization;
 
@@ -223,4 +224,12 @@ it.each(['text-only', 'done-only', 'empty'])('preserves existing selected incomp
   }) });
   expect(await collect(model.stream(request()))).toEqual([{ type: 'text', delta: 'done' }, { type: 'done' }]);
   expect(calls).toEqual(['selected', 'current']);
+});
+
+it('real private finalization accounts usage through its physical source exactly once',async()=>{
+ const writes:Array<{inputTokens:number;outputTokens:number}>=[],input=request();
+ const adapter:ModelAdapter={getModelName:()=> 'test',async *stream(){yield {type:'usage',usage:{inputTokens:17,outputTokens:19}};yield* answer();}};
+ await finalize({adapter,apiMessages:input.messages,systemPrompt:input.systemPrompt,streamOptions:input.options,signal:input.options.signal,deadline:input.deadline,
+ sessionId:'s',turnId:'t',intentId:'i',stepId:'step',emitRuntimeEvent(){},onPhysicalUsage:async chunk=>{writes.push(chunk.usage!);}});
+ expect(writes).toEqual([{inputTokens:17,outputTokens:19}]);
 });

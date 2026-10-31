@@ -1,3 +1,4 @@
+import {recipeRuntimeUnavailable} from '../support/qualified-recipe-runtime.js';
 // @vitest-environment node
 import {expect,it} from 'vitest';
 import {mkdtempSync,realpathSync,writeFileSync,rmSync} from 'node:fs';
@@ -9,7 +10,7 @@ import {computeSessionHistoryDigest} from '../../../src/ai/runtime/session-store
 import {parseObservationPolicyFile} from '../../../src/runtime/sol-pi/product-bootstrap.js';
 import {DesktopTaskObservationStore} from '../../../src/runtime/task-host/protected-observation-store.js';
 import {createDesktopProductObservationBinding,requireDesktopProductHost} from '../../electron/desktop-observation-owner.js';
-it.each(['success','host-failure','other-writer'] as const)('actual Desktop full-history publisher retains its exact basis: %s',async scenario=>{
+it.skipIf(recipeRuntimeUnavailable()).each(['success','host-failure','other-writer'] as const)('actual Desktop full-history publisher retains its exact basis: %s',async scenario=>{
  const root=realpathSync(mkdtempSync(join(tmpdir(),'desktop-basis-'))),source=join(root,'source.txt'),policyFile=join(root,'policy.json');writeFileSync(source,'source');
  writeFileSync(policyFile,JSON.stringify({version:1,environmentId:'deepseek-recipe-0.1.1',model:'deepseek-flash',destination:{provider:'deepseek',url:'https://api.deepseek.com/chat/completions'},localPersistence:true,allowUnclassifiedText:true,allowModelDisclosure:true,allowIncomplete:false,expiresAt:Date.now()+120000,readFileScopes:[{filePath:source,startLine:1}],bashSources:[],compoundExecution:{version:1,mode:'mechanism-experiment'}}));
  const registry=new ToolRegistry({autoMode:true},buildToolList(undefined,{cwd:root})),sidecar=new DesktopTaskObservationStore(join(root,'tasks')),taskId='basis',store=new FileSessionStore(join(root,'compound-sessions'));

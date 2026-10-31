@@ -102,7 +102,7 @@ describe('W12 actual Goal form awaits authoritative acceptance', () => {
     fireEvent.change(screen.getByLabelText('目标'), { target: { value: 'goal draft' } }); fireEvent.change(screen.getByLabelText('完成条件'), { target: { value: 'criterion draft' } });
     fireEvent.click(screen.getByRole('button', { name: '确认创建' })); await act(async () => {});
     expect(screen.getByLabelText('目标')).toHaveValue('goal draft'); expect(screen.getByLabelText('完成条件')).toHaveValue('criterion draft');
-    expect(screen.getByRole('alert')).toHaveTextContent('multi_agent_permission_revoked'); expect(createGoal).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('multi_agent_permission_revoked', { selector: '[role="alert"]' })).toBeInTheDocument(); expect(createGoal).toHaveBeenCalledTimes(1);
   });
   it('pending double click submits once; a returned void is not an accepted Goal; only real new Goal closes the form', async () => {
     const pending = deferred<void>(), onCreate = vi.fn(() => pending.promise);

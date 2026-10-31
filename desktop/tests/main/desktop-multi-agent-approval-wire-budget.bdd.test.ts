@@ -20,7 +20,9 @@ describe('BDD AP6: real store/sender pending metadata fits the existing wire bud
   it('Given nine real default-mode waiters and a formerly legal near-limit snapshot, Then initial reply trims only its old agent page, live approval events stay bounded, and zero pending restores the ordinary page', async () => {
     const f = await authorizationFixture(cleanup), released = deferred(); cleanup.push(() => released.resolve());
     const threadId = '\u0001'.repeat(256), subscriptionId = '\u0002'.repeat(256);
-    let rootRequests = 0;
+    let rootRequests = 0, proposals = 0;
+    const allProposed = deferred();
+    const proposed = () => { if (++proposals === 9) allProposed.resolve(); };
     const childRequests = new Map<string, number>();
     const effects: string[] = [];
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (_messages, _tools, system) {
@@ -29,6 +31,7 @@ describe('BDD AP6: real store/sender pending metadata fits the existing wire bud
         const key = system; const count = (childRequests.get(key) ?? 0) + 1; childRequests.set(key, count);
         if (count === 1) {
           const effect = join(f.root, `child-${childRequests.size}.txt`); effects.push(effect);
+          proposed();
           yield { type: 'tool_use', id: `child-write-${childRequests.size}`, name: 'write', input: { file_path: effect, content: 'only with separate approval' } };
         } else { await released.promise; yield { type: 'text', delta: 'Child ended.' }; }
         return;
@@ -37,10 +40,12 @@ describe('BDD AP6: real store/sender pending metadata fits the existing wire bud
       if (count <= 8) yield { type: 'tool_use', id: `spawn-${count}`, name: 'spawn_agent', input: { task_name: `child_${count}`, message: 'Request one file write.', fork_context: false } };
       else if (count === 9) {
         const effect = join(f.root, 'root.txt'); effects.push(effect);
+        proposed();
         yield { type: 'tool_use', id: 'root-write', name: 'write', input: { file_path: effect, content: 'only with root approval' } };
       } else { await released.promise; yield { type: 'text', delta: 'Root ended.' }; }
     });
     await f.services.createTask({ prompt: 'Delegate eight bounded tasks, then request one root write.', permissionMode: 'default', materials: [], context: { threadId } });
+    await allProposed.promise;
     await vi.waitFor(async () => expect(rootRequests >= 10 || (await f.invoke<ApprovalSnapshot>('getMultiAgentSnapshot', { threadId })).pendingApprovals?.length === 9).toBe(true));
     const initial = await f.invoke<ApprovalSnapshot>('getMultiAgentSnapshot', { threadId });
     expect(initial.pendingApprovals, 'production must first own nine independent real pending approvals, not fake them in the snapshot fixture').toHaveLength(9);

@@ -16,7 +16,7 @@ function isSlice(value: unknown): value is Slice {
 }
 const SOURCE_SHA = Object.freeze({
   before: 'e8e4319e6ef72aa5ffb3323df969ea61ea97e375b4c08fe1993e939d5ee79bdc',
-  post: '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f',
+  post: 'fbed2b46d513114a5549836b2ce174712cde4fb708dea25d009fca8e26263363',
 });
 function frozenSource(stage: 'before' | 'candidate'): Buffer {
   const bytes = readFileSync(new URL(`../fixtures/r299-main-${stage}.txt`, import.meta.url));

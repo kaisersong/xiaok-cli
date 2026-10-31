@@ -18,6 +18,12 @@ vi.mock('../../electron/desktop-execution-coordinator.js', async importOriginal 
   } };
 });
 
+// Keep the independent runner deadline beyond the watchdog for this race.
+vi.mock('../../electron/tool-loop-budget.js', async original => {
+  const actual = await original<typeof import('../../electron/tool-loop-budget.js')>();
+  return { ...actual, resolveDesktopRunDeadline: () => Date.now() + 120_000 };
+});
+
 const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe('BDD: real main watchdog and lease expiry keep whichever legal terminal wins first', () => {

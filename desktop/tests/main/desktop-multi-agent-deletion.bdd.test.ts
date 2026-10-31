@@ -509,7 +509,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
       const task = await fixture.host.createTask({ prompt: 'ordinary', materials: [], context: { threadId: 'thread' } }); await entered.promise;
       const request = fixture.deletion('delete-ordinary');
       expect(await fixture.service.deleteThread(request)).toMatchObject({ state: 'cleanup_pending' });
-      expect((await fixture.host.inspectTask(task.taskId))?.status).toBe('cancelled');
+      await expect.poll(async () => (await fixture.host.inspectTask(task.taskId))?.status).toBe('cancelled');
       expect(fixture.host.activeExecutionCount()).toBe(1); expect(fixture.store.getThread('thread')?.deleteState).toBe('delete_pending');
       release.resolve(); await fixture.host.drain();
       expect(await fixture.service.deleteThread(fixture.deletion('delete-ordinary-retry'))).toMatchObject({ state: 'completed' });

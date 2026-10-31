@@ -136,3 +136,14 @@ describe('Room field classification contracts', () => {
     expect(projectMetadataOnly('RoomWorkspaceSnapshot', { claims })).toEqual({});
   });
 });
+
+it.each([
+ ['RoomWorkspaceInstructions', ['roomId','description','directoryNotes','snapshotDigest','publishedBy','publishedAt']],
+ ['RoomWorkspaceClaim', ['roomId','logicalAgentId','contextScope','parentClaimId','projectMappingRevision','taskId','protocolVersion','workspaceId','originHostId','hostPrincipal','hostIncarnation','bindingId','generation','workspaceRevision','instructionsDigest','membershipRevision','createdAt','acquireDigest','taskName','mappingRevision','roomSequence','updatedAt','lastHeartbeatAt','terminationEvidence']],
+ ['RoomWorkspaceArtifact', ['roomId','workspaceId','originHostId','workspaceRevision','contextScope','producerClaimId','handoff','observedAt','commitTicketId','confirmationTicketId','sourceSequence']],
+] as const)('omits newly classified %s fields without evaluating their getters', (kind,fields)=>{
+ const input=Object.fromEntries(fields.map(key=>[key,'new-sensitive-field-canary']));
+ expect(projectMetadataOnly(kind,input)).toEqual({});
+ for(const key of fields)Object.defineProperty(input,key,{get(){throw Error('new-sensitive-field-canary');},enumerable:true});
+ expect(projectMetadataOnly(kind,input)).toEqual({});
+});

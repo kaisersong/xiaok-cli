@@ -54,11 +54,12 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // semantic commands; the canonical allowlist and real bridge must agree.
     expect(frozenKeys.main).toHaveLength(295);
     expect(frozenKeys.closure).toHaveLength(307);
-    const union = [...new Set([...frozenKeys.main, ...frozenKeys.closure])].sort();
+    const addedSemanticKeys = ['getConversationActivityUnread', 'markConversationActivitiesRead', 'subscribeConversationActivityOverview', 'getConversationActivities', 'getWorkActivity', 'getMcpTaskInputs', 'answerMcpTaskInput', 'cancelMcpWork', 'updateWorkReporting', 'stopWorkWatch', 'subscribeConversationActivities', 'getHarnessOptimizationConfig', 'saveHarnessOptimizationConfig', 'setHarnessOptimizationEnabled', 'revokeHarnessOptimizationGrants', 'resetOptimizationClockGuard'];
+    const union = [...new Set([...frozenKeys.main, ...frozenKeys.closure, ...addedSemanticKeys])].sort();
     expect(keys).toEqual(union);
     expect([...FULL_PRELOAD_KEYS].sort()).toEqual(union);
     expect(new Set(FULL_PRELOAD_KEYS).size).toBe(FULL_PRELOAD_KEYS.length);
-    expect(keys.length).toMatchInlineSnapshot(`310`);
+    expect(keys.length).toMatchInlineSnapshot(`326`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

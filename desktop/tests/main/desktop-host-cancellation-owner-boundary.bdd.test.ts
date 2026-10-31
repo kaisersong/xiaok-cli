@@ -143,14 +143,14 @@ describe('BDD: real cancellation creator boundaries, without replacing an immuta
       cleanup.push(async () => { releaseModel.resolve(); await f.host.drain(); });
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
-        for (let i = 0; i < 253; i++) yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } };
+        for (let i = 0; i < 252; i++) yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } };
         yield { type: 'text', delta: 'Buffered event at the real checkpoint threshold.' };
         modelEntered.resolve(); await releaseModel.promise;
       });
       await f.host.startTask(f.taskId); await modelEntered.promise; await f.internals.flushMutations(f.taskId);
       await flushDispatch(f.internals);
       const before = (await f.cold())!;
-      expect(before.events).toHaveLength(255); expect(before.usage).toEqual({ inputTokens: 253, outputTokens: 253, known: true });
+      expect(before.events).toHaveLength(255); expect(before.usage).toEqual({ inputTokens: 252, outputTokens: 252, known: true });
       f.callback.mockClear();
       const live: DesktopTaskEvent[] = [];
       const stream = (async () => { for await (const event of f.host.subscribeTask(f.taskId, { sinceIndex: 255 })) live.push(event); })();

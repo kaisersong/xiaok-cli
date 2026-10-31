@@ -23,7 +23,7 @@ function isSlice(value: unknown): value is Slice {
     && 'appendOrdinary' in value && typeof value.appendOrdinary === 'function'
     && 'disposeLifetimeResources' in value && typeof value.disposeLifetimeResources === 'function';
 }
-const FINAL_MAIN_SHA = '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f';
+const FINAL_MAIN_SHA = 'fbed2b46d513114a5549836b2ce174712cde4fb708dea25d009fca8e26263363';
 function boundActualMain(): string {
   const actual = readFileSync(new URL('../../electron/main.ts', import.meta.url));
   const snapshot = readFileSync(new URL('../fixtures/r299-main-candidate.txt', import.meta.url));

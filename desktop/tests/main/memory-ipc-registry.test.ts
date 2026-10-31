@@ -84,7 +84,7 @@ describe('complete16 Memory domain through real registration and preload', () =>
   it('registers exactly complete16 at round4 and preserves old28 single metadata', () => {
     expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === 4).map(row => row.channel).sort()).toEqual(cases.map(([name]) => `desktop:${name}`).sort());
     for (const [name, , riskTags] of cases) expect(IPC_SCHEMA_REGISTRY.get(`desktop:${name}`)).toMatchObject({ sourceFile: 'desktop/electron/ipc.ts', riskTags, payloadMode: ['memoryListLayer', 'memoryDeleteEntry', 'memoryCompact'].includes(name) ? 'tuple' : 'single' });
-    for (const [round, count] of [[1, 8], [2, 2], [3, 18]]) expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === round)).toHaveLength(count);
+    for (const [round, count] of [[1, 8], [2, 2], [3, 30]]) expect([...IPC_SCHEMA_REGISTRY.values()].filter(row => Number(row.rolloutRound) === round)).toHaveLength(count);
   });
   it.each(cases)('has a complete typed output schema for %s', name => {
     const entry = IPC_SCHEMA_REGISTRY.get(`desktop:${name}`); expect(entry).toBeDefined();

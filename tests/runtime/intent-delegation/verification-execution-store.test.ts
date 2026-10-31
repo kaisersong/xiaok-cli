@@ -6,6 +6,10 @@ import {intentHostSubjectOwner} from '../../../src/runtime/verification/intent-h
 import {createHash} from 'node:crypto';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 import {afterEach,expect,it,vi} from 'vitest';
+// Real file journals, fsync and native authority fixtures use the same budget as
+// the material-helper cases below; production operation deadlines stay unchanged.
+vi.setConfig({testTimeout:15000});
+
 import {mkdtempSync,rmSync,readFileSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 const leaf=vi.hoisted(()=>({call:vi.fn(),dispose:vi.fn(),routes:new Map<string,any>()}));
 vi.mock('../../../src/runtime/verification/controller-client.js',()=>({createInstalledVerificationClient:()=>({completionTransport:{call:leaf.call},applicationTransport:{call:leaf.call},verificationTransport:{call:leaf.call},materialRequestTransport:{call:leaf.call},materialAuthorization:{prepareMaterialAuthorization(){throw Error("legacy forbidden");},prepareMaterialAuthorizationRequest:(p:any)=>leaf.call("materials.prepareRequest",p),authorizeMaterialChallenge:(id:string)=>leaf.call("materials.authorize",{id}),prepareValidationInput:(p:any)=>leaf.call("materials.stage",p)},dispose:leaf.dispose})}));

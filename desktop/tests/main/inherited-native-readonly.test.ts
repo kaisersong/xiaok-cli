@@ -1,3 +1,4 @@
+// @vitest-environment node
 import type {Tool} from '../../../src/types.js';
 import {afterEach,expect,it} from 'vitest';
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';

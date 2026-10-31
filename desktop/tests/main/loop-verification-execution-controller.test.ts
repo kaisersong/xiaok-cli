@@ -43,7 +43,8 @@ const definition = (id: string) => ({ version: 1, obligations: [{ obligationId: 
 // Real product helper/opaque material plan, canonical file lease, SQLite
 // authorities, material/raw/run/recipe and signed fixed client. Native dialogs,
 // peer identity and engine are fixture leaves, not installed OS qualification.
-it.each(['terminal','lost-dispatch','publication-lost-ack','full-projection','desktop-service','timed-pending','timed-expired','output-consumer'] as const)('executes and recovers the original Loop verification through the signed controller: %s', async mode => {
+for (const mode of ['terminal','lost-dispatch','publication-lost-ack','full-projection','desktop-service','timed-pending','timed-expired','output-consumer'] as const)
+ it(`executes and recovers the original Loop verification through the signed controller: ${mode}`, async () => {
   const f = await verifiedOperationFixture(), receiver = await loopPublicationReceiver(f), unused = (): never => { throw Error('unused'); };
   const application = createApplicationBindingAuthority({ database: f.database, authorityId: 'authority', completion: f.composition, clock: f.clock, assertCurrent() {},
     resolvePrincipal: p => ({ ...p, accountGeneration: '11111111-AAAA-BBBB-CCCC-555555555555', source: 'macos-local-generateduid' as const }),
@@ -132,6 +133,12 @@ it.each(['terminal','lost-dispatch','publication-lost-ack','full-projection','de
           const ss=await stageHost.prepare({nativeAttemptId:n.attemptId,obligationId:'run-original',requestSource:'user'});await stageHost.enroll({id:ss.id,requestSource:'user'});await stageHost.verify({...input,id:ss.id});await publicationWorkflow.start({nativeAttemptId:n.attemptId,expectedLatestAttemptId:null,requestSource:'user'});
         }
         await business.project({runId:began.run.id,requestSource:'user'});
+        const outputContract=await business.readUserTemplateOutput({runId:began.run.id,requestSource:'user'});
+        expect(Reflect.ownKeys(outputContract.payload).sort()).toEqual(['businessRevision','bytes','fullTupleHash','operationId','owner','payloadHash']);
+        for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(outputContract.payload)))expect(Object.hasOwn(descriptor,'value')).toBe(true);
+        const originalBytes=Buffer.from(outputContract.payload.bytes);outputContract.payload.bytes.fill(0);
+        const independentOutput=await business.readUserTemplateOutput({runId:began.run.id,requestSource:'user'});
+        expect(independentOutput.payload.bytes).toEqual(originalBytes);outputContract.assertCurrent();independentOutput.assertCurrent();
         writeFileSync(join(f.root,'result'),'polluted workspace');
         expect(await outputs.readOutputPreview({loopId,requestSource:'user'})).toMatchObject({ok:true,content:'result',origin:'verified_publication',runId:began.run.id});
         expect(await outputs.listPublishedArtifacts({loopId,requestSource:'user',page:{offset:0,identity:null}})).toMatchObject({loopId,total:1,nextOffset:null,items:[{path:'result',size:6,sha256:hash('result')}],identity:{runId:began.run.id,candidateId:candidate.binding.candidateId}});
@@ -199,4 +206,4 @@ it.each(['terminal','lost-dispatch','publication-lost-ack','full-projection','de
     }
 
   } finally { await timedHost?.close();timed?.close();date.mockRestore(); profileLeaf.mockRestore(); markerLeaf.mockRestore(); await host.close(); await workflow.close(); await publicationWorkflow.close(); if(!storeClosed)store.close();reopened?.close(); await server.close(); application.close();await receiver.close(); await f.close(); }
-},30000);
+},mode==='output-consumer'?300000:120000);

@@ -110,7 +110,9 @@ const f = await createPostSealHarness({ root, passiveTrace: trace, readOrdinal: 
       if (mode === 'host-committed' && snapshot.status === 'completed') { out({ stage: mode, taskId, groupId: f.groupId, childId: f.childId }); stop(); }
     }
   }(directory) : undefined,
-  watchdogMs: mode === 'cpu' || mode === 'fifo' ? 100 : 2000,
+  // FIFO must reach its genuine blocking open before the absolute task budget.
+  // CPU classifier retains its independent 100ms responsiveness contract.
+  watchdogMs: mode === 'cpu' ? 100 : 2000,
   prompt: mode === 'cpu' ? 'create' + ' '.repeat(65529) + 'x' : mode === 'fifo' ? '生成 PDF 文件' : 'Hello',
   emit: mode === 'fifo' ? input => input.emitRuntimeEvent({ type: 'artifact_recorded', sessionId: input.sessionId,
     turnId: 'turn', intentId: 'intent', stageId: 'stage', artifactId: 'pdf', kind: 'file', label: 'PDF', path: pathToFileURL(join(root, 'pending.pdf')).href })
@@ -143,11 +145,15 @@ const f = await createPostSealHarness({ root, passiveTrace: trace, readOrdinal: 
       return raw;
     }
     if (mode === 'marker-transaction') {
-      const put = f.store.putRootBinding.bind(f.store);
-      f.store.putRootBinding = (binding, control) => {
-        put(binding, control);
-        if ('delivery' in binding) { out({ stage: 'marker-transaction', taskId, groupId: f.groupId, childId: f.childId }); stop(); }
-      };
+      const transaction = f.store.transaction.bind(f.store);
+      f.store.transaction = action => transaction(port => {
+        const result = action(port);
+        // Observe the real accepted write inside SQLite, before COMMIT.
+        if (f.store.getRootBinding(taskId)?.delivery) {
+          out({ stage: 'marker-transaction', taskId, groupId: f.groupId, childId: f.childId }); stop();
+        }
+        return result;
+      });
     }
     trace?.record('report-persist-call', { revision: report.delivery.revision });
     const receipt = await persist();

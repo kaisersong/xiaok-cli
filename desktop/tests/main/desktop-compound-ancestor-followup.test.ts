@@ -1,3 +1,4 @@
+import {recipeRuntimeUnavailable} from '../support/qualified-recipe-runtime.js';
 // @vitest-environment node
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, realpathSync } from 'node:fs';
@@ -109,7 +110,7 @@ describe('P2 actual managed ancestor followup', () => {
     return { root, store, service, coordinator, host, start };
   }
 
-  it.each(['success','unpublished-ack','unknown-resource','own-effect','active-window','final-history-failure','final-history-failure-shutdown','root-tail'] as const)('uses exact drained descendant resources for a fresh user turn: %s',async scenario=>{
+  it.skipIf(recipeRuntimeUnavailable()).each(['success','unpublished-ack','unknown-resource','own-effect','active-window','final-history-failure','final-history-failure-shutdown','root-tail'] as const)('uses exact drained descendant resources for a fresh user turn: %s',async scenario=>{
     const finalHistoryFailure=scenario==='final-history-failure'||scenario==='final-history-failure-shutdown';
     const negative=!['success','active-window','final-history-failure','final-history-failure-shutdown','root-tail'].includes(scenario);
     const finalPublication=vi.spyOn(publicationProducer,'publishCompoundFinalPublication');cleanup.push(()=>finalPublication.mockRestore());

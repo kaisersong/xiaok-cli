@@ -151,6 +151,12 @@ export interface LocalRoomWorkspaceInstructions {
     sourceChanged: unknown;
     candidateText: unknown;
     candidateHash: unknown;
+    roomId: unknown;
+    description: unknown;
+    directoryNotes: unknown;
+    snapshotDigest: unknown;
+    publishedBy: unknown;
+    publishedAt: unknown;
 }
 export declare const ROOM_WORKSPACE_INSTRUCTIONS_SENSITIVITY: {
     readonly revision: "metadata";
@@ -160,6 +166,12 @@ export declare const ROOM_WORKSPACE_INSTRUCTIONS_SENSITIVITY: {
     readonly sourceChanged: "metadata";
     readonly candidateText: "content";
     readonly candidateHash: "metadata";
+    readonly roomId: "forbidden";
+    readonly description: "forbidden";
+    readonly directoryNotes: "forbidden";
+    readonly snapshotDigest: "forbidden";
+    readonly publishedBy: "forbidden";
+    readonly publishedAt: "forbidden";
 };
 export interface LocalRoomWorkspaceClaim {
     claimId: unknown;
@@ -170,6 +182,30 @@ export interface LocalRoomWorkspaceClaim {
     agentName: unknown;
     executorInstanceId: unknown;
     projectId: unknown;
+    roomId: unknown;
+    logicalAgentId: unknown;
+    contextScope: unknown;
+    parentClaimId: unknown;
+    projectMappingRevision: unknown;
+    taskId: unknown;
+    protocolVersion: unknown;
+    workspaceId: unknown;
+    originHostId: unknown;
+    hostPrincipal: unknown;
+    hostIncarnation: unknown;
+    bindingId: unknown;
+    generation: unknown;
+    workspaceRevision: unknown;
+    instructionsDigest: unknown;
+    membershipRevision: unknown;
+    createdAt: unknown;
+    acquireDigest: unknown;
+    taskName: unknown;
+    mappingRevision: unknown;
+    roomSequence: unknown;
+    updatedAt: unknown;
+    lastHeartbeatAt: unknown;
+    terminationEvidence: unknown;
 }
 export declare const ROOM_WORKSPACE_CLAIM_SENSITIVITY: {
     readonly claimId: "metadata";
@@ -180,6 +216,30 @@ export declare const ROOM_WORKSPACE_CLAIM_SENSITIVITY: {
     readonly agentName: "content";
     readonly executorInstanceId: "metadata";
     readonly projectId: "metadata";
+    readonly roomId: "forbidden";
+    readonly logicalAgentId: "forbidden";
+    readonly contextScope: "forbidden";
+    readonly parentClaimId: "forbidden";
+    readonly projectMappingRevision: "forbidden";
+    readonly taskId: "forbidden";
+    readonly protocolVersion: "forbidden";
+    readonly workspaceId: "forbidden";
+    readonly originHostId: "forbidden";
+    readonly hostPrincipal: "forbidden";
+    readonly hostIncarnation: "forbidden";
+    readonly bindingId: "forbidden";
+    readonly generation: "forbidden";
+    readonly workspaceRevision: "forbidden";
+    readonly instructionsDigest: "forbidden";
+    readonly membershipRevision: "forbidden";
+    readonly createdAt: "forbidden";
+    readonly acquireDigest: "forbidden";
+    readonly taskName: "forbidden";
+    readonly mappingRevision: "forbidden";
+    readonly roomSequence: "forbidden";
+    readonly updatedAt: "forbidden";
+    readonly lastHeartbeatAt: "forbidden";
+    readonly terminationEvidence: "forbidden";
 };
 export interface LocalRoomWorkspaceArtifact {
     artifactId: unknown;
@@ -196,6 +256,17 @@ export interface LocalRoomWorkspaceArtifact {
     producerType: unknown;
     projectId: unknown;
     synchronization: unknown;
+    roomId: unknown;
+    workspaceId: unknown;
+    originHostId: unknown;
+    workspaceRevision: unknown;
+    contextScope: unknown;
+    producerClaimId: unknown;
+    handoff: unknown;
+    observedAt: unknown;
+    commitTicketId: unknown;
+    confirmationTicketId: unknown;
+    sourceSequence: unknown;
 }
 export declare const ROOM_WORKSPACE_ARTIFACT_SENSITIVITY: {
     readonly artifactId: "metadata";
@@ -212,6 +283,17 @@ export declare const ROOM_WORKSPACE_ARTIFACT_SENSITIVITY: {
     readonly producerType: "metadata";
     readonly projectId: "metadata";
     readonly synchronization: "metadata";
+    readonly roomId: "forbidden";
+    readonly workspaceId: "forbidden";
+    readonly originHostId: "forbidden";
+    readonly workspaceRevision: "forbidden";
+    readonly contextScope: "forbidden";
+    readonly producerClaimId: "forbidden";
+    readonly handoff: "forbidden";
+    readonly observedAt: "forbidden";
+    readonly commitTicketId: "forbidden";
+    readonly confirmationTicketId: "forbidden";
+    readonly sourceSequence: "forbidden";
 };
 export interface LocalRoomWorkspaceProjectMapping {
     projectId: unknown;
@@ -346,6 +428,12 @@ declare const tables: {
         readonly sourceChanged: "metadata";
         readonly candidateText: "content";
         readonly candidateHash: "metadata";
+        readonly roomId: "forbidden";
+        readonly description: "forbidden";
+        readonly directoryNotes: "forbidden";
+        readonly snapshotDigest: "forbidden";
+        readonly publishedBy: "forbidden";
+        readonly publishedAt: "forbidden";
     };
     readonly RoomWorkspaceClaim: {
         readonly claimId: "metadata";
@@ -356,6 +444,30 @@ declare const tables: {
         readonly agentName: "content";
         readonly executorInstanceId: "metadata";
         readonly projectId: "metadata";
+        readonly roomId: "forbidden";
+        readonly logicalAgentId: "forbidden";
+        readonly contextScope: "forbidden";
+        readonly parentClaimId: "forbidden";
+        readonly projectMappingRevision: "forbidden";
+        readonly taskId: "forbidden";
+        readonly protocolVersion: "forbidden";
+        readonly workspaceId: "forbidden";
+        readonly originHostId: "forbidden";
+        readonly hostPrincipal: "forbidden";
+        readonly hostIncarnation: "forbidden";
+        readonly bindingId: "forbidden";
+        readonly generation: "forbidden";
+        readonly workspaceRevision: "forbidden";
+        readonly instructionsDigest: "forbidden";
+        readonly membershipRevision: "forbidden";
+        readonly createdAt: "forbidden";
+        readonly acquireDigest: "forbidden";
+        readonly taskName: "forbidden";
+        readonly mappingRevision: "forbidden";
+        readonly roomSequence: "forbidden";
+        readonly updatedAt: "forbidden";
+        readonly lastHeartbeatAt: "forbidden";
+        readonly terminationEvidence: "forbidden";
     };
     readonly RoomWorkspaceArtifact: {
         readonly artifactId: "metadata";
@@ -372,6 +484,17 @@ declare const tables: {
         readonly producerType: "metadata";
         readonly projectId: "metadata";
         readonly synchronization: "metadata";
+        readonly roomId: "forbidden";
+        readonly workspaceId: "forbidden";
+        readonly originHostId: "forbidden";
+        readonly workspaceRevision: "forbidden";
+        readonly contextScope: "forbidden";
+        readonly producerClaimId: "forbidden";
+        readonly handoff: "forbidden";
+        readonly observedAt: "forbidden";
+        readonly commitTicketId: "forbidden";
+        readonly confirmationTicketId: "forbidden";
+        readonly sourceSequence: "forbidden";
     };
     readonly RoomWorkspaceProjectMapping: {
         readonly projectId: "metadata";

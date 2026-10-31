@@ -4,6 +4,7 @@ import 'vitest';
 declare module 'vitest' {
   interface ProvidedContext {
     profileTestAccountRoot: string;
+    nativeObservationAccountMode?: 'real-native-readonly';
     installedSlidePythonRuntime: { python: string; marker: string };
   }
 }

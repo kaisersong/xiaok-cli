@@ -53,5 +53,34 @@ export function installTestAccountHome(os,accountHome,registerCleanup,synchroniz
 const root=inject('profileTestAccountRoot');
 if(typeof root!=='string'||!root)throw Error('test_profile_account_root_required');
 const accountHome=realpathSync(mkdtempSync(join(root,'account-')));
+/** Match production's config precedence with owned, failure-safe restoration. */
+export function installTestAccountEnvironment(env,home,registerCleanup,platform=process.platform){
+ const replacements={HOME:home,XIAOK_CONFIG_DIR:undefined,...(platform==='win32'?{USERPROFILE:home}:{})};
+ const entries=Object.entries(replacements).map(([key,value])=>({key,value,original:env[key],active:false}));
+ const restore=()=>{
+  const errors=[];
+  for(const entry of entries){
+   if(!entry.active)continue;
+   try{
+    if(env[entry.key]!==entry.value)throw Error('test_profile_environment_restoration_conflict:'+entry.key);
+    if(entry.original===undefined)delete env[entry.key];else env[entry.key]=entry.original;
+    entry.active=false;
+   }catch(error){errors.push(error);}
+  }
+  if(errors.length)throw new AggregateError(errors,'test_profile_environment_restore_failed');
+ };
+ registerCleanup(restore);
+ try{
+  for(const entry of entries){
+   if(entry.value===undefined)delete env[entry.key];else env[entry.key]=entry.value;
+   entry.active=true;
+  }
+ }catch(error){
+  try{restore();}catch(cleanupError){throw new AggregateError([error,cleanupError],'test_profile_environment_install_failed');}
+  throw error;
+ }
+ return restore;
+}
+const restoreEnvironment=installTestAccountEnvironment(process.env,accountHome,afterAll);
 const require=createRequire(import.meta.url),os=require('node:os');
-installTestAccountHome(os,accountHome,afterAll);
+try{installTestAccountHome(os,accountHome,afterAll);}catch(error){restoreEnvironment();throw error;}

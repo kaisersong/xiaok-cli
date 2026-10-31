@@ -23,11 +23,13 @@ import {createLoopOutputService,registerLoopOutputIpc} from './loop-output-servi
 import {createLoopCurrentViews,registerLoopCurrentViewIpc} from './loop-current-views.js';
 import {createLoopTimedCompletionHost} from './loop-timed-completion.js';
 import {withDesktopBootstrapWriter} from './desktop-bootstrap-writer.js';
+import { startDesktopTaskRecovery } from './desktop-startup-task-recovery.js';
 import {createDesktopLoopPublicationService} from './loop-desktop-publication-service.js';
 import {registerLoopPublicationIpc,createLoopPublicationIpcAuthorizer} from './loop-publication-ipc.js';
 import {createLoopPublicationShutdownOwner} from './loop-publication-shutdown.js';
 import {createShutdownAwareTimedActionService} from './timed-action-service-lifetime.js';
 import { scheduledRunPresentation } from './scheduled-run-presentation.js';
+import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -68,6 +70,7 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
+import { createOnceNotice } from './activity-owner-startup.js';
 import { resolveKSwarmServiceLogRoot, type KSwarmService } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
@@ -807,7 +810,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       platform: process.platform, executablePath: process.execPath, resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
     }) : undefined;
+  if (!desktopShutdownGate.isOpen) return window;
+  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
     notifyConversationActivity: async activity => {
@@ -835,20 +841,38 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
+  // Initialization starts inside the factory. Own its original completion before
+  // any later await, including renderer load failure or shutdown during loading.
+  const taskInitialization = startDesktopTaskRecovery(desktopShutdownGate, async () => {
+    debugMain('task-initialization:started');
+    await services.multiAgent?.ready;
+    debugMain('task-initialization:completed');
+  }, 'startup-multi-agent-initialization');
+  void taskInitialization?.catch(error => {
+    debugMain('task-initialization:failed');
+    console.error('[main] task initialization failed:', error);
+  });
   desktopIngressOwners.push(services.goalShutdown.ingress);
   desktopDurableStores.push(services.goalShutdown.durable);
   if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
+  const activityOwnerNoticeOnce = createOnceNotice(text => {
+    void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
+  });
   kswarmStartPromise = startDesktopKSwarmService(desktopShutdownGate, kswarmService,
     process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+    error => {
+      const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
+      console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
+      activityOwnerNoticeOnce(code);
+    },
   ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
+  registerLifetimeDisposerStep('local-memory', async () => { getDesktopMemoryStore(dataRoot).close?.(); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
-    if (event.type === 'project_activity' && typeof event.projectId === 'string') void services.conversationActivity?.projectChanged(event.projectId);
+    if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
   });
   registerLifetimeDisposerStep('activity-project-events', async () => stopActivityProjectEvents());
-  const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => {
-    void services.conversationActivity?.projectConnectionChanged(status).catch(error => console.warn('[conversation-activity] source connection failed:', error instanceof Error ? error.message : 'connection_failed'));
-  });
+  const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => services.conversationActivity?.projectConnectionChanged(status));
   registerLifetimeDisposerStep('activity-project-connection', async () => stopActivityProjectConnection());
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
@@ -1130,16 +1154,17 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
 
   try {
-    await services.recoverStaleTasks();
-  } catch (err) {
-    console.error('[main] recoverStaleTasks failed (startup continues):', err);
-  }
-  try {
     await services.reconcileArtifactWorkspace();
   } catch (err) {
     console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
   }
 
+  registerHarnessOptimizationIpc(shutdownAwareIpc, services, event => {
+    return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
+      && event.senderFrame === mainWindow.webContents.mainFrame
+      && isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer })
+      ? harnessUserActor : null;
+  });
   const connectorsProducers = new Map<string, IpcHandlerListener>();
   const connectorsIpc: IpcHandleRegistrar = {handle(channel, listener) {connectorsProducers.set(channel, listener);}};
   registerConnectorsIpc(shutdownAwareIpc, connectorsProducers);
@@ -1963,6 +1988,17 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
+  // Historical validation stays behind existing task/agent admission gates,
+  // while the first frame can load. Shutdown owns the full recovery operation.
+  const taskRecovery = startDesktopTaskRecovery(desktopShutdownGate, async () => {
+    debugMain('task-recovery:started');
+    await services.recoverStaleTasks();
+    debugMain('task-recovery:completed');
+  });
+  void taskRecovery?.catch(error => {
+    debugMain('task-recovery:failed');
+    console.error('[main] recoverStaleTasks failed (startup continues):', error);
+  });
   if (desktopShutdownGate.isOpen) {
     const writer = acquireAutomationWriter('assistant:recover-accepting');
     void assistantController.recoverAccepting({requestSource: 'scheduler'}).catch(error => {

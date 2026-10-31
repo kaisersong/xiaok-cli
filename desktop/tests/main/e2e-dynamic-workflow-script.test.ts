@@ -431,7 +431,7 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
       });
       expect(detail.project.deliverable ?? null).toBeNull();
       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
-      expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path)).toEqual([
+      expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path).sort()).toEqual([
         'artifacts/workflow-report.html',
         'artifacts/workflow-report.pdf',
       ]);

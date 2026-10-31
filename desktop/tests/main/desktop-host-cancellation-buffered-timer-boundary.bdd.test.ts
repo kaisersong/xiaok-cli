@@ -32,7 +32,7 @@ describe('BDD: a real buffered timer already dispatched when cancellation drains
     cleanup.push(async () => { releaseModel.resolve(); releaseWrite.resolve(); await host.drain(); });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
-      for (let i = 0; i < 253; i++) yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } };
+      for (let i = 0; i < 252; i++) yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } };
       yield { type: 'text', delta: 'The original buffered timer owns this delta before cancellation.' };
       modelEntered.resolve(); await releaseModel.promise;
     });

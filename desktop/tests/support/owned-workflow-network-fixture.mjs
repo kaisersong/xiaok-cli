@@ -3,7 +3,7 @@ import {resolve} from 'node:path';
 const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
 const siblingRoot=resolve(repositoryRoot,'..');
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,mkdirSync,realpathSync} from 'node:fs';
+import {mkdtempSync,rmSync,mkdirSync,realpathSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
@@ -77,8 +77,13 @@ try{
  hub.createProject({id:'other',name:'Other temporary project',goal:'Other',poAgent:'xiaok-po',members:[],autoAssignPo:false});
  const workspace=initProjectWorkspace(new Map(),join(data,'projects'),project.id);
  let issued;
- if(options.issuer==='builtin-smoke'){
+ if(options.issuer==='builtin-smoke'||options.issuer==='builtin-review'){
   issued=hub.startAgentReviewSmokeWorkflow(project.id,{requestedBy:'human'});assert.equal(issued.ok,true);assert.equal(issued.workflowRun.source,'builtin-smoke');assert.equal(issued.workflowRun.workflowId,'agent-review-smoke');
+  if(options.issuer==='builtin-review'){
+   const first=issued.dispatches[0],file=join(workspace.artifacts,'reference.txt');writeFileSync(file,'ORIGINAL');
+   issued=hub.handleWorkflowNodeResult({workflowRunId:first.workflowRunId,nodeId:first.nodeId,attempt:first.attempt,handoffId:first.handoffId,fromAgent:'xiaok-worker',output:{summary:'Original reference',artifactPaths:[file]}});
+   assert.equal(issued.ok,true);assert.equal(issued.dispatches.length,1);assert.equal(issued.dispatches[0].nodeKind,'review');
+  }
  }else if(options.issuer==='po_generated'||options.issuer==='po_generated_project'){
   // These are ordinary persisted Hub producers, not hand-built run/spec rows.
   // Keep the original mixed permissions intact for the real checkpoint.
