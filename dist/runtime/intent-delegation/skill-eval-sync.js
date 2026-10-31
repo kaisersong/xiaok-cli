@@ -33,7 +33,7 @@ export function wireSkillEvalToRuntimeSync(options) {
             }
             enqueue(async () => {
                 const ledger = await refreshLedger();
-                const intent = ledger?.intents.find((candidate) => candidate.intentId === event.intentId);
+                const intent = findSkillIntent(ledger, event.intentId);
                 if (!intent) {
                     return;
                 }
@@ -64,6 +64,7 @@ export function wireSkillEvalToRuntimeSync(options) {
                 if (!activeIntent) {
                     return;
                 }
+                assertSkillStepId(activeIntent.activeStepId);
                 await options.skillEvalStore.recordSkillInvocation(options.sessionId, {
                     intentId: activeIntent.intentId,
                     stepId: activeIntent.activeStepId,
@@ -87,9 +88,10 @@ export function wireSkillEvalToRuntimeSync(options) {
                 return;
             }
             enqueue(async () => {
-                const ledger = await refreshLedger(), step = ledger?.intents.find(r => r.intentId === event.intentId)?.stages.flatMap(s => s.steps).find(s => s.stepId === event.stepId);
+                const ledger = await refreshLedger(), step = findSkillStep(ledger, event.intentId, event.stepId);
                 if (!step || step.status === 'skipped')
                     return;
+                assertObservationStatus(step.status);
                 await options.skillEvalStore.updateObservationStatus(options.sessionId, { intentId: event.intentId, stepId: event.stepId, status: step.status });
             });
         }),
@@ -107,9 +109,10 @@ export function wireSkillEvalToRuntimeSync(options) {
             if (event.sessionId !== options.sessionId)
                 return;
             enqueue(async () => {
-                const ledger = await refreshLedger(), step = ledger?.intents.find(r => r.intentId === event.intentId)?.stages.flatMap(s => s.steps).find(s => s.stepId === event.stepId);
+                const ledger = await refreshLedger(), step = findSkillStep(ledger, event.intentId, event.stepId);
                 if (!step || step.status === 'skipped')
                     return;
+                assertObservationStatus(step.status);
                 const state = await options.skillEvalStore.updateObservationStatus(options.sessionId, { intentId: event.intentId, stepId: event.stepId, status: step.status });
                 if (step.status !== 'completed' && step.status !== 'failed')
                     return;
@@ -136,11 +139,12 @@ export function wireSkillEvalToRuntimeSync(options) {
             }
             enqueue(async () => {
                 const ledger = await refreshLedger();
-                const intent = ledger?.intents.find((candidate) => candidate.intentId === event.intentId);
-                const artifact = intent?.artifacts?.find((candidate) => candidate.artifactId === event.artifactId);
+                const intent = findSkillIntent(ledger, event.intentId);
+                const artifact = findSkillArtifact(intent, event.artifactId);
                 if (!intent || !artifact) {
                     return;
                 }
+                assertArtifactValidationData(artifact);
                 await options.skillEvalStore.recordArtifact(options.sessionId, {
                     intentId: event.intentId,
                     stageId: event.stageId,
@@ -172,9 +176,63 @@ export function wireSkillEvalToRuntimeSync(options) {
         return stopping;
     };
 }
+function skillIntentRows(value) {
+    if (!Array.isArray(value))
+        throw Error('skill_eval_intents_data');
+    return value;
+}
+function skillStageRows(value) {
+    if (!Array.isArray(value))
+        throw Error('skill_eval_stages_data');
+    return value;
+}
+function skillStepRows(value) {
+    if (!Array.isArray(value))
+        throw Error('skill_eval_steps_data');
+    return value;
+}
+function isSkillFact(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function skillFact(value) {
+    if (!isSkillFact(value))
+        throw Error('skill_eval_artifact_data');
+    return value;
+}
+function findSkillIntent(ledger, intentId) {
+    return ledger === undefined || ledger === null ? undefined : skillIntentRows(ledger.intents).find(candidate => candidate.intentId === intentId);
+}
+function findSkillStep(ledger, intentId, stepId) {
+    const intent = findSkillIntent(ledger, intentId);
+    return intent === undefined ? undefined : skillStageRows(intent.stages).flatMap(stage => skillStepRows(stage.steps)).find(step => step.stepId === stepId);
+}
+function findSkillArtifact(intent, artifactId) {
+    const values = intent?.artifacts;
+    if (values === undefined || values === null)
+        return undefined;
+    if (!Array.isArray(values))
+        throw Error('skill_eval_artifacts_data');
+    return values.find(candidate => skillFact(candidate).artifactId === artifactId);
+}
+function assertSkillStepId(value) {
+    if (typeof value !== 'string')
+        throw Error('skill_eval_step_id_data');
+}
+function assertObservationStatus(value) {
+    if (value !== 'planned' && value !== 'running' && value !== 'blocked' && value !== 'completed' && value !== 'failed')
+        throw Error('skill_eval_status_data');
+}
+function assertArtifactValidationData(value) {
+    const data = skillFact(value), structural = data.structuralValidation;
+    if (structural !== undefined && structural !== 'pending' && structural !== 'passed' && structural !== 'failed')
+        throw Error('skill_eval_structural_validation_data');
+    const semantic = data.semanticValidation;
+    if (semantic !== undefined && semantic !== 'pending' && semantic !== 'passed' && semantic !== 'failed')
+        throw Error('skill_eval_semantic_validation_data');
+}
 function resolveActiveIntent(ledger) {
     if (!ledger?.activeIntentId) {
         return undefined;
     }
-    return ledger.intents.find((intent) => intent.intentId === ledger.activeIntentId);
+    return skillIntentRows(ledger.intents).find((intent) => intent.intentId === ledger.activeIntentId);
 }

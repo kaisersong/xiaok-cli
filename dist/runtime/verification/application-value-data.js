@@ -1,3 +1,5 @@
+import { ownDataString } from './application-native-intrinsics.js';
+import { capturedArrayIterator, createCapturedSet } from './application-iteration-intrinsics.js';
 import { types } from 'node:util';
 const isProxy = types.isProxy;
 const arrayIsArray = Array.isArray;
@@ -26,7 +28,7 @@ const NativeError = Error;
 const NativeString = String;
 const objectPrototype = Object.prototype;
 const arrayPrototype = Array.prototype;
-const MAXIMUM_DESCRIPTOR_KEYS = 8_000_000;
+const MAXIMUM_DESCRIPTOR_KEYS = 8000000;
 function nativeOwn(value, key) { return apply(hasOwn, value, [key]); }
 function fail(error) { const label = typeof error === 'string' ? error : typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint' || typeof error === 'symbol' ? NativeString(error) : 'application_data'; throw new NativeError(label); }
 function descriptorValue(descriptors, key) {
@@ -37,7 +39,7 @@ function descriptorValue(descriptors, key) {
         return undefined;
     return apply(reflectGet, undefined, [entry, 'value', entry]);
 }
-function append(target, value) { defineProperty(target, `${target.length}`, { value, enumerable: true, writable: true, configurable: true }); }
+function append(target, value) { defineProperty(target, `${target.length}`, { __proto__: null, value, enumerable: true, writable: true, configurable: true }); }
 /** Read one control field without enumerating the caller's other fields. */
 export function readApplicationOwnDataField(value, key, error) {
     const reject = () => fail(error);
@@ -66,9 +68,9 @@ export function readApplicationOwnDataField(value, key, error) {
     const present = descriptor !== undefined;
     const kind = !present ? 'missing' : nativeOwn(descriptor, 'value') ? 'data' : 'accessor';
     const result = objectCreate(null);
-    defineProperty(result, 'present', { value: present, enumerable: true, writable: false, configurable: false });
-    defineProperty(result, 'kind', { value: kind, enumerable: true, writable: false, configurable: false });
-    defineProperty(result, 'value', { value: kind === 'data' ? apply(reflectGet, undefined, [descriptor, 'value', descriptor]) : undefined, enumerable: true, writable: false, configurable: false });
+    defineProperty(result, 'present', { __proto__: null, value: present, enumerable: true, writable: false, configurable: false });
+    defineProperty(result, 'kind', { __proto__: null, value: kind, enumerable: true, writable: false, configurable: false });
+    defineProperty(result, 'value', { __proto__: null, value: kind === 'data' ? apply(reflectGet, undefined, [descriptor, 'value', descriptor]) : undefined, enumerable: true, writable: false, configurable: false });
     return freeze(result);
 }
 /** Inspect own descriptors without evaluating input accessors or Proxy traps. */
@@ -84,12 +86,19 @@ export function applicationDataDescriptors(value, maximumKeys = 65536, error = '
     if (keys.length > maximumKeys || apply(arraySome, keys, [key => typeof key !== 'string']))
         fail(safeErrorLabel(error));
     const source = getOwnPropertyDescriptors(value), result = objectCreate(null);
-    for (const key of keys) {
-        const descriptor = descriptorValue(source, key);
+    for (const key of capturedArrayIterator(keys)) {
+        const descriptor = nativeOwn(source, key) ? source[key] : undefined;
         if (!descriptor || !nativeOwn(descriptor, 'value'))
             fail(safeErrorLabel(error));
-        defineProperty(result, key, { value: descriptor, enumerable: true, writable: true, configurable: true });
+        result[key] = descriptor;
     }
+    return result;
+}
+/** Rebuild an ordinary object from captured dense entries without native iterator lookup. */
+export function applicationDataFromEntries(entries) {
+    const result = objectCreate(objectPrototype);
+    for (const entry of capturedArrayIterator(entries))
+        defineProperty(result, entry[0], { __proto__: null, value: entry[1], enumerable: true, writable: true, configurable: true });
     return result;
 }
 function safeErrorLabel(error) {
@@ -112,10 +121,13 @@ export function captureApplicationData(raw, limits) {
     const invalid = invalidValue, limit = limitValue, maximumDepth = depthField === undefined ? 64 : depthField;
     if (!numberIsSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 128 * 1024 ** 2 || !numberIsSafeInteger(maximumNodes) || maximumNodes < 1 || maximumNodes > MAXIMUM_DESCRIPTOR_KEYS || !numberIsSafeInteger(maximumDepth) || maximumDepth < 0 || maximumDepth > 128)
         fail('application_data_budget');
-    const seen = new Set();
+    const seen = createCapturedSet();
     let nodes = 0, bytes = 0;
-    const charge = (count) => { bytes += count; if (bytes > maximumBytes)
-        fail(limit); };
+    const charge = (count) => {
+        bytes += count;
+        if (bytes > maximumBytes)
+            fail(limit);
+    };
     const string = (value) => {
         charge(2);
         for (let i = 0; i < value.length; i++) {
@@ -163,29 +175,29 @@ export function captureApplicationData(raw, limits) {
         try {
             charge(2);
             if (array) {
-                const lengthField = descriptorValue(descriptors, 'length'), length = lengthField && nativeOwn(lengthField, 'value') ? apply(reflectGet, undefined, [lengthField, 'value', lengthField]) : undefined;
+                const lengthField = descriptors.length, length = lengthField && nativeOwn(lengthField, 'value') ? apply(reflectGet, undefined, [lengthField, 'value', lengthField]) : undefined;
                 if (!numberIsSafeInteger(length) || length < 0 || length > maximumNodes - nodes || keys.length !== length + 1)
                     fail(invalid);
                 const result = [];
                 for (let i = 0; i < length; i++) {
                     if (i)
                         charge(1);
-                    const item = descriptorValue(descriptors, String(i)), child = item && nativeOwn(item, 'value') ? apply(reflectGet, undefined, [item, 'value', item]) : undefined;
+                    const item = descriptors[ownDataString(i)], child = item && nativeOwn(item, 'value') ? apply(reflectGet, undefined, [item, 'value', item]) : undefined;
                     append(result, copy(child, depth + 1));
                 }
                 return result;
             }
-            const keysInOrder = ownKeys(descriptors), result = [];
+            const keysInOrder = ownKeys(descriptors), copied = objectCreate(objectPrototype);
             for (let i = 0; i < keysInOrder.length; i++) {
-                const key = keysInOrder[i], descriptor = descriptorValue(descriptors, key);
+                const key = keysInOrder[i], descriptor = descriptors[key];
                 if (i)
                     charge(1);
                 string(key);
                 charge(1);
                 const child = descriptor && nativeOwn(descriptor, 'value') ? apply(reflectGet, undefined, [descriptor, 'value', descriptor]) : undefined;
-                append(result, [key, copy(child, depth + 1)]);
+                defineProperty(copied, key, { __proto__: null, value: copy(child, depth + 1), enumerable: true, writable: true, configurable: true });
             }
-            return objectFromEntries(result);
+            return copied;
         }
         finally {
             apply(setDelete, seen, [value]);

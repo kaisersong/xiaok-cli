@@ -16,6 +16,14 @@ import { createInstalledIntentApplicationClient } from '../verification/installe
 import { readInstalledCurrentOwner } from '../verification/installed-owner-state.js';
 import { intentHostSubjectOwner } from '../verification/intent-host-subject.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
+function receiverCandidateRows(value) { if (!Array.isArray(value))
+    throw Error('intent_receiver_candidate_data'); return value; }
+function receiverCandidateRow(value) { if (value === null || typeof value !== 'object')
+    throw Error('intent_receiver_candidate_data'); }
+function receiverStageRows(value) { if (!Array.isArray(value))
+    throw Error('intent_receiver_current'); return value; }
+function receiverStageRow(value) { if (value === null || typeof value !== 'object')
+    throw Error('intent_receiver_current'); }
 const writes = new WeakMap();
 /** Consume-only entry. Ordinary data cannot create a receiver journal write. */
 export function consumeIntentReceiverWrite(store, raw) {
@@ -65,7 +73,7 @@ export function createIntentReceiverPublicationHost(options) {
         throw Error('intent_receiver_candidate'); return c; }
     function route(ledger, c, original) { assertIntentParentRoutesCurrent(ledger, c); const binding = intentPublicationTarget(ledger, c); if (json(readInstalledCurrentOwner(intentHostSubjectOwner(binding.subject))) !== original)
         throw Error('intent_receiver_route'); return binding; }
-    function fresh(ledger, c, original, signal) { exact(ledger, signal); route(ledger, c, original); const native = parseIntentNativeContracts(ledger.nativeContracts, sessionId).find(n => n.intentId === c.intentId), record = ledger.intents.find(r => r.intentId === c.intentId); if (!native || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || ledger.activeIntentId !== c.intentId || (c.stageId === null ? !record || record.stages.some(s => s.status !== 'completed') : record?.activeStageId !== c.stageId) || record?.overallStatus !== 'publication_pending' || json(readIntentPublicationFileFacts(ledger, workspace, c)) !== json(c.fileObservations))
+    function fresh(ledger, c, original, signal) { exact(ledger, signal); route(ledger, c, original); const native = parseIntentNativeContracts(ledger.nativeContracts, sessionId).find(n => n.intentId === c.intentId), record = ledger.intents.find(r => r.intentId === c.intentId); if (!native || native.subjects.some(s => s.attempts.at(-1)?.phase !== 'enrolled') || ledger.activeIntentId !== c.intentId || (c.stageId === null ? !record || receiverStageRows(record.stages).some(s => { receiverStageRow(s); return s.status !== 'completed'; }) : record?.activeStageId !== c.stageId) || record?.overallStatus !== 'publication_pending' || json(readIntentPublicationFileFacts(ledger, workspace, c)) !== json(c.fileObservations))
         throw Error('intent_receiver_current'); exact(ledger, signal); route(ledger, c, original); signal.throwIfAborted(); }
     async function application(ledger, c, original, signal) { fresh(ledger, c, original, signal); const binding = route(ledger, c, original), client = createInstalledIntentApplicationClient(binding, 'user'); try {
         fresh(ledger, c, original, signal);
@@ -114,14 +122,14 @@ export function createIntentReceiverPublicationHost(options) {
                 }
                 finally {
                     writes.delete(ticket);
-                } const expected = captureIntentData(before); expected.publicationCandidates = expected.publicationCandidates.map(r => r.id === c.id ? c : r); row = parseIntentReceiverAttempts(c.receiverAttempts, c).at(-1); expected.updatedAt = Math.max(expected.updatedAt, row.updatedAt); if (intentNativeLedgerHash(load()) !== intentNativeLedgerHash(expected))
+                } const expected = captureIntentData(before); expected.publicationCandidates = receiverCandidateRows(expected.publicationCandidates).map(r => { receiverCandidateRow(r); return r.id === c.id ? c : r; }); row = parseIntentReceiverAttempts(c.receiverAttempts, c).at(-1); expected.updatedAt = Math.max(expected.updatedAt, row.updatedAt); if (intentNativeLedgerHash(load()) !== intentNativeLedgerHash(expected))
                     throw Error('intent_receiver_basis'); ledger = load(); history(); }
                 if (mode === 'project') {
                     if (source !== 'user' || !row || row.status !== 'committed')
                         throw Error('intent_projection_receiver');
                     history();
                     const binding = route(ledger, c, original), stage = binding.contract.stages.find(s => s.stageId === c.stageId), subjects = [binding.subject, ...(c.stageId === null ? binding.contract.stages.map(s => s.stageId) : stage.dependsOnStageIds).map(stageId => ({ ...binding.subject, stageId }))];
-                    const originals = subjects.map(subject => { const local = ledger.publicationCandidates?.find(p => p.intentId === subject.intentId && p.stageId === subject.stageId), originalRoute = local?.applicationAttempts.at(-1)?.route; if (!local || !originalRoute)
+                    const originals = subjects.map(subject => { const local = parseIntentPublicationCandidates(ledger).find(p => p.intentId === subject.intentId && p.stageId === subject.stageId), originalRoute = local?.applicationAttempts.at(-1)?.route; if (!local || !originalRoute)
                         throw Error('intent_projection_dependency'); return { local, originalRoute }; });
                     // This closure can only reject; the original lease calls it again at actual Store write/readback boundaries.
                     projectionGuard = () => { signal.throwIfAborted(); if (!c.businessProjection)

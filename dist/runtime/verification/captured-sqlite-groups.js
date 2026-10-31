@@ -27,7 +27,7 @@ function one(reader, relation, table, keys) {
     }
 }
 function messageDigest(value) { const { groupId, messageId, sender, receiverId, kind, preview, contentId, truncated, createdAt, bodyUnavailable } = value; return createHash('sha256').update(encodeMultiAgentRow({ groupId, messageId, sender, receiverId, kind, preview, contentId, truncated, createdAt, bodyUnavailable })).digest('hex'); }
-function relationships(reader, row) {
+function relationships(reader, row, activityTables) {
     const body = row.json.data_json === undefined ? undefined : groupsObject(row.json.data_json);
     if (row.table === 'thread_bindings' && row.cells.active_group_id?.type === 'text') {
         const group = one(reader, 'groups:group', 'groups', [row.cells.active_group_id.value]);
@@ -37,7 +37,8 @@ function relationships(reader, row) {
     if (row.table === 'groups') {
         let bytes = integer(row, 'logical_bytes'), events = 0n;
         const id = scalar(row, 'group_id');
-        for (const table of ['agents', 'events', 'messages', 'contents', 'operations', 'root_turns', 'managed_resources'])
+        const tables = activityTables ? ['agents', 'events', 'messages', 'contents', 'operations', 'root_turns', 'managed_resources', 'activity_runs', 'activity_members'] : ['agents', 'events', 'messages', 'contents', 'operations', 'root_turns', 'managed_resources'];
+        for (const table of tables)
             for (const raw of iterateProfileSqliteReaderRelation(reader, ('groups:group-' + table), [id])) {
                 const item = readCapturedGroupsRow(table, raw);
                 bytes += integer(item, 'logical_bytes');
@@ -49,6 +50,16 @@ function relationships(reader, row) {
             }
         if (integer(row, 'byte_usage') !== bytes || typeof body?.lastSeq !== 'number' || !Number.isSafeInteger(body.lastSeq) || BigInt(body.lastSeq) !== events)
             fail('group_accounting');
+    }
+    if (activityTables && row.table === 'activity_runs') {
+        const group = one(reader, 'groups:group', 'groups', [scalar(row, 'group_id')]);
+        if (body?.threadId !== scalar(group, 'thread_id'))
+            fail('activity_thread');
+    }
+    if (activityTables && row.table === 'activity_members') {
+        const run = one(reader, 'groups:activity-run', 'activity_runs', [scalar(row, 'run_id')]);
+        if (scalar(run, 'group_id') !== scalar(row, 'group_id'))
+            fail('activity_group');
     }
     if (row.table === 'messages' && body?.contentId !== undefined) {
         if (typeof body.contentId !== 'string')
@@ -93,7 +104,7 @@ export function* iterateCapturedSQLiteGroupsSources(owner, token) {
                 yield frame({ kind: 'table-start', sourceId, table, columns: METADATA_SESSION_QUERIES[query].columns });
                 for (const raw of iterateProfileSqliteReaderRows(reader, query)) {
                     const row = readCapturedGroupsRow(table, raw);
-                    relationships(reader, row);
+                    relationships(reader, row, schema.version === 4);
                     const declared = declareCapturedGroupsRow(row);
                     count++;
                     yield frame({ kind: 'row', sourceId, table, rowid: row.rowid, ordinal: String(count), cells: row.cells, parsed: row.json, references: declared.references, unmapped: declared.unmapped, observationDeclarations: declared.observationDeclarations });

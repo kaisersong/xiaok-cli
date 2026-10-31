@@ -37,6 +37,10 @@ export declare class ConversationActivitySources {
     private projectConnected;
     private projectFallback;
     private disposed;
+    private closing?;
+    private readonly drainWork;
+    /** Reserve ownership before any synchronous producer prefix can reenter close. */
+    private own;
     constructor(options: {
         store: ConversationActivityStore;
         service: ConversationActivityApi;
@@ -55,16 +59,22 @@ export declare class ConversationActivitySources {
         onError?(error: unknown): void;
     });
     startWatch(watchId: string): Promise<void>;
+    private startWatchNow;
     private readTask;
     private taskEvent;
     refreshProject(projectId: string, sourceChanged?: boolean): Promise<void>;
+    private refreshProjectNow;
     private projectWatches;
     projectConnectionChanged(status: 'connected' | 'disconnected' | 'reconnecting'): Promise<void>;
+    private projectConnectionChangedNow;
     private scheduleProjectFallback;
     private drainProject;
     stopWatch(watchId: string): void;
     private scheduleTaskRetry;
     refreshGroup(groupId: string, sourceChanged?: boolean): Promise<void>;
+    private refreshGroupNow;
     private drainGroup;
+    /** Seals scheduling synchronously and waits actual owned work; never fabricates a drain ACK. */
+    close(): Promise<void>;
     dispose(): void;
 }

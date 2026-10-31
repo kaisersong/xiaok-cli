@@ -236,8 +236,8 @@ export declare function getObservationClosedReadBinding(anchor: ObservationClose
             capture: import("./observation-service.js").ObservationCapture;
         } & {
             outcome?: "success" | "error" | "cancelled" | "timeout" | undefined;
-            executionState: "running" | "termination_pending" | "interrupted" | "terminal";
             incompleteReason?: string | undefined;
+            executionState: "running" | "termination_pending" | "interrupted" | "terminal";
         }): ObservationRef;
         reviseTerminal(input: {
             requestSource: "user" | "agent" | "scheduler";
@@ -482,8 +482,8 @@ export declare function getPublishedClosureReadBinding(anchor: PublishedClosureR
             capture: import("./observation-service.js").ObservationCapture;
         } & {
             outcome?: "success" | "error" | "cancelled" | "timeout" | undefined;
-            executionState: "running" | "termination_pending" | "interrupted" | "terminal";
             incompleteReason?: string | undefined;
+            executionState: "running" | "termination_pending" | "interrupted" | "terminal";
         }): ObservationRef;
         reviseTerminal(input: {
             requestSource: "user" | "agent" | "scheduler";

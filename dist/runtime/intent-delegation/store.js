@@ -3,6 +3,34 @@ import { captureIntentData, parseIntentExecutionInput } from './intent-commit-bo
 import { cloneIntentRecord, cloneSessionIntentLedger, createEmptySessionIntentLedger, createIntentLedgerRecord, } from './types.js';
 export { createEmptySessionIntentLedger } from './types.js';
 export { rekeySessionIntentLedger } from './types.js';
+// Consumed report DATA only; not a producer/authority/control witness.
+function isProducerReportObject(value) {
+    return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+function producerReportObject(value) {
+    if (!isProducerReportObject(value))
+        throw Error('intent_producer_report_data');
+    return value;
+}
+function producerReportNow(value, origin) {
+    if (value === undefined || value === null)
+        return undefined;
+    if (!Array.isArray(value))
+        throw Error('intent_producer_report_data');
+    const rows = value, length = rows.length;
+    for (let index = 0; index < length; index++) {
+        const report = producerReportObject(rows[index]), action = producerReportObject(report.action), source = producerReportObject(action.origin);
+        if (source.providerInvocationId === origin.providerInvocationId && source.toolInvocationId === origin.toolInvocationId) {
+            const now = report.now;
+            if (now === undefined || now === null)
+                return undefined;
+            if (typeof now !== 'number')
+                throw Error('intent_producer_report_time');
+            return now;
+        }
+    }
+    return undefined;
+}
 const producerMutationPorts = new WeakMap();
 const producerSessionStores = new WeakMap();
 export function isIntentDelegationStoreFor(store, sessionStore) { return producerSessionStores.get(store) === sessionStore; }
@@ -23,7 +51,7 @@ export class SessionIntentDelegationStore {
             const captured = captureIntentData(action), snapshot = await load(sessionId), ledger = snapshot ? readLedger(snapshot) : null;
             if (!ledger || !write)
                 throw Error('intent_producer_store_required');
-            await write({ sessionId, intentId, instanceId, action: captured, requestSource, expectedLedgerHash: intentProducerLedgerHash(ledger), now: ledger.intents.find(row => row.intentId === intentId)?.producerReports?.find(report => report.action.origin.providerInvocationId === captured.origin.providerInvocationId && report.action.origin.toolInvocationId === captured.origin.toolInvocationId)?.now ?? Date.now(), lease });
+            await write({ sessionId, intentId, instanceId, action: captured, requestSource, expectedLedgerHash: intentProducerLedgerHash(ledger), now: producerReportNow(ledger.intents.find(row => row.intentId === intentId)?.producerReports, captured.origin) ?? Date.now(), lease });
             const saved = await load(sessionId);
             if (!saved)
                 throw Error('intent_producer_store_required');

@@ -35,6 +35,7 @@ import { createApprovedVerificationOperations } from './approved-verification-op
 import { createApprovedRecipeArtifactReader } from './approved-artifact-reader.js';
 import { createInstalledProfileIndexPublisher } from './installed-migration-publisher.js';
 import { startPublicController } from './controller-public-daemon.js';
+import { createInstalledMetadataTargetPreparation } from './installed-metadata-target-prepare.js';
 import { readControllerSocketAuditPeer } from './socket-peer.js';
 const failedLifetimes = new Set();
 const unresolvedShutdownErrors = new WeakSet();
@@ -153,6 +154,15 @@ export function assertInstalledVerificationCurrent(token) { const state = assemb
 export function readInstalledVerificationClock(token) { const state = assemblyState(token); return state.stack.privateHost.broker.clock(); }
 export async function ensureInstalledVerificationQualification(token, signal) { const state = assemblyState(token); state.admission.throwIfAborted(); signal.throwIfAborted(); await state.stack.privateHost.qualification.ensureCurrent(signal); assertInstalledVerificationCurrent(token); state.admission.throwIfAborted(); signal.throwIfAborted(); if (json(state.stack.privateHost.qualification.currentFacts().engineBinding) !== state.engineBinding)
     throw Error('installed_controller_engine_changed'); }
+export function prepareInstalledMetadataTarget(assembly, owner, token, closure, signal) {
+    if (arguments.length !== 5)
+        return Promise.reject(Error('metadata_prepare_arguments'));
+    const state = assemblyState(assembly);
+    state.admission.throwIfAborted();
+    if (!state.metadataPreparation)
+        throw Error('metadata_prepare_unavailable');
+    return state.metadataPreparation.prepare(owner, token, closure, AbortSignal.any([state.admission, signal]));
+}
 export function recordInstalledVerificationResult(token, result) { const state = assemblyState(token), stack = state.stack.privateHost; stack.transcripts.record({ ownerKey: stack.execution.privateHost.raw.readOwnerKey(result.expected), ...result }); }
 export function registerInstalledVerificationOutput(token, result) { const state = assemblyState(token); state.artifacts.registerActualOutput(result); }
 /** Sole fixed installed entry. Public listener opens only after all private ports
@@ -186,7 +196,7 @@ export async function startInstalledVerificationController() {
         // Publish the original attempt before abort listeners or any actual drain may reenter.
         admission.abort(Error('installed_controller_closing'));
         void closeInstalledControllerComponents({ components: [() => { if (stackConstructionPending)
-                    throw Error('installed_stack_construction_unknown'); }, () => server?.close(), () => maintenance?.close(), () => archive?.close(), () => application?.close(), () => publication?.close(), () => receiverTransport?.close(), () => operations?.close(), () => stack?.close()], finalizers: [() => sources?.close(), () => caps?.close(), () => artifacts?.close(), () => completion?.close(), () => receiver?.close(), () => sharedCapacity?.close(), () => rootBroker?.dispose()], closeLifetime: () => { lifetime.close(); assemblyFacts.closed = true; }, retainLifetime: () => { failedLifetimes.add(lifetime); } }).then(resolve, error => { const failure = typeof error === 'object' && error !== null ? error : new AggregateError([error], 'installed_controller_shutdown_unknown'); unresolvedShutdownErrors.add(failure); reject(failure); });
+                    throw Error('installed_stack_construction_unknown'); }, () => server?.close(), () => assemblyFacts.metadataPreparation?.close(), () => maintenance?.close(), () => archive?.close(), () => application?.close(), () => publication?.close(), () => receiverTransport?.close(), () => operations?.close(), () => stack?.close()], finalizers: [() => sources?.close(), () => caps?.close(), () => artifacts?.close(), () => completion?.close(), () => receiver?.close(), () => sharedCapacity?.close(), () => rootBroker?.dispose()], closeLifetime: () => { lifetime.close(); assemblyFacts.closed = true; }, retainLifetime: () => { failedLifetimes.add(lifetime); } }).then(resolve, error => { const failure = typeof error === 'object' && error !== null ? error : new AggregateError([error], 'installed_controller_shutdown_unknown'); unresolvedShutdownErrors.add(failure); reject(failure); });
         return closing;
     }
     try {
@@ -236,6 +246,8 @@ export async function startInstalledVerificationController() {
         const archiveRouting = createArchiveOperationRouting(archive, signal => renew(signal));
         const routing = createControllerOperationRouting({ assertCurrent: () => { admission.signal.throwIfAborted(); lifetime.assertCurrent(); }, renew: signal => renew(signal), verification: operations, publication, completion: completion.public, execution: stack.publicPort });
         const applicationRouting = createControllerApplicationRouting({ application: need(application), assertCurrent: () => { admission.signal.throwIfAborted(); lifetime.assertCurrent(); }, renew: signal => renew(signal) });
+        assemblyFacts.metadataPreparation = createInstalledMetadataTargetPreparation(lifetime, capacityAuthorityToken);
+        assemblyFacts.metadataPreparation.initialize();
         // The namespace is ready only here; no early requests can reach late-bound ports.
         server = await startPublicController({ socketPath: join(lifetime.base, 'public', 'controller.sock'), authorityId: lifetime.manifest.authorityId, serviceEpoch: lifetime.serviceEpoch, privateKey: lifetime.privateKey, allowedUserIds: lifetime.manifest.allowedUserIds,
             acceptPeer(socket) { lifetime.assertCurrent(); const peer = readControllerSocketAuditPeer(socket, lifetime.peerHelper); return { uid: peer.uid, gid: peer.gid, auditSessionId: peer.auditSessionId }; },
@@ -253,7 +265,7 @@ export async function startInstalledVerificationController() {
         failedLifetimes.add(lifetime);
         try {
             await closeInstalledControllerComponents({ components: [() => { if (stackConstructionPending)
-                        throw Error('installed_stack_construction_unknown'); }, () => server?.close(), () => maintenance?.close(), () => archive?.close(), () => application?.close(), () => publication?.close(), () => receiverTransport?.close(), () => operations?.close(), () => stack?.close()],
+                        throw Error('installed_stack_construction_unknown'); }, () => server?.close(), () => assemblyFacts.metadataPreparation?.close(), () => maintenance?.close(), () => archive?.close(), () => application?.close(), () => publication?.close(), () => receiverTransport?.close(), () => operations?.close(), () => stack?.close()],
                 finalizers: [() => sources?.close(), () => caps?.close(), () => artifacts?.close(), () => completion?.close(), () => receiver?.close(), () => sharedCapacity?.close(), () => rootBroker?.dispose()],
                 closeLifetime() { }, retainLifetime() { } });
         }

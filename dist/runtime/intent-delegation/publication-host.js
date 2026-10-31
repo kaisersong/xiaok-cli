@@ -13,6 +13,16 @@ import { intentHostSubjectOwner } from '../verification/intent-host-subject.js';
 import { intentContractOriginalRegistration, intentOriginalRegistrationHash } from '../verification/intent-contract-enrollment.js';
 import { readInstalledCurrentOwner } from '../verification/installed-owner-state.js';
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
+function publicationArray(value) { if (!Array.isArray(value))
+    throw Error('intent_publication_candidate_data'); return value; }
+function publicationRow(value) { if (value === null || typeof value !== 'object')
+    throw Error('intent_publication_candidate_data'); }
+function artifactArray(value) { if (!Array.isArray(value))
+    throw Error('intent_publication_file'); return value; }
+function artifactRow(value) { if (value === null || typeof value !== 'object')
+    throw Error('intent_publication_file'); }
+function artifactString(value) { if (typeof value !== 'string')
+    throw Error('intent_publication_file'); return value; }
 const id = (v) => typeof v === 'string' && !!v && Buffer.byteLength(v) <= 160 && !/[\x00-\x1f\x7f]/.test(v);
 const parentWrites = new WeakMap();
 /** Consume-only: ordinary observations cannot mint a parent capture ticket. */
@@ -210,7 +220,7 @@ export function createIntentPublicationHost(options) {
                 exact(ledger, signal);
                 row = await claimRequest({ sessionId, instanceId, candidateId: row.id, expectedLedgerHash: intentNativeLedgerHash(ledger), expectedRequestId: attempt.requestId, expectedRevision: attempt.revision, route, requestSource: 'user', now: timestamp, lease });
                 attempt = row.applicationAttempts.at(-1);
-                ledger = { ...ledger, updatedAt: timestamp, publicationCandidates: ledger.publicationCandidates.map(previous => previous.id === row.id ? row : previous) };
+                ledger = { ...ledger, updatedAt: timestamp, publicationCandidates: publicationArray(ledger.publicationCandidates).map(previous => { publicationRow(previous); return previous.id === row.id ? row : previous; }) };
                 exact(ledger, signal);
                 const client = createInstalledIntentApplicationClient(intentPublicationTarget(ledger, row), 'user');
                 try {
@@ -297,7 +307,7 @@ export function createIntentPublicationHost(options) {
                 const record = ledger.intents.find(r => r.intentId === ledger.activeIntentId), native = parseIntentNativeContracts(ledger.nativeContracts, sessionId).find(n => n.intentId === record?.intentId), stage = native?.contract.stages.find(s => s.stageId === record?.activeStageId);
                 if (!record || !stage || record.overallStatus !== 'publication_pending')
                     throw Error('intent_publication_current');
-                const originalSelections = stage.verification.obligations.flatMap(o => { const recipe = o.recipe, paths = recipe.kind === 'artifact-content' ? recipe.checks.map(c => c.path) : recipe.kind === 'blackbox' ? ['verification-report.json'] : ('sources' in recipe ? recipe.sources : [recipe]).map(s => s.diagnosisPath); return [...new Set(paths)].map(path => ({ obligationId: o.obligationId, path })); }), artifacts = (record.artifacts ?? []).filter(a => a.stageId === stage.stageId), configuration = { artifactSelections: artifacts.map(a => ({ artifactId: a.artifactId, ...(originalSelections.length === 1 ? originalSelections[0] : { obligationId: null, path: null }) })) };
+                const originalSelections = stage.verification.obligations.flatMap(o => { const recipe = o.recipe, paths = recipe.kind === 'artifact-content' ? recipe.checks.map(c => c.path) : recipe.kind === 'blackbox' ? ['verification-report.json'] : ('sources' in recipe ? recipe.sources : [recipe]).map(s => s.diagnosisPath); return [...new Set(paths)].map(path => ({ obligationId: o.obligationId, path })); }), artifacts = artifactArray(record.artifacts ?? []).filter((a) => { artifactRow(a); return a.stageId === stage.stageId; }), configuration = { artifactSelections: artifacts.map(a => ({ artifactId: a.artifactId, ...(originalSelections.length === 1 ? originalSelections[0] : { obligationId: null, path: null }) })) };
                 exact(ledger, signal);
                 const result = captureIntentData({ intentId: record.intentId, stageId: stage.stageId, artifacts, originalSelections, configuration });
                 const freeze = (v) => {
@@ -326,7 +336,7 @@ export function createIntentPublicationHost(options) {
                     exact(ledger, signal);
                     const observed = await readCurrentIntentPublicationDependencies({ version: 1, sessionId, intentId, stageId: null }, signal);
                     exact(ledger, signal);
-                    const references = observed.publications.map(p => { const local = ledger.publicationCandidates?.find(c => c.intentId === intentId && c.stageId === p.application.binding.subject.stageId); if (!local || json(intentPublicationTarget(ledger, local)) !== json(p.application.binding))
+                    const references = observed.publications.map(p => { const local = parseIntentPublicationCandidates(ledger).find(c => c.intentId === intentId && c.stageId === p.application.binding.subject.stageId); if (!local || json(intentPublicationTarget(ledger, local)) !== json(p.application.binding))
                         throw Error('intent_parent_current'); return { subject: p.application.binding.subject, candidateId: local.id, candidateRevision: local.candidateRevision, bindingHash: p.application.bindingHash, immutablePayloadHash: p.payloadHash, operationId: p.operationId, fullTupleHash: p.fullTupleHash, committedBusinessRevision: p.businessRevision, receiverId: p.receiverId, receiverProtocolVersion: p.receiverProtocolVersion, receiverInstanceEpoch: p.receiverInstanceEpoch }; });
                     const files = readIntentPublicationFileFacts(ledger, workspace, { intentId, stageId: null }), timestamp = now();
                     exact(ledger, signal);
@@ -451,10 +461,10 @@ export function readIntentPublicationFileFacts(ledger, workspace, row) {
     const record = ledger.intents.find(r => r.intentId === (row?.intentId ?? ledger.activeIntentId)), stageId = row ? row.stageId : record?.activeStageId;
     if (!record)
         throw Error('intent_publication_current');
-    return (record.artifacts ?? []).filter(a => (stageId === null || a.stageId === stageId) && a.storage === 'file_ref').map(a => {
+    return artifactArray(record.artifacts ?? []).filter((a) => { artifactRow(a); return (stageId === null || a.stageId === stageId) && a.storage === 'file_ref'; }).map(a => {
         if (!a.path)
             throw Error('intent_publication_file');
-        const path = resolve(workspace, a.path), before = lstatSync(path, { bigint: true });
+        const path = resolve(workspace, artifactString(a.path)), before = lstatSync(path, { bigint: true });
         if (!before.isFile() || before.isSymbolicLink() || before.size > 16n * 1024n ** 2n)
             throw Error('intent_publication_file');
         const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -466,7 +476,7 @@ export function readIntentPublicationFileFacts(ledger, workspace, row) {
             const identity = (s) => json({ dev: String(s.dev), ino: String(s.ino), size: String(s.size), mtimeNs: String(s.mtimeNs), ctimeNs: String(s.ctimeNs) });
             if (identity(before) !== identity(after) || identity(current) !== identity(after) || current.isSymbolicLink() || bytes.length !== Number(before.size))
                 throw Error('intent_publication_file_changed');
-            return { artifactId: a.artifactId, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, identity: identity(after) };
+            return { artifactId: artifactString(a.artifactId), sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, identity: identity(after) };
         }
         finally {
             closeSync(fd);

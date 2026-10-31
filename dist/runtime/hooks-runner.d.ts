@@ -9,6 +9,8 @@ export interface HookSharedContext {
 }
 export type HookType = 'command' | 'http' | 'prompt';
 export interface HookConfigBase {
+    /** Opt in to strictly validated synchronous JSON control output. */
+    outputFormat?: 'json';
     /** Hook type. Defaults to 'command'. */
     type?: HookType;
     /** Which hook events this hook responds to. Omit to match ALL events. */
@@ -90,6 +92,8 @@ export interface HooksRunnerConfig {
 }
 export interface HookRunResult {
     ok: boolean;
+    /** Machine-readable rejection for malformed declared control output. */
+    errorCode?: 'hook_invalid_json_output';
     message?: string;
     /** PreToolUse: modified tool input to pass to the tool */
     updatedInput?: Record<string, unknown>;

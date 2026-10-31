@@ -1,17 +1,46 @@
 import { intentHint, intentHintDot } from './render.js';
 const TERMINAL_INTENT_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+function presentationFail(field) { throw new TypeError(`intent_presentation:${field}`); }
+function presentationText(value, field) {
+    if (typeof value !== 'string')
+        return presentationFail(field);
+    return value;
+}
+function presentationNumber(value, field) {
+    // Preserve original number arithmetic, including fractions and non-finite values.
+    if (typeof value !== 'number')
+        return presentationFail(field);
+    return value;
+}
+function presentationObject(value, field) {
+    if (!isPresentationObject(value))
+        return presentationFail(field);
+    return value;
+}
+function isPresentationObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function presentationArray(value, field) {
+    if (!Array.isArray(value))
+        return presentationFail(field);
+    return value;
+}
+function presentationStrings(value, field) {
+    return presentationArray(value, field).map(entry => presentationText(entry, field));
+}
+function presentationStage(value) {
+    return presentationObject(value, 'stage');
+}
 export function formatCurrentIntentSummaryLine(ledger, instanceId) {
     const activeIntent = getOwnedActiveIntent(ledger, instanceId);
-    if (!activeIntent) {
+    if (!activeIntent)
         return '';
-    }
     const stages = getIntentStages(activeIntent);
-    const activeStage = stages.find((stage) => stage.stageId === activeIntent.activeStageId) ?? stages[0];
-    const stageLabel = activeStage?.label ?? 'Waiting';
-    const stageProgress = activeStage
-        ? `Stage ${activeStage.order + 1}/${stages.length}`
-        : 'Stage';
-    return formatIntentSummaryHint(`Intent: ${activeIntent.deliverable} · ${stageProgress} ${stageLabel} · ${humanizeOverallStatus(activeIntent.overallStatus)}`);
+    const activeStage = stages.find(stage => presentationStage(stage).stageId === activeIntent.activeStageId) ?? stages[0];
+    const stage = activeStage === undefined ? undefined : presentationStage(activeStage);
+    const stageLabel = stage ? presentationText(stage.label ?? 'Waiting', 'stage.label') : 'Waiting';
+    const stageProgress = stage ? `Stage ${presentationNumber(stage.order, 'stage.order') + 1}/${stages.length}` : 'Stage';
+    return formatIntentSummaryHint(`Intent: ${presentationText(activeIntent.deliverable, 'deliverable')} · ${stageProgress} ${stageLabel} · ${humanizeOverallStatus(activeIntent.overallStatus)}`);
 }
 export function formatCurrentTurnIntentSummaryLine(input) {
     const skillText = formatSkillSummary(input.skillNames ?? []);
@@ -19,52 +48,42 @@ export function formatCurrentTurnIntentSummaryLine(input) {
 }
 export function buildIntentReminderBlock(ledger, instanceId) {
     const activeIntent = getOwnedActiveIntent(ledger, instanceId);
-    if (!activeIntent) {
+    if (!activeIntent)
         return undefined;
-    }
     const lines = [
         'Intent run contract:',
-        `Goal chain: ${activeIntent.deliverable}`,
-        `Final deliverable: ${activeIntent.finalDeliverable}`,
+        `Goal chain: ${presentationText(activeIntent.deliverable, 'deliverable')}`,
+        `Final deliverable: ${presentationText(activeIntent.finalDeliverable, 'finalDeliverable')}`,
         `Active stage: ${describeActiveStage(activeIntent)}`,
-        `Risk: ${activeIntent.riskTier}`,
+        `Risk: ${presentationText(activeIntent.riskTier, 'riskTier')}`,
     ];
-    const providedSourcePaths = activeIntent.providedSourcePaths ?? [];
-    if (providedSourcePaths.length > 0) {
+    const providedSourcePaths = presentationStrings(activeIntent.providedSourcePaths ?? [], 'providedSourcePaths');
+    if (providedSourcePaths.length > 0)
         lines.push(`Provided sources: ${providedSourcePaths.join(' | ')}`);
-    }
     const preferredStageSkills = describePreferredStageSkills(activeIntent);
-    if (preferredStageSkills) {
+    if (preferredStageSkills)
         lines.push(`Preferred stage skills: ${preferredStageSkills}`);
-    }
-    if (activeIntent.delegationBoundary.length > 0) {
-        lines.push(`Boundary: ${activeIntent.delegationBoundary.join(' | ')}`);
-    }
-    if (activeIntent.latestBreadcrumb) {
-        lines.push(`Latest progress: ${activeIntent.latestBreadcrumb}`);
-    }
-    const constraints = activeIntent.explicitConstraints ?? [];
-    if (constraints.length > 0) {
+    const boundary = presentationStrings(activeIntent.delegationBoundary, 'delegationBoundary');
+    if (boundary.length > 0)
+        lines.push(`Boundary: ${boundary.join(' | ')}`);
+    if (activeIntent.latestBreadcrumb)
+        lines.push(`Latest progress: ${presentationText(activeIntent.latestBreadcrumb, 'latestBreadcrumb')}`);
+    const constraints = presentationStrings(activeIntent.explicitConstraints ?? [], 'explicitConstraints');
+    if (constraints.length > 0)
         lines.push(`Constraints (must follow): ${constraints.join('; ')}`);
-    }
-    return {
-        type: 'text',
-        text: `<system-reminder>${lines.join('\n')}</system-reminder>`,
-    };
+    return { type: 'text', text: `<system-reminder>${lines.join('\n')}</system-reminder>` };
 }
 export function formatIntentCreatedTranscriptBlock(ledger, intentId) {
-    const intent = ledger?.intents.find((candidate) => candidate.intentId === intentId);
-    if (!intent) {
+    const intent = ledger?.intents.find(candidate => candidate.intentId === intentId);
+    if (!intent)
         return '';
-    }
     const intentLines = [buildIntentAcknowledgement(intent)];
-    const providedSourcePaths = intent.providedSourcePaths ?? [];
-    if (providedSourcePaths.length > 0) {
-        intentLines.push(`来源：${providedSourcePaths.join(' | ')}`);
-    }
-    if (intent.delegationBoundary.length > 0) {
-        intentLines.push(`边界：${intent.delegationBoundary.join(' | ')}`);
-    }
+    const paths = presentationStrings(intent.providedSourcePaths ?? [], 'providedSourcePaths');
+    if (paths.length > 0)
+        intentLines.push(`来源：${paths.join(' | ')}`);
+    const boundary = presentationStrings(intent.delegationBoundary, 'delegationBoundary');
+    if (boundary.length > 0)
+        intentLines.push(`边界：${boundary.join(' | ')}`);
     return intentHint([...intentLines, ''].join('\n'));
 }
 export function formatProgressTranscriptBlock(input) {
@@ -116,33 +135,36 @@ function humanizeStepId(stepId) {
 }
 function describeActiveStage(intent) {
     const stages = getIntentStages(intent);
-    const activeStage = stages.find((stage) => stage.stageId === intent.activeStageId) ?? stages[0];
-    if (!activeStage) {
+    const activeStage = stages.find(stage => presentationStage(stage).stageId === intent.activeStageId) ?? stages[0];
+    if (activeStage === undefined)
         return 'Waiting';
-    }
-    return `${activeStage.order + 1}/${stages.length} ${activeStage.label}`;
+    const stage = presentationStage(activeStage);
+    return `${presentationNumber(stage.order, 'stage.order') + 1}/${stages.length} ${presentationText(stage.label, 'stage.label')}`;
 }
 function getIntentStages(intent) {
-    if (Array.isArray(intent.stages) && intent.stages.length > 0) {
-        return intent.stages;
+    if (intent.stages != null) {
+        const stages = presentationArray(intent.stages, 'stages');
+        if (stages.length > 0)
+            return stages;
     }
+    // Retain this existing display-only legacy fallback; never write it into DATA.
     return [{
-            stageId: intent.activeStageId ?? `${intent.intentId}:stage:1`,
+            stageId: intent.activeStageId ?? `${presentationText(intent.intentId, 'intentId')}:stage:1`,
             order: 0,
-            label: `生成${intent.finalDeliverable ?? intent.deliverable}`,
+            label: `生成${presentationText(intent.finalDeliverable ?? intent.deliverable, 'finalDeliverable')}`,
             steps: intent.steps,
         }];
 }
 function describePreferredStageSkills(intent) {
-    const preferred = intent.stages
-        .map((stage) => {
-        const skillName = stage.steps
-            .map((step) => step.skillName)
+    const preferred = presentationArray(intent.stages, 'stages')
+        .map(value => {
+        const stage = presentationStage(value);
+        const skillName = presentationArray(stage.steps, 'stage.steps')
+            .map(step => presentationObject(step, 'step').skillName)
             .find((name) => typeof name === 'string' && !name.startsWith('generic_llm::'));
-        if (!skillName) {
+        if (!skillName)
             return null;
-        }
-        return `${stage.label} -> ${skillName}`;
+        return `${presentationText(stage.label, 'stage.label')} -> ${skillName}`;
     })
         .filter((value) => Boolean(value));
     return preferred.join(' | ');
@@ -159,9 +181,9 @@ function formatSkillSummary(skillNames) {
 function buildIntentAcknowledgement(intent) {
     const stages = getIntentStages(intent);
     if (stages.length > 1) {
-        return `🤝 已理解，会先${stages.map((stage) => stage.label).join('，再')}。`;
+        return `🤝 已理解，会先${stages.map(stage => presentationText(presentationStage(stage).label, 'stage.label')).join('，再')}。`;
     }
-    const deliverable = intent.finalDeliverable ?? intent.deliverable;
+    const deliverable = presentationText(intent.finalDeliverable ?? intent.deliverable, 'finalDeliverable');
     return `🤝 已理解，会帮你产出${deliverable}。`;
 }
 function formatIntentSummaryHint(text) {
@@ -184,7 +206,7 @@ function humanizeStepStatus(status) {
     return 'Failed';
 }
 function humanizeOverallStatus(status) {
-    return status
+    return presentationText(status, 'overallStatus')
         .split(/[_-]+/g)
         .filter(Boolean)
         .map((part) => part[0]?.toUpperCase() + part.slice(1))

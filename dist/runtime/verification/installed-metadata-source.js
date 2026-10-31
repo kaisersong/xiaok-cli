@@ -14,6 +14,11 @@ import { parseOwnerEnrollmentRegistration } from './owner-enrollment-review.js';
 const hash = (v) => createHash('sha256').update(json(v)).digest('hex');
 const required = ['verification_profiles', 'verification_registered_owners', 'verification_registered_invocations', 'owner_enrollment_invocation_receipts', 'owner_enrollment_goal_sessions', 'owner_enrollment_intents'];
 const sources = new WeakMap(), owners = new WeakMap();
+const mappingNotReadyErrors = new WeakMap();
+function mappingNotReady(source, message) { const error = Error(message); mappingNotReadyErrors.set(error, { source, database: source.database, authorityId: source.authorityId }); return error; }
+/** Only the original Source's validated pending row can issue this classification. */
+export function isInstalledMetadataMappingNotReady(error, database, authorityId) { if (!error || typeof error !== 'object')
+    return false; const facts = mappingNotReadyErrors.get(error); return !!facts && facts.database === database && facts.authorityId === authorityId; }
 function identifier(v) { if (typeof v !== 'string' || !v || Buffer.byteLength(v) > 160 || /[\x00-\x1f\x7f]/.test(v))
     throw Error('metadata_source_identity'); }
 function parsed(text) { const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value) || json(value) !== text)
@@ -39,23 +44,34 @@ function inventorySnapshot(s) {
     const profiles = db.prepare('SELECT uid,account_id,profile_id,state FROM main.verification_profiles ORDER BY uid').all();
     const sessions = new Map(), records = [], ownerSessions = [];
     const registeredLogicalOwners = new Set();
+    let pendingReason;
     for (const profile of profiles) {
-        if (profile.state !== 'active' || !Number.isSafeInteger(profile.uid) || profile.uid < 1 || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(profile.account_id))
+        if (!Number.isSafeInteger(profile.uid) || profile.uid < 1 || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(profile.account_id))
             throw Error('metadata_source_profile_unknown');
         identifier(profile.profile_id);
+        const pendingProfile = profile.state === 'pending' && s.lifetime.manifest.allowedUserIds.includes(profile.uid);
+        if (pendingProfile)
+            pendingReason ??= 'metadata_source_profile_unknown';
+        else if (profile.state !== 'active')
+            throw Error('metadata_source_profile_unknown');
         const add = (sessionIdentity) => { identifier(sessionIdentity); const sessionKey = hash({ authorityId: s.authorityId, profileId: profile.profile_id, accountId: profile.account_id, sessionIdentity }); sessions.set(sessionKey, Object.freeze({ sessionKey, producerKey: 'installed-controller-metadata' })); };
         const registered = db.prepare('SELECT owner_key,state FROM main.verification_registered_owners WHERE uid=? ORDER BY owner_key').all(profile.uid);
         for (const owner of registered) {
             const o = parsed(owner.owner_key);
-            if (Object.keys(o).sort().join(',') !== 'ownerId,ownerKind,profileId' || owner.state !== 'active' || o.profileId !== profile.profile_id || !(['task', 'goal', 'intent', 'loop', 'project'].includes(o.ownerKind) || isKSwarmOwnerIdentity(o)))
+            if (Object.keys(o).sort().join(',') !== 'ownerId,ownerKind,profileId' || o.profileId !== profile.profile_id || !(['task', 'goal', 'intent', 'loop', 'project'].includes(o.ownerKind) || isKSwarmOwnerIdentity(o)))
                 throw Error('metadata_source_owner_unknown');
             identifier(o.ownerId);
+            const pendingOwner = owner.state === 'pending' && s.lifetime.manifest.allowedUserIds.includes(profile.uid);
+            if (pendingOwner)
+                pendingReason ??= 'metadata_source_owner_unknown';
+            else if (owner.state !== 'active')
+                throw Error('metadata_source_owner_unknown');
             const ownerSessionIds = new Set();
             const collect = (identity) => { identifier(identity); add(identity); ownerSessionIds.add(identity); };
             const logical = json({ uid: profile.uid, accountGeneration: profile.account_id.toUpperCase(), ownerKind: o.ownerKind, ownerId: o.ownerId });
             registeredLogicalOwners.add(logical);
             const intent = db.prepare('SELECT registration_json,committed FROM main.owner_enrollment_intents WHERE logical_owner_key=?').get(logical);
-            if (!intent || intent.committed !== 1)
+            if (!intent || (!pendingOwner && intent.committed !== 1) || (pendingOwner && intent.committed !== 0 && intent.committed !== 1))
                 throw Error('metadata_source_registration_unknown');
             const registration = parseOwnerEnrollmentRegistration(parsed(intent.registration_json));
             const validateReceipt = (receipt) => { if (!receipt || receipt.logical_owner_key !== logical)
@@ -63,14 +79,16 @@ function inventorySnapshot(s) {
                 throw Error('metadata_source_receipt_changed'); };
             const invocations = db.prepare('SELECT profile_id,invocation_json,state FROM main.verification_registered_invocations WHERE owner_key=? ORDER BY invocation_json').all(owner.owner_key);
             for (const r of invocations) {
-                if (r.profile_id !== profile.profile_id || r.state !== 'active')
+                const uncommittedPendingInvocation = pendingOwner && intent.committed === 0 && r.state === 'pending';
+                if (r.profile_id !== profile.profile_id || (r.state !== 'active' && !uncommittedPendingInvocation))
                     throw Error('metadata_source_invocation_unknown');
                 const invocation = parsed(r.invocation_json);
                 if (Object.keys(invocation).sort().join(',') !== 'compoundOperationId,sessionIdentity,validationInvocationId')
                     throw Error('metadata_source_invocation');
                 Object.values(invocation).forEach(identifier);
                 const receipt = db.prepare('SELECT logical_owner_key,registration_json FROM main.owner_enrollment_invocation_receipts WHERE owner_key=? AND invocation_json=?').get(owner.owner_key, r.invocation_json);
-                validateReceipt(receipt);
+                if (receipt || !uncommittedPendingInvocation)
+                    validateReceipt(receipt);
                 collect(invocation.sessionIdentity);
                 records.push({ profile, owner, invocation, receipt });
             }
@@ -116,7 +134,12 @@ function inventorySnapshot(s) {
     if (!intents?.present)
         throw Error('metadata_source_mapping_missing');
     const unresolvedEnrollments = Object.freeze(intents.rows.filter(row => !registeredLogicalOwners.has(String(row.logical_owner_key))).map(row => Object.freeze(row)));
+    // Never classify an early pending row until every original hard semantic and
+    // orphan/current check in this same snapshot has completed. Pending facts are
+    // never returned or turned into capacity owner brands.
     s.current();
+    if (pendingReason)
+        throw mappingNotReady(s, pendingReason);
     return { sessions: [...sessions.values()].sort((a, b) => a.sessionKey.localeCompare(b.sessionKey)), censusHash: createHash('sha256').update('{"enrollmentPopulation":' + canonicalNativeCensusPopulation(enrollmentPopulation) + ',"profiles":' + json(profiles) + ',"records":' + json(records) + '}').digest('hex'), enrollmentPopulation, unresolvedEnrollments, profiles: Object.freeze(profiles.map(profile => Object.freeze({ uid: profile.uid, accountId: profile.account_id, profileId: profile.profile_id, state: 'active' }))), ownerSessions: Object.freeze(ownerSessions) };
 }
 /** Actual controller lifetime is the sole issuer; no caller-provided path/session/partition. */
