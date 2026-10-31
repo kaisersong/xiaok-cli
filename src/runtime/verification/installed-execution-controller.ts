@@ -1,3 +1,4 @@
+import {drainDockerRunnerCleanup} from '../isolated-execution/docker-runner.js';
 import {assertControllerMaterialPipelineDatabase} from './material-pipeline.js';
 import {consumeExecutionCommandContext} from '../isolated-execution/docker-runner.js';
 import type {ExecutionWriteContext} from './execution-command-dispatch.js';
@@ -53,6 +54,6 @@ export function createInstalledExecutionController(input:{engine:Awaited<ReturnT
   throw Error('execution_method');
  }
  return Object.freeze({deletionAuthority:raw.deletionAuthority,publicPort:Object.freeze({invoke(method:string,payload:unknown,peer:ControllerPeer,signal:AbortSignal){const task=invoke(method,payload,peer,signal);active.add(task);void task.then(()=>active.delete(task),()=>active.delete(task));return task;}}),privateHost:Object.freeze({raw,quiescence,caseStager}),
-  close(){return closing??=(async()=>{lifetime.abort();await Promise.allSettled([...active]);for(const record of handles.values())await cancelPrepared(record.expected);handles.clear();caseStager.close();raw.close();})();},
+  close(){return closing??=(async()=>{lifetime.abort();await Promise.allSettled([...active]);for(const record of handles.values())await cancelPrepared(record.expected);handles.clear();await drainDockerRunnerCleanup(raw);caseStager.close();raw.close();})();},
  });
 }

@@ -1,3 +1,5 @@
+import {claimInstalledMaintenanceBatch,readInstalledMaintenanceBatch,finishInstalledMaintenanceBatch,sealInstalledMaintenanceRequests} from './installed-maintenance-handoff.js';
+import {createInstalledMaintenanceStack,isInstalledConstructionPending} from './installed-execution-stack.js';
 import {assertSharedBlobCapacityAuthority} from './shared-blob-capacity.js';
 import {assertSharedCapacityLedgerAuthority} from './shared-capacity-ledger.js';
 import {assertVerificationBlobBudgetAuthority} from './blob-budget.js';
@@ -29,7 +31,7 @@ import {canonicalVerificationJson as json} from './protocol.js';
 import {refreshNativeApprovalQualification,createStableQualificationRefresh} from './native-approval-refresh.js';
 import {createControllerOperationRouting} from './controller-operation-routing.js';
 import {closeInstalledControllerComponents} from './controller-shutdown.js';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {createInstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {createInstalledExecutionStack} from './installed-execution-stack.js';
@@ -43,6 +45,8 @@ import {createInstalledProfileIndexPublisher} from './installed-migration-publis
 import {startPublicController} from './controller-public-daemon.js';
 import {createInstalledMetadataTargetPreparation} from './installed-metadata-target-prepare.js';
 import {readControllerSocketAuditPeer} from './socket-peer.js';
+const maintenanceSealFacts=new WeakMap<object,{stack:object;closeAttemptId:string}>();
+export function readInstalledMaintenanceSeal(lifetime:object,stack:object):string{const facts=maintenanceSealFacts.get(lifetime);if(!facts||facts.stack!==stack)throw Error('installed_controller_drain_unknown');assertInstalledControllerLifetime(lifetime);return facts.closeAttemptId;}
 const failedLifetimes=new Set<ReturnType<typeof createInstalledControllerLifetime>>();
 const unresolvedShutdownErrors=new WeakSet<object>();
 /** Read-only error classification; only an actual root close failure can enter this set. */
@@ -50,10 +54,11 @@ export function isInstalledControllerShutdownUnresolved(error:unknown):boolean{r
 type InstalledAssemblyState={metadataPreparation?:ReturnType<typeof createInstalledMetadataTargetPreparation>;lifetime:ReturnType<typeof createInstalledControllerLifetime>;admission:AbortSignal;closed:boolean;receiver?:ReturnType<typeof createInstalledReceiverRegistration>;stack?:Awaited<ReturnType<typeof createInstalledExecutionStack>>;completion?:ReturnType<typeof createVerificationCompletionComposition>;caps?:ReturnType<typeof createApprovedSourceCapabilities>;sources?:ReturnType<typeof createApprovedProtectedSourceReader>;artifacts?:ReturnType<typeof createApprovedRecipeArtifactReader>;engineBinding?:string;verification?:ReturnType<typeof createApprovedVerificationOperations>;archive?:ReturnType<typeof createUserArchiveOperations>};
 const installedAssemblies=new WeakMap<object,InstalledAssemblyState>();
 type InstalledCapacityLayer='installed-owner'|'shared'|'ledger'|'authority-budget'|'blob-budget';
-type InstalledCapacityAuthorityState={assembly:InstalledAssemblyState;stackConstruction?:object;layers:Map<InstalledCapacityLayer,{phase:'constructing'|'ready'|'failed'|'closed';component?:object}>};
+type InstalledCapacityAuthorityState={assembly:InstalledAssemblyState;stackConstruction?:object;selectedKind?:'normal'|'maintenance';layers:Map<InstalledCapacityLayer,{phase:'constructing'|'ready'|'failed'|'closed';component?:object}>};
 const installedCapacityAuthorities=new WeakMap<object,InstalledCapacityAuthorityState>(),capacityAuthorityLifetimes=new WeakSet<object>(),assemblyCapacityAuthorities=new WeakMap<object,object>();
 type InstalledCapacityAuthorityFacts=Readonly<{database:Database;authorityId:string}>;
-export function claimInstalledCapacityStackConstruction(assembly:object,owner:object):object{const token=assemblyCapacityAuthorities.get(assembly);if(!token)throw Error('installed_capacity_construction');const state=capacityAuthority(token);if(installedAssemblies.get(assembly)!==state.assembly||state.stackConstruction||state.layers.get('installed-owner')?.component!==owner)throw Error('installed_capacity_construction');const ticket=Object.freeze({});state.stackConstruction=ticket;return ticket;}
+export function claimInstalledCapacityStackConstruction(assembly:object,owner:object):object{const token=assemblyCapacityAuthorities.get(assembly);if(!token)throw Error('installed_capacity_construction');const state=capacityAuthority(token);if(installedAssemblies.get(assembly)!==state.assembly||!state.selectedKind||state.stackConstruction||state.layers.get('installed-owner')?.component!==owner)throw Error('installed_capacity_construction');const ticket=Object.freeze({});state.stackConstruction=ticket;return ticket;}
+export function assertInstalledStackConstructionKind(assembly:object,kind:'normal'|'maintenance'):void{const token=assemblyCapacityAuthorities.get(assembly);if(!token)throw Error('installed_capacity_construction');const state=capacityAuthority(token);if(installedAssemblies.get(assembly)!==state.assembly||state.selectedKind!==kind)throw Error('installed_capacity_construction');}
 function capacityAuthority(token:object){const state=installedCapacityAuthorities.get(token);if(!state)throw Error('capacity_authority_configuration');if(state.assembly.closed)throw Error('capacity_authority_closed');assertInstalledControllerLifetime(state.assembly.lifetime);return state;}
 /** Narrow capacity facts only; this token is not accepted by assembly APIs. */
 export function readInstalledCapacityAuthority(token:object):InstalledCapacityAuthorityFacts{if(arguments.length!==1)throw Error('capacity_authority_configuration');const state=capacityAuthority(token);return Object.freeze({database:state.assembly.lifetime.database,authorityId:state.assembly.lifetime.manifest.authorityId});}
@@ -122,7 +127,9 @@ export async function startInstalledVerificationController(){
  let application:ReturnType<typeof createApplicationBindingAuthority>|undefined;
  let publication:ReturnType<typeof createApprovedPublicationOperations>|undefined,receiverTransport:ReturnType<typeof createInstalledReceiverTransport>|undefined;
  let sharedCapacity:ReturnType<typeof createInstalledSharedCapacity>|undefined,rootBroker:ReturnType<typeof createInstalledRootBrokerClient>|undefined,maintenance:ReturnType<typeof createInstalledCapacityMaintenance>|undefined;
+ const closeAttemptId=randomUUID();
  let stackConstructionPending=false;
+ let maintenanceStack:Awaited<ReturnType<typeof createInstalledMaintenanceStack>>|undefined;
  let receiver:ReturnType<typeof createInstalledReceiverRegistration>|undefined,closing:Promise<void>|undefined;
  const need=<T>(value:T|undefined):T=>{lifetime.assertCurrent();if(!value)throw Error('installed_controller_unassembled');return value;};
  const denied=()=>{throw Error('installed_controller_native_delete_authorization_required');};
@@ -131,7 +138,7 @@ export async function startInstalledVerificationController(){
   let resolve!:(value:void)=>void,reject!:(error:unknown)=>void;closing=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});
   // Publish the original attempt before abort listeners or any actual drain may reenter.
   admission.abort(Error('installed_controller_closing'));
-  void closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending)throw Error('installed_stack_construction_unknown');},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close()],finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose()],closeLifetime:()=>{lifetime.close();assemblyFacts.closed=true;},retainLifetime:()=>{failedLifetimes.add(lifetime);}}).then(resolve,error=>{const failure=typeof error==='object'&&error!==null?error:new AggregateError([error],'installed_controller_shutdown_unknown');unresolvedShutdownErrors.add(failure);reject(failure);});
+  void closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending){const ticket=installedCapacityAuthorities.get(capacityAuthorityToken)?.stackConstruction;if(!ticket||isInstalledConstructionPending(ticket))throw Error('installed_stack_construction_unknown');}},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close(),()=>maintenanceStack?.close()],finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose(),()=>{if(stack){maintenanceSealFacts.set(lifetime,{stack,closeAttemptId});sealInstalledMaintenanceRequests(lifetime,stack);}}],closeLifetime:()=>{lifetime.close();assemblyFacts.closed=true;},retainLifetime:()=>{failedLifetimes.add(lifetime);}}).then(resolve,error=>{const failure=typeof error==='object'&&error!==null?error:new AggregateError([error],'installed_controller_shutdown_unknown');unresolvedShutdownErrors.add(failure);reject(failure);});
   return closing;
  }
  try{
@@ -144,6 +151,20 @@ export async function startInstalledVerificationController(){
     async invoke(method,payload,peer,signal){const combined=AbortSignal.any([signal,admission.signal]);combined.throwIfAborted();lifetime.assertCurrent();if(method!=='maintenance.diagnose')throw Error('installed_controller_maintenance');return recovery.publicPort.diagnose(payload,peer,combined);},
    });
    return Object.freeze({close});
+  }
+  const recoveryBatch=claimInstalledMaintenanceBatch(lifetime),authorityState=installedCapacityAuthorities.get(capacityAuthorityToken);if(!authorityState)throw Error('capacity_authority_configuration');authorityState.selectedKind=recoveryBatch?'maintenance':'normal';
+  if(recoveryBatch){
+   stackConstructionPending=true;
+   maintenanceStack=await createInstalledMaintenanceStack({assembly,lifetime,sharedCapacity,broker:rootBroker,batch:recoveryBatch,signal:admission.signal});stackConstructionPending=false;
+   try{
+    const targets=readInstalledMaintenanceBatch(recoveryBatch,lifetime);
+    for(const target of targets.filter(target=>target.kind==='material')){admission.signal.throwIfAborted();await maintenanceStack.privateHost.staging.cleanupResource(target.resourceId,admission.signal);}
+    for(const target of targets.filter(target=>target.kind==='raw')){admission.signal.throwIfAborted();if(!target.expected)throw Error('maintenance_handoff_target');const receipt=await maintenanceStack.privateHost.execution.cleanupExecution(target.expected);maintenanceStack.privateHost.execution.assertQuiescent(receipt,target.expected);}
+    finishInstalledMaintenanceBatch(recoveryBatch,lifetime,false);
+   }catch(error){
+    const failures:unknown[]=[error];try{finishInstalledMaintenanceBatch(recoveryBatch,lifetime,true);}catch(recordError){failures.push(recordError);}try{await close();}catch(cleanupError){failures.push(cleanupError);}if(failures.length>1){const failure=new AggregateError(failures,'installed_maintenance_recovery_unknown',{cause:error});if(failures.some(isInstalledControllerShutdownUnresolved))unresolvedShutdownErrors.add(failure);throw failure;}throw error;
+   }
+   await close();return Object.freeze({close});
   }
   receiver=createInstalledReceiverRegistration(lifetime);const actualReceiver=receiver;assertInstalledReceiverRegistration(actualReceiver,lifetime);
   stackConstructionPending=true;
@@ -181,14 +202,15 @@ export async function startInstalledVerificationController(){
   });
   return Object.freeze({close});
  }catch(error){
+  if(assemblyFacts.closed)throw error;
   // Keep the original lifetime before cleanup: unknown drains and native close
   // failures must never let GC release its actual OS owner lock.
   failedLifetimes.add(lifetime);
   try{
-   await closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending)throw Error('installed_stack_construction_unknown');},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close()],
-    finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose()],
+   await closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending){const ticket=installedCapacityAuthorities.get(capacityAuthorityToken)?.stackConstruction;if(!ticket||isInstalledConstructionPending(ticket))throw Error('installed_stack_construction_unknown');}},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close(),()=>maintenanceStack?.close()],
+    finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose(),()=>{if(stack){maintenanceSealFacts.set(lifetime,{stack,closeAttemptId});sealInstalledMaintenanceRequests(lifetime,stack);}}],
     closeLifetime(){},retainLifetime(){/* Already strongly retained before cleanup. */}});
-  }catch(cleanupError){throw new AggregateError([error,cleanupError],'installed_controller_startup_cleanup_unknown',{cause:error});}
+  }catch(cleanupError){const failure=new AggregateError([error,cleanupError],'installed_controller_startup_cleanup_unknown',{cause:error});unresolvedShutdownErrors.add(failure);throw failure;}
   throw error;
  }
 }
