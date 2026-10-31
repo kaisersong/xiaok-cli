@@ -16,6 +16,7 @@ import { getDesktopApi } from '../shared/desktop';
 import { getDesktopDocumentMimeType } from '../shared/document-formats';
 import { useLocale } from '../contexts/LocaleContext';
 import { fileBasename, filePathIdentity, normalizeClipboardFilePath } from '../lib/file-path';
+import { projectFinalDeliverables } from '../lib/final-deliverables';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
@@ -332,11 +333,12 @@ export function ChatView({
     () => promptIndexEntries[0]?.id ?? null,
   );
   const currentTurnAssistantText = findAssistantTextInCurrentTurn(messages, messages.length) || streamingText;
-  const standaloneDisplayResult = projectResultForDisplay(result, currentTurnAssistantText);
-  const standaloneResultEligible = Boolean(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0;
+  const standaloneOutputs = projectFinalDeliverables(result, generatedFiles, currentTurnAssistantText, isA2uiArtifact);
+  const standaloneDisplayResult = projectResultForDisplay(standaloneOutputs.result, currentTurnAssistantText);
+  const standaloneResultEligible = status === 'completed' || status === 'idle';
   const showStandaloneResult = !hasResultCardInCurrentTurn(messages)
     && standaloneResultEligible
-    && hasResultCardContent(standaloneDisplayResult, generatedFiles);
+    && hasResultCardContent(standaloneDisplayResult, standaloneOutputs.generatedFiles);
 
   useEffect(() => {
     setActivePromptId((current) => (
@@ -452,10 +454,12 @@ export function ChatView({
         <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
             {messages.map((msg, index) => {
-              const displayResult = msg.role === 'result_card'
-                ? projectResultForDisplay(msg.result ?? null, findAssistantTextInCurrentTurn(messages, index))
-                : null;
-              const resultGeneratedFiles = msg.generatedFiles ?? [];
+              const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
+              const outputs = msg.role === 'result_card'
+                ? projectFinalDeliverables(msg.result ?? null, msg.generatedFiles ?? [], assistantText, isA2uiArtifact)
+                : { result: null, generatedFiles: [] };
+              const displayResult = projectResultForDisplay(outputs.result, assistantText);
+              const resultGeneratedFiles = outputs.generatedFiles;
               if (msg.role === 'result_card' && !hasResultCardContent(displayResult, resultGeneratedFiles)) return null;
               return (
                 <div
@@ -583,7 +587,7 @@ export function ChatView({
             {showStandaloneResult ? (
               <ResultCard
                 result={standaloneDisplayResult}
-                generatedFiles={generatedFiles}
+                generatedFiles={standaloneOutputs.generatedFiles}
                 onArtifactClick={onArtifactClick}
                 onArtifactOpenExternal={onArtifactOpenExternal}
               />
@@ -814,7 +818,8 @@ function ResultCard({
   const { t } = useLocale();
   const hasSummary = Boolean(result?.summary?.trim());
   const artifacts = uniqueOutputFiles(result?.artifacts ?? []);
-  const outputFiles = uniqueOutputFiles(generatedFiles);
+  const artifactPaths = new Set(artifacts.filter(a => a.filePath).map(a => filePathIdentity(normalizeClipboardFilePath(a.filePath!))));
+  const outputFiles = uniqueOutputFiles(generatedFiles).filter(file => !artifactPaths.has(filePathIdentity(normalizeClipboardFilePath(file.filePath))));
   const hasArtifacts = artifacts.length > 0;
   if (!hasSummary && !hasArtifacts && outputFiles.length === 0) return null;
 
@@ -914,7 +919,7 @@ function ResultCard({
           })}
         </div>
       )}
-      {!hasArtifacts && outputFiles.length > 0 && (
+      {outputFiles.length > 0 && (
         <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
           {outputFiles.map(f => {
             const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
