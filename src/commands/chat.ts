@@ -1,3 +1,5 @@
+import {inspectProfileAccountHome,ProfileAccountHomeError} from '../runtime/verification/profile-account-home.js';
+import {getUiCopy} from '../ui/locale.js';
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
 import { confirmChatPermission } from './chat-permission.js';
 import { getResumeHistoryMessages } from '../ui/resume-history.js';
@@ -571,6 +573,26 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     ?resolveCompoundHostStorage({configRoot:getConfigDir()}):undefined;
   const sessionStoreRoot=compoundStorage?.canonicalRoot??getConfigDir('sessions');
   const sessionStore = createFileSessionStore(sessionStoreRoot);
+  // Unexpected resolver errors keep the previous behaviour: surface at the first save.
+  let profileInspection:ReturnType<typeof inspectProfileAccountHome>;
+  try{profileInspection=inspectProfileAccountHome();}catch{profileInspection={ok:true};}
+  let sessionPersistenceDisabled=!profileInspection.ok;
+  let sessionStorageNotice=profileInspection.ok?undefined:getUiCopy().sessionStorageDisabled(profileInspection.path,profileInspection.reason);
+  const flushPrintStorageNotice=():void=>{
+    if(opts.print&&sessionStorageNotice){process.stderr.write(sessionStorageNotice+'\n');sessionStorageNotice=undefined;}
+  };
+  flushPrintStorageNotice();
+  const disableSessionPersistence=(error:ProfileAccountHomeError):void=>{
+    if(!sessionPersistenceDisabled)sessionStorageNotice=getUiCopy().sessionStorageDisabled(error.path,error.reason);
+    sessionPersistenceDisabled=true;
+    flushPrintStorageNotice();
+  };
+  const saveSession=sessionStore.save.bind(sessionStore);
+  sessionStore.save=async (...args:Parameters<typeof saveSession>):Promise<void>=>{
+    if(sessionPersistenceDisabled)return;
+    try{await saveSession(...args);}catch(error){if(!(error instanceof ProfileAccountHomeError))throw error;disableSessionPersistence(error);}
+  };
+
   const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
   const skillEvalStore = new SessionSkillEvalStore(sessionStore,{withMutationLease:async<T>(targetSession:string,work:(lease?:import('../ai/runtime/session-store/execution-authority.js').SessionExecutionLease)=>Promise<T>):Promise<T>=>{
     if(targetSession!==sessionId)throw Error('skill_eval_session_changed');
@@ -2801,6 +2823,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     const activityCanWrite = canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready';
     cliActivities?.flush(activityCanWrite, writeOrchestrationBlock);
     if (activityCanWrite) {
+      if(sessionStorageNotice&&writeOrchestrationBlock(sessionStorageNotice))sessionStorageNotice=undefined;
       const notice = activityStartupNotices.take();
       if (notice) {
         if (writeOrchestrationBlock(notice.text)) notice.markShown();
@@ -2812,6 +2835,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     refreshIntentLedger?: boolean;
     refreshSkillEvalState?: boolean;
   } = {}): Promise<void> => {
+    if(sessionPersistenceDisabled)return;
     if (options.refreshIntentLedger ?? true) {
       await refreshIntentLedger();
     }
@@ -2840,7 +2864,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (observationSession && historyBasis !== undefined) observationSession.notePublishedHistory(snapshot, historyBasis);
   };
 
-  const persistSession: typeof persistSessionBody = (...args) => trackSessionWrite(() => persistSessionBody(...args));
+  const persistSession: typeof persistSessionBody = (...args) => trackSessionWrite(async () => {
+    try{await persistSessionBody(...args);}catch(error){if(!(error instanceof ProfileAccountHomeError))throw error;disableSessionPersistence(error);}
+  });
 
   const pauseCurrentGoalForInterruption = async (
     reason: string,

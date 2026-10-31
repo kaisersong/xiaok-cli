@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, symlinkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1266,6 +1266,30 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     vi.clearAllMocks();
     resetAdapterState();
   });
+
+  it.skipIf(process.platform==='win32')('starts without session persistence when the config link is unsafe', async () => {
+    const root=join(tmpdir(),`xiaok-unsafe-profile-${Date.now()}`);tempDirs.push(root);
+    const target=join(root,'target'),alias=join(root,'config');mkdirSync(target,{recursive:true});chmodSync(target,0o777);symlinkSync(target,alias,'dir');
+    writeFileSync(join(target,'config.json'),JSON.stringify({schemaVersion:1,defaultModel:'claude',models:{claude:{model:'claude-test'}},defaultMode:'interactive',contextBudget:4000,channels:{}}));
+    process.env.XIAOK_CONFIG_DIR=alias;cwdSpy=vi.spyOn(process,'cwd').mockReturnValue(root);
+    const loader=await import('../../src/runtime/conversation-activity/cli-loader.js');
+    const attachSpy=vi.spyOn(loader,'attachCliConversationActivitiesWithinBudget').mockResolvedValue(undefined);
+    const {registerChatCommands}=await import('../../src/commands/chat.js');
+    const harness=createTtyHarness(180,40),tty=process.stdout.isTTY;process.stdout.isTTY=true;
+    const sigints=process.listeners('SIGINT'),resizes=process.stdout.listeners('resize');
+    try{
+      const program=new Command();registerChatCommands(program);const pending=program.parseAsync(['node','xiaok','chat']);
+      await waitForInputTurnReady(harness);expect(harness.screen.text()).toContain(alias);expect(harness.screen.text()).toContain('XIAOK_CONFIG_DIR');
+      harness.send('hello\r');await waitFor(()=>adapterCalls.length>0);await waitForInputTurnReady(harness);
+      harness.send('/exit\r');await pending;
+      expect(harness.output.normalized).not.toMatch(/AggregateError|chat_finalization_unconfirmed|crash report/);
+      expect(existsSync(join(target,'sessions'))?readdirSync(join(target,'sessions')).filter(p=>p.endsWith('.json')):[]).toEqual([]);
+    }finally{
+      for(const listener of process.listeners('SIGINT'))if(!sigints.includes(listener))process.removeListener('SIGINT',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener)&&isResizeListener(listener))process.stdout.removeListener('resize',listener);
+      harness.restore();process.stdout.isTTY=tty;attachSpy.mockRestore();
+    }
+  },15000);
 
   it.each([false, true])('starts directly without adopting project rules (shared global settings=%s)', async shared => {
     const root = join(tmpdir(), `xiaok-quiet-startup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
