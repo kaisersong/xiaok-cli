@@ -45,3 +45,15 @@
 - 最终 adapter / stream lifecycle / authorization / read recovery：219/219；Desktop production loop / task recovery / provider lifecycle：18/18。工具输入进度不进入 assistant history，也不会重复执行已完成工具。
 - Desktop build:main、typecheck 通过；governance:check 无新增违规，未变更 baseline。
 - finish 后的空闲错误现在保留固定 OPENAI_STREAM_IDLE_TIMEOUT 诊断，retryable:false；finish 前才可由现有 read owner 恢复。没有增加 task/tool 重试状态机，没有延长任务 deadline。
+
+## 指定项目模型的永久错误边界
+
+独立整 PR 审查发现 selected-model fallback 的 isBoundaryFailure 只识别旧错误码/授权消息，未消费 retryable:false；invalid_tool_call 及 finish 后 idle 的永久错误仍能切到默认模型发第二次请求。默认 read recovery 已正确，需修复真实兄弟入口。
+
+设计：沿 Error/cause 链循环去重，任一明确 retryable:false、原有授权/取消/deadline/repetition 边界均禁止 fallback；补显式 KIMI_REASONING_ADMISSION_REQUIRED（既有 adapter 会抛普通 Error）。missing_finish+official 的 retryable:true 保留既有恢复/fallback，HTTP503 仍可走原备用模型，不增加新的重试 owner。construction 与 stream 共用该分类，不转换原错误。
+
+回归：真实 createProjectAgentModel.stream、不同 selected/default，下游 adapter 抛实际结构化 invalid_tool_call、finish 后 timeout(false)、未准入 reasoning、包装 false cause/循环 cause，断言不调用备用模型或 onRecovery，原错误保留；construction 永久错误同样拒绝。至少一项实际 OpenAIAdapter→selected-model→transport fixture 的 malformed tool 流，禁止第二个 adapter 请求。保留原503正常fallback测试并接入现有 CI。
+
+既有兼容边界：base 已接受“官方 reasoning 已准入、完整工具参数、clean EOF 无 finish”的工具调用，本 PR 保留其明确测试；不能笼统声称所有工具必须有 finish 帧。非法/不完整 JSON 不执行，未准入 reasoning 不执行。
+
+指定模型增量验证：旧实现新增 7 项 RED；修复后 project-agent-model 21/21 GREEN，其中实际 OpenAIAdapter 的非法工具流只发起一次 wire 请求，备用 factory/onRecovery 均未调用，原结构化错误保留。HTTP503、可恢复 missing_finish 与 cause 循环正常完成既有 fallback。gpt-6-astra 对增量 CODE APPROVE，未执行测试。最终整 PR 完整 HEAD、包与真实项目继续单独验收。

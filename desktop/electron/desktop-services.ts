@@ -1,3 +1,4 @@
+import { buildKSwarmReviewPrompt } from './kswarm-task-review-prompt.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
 import type { MaterialAccessImportInput } from './material-access-ipc-contract.js';
 import { assertPluginActionSource, capturePluginActionInput, capturePluginActionRequest, pluginActionCode } from './plugin-action-service.js';
@@ -2819,8 +2820,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const taskId = readString(payload.taskId);
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
-      const reviewPrompt = buildKSwarmReviewPrompt(payload);
       const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+      const reviewPrompt = buildKSwarmReviewPrompt(payload, detail);
       const readOnlyPaths = resolveKSwarmReviewReadPaths(payload, detail);
       const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, reviewPrompt), { control: true, nativeReadonlyOnly: true, readOnlyPaths });
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
@@ -4592,20 +4593,6 @@ function buildKSwarmAssignPoPrompt(payload: Record<string, unknown>, fallbackWor
     '用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛；验收标准应要求尽可能完整覆盖已公开信息，并在公开信息不足时说明搜索范围、已找到条目和信息缺口，不得凑数。',
     '请只输出一个 JSON object，不要 Markdown，不要解释。',
     'JSON schema: {"analysis":"string","successCriteria":["string"],"phases":[{"id":"phase-1","name":"string","items":[{"id":"item-1","title":"string","brief":"string","assignedAgent":"string","dependencies":[],"acceptanceCriteria":"string","requiredOutputs":["markdown"]}]}]}',
-  ].filter(Boolean).join('\n');
-}
-
-function buildKSwarmReviewPrompt(payload: Record<string, unknown>): string {
-  return [
-    'KSwarm PO 验收任务提交。',
-    `项目 ID：${readString(payload.projectId)}`,
-    `任务 ID：${readString(payload.taskId)}`,
-    readString(payload.fromWorker) ? `提交 Worker：${readString(payload.fromWorker)}` : '',
-    '任务结果 JSON：',
-    JSON.stringify(payload.result ?? {}, null, 2),
-    '请基于任务结果和产物证据做标准门禁验收。不要因为是小K帮忙推进就绕过门禁。',
-    '请只输出一个 JSON object，不要 Markdown，不要解释。',
-    'JSON schema: {"passed":true,"feedback":"string","failureClass":null,"planRevisionNeeded":false}',
   ].filter(Boolean).join('\n');
 }
 

@@ -61,6 +61,9 @@ jobs:
         working-directory: desktop
         run: >
           node node_modules/vitest/vitest.mjs run --environment node
+          tests/main/kswarm-task-review-prompt.test.ts
+          tests/main/kswarm-review-files.test.ts
+          tests/main/project-agent-model.test.ts
           tests/main/workflow-deadline-policy.test.ts
           tests/main/workflow-deadline-late-summary.test.ts
           tests/main/kswarm-execution-clock.test.ts
@@ -100,7 +103,11 @@ jobs:
           XIAOK_WORKFLOW_TEST_REPO_ROOT: ${{ github.workspace }}
         run: >
           cd desktop && npm run test -- --maxWorkers=2 --environment node --run
+          tests/main/kswarm-task-review-scope-integration.test.ts
           tests/main/workflow-approved-deadline.test.ts
+          tests/main/kswarm-task-review-prompt.test.ts
+          tests/main/kswarm-review-files.test.ts
+          tests/main/project-agent-model.test.ts
           tests/main/workflow-deadline-policy.test.ts
           tests/main/workflow-budget-read-lifecycle.test.ts
           tests/main/workflow-deadline-late-summary.test.ts
