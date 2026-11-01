@@ -136,6 +136,7 @@ jobs:
           .test-dist/tests/ui/ask-question.test.js
           .test-dist/tests/ui/statusbar.test.js
           .test-dist/tests/ui/statusbar-config.test.js
+          .test-dist/tests/ui/statusline-selector.test.js
           .test-dist/tests/ui/statusline-preferences.test.js
           .test-dist/tests/commands/version.test.js
           .test-dist/tests/commands/registry.test.js

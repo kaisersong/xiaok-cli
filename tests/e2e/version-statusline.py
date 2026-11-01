@@ -59,15 +59,53 @@ def main(entry=None):
         def footer(screen):
             return screen.splitlines()[-1].strip()
 
+        def menu():
+            tty.send_text('/statusline'); tty.send_key('Enter')
+            return tty.wait_for(lambda s: '自定义状态栏' in s and 'Enter' in s)
+
+        def menu_action(index, predicate):
+            menu()
+            tty.tmux('send-keys', '-t', tty.session, *(['Down'] * index), 'Enter')
+            return tty.wait_for(lambda s: predicate(s) and '自定义状态栏' not in s and e2e.footer_has_empty_prompt(s))
+
         try:
             start()
             issue('/version', lambda s: '安装目录' in s)
             history = tty.tmux('capture-pane', '-p', '-S', '-2000', '-t', tty.session).stdout
             assert '实际入口' in history and '源码提交' in history and '构建时间' in history, history
             (case / 'slash-version.txt').write_text(history)
+            issue('/statusline model,project', lambda s: footer(s) == 'gpt-terminal-e2e · project')
+            opened = menu()
+            assert '❯ 1. [x] 模型名称' in opened, opened
+            (case / 'menu-opened.txt').write_text(opened)
+            tty.send_key('Right')
+            tty.wait_for(lambda s: 'project · gpt-terminal-e2e' in s)
+            tty.send_key('Space'); tty.send_key('Enter')
+            tty.wait_for(lambda s: footer(s) == 'project' and '自定义状态栏' not in s and e2e.footer_has_empty_prompt(s))
+            preference = config / 'statusline.json'
+            assert json.loads(preference.read_text())['fields'] == ['project']
+            saved = preference.read_bytes()
+            menu(); tty.send_key('Space'); tty.send_key('Escape')
+            tty.wait_for(lambda s: '已取消状态栏设置' in s and '自定义状态栏' not in s and e2e.footer_has_empty_prompt(s))
+            assert preference.read_bytes() == saved
+            menu(); tty.tmux('send-keys', '-t', tty.session, *(['Down'] * 12))
+            tty.tmux('resize-window', '-t', tty.session, '-x', '36', '-y', '12')
+            short = tty.wait_for(lambda s: '❯ 13. 取消' in s and 'Esc' in s)
+            assert short.count('自定义状态栏') <= 1, short
+            (case / 'menu-short.txt').write_text(short)
+            tty.send_key('Escape')
+            tty.tmux('resize-window', '-t', tty.session, '-x', str(cols), '-y', str(rows))
+            tty.wait_for(lambda s: '自定义状态栏' not in s and e2e.footer_has_empty_prompt(s))
+            # A failed menu save must leave the active footer and previous bytes intact.
+            saved_file = case / 'preference-before-failure.json'
+            preference.rename(saved_file); preference.mkdir()
+            menu(); tty.send_key('Space'); tty.send_key('Enter')
+            failed = tty.wait_for(lambda s: '保存失败' in s and e2e.footer_has_empty_prompt(s))
+            assert footer(failed) == 'project', failed
+            assert saved_file.read_bytes() == saved
+            preference.rmdir(); saved_file.rename(preference)
             wanted = f'gpt-terminal-e2e · v{version["version"]} · project'
             screen = issue('/statusline model,version,project', lambda s: footer(s) == wanted)
-            preference = config / 'statusline.json'
             before = preference.read_bytes()
             assert json.loads(before)['fields'] == ['model', 'version', 'project']
             screen = issue('/statusline invalid-field', lambda s: '未知字段' in s)
@@ -75,11 +113,11 @@ def main(entry=None):
             assert footer(screen) == wanted, screen
             tty.stop()
             assert footer(start()) == wanted
-            screen = issue('/statusline off', lambda s: not footer(s))
+            screen = menu_action(10, lambda s: not footer(s))
             assert json.loads(preference.read_text())['fields'] == []
             tty.stop()
             assert not footer(start())
-            screen = issue('/statusline reset', lambda s: 'gpt-terminal-e2e' in footer(s) and '0%' in footer(s))
+            screen = menu_action(9, lambda s: 'gpt-terminal-e2e' in footer(s) and '0%' in footer(s))
             assert 'project' in footer(screen), screen
             screen = issue('Followup input remains usable', lambda s: 'STATUSLINE_INPUT_OK' in s)
             assert len(server.requests) == 1, 'slash commands must not call a model'
@@ -87,7 +125,8 @@ def main(entry=None):
             (case / 'final.txt').write_text(screen)
             results.append({'cols':cols, 'rows':rows, 'version':True, 'orderedFields':True,
                             'persistedAcrossRestart':True, 'offAndReset':True, 'invalidRetainsPreference':True,
-                            'nextInput':True, 'modelRequests':len(server.requests)})
+                            'menuToggleAndReorder':True, 'menuCancel':True, 'shortMenu':True,
+                            'menuSaveFailureRetainsState':True, 'nextInput':True, 'modelRequests':len(server.requests)})
         except Exception:
             (case / 'failure.txt').write_text(tty.capture())
             raise

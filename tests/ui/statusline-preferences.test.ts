@@ -29,6 +29,7 @@ describe('statusline command preferences', () => {
     const next = new StatusBar(); next.init('claude-sonnet-4-20250514', 'sess_example', join(root, 'project'), mode);
     next.updateBranch('feature/example'); next.update({inputTokens:6000,outputTokens:2000});
     expect(next.getStatusLine().replace(/\x1b\[[0-9;]*m/g, '')).toBe(expected);
+    expect(next.getStatusLineForFields(next.getEditableFields()).replace(/\x1b\[[0-9;]*m/g, '')).toBe(expected);
   });
   it.each([{}, {version:1}, {version:2,fields:[]}, {version:1,fields:[1]}, {version:1,fields:['unknown']}])(
     'does not interpret an invalid or future preference as off: %j', preference => {

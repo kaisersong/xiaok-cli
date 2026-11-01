@@ -17,8 +17,8 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
     helpLine: '  /version - 查看版本、构建信息与实际入口', showInSlash: true, showInHelp: true,
   },
   {
-    id: 'statusline', cmd: '/statusline', slashDesc: '自定义底部状态栏字段和顺序',
-    helpLine: '  /statusline [字段列表|off|reset] - 自定义底部状态栏', showInSlash: true, showInHelp: true,
+    id: 'statusline', cmd: '/statusline', slashDesc: '打开状态栏菜单，勾选字段、排序和预览',
+    helpLine: '  /statusline - 菜单配置底部状态栏', showInSlash: true, showInHelp: true,
   },
   {
     id: 'exit',
