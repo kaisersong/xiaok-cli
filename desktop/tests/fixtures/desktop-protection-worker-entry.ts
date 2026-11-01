@@ -84,7 +84,7 @@ export async function compileProtectionWorkerEntry() {
     writeFileSync(inputPreload, compilerInputAuditScript);
     await promisify(execFile)(process.execPath,
       ['--import', pathToFileURL(inputPreload).href, resolve(projectRoot, 'node_modules/typescript/bin/tsc'), '--project', config],
-      { cwd: projectRoot, maxBuffer: 2 * 1024 * 1024 });
+      { cwd: projectRoot, maxBuffer: 2 * 1024 * 1024, timeout: 45_000 });
     writeFileSync(join(root, 'package.json'), readFileSync(join(projectRoot, 'package.json')));
     const storeEntry = join(root, 'runtime/task-host/protected-observation-store.js');
     const bundle = join(root, 'runtime/task-host/protected-observation-store.bundle.js');

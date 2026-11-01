@@ -30,11 +30,12 @@ vi.mock('node:worker_threads', async importOriginal => {
     }
   } };
 });
+// Fresh typechecked worker compilation is setup, not a product latency assertion.
 beforeAll(async () => {
   Object.assign(compiled, await compileVerifierEntry('delivery-verifier-worker.ts'));
   const protection = await compileProtectionWorkerEntry();
   compiled.protectionOutput = protection.output; compiled.protectionRoot = protection.root;
-});
+}, 60_000);
 afterAll(() => {
   expect(compiled.exits).toBe(compiled.starts);
   for (const root of [compiled.root, compiled.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 });

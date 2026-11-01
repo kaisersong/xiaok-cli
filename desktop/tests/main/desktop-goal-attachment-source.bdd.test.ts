@@ -33,11 +33,12 @@ vi.mock('node:worker_threads', async importOriginal => {
     }
   } };
 });
+// Fresh typechecked worker compilation is setup, not a product latency assertion.
 beforeAll(async () => {
   Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
   const protection = await compileProtectionWorkerEntry();
   nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
-});
+}, 60_000);
 afterAll(() => {
   console.info('W2 P1/P4 native Worker physical lifecycle', { starts: nativeWorker.starts, exits: nativeWorker.exits });
   for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
