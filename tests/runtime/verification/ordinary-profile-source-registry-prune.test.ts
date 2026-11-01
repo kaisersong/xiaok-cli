@@ -34,10 +34,24 @@ it.each(['EACCES','EIO'])('retains unrelated rows on %s while still pruning miss
  register(paths[0]!);register(paths[1]!);rmSync(paths[1]!,{recursive:true});state.errors.set(paths[0]!,code);
  register(paths[2]!);expect(readOrdinaryProfileSources()!.sources.map(row=>row.directory.canonicalPath)).toEqual([paths[0],paths[2]]);
 });
-it('evicts oldest persisted registration without refreshing no-op LRU',()=>{
- const {paths,current}=seed();register(paths[0]!);register(current);
+it('rejects a full live table without changing bytes, generation or any live row',()=>{
+ const {paths,current}=seed();register(paths[0]!);
+ const before=readFileSync(registry),facts=readOrdinaryProfileSources()!;
+ expect(()=>register(current)).toThrow(/profile_source_registry_capacity.*registry\.json.*2 active.*clean up.*project directories.*retry/i);
+ expect(readFileSync(registry)).toEqual(before);
+ expect(readOrdinaryProfileSources()).toEqual(facts);
+ expect(state.warn).not.toHaveBeenCalled();
+});
+it('prunes stale rows from a full table and admits the new source',()=>{
+ const {paths,current}=seed();state.errors.set(paths[0]!,'ENOENT');
+ register(current);
  expect(readOrdinaryProfileSources()!.sources.map(row=>row.directory.canonicalPath)).toEqual([paths[1],current]);
- expect(readFileSync(registry).length).toBeLessThanOrEqual(512*1024);
+ expect(readOrdinaryProfileSources()!.generation).toBe('2');
+});
+it('sweeps stale rows even when registering an unchanged source',()=>{
+ const {paths}=seed();state.errors.set(paths[1]!,'ENOENT');register(paths[0]!);
+ expect(readOrdinaryProfileSources()!.sources.map(row=>row.directory.canonicalPath)).toEqual([paths[0]]);
+ expect(readOrdinaryProfileSources()!.generation).toBe('2');
 });
 it('reports registry path and recovery advice when the current source alone cannot fit',()=>{
  seed();const current=join(root,'4'.repeat(530000));state.stats.set(current,1003n);const before=readFileSync(registry);
@@ -80,18 +94,15 @@ it('prunes missing rows from compact v3 storage',()=>{
  const current=join(root,'current');mkdirSync(current);register(current);
  expect(readOrdinaryProfileSources()!.sources).toHaveLength(20);
 });
-it('bounds serialization for 2000-row compact eviction, warns once and preserves current row',()=>{
+it('bounds serialization when rejecting a full 2000-row compact live table',()=>{
  compactTable(2000);const current=join(root,'x'.repeat(160000));state.stats.set(current,99999n);state.calls=0;
- register(current);const rows=readOrdinaryProfileSources()!.sources;
- expect(rows.length).toBeLessThan(2001);expect(rows.at(-1)!.directory.canonicalPath).toBe(current);
- expect(state.calls).toBe(1);expect(readFileSync(registry).length).toBeLessThanOrEqual(512*1024);
- expect(state.warn).toHaveBeenCalledExactlyOnceWith('Evicted live profile source registrations',{count:2001-rows.length,registryPath:registry});
+ const before=readFileSync(registry),facts=readOrdinaryProfileSources()!;
+ expect(()=>register(current)).toThrow(/profile_source_registry_capacity.*2000 active/);
+ expect(state.calls).toBeLessThanOrEqual(2);
+ expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
+ expect(state.warn).not.toHaveBeenCalled();
 });
 
-it('warns with only count and registry path after live eviction',()=>{
- const {current}=seed();register(current);
- expect(state.warn).toHaveBeenCalledExactlyOnceWith('Evicted live profile source registrations',{count:1,registryPath:registry});
-});
 it('recognizes capacity errors with appended codec context',()=>{
  seed();const current=join(root,'x'.repeat(530000));state.stats.set(current,1003n);state.capacitySuffix=true;
  expect(()=>register(current)).toThrow(/current source itself exceeds registry limit/);

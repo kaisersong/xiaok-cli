@@ -1,6 +1,5 @@
-import {createLogger} from '../../utils/logger.js';
 import {canonicalVerificationJson as canonicalJson} from './protocol.js';
-import {decodeOrdinaryProfileSourceStorage,serializeOrdinaryProfileSourceStorage,ordinaryProfileSourceEvictionCount} from './ordinary-profile-source-storage-codec.js';
+import {decodeOrdinaryProfileSourceStorage,serializeOrdinaryProfileSourceStorage} from './ordinary-profile-source-storage-codec.js';
 import {createHash} from 'node:crypto';
 import {constants,closeSync,fstatSync,lstatSync,mkdirSync,openSync,readSync,realpathSync} from 'node:fs';
 import {userInfo} from 'node:os';
@@ -30,7 +29,6 @@ export interface OrdinaryProfileSources {
  readonly version:1|2;readonly uid:number;readonly generation:string;
  readonly legacyInventoryRequired:true;readonly sources:readonly Readonly<OrdinaryProfileSource>[];
 }
-const logger=createLogger('profile-source-registry');
 const MAX_BYTES=512*1024,U64=(1n<<64n)-1n,UNSUPPORTED_DIRECTORY_SYNC=new Set(['EINVAL','ENOTSUP','EISDIR']);
 function fail(reason:string):never{throw Error('profile_source_registry_'+reason);}
 function registryFull(path:string,reason:'capacity'|'identity'='capacity'):never{fail(`${reason}: registry is full at ${path} (limit ${MAX_BYTES} bytes). Move this discovery registry to a backup or remove it, then retry to rediscover sources; source data is not removed.`);}
@@ -148,21 +146,21 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   if(layout||(removed.length||rebound)&&histories.length){const observations=histories.flatMap(row=>row.observations).filter((row,index,all)=>all.findIndex(item=>item.layoutHash===row.layoutHash)===index);if(layout&&!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
   // Keep current/rebound history out of the sweep. Unknown IO failures are not proof of staleness.
   sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row);}catch(error){if(typeof (error as NodeJS.ErrnoException)?.code==='string')return true;throw error;}});
-  // Oldest persisted registration first; unchanged observations do not refresh order.
+  // Unchanged observations preserve bytes and generation after the stale sweep.
   if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
   sources=[...sources.filter(row=>row!==prior),merged];
   const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true as const,sources};
-  const evicted=ordinaryProfileSourceEvictionCount(next);
-  sources=sources.slice(evicted); // Current observation is last and cannot be evicted.
-  const validated=parseOrdinaryProfileSources({...next,sources},loc.uid);
+  const validated=parseOrdinaryProfileSources(next,loc.uid);
   let bytes:string;
   try{bytes=serializeOrdinaryProfileSourceStorage(validated);}
   catch(error){if(!(error instanceof Error)||!error.message.startsWith('profile_source_registry_capacity'))throw error;
-   fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes at ${loc.path}. Reduce source path or metadata size; removing the registry will not resolve this.`);}
+   try{serializeOrdinaryProfileSourceStorage({...validated,sources:[merged]});}
+   catch(singleError){if(!(singleError instanceof Error)||!singleError.message.startsWith('profile_source_registry_capacity'))throw singleError;
+    fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes at ${loc.path}. Reduce source path or metadata size; removing the registry will not resolve this.`);}
+   fail(`capacity: registry at ${loc.path} has ${sources.length-1} active records and cannot fit the current source (limit ${MAX_BYTES} bytes). Clean up project directories that are no longer used, then retry.`);}
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();
-  if(evicted)logger.warn('Evicted live profile source registrations',{count:evicted,registryPath:loc.path});
  }finally{loc.assertCurrent();release();}
 }

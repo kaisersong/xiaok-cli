@@ -54,3 +54,31 @@ M1：恢复内容相同且 sweep 无删除时早退，不因数组位置重写�
 7. `git diff --check`：exit 0。未启动持久后台服务；会话中的 vitest/build/tsc/治理子进程均已退出，收尾 `/proc` 核对工作目录下仅宿主 Codex/MCP 服务，测试进程残留 **0**，未清理其他任务进程。
 
 本轮为 Codex 编码和对抗自审；输入报告分别为 ds-clean 不通过（3 major）和 glm-clean 通过（minor），不将它们表述为对本轮最终 HEAD 的独立放行。未做 Windows/macOS 实机、CI 或最终 HEAD 独立质量复验；未合并、未 push、未发布。全表 lstat 仍为 O(N)，本轮消除了逐行淘汰的 O(k*N) 校验/序列化，未引入持久时间字段。新增经验已落实在本文件和生产入口回归：no-op 必须覆盖非末尾位置，大表容量回归约束调用次数并验证当前行保留；尚未关闭缺陷/发版，不改外部台账状态。
+
+## 第三轮设计（取代前两轮 LRU / eviction 行为）
+
+全表 sweep 与原有冲突、历史合并顺序保持；仅 stale 删除，IO 异常保留。清理后的完整候选一次校验/序列化，不再裁剪活记录。容量失败时只在内存中序列化当前 merged 单行一次用于分类：单源超限沿用专用提示；否则提示 registry 路径、候选活跃记录数及清理不再使用项目目录后重试。失败不写文件，sweep 删除也不部分提交。成功只递增一次 generation；no-op 仍先 sweep。
+
+对抗性自审：IO 未知记录仍占容量，不能为腾空间删除；过期清理后仍超限须保持整个原文件；compact 与 decoded 两种预算均交由现有 codec 判断，不能按行数猜测；单源分类必须保留合并历史；错误后追加 context 仍识别前缀；成功一次、容量失败最多两次序列化，次数与表大小无关。保留所有 identity、锁、原子写边界。本轮仅 discovery 清理策略，不修改权限、环境变量或配置选择。
+
+### 第三轮逐条回应与证据
+
+1. 不再按 LRU 删除活记录。满表容量失败回归核对完整 DTO（含全部原行与 generation）及原始文件字节。
+2. 全表 stale sweep 保留；ENOENT/identity 变化清理，EACCES/EIO 保留。满表 stale 后新增成功和 no-op 登记清理均覆盖。
+3. 清理后候选超限整次拒写，保留 `profile_source_registry_capacity`；文案给 registry 路径、清理后已有活跃记录数（不含本次当前源）、清理不再使用的项目目录后重试。失败不持久化部分清理。
+4. 删除活记录 eviction、warning 和 `ordinaryProfileSourceEvictionCount` 导出；对应测试改为拒写断言，保留无 warning 断言。
+5. M1 无变化不重写保持；M2 正常成功完整序列化一次，容量失败至多两次（第二次仅分类当前单源），大表测试约束上界；no-op 先 sweep。
+6. 先补测试再改生产。在 `cd26ff6cdb01c27e05b78c490937f93ce099969a` 生产代码上执行 `./node_modules/.bin/vitest run tests/runtime/verification/ordinary-profile-source-registry-prune.test.ts`：exit 1，2 failed / 14 passed；两项失败均为满表活记录仍成功、未抛 capacity。日志 `/tmp/fix94-r3-red.log`。超长合成路径明确注入 ENOENT 模拟 stale，避免系统 ENAMETOOLONG 被正确当作 IO 保留而误判用例。
+
+全部运行前 `TASK_HOME=$(mktemp -d /tmp/fix94-r3-XXXXXX)`，设置 `HOME=$TASK_HOME XDG_CONFIG_HOME=$TASK_HOME/config XDG_DATA_HOME=$TASK_HOME/data XDG_CACHE_HOME=$TASK_HOME/cache`。测试内部继续独立 HOME/XIAOK_CONFIG_DIR/账户 home，不读写真实 `/home/box/.xiaok`。
+
+最终验证命令与结果：
+- `./node_modules/.bin/vitest run tests/runtime/verification/ordinary-profile-source-registry tests/runtime/verification/ordinary-registry-`：8 files / 73 passed，exit 0；`/tmp/fix94-r3-all.log`。
+- `npm run build`：exit 0；`/tmp/fix94-r3-build.log`。恢复构建的 dist 和 src/build-info.ts，不提交产物。
+- `npx tsc --noEmit -p .`：exit 0；`/tmp/fix94-r3-tsc.log`。
+- `npm run governance:check`：exit 0，0 new violations；`/tmp/fix94-r3-governance.log`。
+- `npm run architecture:check -- --changed`：exit 0，0 new violations；`/tmp/fix94-r3-architecture.log`。
+- `npm run hygiene:check`：exit 1，upstream/master 落后和三个 sibling repo 缺失；按指定 HEAD 工作，未更新分支或 baseline。
+- `git diff --check`：exit 0。
+
+Codex 编码与对抗自审，未声称独立模型质量放行。未运行 Windows/macOS 实机或 CI；原有超限文件读取仍拒绝，O(N) 全表扫描仍保留。本轮不改权限或配置路径。测试/build/tsc/治理命令均退出，未启动持久服务；工作目录进程核对仅宿主 Codex/MCP，测试残留 0（`/tmp/fix94-r3-processes.json`）。缺陷尚未独立质量关闭，不修改外部台账状态。不 push、不合并、不发布。
