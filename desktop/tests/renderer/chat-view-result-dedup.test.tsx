@@ -200,6 +200,7 @@ describe('ChatView Result 摘要去重', () => {
         { id: 'assistant-1', role: 'assistant', content: '第一轮回答' },
         resultCard('result-1', '第一轮回答'),
         { id: 'user-2', role: 'user', content: '生成文本文件' },
+        { id: 'assistant-2', role: 'assistant', content: '已生成：`/tmp/current.txt`' },
       ],
       result: null,
       generatedFiles: [{ filePath: '/tmp/current.txt', name: 'current.txt' }],

@@ -13,7 +13,7 @@ describe('packaged Kimi Desktop smoke', () => {
     }
   });
 
-  it('covers both K3 models, task-local multi-turn replay, auth deny, and rollback deny', async () => {
+  it('covers all four K3/K3.1 models, task-local multi-turn replay, auth deny, and rollback deny', async () => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-kimi-packaged-smoke-'));
     roots.push(root);
     const resultPath = join(root, 'result.json');
@@ -28,6 +28,8 @@ describe('packaged Kimi Desktop smoke', () => {
       modelResults: [
         { model: 'k3', requests: 2, secondTurnReplayedReasoning: true },
         { model: 'k3-256k', requests: 2, secondTurnReplayedReasoning: true },
+        { model: 'k3.1-pro', requests: 2, secondTurnReplayedReasoning: true },
+        { model: 'k3.1-pro-highspeed', requests: 2, secondTurnReplayedReasoning: true },
       ],
       authorizationDenyNetworkRequests: 0,
       rollbackDenyNetworkRequests: 0,

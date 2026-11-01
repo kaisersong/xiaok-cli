@@ -1,0 +1,20 @@
+{
+  "kind": "UNIT_TEST_FIXTURES_ONLY_NOT_NEW_RUNTIME_RECEIPTS",
+  "originalRun": 40031447989,
+  "originalHEAD": "453d51b910e152c8ca7dc9713eda370479444190",
+  "originalArtifact": 12534618693,
+  "originalResult": "FAIL_UNKNOWN_RAW_ONLY_UNCHANGED",
+  "targetPID": 2429,
+  "files": {
+    "linux-family.txt": {
+      "sourceArtifactFile": "0-worker-family.stdout",
+      "sha256": "3aaf51f2d05c3bbb1c9792a228baccd59fd2f77067e605a3f595307bed85f5e8",
+      "rowCount": 171
+    },
+    "linux-terminal.txt": {
+      "sourceArtifactFile": "0-group-observer.stdout",
+      "sha256": "5858b53bb3e48d97a73baf259c09c85901b29c4f00ac7670a91f539f9b98c506",
+      "rowCount": 168
+    }
+  }
+}

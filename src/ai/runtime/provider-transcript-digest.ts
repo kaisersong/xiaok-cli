@@ -2,9 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Message, MessageBlock } from '../../types.js';
 import { canonicalJsonV1 } from './canonical-json.js';
 
-export type StrictKimiK3ProfileId =
-  | 'kimi-k3-coding-openai'
-  | 'kimi-k3-256k-coding-openai';
+import type { StrictKimiK3ProfileId } from '../providers/kimi-models.js';
+export type { StrictKimiK3ProfileId } from '../providers/kimi-models.js';
 
 const EPHEMERAL_PROVIDER_TRANSCRIPT_DOMAIN = 'xiaok:ephemeral-provider-transcript:v1\0';
 const CapturedArray = Array;

@@ -1,7 +1,7 @@
 import {canonicalVerificationJson as canonicalJson} from './protocol.js';
 import {decodeOrdinaryProfileSourceStorage,serializeOrdinaryProfileSourceStorage} from './ordinary-profile-source-storage-codec.js';
 import {createHash} from 'node:crypto';
-import {constants,closeSync,fstatSync,lstatSync,mkdirSync,openSync,readSync,realpathSync} from 'node:fs';
+import {constants,closeSync,fstatSync,lstatSync,mkdirSync,openSync,readFileSync,readSync,realpathSync} from 'node:fs';
 import {userInfo} from 'node:os';
 import {resolveProfileAccountHome} from './profile-account-home.js';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
@@ -10,8 +10,7 @@ import {writeFileAtomicallySync,syncDirectoryTreeStrict} from '../../utils/atomi
 import {readInstalledCurrentProfile} from './migration-markers.js';
 import type {ProfileSourceDirectory} from './profile-source-descriptor.js';
 
-/** Ordinary host discovery only. No snapshot hash, completeness, quota grant,
- * custody or activation capability can be obtained from this registry. */
+/** Discovery only; grants no completeness, quota, custody, hash or activation authority. */
 export type OrdinaryProfileSourceInput =
  |{kind:'session-root'|'task-root'|'goal-file-root'|'session-alias-holder';directory:string}
  |{kind:'sqlite-db';directory:string;databaseBasename:string;snapshotFormat:'session-sqlite-v1'|'loop-sqlite-v1'|'goal-sqlite-v1'|'codex-native-sqlite-v1'|'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'};
@@ -31,6 +30,8 @@ export interface OrdinaryProfileSources {
 }
 const MAX_BYTES=512*1024,U64=(1n<<64n)-1n,UNSUPPORTED_DIRECTORY_SYNC=new Set(['EINVAL','ENOTSUP','EISDIR']);
 function fail(reason:string):never{throw Error('profile_source_registry_'+reason);}
+function shortPath(path:string):string{return path.length<=160?path:`${path.slice(0,80)}…${path.slice(-60)} (${path.length} chars)`;}
+function registryFull(path:string,size:bigint):never{fail(`identity: registry is full; limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); current usage ${size} bytes. Registry: ${path}. 先备份，再用编辑器打开该文件删除不再使用的项目条目。`);}
 function digest(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function decimal(value:unknown):value is string{return typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(value)&&value.length<=20&&BigInt(value)<=U64;}
 function syncOrdinaryRegistryTree(path:string):void{try{syncDirectoryTreeStrict(path);}catch(error){const code=(error as NodeJS.ErrnoException).code;if(!code||!UNSUPPORTED_DIRECTORY_SYNC.has(code))throw error;}}
@@ -63,18 +64,19 @@ function source(input:OrdinaryProfileSourceInput):Readonly<OrdinaryProfileSource
  return Object.freeze({sourceId,namespaceId,kind:input.kind,directory:dir,snapshotFormat,...(database?{database}:{})});
 }
 type SourceStat=(path:string)=>{dev:bigint;ino:bigint}|undefined;
-/** Missing paths and changed physical identities are stale; IO failures are not. */
-export function isStaleOrdinaryProfileSource(row:Readonly<OrdinaryProfileSource>,statFn:SourceStat=path=>lstatSync(path,{bigint:true})):boolean{
+/** Missing/changed identity is stale; IO errors are not. Sweep tolerates device renumbering. */
+export function isStaleOrdinaryProfileSource(row:Readonly<OrdinaryProfileSource>,statFn:SourceStat=path=>lstatSync(path,{bigint:true}),preserveDeviceRenumbering=false):boolean{
  function changed(path:string,recorded:{device:string;inode:string}){
   let stat:ReturnType<SourceStat>;try{stat=statFn(path);}catch(error){if(['ENOENT','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''))return true;throw error;}
-  return !stat||String(stat.dev)!==recorded.device||String(stat.ino)!==recorded.inode;
+  return !stat||String(stat.ino)!==recorded.inode||String(stat.dev)!==recorded.device&&!(preserveDeviceRenumbering&&isRenumberedIdentity(recorded,{device:String(stat.dev),inode:String(stat.ino)}));
  }
  return changed(row.directory.canonicalPath,row.directory)||!!row.database&&changed(join(row.directory.canonicalPath,row.database.basename),row.database);
 }
+function isRenumberedIdentity(prior:{device:string;inode:string},observed:{device:string;inode:string}):boolean{return prior.inode===observed.inode&&prior.device!==observed.device;}
 function isDeviceRenumbering(prior:Readonly<OrdinaryProfileSource>,observed:Readonly<OrdinaryProfileSource>):boolean{
- if(prior.namespaceId!==observed.namespaceId||prior.kind!==observed.kind||prior.snapshotFormat!==observed.snapshotFormat||prior.directory.canonicalPath!==observed.directory.canonicalPath||prior.directory.inode!==observed.directory.inode||prior.directory.device===observed.directory.device)return false;
+ if(prior.namespaceId!==observed.namespaceId||prior.kind!==observed.kind||prior.snapshotFormat!==observed.snapshotFormat||prior.directory.canonicalPath!==observed.directory.canonicalPath||!isRenumberedIdentity(prior.directory,observed.directory))return false;
  if(!prior.database&&!observed.database)return true;
- if(!prior.database||!observed.database||prior.database.basename!==observed.database.basename||prior.database.inode!==observed.database.inode||prior.database.device===observed.database.device)return false;
+ if(!prior.database||!observed.database||prior.database.basename!==observed.database.basename||!isRenumberedIdentity(prior.database,observed.database))return false;
  return prior.directory.device===prior.database.device&&observed.directory.device===observed.database.device;
 }
 function parseLayout(value:unknown):Readonly<OrdinarySQLiteLayout>{
@@ -112,7 +114,7 @@ function parseExpandedOrdinaryProfileSources(raw:unknown,uid:number):Readonly<Or
 }
 function read(path:string,uid:number):Readonly<OrdinaryProfileSources>|undefined{
  let fd:number;try{fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
- try{const before=fstatSync(fd,{bigint:true});if(!before.isFile()||before.nlink!==1n||before.uid!==BigInt(uid)||before.size>BigInt(MAX_BYTES))fail('identity');
+ try{const before=fstatSync(fd,{bigint:true});if(!before.isFile()||before.nlink!==1n||before.uid!==BigInt(uid))fail('identity');if(before.size>BigInt(MAX_BYTES))registryFull(path,before.size);
   const bytes=Buffer.alloc(Number(before.size)+1);let length=0;for(;;){const n=readSync(fd,bytes,length,bytes.length-length,null);if(!n)break;length+=n;if(length===bytes.length)break;}
   const after=fstatSync(fd,{bigint:true}),current=lstatSync(path,{bigint:true});
   if(length!==Number(before.size)||after.mtimeNs!==before.mtimeNs||after.ctimeNs!==before.ctimeNs||after.size!==before.size||current.dev!==before.dev||current.ino!==before.ino||current.isSymbolicLink())fail('identity');
@@ -143,9 +145,25 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   let merged:Readonly<OrdinaryProfileSource>=prior&&!rebound?prior:observed;
   const histories=[...removed,...(prior?[prior]:[])].filter(row=>row.kind===observed.kind&&row.snapshotFormat===observed.snapshotFormat).flatMap(row=>row.componentHistory?[row.componentHistory]:[]);
   if(layout||(removed.length||rebound)&&histories.length){const observations=histories.flatMap(row=>row.observations).filter((row,index,all)=>all.findIndex(item=>item.layoutHash===row.layoutHash)===index);if(layout&&!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
-  if(!removed.length&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
-  const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail('capacity');
-  const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true,sources:prior?sources.map(row=>row===prior?merged:row):[...sources,merged]};const validated=parseOrdinaryProfileSources(next,loc.uid);const bytes=serializeOrdinaryProfileSourceStorage(validated);if(Buffer.byteLength(bytes)>MAX_BYTES)fail('capacity');
+  // Keep current/rebound history out of the sweep. Unknown IO failures are not proof of staleness.
+  sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row,undefined,true);}catch(error){if(typeof (error as NodeJS.ErrnoException)?.code==='string')return true;throw error;}});
+  // Unchanged observations preserve bytes and generation after the stale sweep.
+  if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
+  const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
+  const existingSources=sources;
+  sources=[...sources.filter(row=>row!==prior),merged];
+  const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true as const,sources};
+  const validated=parseOrdinaryProfileSources(next,loc.uid);
+  let bytes:string;
+  try{bytes=serializeOrdinaryProfileSourceStorage(validated);}
+  catch(error){if(!(error instanceof Error)||!error.message.startsWith('profile_source_registry_capacity'))throw error;
+   let diskBytes=0;try{diskBytes=readFileSync(loc.path).length;}catch{}
+   let activeUsage:string;try{activeUsage=`${Buffer.byteLength(serializeOrdinaryProfileSourceStorage({...validated,version:original?.version??1,generation:original?.generation??'1',sources:existingSources}))} bytes`;}catch{activeUsage='unavailable';}
+   const capacityDetails=`limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); file current usage ${diskBytes} bytes; active usage after pruning ${activeUsage}, ${existingSources.length} active record${existingSources.length===1?'':'s'}. Registry: ${loc.path}. 删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理；也可以用编辑器打开该文件删除不再使用的项目条目（先备份）。`;
+   try{serializeOrdinaryProfileSourceStorage({...validated,sources:[merged]});}
+   catch(singleError){if(!(singleError instanceof Error)||!singleError.message.startsWith('profile_source_registry_capacity'))throw singleError;
+    fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); source size ${Buffer.byteLength(JSON.stringify({...validated,sources:[merged]}))} bytes (expanded JSON). Source: ${shortPath(merged.directory.canonicalPath)}. 这个来源自己就超过上限，清理其他项目没有用；Reduce source path or metadata size（换一个更短的项目路径后重试）。`);}
+   fail(`capacity: registry cannot fit the current source; ${capacityDetails}`);}
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();

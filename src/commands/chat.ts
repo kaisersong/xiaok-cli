@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
 import {inspectProfileAccountHome,ProfileAccountHomeError} from '../runtime/verification/profile-account-home.js';
 import {getUiCopy} from '../ui/locale.js';
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
@@ -1201,6 +1202,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     return answer;
   }
 
+  function writeQuestionTranscript(text: string): void {
+    if (replRenderer.hasActiveScrollRegion()) {
+      scrollRegion.writeAtContentCursor(text);
+    } else {
+      process.stdout.write(text);
+    }
+  }
+
   const workflowTools = [
     createAskUserTool({
       ask: async (question, placeholder, interaction, signal) => {
@@ -1218,6 +1227,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
               clearFrame: () => askUserClearFrame?.(),
               readText: readQuestionText,
+              writeTranscript: writeQuestionTranscript,
               signal,
             });
             return [...result.labels, result.otherText]
@@ -1288,6 +1298,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
       clearFrame: () => askUserClearFrame?.(),
       readText: readQuestionText,
+      writeTranscript: writeQuestionTranscript,
     }),
     createInstallSkillTool({
       cwd,
@@ -3910,6 +3921,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     endStreamingPhaseForInterrupt();
     flushSubAgentNotices();
     if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
+      toolExplorer.reset();
       turnHadAskUserQuestion = true;
       maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
       return;
@@ -4661,7 +4673,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
         const selectedProvider = config.providers[selected.provider];
         const catalogRuntimeEligible = selected.provider !== 'kimi'
-          || variant?.model !== 'k3'
+          || !isKimiCodingModel(variant?.model)
           || (
             selectedProvider?.protocol === 'openai_legacy'
             && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl)
