@@ -1,3 +1,4 @@
+import { buildKSwarmReviewPrompt } from './kswarm-task-review-prompt.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
 import type { MaterialAccessImportInput } from './material-access-ipc-contract.js';
 import { assertPluginActionSource, capturePluginActionInput, capturePluginActionRequest, pluginActionCode } from './plugin-action-service.js';
@@ -211,6 +212,7 @@ import {
 } from './desktop-goal-coordinator.js';
 import { SqliteGoalStore } from './goal-store-sqlite.js';
 import { DesktopExecutionCoordinator, currentExecutionLane, withExecutionLane } from './desktop-execution-coordinator.js';
+import {createKSwarmWorkflowExecutionWindow,resolveKSwarmWorkflowDeadline,workflowRunDeadlineExceeded} from './kswarm-workflow-deadline.js';
 import { ConversationProjectService, type ConversationProjectRoomClient } from './conversation-project-service.js';
 import { ConversationActivityStore } from '../../src/runtime/conversation-activity/store.js';
 import { ConversationActivityService, type ActivityActor, type ConversationActivityApi } from '../../src/runtime/conversation-activity/service.js';
@@ -2177,11 +2179,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return createProjectAgentModel({ modelId, loadConfig });
   };
 
-  type KSwarmScopedTaskOptions = { workflowRestrictionCheckpoint?: NativeWorkflowRestrictionCheckpoint; nativeReadonlyOnly?: boolean; readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; signal?: AbortSignal; onStarted?: () => void | Promise<void> };
+  type KSwarmScopedTaskOptions = { workflowRestrictionCheckpoint?: NativeWorkflowRestrictionCheckpoint; workflowDeadline?: number; nativeReadonlyOnly?: boolean; readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; signal?: AbortSignal; onStarted?: () => void | Promise<void> };
   const workflowArtifactRegistries = new WeakMap<InProcessTaskRuntimeHost, ToolRegistry>();
   const createKSwarmTaskHost = async (workspaceRoot: string, participantId?: string, taskOptions: KSwarmScopedTaskOptions = {}) => {
     taskSourcePopulation.assertAccepting();
-    const execution = { clock: undefined as KSwarmExecutionClock | undefined };
+    const execution = { clock: undefined as KSwarmExecutionClock | undefined, deadline: taskOptions.workflowDeadline };
     const artifactScope = taskOptions.workflowRestrictionCheckpoint && isNativeWorkflowArtifactCheckpoint(taskOptions.workflowRestrictionCheckpoint)
       ? await createNativeWorkflowArtifactRegistry(taskOptions.workflowRestrictionCheckpoint) : undefined;
     const scopedDescriptions = new Map<Tool, ToolDescriptionMetadata>();
@@ -2194,15 +2196,19 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       // This scoped owner is bounded by the KSwarm queue/run clocks.
       taskIdleTimeoutMs: 0,
       materialRegistry,
-      runner: input => {
+      runner: async input => {
         const signal = taskOptions.signal ? AbortSignal.any([input.signal, taskOptions.signal]) : input.signal;
-        return withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
-        const freshGate = () => { runInput.signal.throwIfAborted(); taskOptions.signal?.throwIfAborted(); taskSourcePopulation.assertAccepting(); };
+        const window = createKSwarmWorkflowExecutionWindow(execution.deadline, signal, input.deadlineMs);
+        execution.deadline = window.deadline;
+        try { return await withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
+        const freshGate = () => { window.assertCurrent(); runInput.signal.throwIfAborted(); taskOptions.signal?.throwIfAborted(); taskSourcePopulation.assertAccepting(); };
         freshGate();
-        execution.clock = new KSwarmExecutionClock(10 * 60 * 1000);
-        execution.clock.start();
+        const startedAt = Date.now();
+        execution.clock = new KSwarmExecutionClock(window.deadline === undefined ? 10 * 60 * 1000 : Math.max(0, window.deadline - startedAt));
+        execution.clock.start(startedAt);
         freshGate();
         await taskOptions.onStarted?.();
+        freshGate();
         await assertNativeRegistryCheckpointCurrent(scopedRegistry);
         freshGate();
         return (options.runner ?? createDesktopModelRunnerWithRegistry(
@@ -2222,8 +2228,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           // PO artifact-only tasks cannot import plugin capabilities.
           ...(!artifactScope && options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
         },
-      ))(runInput);
-      })({ ...input, signal }));
+      ))(window.deadline === undefined ? runInput : { ...runInput, deadlineMs: window.remainingMs() });
+      })({ ...input, signal: window.signal })); } finally { window.dispose(); }
       },
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
@@ -2604,8 +2610,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   }
 
   async function runKSwarmWorkflowNode({ handoff, targetParticipantId }: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string }) {
-    const { getKSwarmWorkflowReadPort } = await import('./kswarm-service.js');
+    const { getKSwarmWorkflowReadPort,readKSwarmWorkflowRunForExecution } = await import('./kswarm-service.js');
     const restriction=await createNativeWorkflowRestrictionCheckpoint(await getKSwarmWorkflowReadPort(options.kswarmService),{projectId:handoff.projectId,workflowRunId:handoff.workflowRunId,workflowId:handoff.workflowId,nodeId:handoff.nodeId,nodeKind:handoff.nodeKind,attempt:handoff.attempt,handoffId:handoff.handoffId,participantId:targetParticipantId||'xiaok-worker',...(handoff.project?.workFolder?{admittedRoot:handoff.project.workFolder}:{})});
+    const workflowDeadline = ['po-generated-task-workflow','po-generated-project-workflow'].includes(handoff.workflowId)
+      ? resolveKSwarmWorkflowDeadline(await readKSwarmWorkflowRunForExecution(options.kswarmService,handoff.projectId,handoff.workflowRunId),handoff) : undefined;
     if(handoff.project?.id&&handoff.project.id!==handoff.projectId)throw Error('workflow_project_binding_mismatch');
     const workspaceRoot = restriction.root;
     const artifactsDir = join(workspaceRoot, 'artifacts');
@@ -2679,7 +2687,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       },
       reviewDecision: null,
     };
-    }, {workflowRestrictionCheckpoint:restriction.checkpoint,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly});
+    }, {workflowRestrictionCheckpoint:restriction.checkpoint,workflowDeadline,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly});
   }
 
   async function runKSwarmAssignPo({ payload, targetParticipantId, startAfterPlanning }: { payload: Record<string, unknown>; targetParticipantId?: string; startAfterPlanning?: boolean }) {
@@ -2812,8 +2820,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const taskId = readString(payload.taskId);
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
-      const reviewPrompt = buildKSwarmReviewPrompt(payload);
       const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+      const reviewPrompt = buildKSwarmReviewPrompt(payload, detail);
       const readOnlyPaths = resolveKSwarmReviewReadPaths(payload, detail);
       const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, reviewPrompt), { control: true, nativeReadonlyOnly: true, readOnlyPaths });
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
@@ -4297,7 +4305,7 @@ function kindFromFilename(filename: string): string {
   return 'file';
 }
 
-const kswarmTextExecutionClocks = new WeakMap<InProcessTaskRuntimeHost, { clock?: KSwarmExecutionClock }>();
+const kswarmTextExecutionClocks = new WeakMap<InProcessTaskRuntimeHost, { clock?: KSwarmExecutionClock; deadline?: number }>();
 
 async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
@@ -4319,13 +4327,14 @@ async function runKSwarmRuntimeTextTask(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let retry = false;
     const execution = kswarmTextExecutionClocks.get(host);
+    if (execution?.deadline !== undefined && Date.now() >= execution.deadline) throw workflowRunDeadlineExceeded();
     if (execution) execution.clock = undefined;
     const created = await host.createTask({ prompt, materials: options.materials ?? [] });
     options.onTaskCreated?.(created.taskId);
     const deadline = Date.now() + 10 * 60 * 1000;
-    const queueDeadline = Date.now() + 60 * 60 * 1000;
+    const queueDeadline = Math.min(Date.now() + 60 * 60 * 1000, execution?.deadline ?? Infinity);
     while (execution
-      ? (execution.clock ? !execution.clock.expired() : Date.now() < queueDeadline)
+      ? (Date.now() < (execution.deadline ?? Infinity) && (execution.clock ? !execution.clock.expired() : Date.now() < queueDeadline))
       : Date.now() < deadline) {
       const current = await host.inspectTask(created.taskId);
       if (!current) throw Error('desktop_task_snapshot_missing');
@@ -4366,6 +4375,7 @@ async function runKSwarmRuntimeTextTask(
     }
     if (retry) continue;
     await host.cancelTask(created.taskId);
+    if (execution?.deadline !== undefined && Date.now() >= execution.deadline) throw workflowRunDeadlineExceeded();
     throw new Error('desktop_task_timeout');
   }
   throw new Error(lastFailure ? `desktop_task_failed: ${lastFailure}` : 'desktop_task_timeout');
@@ -4583,20 +4593,6 @@ function buildKSwarmAssignPoPrompt(payload: Record<string, unknown>, fallbackWor
     '用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛；验收标准应要求尽可能完整覆盖已公开信息，并在公开信息不足时说明搜索范围、已找到条目和信息缺口，不得凑数。',
     '请只输出一个 JSON object，不要 Markdown，不要解释。',
     'JSON schema: {"analysis":"string","successCriteria":["string"],"phases":[{"id":"phase-1","name":"string","items":[{"id":"item-1","title":"string","brief":"string","assignedAgent":"string","dependencies":[],"acceptanceCriteria":"string","requiredOutputs":["markdown"]}]}]}',
-  ].filter(Boolean).join('\n');
-}
-
-function buildKSwarmReviewPrompt(payload: Record<string, unknown>): string {
-  return [
-    'KSwarm PO 验收任务提交。',
-    `项目 ID：${readString(payload.projectId)}`,
-    `任务 ID：${readString(payload.taskId)}`,
-    readString(payload.fromWorker) ? `提交 Worker：${readString(payload.fromWorker)}` : '',
-    '任务结果 JSON：',
-    JSON.stringify(payload.result ?? {}, null, 2),
-    '请基于任务结果和产物证据做标准门禁验收。不要因为是小K帮忙推进就绕过门禁。',
-    '请只输出一个 JSON object，不要 Markdown，不要解释。',
-    'JSON schema: {"passed":true,"feedback":"string","failureClass":null,"planRevisionNeeded":false}',
   ].filter(Boolean).join('\n');
 }
 
@@ -6048,6 +6044,11 @@ const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
   '不要输出 Markdown 代码块，除非原始任务明确要求 Markdown 正文。',
 ].join('\n');
 
+function assertDesktopRunCurrent(signal: AbortSignal, deadline: number): void {
+  throwIfAborted(signal);
+  if (Date.now() >= deadline) throw new Error('desktop_tool_loop_deadline_exceeded');
+}
+
 async function streamDesktopToolLoopFinalization(input: {
   modelPhysicalScope?: DesktopModelPhysicalScope;
   prepareRequest?: DesktopTaskRequestPreparer;
@@ -6099,7 +6100,7 @@ async function streamDesktopToolLoopFinalization(input: {
       if (captured) await captured;
       continue;
     }
-    throwIfAborted(input.signal);
+    assertDesktopRunCurrent(input.signal, input.deadline ?? Infinity);
     if (connectionRecovering) {
       connectionRecovering = false;
       await input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:input.turnId,state:'running'});
@@ -6134,7 +6135,7 @@ async function streamDesktopToolLoopFinalization(input: {
     }
   }
     } finally { modelPhysicalRun.finish(); }
-  throwIfAborted(input.signal);
+  assertDesktopRunCurrent(input.signal, input.deadline ?? Infinity);
   if (!reply.trim()) {
     throw new Error('desktop_tool_loop_finalization_empty');
   }
@@ -6714,7 +6715,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
         continue;
       }
-      throwIfAborted(ctx.signal);
+      assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline);
       if (connectionRecovering) {
         connectionRecovering = false;
         await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'running'});
@@ -6753,7 +6754,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       }
     }
     } finally { modelPhysicalRun.finish(); }
-    throwIfAborted(ctx.signal);
+    assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline);
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
     const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
     if (toolCalls.length === 0) {
@@ -6783,7 +6784,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     }
     const toolResults: MessageBlock[] = [];
     for (const toolCall of toolCalls) {
-      throwIfAborted(ctx.signal);
+      assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline);
       totalToolCalls++;
       const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, ctx.sessionId);
       const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
@@ -6892,6 +6893,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         ? { ...projectedToolContext, onToolInvocationStarted: () => { invoked = true; } }
         : projectedToolContext;
       const monitoredToolContext:ToolExecutionContext={...toolContext,hostProviderInvocationId:providerInvocationId,
+        assertPermissionApproval: () => {
+          toolContext.assertPermissionApproval?.();
+          assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline);
+        },
         modelSupportsImageInput,
         emitToolImage: toolImages.emit,
         onExecutionHealth: state => {void ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,invocationId:toolCall.id,state}).catch(error=>console.warn('[execution-health] status delivery failed',error));},
@@ -6899,7 +6904,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       };
       if(Object.isFrozen(projectedToolContext))Object.freeze(monitoredToolContext);
       let execution: Awaited<ReturnType<typeof executeDesktopTaskTool>>;
-      try { execution = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
+      try { assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline); execution = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
         registry: ctx.registry,
         taskId: ctx.taskId,
         materials: ctx.materials,
@@ -6907,7 +6912,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         context:monitoredToolContext,
         officeToMarkdown: ctx.officeToMarkdown,
         scoped: Boolean(ctx.mailbox),
-      }); } catch (error) { toolImages.finish(false); throw error; }
+      }); assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline); } catch (error) { toolImages.finish(false); throw error; }
       let { ok, result } = execution;
       if (ok && isToolName(toolCall.name, 'create_project') && ctx.finalizeProjectProposal) {
         let proposal: Record<string, unknown> | undefined;
@@ -8090,6 +8095,8 @@ export function createDesktopModelRunnerWithRegistry(
   }
 
   const run = async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, persistObservationSnapshot, executionPersistence, registerCompoundFinalPublication, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }: TaskRunnerInput, rootContext: DesktopAgentExecutionContext | undefined, observationActivation: DesktopObservationTaskActivation | undefined) => {
+    // Initialization consumes the caller's remaining duration too.
+    const runDeadline = resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs);
     const pendingRoomImages:MessageBlock[]=[];
     if(!nativeReadonlyOnly && runnerOptions.roomExecution)registry.registerTool({permission:'safe',definition:{name:'read_workspace_material',description:'Read a document or image downloaded into the current collaboration workspace. Use file_path relative to the workspace. Images are supplied to the model visually; documents return extracted text. Paths outside the workspace are forbidden.',inputSchema:{type:'object',properties:{file_path:{type:'string'},maxChars:{type:'number'}},required:['file_path']}},async execute(input,context){
       const record=await materialRegistry.importMaterial({taskId,sourcePath:String(input.file_path),role:'customer_material',roleSource:'auto'});
@@ -8278,7 +8285,7 @@ export function createDesktopModelRunnerWithRegistry(
         : undefined,
       invocationOptions,
       signal:loopSignal,
-      taskDeadline: resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs),
+      taskDeadline: runDeadline,
       cwd: rootContext?.cwd ?? runnerOptions.cwd,
       roomExecution:runnerOptions.roomExecution?{...runnerOptions.roomExecution,takePendingImages:()=>pendingRoomImages.splice(0)}:undefined,
       mailbox: rootContext?.mailbox,
