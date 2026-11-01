@@ -2,7 +2,7 @@ import {describe,it,expect} from 'vitest';
 import {LoopStore} from '../../electron/loop-store.js';
 import {createLoopDatabaseOwnerGroup,openLoopDatabase} from '../../electron/loop-database-owner.js';
 import {ASSISTANT_MORNING_LOOP_ID} from '../../electron/assistant-types.js';
-import {assistantDerivedHash,createAssistantDerivedVisibility,beginAssistantDerivedCapture} from '../../electron/assistant-derived-lineage.js';
+import {assistantDerivedHash,createAssistantDerivedVisibility,beginAssistantDerivedCapture,hasAssistantExternalLineage} from '../../electron/assistant-derived-lineage.js';
 import {migrateAssistantDerivedLineage,recordAssistantDerivedSourceRun,readAssistantDerivedLineage} from '../../electron/assistant-derived-lineage-store.js';
 import {migrateAssistantSourceRuns} from '../../electron/assistant-source-store.js';
 import {ASSISTANT_SOURCE_IDS} from '../../shared/assistant-coverage-contract.js';
@@ -55,4 +55,22 @@ it('fails closed for parent cycles and damaged lineage rather than treating them
 it('does not hide unrelated or legacy business evidence while assistant is paused; tracked missing lineage fails closed',()=>{
  const gate=createAssistantDerivedVisibility({readLineage:()=>undefined,isTrackedAssistantRun:runId=>runId==='tracked-assistant',getProfile:()=>({...profile,status:'paused'}),currentCalendar:()=>undefined,currentMemorySettings:()=>undefined,getMemory:()=>undefined,confirmMemory:()=>undefined});
  expect(gate.isRunVisible('artifact-health-userloop')).toBe(true);expect(gate.isEvidenceVisible({ownerKind:'loop_run',ownerId:'artifact-health-userloop'})).toBe(true);expect(gate.isRunVisible('legacy-assistant')).toBe(true);expect(gate.isRunVisible('tracked-assistant')).toBe(false);
+});
+
+it('pins internal-only ancestors without classifying ordinary history as external; missing ancestor invalidates both gates',async()=>{
+ const internal={version:1 as const,profileId:profile.id,profileRevision:assistantDerivedHash(profile),parents:[]};
+ const records=new Map<string,any>([['parent',internal]]),tracked=new Set(['parent','child']);
+ const visibility=createAssistantDerivedVisibility({readLineage:id=>records.get(id),isTrackedAssistantRun:id=>tracked.has(id),getProfile:()=>profile,currentCalendar:()=>undefined,currentMemorySettings:()=>undefined,getMemory:()=>undefined,confirmMemory:()=>undefined});
+ const capture=await beginAssistantDerivedCapture({profile,getProfile:()=>profile,owner:()=>({ownerId:'owner',profileId:profile.id,cwd:'/work'}),calendar:()=>({lineage:{epoch:1,revision:hash},isCurrent:()=>true,read:()=>({status:'disabled',events:[]})}),memorySettings:()=>({ownerId:'owner',profileId:profile.id,enabled:false,revision:0}),memoryStore:{listRelevant:async()=>[]},confirmMemory:()=>undefined,visibility,now:10}).finish({derivedRunIds:['parent']});
+ expect(capture.lineage.parents).toHaveLength(1);
+ expect(hasAssistantExternalLineage(capture.lineage)).toBe(false);
+ records.set('child',capture.lineage);expect(visibility.isRunVisible('child')).toBe(true);expect(capture.isCurrent()).toBe(true);
+ records.delete('parent');expect(visibility.isRunVisible('child')).toBe(false);expect(capture.isCurrent()).toBe(false);
+});
+it('does not trust an internal parent classification for an actually external ancestor; legacy parents stay external',()=>{
+ const external=lineage(),child={version:1 as const,profileId:profile.id,profileRevision:assistantDerivedHash(profile),parents:[{runId:'parent',lineageHash:assistantDerivedHash(external),external:false}]};
+ const records=new Map<string,any>([['parent',external],['child',child]]);
+ const visibility=createAssistantDerivedVisibility({readLineage:id=>records.get(id),isTrackedAssistantRun:()=>true,getProfile:()=>profile,currentCalendar:()=>({epoch:2,events:[{id:eid,observationRevision:hash}]}),currentMemorySettings:()=>undefined,getMemory:()=>undefined,confirmMemory:()=>undefined});
+ expect(visibility.isRunVisible('child')).toBe(false);
+ expect(hasAssistantExternalLineage({...child,parents:[{runId:'parent',lineageHash:assistantDerivedHash(external)}]})).toBe(true);
 });

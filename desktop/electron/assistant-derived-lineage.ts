@@ -8,7 +8,7 @@ import {readAssistantCalendarMemory} from './assistant-calendar-context.js';
 const hash=z.string().regex(/^[a-f0-9]{64}$/),id=z.string().min(1).max(512);
 export const ASSISTANT_DERIVED_LINEAGE_SCHEMA=z.object({
  version:z.literal(1),profileId:id,profileRevision:hash,
- parents:z.array(z.object({runId:id,lineageHash:hash}).strict()).max(100),
+ parents:z.array(z.object({runId:id,lineageHash:hash,external:z.boolean().optional()}).strict()).max(100),
  calendar:z.object({epoch:z.number().int().positive(),observationRevision:hash,events:z.array(z.object({id:hash,observationRevision:hash}).strict()).max(20)}).strict().optional(),
  memory:z.object({ownerId:id,consentRevision:z.number().int().nonnegative(),records:z.array(z.object({id,contentHash:hash,candidateId:id,confirmationRevision:hash}).strict()).max(6)}).strict().optional(),
 }).strict();
@@ -18,7 +18,9 @@ export interface AssistantMemoryConfirmation {candidateId:string;confirmationRev
 export interface DerivedMemorySettings {ownerId:string;profileId:string;enabled:boolean;revision:number}
 export function assistantDerivedHash(value:unknown):string{return createHash('sha256').update(canonicalVerificationJson(JSON.parse(JSON.stringify(value)))).digest('hex');}
 export function assistantMemoryContentHash(record:MemoryRecord):string{return assistantDerivedHash(record);}
-export function hasAssistantExternalLineage(lineage:AssistantDerivedLineage):boolean{return !!(lineage.calendar||lineage.memory||lineage.parents.length);}
+/** All ancestors remain visibility dependencies; only verified internal parents
+ * are exempt from external routing restrictions. Legacy refs stay conservative. */
+export function hasAssistantExternalLineage(lineage:AssistantDerivedLineage):boolean{return !!(lineage.calendar||lineage.memory||lineage.parents.some(parent=>parent.external!==false));}
 export interface AssistantDerivedVisibility {
  readLineage(runId:string):AssistantDerivedLineage|undefined;
  isRunVisible(runId:string):boolean;
@@ -54,7 +56,7 @@ export function createAssistantDerivedVisibility(options:{
     if(!settings?.enabled||settings.ownerId!==lineage.memory.ownerId||settings.profileId!==lineage.profileId||settings.revision!==lineage.memory.consentRevision)return false;
     for(const ref of lineage.memory.records){const record=options.getMemory(ref.id);if(!record||assistantMemoryContentHash(record)!==ref.contentHash)return false;const confirmation=options.confirmMemory(record);if(!confirmation||!confirmation.isCurrent()||confirmation.contentHash!==ref.contentHash||confirmation.candidateId!==ref.candidateId||confirmation.confirmationRevision!==ref.confirmationRevision)return false;}
    }
-   for(const parent of lineage.parents){const current=options.readLineage(parent.runId);if(!current||assistantDerivedHash(current)!==parent.lineageHash||!isRunVisible(parent.runId))return false;}
+   for(const parent of lineage.parents){const current=options.readLineage(parent.runId);if(!current||assistantDerivedHash(current)!==parent.lineageHash||parent.external===false&&hasAssistantExternalLineage(current)||!isRunVisible(parent.runId))return false;}
    return true;
   }catch{return false;}finally{active.delete(runId);}
  }
@@ -96,7 +98,7 @@ export function beginAssistantDerivedCapture(options:{
   const data=snapshot as {derivedRunIds?:unknown};
   if(Array.isArray(data?.derivedRunIds))for(const runId of new Set(data.derivedRunIds)){
    if(typeof runId!=='string'||!options.visibility.isRunVisible(runId))throw Error('assistant_derived_stale');
-   const parent=options.visibility.readLineage(runId);if(parent&&hasAssistantExternalLineage(parent))parents.push({runId,lineageHash:assistantDerivedHash(parent)});
+   const parent=options.visibility.readLineage(runId);if(parent)parents.push({runId,lineageHash:assistantDerivedHash(parent),external:hasAssistantExternalLineage(parent)});
   }
   const lineage=ASSISTANT_DERIVED_LINEAGE_SCHEMA.parse({version:1,profileId:owner.profileId,profileRevision,parents,
    ...(events.length?{calendar:{epoch:initialEpoch,observationRevision:calendar.lineage.revision,events:events.map(e=>({id:e.id,observationRevision:e.observationRevision}))}}:{}),
