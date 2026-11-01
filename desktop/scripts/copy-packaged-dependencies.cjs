@@ -32,13 +32,13 @@ async function copyPackagedDependencies({ asarPath, projectDir, platform = proce
   const entries = new Map();
   for (const name of asar.listPackage(asarPath)) {
     const key = name.replaceAll('\\', '/').replace(/^\//, '');
-    entries.set(key, asar.statFile(asarPath, key, false));
+    entries.set(key, asar.statFile(asarPath, path.normalize(key), false));
   }
   const additions = new Map(), copied = [], visited = new Set();
   function manifestAt(target) {
     const key = path.posix.join(target, 'package.json');
     if (additions.has(key)) return JSON.parse(fs.readFileSync(additions.get(key).source, 'utf8'));
-    if (entries.has(key)) return JSON.parse(asar.extractFile(asarPath, key).toString('utf8'));
+    if (entries.has(key)) return JSON.parse(asar.extractFile(asarPath, path.normalize(key)).toString('utf8'));
     return null;
   }
   function addTree(source, target) {
@@ -96,7 +96,7 @@ async function copyPackagedDependencies({ asarPath, projectDir, platform = proce
     if (info.files) streams.push({ path: key, type: 'directory', unpacked: !!info.unpacked });
     else if (info.link) streams.push({ path: key, type: 'link', unpacked: !!info.unpacked, symlink: path.posix.relative(path.posix.dirname(key), info.link), stat: { mode: 0o777, size: 0 } });
     else streams.push({ path: key, type: 'file', unpacked: !!info.unpacked,
-      stat: { size: info.size, mode: info.executable ? 0o755 : 0o644 }, streamGenerator: () => Readable.from(asar.extractFile(asarPath, key)) });
+      stat: { size: info.size, mode: info.executable ? 0o755 : 0o644 }, streamGenerator: () => Readable.from(asar.extractFile(asarPath, path.normalize(key))) });
   }
   const directories = new Set([...entries].filter(([, info]) => info.files).map(([key]) => key));
   for (const [key, item] of additions) {

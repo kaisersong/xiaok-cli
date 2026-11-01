@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -14,7 +15,7 @@ describe('factory local Chat/Goal entrypoints share the existing startup receipt
   afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   it.each(methods.flatMap(method => [false, true].map(failed => ({ method, failed }))))('$method waits before Goal admission when recovery failure=$failed', async ({ method, failed }) => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-goal-admission-ready-'));
-    cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+    cleanup.push(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     vi.stubEnv('XIAOK_CONFIG_DIR', join(root, 'config'));
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });

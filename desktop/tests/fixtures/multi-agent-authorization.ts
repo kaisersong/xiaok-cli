@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { vi, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -35,7 +36,7 @@ export type SqliteWithAuthorizer = DatabaseSync & {
 // default TaskRunner, registry, service, coordinator, store and IPC are real.
 export async function authorizationFixture(cleanup: Array<() => void | Promise<void>>, existingRoot?: string, overrides: Partial<Parameters<typeof createDesktopServices>[0]> = {}) {
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'xiaok-execution-auth-'));
-  if (!existingRoot) cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+  if (!existingRoot) cleanup.push(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
   vi.stubEnv('XIAOK_CONFIG_DIR', join(root, 'config'));
   const kswarmService = {
     start: async () => {}, stop: async () => {}, restart: async () => {},

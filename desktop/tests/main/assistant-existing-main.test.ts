@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 // @vitest-environment node
 import {SqliteGoalStore} from '../../electron/goal-store-sqlite.js';
 import {createGoalState} from '../../../src/runtime/goal/reducer.js';
@@ -37,7 +38,7 @@ it('actual default foreground services preserve assistant Goal authority and res
  await services.setGoalUserQueuePending({threadId,pending:true});
  }finally{
  if(taskId)try{await services.assistantTaskAdmission.cancel?.(taskId);}catch{}
- try{await services.disposeMultiAgent();await services.closeTaskSourceWritersForMigration();}finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));vi.unstubAllEnvs();rmSync(root,{recursive:true,force:true,maxRetries:3});}
+ try{await services.disposeMultiAgent();await services.closeTaskSourceWritersForMigration();}finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));vi.unstubAllEnvs();fs.rmSync(root,{recursive:true,force:true,maxRetries:3});}
  }
 },30000);
 it('actual existing no-Goal first-group preparation must not invalidate its own final guard',async()=>{
@@ -58,7 +59,7 @@ it('actual existing no-Goal first-group preparation must not invalidate its own 
  for await(const event of services.subscribeTask(taskId)){if(event.type==='task_terminal')break;}
  }finally{
  if(taskId)try{await services.assistantTaskAdmission.cancel?.(taskId);}catch{}
- try{await services.disposeMultiAgent();try{await services.closeTaskSourceWritersForMigration();}catch(error){console.warn('no-goal-source-close',error);}}finally{vi.unstubAllEnvs();rmSync(root,{recursive:true,force:true,maxRetries:3});}
+ try{await services.disposeMultiAgent();try{await services.closeTaskSourceWritersForMigration();}catch(error){console.warn('no-goal-source-close',error);}}finally{vi.unstubAllEnvs();fs.rmSync(root,{recursive:true,force:true,maxRetries:3});}
  }
 },10000);
 
@@ -76,5 +77,5 @@ it('actual main final guard rejects a sibling Goal writer without any threadRevi
  const next=createGoalState({sessionId:threadId,objective:'Sibling actual Goal',expectedEvidenceKinds:['answer'],turnLimit:3,now:Date.now()});
  await peer.commit({sessionId:threadId,expectedRevision:null,next,events:[],turns:[],evidence:[]});
  expect(()=>services.assistantThreadTargets.assertCurrent(target)).toThrow('goal_consent_stale');
- }finally{peer?.close();try{await services.disposeMultiAgent();await services.closeTaskSourceWritersForMigration();}finally{vi.unstubAllEnvs();rmSync(root,{recursive:true,force:true,maxRetries:3});}}
+ }finally{peer?.close();try{await services.disposeMultiAgent();await services.closeTaskSourceWritersForMigration();}finally{vi.unstubAllEnvs();fs.rmSync(root,{recursive:true,force:true,maxRetries:3});}}
 },10000);

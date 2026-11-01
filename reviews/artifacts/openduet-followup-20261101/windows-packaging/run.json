@@ -1,0 +1,25 @@
+{
+  "runnerPid": 79262,
+  "started": 1793521431.2731159,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "5899145f7359a1c170cca685525e44afb3d5421386eac742809df7e99e869efa",
+  "status": 200,
+  "ended": 1793521448.696877,
+  "sourceDrift": [],
+  "responseSha256": "415f8eb733aa4247e45aef3a2f4c945e7688634ee8ecbda5385e60895aa82efe",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 1108,
+    "completion_tokens_details": {
+      "reasoning_tokens": 274
+    },
+    "prompt_tokens": 5204,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 6312
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/windows-packaging-direct/response.json"
+}

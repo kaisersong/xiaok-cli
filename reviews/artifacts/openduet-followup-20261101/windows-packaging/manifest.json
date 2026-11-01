@@ -1,0 +1,10 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "desktop/scripts/copy-packaged-dependencies.cjs": "e6cf0729533b574739fa8748146b11eca98e9dca58937c51ce2e222f29f36d63",
+    "desktop/scripts/verify-packaged-runtime-dependencies.cjs": "16dd39289162a0914e3de1c0111f4b5511ac988fc5806be4b5055479fbf3d198",
+    "desktop/tests/main/copy-packaged-dependencies.test.ts": "7630d0213b36dbd8ce1a04034a125cb5526b329b609225804c615204bb41e2b2"
+  },
+  "bundleSha256": "5899145f7359a1c170cca685525e44afb3d5421386eac742809df7e99e869efa"
+}

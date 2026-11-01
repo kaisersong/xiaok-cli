@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import { createRequire } from 'node:module';
 import { finished } from 'node:stream/promises';
 import { createPackageWithOptions, extractFile, statFile, uncache } from '@electron/asar';
@@ -51,10 +51,10 @@ describe('production dependency closure copy', () => {
   it('fills transitive dependencies, keeps nested versions and terminates cycles without installing optional missing packages', async () => {
     const f = await fixture(); const result = await copy(f);
     expect(result.copied.length).toBeGreaterThan(0);
-    expect(JSON.parse(extractFile(f.asarPath, 'node_modules/leaf/package.json').toString()).version).toBe('1.0.0');
-    expect(JSON.parse(extractFile(f.asarPath, 'node_modules/other/node_modules/leaf/package.json').toString()).version).toBe('2.0.0');
-    expect(extractFile(f.asarPath, 'dist/native.node').toString()).toBe('preserved-unpacked');
-    expect(statFile(f.asarPath, 'dist/native.node').unpacked).toBe(true);
+    expect(JSON.parse(extractFile(f.asarPath, normalize('node_modules/leaf/package.json')).toString()).version).toBe('1.0.0');
+    expect(JSON.parse(extractFile(f.asarPath, normalize('node_modules/other/node_modules/leaf/package.json')).toString()).version).toBe('2.0.0');
+    expect(extractFile(f.asarPath, normalize('dist/native.node')).toString()).toBe('preserved-unpacked');
+    expect(statFile(f.asarPath, normalize('dist/native.node')).unpacked).toBe(true);
     const bytes = readFileSync(f.asarPath); expect((await copy(f)).copied).toEqual([]);
     expect(readFileSync(f.asarPath).equals(bytes)).toBe(true);
   });
