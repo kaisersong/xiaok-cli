@@ -1202,6 +1202,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     return answer;
   }
 
+  function writeQuestionTranscript(text: string): void {
+    if (replRenderer.hasActiveScrollRegion()) {
+      scrollRegion.writeAtContentCursor(text);
+    } else {
+      process.stdout.write(text);
+    }
+  }
+
   const workflowTools = [
     createAskUserTool({
       ask: async (question, placeholder, interaction, signal) => {
@@ -1219,6 +1227,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
               clearFrame: () => askUserClearFrame?.(),
               readText: readQuestionText,
+              writeTranscript: writeQuestionTranscript,
               signal,
             });
             return [...result.labels, result.otherText]
@@ -1289,6 +1298,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
       clearFrame: () => askUserClearFrame?.(),
       readText: readQuestionText,
+      writeTranscript: writeQuestionTranscript,
     }),
     createInstallSkillTool({
       cwd,
@@ -3911,6 +3921,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     endStreamingPhaseForInterrupt();
     flushSubAgentNotices();
     if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
+      toolExplorer.reset();
       turnHadAskUserQuestion = true;
       maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
       return;
