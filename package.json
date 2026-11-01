@@ -120,6 +120,7 @@
     "nodejieba": "^3.5.8"
   },
   "devDependencies": {
+    "@gkoreli/ghostty-vt-js": "0.5.0",
     "@modelcontextprotocol/node": "2.1.1",
     "@modelcontextprotocol/server": "2.3.0",
     "@types/better-sqlite3": "7.6.13",
