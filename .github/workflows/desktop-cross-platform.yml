@@ -128,6 +128,7 @@ jobs:
           tests/main/desktop-text-repetition.test.ts
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/kimi-packaged-smoke.test.ts
+          tests/main/windows-kimi-packaged-smoke-contract.test.ts
           tests/main/kimi-harness-contract.test.ts
           tests/main/kimi-reasoning-admission.test.ts
           tests/main/desktop-provider-stream-lifecycle.test.ts

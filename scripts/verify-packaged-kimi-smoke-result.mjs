@@ -1,21 +1,47 @@
 #!/usr/bin/env node
 /**
  * Validate packaged Kimi smoke result.json against KIMI_CODING_PROFILES.
- * Usage: node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot]
+ * Usage:
+ *   node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot]
+ *   node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot] --models-source <path>
+ *   KIMI_CODING_MODELS_SOURCE=<path> node scripts/verify-packaged-kimi-smoke-result.mjs <result.json>
+ *
  * Optional smokeRoot: scan for PACKAGED_SMOKE_RUNTIME_ONLY canary outside result.json.
+ * --models-source / KIMI_CODING_MODELS_SOURCE overrides the TypeScript profiles file
+ * so tests can break the self-proving loop with an independent fixture.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { readKimiCodingModels } from './read-kimi-coding-models.mjs';
 
-const resultPath = resolve(process.argv[2] ?? '');
-const smokeRoot = process.argv[3] ? resolve(process.argv[3]) : undefined;
-if (!process.argv[2]) {
-  console.error('Usage: node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot]');
+function takeModelsSource(argv) {
+  const env = process.env.KIMI_CODING_MODELS_SOURCE;
+  const out = [];
+  let source;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--models-source') {
+      source = argv[++i];
+      continue;
+    }
+    if (arg.startsWith('--models-source=')) {
+      source = arg.slice('--models-source='.length);
+      continue;
+    }
+    out.push(arg);
+  }
+  return { positional: out, modelsSource: source || env || undefined };
+}
+
+const { positional, modelsSource } = takeModelsSource(process.argv.slice(2));
+const resultPath = resolve(positional[0] ?? '');
+const smokeRoot = positional[1] ? resolve(positional[1]) : undefined;
+if (!positional[0]) {
+  console.error('Usage: node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot] [--models-source path]');
   process.exit(2);
 }
 
-const expectedModels = readKimiCodingModels();
+const expectedModels = readKimiCodingModels(modelsSource);
 const result = JSON.parse(readFileSync(resultPath, 'utf8'));
 
 function fail(message) {
