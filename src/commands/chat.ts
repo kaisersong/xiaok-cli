@@ -114,6 +114,8 @@ import {
 } from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
+import { runStatuslineCommand } from './chat-statusline.js';
+import { formatVersionInfo } from '../utils/version-info.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { TuiRuntimeState, type TuiSummarySource } from '../ui/tui/runtime-state.js';
 import { renderWelcomeScreen, renderInputSeparator, dim, boldCyan, yellow, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
@@ -4348,6 +4350,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (trimmed === '/help') {
       writeCommandOutput(trimmed, buildChatHelpText(skills));
+      return 'continue';
+    }
+
+    if (trimmed === '/version') {
+      writeCommandOutput(trimmed, formatVersionInfo());
+      return 'continue';
+    }
+    if (trimmed === '/statusline' || trimmed.startsWith('/statusline ')) {
+      const output = runStatuslineCommand(trimmed.slice('/statusline'.length), statusBar);
+      writeCommandOutput(trimmed, output);
+      scrollRegion.updateStatusLine(statusBar.getStatusLine());
       return 'continue';
     }
 
