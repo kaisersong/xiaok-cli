@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const VERIFY_WITH_SMOKE_ROOT =
+  /verify-packaged-kimi-smoke-result\.mjs\s+\$resultPath\s+\$smokeRoot/;
+
 describe('Windows packaged Kimi release gate', () => {
   it('launches win-unpacked and gates models via KIMI_CODING_PROFILES verifier', () => {
     const workflow = readFileSync(
@@ -16,7 +19,7 @@ describe('Windows packaged Kimi release gate', () => {
     expect(smokeIndex).toBeGreaterThan(packageIndex);
     expect(uploadIndex).toBeGreaterThan(smokeIndex);
     expect(workflow).toContain('desktop/release/win-unpacked/xiaok.exe');
-    expect(workflow).toContain('scripts/verify-packaged-kimi-smoke-result.mjs');
+    expect(workflow).toMatch(VERIFY_WITH_SMOKE_ROOT);
     expect(workflow).not.toMatch(/foreach \(\$model in @\(/);
     expect(workflow).not.toMatch(/modelResults\.Count -ne \d+/);
     expect(workflow).toContain('scripts/check-desktop-sibling-pins.mjs');
@@ -41,7 +44,7 @@ describe('Windows packaged Kimi release gate', () => {
     expect(packageIndex).toBeGreaterThan(jobIndex);
     expect(smokeIndex).toBeGreaterThan(packageIndex);
     expect(workflow.slice(jobIndex)).toContain('desktop/release/win-unpacked/xiaok.exe');
-    expect(workflow.slice(jobIndex)).toContain('scripts/verify-packaged-kimi-smoke-result.mjs');
+    expect(workflow.slice(jobIndex)).toMatch(VERIFY_WITH_SMOKE_ROOT);
     expect(workflow.slice(jobIndex)).not.toMatch(/foreach \(\$model in @\(/);
     expect(workflow).toContain('src/ai/providers/kimi-models.ts');
     expect(workflow).not.toContain('gh release');

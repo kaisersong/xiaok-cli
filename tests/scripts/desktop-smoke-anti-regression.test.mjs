@@ -122,7 +122,7 @@ test('verify-packaged-kimi-smoke-result honors --models-source fixture (kills ha
     writeFileSync(otherModels, profilesFixture(['fx-alpha', 'fx-beta', 'fx-gamma']));
     const fail = spawnSync(
       'node',
-      [VERIFY_SCRIPT, resultPath, '--models-source', otherModels],
+      [VERIFY_SCRIPT, resultPath, dir, '--models-source', otherModels],
       { encoding: 'utf8' },
     );
     assert.notEqual(fail.status, 0);
@@ -157,9 +157,47 @@ test('verify-packaged-kimi-smoke-result accepts matching live result and rejects
     const bad = JSON.parse(readFileSync(resultPath, 'utf8'));
     bad.modelResults = bad.modelResults.slice(0, 1);
     writeFileSync(resultPath, JSON.stringify(bad));
-    const fail = spawnSync('node', [VERIFY_SCRIPT, resultPath], { encoding: 'utf8' });
+    const fail = spawnSync('node', [VERIFY_SCRIPT, resultPath, dir], { encoding: 'utf8' });
     assert.notEqual(fail.status, 0);
     assert.match(fail.stderr, /modelResults\.length/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('verify-packaged-kimi-smoke-result rejects missing smokeRoot even with canary present (B3)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kimi-smoke-b3-'));
+  try {
+    const models = readKimiCodingModels();
+    const appdata = join(dir, 'appdata');
+    mkdirSync(appdata, { recursive: true });
+    writeFileSync(join(appdata, 'leak.txt'), 'PACKAGED_SMOKE_RUNTIME_ONLY leaked');
+    const resultPath = join(dir, 'result.json');
+    writeFileSync(
+      resultPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        status: 'pass',
+        modelResults: models.map((model) => ({
+          model,
+          requests: 2,
+          secondTurnReplayedReasoning: true,
+        })),
+        authorizationDenyNetworkRequests: 0,
+        rollbackDenyNetworkRequests: 0,
+      }),
+    );
+
+    // With smokeRoot: canary must fail the verify
+    const withRoot = spawnSync('node', [VERIFY_SCRIPT, resultPath, dir], { encoding: 'utf8' });
+    assert.notEqual(withRoot.status, 0, withRoot.stdout + withRoot.stderr);
+    assert.match(withRoot.stderr, /canary|PACKAGED_SMOKE_RUNTIME_ONLY|persisted/);
+
+    // Without smokeRoot: must also fail (B3 — previously exited 0 and printed pass)
+    const withoutRoot = spawnSync('node', [VERIFY_SCRIPT, resultPath], { encoding: 'utf8' });
+    assert.notEqual(withoutRoot.status, 0, withoutRoot.stdout + withoutRoot.stderr);
+    assert.match(withoutRoot.stderr, /smokeRoot/i);
+    assert.doesNotMatch(withoutRoot.stdout, /\[packaged-kimi-smoke\] pass:/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

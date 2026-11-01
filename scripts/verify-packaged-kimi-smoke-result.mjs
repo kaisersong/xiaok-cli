@@ -2,11 +2,12 @@
 /**
  * Validate packaged Kimi smoke result.json against KIMI_CODING_PROFILES.
  * Usage:
- *   node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot]
- *   node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot] --models-source <path>
- *   KIMI_CODING_MODELS_SOURCE=<path> node scripts/verify-packaged-kimi-smoke-result.mjs <result.json>
+ *   node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> <smokeRoot>
+ *   node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> <smokeRoot> --models-source <path>
+ *   KIMI_CODING_MODELS_SOURCE=<path> node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> <smokeRoot>
  *
- * Optional smokeRoot: scan for PACKAGED_SMOKE_RUNTIME_ONLY canary outside result.json.
+ * smokeRoot is required: scan for PACKAGED_SMOKE_RUNTIME_ONLY canary outside result.json.
+ * Omitting it used to silently skip the leak check (B3); missing args now exit non-zero.
  * --models-source / KIMI_CODING_MODELS_SOURCE overrides the TypeScript profiles file
  * so tests can break the self-proving loop with an independent fixture.
  */
@@ -34,12 +35,17 @@ function takeModelsSource(argv) {
 }
 
 const { positional, modelsSource } = takeModelsSource(process.argv.slice(2));
-const resultPath = resolve(positional[0] ?? '');
-const smokeRoot = positional[1] ? resolve(positional[1]) : undefined;
-if (!positional[0]) {
-  console.error('Usage: node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> [smokeRoot] [--models-source path]');
+if (!positional[0] || !positional[1]) {
+  console.error(
+    'Usage: node scripts/verify-packaged-kimi-smoke-result.mjs <result.json> <smokeRoot> [--models-source path]',
+  );
+  console.error(
+    '[packaged-kimi-smoke] smokeRoot is required; omitting it would skip the PACKAGED_SMOKE_RUNTIME_ONLY canary scan',
+  );
   process.exit(2);
 }
+const resultPath = resolve(positional[0]);
+const smokeRoot = resolve(positional[1]);
 
 const expectedModels = readKimiCodingModels(modelsSource);
 const result = JSON.parse(readFileSync(resultPath, 'utf8'));
@@ -66,7 +72,7 @@ if (result.authorizationDenyNetworkRequests !== 0 || result.rollbackDenyNetworkR
   fail('deny smoke observed a network request');
 }
 
-if (smokeRoot) {
+{
   const canary = 'PACKAGED_SMOKE_RUNTIME_ONLY';
   const hits = [];
   const walk = (dir) => {
