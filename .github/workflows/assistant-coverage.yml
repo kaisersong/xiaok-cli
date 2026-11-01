@@ -88,6 +88,10 @@ jobs:
           "${electron_test_runner[@]}" npm run test -- --run \
           tests/main/desktop-protection-worker-compiled-entry.test.ts \
           tests/main/sqlite-transaction-compat.test.ts \
+          tests/main/loop-database-owner.test.ts \
+          tests/main/loop-native-schema.test.ts \
+          tests/main/loop-artifact-export-journal.test.ts \
+          tests/main/kswarm-health-capacity.test.ts \
           tests/main/assistant-periodic-runtime.test.ts \
           tests/main/assistant-periodic-scheduling.test.ts \
           tests/main/assistant-digest-policy.test.ts \

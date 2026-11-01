@@ -13,7 +13,7 @@ it('real legacy migration rolls back on broken dependent FK, retains indexes/tri
  CREATE TRIGGER native_identity_extra BEFORE UPDATE OF application_request_id ON loop_native_attempts BEGIN SELECT RAISE(ABORT,'immutable request');END;
  PRAGMA foreign_keys=ON;`);
  const original=db.prepare('SELECT * FROM loop_native_attempts').all(),schema=db.prepare("SELECT type,name,sql FROM sqlite_master WHERE tbl_name='loop_native_attempts' ORDER BY type,name").all();
- expect(()=>migrateLoopNativeSchema(db)).toThrow('integrity');expect(db.isTransaction).toBe(false);expect(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys).toBe(1);
+ expect(()=>migrateLoopNativeSchema(db)).toThrow('integrity');expect(()=>db.exec('BEGIN;ROLLBACK')).not.toThrow();expect(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys).toBe(1);
  expect(db.prepare('SELECT * FROM loop_native_attempts').all()).toEqual(original);expect(db.prepare("SELECT type,name,sql FROM sqlite_master WHERE tbl_name='loop_native_attempts' ORDER BY type,name").all()).toEqual(schema);
  db.exec("UPDATE child SET native_id='attempt'");migrateLoopNativeSchema(db);expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
  expect(()=>db.exec("UPDATE loop_native_attempts SET application_request_id='replaced'")).toThrow('immutable request');
@@ -24,5 +24,5 @@ it('real legacy migration rolls back on broken dependent FK, retains indexes/tri
 });
 it('does not change an existing transaction or its foreign key setting',()=>{const db=new DatabaseSync(':memory:');try{
  db.exec('CREATE TABLE loop_native_attempts(attempt_id text);PRAGMA foreign_keys=ON;BEGIN');
- expect(()=>migrateLoopNativeSchema(db)).toThrow('outer_transaction');expect(db.isTransaction).toBe(true);expect(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys).toBe(1);db.exec('ROLLBACK');
+ expect(()=>migrateLoopNativeSchema(db)).toThrow('outer_transaction');expect(()=>db.exec('BEGIN')).toThrow('cannot start a transaction within a transaction');expect(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys).toBe(1);db.exec('ROLLBACK');
  }finally{db.close();}});
