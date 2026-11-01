@@ -112,6 +112,7 @@ jobs:
           tests/main/assistant-morning-context.test.ts \
           tests/main/assistant-profile-store.test.ts \
           tests/main/assistant-quality-files.test.ts \
+          tests/main/assistant-quality-files-growth.test.ts \
           tests/main/assistant-quality-population.test.ts \
           tests/main/assistant-quality-predictions.test.ts \
           tests/main/assistant-quality-product.test.ts \
