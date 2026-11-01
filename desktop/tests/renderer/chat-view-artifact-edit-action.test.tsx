@@ -217,7 +217,7 @@ function renderFiles(artifacts: NonNullable<React.ComponentProps<typeof ChatView
     thread={{ id: 'dedup', title: 'Files', status: 'completed', mode: 'work', createdAt: 1, updatedAt: 1,
       starred: false, gtdBucket: 'inbox', pinnedAt: null, currentTaskId: null, taskIds: [] }}
     messages={[]} streamingText="" status="completed" currentQuestion={null}
-    result={{ summary: '', artifacts }} generatedFiles={generatedFiles}
+    result={{ summary: generatedFiles.map(file => `\`${file.filePath}\``).join('\n'), artifacts }} generatedFiles={generatedFiles}
     prompt="" onPromptChange={vi.fn()} onSubmit={vi.fn()} onAnswer={vi.fn()} onCancel={vi.fn()}
     canvasOpen={false} onToggleCanvas={vi.fn()} onArtifactClick={onArtifactClick}
   /></LocaleProvider>);

@@ -1,3 +1,4 @@
+import { KIMI_CODING_PROFILES, type KimiCodingModel } from '../../src/ai/providers/kimi-models.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -21,11 +22,11 @@ interface FakeSdkChunk {
   };
 }
 
-function strictBinding(model: 'k3' | 'k3-256k'): ResolvedModelBinding {
+function strictBinding(model: KimiCodingModel): ResolvedModelBinding {
   return {
     providerId: 'kimi',
     providerType: 'first_party',
-    modelId: model === 'k3' ? 'kimi-k3' : 'kimi-k3-256k',
+    modelId: `kimi-${model}`,
     wireModel: model,
     protocol: 'openai_legacy',
     apiKey: 'packaged-smoke-no-network',
@@ -35,7 +36,7 @@ function strictBinding(model: 'k3' | 'k3-256k'): ResolvedModelBinding {
   };
 }
 
-function createStrictAdapter(model: 'k3' | 'k3-256k'): OpenAIAdapter {
+function createStrictAdapter(model: KimiCodingModel): OpenAIAdapter {
   const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'window', {
@@ -182,12 +183,12 @@ function verifyRollbackDeny(): void {
 
 export async function runPackagedKimiSmoke(resultPath: string): Promise<void> {
   const modelResults: Array<{
-    model: 'k3' | 'k3-256k';
+    model: KimiCodingModel;
     requests: number;
     secondTurnReplayedReasoning: boolean;
   }> = [];
 
-  for (const model of ['k3', 'k3-256k'] as const) {
+  for (const model of Object.keys(KIMI_CODING_PROFILES) as KimiCodingModel[]) {
     const adapter = createStrictAdapter(model);
     const capture = installFakeSdk(adapter);
     const messages: Message[] = [{

@@ -31,6 +31,128 @@ import { resolveRegisteredStrictKimiK3Profile } from '../../../src/ai/runtime/mo
 import { recoverModelStream } from '../../../src/ai/runtime/model-stream-recovery.js';
 import { normalizeRuntimeError } from '../../../src/ai/runtime/runtime-errors.js';
 
+describe('strict Kimi terminal frame recovery', () => {
+  it.each([undefined, null])('accepts an admitted metadata-only finish frame (delta=%s)', async delta => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({apiKey:'test'});
+    vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator]() {
+      yield {choices:[{delta:{reasoning_content:'',content:'complete answer'},finish_reason:null}]};
+      yield {choices:[{delta,finish_reason:'stop'}]};
+    }} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    const chunks=await collectAdapterChunks(adapter);
+    expect(chunks).toContainEqual({type:'text',delta:'complete answer'});
+    expect(chunks.at(-1)).toEqual({type:'done'});
+  });
+
+  it('does not admit metadata-only completion without official reasoning',async()=>{
+    const OpenAI = (await import('openai')).default;const instance=new OpenAI({apiKey:'test'});
+    vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){yield {choices:[{finish_reason:'stop'}]};}} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toThrow('KIMI_REASONING_ADMISSION_REQUIRED');
+  });
+
+  it('classifies admitted EOF as an incomplete provider read without accepting it as done',async()=>{
+    const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'test'});
+    const create=vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){yield {choices:[{delta:{reasoning_content:'',content:'partial'},finish_reason:null}]};}} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toMatchObject({code:'KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED',boundaryKind:'missing_finish',retryable:true,sawOfficialReasoning:true,toolCallCount:0});
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps malformed tool arguments permanent and content-free',async()=>{
+    const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'test'});
+    const create=vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){yield {choices:[{delta:{reasoning_content:'',tool_calls:[{index:0,id:'call-fictional',function:{name:'write',arguments:'{"PRIVATE_ARGUMENT_CANARY":'}}]},finish_reason:'tool_calls'}]};}} as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    let failure:unknown;try{await collectAdapterChunks(adapter);}catch(error){failure=error;}
+    expect(failure).toMatchObject({code:'KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED',boundaryKind:'invalid_tool_call',retryable:false});
+    expect(JSON.stringify(failure)).not.toContain('PRIVATE_ARGUMENT_CANARY');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the existing read recovery owner retry admitted EOF',async()=>{
+    const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'test'});let calls=0;
+    vi.spyOn(instance.chat.completions,'create').mockImplementation(()=>localChatCompletionReturn(instance,async()=>({async *[Symbol.asyncIterator](){
+      calls++;yield {choices:[{delta:{reasoning_content:'',content:calls===1?'partial':'finished'},finish_reason:null}]};
+      if(calls>1)yield {choices:[{delta:{},finish_reason:'stop'}]};
+    }}) as never));
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    const chunks:StreamChunk[]=[];const retry=vi.fn();
+    for await(const chunk of recoverModelStream({signal:new AbortController().signal,policy:{windowMs:1000,idleMs:500,initialDelayMs:1,maxDelayMs:2},onRetry:retry,open:signal=>streamTestAdapter(adapter,[],[],'system',{signal})}))chunks.push(chunk);
+    expect(calls).toBe(2);expect(retry).toHaveBeenCalledTimes(1);
+    expect(chunks.filter(c=>c.type==='done')).toHaveLength(1);
+    expect(chunks).toContainEqual({type:'text',delta:'finished'});
+  });
+});
+
+describe('model stream activity and owned idle timeout', () => {
+  async function fixture(open: (signal: AbortSignal) => AsyncGenerator<unknown>) {
+    const OpenAI=(await import('openai')).default,instance=new OpenAI({apiKey:'fixture'});
+    const create=vi.spyOn(instance.chat.completions,'create').mockImplementation((_request,options)=>localChatCompletionReturn(instance,async()=>({[Symbol.asyncIterator]:()=>open(options!.signal!)})) as never);
+    const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+    return {adapter,create};
+  }
+  function delay(signal:AbortSignal,ms:number):Promise<boolean>{return new Promise(resolve=>{
+    const finish=(ok:boolean)=>{clearTimeout(timer);signal.removeEventListener('abort',abort);resolve(ok);};
+    const abort=()=>finish(false),timer=setTimeout(()=>finish(true),ms);if(signal.aborted)abort();else signal.addEventListener('abort',abort,{once:true});
+  });}
+  const header={choices:[{delta:{reasoning_content:'fixture',tool_calls:[{index:0,id:'fictional-call',function:{name:'write',arguments:'{"content":"'}}]},finish_reason:null}]};
+  const active=async function*(signal:AbortSignal){yield header;for(const part of ['a','b','c"}']){
+    if(!await delay(signal,120000))return;
+    yield {choices:[{delta:{tool_calls:[{index:0,function:{arguments:part}}]},finish_reason:null}]};
+  }yield {choices:[{finish_reason:'tool_calls'}]};};
+
+  it('accepts a six-minute response while tool parameters keep arriving',async()=>{
+    vi.useFakeTimers();try{const {adapter,create}=await fixture(active);
+      const result=collectAdapterChunks(adapter).then(chunks=>({chunks}),error=>({error}));
+      await vi.advanceTimersByTimeAsync(360001);const outcome=await result;
+      expect(outcome).not.toHaveProperty('error');if(!('chunks'in outcome))return;
+      expect(outcome.chunks).toContainEqual({type:'tool_use',id:'fictional-call',name:'write',input:{content:'abc'}});
+      expect(outcome.chunks.at(-1)).toEqual({type:'done'});expect(create).toHaveBeenCalledTimes(1);
+      expect(outcome.chunks.filter(c=>(c.type as string)==='tool_input_progress').length).toBeGreaterThan(0);
+    }finally{vi.useRealTimers();}
+  });
+  it('keeps existing read recovery idle aware of buffered parameter progress',async()=>{
+    vi.useFakeTimers();const owner=new AbortController();try{const {adapter,create}=await fixture(active);let settled=false;
+      const result=(async()=>{const chunks:StreamChunk[]=[];for await(const c of recoverModelStream({signal:owner.signal,policy:{windowMs:600000,idleMs:180000,initialDelayMs:1,maxDelayMs:1},open:signal=>streamTestAdapter(adapter,[],[],'fixture',{signal})}))chunks.push(c);return chunks;})().then(chunks=>{settled=true;return {chunks};},error=>{settled=true;return {error};});
+      await vi.advanceTimersByTimeAsync(360001);const completedWithoutCancellation=settled;if(!settled)owner.abort(Error('fixture_cleanup'));
+      await vi.advanceTimersByTimeAsync(1);const outcome=await result;
+      expect(completedWithoutCancellation).toBe(true);expect(create).toHaveBeenCalledTimes(1);expect(outcome).not.toHaveProperty('error');
+      if('chunks'in outcome)expect(outcome.chunks.filter(c=>c.type==='done')).toHaveLength(1);
+    }finally{owner.abort();vi.useRealTimers();}
+  });
+  it.each([false,true])('reports owned idle expiry when the actual SDK turns abort into clean EOF; after finish=%s',async finished=>{
+    vi.useFakeTimers();try{
+      const {Stream}=await vi.importActual<typeof import('openai/core/streaming')>('openai/core/streaming');
+      const OpenAI=(await import('openai')).default,instance=new OpenAI({apiKey:'fixture'});
+      const create=vi.spyOn(instance.chat.completions,'create').mockImplementation((_request,options)=>localChatCompletionReturn(instance,async()=>{
+        const transport=new AbortController();let body!:ReadableStreamDefaultController<Uint8Array>;
+        const response=new Response(new ReadableStream<Uint8Array>({start(controller){body=controller;controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify(finished?{choices:[{delta:{reasoning_content:'fixture',content:'complete'},finish_reason:'stop'}]}:header)+'\n\n'));}}));
+        options!.signal!.addEventListener('abort',()=>{transport.abort();body.error(new DOMException('fixture abort','AbortError'));},{once:true});
+        return Stream.fromSSEResponse(response,transport);
+      }) as never);
+      const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+      const chunks:StreamChunk[]=[];const result=(async()=>{for await(const c of streamTestAdapter(adapter,[],[],'fixture'))chunks.push(c);})().then(()=>undefined,error=>error);
+      await vi.advanceTimersByTimeAsync(300001);const error=await result;
+      expect(error).toMatchObject({name:'TimeoutError',code:'OPENAI_STREAM_IDLE_TIMEOUT',retryable:!finished});
+      expect(chunks.some(c=>c.type==='done'||c.type==='tool_use')).toBe(false);expect(create).toHaveBeenCalledTimes(1);
+    }finally{vi.useRealTimers();}
+  });
+  it('does not extend idle expiry for empty provider heartbeats',async()=>{
+    vi.useFakeTimers();try{const {adapter,create}=await fixture(async function*(signal){yield header;for(let i=0;i<10;i++){if(!await delay(signal,60000))return;yield {choices:[{delta:{},finish_reason:null}]};}});
+      const result=collectAdapterChunks(adapter).then(()=>undefined,error=>error);await vi.advanceTimersByTimeAsync(300001);
+      expect(await result).toMatchObject({code:'OPENAI_STREAM_IDLE_TIMEOUT'});expect(create).toHaveBeenCalledTimes(1);
+    }finally{vi.useRealTimers();}
+  });
+  it('keeps caller cancellation authoritative despite parameter progress',async()=>{
+    vi.useFakeTimers();const caller=new AbortController(),reason=Error('caller_cancelled');try{const {adapter,create}=await fixture(active);
+      const result=collectAdapterChunks(adapter,{signal:caller.signal}).then(()=>undefined,error=>error);
+      await vi.advanceTimersByTimeAsync(250000);caller.abort(reason);await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toBe(reason);expect(create).toHaveBeenCalledTimes(1);
+    }finally{caller.abort();vi.useRealTimers();}
+  });
+});
+
 // Actual public SDK exports and TEST-only factory; no constructor is dispatched during hoist.
 const localOpenAISDK = await vi.hoisted(async () => {
   const actual = await vi.importActual<typeof import('openai')>('openai');
@@ -2243,6 +2365,89 @@ describe('OpenAIAdapter', () => {
     }]);
   });
 
+  it('retries a missing-reasoning response once without publishing its text or tool call', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    const create = vi.spyOn(instance.chat.completions, 'create');
+    create.mockResolvedValueOnce({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'UNADMITTED_PRIVATE_CANARY', tool_calls: [{ index: 0, id: 'discarded', function: { name: 'record', arguments: '{invalid' } }] }, finish_reason: null }] };
+      yield { choices: [{ delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 2 } };
+    } } as never);
+    create.mockResolvedValueOnce({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+      yield { choices: [{ delta: { tool_calls: [{ index: 0, id: 'valid', function: { name: 'record', arguments: '{"label":"valid"}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 11, completion_tokens: 3 } };
+    } } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    const chunks = await collectAdapterChunks(adapter);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(chunks)).not.toMatch(/UNADMITTED_PRIVATE_CANARY|discarded/);
+    expect(chunks.filter(c => c.type === 'tool_use')).toEqual([{ type: 'tool_use', id: 'valid', name: 'record', input: { label: 'valid' } }]);
+    expect(chunks.filter(c => c.type === 'usage').map(c => c.usage)).toEqual([{ inputTokens: 10, outputTokens: 2 }, { inputTokens: 11, outputTokens: 3 }]);
+    expect(create.mock.calls[0]?.[0]).toEqual(create.mock.calls[1]?.[0]);
+  });
+
+  it('buffers content until a delayed official reasoning field arrives', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const chunks: StreamChunk[] = [];
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'hello ' }, finish_reason: null }] };
+      expect(chunks.filter(c => c.type === 'text')).toEqual([]);
+      yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+      yield { choices: [{ delta: { content: 'world' }, finish_reason: 'stop' }] };
+    } } as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    for await (const chunk of adapter.stream([], [], 'system')) chunks.push(chunk);
+    expect(chunks.filter(c => c.type === 'text').map(c => c.delta).join('')).toBe('hello world');
+  });
+
+  it('bounds missing-reasoning retries and prevents outer recovery from restarting them', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const create = vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'PRIVATE_CANARY' }, finish_reason: 'stop' }] };
+    } }) as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    const onRetry = vi.fn(); let failure: unknown;
+    try { for await (const _ of recoverModelStream({ signal: new AbortController().signal, onRetry,
+      policy: { windowMs: 1000, idleMs: 1000, initialDelayMs: 1, maxDelayMs: 1 }, open: signal => adapter.stream([], [], 'system', { signal }) })) { /* consume */ } } catch (error) { failure = error; }
+    expect(create).toHaveBeenCalledTimes(2); expect(onRetry).not.toHaveBeenCalled();
+    expect(normalizeRuntimeError(failure)).toEqual({ code: 'model_failed', message: 'KIMI_REASONING_ADMISSION_REQUIRED', retryable: false });
+    expect(JSON.stringify(failure)).not.toContain('PRIVATE_CANARY');
+  });
+
+  it('does not retry when the caller cancels the rejected provider response', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const controller = new AbortController(); const reason = new Error('caller cancelled');
+    const create = vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({ async *[Symbol.asyncIterator]() {
+      try { yield { choices: [{ delta: { content: 'PRIVATE_CANARY' }, finish_reason: 'stop' }] }; }
+      finally { controller.abort(reason); }
+    } }) as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    await expect(collectAdapterChunks(adapter, { signal: controller.signal })).rejects.toBe(reason);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds pre-admission content without retrying a capacity violation', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' });
+    const create = vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'x'.repeat(2 * 1024 * 1024 + 1) }, finish_reason: null }] };
+    } } as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toThrow('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not admit a reasoning field arriving after a rejected terminal boundary', async () => {
+    const OpenAI = (await import('openai')).default; const instance = new OpenAI({ apiKey: 'test' }); let lateReads = 0;
+    const create = vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: 'PRIVATE_CANARY' }, finish_reason: 'stop' }] };
+      lateReads += 1; yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+    } }) as never);
+    const adapter = createStrictKimiAdapter(); (adapter as unknown as { client: typeof instance }).client = instance;
+    await expect(collectAdapterChunks(adapter)).rejects.toThrow('KIMI_REASONING_ADMISSION_REQUIRED');
+    expect(create).toHaveBeenCalledTimes(2); expect(lateReads).toBe(0);
+  });
+
   it('rejects a completed strict K3 response without official reasoning_content presence', async () => {
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
@@ -4018,7 +4223,8 @@ describe('OpenAIAdapter', () => {
         { type: 'text', delta: 'finished text' },
       ]);
       expect(caught).toMatchObject({
-        message: 'KIMI_K3_PROVIDER_REQUEST_FAILED',
+        name: 'TimeoutError',
+        code: 'OPENAI_STREAM_IDLE_TIMEOUT',
         retryable: false,
       });
     } finally {

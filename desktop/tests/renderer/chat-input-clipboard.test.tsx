@@ -88,7 +88,7 @@ describe('ChatInput clipboard attachments', () => {
     expect(input).toHaveValue('');
   });
 
-  it('keeps file-item paste working when no Cmd+V keydown preflight ran first', async () => {
+  it('keeps context-menu file-item paste working', async () => {
     const readClipboardFilePaths = vi.fn().mockResolvedValue(['C:\\Users\\song\\Desktop\\spec.pdf']);
     installClipboardApi({ readClipboardFilePaths });
 
@@ -172,7 +172,7 @@ describe('ChatInput clipboard attachments', () => {
     expect(screen.queryByAltText('composing-screenshot.png')).not.toBeInTheDocument();
   });
 
-  it('does not duplicate directory chips when the Cmd+V preflight resolves before the paste event arrives', async () => {
+  it('does not start a file read until the paste event supplies clipboard data', async () => {
     const readClipboardFilePaths = vi.fn().mockResolvedValue([
       '/Users/song/themes/aurora',
       '/Users/song/themes/dark-editorial',
@@ -183,8 +183,8 @@ describe('ChatInput clipboard attachments', () => {
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
 
     fireEvent.keyDown(input, { key: 'v', metaKey: true });
-    // Simulate the race: the preflight IPC resolves before the paste event fires.
-    await waitFor(() => expect(screen.queryAllByText('aurora').length).toBe(1));
+    await Promise.resolve();
+    expect(readClipboardFilePaths).not.toHaveBeenCalled();
 
     // Finder puts the directory display names (basenames) on text/plain.
     const pasteEvent = pasteClipboard(input, {
@@ -195,7 +195,7 @@ describe('ChatInput clipboard attachments', () => {
       text: 'aurora\ndark-editorial',
     });
 
-    // The late paste must not insert the basenames nor add a second batch of chips.
+    // Native file paste must not insert Finder display names.
     expect(pasteEvent.defaultPrevented).toBe(true);
     await new Promise(r => setTimeout(r, 20));
     expect(screen.queryAllByText('aurora')).toHaveLength(1);
@@ -215,6 +215,8 @@ describe('ChatInput clipboard attachments', () => {
     fireEvent.keyDown(input, { key: 'v', metaKey: true, repeat: true });
     fireEvent.keyDown(input, { key: 'v', metaKey: true, repeat: true });
 
+    expect(readClipboardFilePaths).not.toHaveBeenCalled();
+    pasteClipboard(input, { items: [{ kind: 'file', type: '' }] });
     await waitFor(() => expect(screen.queryAllByText('aurora').length).toBeGreaterThan(0));
     await new Promise(r => setTimeout(r, 20));
     expect(screen.queryAllByText('aurora')).toHaveLength(1);
@@ -257,21 +259,40 @@ describe('ChatInput clipboard attachments', () => {
     expect(input).toHaveValue('');
   });
 
-  it('turns pasted Windows path text into a file chip instead of draft text', async () => {
-    installClipboardApi({ readClipboardFilePaths: () => Promise.resolve([]) });
-
-    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
+  it.each([
+    '/Users/tester/work/课程资料',
+    '"/Users/tester/work/课程 资料"',
+    '/tmp/one\n/tmp/two',
+    'C:\\Users\\tester\\Desktop\\brief.txt',
+    '\\\\server\\share\\brief.txt',
+    'file:///tmp/brief.txt',
+    '请阅读 /tmp/brief.txt 并总结',
+    '/help',
+  ])('keeps copied path-like text verbatim: %s', async text => {
+    const onSubmit = vi.fn();
+    const readClipboardImage = vi.fn().mockResolvedValue(null);
+    installClipboardApi({ readClipboardImage });
+    render(<LocaleProvider><ChatInput onSubmit={onSubmit} /></LocaleProvider>);
     const input = screen.getByRole('textbox');
-
-    pasteClipboard(input, {
-      items: [{ kind: 'string', type: 'text/plain' }],
-      text: '"C:\\Users\\song\\Desktop\\brief.txt"',
-    });
-    fireEvent.change(input, { target: { value: '"C:\\Users\\song\\Desktop\\brief.txt"' } });
-
-    expect(await screen.findByText('brief.txt')).toBeInTheDocument();
-    expect(input).toHaveValue('');
+    fireEvent.keyDown(input, { key: 'v', metaKey: true });
+    const event = pasteClipboard(input, { items: [{ kind: 'string', type: 'text/plain' }], text });
+    expect(event.defaultPrevented).toBe(false);
+    // jsdom does not implement the browser's native paste insertion.
+    if (!event.defaultPrevented) fireEvent.change(input, { target: { value: text } });
+    await waitFor(() => expect(input).toHaveValue(text));
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledWith(text, []);
   });
 
-
+  it('keeps context-menu path paste as text and preserves the surrounding draft', () => {
+    const onChange = vi.fn();
+    render(<LocaleProvider><ChatInput value="before  after" onChange={onChange} onSubmit={() => {}} /></LocaleProvider>);
+    const input = screen.getByRole('textbox');
+    const text = '/tmp/课程资料';
+    const event = pasteClipboard(input, { items: [{ kind: 'string', type: 'text/plain' }], text });
+    expect(event.defaultPrevented).toBe(false);
+    fireEvent.change(input, { target: { value: `before ${text} after` } });
+    expect(input).toHaveValue(`before ${text} after`);
+    expect(onChange).toHaveBeenLastCalledWith(`before ${text} after`);
+  });
 });

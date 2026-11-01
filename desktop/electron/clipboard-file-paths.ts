@@ -6,7 +6,6 @@ export function readClipboardPathCandidates(clipboard: ClipboardSource): string[
   const candidates = [
     ...readMacClipboardFilePaths(),
     ...readWindowsClipboardFilePaths(),
-    ...readTextClipboardFilePaths(),
   ];
   const seen = new Set<string>();
   return candidates.filter(candidate => {
@@ -45,23 +44,9 @@ export function readClipboardPathCandidates(clipboard: ClipboardSource): string[
     return paths.map(normalizeClipboardPathCandidate).filter(isLikelyFilePath);
   }
 
-  function readTextClipboardFilePaths(): string[] {
-    return splitClipboardPathList(readClipboardText())
-      .map(normalizeClipboardPathCandidate)
-      .filter(isLikelyFilePath);
-  }
-
   function readClipboardFormat(format: string): string {
     try {
       return clipboard.read(format);
-    } catch {
-      return '';
-    }
-  }
-
-  function readClipboardText(): string {
-    try {
-      return clipboard.readText();
     } catch {
       return '';
     }

@@ -297,11 +297,11 @@ describe('FileSessionStore', () => {
   });
 
 
-  it.each(['k3', 'k3-256k'] as const)(
+  it.each(['k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed'] as const)(
     'redacts %s durable messages without mutating live messages and rejects bound resume',
     async (model) => {
       const store = new FileSessionStore(rootDir);
-      const sessionId = `sess_kimi_${model.replace('-', '_')}_durable`;
+      const sessionId = `sess_kimi_${model.replace(/[^a-zA-Z0-9_-]/g, '_')}_durable`;
       const messages = preservedThinkingRoundTripMessages();
 
       await store.save({
@@ -389,11 +389,11 @@ describe('FileSessionStore', () => {
     });
   });
 
-  it.each(['k3', 'k3-256k'] as const)(
+  it.each(['k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed'] as const)(
     'loads and forks a user-only %s durable snapshot',
     async (model) => {
       const store = new FileSessionStore(rootDir);
-      const sessionId = `sess_kimi_${model.replace('-', '_')}_fresh`;
+      const sessionId = `sess_kimi_${model.replace(/[^a-zA-Z0-9_-]/g, '_')}_fresh`;
       await store.save({
         sessionId,
         cwd: '/workspace/kimi',
@@ -811,67 +811,72 @@ describe('FileSessionStore', () => {
       }
       throw error;
     }
-    const intentDelegation = createEmptySessionIntentLedger('sess_sqlite', 200);
-    intentDelegation.instanceId = 'inst_sqlite';
-    intentDelegation.ownership = {
-      state: 'owned',
-      ownerInstanceId: 'inst_sqlite',
-      updatedAt: 200,
-    };
-
-    const skillEval = createEmptySessionSkillEvalState(200);
-    skillEval.observations.push({
-      observationId: 'obs_sqlite',
-      sessionId: 'sess_sqlite',
-      intentId: 'intent_sqlite',
-      stageId: 'intent_sqlite:stage:1',
-      stepId: 'intent_sqlite:stage:1:step:compose',
-      intentType: 'generate',
-      stageRole: 'compose',
-      deliverable: '报告',
-      deliverableFamily: 'document',
-      selectedSkillName: 'report-skill',
-      actualSkillName: 'report-skill',
-      status: 'completed',
-      artifactRecorded: true,
-      structuralValidation: 'passed',
-      semanticValidation: 'passed',
-      createdAt: 200,
-      updatedAt: 200,
-    });
-
-    await store.save({
-      sessionId: 'sess_sqlite',
-      cwd: '/sqlite',
-      createdAt: 100,
-      updatedAt: 200,
-      lineage: ['sess_sqlite'],
-      messages: [],
-      usage: { inputTokens: 0, outputTokens: 0 },
-      compactions: [],
-      memoryRefs: [],
-      approvalRefs: [],
-      backgroundJobRefs: [],
-      intentDelegation,
-      skillEval,
-    });
-
-    const loaded = await store.load('sess_sqlite');
-    expect(loaded?.intentDelegation).toMatchObject({
-      sessionId: 'sess_sqlite',
-      instanceId: 'inst_sqlite',
-      ownership: {
+    // Windows cannot unlink sessions.db while the handle is open; always release it.
+    try {
+      const intentDelegation = createEmptySessionIntentLedger('sess_sqlite', 200);
+      intentDelegation.instanceId = 'inst_sqlite';
+      intentDelegation.ownership = {
         state: 'owned',
         ownerInstanceId: 'inst_sqlite',
-      },
-    });
-    expect(loaded?.skillEval?.observations).toEqual([
-      expect.objectContaining({
+        updatedAt: 200,
+      };
+
+      const skillEval = createEmptySessionSkillEvalState(200);
+      skillEval.observations.push({
         observationId: 'obs_sqlite',
+        sessionId: 'sess_sqlite',
+        intentId: 'intent_sqlite',
+        stageId: 'intent_sqlite:stage:1',
+        stepId: 'intent_sqlite:stage:1:step:compose',
+        intentType: 'generate',
+        stageRole: 'compose',
+        deliverable: '报告',
+        deliverableFamily: 'document',
+        selectedSkillName: 'report-skill',
         actualSkillName: 'report-skill',
         status: 'completed',
-      }),
-    ]);
+        artifactRecorded: true,
+        structuralValidation: 'passed',
+        semanticValidation: 'passed',
+        createdAt: 200,
+        updatedAt: 200,
+      });
+
+      await store.save({
+        sessionId: 'sess_sqlite',
+        cwd: '/sqlite',
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: ['sess_sqlite'],
+        messages: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+        intentDelegation,
+        skillEval,
+      });
+
+      const loaded = await store.load('sess_sqlite');
+      expect(loaded?.intentDelegation).toMatchObject({
+        sessionId: 'sess_sqlite',
+        instanceId: 'inst_sqlite',
+        ownership: {
+          state: 'owned',
+          ownerInstanceId: 'inst_sqlite',
+        },
+      });
+      expect(loaded?.skillEval?.observations).toEqual([
+        expect.objectContaining({
+          observationId: 'obs_sqlite',
+          actualSkillName: 'report-skill',
+          status: 'completed',
+        }),
+      ]);
+    } finally {
+      store.dispose();
+    }
   });
 
   describe('loadLast', () => {

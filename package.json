@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.5.17",
+  "version": "1.6.0",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -120,6 +120,7 @@
     "nodejieba": "^3.5.8"
   },
   "devDependencies": {
+    "@gkoreli/ghostty-vt-js": "0.5.0",
     "@modelcontextprotocol/node": "2.1.1",
     "@modelcontextprotocol/server": "2.3.0",
     "@types/better-sqlite3": "7.6.13",
