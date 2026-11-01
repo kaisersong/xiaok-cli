@@ -4,14 +4,14 @@
 
 - `src/build-info.ts` 只有时间，`--version` 只有包版本；没有 `/version`。新增 `/version` 与 `xiaok version [--json]`，二者共享读取当前安装产物的版本信息，不在业务 cwd 执行 git。
 - `src/ui/statusbar.ts` 已有字段配置读取与 setFields；复用它，不另起 footer。当前字段只有 model/mode/tokens/session，branch 由隐式规则补入，session 实际显示项目名。
-- 参考本地 Codex 的 `codex-rs/tui/src/bottom_pane/status_line_setup.rs`：借用“选择字段并按顺序显示”的模式。此次采用简单命令参数，不移植 picker、主题、配额、外部脚本或其它 Codex 专有字段。
+- 参考本地 Codex 的 `codex-rs/tui/src/bottom_pane/status_line_setup.rs`：借用“勾选字段、调整顺序、实时预览”的模式。首版只有参数入口，用户明确要求菜单，以下菜单交互取代无参数时的帮助文本；参数仍兼容。不移植主题、配额、外部脚本或其它 Codex 专有字段。
 - 对应 terminal architecture §9.10：默认仍显示分支；用户显式自定义时按指定字段显示，可隐藏分支。底栏保持同一 owner、同一行和既有截断策略。
 
 ## 设计
 
 1. 构建脚本冻结包版本、完整提交、源码分支、源码提交时间、源码是否有未提交改动、构建时间、构建 Node/platform/arch。未知信息写 null，禁止借用启动目录 git 作为安装版本。保留 BUILD_TIME 兼容欢迎页；normal 使用实际时间，release/rollback 保留可复现策略，时间仅在提供 SOURCE_DATE_EPOCH 时记录，未提供明确显示未记录。生成目录和 build-info/build-flavor 不计入 sourceDirty。
 2. `/version` 和独立 version 命令展示冻结构建信息、当前 Node/platform/arch、实际入口和安装根目录；JSON 便于脚本读取。不会打印配置、凭据、用户环境变量或构建机器绝对路径。
-3. `/statusline` 显示当前字段、可用字段与用法；`/statusline model,branch,tokens,project,version` 保存顺序并立即应用；支持空格分隔、reset/on、off。字段为 model/mode/branch/tokens/cost/project/cwd/session-id/version；不执行自定义 shell。
+3. `/statusline` 打开字段选择菜单；`/statusline model,branch,tokens,project,version` 等参数入口继续兼容。字段为 model/mode/branch/tokens/cost/project/cwd/session-id/version；不执行自定义 shell。
 4. 自定义偏好单独原子写入本机全局 statusline.json，只包含 schema version 与字段，不读写权限配置。仍兼容原 global/project settings 的 ui.statusBar.fields（session 作为 project 旧别名，旧 tokens 保留费用），新的显式偏好优先；reset 写回默认字段，off 保存空数组。未知字段拒绝且不写入；重复字段去重；损坏偏好回退旧配置。保存失败保留当前状态并显示错误。
 5. 文本来自既有 model/cwd/branch/session 状态；渲染前去掉控制字符，避免路径或模型字符串注入多行/ANSI。窗口窄时沿用 scroll-region 的裁剪，不移动光标或新增 footer 行。
 
@@ -41,3 +41,18 @@ P2 取舍：运行路径是用户要求的本机排查信息，仅运行时展�
 - 构建元数据真实 git fixture 通过：固定 SHA、源码 dirty、生成文件排除、rollback 不误报、SOURCE_DATE_EPOCH 可复现、非法时间拒绝、无 git 回退。builtAt 使用带 Z 的 UTC；BUILD_TIME 仅保留欢迎页的本地时间兼容。
 - `/version`、`/statusline`、帮助与 statusbar 相关 57 项已通过，governance / architecture 增量均 0 new。真实 tmux 脚本覆盖 80×24 / 48×16、version JSON、字段顺序、非法设置保留、两次重启、off/reset、下一轮输入，两个窗口尺寸均通过。
 - Terminal UI CI 增加相关测试、构建元数据测试及 Linux TTY 场景。开工 hygiene 因关联 repo 既有 WIP 未通过，未清理他人文件。Windows / 原生 Ghostty 暂无本机验收；本地同步采用主 checkout 增量构建合并，保持实际命令入口及其它本地修复。
+
+## 菜单交互调整
+
+- 无参数 `/statusline` 复用 ReplRenderer 的 question overlay：已选字段按当前顺序置顶，其余字段追加；↑↓ 移动、空格勾选、←→ 调整字段顺序、Enter 保存、Esc/Ctrl+C/EOF 取消。支持“恢复默认并保存 / 全部关闭并保存 / 保存设置 / 取消”菜单项，不要求记字段名。
+- 预览读取 StatusBar 当前真实 model/usage/branch 等值，只对候选字段格式化，不修改实际字段或偏好；legacy 配置转换为可编辑字段时保留 cost/branch 的选择含义。只有确认后调用既有保存函数，失败不改变实际状态。
+- 菜单使用既有暂停活动/overlay/input handoff；不直接输出 ANSI 或调整 scroll region。标题、单行预览、编号选项和单行提示交给现有 question 滚动窗口，短终端保留焦点项与提示；resize 重绘不重复写历史。
+- 键盘复用 normalizeEnhancedKeys/identifyKey，按批次顺序处理箭头、空格、确认；结束后停止消费同批剩余输入，移除 data/end/resize 监听并释放键盘协议。绘制或输入处理异常也执行同样清理。取消不保存、不改变原状态。
+- 回归：默认选中、勾选、排序、预览无副作用、动作项、取消/EOF/异常、批量键、短窗口末项、resize、保存失败；真实 CLI 菜单提交后字段持久化、取消保持字节、重启恢复与下一轮输入。本机实际入口复验后再交付。
+- 输入优先级已核对现有 mode-selector/chat 路径：InputReader.read 返回后才进入 slash handler，其 data listener 已释放；ReplRenderer.renderInput 只渲染、不绑定键盘。菜单经 withPausedLiveActivity 暂停可能的 busy capture，自己独占 data 直到退出，因此左右键只排序，不会传给输入框或历史。验证包含菜单导航后下一轮原样输入。
+- 预览沿用“省略无值字段、只在实际片段间加分隔符”；没有显示内容时用文字占位，按当前列宽截成单行（允许末尾省略号），不扩展正文区。字段勾选不会修改真实 StatusBar 字段或文件。
+- legacy 仅在菜单进入时转为一次候选字段快照；新偏好已是显式顺序，不做 legacy 分支处理。恢复默认直接返回 DEFAULT_STATUSLINE_FIELDS，确认后仍保存新格式；保存/重启不再经过 legacy 转换。菜单顺序始终是已选快照原顺序 + 未选字段，不重排已选项。
+- 14 行以内合并标题与预览；12 行的现有 overlay 只有两行预算，优先显示焦点项和操作提示，不占用额外正文行。预览使用严格显示列宽截断，避免 CJK 半字边界多占一列。
+- 菜单 stdin 使用流式 UTF-8、CSI/SS3 残余缓冲和 30ms 裸 Esc 判定，覆盖逐字节方向键/增强 Enter；取消、EOF 和异常统一回收 timer、data/end/resize、键盘协议。
+- 增量设计由 deepseek-v4-flash 复核 APPROVE；最终菜单代码由 kimi-for-coding 复核 APPROVE，无 P0/P1。批准输入 SHA256：`1c94af34a026c88ba9078cc166c1a85a9dcfbd6d67cc9f7c082c34c1fab97aae`，批准后生产文件哈希未漂移。
+- 菜单及相关组件 84 项 focused 回归通过；真实 80×24/48×16 CLI 均完成勾选/排序、取消保持原文件、36×12 resize、失败保存保持实际字段、菜单恢复默认/关闭、重启与下一轮输入。测试使用独立配置目录，保留用户实际 statusline.json。

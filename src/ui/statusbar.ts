@@ -93,6 +93,29 @@ export class StatusBar {
 
   getFields(): StatusBarField[] { return [...this.fields]; }
 
+  getEditableFields(): StatusBarField[] {
+    const groups = this.fields.map(field => this.legacyFields && this.contextLimit > 0 && field === 'tokens' && !this.fields.includes('cost')
+      ? ['tokens', 'cost'] : [field]);
+    if (this.legacyFields && !this.fields.includes('branch')) {
+      if (!this.fields.includes('mode')) groups.push(['branch']);
+      else if (this.fields.includes('session')) {
+        let visible = 0;
+        let index = 0;
+        for (; index < groups.length; index++) {
+          if (this.getStatusText([this.fields[index]!], false)) visible++;
+          if (visible === 2) { index++; break; }
+        }
+        groups.splice(index, 0, ['branch']);
+      }
+    }
+    return normalizeStatuslineFields(groups.flat());
+  }
+
+  getStatusLineForFields(fields: StatusBarField[]): string {
+    const text = this.getStatusText(normalizeStatuslineFields(fields), false);
+    return text ? dim(text) : '';
+  }
+
   beginActivity(label: string, startedAt = Date.now()): void {
     if (!this.activity) {
       this.activity = { label, startedAt };
@@ -180,12 +203,12 @@ export class StatusBar {
     // streamed transcript rows in real tmux sessions.
   }
 
-  private getStatusText(): string {
+  private getStatusText(fields = this.fields, legacyFields = this.legacyFields): string {
     const parts: string[] = [];
     const normalizedCwd = this.cwd.replace(/[\\/]+$/, '');
     const projectName = normalizedCwd.split(/[\\/]/).filter(Boolean).pop() || 'xiaok';
 
-    for (const field of this.fields) {
+    for (const field of fields) {
       if ((field === "session" || field === 'project') && projectName) {
         parts.push(projectName);
       }
@@ -198,7 +221,7 @@ export class StatusBar {
       if (field === "tokens" && this.contextLimit > 0) {
         const total = getContextTokens(this.usage);
         const pct = Math.round((total / this.contextLimit) * 100);
-        const cost = this.legacyFields && !this.fields.includes('cost') ? computeCost(this.usage, this.model) : 0;
+        const cost = legacyFields && !fields.includes('cost') ? computeCost(this.usage, this.model) : 0;
         parts.push(cost > 0 ? `${pct}% · ${formatCost(cost)}` : `${pct}%`);
       }
       if (field === 'cost') {
@@ -215,9 +238,9 @@ export class StatusBar {
       }
     }
 
-    if (this.legacyFields && this.branch && !this.fields.includes('branch')) {
-      if (!this.fields.includes('mode')) parts.push(this.branch);
-      else if (this.fields.includes('session')) parts.splice(Math.min(parts.length, 2), 0, this.branch);
+    if (legacyFields && this.branch && !fields.includes('branch')) {
+      if (!fields.includes('mode')) parts.push(this.branch);
+      else if (fields.includes('session')) parts.splice(Math.min(parts.length, 2), 0, this.branch);
     }
     return stripVTControlCharacters(parts.join(' · ')).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
   }
