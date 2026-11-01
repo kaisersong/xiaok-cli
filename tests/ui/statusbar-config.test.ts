@@ -5,6 +5,35 @@ import { tmpdir } from 'node:os';
 import { StatusBar } from '../../src/ui/statusbar.js';
 
 describe('statusbar config', () => {
+  it('shows only explicitly selected fields in the requested order', () => {
+    const bar = new StatusBar();
+    bar.init('example-model', 'sess_example', '/projects/demo', 'auto');
+    bar.updateBranch('feature/example');
+    bar.setFields(['project', 'branch', 'model', 'session-id']);
+    expect(bar.getStatusLine().replace(/\x1b\[[0-9;]*m/g, ''))
+      .toBe('demo · feature/example · example-model · sess_example');
+    bar.setFields(['tokens']);
+    expect(bar.getStatusLine()).not.toContain('feature/example');
+  });
+
+  it('hides all status fields without hiding live activity', () => {
+    const bar = new StatusBar();
+    bar.init('example-model', 'sess_example', '/projects/demo', 'auto');
+    bar.updateBranch('feature/example');
+    bar.setFields([]);
+    expect(bar.getStatusLine()).toBe('');
+    bar.beginActivity('Working', 0);
+    expect(bar.getActivityLine(1000)).toContain('Working');
+  });
+
+  it('keeps selected field values on one terminal row', () => {
+    const bar = new StatusBar();
+    bar.init('example\nmodel\x1b[2J', 'sess_example', '/projects/demo', 'auto');
+    bar.setFields(['model']);
+    const line = bar.getStatusLine().replace(/\x1b\[[0-9;]*m/g, '');
+    expect(line).not.toMatch(/[\r\n\x1b]/);
+    expect(line).toContain('example');
+  });
   it('can limit output to configured fields', () => {
     const bar = new StatusBar();
     bar.init('claude-opus-4-6', 'sess_1', '/Users/song/projects/xiaok-cli', 'plan');

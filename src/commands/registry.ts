@@ -1,5 +1,6 @@
 import type { SkillMeta } from '../ai/skills/loader.js';
 import { CHAT_REMINDER_SLASH_COMMANDS } from './chat-reminder.js';
+import { getDisplayWidth } from '../ui/text-metrics.js';
 
 export interface ChatCommandMetadata {
   id: string;
@@ -11,6 +12,14 @@ export interface ChatCommandMetadata {
 }
 
 const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
+  {
+    id: 'version', cmd: '/version', slashDesc: '查看版本与详细构建信息',
+    helpLine: '  /version - 查看版本、构建信息与实际入口', showInSlash: true, showInHelp: true,
+  },
+  {
+    id: 'statusline', cmd: '/statusline', slashDesc: '自定义底部状态栏字段和顺序',
+    helpLine: '  /statusline [字段列表|off|reset] - 自定义底部状态栏', showInSlash: true, showInHelp: true,
+  },
   {
     id: 'exit',
     cmd: '/exit',
@@ -134,7 +143,22 @@ export function getChatHelpLines(): string[] {
 }
 
 export function buildChatHelpText(skills: SkillMeta[]): string {
-  const lines = ['', '可用命令：', ...getChatHelpLines()];
+  const lines = ['', '可用命令：'];
+  const commands = getChatHelpLines();
+  const width = process.stdout.columns ?? 80;
+  const columnWidth = Math.floor((width - 4) / 2);
+  for (let index = 0; index < commands.length; index++) {
+    const line = commands[index];
+    const next = commands[index + 1];
+    const padding = ' '.repeat(Math.max(0, columnWidth - getDisplayWidth(line)));
+    const pair = next ? `${line}${padding}    ${next.trim()}` : line;
+    if (next && getDisplayWidth(line) <= columnWidth && getDisplayWidth(pair) <= width - 2) {
+      lines.push(pair);
+      index++;
+    } else {
+      lines.push(line);
+    }
+  }
   if (skills.length > 0) {
     lines.push('', '可用 skills：');
     for (const skill of skills) {
