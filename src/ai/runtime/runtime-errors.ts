@@ -1,5 +1,6 @@
 import { isAbortError } from './abort-utils.js';
 import { MODEL_TEXT_REPETITION_CODE } from './model-text-repetition.js';
+import { isKimiReasoningAdmissionError, KIMI_REASONING_ADMISSION_CODE } from './kimi-reasoning-admission.js';
 import { getOpenAIStreamFailure } from './openai-stream-error.js';
 import { formatKimiProviderRequestError, getKimiProviderRequestDiagnostic } from './provider-request-error.js';
 
@@ -33,6 +34,9 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
       message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
       retryable: false,
     };
+  }
+  if (isKimiReasoningAdmissionError(error)) {
+    return { code: 'model_failed', message: KIMI_REASONING_ADMISSION_CODE, retryable: false };
   }
   const providerDiagnostic = getKimiProviderRequestDiagnostic(error);
   if (providerDiagnostic) {
