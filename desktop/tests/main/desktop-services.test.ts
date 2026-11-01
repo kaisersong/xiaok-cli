@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
 import * as atomicUserFile from '../../../src/utils/atomic-file.js';
 import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
@@ -243,7 +244,7 @@ describe('desktop services', () => {
   });
 
   afterEach(() => {
-    rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 3 });
     delete process.env.XIAOK_CONFIG_DIR;
   });
 

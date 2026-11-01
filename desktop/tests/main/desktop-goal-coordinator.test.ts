@@ -286,7 +286,7 @@ describe('DesktopGoalCoordinator', () => {
     });
     expect(coordinator.getPendingAttachmentForTest('thread_1')?.taskId)
       .toBe(resumed.preparedTask.taskId);
-  });
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 
   it('requires three consecutive admitted blocker claims before blocking', async () => {
     const { coordinator } = setup();

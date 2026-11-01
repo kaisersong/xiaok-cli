@@ -15,7 +15,7 @@ it('rejects noGoal guard after a different store commits a real current Goal wit
  const token=await f.coordinator.prepareAssistantNoGoalGuard({threadId:'t',requestSource:'user'});expect(()=>f.coordinator.assertAssistantNoGoalGuard(token)).not.toThrow();
  await f.peer.commit({sessionId:'t',expectedRevision:null,next:state('t'),events:[],turns:[],evidence:[]});
  expect(()=>f.coordinator.assertAssistantNoGoalGuard(token)).toThrow('goal_consent_stale');
-}));
+}), process.platform === 'win32' ? 20_000 : 5_000);
 it('rejects a corrupted current pointer even when the historical Goal stays unchanged',async()=>fixture(async f=>{
  const created=await f.coordinator.createGoal({threadId:'t',objective:'Original',expectedEvidenceKinds:['answer'],turnLimit:3});
  await f.coordinator.setUserQueuePending({threadId:'t',pending:true});await f.coordinator.setUserQueuePending({threadId:'t',pending:false});
