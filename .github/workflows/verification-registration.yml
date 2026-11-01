@@ -77,6 +77,8 @@ jobs:
         # master f7b86575 (pre-existing). Still runs and uploads its JSON report.
         # Restore blocking (remove continue-on-error) when #105 is fixed.
         continue-on-error: true
+        # Step cap keeps the 25-min job limit from cancelling the blocking suites.
+        timeout-minutes: 15
         # No SOLPI_INTENT_POPULATION override: the original 99 opt-in stays a
         # natural skip, not a PASS or closure of the original 99 acceptance.
         run: >-
