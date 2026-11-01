@@ -1,3 +1,4 @@
+import { isKimiCodingModel, type KimiCodingModel } from '../../providers/kimi-models.js';
 import type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 export type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 import { validateCompoundOperationLedger, mergeCompoundOperationLedgers, type CompoundOperationLedger } from '../../../runtime/sol-pi/compound-operation.js';
@@ -59,8 +60,8 @@ export class KimiK3DurableResumeUnsupportedError extends Error {
 
 export function isKimiK3DurableModel(
   model: string | undefined,
-): model is 'k3' | 'k3-256k' {
-  return model === 'k3' || model === 'k3-256k';
+): model is KimiCodingModel {
+  return isKimiCodingModel(model);
 }
 
 export function toDurableSessionSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
