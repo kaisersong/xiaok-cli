@@ -1,0 +1,11 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "desktop/tests/fixtures/desktop-protection-worker-entry.ts": "a1d08f558207fc2a081b245d28e21f15b95a42c3ee5b61443e2d75f86a166e81",
+    "desktop/tests/main/desktop-protection-worker-compiled-entry.test.ts": "8be75457a53491d4433d537920ea10995992aed413f6be0aea0ec9bcdb159ede",
+    "scripts/verification/copy-windows-absence.mjs": "fb6ea2ca98839ab286c5fd57a58372cd29d6edffdea104c38cbbdeddcd1a1ee2",
+    "src/runtime/verification/windows-installation-absence.ts": "5f7b3df9d166564dc42c20022415908ddaa0a502daaa3ed4d2dbb71eb1d57a35"
+  },
+  "bundleSha256": "00082e10f92af959caa3aaa59eaced527fcb166eb3ae46c56191391d07b6f3ee"
+}

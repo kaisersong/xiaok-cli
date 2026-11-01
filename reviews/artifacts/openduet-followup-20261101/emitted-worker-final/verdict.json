@@ -1,0 +1,32 @@
+{
+  "verdict": "APPROVE",
+  "findings": [
+    {
+      "severity": "P3",
+      "file": "desktop/tests/fixtures/desktop-protection-worker-entry.ts",
+      "line": 112,
+      "issue": "The esbuild onLoad guard rejects inputs outside `root` via relative-path string checks, but esbuild metafile input paths on Windows use backslash-relative forms that `relative()` already normalizes; the check is correct, though '..' prefixes only test one separator form — acceptable given tests run per-platform.",
+      "minimalFix": "None required; optionally assert `metaInputs` are all under `root` with `startsWith(root + sep)` for clarity."
+    },
+    {
+      "severity": "P3",
+      "file": "desktop/tests/main/desktop-protection-worker-compiled-entry.test.ts",
+      "line": 39,
+      "issue": "The test asserts the resolved protection value equals {} but does not assert a positive protection case, so a Worker that always reports empty protection would still pass; this is a pre-existing scope limitation of a test-only integrity delta, not a new defect.",
+      "minimalFix": "Optionally seed a session snapshot before readProtectionInWorker and assert the closure is returned."
+    },
+    {
+      "severity": "P3",
+      "file": "desktop/tests/fixtures/desktop-protection-worker-entry.ts",
+      "line": 103,
+      "issue": "Copying the root package.json wholesale into the emitted tree may pull unrelated script/type metadata, but `packages: 'external'` bundling keeps behavior unchanged; harmless for the test's purpose.",
+      "minimalFix": "Optionally write a minimal `{\"type\":\"module\"}` package.json instead."
+    }
+  ],
+  "limitations": [
+    "Static review only; actual Worker execution, verifyArtifact implementation, production store graph files (protected-observation-reader, file-session-reader, session-store modules), and CI behavior could not be executed or inspected beyond supplied sources.",
+    "The Windows SDK build step producing data/verification/windows artifacts is asserted but not shown; integrity of those binaries is delegated to the previously approved verifyArtifact.",
+    "ESM/CJS interplay under NodeNext with extensionless JSON package.json type and emitted .js resolution relies on runtime verification reported as passing; not independently confirmed here.",
+    "The mock of node:worker_threads maps only the exact source-file URL to the compiled entry; any unrelated Worker construction in the same module graph would bypass the mock — assumed out of scope for this narrow test-only delta."
+  ]
+}

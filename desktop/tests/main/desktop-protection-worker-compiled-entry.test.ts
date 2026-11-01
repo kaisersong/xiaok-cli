@@ -29,12 +29,16 @@ it('fresh full production compilation supplies an actual fixed protection Worker
   expect(compiled.emittedSha).toMatch(/^[a-f0-9]{64}$/);
   expect(compiled.audit.length).toBeGreaterThan(1);
   for (const module of compiled.audit) expect(module.originalUrl).toBe(pathToFileURL(module.file).href);
+  if (process.platform === 'win32') {
+    expect(compiled.compilation.windowsAbsenceManifest).toMatchObject({version:1,target:`win32-${process.arch}`});
+    expect(existsSync(join(compiled.root, 'runtime/verification/native', `win32-${process.arch}`, 'windows-installation-absence.exe'))).toBe(true);
+  }
   physical.entry = compiled.output;
   const root = mkdtempSync(join(tmpdir(), 'fresh-native-protection-account-')); cleanup.push(root);
   const store = new DesktopTaskObservationStore(root, join(root, 'canonical'));
   expect(await store.readProtectionInWorker('ordinary-task')).toEqual({});
   expect(physical.starts).toBe(1); expect(physical.exits).toBe(1);
-}, 20000);
+}, 60_000);
 
 it('preserves only lexical module URLs, including spaces and hashes in the original path', () => {
   const file = join(tmpdir(), 'original emitted # module.js');

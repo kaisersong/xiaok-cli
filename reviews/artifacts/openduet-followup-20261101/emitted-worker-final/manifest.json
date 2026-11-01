@@ -1,0 +1,14 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "tsconfig.json": "7385a600bc34fc6e80052dc8ae391b95858d5393bca9ae2d3b5e1fc3df9e4a8a",
+    "desktop/tests/fixtures/desktop-protection-worker-entry.ts": "ec34642e1cad77d2c1e75b8b560d6378271076f6898d53af4368d45f68799c3f",
+    "desktop/tests/main/desktop-protection-worker-compiled-entry.test.ts": "8be75457a53491d4433d537920ea10995992aed413f6be0aea0ec9bcdb159ede",
+    "src/runtime/task-host/protected-observation-store.ts": "6777b2cee63bca08b3536a4d628ae5d97bda64f75791abcb0d5fa9febd5976c5",
+    "src/runtime/task-host/protection-read-worker.ts": "25f34f6f0d4197035bce3fad49ae4ccb16b582f46517715b7d70685ceab2881b",
+    "src/runtime/task-host/protection-read-worker-body.ts": "d7bd07161a15b193cfea763939197a77e39464c5ca5a281df2cabf475a8eb873",
+    "src/runtime/verification/windows-installation-absence.ts": "5f7b3df9d166564dc42c20022415908ddaa0a502daaa3ed4d2dbb71eb1d57a35"
+  },
+  "bundleSha256": "e274856bd5215ce4fd553a3b501eb2719a6054c5be0e2676d360d14d8dd26cda"
+}

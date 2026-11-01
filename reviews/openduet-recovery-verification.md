@@ -1,5 +1,27 @@
 # OpenDuet 中断恢复与最终候选验证（2026-11-01）
 
+## 下午继续实施与最终候选
+
+用户已授权完成开发验证后提交 GitHub。当前已整合主线至 624c43c4，保留 assistant 与 Kimi admission；唯一内容冲突是 desktop-services 的 imports，合并后保留双方导入。主线两份文件触发本机单文件令牌门禁，评审文档按历史/当前方案分文件，registry 只压缩注释，不修改逻辑。PR #116 最终完整 HEAD 和对应远端结果以 PR 说明为准，不把旧轮成功带到新 HEAD。
+
+本轮实际执行，原始日志均在 .artifacts/openduet-followup-20261101/：
+
+- 完整 workflow collector（新增真实 compiled protection Worker 入口后 86 文件）：679 passed / 7 条件跳过；final-with-emitted-worker.log。默认六个 counter 环境用例另以实际官方资源全量执行，31 passed / 0 skipped；final660-official-counter.log，使用已有 synthetic-counter-config，无产品模型调用或真实配置改写。
+- Root 先 test:sandbox:build 再 emitted 九文件（原六文件 + project handoff、Kimi K3.1、profile registry）：204 passed / 7 既有跳过；final-root-build.log、final-root-green.log。新主线 profile 2000 行夹具最初在 macOS 长 temp 前缀下超出原容量，修复虚拟路径长度后保留全部 2000 行/512 KiB 门槛通过。
+- Node22.14 的 Goal attachment/workspace 与 KB 持久三文件：95 passed，node22-goal-green.log。SQLite helper/lineage/LoopStore/KB 四文件：44 passed，node22-final-helper.log。原始 red/diagnostic 全部保留；没有提高 engines、删除断言或无条件跳过 Windows。
+- 新主线交接与最终交付物跨层七文件：60 passed，merged-upstream-tests.log。正式 foreground 两个限定场景：2 passed / 193 名称未选中，foreground-final.log，不称整文件全绿。Windows copier/source target 八项：8 passed，windows-absence-final.log。
+- Desktop main/renderer 完整构建与 raw typecheck、完整治理通过，未更新 baseline；merged-build.log、emitted-worker-typecheck.log、emitted-worker-governance.log。增量架构在干净 HEAD 扫描 0 文件，不替代完整治理。
+
+Windows ASAR key 读取分隔符、清理夹具命名导出、最低 Node 两个真实 Worker 装配、fresh 编译预算及验证过的 Windows helper emitted 装配均记录在 assistant-ci-repair-design.md。独立 GLM-5.3 票据见 artifacts/openduet-followup-20261101/，包括真实 HTTP 状态、model、finish_reason、source hashes 与未删的 P2/P3；首张 emitted Worker 票的矛盾 P1 没有冒充闭环，后续完整上下文最终票单列。
+
+最新产品源码在 660a61ed 完整 unsigned macOS arm64 包上复验：1,471 个 dist 文件 mismatch=[]，closure 二次 copied=[]，archiveUnchanged=true、helper bytes 相符，全部 afterPack 门禁通过。打包前后 source/dist/resourceInputs/siblings 均 unchanged；followup-660a61ed/ 与 final660-package-* 日志。后续改动仅测试夹具、CI 清单、评审证据，不更换产品模块。没有正式签名或发布。
+
+**本轮 GUI 尚未通过。** 三次私有配置/OS policy 启动在 Electron browser DevTools 握手前超时；sample 实际显示主线程在 NSApplication.finishLaunching → _NSPersistentUIEstablishTalagentCommunication → _send_to_talagent 的同步 IPC 中等待。Node inspector 可访问，Chromium HTTP 超时，无助理业务表初始化。忽略持久 UI 恢复的单次实验也未解除阻塞；不修改或结束用户系统 talagent，不把旧 GUI 通过当本轮通过。原始 result/trace/sample 留在 final660-packaged-gui*、gui-timeout-sample.txt、final660-ignore-persistence-gui/。每轮按自有 PID/独立 cwd 补查，remaining=[]，private root 已删除；没有接管既有服务。
+
+真实 P1/P2/P3 与 Windows 安装包门槛仍按下文保留；hygiene 对 sibling intent-broker 既有 tracked WIP/上游落后仍失败，不整理或提交别人的改动。mydocs 的过期“未实施”状态已在独立文档 PR kaisersong/mydocs#18 更新。
+
+## 前轮历史记录
+
 继续原分支 feat/openduet-assistant-20261101、原草稿 PR #116。恢复起点为 9e237f85（原实现 93992a44 加 upstream 集成），没有重写或重放真实交办。设计 v3 已从 mydocs GitHub 原路径重新读取；不覆盖主 docs checkout 的其他 WIP。
 
 本轮补 CI 覆盖、验证记录，并修复人工复核文件增长时的读取上限与内部祖先关联的撤权依赖。设计、真实文件先红后绿与不同模型复审分别留证。最终完整 HEAD、远端 CI 状态以 PR 说明为准。原始命令/PID/退出码/日志在已忽略的 .artifacts/openduet-recovery-20261101/；不使用对话摘要补数字。

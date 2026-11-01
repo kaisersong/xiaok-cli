@@ -1,0 +1,18 @@
+{
+  "verdict": "APPROVE",
+  "actualP0": [],
+  "actualP1": [
+    "Fixture copies the Windows native helper to 'runtime/verification/native/win32-<arch>' based on an ASSUMED emitted reader path, but never asserts that tsc actually emitted 'root/runtime/verification/windows-installation-absence.js' at that sibling location. If the reader is not in the worker/store import graph (or tsc emits it under a different relative layout due to rootDir interaction with project-wide .d.ts roots), the test still passes on Windows while the helper is placed where no reader ever resolves, silently defeating the stated purpose (emitted import.meta.url beside native helper). Add an existsSync assertion on the emitted reader file and, ideally, a resolution check from the preserved URL.",
+    "Roots include 'parsedRoot.fileNames.filter(f => f.endsWith(\".d.ts\"))' from the whole project config while compilerOptions.rootDir is pinned to 'src'. Any ambient .d.ts outside src (e.g., under desktop/ or build output dirs matched by the root include) makes tsc fail with 'not under rootDir', turning the fixture into a compile failure rather than a fixture-only test. Filter the .d.ts roots to the src tree or drop rootDir pinning."
+  ],
+  "actualP2_limit3": [
+    "The 60s test-case timeout must absorb up to 45s of tsc execFile plus esbuild bundling, artifact verification, and the physical worker run; on slow CI this can exceed the case timeout and report a misleading timeout instead of the 45s compiler bound. Consider splitting compile into a beforeAll hook or raising the case timeout above the sum of bounded stages.",
+    "preserveOriginalModuleUrls is applied to ALL .js onLoad inputs including files whose import.meta.url the production code may deliberately re-resolve relative to the bundle; the audit records replacements per file but nothing asserts that only the intended fixed modules were transformed — a future added sibling silently gets its URL pinned without any test-level expectation.",
+    "Cleanup: fixture roots under .artifacts are only removed on in-fixture error or in afterAll; an uncaught/vitest crash between mkdtemp and cleanup.push (or rmSync failure after maxRetries) leaks 'fresh-protection-worker-*' directories into the repo working tree, which the fixture itself hashes nothing about — .artifacts accumulation is unbounded across failed runs."
+  ],
+  "limitations": [
+    "Cannot execute Node/tsc/esbuild/vitest, so runtime behavior of the compiler-audit preload (syncBuiltinESMExports patching tsc's fs), esbuild metafile input completeness, and the physical worker exit timing (physical.exits===1 immediately after the awaited read) are verified by reading only, not observation.",
+    "The production files (protected-observation-store.ts, protection-read-worker*.ts, DesktopTaskObservationStore) were not supplied, so whether the Windows reader is actually in the emitted import graph, whether readProtectionInWorker awaits worker exit, and whether the store spawns the worker with the exact fixed TS source URL assumed by the mock could not be confirmed; the P1 items partly depend on this.",
+    "Assumed per task statement that data/verification/windows artifacts are CI-compiled and that copy-windows-absence.mjs is otherwise pre-existing production code; only its use as verifyArtifact in the fixture was reviewed for integrity (hash/PE/stat checks look sound, including nlink/symlink rejection and double verification before/after copy)."
+  ]
+}

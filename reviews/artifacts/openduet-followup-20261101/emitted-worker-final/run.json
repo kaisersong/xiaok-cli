@@ -1,0 +1,25 @@
+{
+  "runnerPid": 78249,
+  "started": 1793522208.7769668,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "e274856bd5215ce4fd553a3b501eb2719a6054c5be0e2676d360d14d8dd26cda",
+  "status": 200,
+  "ended": 1793522217.001677,
+  "sourceDrift": [],
+  "responseSha256": "9dce3e641743e4f7385f932a8d484b0aa113afc035dd23d943f652b08949978e",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 459,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 9306,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 9765
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/emitted-worker-final-direct/response.json"
+}

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -85,6 +85,21 @@ export async function compileProtectionWorkerEntry() {
     await promisify(execFile)(process.execPath,
       ['--import', pathToFileURL(inputPreload).href, resolve(projectRoot, 'node_modules/typescript/bin/tsc'), '--project', config],
       { cwd: projectRoot, maxBuffer: 2 * 1024 * 1024, timeout: 45_000 });
+    // The emitted reader keeps its own real import.meta.url. Carry the same
+    // verified native Windows helper beside it; a source-tree copy is not enough.
+    let windowsAbsenceManifest: Record<string, unknown> | undefined;
+    if (process.platform === 'win32') {
+      const emittedReader = join(root, 'runtime/verification/windows-installation-absence.js');
+      if (!existsSync(emittedReader)) throw Error('fresh_protection_worker_windows_reader_missing');
+      const { verifyArtifact } = await import(pathToFileURL(join(projectRoot, 'scripts/verification/copy-windows-absence.mjs')).href);
+      const sourceNative = join(projectRoot, 'data/verification/windows', `win32-${process.arch}`);
+      const destination = join(root, 'runtime/verification/native', `win32-${process.arch}`);
+      windowsAbsenceManifest = verifyArtifact(sourceNative, process.arch);
+      mkdirSync(destination, { recursive: true });
+      for (const name of ['windows-installation-absence.exe', 'windows-installation-absence.json'])
+        copyFileSync(join(sourceNative, name), join(destination, name));
+      verifyArtifact(destination, process.arch);
+    }
     writeFileSync(join(root, 'package.json'), readFileSync(join(projectRoot, 'package.json')));
     const storeEntry = join(root, 'runtime/task-host/protected-observation-store.js');
     const bundle = join(root, 'runtime/task-host/protected-observation-store.bundle.js');
@@ -119,7 +134,7 @@ export async function compileProtectionWorkerEntry() {
       || !existsSync(join(root, 'runtime/task-host/protected-observation-store.js'))
       || hash(source) !== sourceSha || sourceTreeHash() !== treeSha || hash(rootConfig) !== rootConfigSha) throw Error('fresh_protection_worker_compilation_changed');
     return { root, output, sourceSha, treeSha, emittedSha: hash(output), audit,
-      compilation: { roots, noCheck: false as const, firstReadHashes: compilerAudit.firstReads, readDrift, emittedOutputs } };
+      compilation: { roots, windowsAbsenceManifest, noCheck: false as const, firstReadHashes: compilerAudit.firstReads, readDrift, emittedOutputs } };
   } catch (error) {
     rmSync(root, { recursive: true, force: true, maxRetries: 3 });
     throw error;
