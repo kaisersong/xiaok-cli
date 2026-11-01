@@ -4,16 +4,17 @@ import {lstatSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFi
 import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
 import {registerOrdinarySQLiteLayout,registerOrdinaryProfileSource,readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
-const state=vi.hoisted(()=>({stats:new Map<string,bigint>(),errors:new Map<string,string>(),template:'',bug:false,capacitySuffix:false,calls:0,devices:new Map<string,bigint>(),diagnosticFailure:false}));
+const state=vi.hoisted(()=>({stats:new Map<string,bigint>(),errors:new Map<string,string>(),template:'',bug:false,capacitySuffix:false,calls:0,devices:new Map<string,bigint>(),diagnosticFailure:false,writes:0}));
 vi.mock('node:fs',async load=>{const fs=await load<typeof import('node:fs')>();return {...fs,
  lstatSync:(path:string,options:unknown)=>{if(state.bug&&path.endsWith('/bug'))throw new TypeError('sweep bug');const code=state.errors.get(path);if(code)throw Object.assign(Error(code),{code});const ino=state.stats.get(path);const dev=state.devices.get(path);if(dev!==undefined){const stat=fs.lstatSync(path,options as never);return new Proxy(stat,{get(target,key){if(key==='dev')return typeof target.dev==='bigint'?dev:Number(dev);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});}if(ino!==undefined){const stat=fs.lstatSync(state.template,options as never);return new Proxy(stat,{get(target,key){if(key==='ino')return typeof target.ino==='bigint'?ino:Number(ino);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});}return fs.lstatSync(path,options as never);},
  realpathSync:(path:string)=>state.stats.has(path)?path:fs.realpathSync(path)};});
 vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInstalledCurrentProfile:()=>({kind:'ordinary'})}));
 vi.mock('../../../src/runtime/verification/ordinary-profile-source-storage-codec.js',async load=>{const codec=await load<typeof import('../../../src/runtime/verification/ordinary-profile-source-storage-codec.js')>();return {...codec,serializeOrdinaryProfileSourceStorage:(...args:Parameters<typeof codec.serializeOrdinaryProfileSourceStorage>)=>{state.calls++;if(state.diagnosticFailure&&state.calls===2)throw Error("diagnostic serialization failed");try{return codec.serializeOrdinaryProfileSourceStorage(...args);}catch(error){if(state.capacitySuffix&&error instanceof Error&&error.message.startsWith('profile_source_registry_capacity'))throw Error(error.message+': context');throw error;}}};});
+vi.mock('../../../src/utils/atomic-file.js',async load=>{const actual=await load<typeof import('../../../src/utils/atomic-file.js')>();return {...actual,writeFileAtomicallySync:(...args:Parameters<typeof actual.writeFileAtomicallySync>)=>{state.writes++;return actual.writeFileAtomicallySync(...args);}};});
 let root:string,registry:string;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const register=(directory:string)=>registerOrdinaryProfileSource({kind:'session-root',directory});
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'registry-prune-')));vi.stubEnv('HOME',root);vi.stubEnv('XIAOK_CONFIG_DIR',join(root,'.xiaok'));vi.stubEnv('XDG_CONFIG_HOME',join(root,'config'));vi.stubEnv('XDG_DATA_HOME',join(root,'data'));vi.stubEnv('XDG_CACHE_HOME',join(root,'cache'));state.bug=false;state.capacitySuffix=false;state.calls=0;state.devices.clear();state.diagnosticFailure=false;state.template=root;state.stats.clear();state.errors.clear();registry=join(root,'.xiaok','profile-sources','registry.json');});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'registry-prune-')));vi.stubEnv('HOME',root);vi.stubEnv('TMPDIR',root);vi.stubEnv('XIAOK_CONFIG_DIR',join(root,'.xiaok'));vi.stubEnv('XDG_CONFIG_HOME',join(root,'config'));vi.stubEnv('XDG_DATA_HOME',join(root,'data'));vi.stubEnv('XDG_CACHE_HOME',join(root,'cache'));state.writes=0;state.bug=false;state.capacitySuffix=false;state.calls=0;state.devices.clear();state.diagnosticFailure=false;state.template=root;state.stats.clear();state.errors.clear();registry=join(root,'.xiaok','profile-sources','registry.json');});
 afterEach(()=>{vi.unstubAllEnvs();state.stats.clear();state.errors.clear();rmSync(root,{recursive:true,force:true,maxRetries:3});});
 function seed(){
  const directory=join(root,'initial');mkdirSync(directory);register(directory);
@@ -28,8 +29,9 @@ function expectCapacity(action:()=>void,existing:NonNullable<ReturnType<typeof r
  let message='';try{action();}catch(error){if(!(error instanceof Error))throw error;message=error.message;}
  expect(message).toContain('profile_source_registry_capacity:');
  expect(message).toContain('limit 524288 bytes (512 KiB)');
- expect(message).toContain(`current usage ${bytes} bytes`);
- expect(message).toContain(`${existing.sources.length} active records`);
+ expect(message).toContain(`file current usage ${bytes} bytes`);
+ if(state.diagnosticFailure)expect(message).toContain('active usage after pruning unavailable');
+ expect(message).toContain(`${existing.sources.length} active record${existing.sources.length===1?'':'s'}`);
  expect(message).toContain(registry);
  expect(message).toContain('删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理');
  expect(message).toContain('也可以用编辑器打开该文件删除不再使用的项目条目（先备份）');
@@ -158,10 +160,50 @@ it.each([false,true])('preserves device-renumbered A and B including SQLite hist
  expect(after.sources.filter(row=>row.directory.canonicalPath!==c)).toEqual(before.sources);
  if(noop)expect(readFileSync(registry)).toEqual(bytes);
 });
-it('falls back to disk bytes when diagnostic serialization fails',()=>{
+it('reports unavailable active bytes when diagnostic serialization fails',()=>{
  const {current}=seed();const facts=readOrdinaryProfileSources()!,before=readFileSync(registry);
  state.calls=0;state.diagnosticFailure=true;
  expectCapacity(()=>register(current),facts);
  expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
  expect(state.calls).toBeLessThanOrEqual(3);
+});
+
+it('sweeps every stale row in one near-capacity registration with exactly one write',()=>{
+ const {paths}=seed();const current=join(root,'6'.repeat(40000));state.stats.set(current,1006n);const facts=readOrdinaryProfileSources()!;
+ const stale=Array.from({length:6},(_,index)=>{const canonicalPath=join(root,'stale-'+index+'s'.repeat(5000));const inode=String(2000+index);return {...facts.sources[0]!,sourceId:hash(['session-root',facts.sources[0]!.directory.device,inode,null]),namespaceId:hash([canonicalPath,'session-root',null]),directory:{...facts.sources[0]!.directory,canonicalPath,inode}};});
+ writeFileSync(registry,JSON.stringify({...facts,sources:[...stale,...facts.sources]}));
+ expect(readFileSync(registry).length).toBeGreaterThan(500000);
+ expect(readFileSync(registry).length).toBeLessThan(524288);
+ for(const row of stale)state.errors.set(row.directory.canonicalPath,'ENOENT');
+ state.writes=0;register(current);
+ const after=readOrdinaryProfileSources()!;
+ expect(after.sources.map(row=>row.directory.canonicalPath)).toEqual([...paths,current]);
+ expect(after.sources.slice(0,2)).toEqual(facts.sources);
+ for(const row of stale)expect(after.sources.some(item=>item.namespaceId===row.namespaceId)).toBe(false);
+ expect(after.generation).toBe('2');expect(state.writes).toBe(1);
+});
+it.each([1,2])('reports disk and swept active bytes separately on rejection (%s active)',count=>{
+ const {paths}=seed();const facts=readOrdinaryProfileSources()!;
+ const canonicalPath=join(root,'stale');const inode='2000';
+ const stale={...facts.sources[0]!,sourceId:hash(['session-root',facts.sources[0]!.directory.device,inode,null]),namespaceId:hash([canonicalPath,'session-root',null]),directory:{...facts.sources[0]!.directory,canonicalPath,inode}};
+ const active={...facts,sources:facts.sources.slice(0,count)};
+ writeFileSync(registry,JSON.stringify({...facts,sources:[stale,...active.sources]},null,2));
+ const before=readFileSync(registry),original=readOrdinaryProfileSources()!;
+ const current=join(root,'5'.repeat(count===1?290000:80000));state.stats.set(current,1005n);
+ let message='';try{register(current);}catch(error){message=(error as Error).message;}
+ expect(message).toContain(`file current usage ${before.length} bytes`);
+ expect(message).toContain(`active usage after pruning ${Buffer.byteLength(JSON.stringify(active))} bytes, ${count} active record${count===1?'':'s'}.`);
+ expect(message).not.toContain('1 active records');
+ expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(original);
+});
+it('directly re-registers a device-renumbered source and updates its device',()=>{
+ const directory=join(root,'renumbered');mkdirSync(directory);register(directory);
+ const before=readOrdinaryProfileSources()!;const device=lstatSync(directory,{bigint:true}).dev+1n;
+ state.devices.set(directory,device);register(directory);
+ const after=readOrdinaryProfileSources()!;
+ expect(after.sources).toHaveLength(1);
+ expect(after.sources[0]!.namespaceId).toBe(before.sources[0]!.namespaceId);
+ expect(after.sources[0]!.directory).toEqual({...before.sources[0]!.directory,device:String(device)});
+ expect(after.sources[0]!.sourceId).not.toBe(before.sources[0]!.sourceId);
+ expect(after.generation).toBe(String(BigInt(before.generation)+1n));
 });

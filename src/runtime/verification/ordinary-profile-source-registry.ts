@@ -159,8 +159,9 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   let bytes:string;
   try{bytes=serializeOrdinaryProfileSourceStorage(validated);}
   catch(error){if(!(error instanceof Error)||!error.message.startsWith('profile_source_registry_capacity'))throw error;
-   let existingBytes:number;try{existingBytes=Buffer.byteLength(serializeOrdinaryProfileSourceStorage({...validated,version:original?.version??1,generation:original?.generation??'1',sources:existingSources}));}catch{existingBytes=readFileSync(loc.path).length;}
-   const capacityDetails=`limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); current usage ${existingBytes} bytes, ${existingSources.length} active records. Registry: ${loc.path}. 删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理；也可以用编辑器打开该文件删除不再使用的项目条目（先备份）。`;
+   let diskBytes=0;try{diskBytes=readFileSync(loc.path).length;}catch{}
+   let activeUsage:string;try{activeUsage=`${Buffer.byteLength(serializeOrdinaryProfileSourceStorage({...validated,version:original?.version??1,generation:original?.generation??'1',sources:existingSources}))} bytes`;}catch{activeUsage='unavailable';}
+   const capacityDetails=`limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); file current usage ${diskBytes} bytes; active usage after pruning ${activeUsage}, ${existingSources.length} active record${existingSources.length===1?'':'s'}. Registry: ${loc.path}. 删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理；也可以用编辑器打开该文件删除不再使用的项目条目（先备份）。`;
    try{serializeOrdinaryProfileSourceStorage({...validated,sources:[merged]});}
    catch(singleError){if(!(singleError instanceof Error)||!singleError.message.startsWith('profile_source_registry_capacity'))throw singleError;
     fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); source size ${Buffer.byteLength(JSON.stringify({...validated,sources:[merged]}))} bytes (expanded JSON). Source: ${shortPath(merged.directory.canonicalPath)}. 这个来源自己就超过上限，清理其他项目没有用；Reduce source path or metadata size（换一个更短的项目路径后重试）。`);}
