@@ -1,0 +1,34 @@
+{
+  "verdict": "APPROVE",
+  "findings": [
+    {
+      "severity": "P2",
+      "file": "src/utils/sqlite-transaction-state.ts",
+      "line": 16,
+      "issue": "The legacy-probe true-branch requires an exact string equality on error.message ('cannot start a transaction within a transaction'). SQLite/Node message formatting has historically varied (prefixes, quoting, version drift), so a future patch release of Node 22.x or SQLite that rewords or decorates the message would make an active transaction fall through to the rethrow path instead of returning true, converting a gate check into an unexpected throw in production call sites. The errcode=1 + ERR_SQLITE_ERROR checks already carry the semantic signal.",
+      "minimalFix": "Relax the string check to a containment/prefix test (e.g. error.message.includes('cannot start a transaction within a transaction')) while keeping the code/errcode equality checks, and keep the existing tests unchanged."
+    },
+    {
+      "severity": "P2",
+      "file": "scripts/verification/copy-windows-absence.mjs",
+      "line": 22,
+      "issue": "plainRead/statPlain have a TOCTOU window: lstatSync (rejecting symlinks and nlink>1) is followed by a separate readFileSync, and 'unchanged' re-stats later. A local attacker who swaps the path for a symlink between the lstat and the read could feed bytes that were never subject to the plain-file invariants. Practical risk is low (verification context, CI runner, and payload is still SHA-pinned against the manifest), so this is hardening, not a gate bypass, but it is inconsistent with the script's otherwise strict plain-file discipline.",
+      "minimalFix": "Open the file with fs.openSync(file, 'r', O_NOFOLLOW where available) and fstat/read from the descriptor instead of path-based readFileSync, or re-read via the same fd used for the lstat-equivalent fstat."
+    },
+    {
+      "severity": "P2",
+      "file": ".github/workflows/assistant-coverage.yml",
+      "line": 55,
+      "issue": "The pinned-SHA clone of kswarm/intent-broker clones the default branch at depth 1 first and then fetches the pinned SHA, but never verifies that the detached FETCH_HEAD commit actually equals the pinned SHA (a truncated fetch or server-side anomaly could check out an unexpected commit). The intent-broker/kswarm sources themselves are never hash-pinned in-repo. Impact is limited because these are real sibling fixtures consumed by tests, but the 'fixed real repos' guarantee is weaker than the design text implies.",
+      "minimalFix": "After checkout --detach FETCH_HEAD, add `git -C ../kswarm rev-parse HEAD` / `git -C ../intent-broker rev-parse HEAD` steps that compare against the pinned SHAs and fail on mismatch."
+    }
+  ],
+  "limitations": [
+    "Only the five listed files were reviewed. The production call sites that are said to replace db.isTransaction with isSqliteTransactionActive (loop-store, completion/KB/lineage/migration code), the production FileGoalNativeJournal Windows requireDirectorySync rejection path, DesktopGoalCoordinator internals, goal-store-sqlite.ts, and the TypeScript/JS windows-installation-absence readers are not shown, so correctness of those integrations (including the exact 'directory sync durability unsupported on Windows' message asserted in desktop-goal-native-mutation.test.ts:101 and the journal-id validation messages at lines 91-94) cannot be independently verified.",
+    "scripts/verification/build-windows-absence.mjs, referenced by the Windows CI compile step (workflow line 71), is not provided; the claim of actual MSVC compile with source/hash/PE verification is taken from the shown copy/verify script only.",
+    "The repos github.com/kaisersong/kswarm and github.com/kaisersong/intent-broker and the pinned SHAs could not be checked; existence and content are assumed per the workflow text.",
+    "tests/scripts/windows-absence.test.mjs does not appear in the assistant-coverage workflow's test invocation; whether it runs in another CI job is unknown. Its first test requires clang on the runner, which is present on GitHub-hosted ubuntu/macos images but unverified for whatever job executes it.",
+    "No tests were executed by this reviewer; the reported 672-pass regression is the author's claim only. Node 22.14's exact SQLite error message string was not empirically confirmed here, which is why the exact-match concern is filed as P2 rather than P1.",
+    "Vitest version behavior for it.runIf/it.skipIf and vi.hoisted mocking is assumed to be compatible with the repo's installed versions; not verified."
+  ]
+}

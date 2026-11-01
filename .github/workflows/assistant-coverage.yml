@@ -49,6 +49,31 @@ jobs:
         # --no-sandbox is a Chromium flag and must not be sent to the Node probe.
         run: |
           node -e "const {spawnSync}=require('node:child_process');const expected=require('electron/package.json').version;const r=spawnSync(require('electron'),['--eval','console.log(process.versions.electron)'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',timeout:30000});if(r.error)throw r.error;if(r.status!==0||r.stdout.trim()!==expected){console.error(r.stderr||r.stdout);process.exit(1)}console.log('Actual Electron Node binary verified: '+expected)"
+      - name: Clone fixed real foreground fixture dependencies
+        shell: bash
+        run: |
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
+          git -C ../kswarm checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker checkout --detach FETCH_HEAD
+          npm ci --ignore-scripts --omit=dev --prefix ../kswarm
+          npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
+      - name: Compile actual Windows ordinary-owner reader
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=* delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
+          if not defined VSINSTALL exit /b 1
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul
+          if errorlevel 1 exit /b 1
+          node scripts/verification/build-windows-absence.mjs --target x64
+          if errorlevel 1 exit /b 1
+          node scripts/verification/copy-windows-absence.mjs source --arch x64
+          if errorlevel 1 exit /b 1
+          node scripts/verification/copy-windows-absence.mjs source --check --arch x64
+          if errorlevel 1 exit /b 1
       - run: npm run test:sandbox:build
       - name: Formal action body and hash binding
         run: npm run test:sandbox:run -- .test-dist/tests/runtime/assistant/model-identity.test.js .test-dist/tests/runtime/verification/loop-application-binding.test.js .test-dist/tests/runtime/task-host/task-runtime-host.test.js .test-dist/tests/runtime/conversation-activity/assistant-digest.test.js .test-dist/tests/runtime/conversation-activity/assistant-quality.test.js .test-dist/tests/runtime/conversation-activity/owner-host.test.js
@@ -61,6 +86,7 @@ jobs:
             electron_test_runner=(xvfb-run --auto-servernum)
           fi
           "${electron_test_runner[@]}" npm run test -- --run \
+          tests/main/sqlite-transaction-compat.test.ts \
           tests/main/assistant-periodic-runtime.test.ts \
           tests/main/assistant-periodic-scheduling.test.ts \
           tests/main/assistant-digest-policy.test.ts \

@@ -1,0 +1,14 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "reviews/assistant-ci-repair-design.md": "fc5c7d9ff1474d7b781d62e3e996e31ebe86002fc88958494b54deb5ff42291d",
+    "src/utils/sqlite-transaction-state.ts": "614536d83b32e792092a985bdf374cc221f65fe5cdffc91346e1c5e5b32cf528",
+    "desktop/tests/main/sqlite-transaction-compat.test.ts": "9b34a91852cb1e2cdc58494dd9a23f144308fb4c97596891bda00a2be3c0c72b",
+    "scripts/verification/copy-windows-absence.mjs": "fb6ea2ca98839ab286c5fd57a58372cd29d6edffdea104c38cbbdeddcd1a1ee2",
+    "tests/scripts/windows-absence.test.mjs": "1746590498dd298a6ce59fdeb5140f0aba93faff4f53c56a2707413beca6205a",
+    ".github/workflows/assistant-coverage.yml": "f932bebaa49356c4e0f50080c98b1e64f48f5c0bbaaa9a93528dfb7f4bb29006",
+    "desktop/tests/main/desktop-goal-native-mutation.test.ts": "36afeee54ad1f1e62eeab062e4f68396be3d737583684c5471b0b101949933e7"
+  },
+  "bundleSha256": "d86657f885a5dd9bb037dfca52694fad2ae8af6ef3c59335f723630596c8da0b"
+}

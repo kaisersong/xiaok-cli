@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 /**
  * Knowledge Base — SQLite Store Implementation
  *
@@ -252,7 +253,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
 
   function ensureAssistantSource(raw: AddSourceInput, requestSource: RequestSource): Source {
     if (requestSource !== 'user') throw Error('assistant_knowledge_user_only');
-    if (db.isTransaction) throw Error('assistant_knowledge_outer_transaction');
+    if (isSqliteTransactionActive(db)) throw Error('assistant_knowledge_outer_transaction');
     const input = captureExecutionValue(raw);
     const fields = ['sourceId','clientRequestKey','collectionId','kind','title','text','parseStatus','metadata'];
     const meta = input?.metadata;
@@ -672,10 +673,10 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   }
 
   function withMutationTransaction<T>(run: () => T): T {
-    if (db.isTransaction) return run();
+    if (isSqliteTransactionActive(db)) return run();
     db.exec('BEGIN IMMEDIATE');
     try { const value = run(); db.exec('COMMIT'); return value; }
-    catch (error) { if (db.isTransaction) { try { db.exec('ROLLBACK'); } catch (rollbackError) { console.error('[KB] mutation rollback failed', rollbackError); } } throw error; }
+    catch (error) { if (isSqliteTransactionActive(db)) { try { db.exec('ROLLBACK'); } catch (rollbackError) { console.error('[KB] mutation rollback failed', rollbackError); } } throw error; }
   }
 
   function assertSchedulerChunkState(chunkId: string, requestSource: RequestSource): void {

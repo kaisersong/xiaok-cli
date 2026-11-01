@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "findings": [
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-derived-lineage.ts",
+      "line": 99,
+      "issue": "derivedRunIds is unbounded; the only cap is the schema's parents max(100) throwing inside finish at line 103, which surfaces as an opaque parse failure rather than a named stale/limit error.",
+      "minimalFix": "Check new Set(data.derivedRunIds).size <= 100 before the loop and throw a descriptive error (e.g. 'assistant_deriveed_parent_limit') instead of relying on the schema parse."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-derived-lineage.ts",
+      "line": 100,
+      "issue": "A derivedRunId that is visible but has no stored lineage (untracked run) is silently skipped rather than pinned or rejected, so such a run influences the child without any existence/hash dependency. This is consistent with the prior accepted scope (no lineage means nothing to pin), but it is untested.",
+      "minimalFix": "Add a test (or explicit comment plus assertion) covering derivedRunIds pointing at a visible lineage-less run, documenting intended skip behavior."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/tests/main/assistant-derived-lineage.test.ts",
+      "line": 29,
+      "issue": "The child fixture with an external (flag-absent) parent is only asserted for propagation of the epoch change; the negative case 'external parent makes child non-visible/ineligible' is covered indirectly in the later test (line 70-75) but not with the legacy-flag path through isRunVisible there.",
+      "minimalFix": "Add expect(gate.isRunVisible('child')).toBe(false) while epoch is still 2 to assert legacy parents are conservatively external before the epoch mutation."
+    }
+  ],
+  "limitations": "Static review of supplied excerpts only; no execution, no inspection of full publication/producer call sites beyond the two excerpts, no runtime/SQLite integration verification, and no assessment of test flakiness or build/GUI state. The claim that no other caller writes the external flag is taken from the supplied excerpts and design statement, not verified against the full repository. No claim is made about human-quality output, live calendar behavior, or platform acceptance. The author-reported passing of runtime/SQLite integration tests was not reproduced by this reviewer."
+}

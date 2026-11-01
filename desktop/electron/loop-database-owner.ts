@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 import {assertOrdinarySourceWriterRoute} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import {existsSync,lstatSync,mkdirSync,realpathSync,statSync} from 'node:fs';
 import {basename,dirname,join,resolve} from 'node:path';
@@ -53,7 +54,7 @@ export interface LoopDatabaseMetadataFacts {
 export function describeLoopDatabaseSource(source:LoopDatabaseSource):Readonly<LoopDatabaseMetadataFacts> {
  const owner=source&&typeof source==='object'?sources.get(source):undefined;
  if(!owner)throw Error('loop_database_source');if(owner.stopped)throw Error('loop_database_closed');
- if(owner.database.isTransaction)throw Error('loop_database_metadata_transaction');
+ if(isSqliteTransactionActive(owner.database))throw Error('loop_database_metadata_transaction');
  if(owner.location===':memory:'||!owner.identity)throw Error('loop_database_metadata_file');
  const identity=()=>{if(fileIdentity(owner.location)!==owner.identity)throw Error('loop_database_metadata_identity');};identity();
  const bytes=(path:string,optional=false)=>{try{const stat=lstatSync(path);if(!stat.isFile()||stat.isSymbolicLink()||!Number.isSafeInteger(stat.size)||stat.size<0)throw Error('loop_database_metadata_file');return stat.size;}catch(error){if(optional&&(error as NodeJS.ErrnoException).code==='ENOENT')return 0;throw error;}};

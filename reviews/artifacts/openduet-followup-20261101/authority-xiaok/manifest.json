@@ -1,0 +1,12 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "src/runtime/assistant/quality-authorization.ts": "61cc2ba876b782e804be83e13267c05b8366608ed0862cd60180101b24457454",
+    "src/runtime/assistant/quality-qualification.ts": "0b0b32c89a8fc75c6bbd6f6cd02950408d318b2c8b92d1136f32bc23bd10e549",
+    "desktop/electron/assistant-quality-workflow-support.ts": "cd7f22313a3153acb4128704f94edcbce015ca50ab9182460a75cc6768da3ff1",
+    "desktop/electron/assistant-quality-workflow.ts": "7bf2b06e76f565ff00facec46cdf42909f3506c27336b2ed046bf5043184bf63",
+    "desktop/tests/main/assistant-quality-review-import.test.ts": "0a307a0a6e675a4d7ed9c8511c06d86134fca5f75a8e5b6e5e747405cad256f2"
+  },
+  "bundleSha256": "d99a175c40077b27235afe3d789e109143fbdb71aa4973336fc9b8dbdbc84c9f"
+}

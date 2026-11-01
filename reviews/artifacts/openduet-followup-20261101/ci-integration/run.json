@@ -1,0 +1,25 @@
+{
+  "runnerPid": 81207,
+  "started": 1793520697.557835,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "651ac61d0780c2052b526219ef1cac29dd41ad17960853288382132c955ee570",
+  "status": 200,
+  "ended": 1793520723.3084228,
+  "sourceDrift": [],
+  "responseSha256": "ba48542d46a3f6b75efeade073c3624ffe1289a2d5339fce060b8e5b0402d60f",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 1607,
+    "completion_tokens_details": {
+      "reasoning_tokens": 784
+    },
+    "prompt_tokens": 9948,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 11555
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/ci-integration-direct/response.json"
+}

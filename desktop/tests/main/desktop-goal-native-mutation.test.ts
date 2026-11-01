@@ -11,6 +11,7 @@ import { DesktopGoalCoordinator } from '../../electron/desktop-goal-coordinator.
 import { SqliteGoalStore } from '../../electron/goal-store-sqlite.js';
 import { FileGoalNativeJournal } from '../../../src/runtime/goal/native-mutation-journal.js';
 import { goalApplicationBindingHash } from '../../../src/runtime/verification/goal-application-binding.js';
+const nativeIt=it.skipIf(process.platform==='win32');
 const cleanups:Array<()=>void>=[];afterEach(()=>{for(const fn of cleanups.splice(0).reverse())fn();});beforeEach(()=>{leaf.call.mockReset();});
 const definition={version:1,obligations:[{obligationId:'original',predicateId:'artifact',predicateVersion:'1',semantics:'current-subject',recipe:{kind:'artifact-content',checks:[{id:'content',path:'result.txt',sha256:'a'.repeat(64),structure:'utf8'}]}}]};
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {resolve,promise};}
@@ -34,21 +35,21 @@ function fixture(){
  leaf.call.mockImplementation(transport);const input={threadId:'thread',objective:'original',expectedEvidenceKinds:['file_artifact' as const],verificationDefinition:definition};
  return {root,store,journal,host,coordinator,options,input,transport,advanceRemote(epoch:number){remoteEpoch=epoch;},unbind(){bound=false;}};
 }
-it('first unregistered profile completes both native stages before preparing and requires exact attachment ack before SDK',async()=>{
+nativeIt('first unregistered profile completes both native stages before preparing and requires exact attachment ack before SDK',async()=>{
  const f=fixture(),entered=deferred<void>(),release=deferred<void>();leaf.call.mockImplementation(async(m,p)=>{if(m==='completion.authorize-owner'){entered.resolve();await release.promise;}return f.transport(m,p);});const running=f.coordinator.createGoal(f.input);await entered.promise;expect(await f.store.load('thread')).toBeNull();expect(f.host.prepareTask).not.toHaveBeenCalled();expect(await f.coordinator.getGoalNativeMutation('thread')).toMatchObject({status:'enrolling'});release.resolve();const result=await running;expect(result.goal.activation).toBe('armed');expect(f.journal.load('thread')[0].status).toBe('applied');expect(f.host.startTask).not.toHaveBeenCalled();await f.coordinator.ackGoalTaskAttached({threadId:'thread',attachmentId:result.preparedTask.attachmentId});expect(f.host.startTask).toHaveBeenCalledTimes(1);
 });
 it('missing original definition fails closed before any native or Goal write',async()=>{const f=fixture();const {verificationDefinition,...input}=f.input;await expect(f.coordinator.createGoal(input)).rejects.toThrow(/definition/);expect(leaf.call).not.toHaveBeenCalled();expect(await f.store.load('thread')).toBeNull();});
-it('cancel remains responsive before any Goal exists and late native reply cannot create or prepare',async()=>{
+nativeIt('cancel remains responsive before any Goal exists and late native reply cannot create or prepare',async()=>{
  const f=fixture(),entered=deferred<void>(),release=deferred<void>();leaf.call.mockImplementation(async(m,p)=>{if(m==='completion.authorize-owner'){entered.resolve();await release.promise;}return f.transport(m,p);});const running=f.coordinator.createGoal(f.input);void running.catch(()=>{});await entered.promise;expect(await f.coordinator.cancelGoalNativeMutation({threadId:'thread',requestSource:'user'})).toMatchObject({status:'retired'});release.resolve();await expect(running).rejects.toThrow();expect(await f.store.load('thread')).toBeNull();expect(f.host.prepareTask).not.toHaveBeenCalled();
 });
-it('shutdown census waits for the actual native operation and rejects late activation',async()=>{
+nativeIt('shutdown census waits for the actual native operation and rejects late activation',async()=>{
  const f=fixture(),entered=deferred<void>(),release=deferred<void>();leaf.call.mockImplementation(async(m,p)=>{if(m==='application.authorize'){entered.resolve();await release.promise;}return f.transport(m,p);});const running=f.coordinator.createGoal(f.input);void running.catch(()=>{});await entered.promise;f.coordinator.stopAccepting();expect(await f.coordinator.drainShutdown(1)).toBe(false);release.resolve();await expect(running).rejects.toThrow();expect(await f.coordinator.drainShutdown(100)).toBe(true);expect(f.host.prepareTask).not.toHaveBeenCalled();expect(await f.store.load('thread')).toBeNull();
 });
-it('fresh application check at attachment acknowledgement blocks an application invalidated after cache commit',async()=>{const f=fixture(),result=await f.coordinator.createGoal(f.input);f.unbind();await expect(f.coordinator.ackGoalTaskAttached({threadId:'thread',attachmentId:result.preparedTask.attachmentId})).rejects.toThrow(/application/);expect(f.host.startTask).not.toHaveBeenCalled();});
-it('restart recovers enrollment only; explicit user continue starts application and task preparation',async()=>{
+nativeIt('fresh application check at attachment acknowledgement blocks an application invalidated after cache commit',async()=>{const f=fixture(),result=await f.coordinator.createGoal(f.input);f.unbind();await expect(f.coordinator.ackGoalTaskAttached({threadId:'thread',attachmentId:result.preparedTask.attachmentId})).rejects.toThrow(/application/);expect(f.host.startTask).not.toHaveBeenCalled();});
+nativeIt('restart recovers enrollment only; explicit user continue starts application and task preparation',async()=>{
  const f=fixture();leaf.call.mockImplementation(async(m,p)=>{const result=await f.transport(m,p);if(m==='completion.authorize-owner')throw Error('reply lost');return result;});await expect(f.coordinator.createGoal(f.input)).rejects.toThrow('reply lost');f.coordinator.stopAccepting();leaf.call.mockImplementation(f.transport);const restarted=new DesktopGoalCoordinator(f.options);cleanups.push(()=>restarted.stopAccepting());expect(await restarted.recoverGoalNativeMutation({threadId:'thread',requestSource:'user'})).toMatchObject({mutation:{status:'enrolled'},goal:null});expect(f.host.prepareTask).not.toHaveBeenCalled();const result=await restarted.continueGoalNativeMutation({threadId:'thread',requestSource:'user'});expect(result.goal.activation).toBe('armed');expect(leaf.call.mock.calls.filter(c=>c[0]==='completion.authorize-owner')).toHaveLength(1);
 });
-it('pause completes during a held ACK application read and stale ACK never starts the SDK',async()=>{
+nativeIt('pause completes during a held ACK application read and stale ACK never starts the SDK',async()=>{
  const f=fixture(),created=await f.coordinator.createGoal(f.input),entered=deferred<void>(),release=deferred<void>();
  leaf.call.mockImplementation(async(m,p)=>{if(m==='application.inspect'){entered.resolve();await release.promise;}return f.transport(m,p);});
  const ack=f.coordinator.ackGoalTaskAttached({threadId:'thread',attachmentId:created.preparedTask.attachmentId});void ack.catch(()=>{});await entered.promise;
@@ -57,21 +58,21 @@ it('pause completes during a held ACK application read and stale ACK never start
  await expect(ack).rejects.toThrow();expect(f.host.startTask).not.toHaveBeenCalled();
 });
 
-it('replacement observes an already advanced remote epoch before reserving the next immutable target',async()=>{
+nativeIt('replacement observes an already advanced remote epoch before reserving the next immutable target',async()=>{
  const f=fixture();await f.coordinator.createGoal(f.input);await f.coordinator.pauseGoal({threadId:'thread'});f.advanceRemote(9);
  const result=await f.coordinator.replaceGoal({...f.input,objective:'replacement'});expect(result.goal.state.epoch).toBe(10);expect(f.journal.load('thread')[1].target.epoch).toBe(10);expect(result.goal.activation).toBe('armed');
 });
-it('pending replacement cannot be bypassed by resume or ordinary user task admission',async()=>{
+nativeIt('pending replacement cannot be bypassed by resume or ordinary user task admission',async()=>{
  const f=fixture();await f.coordinator.createGoal(f.input);await f.coordinator.pauseGoal({threadId:'thread'});
  const entered=deferred<void>(),release=deferred<void>();leaf.call.mockImplementation(async(m,p)=>{if(m==='completion.prepare-owner-request'){entered.resolve();await release.promise;}return f.transport(m,p);});
  const replacement=f.coordinator.replaceGoal({...f.input,objective:'replacement'});void replacement.catch(()=>{});await entered.promise;
  try{await expect(f.coordinator.resumeGoal({threadId:'thread'})).rejects.toThrow(/native_mutation_pending/);await expect(f.coordinator.admitUserTask({input:'bypass',context:{threadId:'thread'}} as any)).rejects.toThrow(/native_mutation_pending/);expect(f.host.startTask).not.toHaveBeenCalled();}
  finally{await f.coordinator.cancelGoalNativeMutation({threadId:'thread',requestSource:'user'});release.resolve();await replacement.catch(()=>{});}
 });
-it('native cancel after local activation also retires the pending attachment task',async()=>{
+nativeIt('native cancel after local activation also retires the pending attachment task',async()=>{
  const f=fixture(),created=await f.coordinator.createGoal(f.input);expect(f.host.cancelTask).not.toHaveBeenCalled();await f.coordinator.cancelGoalNativeMutation({threadId:'thread',requestSource:'user'});expect(f.host.cancelTask).toHaveBeenCalledWith(created.preparedTask.taskId,'goal_native_cancelled');expect(f.host.startTask).not.toHaveBeenCalled();
 });
-it.each(['stop','disarm','permission'].flatMap(kind=>['create','recover'].map(mode=>({kind,mode}))))('native $mode projection rechecks $kind at the actual SQLite commit boundary',async ({kind,mode})=>{
+nativeIt.each(['stop','disarm','permission'].flatMap(kind=>['create','recover'].map(mode=>({kind,mode}))))('native $mode projection rechecks $kind at the actual SQLite commit boundary',async ({kind,mode})=>{
  const f=fixture();let permission=1;
  (f.options as any).multiAgent={getExecutionAuthorization:()=>({permissionRevision:permission}),assertExecutionAdmission(_thread:string,expected:number){if(expected!==permission)throw Error('permission_changed');},async assertThreadAdmission(){},async goalReadiness(){return {ready:true};}};
  const original=f.store.commit.bind(f.store);
@@ -93,4 +94,14 @@ it('ordinary thread compatibility does not weaken explicit native APIs or hide v
  await expect(f.coordinator.cancelGoalNativeMutation({threadId,requestSource:'user'})).rejects.toThrow('goal_native_journal_id');
  const read=vi.spyOn(f.journal,'load').mockImplementation(()=>{throw Error('actual_journal_corruption');});
  await expect(f.coordinator.admitUserTask({input:'ordinary',context:{threadId:'legal-thread'}} as any)).rejects.toThrow('actual_journal_corruption');expect(read).toHaveBeenCalledWith('legal-thread');expect(f.host.startTask).not.toHaveBeenCalled();
+});
+
+it.runIf(process.platform==='win32')('rejects unsupported native journal durability before any native RPC, Goal or task write',async()=>{
+ const f=fixture();
+ await expect(f.coordinator.createGoal(f.input)).rejects.toThrow('directory sync durability unsupported on Windows');
+ expect(leaf.call).not.toHaveBeenCalled();
+ expect(await f.store.load('thread')).toBeNull();
+ expect(f.journal.load('thread')).toEqual([]);
+ expect(f.host.prepareTask).not.toHaveBeenCalled();
+ expect(f.host.startTask).not.toHaveBeenCalled();
 });

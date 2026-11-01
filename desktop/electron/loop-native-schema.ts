@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { canonicalVerificationJson as json } from '../../src/runtime/verification/protocol.js';
 
@@ -6,7 +7,7 @@ import { canonicalVerificationJson as json } from '../../src/runtime/verificatio
  * original table name. All DDL and data checks share one writer transaction. */
 export function migrateLoopNativeSchema(db: DatabaseSync): void {
   if (db.prepare('PRAGMA table_info(loop_native_attempts)').all().some(row => row.name === 'kind')) return;
-  if (db.isTransaction) throw Error('loop_native_migration_outer_transaction');
+  if (isSqliteTransactionActive(db)) throw Error('loop_native_migration_outer_transaction');
   const fk = db.prepare('PRAGMA foreign_keys').get()?.foreign_keys;
   db.exec('PRAGMA foreign_keys=OFF');
   try {

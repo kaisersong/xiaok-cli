@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVE",
+  "findings": [
+    {
+      "severity": "P2",
+      "file": "src/runtime/assistant/quality-authorization.ts",
+      "line": 28,
+      "issue": "Optional frozen/predictions replay checks compare via JSON.stringify of re-parsed objects, so a legitimately reformatted (key-reordered) review file is rejected even though semantically identical. Fail-closed, usability only.",
+      "minimalFix": "Compare via a canonicalizing deep-equal (or re-serialize with sorted keys) instead of raw JSON.stringify."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-quality-workflow.ts",
+      "line": 165,
+      "issue": "importRisk requires generation equality and never consults reimport_id, so an explicitly revoked-but-still-current review cannot be re-imported at the risk stage (only the action stage honors reimport). Fail-closed; may be intentional but is asymmetric with the documented revocation/reimport policy.",
+      "minimalFix": "If risk-stage reimport is intended, mirror the importable() reimport_id/generation rule in importRisk; otherwise document risk stage as non-reimportable."
+    },
+    {
+      "severity": "P2",
+      "file": "src/runtime/assistant/quality-authorization.ts",
+      "line": 146,
+      "issue": "The qualification isCurrent closure compares only reportDigest (dataset+report hash, which excludes assessmentId/generation), so a later re-frozen assessment with byte-identical dataset satisfies currency of an earlier token. Semantically equivalent data, no downgrade or binding escape (binding still checked at read time), but token identity is weaker than record identity.",
+      "minimalFix": "Also compare assessmentId/digest/generation captured at issuance inside isCurrent."
+    }
+  ],
+  "limitations": "Native export/import port implementations (save/open/confirmHumanReview), model reader wiring, shared prediction budget ledger, Settings/startup reconciliation, and profile/source grant readers are separate reviewed scope; their correctness is assumed, not verified here. All reviewed labels and the 200-fact regression are synthetic test data; no real human quality evaluation is claimed or authorized. The prior Kimi P1 (population facts superset persisted) is resolved: freeze filters facts by the deterministic sample before persistence (workflow.ts:46-48), and pre-frozen known severe values remain immutable on risk import (quality-authorization.ts:77-79). No P0/P1 found in the supplied code within scope: digest/generation/context/model revalidation after awaits, savepoint atomicity, exact-ID label matching, severity non-downgrade, statistical gates (>=100, >=30 needs_action, precision>=0.90, recall>=0.95, unknown<=0.10, severe misses 0, unknown-prediction-on-needs_action counted as miss), and deterministic sampling all verify against the actual code and tests."
+}

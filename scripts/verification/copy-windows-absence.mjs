@@ -102,16 +102,17 @@ function publish(directory, record) {
 export function copyWindowsAbsence(root, options={}) {
   const {check=false,archs=architectures,desktop=false,requireAll=false,target=desktop?'desktop':'cli'} = options;
   if(![check,desktop,requireAll].every(value => typeof value === 'boolean') ||
-     !['cli','desktop','sandbox'].includes(target) || (desktop && target !== 'desktop') ||
+     !['cli','desktop','sandbox','source'].includes(target) || (desktop && target !== 'desktop') ||
      !Array.isArray(archs) || !archs.length || archs.some(arch => !architectures.includes(arch)) ||
      new Set(archs).size !== archs.length ||
      (requireAll && (archs.length !== 2 || !architectures.every(arch => archs.includes(arch)))))
     throw Error('Invalid Windows absence copy arguments');
   const selected = [...archs], host = nativeHost(); // Before any filesystem operation.
   root = path.resolve(root);
-  const moduleDirectory = target === 'sandbox' ? path.join(root,'.test-dist','src','runtime','verification')
+  const moduleDirectory = target === 'source' ? path.join(root,'src','runtime','verification')
+    : target === 'sandbox' ? path.join(root,'.test-dist','src','runtime','verification')
     : target === 'desktop' ? path.join(root,'desktop','dist','main','src','runtime','verification') : path.join(root,'dist','runtime','verification');
-  const reader = path.join(moduleDirectory,'windows-installation-absence.js');
+  const reader = path.join(moduleDirectory,target === 'source' ? 'windows-installation-absence.ts' : 'windows-installation-absence.js');
   if(!exists(reader)) {
     if(requireAll || check) throw Error('Windows absence reader missing: ' + moduleDirectory);
     // A missing emitted reader is optional only for a clean native destination.
@@ -169,7 +170,7 @@ export function copyWindowsAbsence(root, options={}) {
 function parse(args) {
   let desktop=false, root=sourceRoot, archs=architectures, check=false, requireAll=false, target;
   const seen = new Set();
-  if(['cli','desktop','sandbox'].includes(args[0])) { target=args.shift(); desktop=target === 'desktop'; }
+  if(['cli','desktop','sandbox','source'].includes(args[0])) { target=args.shift(); desktop=target === 'desktop'; }
   for(let i=0;i<args.length;i++) {
     const flag=args[i];
     if(!['--root','--arch','--check','--require-all'].includes(flag) || seen.has(flag))

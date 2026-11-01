@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 import {ASSISTANT_MORNING_LOOP_ID,ASSISTANT_EVENING_LOOP_ID} from './assistant-types.js';
 import type {DatabaseSync} from 'node:sqlite';
 import type {AssistantSourceRun} from '../shared/assistant-coverage-contract.js';
@@ -9,7 +10,7 @@ export function migrateAssistantDerivedLineage(db:DatabaseSync):void{
 /** Main's LoopStore wrapper MUST own the transaction and use this instead of a
  * separate recordAssistantSourceRun call. No second DB or hidden writer. */
 export function recordAssistantDerivedSourceRun(db:DatabaseSync,input:{sourceRun:Omit<AssistantSourceRun,'analysisStatus'>;lineage:AssistantDerivedLineage},isCurrent:()=>boolean):void{
- if(!db.isTransaction)throw Error('assistant_derived_transaction_required');
+ if(!isSqliteTransactionActive(db))throw Error('assistant_derived_transaction_required');
  if(!isCurrent())throw Error('assistant_derived_stale');
  const lineage=ASSISTANT_DERIVED_LINEAGE_SCHEMA.parse(input.lineage);
  if(lineage.profileId!==input.sourceRun.profileId)throw Error('assistant_derived_profile');

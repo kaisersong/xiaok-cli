@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
 import {createHash} from 'node:crypto';
 import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
@@ -334,7 +335,7 @@ export class CompletionEvidenceStore {
       return result;
     } catch (error) {
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        if(isSqliteTransactionActive(this.db))this.db.exec('rollback');
       } catch { /* ignore rollback errors */ }
       throw error;
     }

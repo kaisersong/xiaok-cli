@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
@@ -392,7 +393,7 @@ export class KSwarmServiceHealthScanner {
       return result;
     } catch (error) {
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        if(isSqliteTransactionActive(this.db))this.db.exec('rollback');
       } catch { /* ignore rollback errors */ }
       throw error;
     }

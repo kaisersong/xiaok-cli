@@ -1,3 +1,4 @@
+import {isSqliteTransactionActive} from '../../src/utils/sqlite-transaction-state.js';
 import {migrateAssistantDerivedLineage,recordAssistantDerivedSourceRun,readAssistantDerivedLineage,isAssistantDerivedRunTracked} from './assistant-derived-lineage-store.js';
 import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
 import {migrateAssistantAnalysisSelection,readAssistantAnalysisSelection,selectAssistantAnalysisModel} from './assistant-analysis-settings.js';
@@ -2630,7 +2631,7 @@ export class LoopStore {
       return result;
     } catch (error) {
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        if(isSqliteTransactionActive(this.db))this.db.exec('rollback');
       } catch { /* ignore rollback errors */ }
       throw error;
     }

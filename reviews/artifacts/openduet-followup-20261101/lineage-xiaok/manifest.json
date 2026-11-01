@@ -1,0 +1,11 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "desktop/electron/assistant-derived-lineage.ts": "401489d7d8402cf3fe76d8a2f7acaef4f24509474e41435c06848acde2d198b6",
+    "desktop/electron/assistant-derived-lineage-store.ts": "d72a307f85a9ab78f6c7ca5d4f769fb1cfa4c599e20dc8d8b733cfda89f43632",
+    "desktop/tests/main/assistant-derived-lineage.test.ts": "4f6596faaea22fd1ae83a3beb2dd3b6576bd20daf7fd7413c2164fb8686cd499",
+    "reviews/assistant-internal-parent-lineage.md": "7ab959bb97cc086eb6cd446d6361f5adf476aa460a28a95d12876653c4da78e4"
+  },
+  "bundleSha256": "c3d53616d85e5ee3e8faeb1d52d4a551803e0e66c0c7fe3d01b4c909f5f44c3e"
+}

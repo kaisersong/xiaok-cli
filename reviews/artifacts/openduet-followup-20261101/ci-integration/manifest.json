@@ -1,0 +1,17 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    "src/utils/sqlite-transaction-state.ts": "614536d83b32e792092a985bdf374cc221f65fe5cdffc91346e1c5e5b32cf528",
+    "desktop/electron/assistant-derived-lineage-store.ts": "d72a307f85a9ab78f6c7ca5d4f769fb1cfa4c599e20dc8d8b733cfda89f43632",
+    "desktop/electron/loop-database-owner.ts": "f672c0e428b245a6a016feb19f96a3b31ddc3c3e05b49d0f9fccb546d4fec75c",
+    "desktop/electron/loop-native-schema.ts": "aeab779fbda993baa7564e4cdca3e012dfad99c75fd3b388b3437c6aaa8c08c4",
+    "desktop/tests/main/sqlite-transaction-compat.test.ts": "9b34a91852cb1e2cdc58494dd9a23f144308fb4c97596891bda00a2be3c0c72b",
+    "desktop/electron/loop-store.ts": "9e4ada0f650abd69c5aa703642e49ca032e58398e40c536d04f49b45f403f76a",
+    "desktop/electron/completion-evidence-store.ts": "5f2014c907b32552bfe70a4d48de39bf8b8fb727f9c312e18115736efdbfb8e5",
+    "desktop/electron/artifact-evidence-regression-loop.ts": "cf3fd08b29086e74a249ec1f1779e94cae5176bc7ae8ae79054a33acc8b98562",
+    "desktop/electron/kswarm-health-loop.ts": "5313f9bc644662ad783535f53053cf1db9df26619a7e02d90d6089493e239d23",
+    "desktop/electron/kb-store-sqlite.ts": "99a9b11a60355372e3f71bb9c9ea42c190c71a85097765acbf8defbb683e31eb"
+  },
+  "bundleSha256": "651ac61d0780c2052b526219ef1cac29dd41ad17960853288382132c955ee570"
+}

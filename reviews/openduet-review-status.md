@@ -1,5 +1,18 @@
 # OpenDuet 候选复审状态（2026-11-01）
 
+## 16 时后续独立复核
+
+以下为最新状态，取代下表中两项待复核阻塞；旧票原文保留。编码 Codex GPT-6，独立复核为已配置 Zhipu API 实际返回的 `glm-5.3`，HTTP 200、finish_reason=stop、四组 sourceDrift=[]。
+
+- 内部祖先撤权依赖：APPROVE，未发现 P0/P1。
+- 人工风险标签 authority：APPROVE，确认 freeze 在持久化前按 selected sample 过滤 facts，原 Kimi P1 已裁决不适用；不赋予真实人工质量资格。
+- CI/SQLite 兼容实现与八处实际生产集成：两组分别 APPROVE，未发现 P0/P1。
+- 限域票和 source hash 见 [新票目录](artifacts/openduet-followup-20261101/)。非阻断 P2 保留原票，包括保守 exact SQLite error、已有 copier 文件读取硬化、人工复核重导入体验等；本轮不放宽事务错误识别或安全 gate。
+
+ZCode 预设计票已返回 APPROVE；其余 CLI 包装轮次主动停止、无票。实际最终批准来自上述直接 API 原始响应，不按退出码推断。限域静态批准不代表全仓产品验收。
+
+## 前轮历史状态
+
 作者 Codex GPT-6；独立模型 Kimi CLI 2.2.0 / kimi-code/k3。这里只记实际裁决和范围，不把源码测试、超时或无 verdict 当独立批准。全部小型 manifest/run/verdict 见 artifacts/openduet-recovery-20261101；完整 prompt/bundle/输出留在 ignored .artifacts/openduet-recovery-20261101。
 
 | 范围 | 实际状态 | 当前边界 |

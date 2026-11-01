@@ -1,0 +1,25 @@
+{
+  "runnerPid": 76213,
+  "started": 1793520652.655013,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "c3d53616d85e5ee3e8faeb1d52d4a551803e0e66c0c7fe3d01b4c909f5f44c3e",
+  "status": 200,
+  "ended": 1793520677.748831,
+  "sourceDrift": [],
+  "responseSha256": "e97c41bfbfcd3365287e67af5832d5a688ed5bf2b8dc5810181e57b15abb7e2c",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 1437,
+    "completion_tokens_details": {
+      "reasoning_tokens": 902
+    },
+    "prompt_tokens": 7417,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 8854
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/lineage-xiaok-direct/response.json"
+}

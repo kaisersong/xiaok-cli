@@ -1,0 +1,25 @@
+{
+  "runnerPid": 76407,
+  "started": 1793520653.895616,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "d99a175c40077b27235afe3d789e109143fbdb71aa4973336fc9b8dbdbc84c9f",
+  "status": 200,
+  "ended": 1793520723.758156,
+  "sourceDrift": [],
+  "responseSha256": "0310fc2d5c68fe7d96d8c18bae64d393a1bb0da2eb4360eb567f53b31b02dc37",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 5142,
+    "completion_tokens_details": {
+      "reasoning_tokens": 4510
+    },
+    "prompt_tokens": 15057,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 20199
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/authority-xiaok-direct/response.json"
+}
