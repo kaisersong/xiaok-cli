@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import {createKimiTerminalBoundaryError} from '../../../src/ai/runtime/kimi-terminal-boundary.js';
+import {OpenAIAdapter} from '../../../src/ai/adapters/openai.js';
+import {buildOpenAIAdapterInit} from '../../../src/ai/models.js';
+import { describe, it, expect, vi } from 'vitest';
 import { createProjectAgentModel, validateProjectAgentModelSelection } from '../../electron/project-agent-model.js';
 import { DEFAULT_CONFIG, type Config, type ModelAdapter, type StreamChunk } from '../../../src/types.js';
 const config = (): Config => ({...structuredClone(DEFAULT_CONFIG),schemaVersion:2, defaultProvider:'local',defaultModelId:'current',providers:{local:{type:'custom',protocol:'openai_legacy',baseUrl:'http://localhost:1234/v1'}},models:{current:{provider:'local',model:'current',label:'Current',capabilities:['tools']},vision:{provider:'local',model:'vision',label:'Vision',capabilities:['tools','image_in']}}});
@@ -30,4 +33,34 @@ describe('project agent model selection and request fallback',()=>{
   const model=await createProjectAgentModel({modelId:'vision',loadConfig:async()=>config(),createAdapter:binding=>{if(binding.modelId==='vision')throw new Error('unsupported model');return {getModelName:()=>binding.wireModel,async *stream(){yield {type:'text',delta:'current'};yield {type:'done'}}}}});expect(model.binding.modelId).toBe('current');
  });
 
+});
+
+describe('selected model permanent provider boundary',()=>{
+ it.each(['invalid-tool','finished-idle','reasoning-admission','wrapped-permanent','cyclic-permanent'])('keeps %s on the original request',async kind=>{
+  const invalid=createKimiTerminalBoundaryError({boundaryKind:'invalid_tool_call',sawOfficialReasoning:true,toolCallCount:1});
+  let error:Error=kind==='finished-idle'?Object.assign(new Error('openai_stream_idle_timeout'),{name:'TimeoutError',code:'OPENAI_STREAM_IDLE_TIMEOUT',retryable:false}):kind==='reasoning-admission'?new Error('KIMI_REASONING_ADMISSION_REQUIRED'):invalid;
+  if(kind==='wrapped-permanent'||kind==='cyclic-permanent')error=Object.assign(new Error('network timeout',{cause:invalid}),{retryable:true});
+  if(kind==='cyclic-permanent')(invalid as Error&{cause:unknown}).cause=error;
+  const onRecovery=vi.fn(),s=setup('vision',async function*(name){if(name==='vision')throw error;yield {type:'text',delta:'must not fallback'};yield {type:'done'};});
+  const model=await s.create();await expect(collect(model.stream({...input(),onRecovery}))).rejects.toBe(error);expect(s.calls).toEqual(['vision']);expect(onRecovery).not.toHaveBeenCalled();
+ });
+ it('does not construct a fallback for a permanent construction error',async()=>{
+  const error=Object.assign(new Error('network timeout'),{retryable:false}),calls:string[]=[];
+  await expect(createProjectAgentModel({modelId:'vision',loadConfig:async()=>config(),createAdapter:binding=>{calls.push(binding.modelId);throw error;}})).rejects.toBe(error);expect(calls).toEqual(['vision']);
+ });
+ it('keeps an admitted missing-finish error recoverable by the existing selected fallback',async()=>{
+  const error=createKimiTerminalBoundaryError({boundaryKind:'missing_finish',sawOfficialReasoning:true,toolCallCount:0}),s=setup('vision',async function*(name){if(name==='vision')throw error;yield {type:'text',delta:'recovered'};yield {type:'done'};});
+  expect(await collect((await s.create()).stream(input()))).toContainEqual({type:'text',delta:'recovered'});expect(s.calls).toEqual(['vision','current']);
+ });
+ it('terminates a cyclic transient cause and preserves ordinary fallback',async()=>{
+  const error=Object.assign(new Error('HTTP 503'),{cause:null as unknown});error.cause=error;const s=setup('vision',async function*(name){if(name==='vision')throw error;yield {type:'text',delta:'fallback'};yield {type:'done'};});await collect((await s.create()).stream(input()));expect(s.calls).toEqual(['vision','current']);
+ });
+ it('actual OpenAIAdapter invalid tool stream cannot activate the default model',async()=>{
+  const cfg=config();cfg.providers.kimi={type:'first_party',protocol:'openai_legacy',apiKey:'fictional',baseUrl:'https://api.kimi.com/coding/v1'};cfg.models.selectedKimi={provider:'kimi',model:'k3',label:'Fictional Kimi',capabilities:['tools','thinking']};const factories:string[]=[],onRecovery=vi.fn();let wireCalls=0;
+  const model=await createProjectAgentModel({modelId:'selectedKimi',loadConfig:async()=>cfg,createAdapter:binding=>{
+   factories.push(binding.modelId);if(binding.modelId!=='selectedKimi')return {getModelName:()=>binding.wireModel,async *stream(){yield {type:'text',delta:'must not run'};yield {type:'done'};}};
+   const adapter=new OpenAIAdapter(buildOpenAIAdapterInit(binding));(adapter as unknown as {client:unknown}).client={chat:{completions:{create:async()=>{wireCalls++;return {async *[Symbol.asyncIterator](){yield {choices:[{delta:{reasoning_content:'',tool_calls:[{index:0,id:'fictional-call',function:{name:'write',arguments:'{"broken":'}}]},finish_reason:'tool_calls'}]};}};}}}};return adapter;
+  }});
+  await expect(collect(model.stream({...input(),onRecovery}))).rejects.toMatchObject({code:'KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED',boundaryKind:'invalid_tool_call',retryable:false});expect(factories).toEqual(['selectedKimi']);expect(wireCalls).toBe(1);expect(onRecovery).not.toHaveBeenCalled();
+ });
 });

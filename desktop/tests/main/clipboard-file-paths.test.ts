@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { readClipboardPathCandidates } from '../../electron/clipboard-file-paths.js';
 const source = (values: Record<string, string | Buffer>) => ({
   read: (name: string) => String(values[name] ?? ''),
@@ -19,7 +22,14 @@ describe('native clipboard paths', () => {
   it('decodes Finder XML once and ignores ordinary clipboard prose', () => {
     expect(readClipboardPathCandidates(source({ NSFilenamesPboardType: '<array><string>/tmp/a&amp;lt;.txt</string></array>', text: 'normal text' }))).toEqual(['/tmp/a&lt;.txt']);
   });
-  it('reads file URLs and quoted paths without requiring availableFormats', () => {
-    expect(readClipboardPathCandidates(source({ text: '"/tmp/a b.txt"\nfile:///tmp/c%20d.txt' }))).toEqual(['/tmp/a b.txt', '/tmp/c d.txt']);
+  it('reads explicit native file URL formats', () => {
+    const path = join(tmpdir(), 'clipboard-fixture', 'a b.txt');
+    const url = pathToFileURL(path).href;
+    expect(readClipboardPathCandidates(source({ 'text/uri-list': url }))).toEqual([path]);
+    expect(readClipboardPathCandidates(source({ 'public.file-url': url }))).toEqual([path]);
   });
+  it.each(['/tmp/课程资料', '"/tmp/a b.txt"', 'file:///tmp/c.txt', 'C:\\Users\\tester\\brief.txt', '/tmp/one\n/tmp/two'])(
+    'does not interpret plain clipboard text as copied files: %s', text => {
+      expect(readClipboardPathCandidates(source({ text }))).toEqual([]);
+    });
 });
