@@ -83,6 +83,22 @@ describe('ConnectorsService', () => {
     expect(firecrawl?.runtime_state).toBe('ready');
   });
 
+  it('tests Firecrawl directly after an acknowledged provider save, including provider failures', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      success: true, data: { web: [{ title: 'Fixture', url: 'https://example.com', description: 'Fixture' }] },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const saved = await service.setConfig({ search: { provider: 'firecrawl' }, fetch: { provider: 'basic' } }, { requestSource: 'user' });
+    expect(saved.config.search.provider).toBe('firecrawl');
+    expect((await service.testProvider('search', { requestSource: 'user' })).providerName).toBe('web_search.firecrawl');
+    fetchMock.mockResolvedValueOnce(new Response('unauthorized', { status: 401 }));
+    const failed = await service.testProvider('search', { requestSource: 'user' });
+    expect(failed.success).toBe(false);
+    expect(failed.error).toContain('401');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([url]) => String(url) === 'https://api.firecrawl.dev/v2/search')).toBe(true);
+  });
+
   it('rebuilds in-memory tool wiring on setConfig', async () => {
     const before = toolRegistry.getToolDefinitions().find((d) => d.name === 'web_search');
     await service.setConfig({
