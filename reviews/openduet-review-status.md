@@ -18,3 +18,5 @@
 此前 calendar scoped manifest 与当前源码一致；provider/resources 的未变部分沿原票，identity/settings 的变化由本次 identity-r2 单独覆盖。packaging/smoke 原票的受审源码 hash 已再次逐文件核对一致。旧 lineage manifest 的两个生产文件曾有漂移，已经明确另审，不沿用旧票冒称新范围已批准。
 
 当前保持草稿，不自行合并或发布；真实人工质量、P1 交办试点、Windows 安装包验收与最终 CI 另列。额度阻塞不等于源码已通过。
+
+历史批准票的 Git 可读副本只规范了末尾空行；完整逐字原件仍在本地 historical-review-materials，未修改原始材料或 source hash。

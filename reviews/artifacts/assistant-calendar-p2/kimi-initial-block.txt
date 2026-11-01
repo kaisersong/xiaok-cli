@@ -35,4 +35,3 @@
   2. P1-2：给出主线程接线证据——`enabled` 来自独立 opt-in 开关、`canUse` 实际校验 owner/access/confirmed、以及 `latest()` 消费面的鉴权位置。
 
   P2 各项建议在后续 PR 处理，不构成本轮阻塞。
-

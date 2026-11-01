@@ -17,4 +17,3 @@
   - The trailing-newline-only hunk at the end of the diff is cosmetic.
 
   Scope honored: main wiring (`getLoopRun` public filtering on revoke) is owned separately and not audited here.
-

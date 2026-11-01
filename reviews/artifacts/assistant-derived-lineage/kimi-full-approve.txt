@@ -22,4 +22,3 @@
   **范围说明**：按指示未要求 main 侧 LoopStore/EvidenceStore wrapper 的接线证据；`finishAnalysis` 在 collect 失败时也可能被调用、依赖 owner 幂等，属父线程职责。质量标签与真实日历只读状态与声明一致，未发现越界写入。
 
   结论：APPROVE，可合并；P2 项建议建后续跟踪。
-

@@ -18,4 +18,3 @@
   - 能力边界与声明一致：`allDay`/`cancelled` 恒 `unknown`、status 恒 `partial`、watermark 恒 null、`recordCount>200` 在 schema 上限前已被 limit 检查拦截。
 
   **结论**：接缝代码本身可批准。P1-1 是放行 main 接线的闸门项——在 main 完成 actor 映射与事务包装的 PR 中，需附 LoopStore 事务覆盖这三个 store 函数的 `文件:行号` 证据。
-
