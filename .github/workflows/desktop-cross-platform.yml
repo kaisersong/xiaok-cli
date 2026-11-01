@@ -180,7 +180,6 @@ jobs:
           }
 
       - name: Vendor self-contained provider runtimes (Windows)
-        shell: bash
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
