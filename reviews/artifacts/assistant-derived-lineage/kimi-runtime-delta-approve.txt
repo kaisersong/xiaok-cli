@@ -1,0 +1,20 @@
+• **APPROVE**
+
+  No P0/P1 found in this delta.
+
+  **Verification of the four claims:**
+
+  1. **Lineage check before duplicate-run reads** — `previousRunId` guard at the top of the `begin.status !== 'started'` branch fires before any `getLoopRun`/`getLoopRunLifecycle` call, so a revoked caller cannot observe `already_running` / `already_completed` state or trigger `recoverLoopPublicationCandidates`. Correct placement.
+
+  2. **Check after awaited completed observation** — in the `already_completed` branch, `isRunVisible(run.id)` is re-checked after `await readLoopCompletedRun(...)`, before both the `publication_pending` return and the `return begin` fallthrough. The red→green regression (revoke during async observation never returns captured private run) covers exactly the TOCTOU window this closes.
+
+  3. **Check before any final run return** — the success-path check now sits after `executor.execute` and before the `publication_pending` recovery, the `persisted` read, and `resultFromRun`. The old body-scrubbing `resultFromRun({...persisted, summary:undefined, ...})` fallback is removed, so no stale sanitized body can be returned either. Throw-only, no durable mutation — success/failure facts written by `finishSuccess`/`finishFailure` are untouched, consistent with the stated contract.
+
+  4. **Stable error code** — `assistant_derived_unavailable` is thrown uniformly at all three sites; it does not collide with `assistant_derived_protected_unsupported` handling in `finishFailure`.
+
+  **Non-blocking notes (P2, not gating):**
+  - Throwing after a successful executor run means the scheduler sees an error for a durably-succeeded run; a retry will land in the `already_completed` branch and throw again while revoked — consistent, but worth a comment that this is intentional.
+  - The trailing-newline-only hunk at the end of the diff is cosmetic.
+
+  Scope honored: main wiring (`getLoopRun` public filtering on revoke) is owned separately and not audited here.
+

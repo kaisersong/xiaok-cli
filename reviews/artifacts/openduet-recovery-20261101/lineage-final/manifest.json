@@ -1,0 +1,10 @@
+{
+  "files": {
+    "desktop/electron/assistant-derived-lineage.ts": "6098ef4a4a1f7d6072dc916b0fa75664eb70f8de41ebe4b7e30c78e2724acebc",
+    "desktop/electron/assistant-publication-context.ts": "d3c97c82ebd93c26304ba97fc65f082faefd003817811da467aa67a8b000a342"
+  },
+  "excerpts": {},
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi kimi-code/k3",
+  "bundleSha256": "acd940cada9399fae7e203d3b7f466d1b96af514fcee09df5db2d54b9ff17b9e"
+}

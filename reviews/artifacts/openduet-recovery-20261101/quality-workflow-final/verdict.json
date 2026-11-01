@@ -1,0 +1,39 @@
+{
+  "verdict": "APPROVE",
+  "findings": [
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-quality-workflow.ts",
+      "line": 97,
+      "issue": "Phase is advanced and persisted ('risk_exported'/'exported') inside the atomic block before the native save dialog completes. If the user cancels the save, the record permanently claims an export that never happened. Recoverable via re-export (both phases are re-accepted), but the stored phase misrepresents reality and could confuse reimport gating logic that trusts 'exported'.",
+      "minimalFix": "Return the would-be phase from the atomic block without persisting it, and persist the phase transition only after ports.save returns true (re-validating binding via the existing assertCurrent callback), or accept and document the cancel-leaves-exported behavior with a status/test."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-quality-workflow.ts",
+      "line": 120,
+      "issue": "JSON.parse(contents) failures (malformed JSON, or a BOM-prefixed file from a common editor) propagate as raw SyntaxError rather than a domain-coded assistant_quality_import_* error, inconsistent with the rest of the workflow's error contract and harder for callers/telemetry to classify.",
+      "minimalFix": "Wrap JSON.parse in a try/catch and rethrow a domain error (e.g. assistant_quality_import_invalid); optionally strip a leading U+FEFF before parsing in the file port or here."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-quality-workflow.ts",
+      "line": 110,
+      "issue": "The save-time assertCurrent callback (this.current(record)) validates only model/generation/context binding, not phase. Because export() awaits the native dialog outside the atomic block, a concurrent user-driven import on the same record can complete (phase -> 'assessed') during the dialog; the stale pre-import export file is then still written. No qualification impact (reimport of that file is rejected), but main-process IPC interleaving makes the race real.",
+      "minimalFix": "Extend the assert callback to also re-read the record and verify phase/digest still match the exported snapshot (e.g. readQualityRecord(this.db, record.assessmentId)?.digest === record.digest and phase in the exported set), throwing assistant_quality_binding_changed otherwise."
+    }
+  ],
+  "limitations": [
+    "Static review only: no tests, builds, or commands were run; the pasted vitest file was read but not executed.",
+    "quality-authorization internals were reviewed only via the pasted excerpts: humanRiskReviewSchema shape, applyHumanRiskReview label-coverage guarantees, hasFrozenRiskCoverage, exportedRiskFacts/exportedQualityFacts, qualityRecordSchema defaults (riskReview/riskAttestation nullability), qualityDigest/frozenQualityDigest hashing, readQualityContext/Generation/Record, and readAssistantQualityAuthorization are assumed to meet their separately reviewed contracts.",
+    "assistant-quality-workflow-support internals not shown: atomic()/SAVEPOINT rollback semantics, user()/authorizeSource key checks, writeAssistantQualityRecord, revokeAssistantQuality, migrateAssistantQuality/syncAssistantQualityContext, and the reimport_id lifecycle (where it is set) could not be verified.",
+    "Population building, known-secret redaction (buildAssistantQualityPopulation), predictor implementation and its quota/retry behavior, and the native chooseSave/chooseOpen dialog implementations are other scopes; their absence is noted, not approved.",
+    "Single-instance, single-main-process execution is assumed; cross-process DB races are out of scope."
+  ],
+  "bundleSha256": "d1144be9a406c55dc790c36e19ae394cd54d95de1df0c2160da4f1fd78db6038",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "exitCode": 0,
+  "stopReason": null,
+  "sourceDrift": [],
+  "appliesToCurrentSnapshot": true
+}

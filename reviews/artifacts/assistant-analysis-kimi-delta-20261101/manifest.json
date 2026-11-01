@@ -1,0 +1,44 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "scope": "static provider/resources/settings delta; not live model/pilot/package acceptance",
+  "files": {
+    "desktop/electron/assistant-analysis-provider.ts": "f6950b63b648a35c37a7f521c42090aa8ca5ae4f5ee4064600eb55a2c7edf375",
+    "desktop/electron/assistant-analysis-resources.ts": "8e46e1cb13cd9c9e9693b8439276195e04c9550434535a861d9cc057ac6ede49",
+    "desktop/electron/assistant-analysis-settings.ts": "1af44a92178083b7fd38248e8205d83dbc568d871cc61d7feb43392d5404e521",
+    "desktop/shared/assistant-analysis-settings-contract.ts": "680a5e7680af5c4e2bc1d3de23a93982c6c22b02d4ca169daa0f09ab468978e9",
+    "src/runtime/assistant/model-identity.ts": "b24784f50fcef323faf0b9e2f4ac3827b041bb6cc394991dd6b5269da9fe2e3e",
+    "src/runtime/assistant/analysis-port.ts": "0d1d58715ebe3e1859431b6ac46ed4c2583d8e21c2bf0d9d51ecf245a794c3b8",
+    "src/runtime/sol-pi/deepseek-capacity-profile.ts": "8904aea32a5b5965d1b39bbb573cc785014c3e580921e96fefccca58f076270f",
+    "src/runtime/sol-pi/capacity-admission.ts": "75dce08d12af7ba63ae42e02617283073f3c09db2ca3cea76f04dca223220c7d",
+    "src/ai/runtime/provider-conversation-authorization.ts": "6e16f01d6c28f732a271cf7f863a4edcff19cf95fd9de7f3003b2ee8392f4e86",
+    "desktop/tests/main/assistant-analysis-provider.test.ts": "06862d86c13bac535f39962685a2c2524f00974e1c44afc5c6b3a2ab29b096d9",
+    "desktop/tests/main/assistant-analysis-resources.test.ts": "03cf77ed1c558ae6dc68bd5bd08b51ec19cdad4a5338b34cb8135c7433710362",
+    "desktop/tests/main/assistant-analysis-provider-counter.test.ts": "049410334db4cd15fb94bc94caa2a0c399e04ed2cec2d01e508ccdba0a94dcc5",
+    "desktop/tests/main/assistant-analysis-settings.test.ts": "d90365ddc10565ddb255716f3524fdb1e6d0c7516c3c186f0a10b8c1ed3d0dc5"
+  },
+  "excerpts": {
+    "desktop/electron/main.ts#anchor=const assistantAnalysisSettings=": {
+      "path": "desktop/electron/main.ts",
+      "anchor": "const assistantAnalysisSettings=",
+      "lineCount": 14,
+      "startLine": 1393,
+      "sha256": "b7b2f624f8bf84aba692cc9eccff052ee1a26763297f8af12524b1111134c017"
+    },
+    "desktop/electron/loop-store.ts#anchor=getAssistantAnalysisSelection(){": {
+      "path": "desktop/electron/loop-store.ts",
+      "anchor": "getAssistantAnalysisSelection(){",
+      "lineCount": 3,
+      "startLine": 260,
+      "sha256": "9de46880f3b71c44cdd789ab716678e4579de8746bd58b0aac207a2a5fecc46c"
+    },
+    "desktop/electron/assistant-typed-ipc.ts#anchor=}else if(method==='getAnalysisProvider')": {
+      "path": "desktop/electron/assistant-typed-ipc.ts",
+      "anchor": "}else if(method==='getAnalysisProvider')",
+      "lineCount": 6,
+      "startLine": 121,
+      "sha256": "8d7999d7861a3c8a7802848e7808810c31a94b4623e633d54beb91b859b5cb3c"
+    }
+  },
+  "bundleSha256": "387564c7e5fb66c4ee730c55cc5ef67c303b9200014f67190d83aaefc29a6493"
+}

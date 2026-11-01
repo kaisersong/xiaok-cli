@@ -1,0 +1,44 @@
+{
+  "verdict": "BLOCK",
+  "findings": [
+    {
+      "severity": "P1",
+      "file": "desktop/electron/assistant-derived-lineage.ts",
+      "line": 99,
+      "issue": "Ancestor invalidation is incomplete: parents are only pinned into the child lineage when the parent itself has external lineage (hasAssistantExternalLineage). A tracked parent whose lineage exists but is internal-only (no calendar/memory/parents of its own) is validated once at capture time (line 98) and then dropped from lineage.parents. If that parent's profile/grant is later revoked, isRunVisible(parent) becomes false, but the child's visibility (lines 57) and capture.current() (line 105) never re-check it, so derived content authorized under the revoked ancestor stays readable and publishable. This violates the scoped requirement that ancestor content/grant change invalidates the child.",
+      "minimalFix": "Pin every parent that has a stored lineage, not only external ones: change line 99 to `if(parent)parents.push({runId,lineageHash:assistantDerivedHash(parent)});`. Untracked legacy parents (readLineage undefined) remain unpinned, preserving the legacy-readable rule, while any tracked ancestor's revocation now propagates through the existing recursive check at line 57 and the current() recheck at line 105."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-derived-lineage.ts",
+      "line": 51,
+      "issue": "lineage.calendar.observationRevision is captured and schema-required but never verified at read time; revocation detection relies only on epoch equality plus per-event id/observationRevision membership. A same-epoch calendar re-observation that preserves all referenced event ids/revisions would not invalidate derived runs even though the observation revision moved.",
+      "minimalFix": "Either compare currentCalendar's lineage revision against lineage.calendar.observationRevision in isRunVisible, or drop the field from the schema if epoch+event pinning is the intended contract."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-publication-context.ts",
+      "line": 133,
+      "issue": "Policy asymmetry: confirmMemory accepts candidates whose evidenceRefs include calendar_observation (when backed by the run lineage), while readMorningSource with allowExternal=false hard-denies calendar/memory evidence refs for action sources. Externally-influenced memory candidates can therefore be confirmed even though the same evidence would block suggestion launch. If intentional (memory is opt-in and display-only), the difference should be documented; otherwise deny external refs here too.",
+      "minimalFix": "Add an explicit comment stating the intended asymmetry, or reject calendar_observation/memory_context refs in confirmMemory to match the action-source policy."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-derived-lineage.ts",
+      "line": 89,
+      "issue": "Event fields (id, start) from the unvalidated calendar.read() payload are used directly in the filter/slice before any schema check; non-string ids or non-finite starts silently drop events (fail closed) with no signal. observationRevision is propagated unvalidated into the lineage, where a later schema parse in isRunVisible will fail closed anyway, so impact is limited to silent omission.",
+      "minimalFix": "Validate the raw calendar payload shape (e.g. a small zod pass on events) before filtering, so malformed observations are rejected explicitly rather than silently."
+    }
+  ],
+  "limitations": [
+    "Static review only; I did not run tests, builds, or the claimed 614-pass suite, and did not see the prior lineage snapshot or hashes, so drift verification against it was not possible.",
+    "Behavior of omitted interfaces (readAssistantCalendarMemory, assertOrdinaryLoopOwner, readInstalledCurrentOwner/completionConsumerOwner, store/publication/evidence implementations, readMemoryConfirmationFacts supplier) is taken as stated assumptions, not verified.",
+    "Memory opt-in default OFF and consentRevision issuance live outside the supplied files; enforcement of the default and of settings revision issuance is assumed, not proven."
+  ],
+  "bundleSha256": "acd940cada9399fae7e203d3b7f466d1b96af514fcee09df5db2d54b9ff17b9e",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "exitCode": 0,
+  "stopReason": null,
+  "sourceDrift": [],
+  "appliesToCurrentSnapshot": true
+}

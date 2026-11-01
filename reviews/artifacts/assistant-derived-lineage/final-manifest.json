@@ -1,0 +1,11 @@
+{
+  "desktop/electron/assistant-derived-lineage.ts": "019232faa0c97075c199857ec4e5d0edef868936af44318ec508934a23bf5a9c",
+  "desktop/electron/assistant-derived-lineage-store.ts": "ef9d41f3330c1b854779ccd484c0419a54c074069f742390ed0b983662e1dd40",
+  "desktop/electron/assistant-loop-executor.ts": "8512912f5397cf7abeacd2b47aeccc38c33f595048e3051577e5408d1aeed255",
+  "desktop/electron/assistant-runtime.ts": "0defb1ac4be0cd5d5fba509b82e690d506107ffff625de8ba85bdd7bacf6d4f9",
+  "desktop/electron/assistant-publication-context.ts": "cfd91bdd4e1b8cd9e59ca86dd42ccdfcbc787e04c7eff16678c478025c627fe9",
+  "desktop/tests/main/assistant-derived-lineage.test.ts": "593db399a72c6e13500be2b03b7fcbd02662c5c746fbedd7003674bc2a4e3085",
+  "desktop/tests/main/assistant-derived-runtime.test.ts": "b1f724d17644838f961a89aa3d9671f308f1218b6855fd8f56ac14c852edd490",
+  "desktop/tests/main/assistant-loop-executor.test.ts": "717f2025b9e6f00a29b2be2ede53449d602571e33899e89a82f1e97ceaeabd9f",
+  "desktop/tests/main/assistant-publication-context.test.ts": "70dd857fb74148d3fe7335bd3116e9d1722de6859118942f70e858673578bd8b"
+}

@@ -1,0 +1,25 @@
+{
+  "files": {
+    "desktop/electron/assistant-derived-lineage.ts": "401489d7d8402cf3fe76d8a2f7acaef4f24509474e41435c06848acde2d198b6",
+    "desktop/electron/assistant-derived-lineage-store.ts": "ef9d41f3330c1b854779ccd484c0419a54c074069f742390ed0b983662e1dd40",
+    "desktop/tests/main/assistant-derived-lineage.test.ts": "4f6596faaea22fd1ae83a3beb2dd3b6576bd20daf7fd7413c2164fb8686cd499",
+    "reviews/assistant-internal-parent-lineage.md": "7ab959bb97cc086eb6cd446d6361f5adf476aa460a28a95d12876653c4da78e4"
+  },
+  "excerpts": {
+    "desktop/electron/assistant-publication-context.ts# function displayOnly(": {
+      "path": "desktop/electron/assistant-publication-context.ts",
+      "anchor": " function displayOnly(",
+      "lineCount": 2,
+      "sha256": "94515f9adb17cf3d83a8a56805eae3e2ec6d0aa422293ae7163cda28a72e8120"
+    },
+    "desktop/electron/assistant-loop-executor.ts#        const assertCurrent=": {
+      "path": "desktop/electron/assistant-loop-executor.ts",
+      "anchor": "        const assertCurrent=",
+      "lineCount": 4,
+      "sha256": "eda27e6001a3f6377da1f50b2bac3570f09234cfd1ac5fdb96a2459c35b5a783"
+    }
+  },
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi kimi-code/k3",
+  "bundleSha256": "2ae0f944f7b37def32e0d35c9a46175d2f4cba56994550fb2db260f4e7ac1a54"
+}

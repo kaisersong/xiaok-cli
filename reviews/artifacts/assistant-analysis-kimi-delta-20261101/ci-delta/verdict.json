@@ -1,0 +1,24 @@
+{
+  "verdict": "APPROVE",
+  "findings": [],
+  "resolved": [
+    "Symlink negative test (desktop/tests/main/assistant-analysis-resources.test.ts:20) now runs on Windows via `process.platform==='win32'?'junction':'dir'` instead of being skipped: target is an absolute mkdtempSync path (valid junction target), the test still asserts prepareAssistantAnalysisResources rejects the symlinked managed directory with ASSISTANT_ANALYSIS_RESOURCES_UNAVAILABLE and makes no fetch call, and afterEach cleanup (rmSync recursive+force on tracked roots, line 8) removes the symlink itself, not its target — no unsafe target modification.",
+    "Real official counter tests (desktop/tests/main/assistant-analysis-provider-counter.test.ts:13-15) now gate on `!!process.env.ASSISTANT_ANALYSIS_COUNTER_ENV && assistantAnalysisResourcesSupportedPlatform()`, so they skip unless the host explicitly provisions the pinned assets AND the platform is the reviewed macOS arm64 — no false-platform claim, no implicit network access on unprovisioned hosts. Base rejection/no-network tests (resources.test.ts lines 11-31, 42-45) carry no skipIf and still run on all three OSs; the hash-rejection test (line 33) uses a stubbed fetch so its platform-only skip is not a test escape.",
+    "Main settings composition (desktop/electron/main.ts:1396-1405) matches the reviewed design: bootstrap routes prepare=true→prepareAssistantAnalysisResources and prepare=false→restoreAssistantAnalysisResources (validation-only, no download), passes modelId through to bootstrapDesktopAssistantAnalysisProvider, and onInvalidated cancels the current run and re-syncs the schedule via requestSource:'scheduler'. The narrower excerpt no longer contains the unrelated dialog-export copy; composition is identical in behavior to what was previously approved.",
+    "Settings production file (desktop/electron/assistant-analysis-settings.ts) is byte-identical to the approved base: revision-pinned optimistic selection, user-only configure gate (line 23), identity triple-check in prepare() (line 27), and fail-closed clearing in current() (line 17) are unchanged.",
+    "Reported local verification (33 passed real-counter+settings suite, main build exit 0) is consistent with the scoped delta; per instructions this is recorded as reported, not independently executed."
+  ],
+  "limitations": [
+    "Static delta review only of the supplied frozen excerpts; I executed no tests, builds, or runtime calls, and claim no Windows runtime verification — the win32 junction branch is reviewed by construction (absolute target, type string correct, rejection assertion unchanged), not by execution.",
+    "The two changed files were verified only as provided in the bundle; all other production files are covered by the recorded unchanged hashes in manifest.baseReview, which I did not re-hash myself.",
+    "Prior P2 items remain open and intentionally unresolved per scope: prepare() catch-all mapping non-resource failures to 'resources_unavailable' (assistant-analysis-settings.ts:27), current() conflating store/transport errors with identity drift under 'config_changed' (line 17), and orphaned '.manifest-<uuid>.tmp' after a crash between link() and unlink() (assistant-analysis-resources.ts:87). These are tracked, not approval blockers.",
+    "Root environment-only credential identity across restart remains a broader pending main-grant limitation, unchanged and not asserted fixed here.",
+    "This approval covers only the scoped static delta; it is not a live pilot, end-to-end activation, or package qualification claim."
+  ],
+  "bundleSha256": "1d6c7d56269008117f48dec393b8969da884c60317dc0fe934805f08f3631718",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "exitCode": 0,
+  "stopReason": null,
+  "sourceDrift": [],
+  "appliesToCurrentSnapshot": true
+}

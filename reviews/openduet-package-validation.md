@@ -1,11 +1,11 @@
 # OpenDuet package 验证入口（2026-11-01）
 
-**最新状态：09:35 输入快照 unsigned package 退出 0、1,463 个 dist 文件零差异；隔离真实 main/preload/GUI 基础 smoke 已通过。随后主线程修改 main/renderer，source/dist manifest 已变化，当前包不再称最终包。等待下一次 fresh build 通知后重跑完整 package + GUI。**
+**恢复后最新状态：读取边界和祖先关联修复后的 recovery-lineage-final 完整 unsigned package、inspection 和真实隔离 GUI 重跑通过；1,468 个 dist 文件零差异。旧 GUI 脱离的自有 broker 已按唯一私有 cwd/PID 补查回收，最终剩余 0。详见[中断恢复验证](openduet-recovery-verification.md)，不把旧采样集零残留冒充完整清理。**
 
 - [打包历史与 source/dist manifest](openduet-package-validation-history.md)：首次失败、依赖修复、全部 unsigned 命令、退出码、资源与 PID 证据、09:35 快照及后续差异。
 - [隔离真实 GUI / preload smoke](openduet-package-validation-gui.md)：准备、失败修正、CDP 实际 preload 源码比对、真实 IPC/SQLite 检查、OS 隔离与清理边界。
 - [CI package contracts](openduet-package-validation-ci.md)：Node 22.14/24 × 三 OS、Electron binary/xvfb、显式测试清单和本机检查；远端结果由主线程确认。
-- [依赖修复窄设计与对抗自审](openduet-package-dependency-design.md)。Kimi 独立静态评审记录待本轮回票后补链接；超时不算批准。
+- [依赖修复窄设计与对抗自审](openduet-package-dependency-design.md)。[Kimi 独立静态评审](openduet-package-kimi-review.md)：两组 APPROVE 仅绑定受审文件 hash；首轮超时未批准，不覆盖后续合并的新 HEAD。
 
 ## 当前证据边界
 

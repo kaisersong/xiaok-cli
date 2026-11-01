@@ -1,0 +1,38 @@
+• # Kimi 独立安全评审（只读 bundle，未用工具、未改文件）
+
+  评审范围仅限题目所给 5 个文件。结论先行：**BLOCK**——无 P0，但撤权/换账号隔离的核心机制在 bundle 内零证据，按「未核实不得当事实」不能放行。
+
+  ## 合规确认（无缺陷部分）
+
+  - provider_record 身份处理符合要求：ID 为 `sha256(provider, accountId, record.id)`，start 已移出身份（`assistant-calendar-source.ts` 改期沿用 ID、仅 observationRevision 变化），未生成 occurrence 级 claim。
+  - 未声称已验证语义：`allDay`/`cancelled` 恒 `'unknown'`，`status` 恒 `'partial'`，`lastCompleteWatermark` 恒 `null`，errorCode 明确 `event_semantics_unknown`/`completeness_unknown`，无 delta/checkpoint 假能力。失败基线经 `observation.records` 保留，缺失只标 `missingUnconfirmed`，成功空与失败区分（`empty` vs `unavailable`）均有测试。这部分设计、代码、测试三者一致。
+  - 写路径门禁正确：enable/disable 仅 `user`，collect 拒绝 `agent`；记忆适配器只读、失败 fail-closed。
+
+  ## P0
+
+  无。
+
+  ## P1（BLOCK 原因）
+
+  **P1-1 换账号/重新 enable 的 epoch 轮换无证据，跨账号事实泄漏风险无法排除。**
+  `enable()` 调 `setAssistantCalendarConnection({...connection, enabled:true, expectedEpoch: before.epoch})`——epoch 是否由 LoopStore CAS 并**递增**，bundle 内完全不可见（loop-store.ts 未提供）。若 epoch 不轮换，`latest()` 的 `getAssistantCalendarGeneration(grant.epoch)` 会把旧账号的事件正文继续提供给新账号。现有「account switch」测试只覆盖 grant 存续期内 transport 返回不同 accountId 被 `grant_changed` 拒绝的场景，**没有 disable→enable（新账号）的回归测试**。撤权与换账号恰是本次评审重点，而这一代际隔离机制是唯一的防线，必须补：loop-store 中 epoch 轮换实现的位置证据 + 对应测试。
+
+  **P1-2 `latest()`/`status()` 无任何 requestSource 门禁，读取侧鉴权依赖 bundle 外接线。**
+  collect 有来源门禁，但已落库事实（含事件标题）的读取函数无任何校验；谁会把它暴露给 agent 可见面，bundle 内无证据。同理，记忆适配器的 `enabled`（独立 opt-in）、`canUse`（owner/access/confirmed）、`isCurrent` 全部是调用方注入的回调，主线程实际接线未展示——适配器本身逻辑正确，但「独立 opt-in」与「access-and-confirmed」这两项声明在 bundle 内无法核实。
+
+  ## P2
+
+  1. **错误信号被塌缩**：`collectOwned` 的裸 `catch{}` 把 `conflicting_records`（完整性违例）、`grant_changed`、超限、schema parse 失败全部吞为 `source_unavailable`；contract 中 `errorCode: 'grant_changed'` 是永不产生的死枚举（`assistant-calendar-contract.ts`）。完整性攻击与「离线」不可区分。
+  2. **collect 并发去重忽略后到调用者**：`if(this.running)return this.running` 使第二个调用者的 `now`/`signal` 被丢弃，可能拿到窗口与取消语义都不匹配的 snapshot。
+  3. **单次瞬时失败即清空可见 events**：失败 snapshot 以 `events:[]` 覆盖落库，`latest()` 在下一次成功前返回空。比较基线保留是对的，但这一可用性行为未在设计文档中说明是有意取舍。
+  4. **测试缺口**：collect 对 `requestSource:'agent'` 的拒绝、query>2048、`getById` 异步化时的行为（当前同步调用，若真实 MemoryStore 返回 Promise 会静默降级为 `empty` 而非 `unavailable`）均未覆盖。
+
+  ## 结论
+
+  **BLOCK**。解除条件收窄为两条证据，不要求改设计：
+
+  1. P1-1：给出 `LoopStore.setAssistantCalendarConnection`/`getAssistantCalendarGeneration` 中 epoch CAS 与轮换的 `文件:行号` 证据，并补 disable→enable（换账号）后旧事件不可见的回归测试及运行结果。
+  2. P1-2：给出主线程接线证据——`enabled` 来自独立 opt-in 开关、`canUse` 实际校验 owner/access/confirmed、以及 `latest()` 消费面的鉴权位置。
+
+  P2 各项建议在后续 PR 处理，不构成本轮阻塞。
+

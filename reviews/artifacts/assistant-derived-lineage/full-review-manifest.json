@@ -1,0 +1,7 @@
+{
+  "desktop/electron/assistant-derived-lineage.ts": "019232faa0c97075c199857ec4e5d0edef868936af44318ec508934a23bf5a9c",
+  "desktop/electron/assistant-derived-lineage-store.ts": "ef9d41f3330c1b854779ccd484c0419a54c074069f742390ed0b983662e1dd40",
+  "desktop/electron/assistant-loop-executor.ts": "8512912f5397cf7abeacd2b47aeccc38c33f595048e3051577e5408d1aeed255",
+  "desktop/electron/assistant-runtime.ts": "e2b7e65f7d1d828edc7f4670661cc84292e5d72a3a850996488a186e5983f829",
+  "desktop/electron/assistant-publication-context.ts": "cfd91bdd4e1b8cd9e59ca86dd42ccdfcbc787e04c7eff16678c478025c627fe9"
+}

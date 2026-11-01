@@ -1,0 +1,30 @@
+--- reviewed
++++ final
+@@ -150,8 +150,10 @@
+       });
+       const begin = options.loopStore.beginLoopRun(loopId, effectiveTrigger, startedAt, staleAfterMs,context);
+       if (begin.status !== 'started') {
++        const previousRunId=begin.status==='already_running'?begin.activeRunId:begin.status==='already_completed'?begin.completedRunId:undefined;
++        if(previousRunId&&options.derived&&!options.derived.visibility.isRunVisible(previousRunId))throw Error('assistant_derived_unavailable');
+         if(begin.status==='already_running'){const run=options.loopStore.getLoopRun(begin.activeRunId);if(run&&options.loopStore.getLoopRunLifecycle(run.id)?.businessState==='publication_pending'){options.loopStore.recoverLoopPublicationCandidates({runId:run.id,requestSource:context.requestSource});return {status:'publication_pending',run};}}
+-        if(begin.status==='already_completed'){const run=options.loopStore.getLoopRun(begin.completedRunId);if(!run)throw Error('loop_completion_missing');if(!await readLoopCompletedRun(options.loopStore,{runId:run.id,loopId,logicalRunKey:String(effectiveTrigger.logicalRunKey??'').trim(),requestSource:context.requestSource,...(signal?{signal}:{})}))return {status:'publication_pending',run};}
++        if(begin.status==='already_completed'){const run=options.loopStore.getLoopRun(begin.completedRunId);if(!run)throw Error('loop_completion_missing');const completed=await readLoopCompletedRun(options.loopStore,{runId:run.id,loopId,logicalRunKey:String(effectiveTrigger.logicalRunKey??'').trim(),requestSource:context.requestSource,...(signal?{signal}:{})});if(options.derived&&!options.derived.visibility.isRunVisible(run.id))throw Error('assistant_derived_unavailable');if(!completed)return {status:'publication_pending',run};}
+         return begin;
+       }
+       const producer=options.loopStore.getLoopRunPublicationBasis(begin.run.id)?options.loopStore.openLoopPublicationProducer(begin.run):undefined;
+@@ -165,9 +167,9 @@
+         publicationProducer:producer,
+       });
+       if(execution.status==='failed'&&execution.errorCode==='assistant_derived_protected_unsupported')throw Error(execution.errorCode);
++      if(options.derived&&!options.derived.visibility.isRunVisible(begin.run.id))throw Error('assistant_derived_unavailable');
+       if(options.loopStore.getLoopRunLifecycle(begin.run.id)?.businessState==='publication_pending'){options.loopStore.recoverLoopPublicationCandidates({runId:begin.run.id,requestSource:context.requestSource});return {status:'publication_pending',run:options.loopStore.getLoopRun(begin.run.id)!};}
+       const persisted = options.loopStore.getLoopRun(begin.run.id) ?? begin.run;
+-      if(options.derived&&!options.derived.visibility.isRunVisible(begin.run.id))return resultFromRun({...persisted,summary:undefined,message:'assistant_derived_unavailable',evidenceIds:[]});
+       return resultFromRun(persisted);
+     },
+   };
+@@ -221,4 +223,3 @@
+   if (run.status === 'blocked') return { status: 'blocked', run };
+   return {status:run.status==='running'?'executing':'failed',run};
+ }
+-

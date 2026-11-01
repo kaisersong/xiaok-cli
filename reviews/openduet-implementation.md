@@ -1,5 +1,7 @@
 # OpenDuet 个人助理实现交付记录
 
+2026-11-01 中断恢复后的重新验证见[当前验证记录](openduet-recovery-verification.md)。下列旧运行记录不替代新日志；真实试点与质量门槛仍保留。
+
 分支 `feat/openduet-assistant-20261101`，隔离工作树 `/Users/kk/projects/.worktrees/openduet-20261101/xiaok-cli`。依据 2026-10-28 v3 设计；用户后续决定首个日历改用云之家 CLI，Google 延后；没有真实人工标签，先交付人工复核流程。实现、合成回归、真实只读读取、真实交办试点和人工质量验收分开记录。
 
 ## 实现范围

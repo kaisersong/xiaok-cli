@@ -1,0 +1,21 @@
+• **APPROVE（带条件）** — 范围内无 P0。以下结论仅覆盖 main-private 接缝代码本身，不触及 main/IPC 接线（已声明未完成）。
+
+  **P1（接线落地前必须关闭，非本轮代码缺陷）**
+
+  1. **CAS 原子性依赖调用方事务，store 层自身无保护。** `setAssistantCalendarConnection`（assistant-calendar-store.ts）是 read-check-write 两步；`setAssistantCalendarMemorySettings` 是 INSERT…ON CONFLICT + 回退 UPDATE 两条语句；`writeAssistantCalendarGeneration` 在 INSERT 提交后才做第二次 `guard()` 检查，throw 时若无事务回滚会留下旧 epoch 的孤儿行。进程内单 `DatabaseSync` 同步执行下交错不可能，安全结论完全押在「LoopStore 事务包装覆盖这三个函数且 guard throw 触发回滚」上——这是转引声明，我在本批代码中未见事务边界。main 接线时必须验证包装真实存在并覆盖全部三个入口，否则 epoch CAS 与撤权清除在异常路径上非原子。
+
+  **P2（记录，不阻塞）**
+
+  - `memorySettingsKey` 只校验非空和长度，不做 trim/大小写规范化；`'  x  '` 与 `'x'` 是两个 owner。owner/profile 的规范身份完全依赖 main 的可信 actor 映射（已在接线要求中），但接缝本身对非规范化输入不防御。
+  - `readAssistantCalendarMemory` 的 cwd 相等比较是原始字符串比较（assistant-calendar-context.ts），project scope 在 Windows 大小写/尾部分隔符差异下只会误排除（fail-closed），无泄漏，但接线时应用 `path.resolve` 规范化后再比。
+  - `enable()` 中 `connect()` 的 await 窗口靠 `expectedEpoch` CAS 兜底——已验证正确；`disable`/`enable` abort 在途 collection 且 `current()` 含 signal 检查，撤权传播完整。
+
+  **已核对通过的撤权/CAS 关键点**
+
+  - 撤权链路闭环：`setAssistantCalendarConnection` bump epoch + 清除非当前 epoch 的 generation 行；`latest()` 只读当前 epoch；`context()` 的 `isCurrent` 闭包同时绑定 grant epoch、accountId 和快照 revision 哈希，任何重采集（含 `collectedAt` 变化）都会使旧 capability 失效——保守方向正确。
+  - `collectOwned` 失败路径 fail-closed：`grant_changed`、记录冲突、超限全部落入 catch，且 catch 内先复查 `current()` 才写 failure 快照；failure 快照保留 baseline observation 但清空 added/changed/missingUnconfirmed，不把失联误报为删除。
+  - `readAssistantCalendarMemory` 在 `listRelevant` 前后及返回前三次 `isCurrent()`，scope 检查 `global || (project && cwd===input.cwd)` 优先级正确，canUse 逐记录调用，异常全吞为 `unavailable`——fail-closed。
+  - 能力边界与声明一致：`allDay`/`cancelled` 恒 `unknown`、status 恒 `partial`、watermark 恒 null、`recordCount>200` 在 schema 上限前已被 limit 检查拦截。
+
+  **结论**：接缝代码本身可批准。P1-1 是放行 main 接线的闸门项——在 main 完成 actor 映射与事务包装的 PR 中，需附 LoopStore 事务覆盖这三个 store 函数的 `文件:行号` 证据。
+

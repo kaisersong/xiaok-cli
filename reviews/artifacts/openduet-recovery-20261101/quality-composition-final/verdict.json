@@ -1,0 +1,40 @@
+{
+  "verdict": "APPROVE",
+  "findings": [
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-quality-predictions.ts",
+      "line": 18,
+      "issue": "A crash between budget.reserve (line 24) and budget.sent (line 25) leaves the attempt in state 'reserved'. On retry with the same frozen digest, budget.read(attemptId) returns that stale row and throws 'assistant_quality_prediction_already_sent' unconditionally, and after 600s the reservation can no longer be sent either (assistant-analysis-budget.ts:35), so that exact digest is permanently un-evaluatable. Mitigated in practice because a new snapshot yields a new digest, and re-reserve with identical parameters is idempotent (assistant-analysis-budget.ts:24).",
+      "minimalFix": "In the predictor, treat a read() hit in state 'reserved' (not yet 'sent'/'settled') as resumable: proceed to budget.sent instead of throwing, or only throw when the existing attempt state is 'sent'/'settled'."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/assistant-quality-population.ts",
+      "line": 9,
+      "issue": "Known-secret redaction skips any secret with length < 8 (`if(secret.length>=8)`), so a short credential present in the provider configuration would be exported verbatim into the human-review JSON. The generic pattern redaction that follows covers common shapes but not arbitrary short secrets.",
+      "minimalFix": "Lower or remove the length floor for exact-match redaction of explicitly configured secrets (e.g. >=4), or document and enforce a minimum secret length at the configuration boundary."
+    },
+    {
+      "severity": "P2",
+      "file": "desktop/electron/main.ts",
+      "line": 1423,
+      "issue": "Non-null assertion `getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)!.timeZone` at AssistantPeriodicPolicyService construction will throw at startup if the profile row is absent (fresh install before profile provisioning or profile deletion). Same pattern in the runtime collect closure (line 1431), which is safer because it runs later.",
+      "minimalFix": "Handle the undefined profile explicitly (skip policy wiring or use a default timeZone with a logged warning) instead of asserting."
+    }
+  ],
+  "limitations": [
+    "Static review only; no tests executed, no build run, no runtime behavior observed. Supplied regression tests (malformed NaN/negative usage, forged zero usage on transport error) were read but not executed.",
+    "LoopStore persistence methods (reserveAssistantAnalysis/sendAssistantAnalysis/settleAssistantAnalysis/readAssistantAnalysisAttempt) and migrateAssistantAnalysisBudget wiring are not shown; assumed to delegate to the reviewed helpers within one SQLite database with adequate transactionality.",
+    "AssistantCalendarSource, createNativeCalendarRead, verifyYzjCalendarBinary, memory store, publication context reader, and authority/workflow import schemas are reviewed by other groups; only their call signatures here were checked, not their implementations.",
+    "AssistantAnalysisPort contract (breach error code origin, usage honesty) is a trust boundary: underreported usage from a trusted provider is not locally detectable and no local recovery was demanded.",
+    "No live config, credentials, real usage data, or human labels were supplied; fixtures are synthetic and no human quality evaluation or P3 qualification is claimed or implied by this verdict.",
+    "Coverage of omitted scopes (calendar occurrence semantics, memory default-off reconciliation, Settings generation drift) is per the reviewed code only; behavior of the omitted implementations is assumed, not approved."
+  ],
+  "bundleSha256": "618a6c51cd4752f5300413e68c33b5719f993e40201d2bc4e299effb8277e2e6",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "exitCode": 0,
+  "stopReason": null,
+  "sourceDrift": [],
+  "appliesToCurrentSnapshot": true
+}

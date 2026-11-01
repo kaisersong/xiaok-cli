@@ -1,0 +1,11 @@
+{
+  "files": {
+    "src/runtime/assistant/quality-authorization.ts": "61cc2ba876b782e804be83e13267c05b8366608ed0862cd60180101b24457454",
+    "src/runtime/assistant/quality-qualification.ts": "0b0b32c89a8fc75c6bbd6f6cd02950408d318b2c8b92d1136f32bc23bd10e549",
+    "desktop/electron/assistant-quality-workflow-support.ts": "cd7f22313a3153acb4128704f94edcbce015ca50ab9182460a75cc6768da3ff1"
+  },
+  "excerpts": {},
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi kimi-code/k3",
+  "bundleSha256": "dcff9ad6c01a10fdf85c69fb06176cf09264d725d78ee90df847cc99061b9762"
+}

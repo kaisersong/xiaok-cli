@@ -1,0 +1,70 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "scope": "static provider/resources/settings delta; not live model/pilot/package acceptance",
+  "files": {
+    "src/runtime/assistant/model-identity.ts": "da892722f15e1cc0716d8c5af65668294ccef77afdfc15af2fcc60407259f7eb",
+    "src/ai/providers/auth-resolver.ts": "7994f8a86c29441287224ee1aafe6d7b000610b55f5c86be998d8b6cdbc48caa",
+    "desktop/electron/assistant-analysis-settings.ts": "4a155f063c2eae7114fef03fa6d2c5f546210cc9c15819a9c809ee3c82ba07da",
+    "tests/runtime/assistant/model-identity.test.ts": "cbd19f83d1253b637da626151478b48a4677d84efd9c52d3e719d68cbc92b994",
+    "desktop/tests/main/assistant-analysis-identity-revocation.test.ts": "ebdfba64b252a069074394262753bba871576a25eab41716ed9bbdb5c2735f0d",
+    "desktop/tests/main/assistant-analysis-settings.test.ts": "665dbe1a9f51d22acdcc5ea1d394bcc6e46f88fb10e878c945cbe4f11fa0dac5",
+    "desktop/tests/main/assistant-quality-product.test.ts": "4dfa8d395570facc937cf759718ec6ef2ad0820c692e244804449c7720a9bc0f",
+    "desktop/tests/main/assistant-profile-store.test.ts": "d0738a476b13042d91ff51a00f874d2f4909b094761743b4d1f047fcd593754c",
+    "desktop/electron/loop-store.ts": "d64a53f50ac97b927ec84a2dea595c6b02ecf84af6d3ee92f281e84162989f50",
+    "src/runtime/assistant/quality-authorization.ts": "61cc2ba876b782e804be83e13267c05b8366608ed0862cd60180101b24457454",
+    "desktop/electron/assistant-quality-product.ts": "935f0d20eb531cc3bd47bfdf1a5b094e617a082e9f8b5f74dce85eb628aaccc9"
+  },
+  "excerpts": {
+    "desktop/electron/loop-store.ts#anchor=invalidateAssistantQualityModelIdentity(": {
+      "path": "desktop/electron/loop-store.ts",
+      "anchor": "invalidateAssistantQualityModelIdentity(",
+      "lineCount": 16,
+      "startLine": 265,
+      "sha256": "dd528690d73f13ae8ad2b53459e1eec202d12a8f65e96f5e2c3cfbc3034c144f"
+    },
+    "desktop/electron/loop-store.ts#anchor=setAssistantProfileStatus(": {
+      "path": "desktop/electron/loop-store.ts",
+      "anchor": "setAssistantProfileStatus(",
+      "lineCount": 8,
+      "startLine": 1616,
+      "sha256": "28d50a334125d5fc6f7cf6b4f173094f227e301a19fe538dbf65824ef52b3668"
+    },
+    "desktop/electron/loop-store.ts#anchor=private transaction<T>": {
+      "path": "desktop/electron/loop-store.ts",
+      "anchor": "private transaction<T>",
+      "lineCount": 16,
+      "startLine": 2625,
+      "sha256": "0acc7e161bef5f3048aab0eeef2c7b8491e55925f020b98d7d4f708d4a648685"
+    },
+    "src/runtime/assistant/quality-authorization.ts#anchor=export function readCurrentAssistantQualityAssessment(": {
+      "path": "src/runtime/assistant/quality-authorization.ts",
+      "anchor": "export function readCurrentAssistantQualityAssessment(",
+      "lineCount": 47,
+      "startLine": 111,
+      "sha256": "9c3e460a6ebe0d19ed55aa9a2ea2935eeb43f90613f8413332b15a26bd0fb904"
+    },
+    "src/runtime/assistant/quality-authorization.ts#anchor=export function readQualityContext(": {
+      "path": "src/runtime/assistant/quality-authorization.ts",
+      "anchor": "export function readQualityContext(",
+      "lineCount": 15,
+      "startLine": 42,
+      "sha256": "a54ea6b9e2556b9abf82e5e66a3e26181eb61310421efee45f63cc05a5d05958"
+    },
+    "desktop/electron/assistant-quality-product.ts#anchor=const user=": {
+      "path": "desktop/electron/assistant-quality-product.ts",
+      "anchor": "const user=",
+      "lineCount": 15,
+      "startLine": 12,
+      "sha256": "5a063318d03519285fb407108b7aba4790b610de59977f556531772313d1c54b"
+    }
+  },
+  "evidence": {
+    "/tmp/openduet-review-20261101/profile-grant-aba-red.log": "8d9b450e8e887a6df96963ed66fc9d9563929a57d21ffc592d5f6bbc2a90bb44",
+    "/tmp/openduet-review-20261101/profile-grant-aba-green.log": "5714444b39e62d94024b2d964864696f41a955809e9eb56e40a93c7c34028ff7",
+    ".artifacts/assistant-identity-composition-red.log": "90de8e5b2b9d9442aa86a7e7a6f31c895550796fab3b94eeab87f6106c57c9ae",
+    ".artifacts/assistant-identity-final-desktop-tests.log": "9df663285329efc874167bfe75001f83b74487806fa409bf948d90f32b19a3b8",
+    ".artifacts/assistant-identity-child-green.log": "65d45c28dfa3d78c1d60fedd0d057734bb217128281aabe958b9210c48b8fdd8"
+  },
+  "bundleSha256": "dc5d5d8856282a51f25dd73594f2f159025b94c222b7b316f6a9e4a4d080864a"
+}

@@ -1,0 +1,25 @@
+• # 评审结论：APPROVE（无 P0/P1 阻断项）
+
+  在声明范围内（lineage 捕获/校验、单事务持久化、发布读取组合），未发现可导致越权展示或授权绕过的 P0/P1 缺陷。声明的几条关键性质在代码中均有对应实现且失败方向正确：
+
+  **验证通过的声明**
+
+  - 捕获侧 before/after：`beginAssistantDerivedCapture` 在 begin 时冻结 profile/owner/settings/epoch，`finish` 首尾各查一次 `authorizationCurrent`，`current()` 还复核 parents 与 memory 证书，mid-model revoke/edit 会走 `assistant_derived_stale` 失败关闭（assistant-derived-lineage.ts `finish`）。
+  - 可见性门禁：`isRunVisible` 对 schema 解析失败、profile 非 active/哈希不符、calendar epoch 或事件 revision 漂移、memory consent revision 不符、父链哈希不符一律返回 false；`catch{return false}` 与 `active` 集合防循环均 fail-closed。tracked-missing 经 `isTrackedAssistantRun` 失败关闭，未跟踪旧 run 不被误隐藏，符合声明。
+  - 存储侧原子性：`recordAssistantDerivedSourceRun` 强制 `db.isTransaction`、写入前后各查 `isCurrent`、prior 冲突检测、owner loop 匹配、marker 先于/独立于 lineage 保留（删 lineage 不会把敏感 run 降级成未跟踪），`assistant_derived_lineage_missing` 堵住了"有 marker 无 lineage"的重放。
+  - 路由围栏：protected route + 外部 lineage 在 executor 与 runtime 两层显式抛 `assistant_derived_protected_unsupported`，无 ordinary 回退；`finishFailure` 对 protected 情形跳过普通失败落库，不污染历史。
+  - 发布读取：`read` 的 ordinary/protected 双分支均带路由与向量/快照比对的 `current()` 闭包；`confirmMemory` 在 derivedVisibility 存在时只用专用 facts accessor，缺失即拒（不递归 gated reader）；`readMorningActionSource` 对 evidenceRefs 的 scope 要求是 default-deny（未知 kind 直接拒）；`buildMorningContext` 在最后一次 await 后复查所有 observation。
+  - `attachAssistantDerivedContext` 在无 capture 时拒绝任何夹带 calendar/personalization/memories/p2Context/derivedRunIds 的快照，旧 collector 的外部文本不能成为隐式授权。
+
+  **P2 观察项（不阻断）**
+
+  1. 父链记录仅覆盖 `hasAssistantExternalLineage(parent)` 的祖先（assistant-derived-lineage.ts `finish` 内 parents 构造）。无外部来源的"纯 profile"父 run 若日后 lineage 被单独删除（marker 使其自身隐藏），衍生 run 不会联动隐藏，而其快照中可能已嵌入该父 run 的摘要文本。当前代码库内未出现此类删除入口，故不定 P1；若未来开放 lineage 删除，需在此补传播或改记全部父链。
+  2. `calendar.observationRevision`（整体 revision）被记录但读取侧只校验 epoch 与逐事件 revision，整体 revision 漂移不触发隐藏。逐事件校验已覆盖实际内容，影响有限。
+  3. `isEvidenceVisible` 对 `ownerKind!=='loop_run'` 无条件放行；若后续 assistant 产物改用其他 ownerKind 落证据，需同步扩展门禁，否则会绕过 lineage 隐藏。
+  4. `assistantMemoryContentHash` 哈希整条 MemoryRecord；若 store 在读路径更新 `updatedAt`/`lastAccessed` 类字段，会导致内容哈希失配而隐藏衍生 run——方向是 fail-closed，但存在可用性误伤风险，建议确认 MemoryRecord 无读时变异字段。
+  5. executor 在 derivedMode 下把所有非 protected_unsupported 错误统一报 `assistant_derived_unavailable`，排障信息被压平，属有意的信息隐藏取舍，运维上需接受。
+
+  **范围说明**：按指示未要求 main 侧 LoopStore/EvidenceStore wrapper 的接线证据；`finishAnalysis` 在 collect 失败时也可能被调用、依赖 owner 幂等，属父线程职责。质量标签与真实日历只读状态与声明一致，未发现越界写入。
+
+  结论：APPROVE，可合并；P2 项建议建后续跟踪。
+

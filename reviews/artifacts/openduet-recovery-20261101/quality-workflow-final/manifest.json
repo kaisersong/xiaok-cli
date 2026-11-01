@@ -1,0 +1,38 @@
+{
+  "files": {
+    "desktop/electron/assistant-quality-workflow.ts": "7bf2b06e76f565ff00facec46cdf42909f3506c27336b2ed046bf5043184bf63",
+    "desktop/electron/assistant-quality-product.ts": "935f0d20eb531cc3bd47bfdf1a5b094e617a082e9f8b5f74dce85eb628aaccc9",
+    "desktop/electron/assistant-quality-files.ts": "4df00a31c05fd2b863af39729dde400e13da9171a99c801fa121b9f36d6cebbe",
+    "desktop/shared/assistant-quality-contract.ts": "19eb2d5b3cb37449f7e090a6c27d1fe53f1c672c5e1e4a57e0922126e37558e1",
+    "desktop/tests/main/assistant-quality-files-growth.test.ts": "0a5df62b7d879f1f53af4ae76220b14032d06b1a6f80e536dd2fbb02b46fa2fc"
+  },
+  "excerpts": {
+    "desktop/electron/assistant-quality-workflow-support.ts#export const predictions": {
+      "path": "desktop/electron/assistant-quality-workflow-support.ts",
+      "anchor": "export const predictions",
+      "lineCount": 1,
+      "sha256": "4f447fbd82228dcccf28e45b89cfdd092cc7f9cff5f82a543e51a2c597f28719"
+    },
+    "src/runtime/assistant/quality-authorization.ts#export function frozenQualityDigest(": {
+      "path": "src/runtime/assistant/quality-authorization.ts",
+      "anchor": "export function frozenQualityDigest(",
+      "lineCount": 6,
+      "sha256": "dffdb75fd7593e48aa45f55e93ba5d26a871a309b283e81f20df8b67e59c3ea8"
+    },
+    "src/runtime/assistant/quality-authorization.ts#export const humanQualityReviewSchema": {
+      "path": "src/runtime/assistant/quality-authorization.ts",
+      "anchor": "export const humanQualityReviewSchema",
+      "lineCount": 4,
+      "sha256": "3707970eca5792ac7f706e5b463bf24f928401540348bb8ef9fee6b0e660b829"
+    },
+    "src/runtime/assistant/quality-authorization.ts#export function applyHumanQualityReview(": {
+      "path": "src/runtime/assistant/quality-authorization.ts",
+      "anchor": "export function applyHumanQualityReview(",
+      "lineCount": 17,
+      "sha256": "ac6c26d31a73c59f2380aee62fe8f072de32d9c04593e35c3b7a701cdcffd7e7"
+    }
+  },
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi kimi-code/k3",
+  "bundleSha256": "d1144be9a406c55dc790c36e19ae394cd54d95de1df0c2160da4f1fd78db6038"
+}

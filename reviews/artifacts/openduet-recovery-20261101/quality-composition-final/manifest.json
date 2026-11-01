@@ -1,0 +1,26 @@
+{
+  "files": {
+    "desktop/electron/assistant-derived-main.ts": "b519483fb82ae76b8d90cec5efb76a33335cd8cf5d8840e21a236e17b954e801",
+    "desktop/electron/assistant-quality-population.ts": "d1500cb40191fa2e510a0bf3bdc6bf6944c16bbf44859fbb2e4a344f938f5230",
+    "desktop/electron/assistant-quality-predictions.ts": "2eaaa7fc2eaaffbe1553a7c5d709f31dd083c006b7bd955709e5cba439d88009",
+    "desktop/electron/assistant-analysis-budget.ts": "b9bd927ea517570e1bde5c668dc0072b90668cb2e53b3766abf0b64f8bf1b086",
+    "desktop/tests/main/assistant-quality-predictions.test.ts": "b034beb97925ce8f16bce804ee7ca89c1b1352fc15b13397980f2b4f9eb8fe09"
+  },
+  "excerpts": {
+    "desktop/electron/main.ts#  const assistantCalendarSource=new AssistantCalendarSource(": {
+      "path": "desktop/electron/main.ts",
+      "anchor": "  const assistantCalendarSource=new AssistantCalendarSource(",
+      "lineCount": 17,
+      "sha256": "55003ffef187caade81917385df6a19f5066c24135b48e1d8d9e2ceb2b143699"
+    },
+    "desktop/electron/main.ts#  const qualityFiles=createAssistantQualityFilePorts(": {
+      "path": "desktop/electron/main.ts",
+      "anchor": "  const qualityFiles=createAssistantQualityFilePorts(",
+      "lineCount": 35,
+      "sha256": "ef6d9312fc50b32f5a4734f3b9018c18e5deae01ac22386c740a0b721d614b9b"
+    }
+  },
+  "author": "Codex GPT-6",
+  "reviewer": "Kimi kimi-code/k3",
+  "bundleSha256": "618a6c51cd4752f5300413e68c33b5719f993e40201d2bc4e299effb8277e2e6"
+}

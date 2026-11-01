@@ -1,0 +1,39 @@
+{
+  "verdict": "BLOCK",
+  "findings": [
+    {
+      "severity": "P1",
+      "file": "src/runtime/assistant/quality-authorization.ts",
+      "line": 77,
+      "issue": "applyHumanRiskReview enforces the known-severity check over ALL record.facts, but `labels` can only contain the sampled case ids (riskLabels.length === cases.length plus dup and full-case-coverage checks above). For any fact whose severe was pre-frozen by main (typeof fact.severe === 'boolean') and whose id is NOT among the sampled cases, labels.get(fact.id) is undefined !== fact.severe, so import always throws assistant_quality_known_risk_changed. Schemas explicitly permit facts (max 10000) to be a superset of the sampled cases (>=100), and hasFrozenRiskCoverage/exportedRiskFacts confirm facts are keyed as a superset of cases — so any population where main pre-labels severity on non-sampled facts makes the human risk-review stage permanently un-importable (fail-closed dead end, but it defeats the designed 'pre-frozen-main-or-human' stage and blocks qualification until code change).",
+      "minimalFix": "Restrict the non-downgrade loop to facts that are part of the review: `for (const fact of record.facts) { const l = labels.get(fact.id); if (l === undefined) continue; if (fact.severe === true && l !== true) throw Error('assistant_quality_known_risk_changed'); }` — i.e., skip non-sampled facts and enforce non-downgrade (true must stay true) rather than strict equality, so a human upgrade false→true is not falsely rejected."
+    },
+    {
+      "severity": "P2",
+      "file": "src/runtime/assistant/quality-authorization.ts",
+      "line": 93,
+      "issue": "hasFrozenRiskCoverage revalidates a stored riskReview (assessmentId, label count/dups, labels match current severe) but never checks review.data.digest === record.digest, unlike applyHumanRiskReview which enforces digest at import. A record upserted with changed facts/cases (new digest) but identical severe flags would still pass coverage with a stale risk review attested against different frozen facts, weakening the attestation-to-frozen-facts binding.",
+      "minimalFix": "Add `review.data.digest !== record.digest` to the rejection conditions in hasFrozenRiskCoverage."
+    },
+    {
+      "severity": "P2",
+      "file": "src/runtime/assistant/quality-qualification.ts",
+      "line": 44,
+      "issue": "Deterministic sampling sorts sha256 hex digests with localeCompare, whose ordering is ICU/locale-dependent; cross-environment (or ICU-upgrade) runs could theoretically produce a different sample for the same frozen dataset, breaking the deterministic-sampling contract. For pure ASCII hex, code-unit comparison is the correct stable order.",
+      "minimalFix": "Replace `.sort((a,b)=>a.order.localeCompare(b.order))` with `.sort((a,b)=>a.order<b.order?-1:a.order>b.order?1:0)`."
+    }
+  ],
+  "limitations": [
+    "Static review only; no tests, commands, or file reads executed; no live config, credentials, or source data supplied.",
+    "Main native export/import and the full workflow (generation captured before native await, post-await context/model/record revalidation under SAVEPOINT, phase transitions, reimport_id consumption) are separate reviewed scope and were not assessed; their approval is not implied here.",
+    "Reachability of the P1 depends on the omitted population() port returning pre-labeled facts beyond the sampled case ids; the presented schemas and hasFrozenRiskCoverage's superset lookup explicitly permit that shape, and nothing in scope forbids it.",
+    "Whether the workflow stores applied labels inside record.dataset.cases affects reimport behavior (exportedQualityFacts would then include labels and mismatch a previously exported `frozen` block); this could not be verified from the scoped files.",
+    "readQualityRecord() picks the latest assessment by rowid, which ON CONFLICT upserts do not advance; correctness of 'latest record' selection under the omitted workflow's write pattern could not be verified."
+  ],
+  "bundleSha256": "dcff9ad6c01a10fdf85c69fb06176cf09264d725d78ee90df847cc99061b9762",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "exitCode": 0,
+  "stopReason": null,
+  "sourceDrift": [],
+  "appliesToCurrentSnapshot": true
+}

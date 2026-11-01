@@ -1,0 +1,10 @@
+{
+  "verdict": "UNPARSED",
+  "rawFile": "verdict.txt",
+  "bundleSha256": "2ae0f944f7b37def32e0d35c9a46175d2f4cba56994550fb2db260f4e7ac1a54",
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "exitCode": 1,
+  "stopReason": null,
+  "sourceDrift": [],
+  "appliesToCurrentSnapshot": false
+}

@@ -1,0 +1,8 @@
+{
+  "reviewer": "Kimi CLI 2.2.0 / kimi-code/k3",
+  "action": "lineage-closure static review",
+  "exitCode": 1,
+  "rawError": "error: failed to run prompt: provider.api_error: 429 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+  "retriesAfterObservingQuota": 0,
+  "replacementReview": "awaiting explicit user authorization per lessons-ledger #48"
+}

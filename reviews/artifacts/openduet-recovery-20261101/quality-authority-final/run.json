@@ -1,0 +1,12 @@
+{
+  "runnerPid": 30494,
+  "pid": 30503,
+  "pgid": 30503,
+  "started": 1793505949.1040928,
+  "bundleSha256": "dcff9ad6c01a10fdf85c69fb06176cf09264d725d78ee90df847cc99061b9762",
+  "model": "kimi-code/k3",
+  "exitCode": 0,
+  "stopReason": null,
+  "reaped": true,
+  "ended": 1793506309.587359
+}

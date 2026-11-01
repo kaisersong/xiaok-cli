@@ -1,0 +1,420 @@
+{
+  "implementationBase": "9e237f85",
+  "sourceChangedDuringRecovery": true,
+  "candidateHeadAtCapture": "b82428ef7c996dceaf48b1a6dcc2c40a6a7b5281",
+  "localRuns": {
+    "root-compile": {
+      "command": [
+        "npm",
+        "run",
+        "test:sandbox:build"
+      ],
+      "cwd": ".",
+      "runnerPid": 6004,
+      "pid": 6022,
+      "pgid": 6022,
+      "started": 1793505273.414019,
+      "exitCode": 0,
+      "ended": 1793505282.089513,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/root-compile.log",
+      "logSha256": "ddf23e791a0da061536428d37c2b28e9f9d748d663f79d3f87bc647b8e828931"
+    },
+    "root-tests": {
+      "command": [
+        "npm",
+        "run",
+        "test:sandbox:run",
+        "--",
+        ".test-dist/tests/runtime/assistant/model-identity.test.js",
+        ".test-dist/tests/runtime/verification/loop-application-binding.test.js",
+        ".test-dist/tests/runtime/task-host/task-runtime-host.test.js",
+        ".test-dist/tests/runtime/conversation-activity/assistant-digest.test.js",
+        ".test-dist/tests/runtime/conversation-activity/assistant-quality.test.js",
+        ".test-dist/tests/runtime/conversation-activity/owner-host.test.js",
+        ".test-dist/tests/runtime/loop/loop-store.test.js",
+        ".test-dist/tests/runtime/loop/completion-evidence-store.test.js"
+      ],
+      "cwd": ".",
+      "runnerPid": 7763,
+      "pid": 7772,
+      "pgid": 7772,
+      "started": 1793505290.19377,
+      "exitCode": 0,
+      "ended": 1793505311.8794749,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/root-tests.log",
+      "logSha256": "5f0ceac7491fa4e14f0d8196c254643aee025cc91ff9d782e18a9957473856f5"
+    },
+    "foreground-admission": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/desktop-services.test.ts",
+        "-t",
+        "assistant admission|assistant workspace replacement"
+      ],
+      "cwd": ".",
+      "runnerPid": 17841,
+      "pid": 17849,
+      "pgid": 17849,
+      "started": 1793505434.685636,
+      "exitCode": 0,
+      "ended": 1793505442.069603,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/foreground-admission.log",
+      "logSha256": "3c953fac254e28f9cc5ee6ad5771eb18b12d644fc9effd3ed826c23637352bbe"
+    },
+    "official-counter": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/assistant-analysis-provider.test.ts",
+        "tests/main/assistant-analysis-resources.test.ts",
+        "tests/main/assistant-analysis-provider-counter.test.ts"
+      ],
+      "cwd": ".",
+      "runnerPid": 15086,
+      "pid": 15097,
+      "pgid": 15097,
+      "started": 1793505388.222355,
+      "exitCode": 0,
+      "ended": 1793505402.6858292,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/official-counter.log",
+      "logSha256": "f212dffd254ad81fe505e7092d34c55f58552b9e3ea6ce311bd89b12c6844f85"
+    },
+    "bounded-file-red-final": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/assistant-quality-files-growth.test.ts"
+      ],
+      "cwd": ".",
+      "runnerPid": 29640,
+      "pid": 29649,
+      "pgid": 29649,
+      "started": 1793505915.138735,
+      "exitCode": 1,
+      "ended": 1793505915.595851,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/bounded-file-red-final.log",
+      "logSha256": "6dd5f1e5dd5e84ca7c9c3e5d683d11fc9bdb3f5c8764f0ccf0568cb0185c4b0f"
+    },
+    "bounded-file-green": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/assistant-quality-files-growth.test.ts",
+        "tests/main/assistant-quality-files.test.ts",
+        "tests/main/assistant-quality-workflow.test.ts",
+        "tests/main/assistant-quality-review-import.test.ts",
+        "tests/main/assistant-quality-product.test.ts"
+      ],
+      "cwd": ".",
+      "runnerPid": 29795,
+      "pid": 29803,
+      "pgid": 29803,
+      "started": 1793505920.131658,
+      "exitCode": 0,
+      "ended": 1793505921.370396,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/bounded-file-green.log",
+      "logSha256": "d167b134a9068f0cb8977a1a7f874484928737ab4eb39686326f0516042ed636"
+    },
+    "internal-parent-red": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/assistant-derived-lineage.test.ts"
+      ],
+      "cwd": ".",
+      "runnerPid": 41594,
+      "pid": 41604,
+      "pgid": 41604,
+      "started": 1793506237.5226822,
+      "exitCode": 1,
+      "ended": 1793506238.572545,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/internal-parent-red.log",
+      "logSha256": "552f1cfafd8b54badb025b574affa61b6887d62f8e3a9c46f06ef1c49e80d58c"
+    },
+    "internal-parent-green": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/assistant-derived-lineage.test.ts",
+        "tests/main/assistant-derived-runtime.test.ts",
+        "tests/main/assistant-derived-main.test.ts",
+        "tests/main/assistant-publication-context.test.ts",
+        "tests/main/assistant-loop-executor.test.ts",
+        "tests/main/assistant-launch.test.ts"
+      ],
+      "cwd": ".",
+      "runnerPid": 41880,
+      "pid": 41888,
+      "pgid": 41888,
+      "started": 1793506243.3886201,
+      "exitCode": 0,
+      "ended": 1793506245.0491142,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/internal-parent-green.log",
+      "logSha256": "f861cfe001032bc0ef14f3eefb0f13246169f62b2bc54ac53f2780f115440598"
+    },
+    "lineage-final-desktop-tests": {
+      "command": [
+        "python3",
+        "-c",
+        "import pathlib,re,subprocess,sys; y=pathlib.Path(\".github/workflows/assistant-coverage.yml\").read_text().split(\"      - name: Production collector\")[1].split(\"      - name: Existing foreground\")[0]; files=list(dict.fromkeys(re.findall(r\"tests/(?:main|renderer)/[^\\s]+\\.tsx?\",y))); assert len(files)==84,len(files); sys.exit(subprocess.call([\"npm\",\"run\",\"test\",\"--prefix\",\"desktop\",\"--\",\"--run\", *files]))"
+      ],
+      "cwd": ".",
+      "runnerPid": 44045,
+      "pid": 44053,
+      "pgid": 44053,
+      "started": 1793506295.405956,
+      "exitCode": 0,
+      "ended": 1793506317.463831,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/lineage-final-desktop-tests.log",
+      "logSha256": "2fb69664fac1cc3dd2f31d34991e91a12e301ee245b0d05b0a2488243ce46aae"
+    },
+    "lineage-final-build": {
+      "command": [
+        "npm",
+        "run",
+        "build",
+        "--prefix",
+        "desktop"
+      ],
+      "cwd": ".",
+      "runnerPid": 44172,
+      "pid": 44180,
+      "pgid": 44180,
+      "started": 1793506296.629323,
+      "exitCode": 0,
+      "ended": 1793506312.5168278,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/lineage-final-build.log",
+      "logSha256": "67edfc0ef1eed6dea2b242cb74bff4975eb7e93c3eb7a01d1d0fb8e7d90e85f0"
+    },
+    "lineage-final-typecheck": {
+      "command": [
+        "npm",
+        "run",
+        "typecheck:raw",
+        "--prefix",
+        "desktop"
+      ],
+      "cwd": ".",
+      "runnerPid": 48743,
+      "pid": 48751,
+      "pgid": 48751,
+      "started": 1793506362.280616,
+      "exitCode": 0,
+      "ended": 1793506371.374636,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/lineage-final-typecheck.log",
+      "logSha256": "e6f486963895ec8ab00ea5343ac0cd9831bd500b62b652bd361e977f03063a80"
+    },
+    "lineage-final-governance": {
+      "command": [
+        "npm",
+        "run",
+        "governance:check"
+      ],
+      "cwd": ".",
+      "runnerPid": 44280,
+      "pid": 44294,
+      "pgid": 44294,
+      "started": 1793506297.860353,
+      "exitCode": 0,
+      "ended": 1793506300.310529,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/lineage-final-governance.log",
+      "logSha256": "45a450e9638a08c57f116fb7a895b057d5a9361c8f787e247d4de0bfcfcbec33"
+    },
+    "quality-population-adjudication": {
+      "command": [
+        "npm",
+        "run",
+        "test",
+        "--prefix",
+        "desktop",
+        "--",
+        "--run",
+        "tests/main/assistant-quality-review-import.test.ts"
+      ],
+      "cwd": ".",
+      "runnerPid": 48692,
+      "pid": 48702,
+      "pgid": 48702,
+      "started": 1793506361.3870971,
+      "exitCode": 0,
+      "ended": 1793506362.194632,
+      "reaped": true,
+      "log": ".artifacts/openduet-recovery-20261101/quality-population-adjudication.log",
+      "logSha256": "f4734e813f0e9afed05c1befe88a07ed9081fe0dd66bbd66c6efd94a3ce59909"
+    }
+  },
+  "packageCommand": {
+    "command": [
+      "./node_modules/.bin/electron-builder",
+      "--mac",
+      "dir",
+      "--arm64",
+      "--publish",
+      "never",
+      "--config",
+      ".artifacts/openduet-package-validation/recovery-lineage-final/electron-builder.json",
+      "-c.mac.identity=null",
+      "-c.mac.notarize=false",
+      "-c.forceCodeSigning=false",
+      "-c.electronDist=node_modules/electron/dist"
+    ],
+    "pid": 49086,
+    "runnerPid": 49067,
+    "exitCode": 0,
+    "cwd": "desktop",
+    "frozenDistFiles": 1468
+  },
+  "inspection": {
+    "pid": 51605,
+    "distFiles": 1468,
+    "mismatch": [],
+    "packages": {
+      "cross-spawn": {
+        "version": "7.0.6"
+      },
+      "path-key": {
+        "version": "3.1.1",
+        "unpacked": true
+      },
+      "shebang-command": {
+        "version": "2.0.0",
+        "unpacked": true
+      }
+    },
+    "closure": {
+      "copied": []
+    },
+    "archiveUnchanged": true,
+    "asarSha256": "a64bdff24b050546a9a3d067fe31ff54c3f743a0242d7d6146f856e89e6ef6a3",
+    "helper": {
+      "sha256": "e5e6ab34ed546e453232f496064dbd996b76f90e2ecf807cabc418495b40b5ee",
+      "expectedSha256": "e5e6ab34ed546e453232f496064dbd996b76f90e2ecf807cabc418495b40b5ee"
+    },
+    "signature": {
+      "exitCode": 0,
+      "output": "Inherited linker adhoc; no TeamIdentifier; no signing executed. Full inspection retained locally."
+    }
+  },
+  "packageCleanup": {
+    "recordedOwnedPids": [
+      49086,
+      49122,
+      49188,
+      49716,
+      49825,
+      49827,
+      49846,
+      49906,
+      49942
+    ],
+    "remainingOwnedPids": [],
+    "killed": 0
+  },
+  "gui": {
+    "status": "passed",
+    "asarSha256": "a64bdff24b050546a9a3d067fe31ff54c3f743a0242d7d6146f856e89e6ef6a3",
+    "pageErrors": [],
+    "consoleErrors": [],
+    "cleanup": {
+      "signals": [],
+      "remaining": [],
+      "privateProfileRemoved": true
+    },
+    "databaseAudit": [
+      {
+        "database": "desktop/loop-evidence.sqlite",
+        "table": "assistant_analysis_attempts",
+        "count": 0
+      },
+      {
+        "database": "desktop/loop-evidence.sqlite",
+        "table": "assistant_launch_operations",
+        "count": 0
+      },
+      {
+        "database": "desktop/loop-evidence.sqlite",
+        "table": "assistant_active_work_claims",
+        "count": 0
+      }
+    ]
+  },
+  "limitations": [
+    "macOS arm64 unsigned only",
+    "no real human quality qualification",
+    "no repeated live model request or clearing unknown usage fence",
+    "Windows native package and full genuine handoff pilot not verified"
+  ],
+  "productionChange": [
+    "desktop/electron/assistant-quality-files.ts: bounded maxBytes+1 reads",
+    "desktop/electron/assistant-derived-lineage.ts: retain internal ancestors, separate external routing classification"
+  ],
+  "additionalGuiCleanup": {
+    "privateRoot": "<unique test-owned od-gui root>",
+    "owned": {
+      "51779": {
+        "ppid": 1,
+        "start": "Sun Nov  1 12:13:55 2026    ",
+        "cwd": "<same unique test-owned od-gui root>/userData/services/intent-broker",
+        "ownershipProof": "exact task private cwd"
+      }
+    },
+    "signals": [
+      {
+        "pid": 51779,
+        "signal": "SIGTERM"
+      }
+    ],
+    "remaining": [],
+    "privateRootExistsAfter": false
+  },
+  "firstGuiPortPreflightFailure": {
+    "error": "EADDRINUSE 4318",
+    "cause": "own earlier isolated GUI broker escaped PID polling; proven by exact private cwd",
+    "cleanupEvidence": ".artifacts/openduet-recovery-20261101/packaged-gui/post-close-cleanup.json",
+    "unrelatedServicesTouched": false
+  },
+  "independentReviewStatus": "reviews/openduet-review-status.md; two closing scopes blocked by Kimi 429, not approved"
+}
