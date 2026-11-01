@@ -180,7 +180,6 @@ jobs:
           }
 
       - name: Vendor self-contained provider runtimes (Windows)
-        shell: bash
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
@@ -229,10 +228,10 @@ jobs:
             throw 'Packaged Kimi smoke did not write its result'
           }
           $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-          if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 2) {
+          if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 4) {
             throw 'Packaged Kimi smoke result is incomplete'
           }
-          foreach ($model in @('k3', 'k3-256k')) {
+          foreach ($model in @('k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed')) {
             $entry = $result.modelResults | Where-Object { $_.model -eq $model }
             if (-not $entry -or $entry.requests -ne 2 -or -not $entry.secondTurnReplayedReasoning) {
               throw "Packaged Kimi multi-turn smoke failed for $model"
