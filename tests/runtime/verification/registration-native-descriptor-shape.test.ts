@@ -9,6 +9,8 @@ import {expect,it} from 'vitest';
 const moduleUrl=new URL('../../../src/runtime/verification/registration-intrinsics.js',import.meta.url);
 if(!existsSync(moduleUrl))moduleUrl.pathname=moduleUrl.pathname.replace(/\.js$/,'.ts');
 const probe=String.raw`
+const stdout=process.stdout,write=stdout.write.bind(stdout);
+write(''); // Initialize the real proof-output stream before any prototype poison.
 const nativeDefine=Object.defineProperty,nativeDescriptor=Object.getOwnPropertyDescriptor,NativeError=Error;
 const {assertRegistrationIntrinsics:guard,assertRegistrationWeakMapIntrinsics:weak}=await import(process.argv[2]);
 const mode=process.argv[3];let calls=0,error,accepted=false;
@@ -33,7 +35,7 @@ if(mode.startsWith('sequence-')||mode==='object-reader'||mode==='reflect-reader'
   const target=mode==='object-reader'?Object:Reflect,key='getOwnPropertyDescriptor',prior=nativeDescriptor(target,key);
   nativeDefine(target,key,{__proto__:null,...prior,value:function(){calls++;throw Error('replaced reader');}});reject();nativeDefine(target,key,prior);guard();
  }
- process.stdout.write(JSON.stringify({failures,calls,restored:true}));
+ write(JSON.stringify({failures,calls,restored:true}));
 }else{
 if(mode.startsWith('inherited-'))nativeDefine(Object.prototype,mode.slice('inherited-'.length),{__proto__:null,configurable:true,get:getter});
 else if(mode==='data-to-accessor')nativeDefine(Map,'length',{__proto__:null,configurable:true,enumerable:length.enumerable,get:getter});
@@ -50,7 +52,7 @@ else if(mode==='unchanged-own-undefined-set')nativeDefine(Map,Symbol.species,{__
 else if(mode==='absent')delete Map.length;
 else if(mode!=='normal')throw Error('unknown probe');
 try{guard();accepted=true;}catch(failure){if(!(failure instanceof NativeError))throw failure;error=failure.message;}
-process.stdout.write(JSON.stringify({accepted,error,calls}));
+write(JSON.stringify({accepted,error,calls}));
 }
 `;
 const modes=['normal','data-to-accessor','accessor-to-data','value-undefined','signed-zero','writable','enumerable','configurable','get','set','get-undefined','unchanged-own-undefined-set','absent',...['value','get','set','writable','enumerable','configurable'].map(key=>'inherited-'+key),'sequence-classes','sequence-edges','sequence-flags','sequence-weakmap','object-reader','reflect-reader'];

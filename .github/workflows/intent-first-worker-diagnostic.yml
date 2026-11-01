@@ -1,0 +1,33 @@
+name: Offline saved process-table replay
+on:
+  pull_request:
+    types: [opened]
+    paths:
+      - '.github/workflows/intent-first-worker-diagnostic.yml'
+      - 'scripts/diagnostics/intent-first-worker-cpu.py'
+      - 'scripts/diagnostics/intent-first-worker-freeze.py'
+      - 'scripts/diagnostics/tests/test_process_table.py'
+      - 'scripts/diagnostics/tests/fixtures/linux-family.txt'
+      - 'scripts/diagnostics/tests/fixtures/linux-terminal.txt'
+      - 'scripts/diagnostics/tests/fixtures/provenance.json'
+permissions:
+  contents: read
+jobs:
+  offline-replay:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Replay saved numeric tables only (exactly 13 unit tests)
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -B scripts/diagnostics/tests/test_process_table.py
