@@ -159,8 +159,16 @@ export class PluginClaimLock {
   }
 
   private listClaims(): ClaimFile[] {
+    let fileNames: string[];
+    try {
+      fileNames = readdirSync(this.claimsDir);
+    } catch (error) {
+      // Teardown or external removal can race a late lease cleanup: no directory means no claims.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
     const claims: ClaimFile[] = [];
-    for (const fileName of readdirSync(this.claimsDir).sort()) {
+    for (const fileName of fileNames.sort()) {
       const claim = parseClaim(this.claimsDir, fileName);
       if (claim) claims.push(claim);
     }
@@ -244,7 +252,15 @@ export class PluginClaimLock {
   }
 
   private releaseByToken(token: string): void {
-    for (const fileName of readdirSync(this.claimsDir)) {
+    let fileNames: string[];
+    try {
+      fileNames = readdirSync(this.claimsDir);
+    } catch (error) {
+      // Teardown or external removal already released every claim in the directory.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    for (const fileName of fileNames) {
       if (!fileName.includes(token)) continue;
       try {
         unlinkSync(join(this.claimsDir, fileName));
