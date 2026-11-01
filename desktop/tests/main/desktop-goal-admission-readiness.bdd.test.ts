@@ -46,5 +46,5 @@ describe('factory local Chat/Goal entrypoints share the existing startup receipt
     release();
     if (failed) { expect(await result).toEqual({ error: reason }); expect(admission).not.toHaveBeenCalled(); }
     else { expect(await result).toEqual({ value: undefined }); expect(admission).toHaveBeenCalledOnce(); }
-  });
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 });

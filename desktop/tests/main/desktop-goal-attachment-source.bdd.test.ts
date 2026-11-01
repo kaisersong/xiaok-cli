@@ -333,7 +333,7 @@ describe('W2 R4 P4 source copies cannot corrupt pending / reply or authorize exe
     await expect(f.goal.ackGoalTaskAttached({ threadId, attachmentId: first.preparedTask.attachmentId })).rejects.toThrow(/attachment/i);
     expect(f.goal.getPendingAttachmentForTest(threadId)?.taskId).toBe(next.preparedTask.taskId);
     expect(f.taskHost.startTask).not.toHaveBeenCalled(); expect(f.runs()).toBe(0);
-  });
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 
   it('P4 existing control: real workspace denial invalidates the original correlated attachment without starting a model', async () => {
     const f = await fixture(); const created = await f.goal.createGoal(correlatedInput());

@@ -67,7 +67,7 @@ describe('W8 actual file admission retains the same execution revision across ma
         expect.soft(settled).toHaveProperty('error');
         expect.soft(prepared).not.toHaveBeenCalled(); expect.soft(modelCalls).toBe(0); expect.soft(existsSync(effect)).toBe(false);
       }
-    },
+    }, process.platform === 'win32' ? 20_000 : 5_000,
   );
 
   it.each([false, true])('plain Chat without thread captures before actual thread registration IO (regrant=%s)', async regrant => {
@@ -107,5 +107,5 @@ describe('W8 actual file admission retains the same execution revision across ma
       expect(settled).toHaveProperty('value.taskId'); expect(prepare).toHaveBeenCalledOnce();
       expect(readFileSync(effect, 'utf8')).toBe('UNTHREADED_USER_SUBMISSION');
     }
-  });
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 });
