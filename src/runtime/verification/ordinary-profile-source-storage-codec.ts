@@ -179,3 +179,19 @@ export function serializeOrdinaryProfileSourceStorage(facts: Readonly<OrdinaryPr
   if (Buffer.byteLength(compact) > ORDINARY_REGISTRY_STORAGE_MAX_BYTES) capacity();
   return compact;
 }
+
+/** Exact suffix budgets, including commas and envelope. Each row is measured once;
+ * final validation/serialization remains the authority before any write. */
+export function ordinaryProfileSourceEvictionCount(facts: Readonly<OrdinaryProfileSources>): number {
+  const compact = encodeOrdinaryProfileSourceStorage(facts) as {sources: unknown[]};
+  const flatSizes = facts.sources.map(row => initialByteLength(initialJson(row)) + 1);
+  const compactSizes = compact.sources.map(row => initialByteLength(initialJson(row)) + 1);
+  let flatBytes = initialByteLength(initialJson({...facts, sources: []})) - 1 + flatSizes.reduce((a,b) => a+b, 0);
+  let compactBytes = initialByteLength(initialJson({...compact, sources: []})) - 1 + compactSizes.reduce((a,b) => a+b, 0);
+  let count = 0;
+  while (count < facts.sources.length - 1 && (flatBytes > ORDINARY_REGISTRY_DECODED_MAX_BYTES
+    || flatBytes > ORDINARY_REGISTRY_STORAGE_MAX_BYTES && compactBytes > ORDINARY_REGISTRY_STORAGE_MAX_BYTES)) {
+    flatBytes -= flatSizes[count]!; compactBytes -= compactSizes[count]!; count++;
+  }
+  return count;
+}
