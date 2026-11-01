@@ -24,8 +24,17 @@ export function validateProjectAgentModelSelection(modelId: unknown, runtimeType
 }
 
 function isBoundaryFailure(error: unknown): boolean {
-  if (error && typeof error === 'object' && (error as { code?: unknown }).code === MODEL_TEXT_REPETITION_CODE) return true;
-  return error instanceof Error && (error.name === 'AbortError' || /KIMI_K3_|authorization|permission|task.cancelled|workspace_|deadline/i.test(error.message));
+  const seen = new Set<object>();
+  let current = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const failure = current as { retryable?: unknown; code?: unknown; cause?: unknown };
+    if (failure.retryable === false || failure.code === MODEL_TEXT_REPETITION_CODE) return true;
+    if (current instanceof Error && (current.name === 'AbortError'
+      || /KIMI_K3_|KIMI_REASONING_ADMISSION_REQUIRED|authorization|permission|task.cancelled|workspace_|deadline/i.test(current.message))) return true;
+    current = failure.cause;
+  }
+  return false;
 }
 
 /** One task owns its selected binding and at most one fallback. No task/tool is replayed. */

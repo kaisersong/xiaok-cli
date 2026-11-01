@@ -13,6 +13,7 @@ import type {
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { createKimiReasoningAdmissionError, isKimiReasoningAdmissionError, KIMI_REASONING_ADMISSION_CODE } from '../runtime/kimi-reasoning-admission.js';
+import { createKimiTerminalBoundaryError, isKimiTerminalBoundaryError, getKimiTerminalBoundaryDiagnostic } from '../runtime/kimi-terminal-boundary.js';
 import { createOpenAIStreamError } from '../runtime/openai-stream-error.js';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
@@ -44,7 +45,7 @@ import { assertKimiTransportAllowed } from '../runtime/kimi-rollback-policy.js';
 import { applyExperimentalToolOrder, parseExperimentalToolOrder } from '../providers/experimental-tool-order.js';
 
 const MAX_RETRIES = 3;
-const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
+const STREAM_IDLE_TIMEOUT_MS = 5 * 60_000;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const usageLogger = createLogger('ai:openai-adapter:usage');
 const ownedHarnessProfiles = new WeakMap<
@@ -150,7 +151,7 @@ function drainBufferedToolCalls(
       input = parsed as Record<string, unknown>;
     } catch {
       if (strictKimiK3) {
-        throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+        throw createKimiTerminalBoundaryError({ boundaryKind: 'invalid_tool_call', sawOfficialReasoning: true, toolCallCount: toolBuffers.size });
       }
       input = { _raw: buffer.argsBuffer };
     }
@@ -599,10 +600,19 @@ export class OpenAIAdapter implements ModelAdapter {
     while (true) {
       throwIfCallerAborted(options?.signal);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
       const signal = options?.signal
         ? AbortSignal.any([controller.signal, options.signal])
         : controller.signal;
+      let receivedTerminalBoundary = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const armIdleTimeout = () => {
+        clearTimeout(timer);
+        if (signal.aborted) return;
+        timer = setTimeout(() => controller.abort(Object.assign(new Error('model stream idle timeout'), {
+          name: 'TimeoutError', code: 'OPENAI_STREAM_IDLE_TIMEOUT', retryable: !receivedTerminalBoundary,
+        })), STREAM_IDLE_TIMEOUT_MS);
+      };
+      armIdleTimeout();
       let emittedAny = false;
       let emittedOutput = false;
       let emittedBufferedUsage = false;
@@ -616,6 +626,8 @@ export class OpenAIAdapter implements ModelAdapter {
           signal,
           bufferedUsage ? attemptState : undefined,
           authorizeDispatch,
+          armIdleTimeout,
+          () => { receivedTerminalBoundary = true; },
         )) {
           emittedAny = true;
           if (chunk.type !== 'usage') emittedOutput = true;
@@ -642,7 +654,9 @@ export class OpenAIAdapter implements ModelAdapter {
         clearTimeout(timer);
         const terminalError = options?.signal?.aborted
           ? (options.signal.reason ?? error)
-          : error;
+          : controller.signal.aborted ? (controller.signal.reason ?? error) : error;
+        const boundaryDiagnostic = getKimiTerminalBoundaryDiagnostic(terminalError);
+        if (boundaryDiagnostic) usageLogger.warn('kimiTerminalBoundaryRejected', boundaryDiagnostic);
         // Only this uncommitted protocol response gets one local retry. The
         // terminal error stays non-retryable to every outer recovery owner.
         if (strictProfile && !options?.signal?.aborted && !options?.semanticSummaryAttempt
@@ -658,6 +672,8 @@ export class OpenAIAdapter implements ModelAdapter {
         // 已产出 chunk 后重试会重复输出，必须放弃重试
         if (
           options?.signal?.aborted
+          || controller.signal.aborted
+          || isKimiTerminalBoundaryError(error)
           || options?.semanticSummaryAttempt !== undefined
           || emittedAny
           || !isRetryableError(error)
@@ -980,6 +996,8 @@ export class OpenAIAdapter implements ModelAdapter {
     signal?: AbortSignal,
     attemptState?: StreamAttemptState,
     authorizeDispatch?: () => void,
+    onProgress?: () => void,
+    onTerminalBoundary?: () => void,
   ): AsyncIterable<StreamChunk> {
     const request = this.buildChatRequest(messages, tools, systemPrompt, options);
 
@@ -1011,6 +1029,7 @@ export class OpenAIAdapter implements ModelAdapter {
     let usageReceived = false;
     let officialReasoningSeen = false;
     let pendingAdmissionText = '';
+    let lastToolProgressAt = Date.now();
     const extractBufferedUsage = attemptState
       ? this.harnessContext.profile.extractUsage
       : undefined;
@@ -1018,10 +1037,14 @@ export class OpenAIAdapter implements ModelAdapter {
     const streamIterator = stream[Symbol.asyncIterator]();
     try {
       while (true) {
+        signal?.throwIfAborted();
         const iteration = await runProviderOperation(
           strictKimiK3,
           () => streamIterator.next(),
         );
+        // The SDK can turn its own transport abort into EOF. Do not drain an
+        // interrupted argument buffer or report successful completion from it.
+        signal?.throwIfAborted();
         if (iteration.done) {
           break;
         }
@@ -1053,8 +1076,8 @@ export class OpenAIAdapter implements ModelAdapter {
 
         const choice = chunk.choices[0];
         if (!choice) continue;
-        const delta = choice.delta;
-        if (!delta) continue;
+        // Some compatible providers omit delta on the metadata-only finish frame.
+        const delta = choice.delta ?? {};
         if (
           strictKimiK3
           && Object.prototype.hasOwnProperty.call(delta, 'reasoning_content')
@@ -1080,6 +1103,7 @@ export class OpenAIAdapter implements ModelAdapter {
           if (reasoning.type !== 'thinking') {
             continue;
           }
+          if (reasoning.delta.length > 0) onProgress?.();
           streamTextChars += reasoning.delta.length;
           if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
             await streamIterator.return?.();
@@ -1091,12 +1115,14 @@ export class OpenAIAdapter implements ModelAdapter {
         if (strictKimiK3 && !officialReasoningSeen) {
           // Never publish possible private reasoning from an invalid dialect.
           if (delta.content) {
+            onProgress?.();
             if (pendingAdmissionText.length + delta.content.length > MAX_OPENAI_STREAM_TEXT_CHARS) {
               throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
             }
             pendingAdmissionText += delta.content;
           }
         } else if (delta.content || pendingAdmissionText) {
+          if (delta.content) onProgress?.();
           const content = pendingAdmissionText + (delta.content ?? '');
           pendingAdmissionText = '';
           for (const segment of drainLeadingRawThinkSegments(rawThinkParser, content)) {
@@ -1130,6 +1156,7 @@ export class OpenAIAdapter implements ModelAdapter {
             if (tc.id) current.id = tc.id;
             if (tc.function?.name) current.name = tc.function.name;
             if (tc.function?.arguments) {
+              onProgress?.();
               if (
                 current.argsBuffer.length + tc.function.arguments.length
                 > MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS
@@ -1140,6 +1167,11 @@ export class OpenAIAdapter implements ModelAdapter {
               current.argsBuffer += tc.function.arguments;
             }
             toolBuffers.set(tc.index, current);
+            if (tc.function?.arguments && (!strictKimiK3 || officialReasoningSeen)
+              && Date.now() - lastToolProgressAt >= 1000) {
+              lastToolProgressAt = Date.now();
+              yield { type: 'tool_input_progress' };
+            }
           }
         }
 
@@ -1175,7 +1207,9 @@ export class OpenAIAdapter implements ModelAdapter {
             yield segment;
           }
 
-          for (const toolCall of drainBufferedToolCalls(toolBuffers, strictKimiK3)) {
+          const completedCalls = drainBufferedToolCalls(toolBuffers, strictKimiK3);
+          onTerminalBoundary?.();
+          for (const toolCall of completedCalls) {
             yield toolCall;
           }
 
@@ -1202,7 +1236,7 @@ export class OpenAIAdapter implements ModelAdapter {
       if (!emittedDone) {
         if (strictKimiK3) {
           if (toolBuffers.size === 0) {
-            throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+            throw createKimiTerminalBoundaryError({ boundaryKind: 'missing_finish', sawOfficialReasoning: officialReasoningSeen, toolCallCount: 0 });
           }
           if (!officialReasoningSeen) {
             throw createKimiReasoningAdmissionError({ sawContent: pendingAdmissionText.length > 0, sawTools: toolBuffers.size > 0, terminal: 'eof' });
