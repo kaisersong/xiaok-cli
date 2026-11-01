@@ -103,3 +103,33 @@ Codex 编码与对抗自审，未声称独立模型质量放行。未运行 Wind
 Codex 编码与自审；未做独立质量放行、Windows/macOS 实机或 CI，不 push、不合并、不发布。本次只提交生产提示、回归断言和本评审记录，不提交 dist。
 
 提交阻塞：已按要求检查 diff 并显式列出三个文件执行暂存和指定身份/消息的 commit；Git 无法创建 `/workspace/xiaok-cli/.git/worktrees/fix94/index.lock`（Read-only file system），暂存及提交均未成功。改动保留在工作区，未 push。
+
+### 第三轮评审修订设计与对抗自审（4be3abfd）
+
+设计：sweep 将同路径同 inode 的 device 重编号视为活跃，目录和 SQLite 文件均保留，仍删除缺失/换 inode 的行。复用设备重编号的物理身份判定，不修改登记冲突或历史合并规则。单源超限单独提示；读取超限给出文件实际大小和备份后编辑建议；诊断序列化异常退回磁盘字节数。
+
+对抗自审：无关登记和 no-op 都必须保护其他活记录及历史；未知 IO 保留，换 inode 仍删除；所有容量失败均不得部分提交 sweep；兜底不增加序列化重试，正常拒写最多三次序列化。minor-4、minor-6 按要求不改。
+
+### 第三轮评审修订结果
+
+- major-1：抽出并复用 device 重编号物理身份判定，sweep 对同 inode 的 dev 变化保留；登记冲突仍保持原有严格判断。新增 A/B 后登记 C 和 A no-op 两例，B 为带 componentHistory 的 SQLite 记录；核对记录、历史和 no-op 原始字节。
+- minor-1：当前占用断言改读 `readFileSync(registry).length`，不再调用生产 codec 计算期望值。清理后单源超限走专用提示，核对拒写字节不变。
+- minor-2：删除 logger mock、state.warn 及全部 warning 断言。
+- minor-3：单源超限仅提供上限、该源 expanded JSON 字节数及缩短路径/元数据建议；断言不含删除目录或编辑 registry 的建议。
+- minor-5：读取超过 512 KiB 的文件，提示上限、实际文件大小、路径及先备份再用编辑器删除不再使用项目条目；不建议删除整个 registry。
+- minor-7：existingBytes 序列化加 try/catch，异常退回磁盘字节数；注入第二次序列化失败，验证 capacity 前缀、完整诊断和原始文件不变。codec 调用上界仍为 3，与记录数无关；单源大小计算额外一次 JSON 序列化，仍为常数次数。
+- minor-4、minor-6：按 CTO 要求保持不变。
+
+验证（HOME/TMPDIR/XDG_CONFIG_HOME 均使用 mktemp 专用目录，未使用真实 ~/.xiaok）：
+- 生产修改前 `npx vitest run tests/runtime/verification/ordinary-profile-source-registry-prune.test.ts`：7 failed / 14 passed，`/tmp/fix94-review-red.log`。minor-1/2 属测试纠正，不伪造必须失败的产品断言。
+- 修改后 prune：21 passed，`/tmp/fix94-review-green.log`。
+- `npx vitest run tests/runtime/verification/ordinary-profile-source-registry tests/runtime/verification/ordinary-registry-`：首次 74 passed / 4 failed，`/tmp/fix94-review-all.log`；其中两项是长临时路径使 2000 行 fixture 文件自身超过 512 KiB。改用 `mktemp -d /tmp/f94-XXXXXX` 且 TMPDIR 为其 t 子目录重跑：76 passed / 2 failed，`/tmp/fix94-review-all-short.log`。剩余两项为原有真实子进程锁恢复和并发历史合并测试，各 15000ms 超时；未核实根因，不声称全通过。
+- `npx tsc --noEmit -p .`：exit 0，`/tmp/fix94-review-check-0.log`。
+- `npm run governance:check`：exit 1，Oxlint 的 spawnSync node EPERM，`/tmp/fix94-review-check-1.log`。
+- `npm run architecture:check -- --changed`：exit 1，spawnSync git EPERM，`/tmp/fix94-review-check-2.log`。
+- `npm run hygiene:check`：远端 freshness 无法核实及三个 sibling repo 缺失，未通过；未修改 baseline。
+- `git diff --check`：exit 0。未启动持久服务，测试命令均退出；按本工作目录检查测试进程残留 0，额外清理 0，`/tmp/fix94-review-processes.json`。
+
+Codex 实现和对抗自审，未做独立模型质量放行、CI 或 Windows/macOS 实机验证；未关闭缺陷或发布，不修改外部台账。不 push、不合并，不提交 dist。
+
+提交阻塞（本轮实测）：检查 diff stat 后显式暂存上述三个文件，Git 无法创建 `/workspace/xiaok-cli/.git/worktrees/fix94/index.lock`：Read-only file system。按要求不重试；未暂存、未执行 commit，工作区修改保留，未 push。

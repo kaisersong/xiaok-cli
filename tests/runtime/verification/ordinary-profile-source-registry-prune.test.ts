@@ -3,19 +3,17 @@ import {createHash} from 'node:crypto';
 import {lstatSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
-import {serializeOrdinaryProfileSourceStorage} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
-import {registerOrdinaryProfileSource,readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
-const state=vi.hoisted(()=>({stats:new Map<string,bigint>(),errors:new Map<string,string>(),template:'',bug:false,capacitySuffix:false,calls:0,warn:vi.fn()}));
+import {registerOrdinarySQLiteLayout,registerOrdinaryProfileSource,readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
+const state=vi.hoisted(()=>({stats:new Map<string,bigint>(),errors:new Map<string,string>(),template:'',bug:false,capacitySuffix:false,calls:0,devices:new Map<string,bigint>(),diagnosticFailure:false}));
 vi.mock('node:fs',async load=>{const fs=await load<typeof import('node:fs')>();return {...fs,
- lstatSync:(path:string,options:unknown)=>{if(state.bug&&path.endsWith('/bug'))throw new TypeError('sweep bug');const code=state.errors.get(path);if(code)throw Object.assign(Error(code),{code});const ino=state.stats.get(path);if(ino!==undefined){const stat=fs.lstatSync(state.template,options as never);return new Proxy(stat,{get(target,key){if(key==='ino')return typeof target.ino==='bigint'?ino:Number(ino);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});}return fs.lstatSync(path,options as never);},
+ lstatSync:(path:string,options:unknown)=>{if(state.bug&&path.endsWith('/bug'))throw new TypeError('sweep bug');const code=state.errors.get(path);if(code)throw Object.assign(Error(code),{code});const ino=state.stats.get(path);const dev=state.devices.get(path);if(dev!==undefined){const stat=fs.lstatSync(path,options as never);return new Proxy(stat,{get(target,key){if(key==='dev')return typeof target.dev==='bigint'?dev:Number(dev);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});}if(ino!==undefined){const stat=fs.lstatSync(state.template,options as never);return new Proxy(stat,{get(target,key){if(key==='ino')return typeof target.ino==='bigint'?ino:Number(ino);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});}return fs.lstatSync(path,options as never);},
  realpathSync:(path:string)=>state.stats.has(path)?path:fs.realpathSync(path)};});
 vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInstalledCurrentProfile:()=>({kind:'ordinary'})}));
-vi.mock('../../../src/utils/logger.js',()=>({createLogger:()=>({warn:state.warn})}));
-vi.mock('../../../src/runtime/verification/ordinary-profile-source-storage-codec.js',async load=>{const codec=await load<typeof import('../../../src/runtime/verification/ordinary-profile-source-storage-codec.js')>();return {...codec,serializeOrdinaryProfileSourceStorage:(...args:Parameters<typeof codec.serializeOrdinaryProfileSourceStorage>)=>{state.calls++;try{return codec.serializeOrdinaryProfileSourceStorage(...args);}catch(error){if(state.capacitySuffix&&error instanceof Error&&error.message.startsWith('profile_source_registry_capacity'))throw Error(error.message+': context');throw error;}}};});
+vi.mock('../../../src/runtime/verification/ordinary-profile-source-storage-codec.js',async load=>{const codec=await load<typeof import('../../../src/runtime/verification/ordinary-profile-source-storage-codec.js')>();return {...codec,serializeOrdinaryProfileSourceStorage:(...args:Parameters<typeof codec.serializeOrdinaryProfileSourceStorage>)=>{state.calls++;if(state.diagnosticFailure&&state.calls===2)throw Error("diagnostic serialization failed");try{return codec.serializeOrdinaryProfileSourceStorage(...args);}catch(error){if(state.capacitySuffix&&error instanceof Error&&error.message.startsWith('profile_source_registry_capacity'))throw Error(error.message+': context');throw error;}}};});
 let root:string,registry:string;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const register=(directory:string)=>registerOrdinaryProfileSource({kind:'session-root',directory});
-beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'registry-prune-')));vi.stubEnv('HOME',root);vi.stubEnv('XIAOK_CONFIG_DIR',join(root,'.xiaok'));vi.stubEnv('XDG_CONFIG_HOME',join(root,'config'));vi.stubEnv('XDG_DATA_HOME',join(root,'data'));vi.stubEnv('XDG_CACHE_HOME',join(root,'cache'));state.bug=false;state.capacitySuffix=false;state.calls=0;state.warn.mockClear();state.template=root;state.stats.clear();state.errors.clear();registry=join(root,'.xiaok','profile-sources','registry.json');});
+beforeEach(()=>{root=realpathSync(mkdtempSync(join(tmpdir(),'registry-prune-')));vi.stubEnv('HOME',root);vi.stubEnv('XIAOK_CONFIG_DIR',join(root,'.xiaok'));vi.stubEnv('XDG_CONFIG_HOME',join(root,'config'));vi.stubEnv('XDG_DATA_HOME',join(root,'data'));vi.stubEnv('XDG_CACHE_HOME',join(root,'cache'));state.bug=false;state.capacitySuffix=false;state.calls=0;state.devices.clear();state.diagnosticFailure=false;state.template=root;state.stats.clear();state.errors.clear();registry=join(root,'.xiaok','profile-sources','registry.json');});
 afterEach(()=>{vi.unstubAllEnvs();state.stats.clear();state.errors.clear();rmSync(root,{recursive:true,force:true,maxRetries:3});});
 function seed(){
  const directory=join(root,'initial');mkdirSync(directory);register(directory);
@@ -26,7 +24,7 @@ function seed(){
  const current=join(root,'3'.repeat(80000));state.stats.set(current,1002n);return {paths,current};
 }
 function expectCapacity(action:()=>void,existing:NonNullable<ReturnType<typeof readOrdinaryProfileSources>>){
- const bytes=Buffer.byteLength(serializeOrdinaryProfileSourceStorage(existing));
+ const bytes=readFileSync(registry).length;
  let message='';try{action();}catch(error){if(!(error instanceof Error))throw error;message=error.message;}
  expect(message).toContain('profile_source_registry_capacity:');
  expect(message).toContain('limit 524288 bytes (512 KiB)');
@@ -53,7 +51,7 @@ it('rejects a full live table without changing bytes, generation or any live row
  expectCapacity(()=>register(current),facts);
  expect(readFileSync(registry)).toEqual(before);
  expect(readOrdinaryProfileSources()).toEqual(facts);
- expect(state.warn).not.toHaveBeenCalled();
+
 });
 it('prunes stale rows from a full table and admits the new source',()=>{
  const {paths,current}=seed();state.errors.set(paths[0]!,'ENOENT');
@@ -66,23 +64,27 @@ it('sweeps stale rows even when registering an unchanged source',()=>{
  expect(readOrdinaryProfileSources()!.sources.map(row=>row.directory.canonicalPath)).toEqual([paths[0]]);
  expect(readOrdinaryProfileSources()!.generation).toBe('2');
 });
-it('reports registry path and recovery advice when the current source alone cannot fit',()=>{
+it('reports only source size and reduction advice when the current source alone cannot fit',()=>{
  seed();const current=join(root,'4'.repeat(530000));state.stats.set(current,1003n);const before=readFileSync(registry);
  const facts=readOrdinaryProfileSources()!;
- expectCapacity(()=>register(current),facts);
+ expectSingleCapacity(()=>register(current));
  expect(readOrdinaryProfileSources()).toEqual(facts);
  expect(readFileSync(registry)).toEqual(before);
 });
-it.each([false,true])('reports post-sweep usage on rejection without persisting partial cleanup (all stale: %s)',allStale=>{
+it.each([false,true])('rejects an oversized source without persisting partial cleanup (all stale: %s)',allStale=>{
  const {paths}=seed();const facts=readOrdinaryProfileSources()!,before=readFileSync(registry);
  state.errors.set(paths[0]!,'ENOENT');if(allStale)state.errors.set(paths[1]!,'ENOENT');
  const current=join(root,'4'.repeat(530000));state.stats.set(current,1003n);
- expectCapacity(()=>register(current),{...facts,sources:allStale?[]:[facts.sources[1]!]});
+ expectSingleCapacity(()=>register(current));
  expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
 });
 it('reports a useful error for an existing oversized registry without reading it',()=>{
  seed();writeFileSync(registry,' '.repeat(512*1024+1));
- expect(()=>readOrdinaryProfileSources()).toThrow(/profile_source_registry_identity.*registry.*full.*registry\.json.*(remove|move)/i);
+ expect(()=>readOrdinaryProfileSources()).toThrow(/profile_source_registry_identity.*limit 524288 bytes.*current usage 524289 bytes/);
+ expect(()=>readOrdinaryProfileSources()).toThrow(registry);
+ expect(()=>readOrdinaryProfileSources()).toThrow('先备份');
+ expect(()=>readOrdinaryProfileSources()).toThrow('用编辑器');
+ expect(()=>readOrdinaryProfileSources()).not.toThrow(/remove it|delete.*registry/i);
 });
 
 it('does not rewrite bytes or generation for an unchanged non-tail row',()=>{
@@ -109,7 +111,7 @@ function compactTable(count:number){
 }
 it('keeps all 2000 compact live rows when under capacity',()=>{
  compactTable(2000);const current=join(root,'current');mkdirSync(current);register(current);
- expect(readOrdinaryProfileSources()!.sources).toHaveLength(2001);expect(state.warn).not.toHaveBeenCalled();
+ expect(readOrdinaryProfileSources()!.sources).toHaveLength(2001);
 });
 it('prunes missing rows from compact v3 storage',()=>{
  const rows=compactTable(20);state.stats.delete(rows[3]![3] as string);
@@ -120,13 +122,46 @@ it('bounds serialization when rejecting a full 2000-row compact live table',()=>
  compactTable(2000);const current=join(root,'x'.repeat(160000));state.stats.set(current,99999n);state.calls=0;
  const before=readFileSync(registry),facts=readOrdinaryProfileSources()!;
  expectCapacity(()=>register(current),facts);
- expect(state.calls).toBeLessThanOrEqual(4); // Includes the expected-usage serialization in expectCapacity.
+ expect(state.calls).toBeLessThanOrEqual(3);
  expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
- expect(state.warn).not.toHaveBeenCalled();
+
 });
 
 it('recognizes capacity errors with appended codec context',()=>{
  seed();const current=join(root,'x'.repeat(530000));state.stats.set(current,1003n);state.capacitySuffix=true;
  expect(()=>register(current)).toThrow(/current source itself exceeds registry limit/);
- expect(state.warn).not.toHaveBeenCalled();
+
+});
+
+function expectSingleCapacity(action:()=>void){
+ let message='';try{action();}catch(error){message=(error as Error).message;}
+ expect(message).toContain('profile_source_registry_capacity:');
+ expect(message).toContain('limit 524288 bytes');
+ expect(message).toMatch(/source size \d+ bytes/);
+ expect(message).toContain('Reduce source path or metadata size');
+ expect(message).toMatch(/Source: \S*4{20}/);
+ expect(message).toContain('清理其他项目没有用');
+ expect(message.length).toBeLessThan(2000);
+ expect(message).not.toMatch(/删除|编辑器|remove it/);
+}
+it.each([false,true])('preserves device-renumbered A and B including SQLite history (no-op: %s)',noop=>{
+ const a=join(root,'a'),b=join(root,'b'),c=join(root,'c');for(const path of [a,b,c])mkdirSync(path);
+ register(a);writeFileSync(join(b,'state.db'),'');
+ const components=['loop'] as const;const layout={version:1 as const,components,layoutRevision:1,layoutHash:hash({version:1,components,layoutRevision:1})};
+ registerOrdinarySQLiteLayout({kind:'sqlite-db',directory:b,databaseBasename:'state.db',snapshotFormat:'loop-sqlite-v1'},layout);
+ const before=readOrdinaryProfileSources()!,bytes=readFileSync(registry);
+ for(const path of [a,b,join(b,'state.db')])state.devices.set(path,lstatSync(path,{bigint:true}).dev+1n);
+ // A remains unchanged in the no-op case so that the sweep alone sees B's renumbering.
+ if(noop)state.devices.delete(a);
+ register(noop?a:c);
+ const after=readOrdinaryProfileSources()!;
+ expect(after.sources.filter(row=>row.directory.canonicalPath!==c)).toEqual(before.sources);
+ if(noop)expect(readFileSync(registry)).toEqual(bytes);
+});
+it('falls back to disk bytes when diagnostic serialization fails',()=>{
+ const {current}=seed();const facts=readOrdinaryProfileSources()!,before=readFileSync(registry);
+ state.calls=0;state.diagnosticFailure=true;
+ expectCapacity(()=>register(current),facts);
+ expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
+ expect(state.calls).toBeLessThanOrEqual(3);
 });
