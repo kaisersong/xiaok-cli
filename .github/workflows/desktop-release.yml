@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fail when cross-platform and release sibling pins drift
+        run: node scripts/check-desktop-sibling-pins.mjs
       - name: Create Draft GitHub Release
         run: gh release view "${{ env.RELEASE_TAG }}" >/dev/null 2>&1 || gh release create "${{ env.RELEASE_TAG }}" --title "Xiaok CLI & Desktop ${RELEASE_TAG#desktop-v}" --generate-notes --draft
         env:
@@ -403,25 +405,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $resultPath)) {
             throw 'Packaged Kimi smoke did not write its result'
           }
-          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-          if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 4) {
-            throw 'Packaged Kimi smoke result is incomplete'
-          }
-          foreach ($model in @('k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed')) {
-            $entry = $result.modelResults | Where-Object { $_.model -eq $model }
-            if (-not $entry -or $entry.requests -ne 2 -or -not $entry.secondTurnReplayedReasoning) {
-              throw "Packaged Kimi multi-turn smoke failed for $model"
-            }
-          }
-          if ($result.authorizationDenyNetworkRequests -ne 0 -or $result.rollbackDenyNetworkRequests -ne 0) {
-            throw 'Packaged Kimi deny smoke observed a network request'
-          }
-          $canaryHit = Get-ChildItem -LiteralPath $smokeRoot -Recurse -File |
-            Where-Object { $_.FullName -ne $resultPath } |
-            Select-String -SimpleMatch 'PACKAGED_SMOKE_RUNTIME_ONLY' -List
-          if ($canaryHit) {
-            throw "Provider-private reasoning canary persisted at $($canaryHit.Path)"
-          }
+          node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
 
       - name: Upload to GitHub Release
         run: gh release upload "${{ env.RELEASE_TAG }}" desktop/release/*.exe desktop/release/latest.yml --clobber

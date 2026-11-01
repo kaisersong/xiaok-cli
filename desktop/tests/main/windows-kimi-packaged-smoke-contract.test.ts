@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('Windows packaged Kimi release gate', () => {
-  it('launches win-unpacked and gates both K3 models plus auth, rollback, and canary checks', () => {
+  it('launches win-unpacked and gates models via KIMI_CODING_PROFILES verifier', () => {
     const workflow = readFileSync(
       join(process.cwd(), '..', '.github', 'workflows', 'desktop-release.yml'),
       'utf8',
@@ -15,14 +15,14 @@ describe('Windows packaged Kimi release gate', () => {
     expect(packageIndex).toBeGreaterThan(-1);
     expect(smokeIndex).toBeGreaterThan(packageIndex);
     expect(uploadIndex).toBeGreaterThan(smokeIndex);
-    expect(workflow).toContain("desktop/release/win-unpacked/xiaok.exe");
-    expect(workflow).toContain("foreach ($model in @('k3', 'k3-256k'))");
-    expect(workflow).toContain('authorizationDenyNetworkRequests');
-    expect(workflow).toContain('rollbackDenyNetworkRequests');
-    expect(workflow).toContain('PACKAGED_SMOKE_RUNTIME_ONLY');
+    expect(workflow).toContain('desktop/release/win-unpacked/xiaok.exe');
+    expect(workflow).toContain('scripts/verify-packaged-kimi-smoke-result.mjs');
+    expect(workflow).not.toMatch(/foreach \(\$model in @\(/);
+    expect(workflow).not.toMatch(/modelResults\.Count -ne \d+/);
+    expect(workflow).toContain('scripts/check-desktop-sibling-pins.mjs');
   });
 
-  it('provides a manually dispatchable packaged smoke without release side effects', () => {
+  it('runs packaged smoke on related PR/push paths, not only workflow_dispatch', () => {
     const workflow = readFileSync(
       join(process.cwd(), '..', '.github', 'workflows', 'desktop-cross-platform.yml'),
       'utf8',
@@ -32,13 +32,18 @@ describe('Windows packaged Kimi release gate', () => {
     const smokeIndex = workflow.indexOf('Run packaged Windows Kimi K3 smoke', jobIndex);
 
     expect(workflow).toContain('workflow_dispatch: {}');
+    expect(workflow).toContain('detect-packaged-kimi-smoke:');
+    expect(workflow).toContain('sibling-pin-consistency:');
     expect(jobIndex).toBeGreaterThan(-1);
-    expect(workflow.slice(jobIndex)).toContain("if: github.event_name == 'workflow_dispatch'");
+    expect(workflow.slice(jobIndex)).toContain("needs.detect-packaged-kimi-smoke.outputs.run_smoke == 'true'");
+    expect(workflow.slice(jobIndex)).not.toContain("if: github.event_name == 'workflow_dispatch'");
     expect(workflow.slice(jobIndex)).toContain('runs-on: windows-2022');
     expect(packageIndex).toBeGreaterThan(jobIndex);
     expect(smokeIndex).toBeGreaterThan(packageIndex);
     expect(workflow.slice(jobIndex)).toContain('desktop/release/win-unpacked/xiaok.exe');
-    expect(workflow.slice(jobIndex)).toContain('PACKAGED_SMOKE_RUNTIME_ONLY');
+    expect(workflow.slice(jobIndex)).toContain('scripts/verify-packaged-kimi-smoke-result.mjs');
+    expect(workflow.slice(jobIndex)).not.toMatch(/foreach \(\$model in @\(/);
+    expect(workflow).toContain('src/ai/providers/kimi-models.ts');
     expect(workflow).not.toContain('gh release');
   });
 });
