@@ -47,6 +47,7 @@ jobs:
           npm run test:sandbox:run --
           .test-dist/tests/runtime/task-host/task-recovery-race.test.js
           .test-dist/tests/runtime/task-host/task-runtime-host.test.js
+          .test-dist/tests/runtime/task-host/project-handoff-delivery.test.js
       - name: Startup ownership, execution admission and room IPC
         run: >
           cd desktop && npm run test -- --run
