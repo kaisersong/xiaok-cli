@@ -56,6 +56,32 @@ describe('ask-question', () => {
       harness.send('\r');
       await expect(pending).resolves.toMatchObject({labels: ['No']});
       expect(harness.screen.text()).toContain('PREVIOUS_TOOL_OUTPUT');
+      expect(harness.screen.lines().findIndex(line => line.includes('PROMPT_SPACING_QUESTION'))).toBe(question);
+    } finally {
+      harness.send('\x1b');
+      await pending;
+      harness.restore();
+    }
+  });
+
+  it('separates the confirmed footer question from preceding tool history', async () => {
+    const harness = createTtyHarness(100, 24);
+    process.stdout.write('PREVIOUS_TOOL_OUTPUT\n');
+    const pending = askQuestion({
+      question: 'FOOTER_QUESTION？',
+      options: [{label: 'Yes'}, {label: 'No'}],
+      renderFrame: () => true,
+      clearFrame: () => {},
+    });
+    try {
+      harness.send('2');
+      await expect(pending).resolves.toMatchObject({labels: ['No']});
+      const lines = harness.screen.lines();
+      const previous = lines.findIndex(line => line.includes('PREVIOUS_TOOL_OUTPUT'));
+      const question = lines.findIndex(line => line.includes('FOOTER_QUESTION？'));
+      expect(question).toBe(previous + 2);
+      expect(lines[previous + 1].trim()).toBe('');
+      expect(lines[question + 1]).toContain('No');
     } finally {
       harness.send('\x1b');
       await pending;

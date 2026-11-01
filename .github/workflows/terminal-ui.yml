@@ -20,6 +20,7 @@ on:
       - 'tests/ai/tools/ask-user*.test.ts'
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
+      - 'tests/e2e/question-transcript-spacing.py'
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
       - 'tests/e2e/memory-background-footer.py'
@@ -44,6 +45,7 @@ on:
       - 'tests/ai/tools/ask-user*.test.ts'
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
+      - 'tests/e2e/question-transcript-spacing.py'
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
       - 'tests/e2e/memory-background-footer.py'
@@ -116,6 +118,7 @@ jobs:
         run: |
           python tests/e2e/inline-image-scrollback.py
           python tests/e2e/askuser-short-menu.py
+          python tests/e2e/question-transcript-spacing.py
           python tests/e2e/thinking-draft-handoff.py
           python tests/e2e/footer-return.py
           python tests/e2e/memory-background-footer.py
@@ -132,4 +135,5 @@ jobs:
             /tmp/xiaok-memory-footer-*/
             /tmp/xiaok-mode-selector-*/
             /tmp/xiaok-mode-persistence-*/
+            /tmp/xiaok-question-spacing-*/
           retention-days: 7
