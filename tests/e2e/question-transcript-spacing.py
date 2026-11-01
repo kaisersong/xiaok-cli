@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import time
 
@@ -93,6 +94,17 @@ def main(cli_entry=None):
             finally:
                 tty.stop()
                 server.close()
+                # The CLI starts a detached reminder daemon for this fixture
+                # account. Stop it through its normal control command.
+                environment = {**os.environ, 'XIAOK_CONFIG_DIR': str(config), 'HOME': str(home),
+                               'USERPROFILE': str(home), 'XIAOK_TEST_ACCOUNT_HOME': str(home)}
+                command = [e2e.resolve_command('node', 'node'), '--import',
+                           str(repo / 'tests/support/profile-account-child.setup.mjs'),
+                           str(cli_entry or repo / 'dist/index.js'), 'daemon']
+                subprocess.run([*command, 'stop'], env=environment, check=True, capture_output=True, timeout=10)
+                status = subprocess.run([*command, 'status'], env=environment, check=True,
+                                        capture_output=True, text=True, timeout=10)
+                assert 'xiaok daemon: stopped' in status.stdout, status.stdout
                 if pane_pid is not None:
                     for _ in range(50):
                         try:
