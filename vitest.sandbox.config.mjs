@@ -21,6 +21,9 @@ export default {
     // afterEach 清理临时目录在 Windows 上会因文件句柄重试而超过默认 10s。
     hookTimeout: 30_000,
     fileParallelism: false,
-    pool: 'threads',
+    // #123（观察口径）：threads 下重 verification 用例超时后 runner 收不住，全量只能外部 kill（exit 143）。
+    // forks 下 worker 是独立子进程，超时/teardown 可杀掉 worker，套件能写完报告并退出。
+    // 验收=进程能退出并写出 JSON，不是用例全绿；yolo spread 本配置继承 forks。
+    pool: 'forks',
   },
 };

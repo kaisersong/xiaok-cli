@@ -9,6 +9,7 @@ export default {
     exclude: [],
     setupFiles: ['./.test-dist/tests/support/setup-host-env.js'],
     fileParallelism: false,
-    pool: 'threads',
+    // #123：预防性与 sandbox 对齐为 forks（本套件无挂死复现）。重复 setupFiles 键为既有问题，另跟，本 PR 不改。
+    pool: 'forks',
   },
 };
