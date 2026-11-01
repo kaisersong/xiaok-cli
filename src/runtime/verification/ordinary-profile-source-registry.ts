@@ -31,6 +31,7 @@ export interface OrdinaryProfileSources {
 }
 const MAX_BYTES=512*1024,U64=(1n<<64n)-1n,UNSUPPORTED_DIRECTORY_SYNC=new Set(['EINVAL','ENOTSUP','EISDIR']);
 function fail(reason:string):never{throw Error('profile_source_registry_'+reason);}
+function registryFull(path:string,reason:'capacity'|'identity'='capacity'):never{fail(`${reason}: registry is full at ${path} (limit ${MAX_BYTES} bytes). Move this discovery registry to a backup or remove it, then retry to rediscover sources; source data is not removed.`);}
 function digest(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function decimal(value:unknown):value is string{return typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(value)&&value.length<=20&&BigInt(value)<=U64;}
 function syncOrdinaryRegistryTree(path:string):void{try{syncDirectoryTreeStrict(path);}catch(error){const code=(error as NodeJS.ErrnoException).code;if(!code||!UNSUPPORTED_DIRECTORY_SYNC.has(code))throw error;}}
@@ -112,7 +113,7 @@ function parseExpandedOrdinaryProfileSources(raw:unknown,uid:number):Readonly<Or
 }
 function read(path:string,uid:number):Readonly<OrdinaryProfileSources>|undefined{
  let fd:number;try{fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
- try{const before=fstatSync(fd,{bigint:true});if(!before.isFile()||before.nlink!==1n||before.uid!==BigInt(uid)||before.size>BigInt(MAX_BYTES))fail('identity');
+ try{const before=fstatSync(fd,{bigint:true});if(!before.isFile()||before.nlink!==1n||before.uid!==BigInt(uid))fail('identity');if(before.size>BigInt(MAX_BYTES))registryFull(path,'identity');
   const bytes=Buffer.alloc(Number(before.size)+1);let length=0;for(;;){const n=readSync(fd,bytes,length,bytes.length-length,null);if(!n)break;length+=n;if(length===bytes.length)break;}
   const after=fstatSync(fd,{bigint:true}),current=lstatSync(path,{bigint:true});
   if(length!==Number(before.size)||after.mtimeNs!==before.mtimeNs||after.ctimeNs!==before.ctimeNs||after.size!==before.size||current.dev!==before.dev||current.ino!==before.ino||current.isSymbolicLink())fail('identity');
@@ -143,9 +144,21 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   let merged:Readonly<OrdinaryProfileSource>=prior&&!rebound?prior:observed;
   const histories=[...removed,...(prior?[prior]:[])].filter(row=>row.kind===observed.kind&&row.snapshotFormat===observed.snapshotFormat).flatMap(row=>row.componentHistory?[row.componentHistory]:[]);
   if(layout||(removed.length||rebound)&&histories.length){const observations=histories.flatMap(row=>row.observations).filter((row,index,all)=>all.findIndex(item=>item.layoutHash===row.layoutHash)===index);if(layout&&!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
-  if(!removed.length&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
-  const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail('capacity');
-  const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true,sources:prior?sources.map(row=>row===prior?merged:row):[...sources,merged]};const validated=parseOrdinaryProfileSources(next,loc.uid);const bytes=serializeOrdinaryProfileSourceStorage(validated);if(Buffer.byteLength(bytes)>MAX_BYTES)fail('capacity');
+  // Keep current/rebound history out of the sweep. Unknown IO failures are not proof of staleness.
+  sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row);}catch{return true;}});
+  // Array order is registration LRU (oldest first), requiring no new storage fields/version.
+  if(!removed.length&&sources.length===(original?.sources.length??0)&&prior===sources.at(-1)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
+  const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
+  sources=[...sources.filter(row=>row!==prior),merged];
+  let bytes:string;
+  for(;;){
+   const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true,sources};
+   const validated=parseOrdinaryProfileSources(next,loc.uid);
+   try{bytes=serializeOrdinaryProfileSourceStorage(validated);if(Buffer.byteLength(bytes)<=MAX_BYTES)break;}
+   catch(error){if(!(error instanceof Error)||error.message!=='profile_source_registry_capacity')throw error;}
+   if(sources.length===1)registryFull(loc.path);
+   sources=sources.slice(1); // The current observation is always last and cannot be evicted.
+  }
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();

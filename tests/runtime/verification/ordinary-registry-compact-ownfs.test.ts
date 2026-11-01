@@ -4,9 +4,16 @@ import {mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSyn
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {discoveryData} from './ordinary-registry-compact-fixture.js';
-const state = vi.hoisted(() => ({home: '', route: 'ordinary', failDirectorySync: false}));
+const state = vi.hoisted(() => ({home: '', route: 'ordinary', failDirectorySync: false, live: new Map<string,{device:string;inode:string}>()}));
 vi.mock('node:os', async load => { const actual = await load<typeof import('node:os')>(); return {...actual, userInfo: () => ({...actual.userInfo(), homedir: state.home})}; });
-vi.mock('node:fs', async load => { const actual = await load<typeof import('node:fs')>(); return {...actual, fsyncSync: (fd: number) => {
+vi.mock('node:fs', async load => { const actual = await load<typeof import('node:fs')>(); return {...actual, lstatSync: (path: string, options: unknown) => {
+  const identity = state.live.get(path); if (!identity) return actual.lstatSync(path, options as never);
+  const stat = actual.lstatSync(state.home, options as never);
+  return new Proxy(stat, {get(target, key) {
+    if (key === 'dev' || key === 'ino') {const value = identity[key === 'dev' ? 'device' : 'inode']; return typeof target[key] === 'bigint' ? BigInt(value) : Number(value);}
+    const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
+  }});
+}, fsyncSync: (fd: number) => {
   if (state.failDirectorySync && actual.fstatSync(fd).isDirectory()) throw Error('owned-registry-directory-sync'); actual.fsyncSync(fd);
 }}; });
 // Test-only route outcome. Not evidence of installed/native admission or SDK qualification.
@@ -14,13 +21,14 @@ vi.mock('../../../src/runtime/verification/migration-markers.js', () => ({readIn
 import {registerOrdinaryProfileSource, readOrdinaryProfileSources, parseOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 import {encodeOrdinaryProfileSourceStorage as encode} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
 let root = '';
-beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-registry-compact-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); state.route = 'ordinary'; state.failDirectorySync = false; });
+beforeEach(() => { state.live.clear(); root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-registry-compact-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); state.route = 'ordinary'; state.failDirectorySync = false; });
 afterEach(() => { state.failDirectorySync = false; if (root) rmSync(root, {recursive: true, force: true}); root = ''; });
 function registryPath() { return join(state.home, '.xiaok/profile-sources/registry.json'); }
 function initial() { const directory = join(root, 'actual-source'); mkdirSync(directory); registerOrdinaryProfileSource({kind: 'session-root', directory}); return directory; }
 function nearCapacity() {
   initial(); const original = readOrdinaryProfileSources()!;
-  const fixture = discoveryData(1300); // Plain historical DTO; no claim that missing old directories are owned/live.
+  const fixture = discoveryData(1300); // Synthetic live stat observations retain the original compact-capacity population.
+  for (const row of fixture.sources) state.live.set(row.directory.canonicalPath,row.directory);
   const next = {...original, generation: '1301', sources: [...fixture.sources, ...original.sources]};
   expect(Buffer.byteLength(JSON.stringify(next))).toBeGreaterThan(512 * 1024);
   writeFileSync(registryPath(), JSON.stringify(encode(next))); return next;

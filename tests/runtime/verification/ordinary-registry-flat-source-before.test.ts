@@ -4,15 +4,24 @@ import {mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, rmSyn
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {discoveryData} from './ordinary-registry-compact-fixture.js';
-const state = vi.hoisted(() => ({home: ''}));
+const state = vi.hoisted(() => ({home: '', live: new Map<string,{device:string;inode:string}>()}));
 vi.mock('node:os', async load => { const actual = await load<typeof import('node:os')>(); return {...actual, userInfo: () => ({...actual.userInfo(), homedir: state.home})}; });
+// These codec fixtures model live identities so pruning does not mask capacity coverage.
+vi.mock('node:fs', async load => {const actual = await load<typeof import('node:fs')>(); return {...actual, lstatSync: (path: string, options: unknown) => {
+  const identity = state.live.get(path); if (!identity) return actual.lstatSync(path, options as never);
+  const stat = actual.lstatSync(state.home, options as never);
+  return new Proxy(stat, {get(target, key) {
+    if (key === 'dev' || key === 'ino') {const value = identity[key === 'dev' ? 'device' : 'inode']; return typeof target[key] === 'bigint' ? BigInt(value) : Number(value);}
+    const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
+  }});
+}, };});
 // Ordinary unit route outcome only; never an installed/native grant or real helper admission.
 vi.mock('../../../src/runtime/verification/migration-markers.js', () => ({readInstalledCurrentProfile: () => ({kind: 'ordinary'})}));
 // EXISTING public module and methods, present in both source-before and candidate.
 // Deliberately no value import of the new storage codec or a new production API.
 import {registerOrdinaryProfileSource, readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 let root = '';
-beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-flat-source-before-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); });
+beforeEach(() => { state.live.clear(); root = realpathSync(mkdtempSync(join(tmpdir(), 'ordinary-flat-source-before-'))); state.home = join(root, 'account');setProfileTestHome(state.home); mkdirSync(state.home); });
 afterEach(() => { if (root) rmSync(root, {recursive: true, force: true}); root = ''; });
 it('migrates a valid near-limit v1 flat registry only when a real new source no longer fits', () => {
   const MAX = 512 * 1024;
@@ -30,7 +39,7 @@ it('migrates a valid near-limit v1 flat registry only when a real new source no 
     if (ids.has(source.sourceId) || namespaces.has(source.namespaceId)) continue;
     const additional = Buffer.byteLength(JSON.stringify(source)) + 1; // Existing array is nonempty.
     if (expectedBytes + additional > MAX) break;
-    sources.push(source); ids.add(source.sourceId); namespaces.add(source.namespaceId); expectedBytes += additional;
+    state.live.set(source.directory.canonicalPath,source.directory); sources.push(source); ids.add(source.sourceId); namespaces.add(source.namespaceId); expectedBytes += additional;
   }
   expect(sources.length).toBeGreaterThan(initial.sources.length);
   const flat = JSON.stringify(seed); expect(Buffer.byteLength(flat)).toBe(expectedBytes);
