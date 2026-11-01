@@ -178,4 +178,7 @@ jobs:
           tests/renderer/assistant-quality.test.tsx
       - name: Existing foreground admission and workspace revocation
         working-directory: desktop
-        run: npm run test -- --run tests/main/desktop-services.test.ts -t "assistant admission|assistant workspace replacement"
+        shell: bash
+        run: |
+          node node_modules/vitest/vitest.mjs run tests/main/desktop-services.test.ts --testNamePattern="assistant admission|assistant workspace replacement" --reporter=default --reporter=json --outputFile=../.artifacts/assistant-foreground-ci.json
+          node -e "const assert=require('node:assert/strict');const p=require('node:path');const r=require(p.resolve('..','.artifacts','assistant-foreground-ci.json'));const passed=r.testResults.flatMap(s=>s.assertionResults).filter(t=>t.status==='passed').map(t=>t.title).sort();assert.deepEqual(passed,['assistant admission uses the real foreground Room/Project/Goal prepareRoot path and a single commit','assistant workspace replacement after commit blocks the actual first runner'].sort());assert.equal(r.success,true);assert.equal(r.numPassedTests,2);assert.equal(r.numFailedTests,0);assert.equal(r.numFailedTestSuites,0);console.log(JSON.stringify({selectedPassedTests:passed,passed:r.numPassedTests,failed:r.numFailedTests,skipped:r.numPendingTests}));"
