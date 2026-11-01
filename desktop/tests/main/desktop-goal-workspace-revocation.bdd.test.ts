@@ -13,21 +13,32 @@ import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-ru
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
 import type { TaskCreateInput } from '../../../src/runtime/task-host/types.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
 
-const compiled = vi.hoisted(() => ({ output: '', root: '' }));
+const compiled = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
   return { ...actual, Worker: class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
-      if (String(filename) === source && !compiled.output) throw new Error('compiled fixed Worker is not ready');
-      super(String(filename) === source ? compiled.output : filename, options);
+      const mapped = String(filename) === source, protection = String(filename) === protectionSource;
+      if (mapped && !compiled.output || protection && !compiled.protectionOutput) throw new Error('compiled fixed Worker is not ready');
+      super(mapped ? compiled.output : protection ? compiled.protectionOutput : filename, options);
+      if (mapped || protection) { compiled.starts++; this.once('exit', () => { compiled.exits++; }); }
     }
   } };
 });
-beforeAll(async () => { Object.assign(compiled, await compileVerifierEntry('delivery-verifier-worker.ts')); });
-afterAll(() => { if (compiled.root) rmSync(compiled.root, { recursive: true, force: true, maxRetries: 3 }); });
+beforeAll(async () => {
+  Object.assign(compiled, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  compiled.protectionOutput = protection.output; compiled.protectionRoot = protection.root;
+});
+afterAll(() => {
+  expect(compiled.exits).toBe(compiled.starts);
+  for (const root of [compiled.root, compiled.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+});
 
 type WorkspaceGoal = DesktopGoalCoordinator & {
   stopForWorkspaceExecutionRevocation(input: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void>;

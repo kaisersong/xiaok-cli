@@ -11,3 +11,5 @@ CI 装配：显式 checkout 固定 SHA 的 kswarm/intent-broker，并安装实�
 仍需分组核查 Windows 原生 durable barrier 试验与普通源测试的夹具、路径语义。涉及 POSIX-only 保护能力的用例必须保留真实 Windows unsupported 断言，不能用成功替身宣称平台已支持；可移植普通能力需真跑。
 
 Windows native Goal journal 的 requireDirectorySync 在产品中明确 unsupported。既有完整 native mutation 竞态套件仅在 Linux/macOS 验证该 POSIX 能力；Windows 改为实际 createGoal 拒绝、无 native RPC、无 Goal/任务写入的回归，不使用伪造成功 writer。纯输入校验/普通线程用例仍跨平台执行。
+
+第二轮最低版本实测：Goal attachment/workspace 两个既有真实 host 夹具仅映射 delivery Worker，遗漏了同一交付流程的 protection-read Worker。Node 24 可直接执行该 TS，22.14 在 snapshot 阶段拒绝、真实 receipt 为 snapshot_read_failed，不能当 runner 慢。夹具统一复用现有 compileProtectionWorkerEntry（实际 typecheck/emitted entry、原模块 URL、输入 hash 审计），只映射固定 Worker 地址，保留真实线程与全部 IO/退出/原断言；不改生产 protected reader。两个 Goal 文件及 KB 持久回归在 Node22.14 实跑 95 项全过。KB 外层事务断言改为实际嵌套 BEGIN 拒绝，独立证明外层仍活着，不再依赖该版本没有的属性。红绿日志分别为 node22-goal-red.log、node22-goal-diagnostic.log、node22-goal-green.log。

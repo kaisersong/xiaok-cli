@@ -14,27 +14,33 @@ import { MaterialRegistry } from '../../../src/runtime/task-host/material-regist
 import type { GoalInput } from '../../../src/runtime/goal/types.js';
 import type { TaskCreateInput } from '../../../src/runtime/task-host/types.js';
 import { bounded, deferred } from '../fixtures/desktop-post-seal-harness.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
 
 // The real native Worker only needs its fixed source-mode URL mapped to the
 // compiled production entry. No frame, termination, verifier or host is mocked.
-const nativeWorker = vi.hoisted(() => ({ output: '', root: '', starts: 0, exits: 0 }));
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
   return { ...actual, Worker: class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
-      const mapped = String(filename) === source;
-      if (mapped && !nativeWorker.output) throw new Error('fixed native Worker fixture is not compiled');
-      super(mapped ? nativeWorker.output : filename, options);
-      if (mapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
+      const mapped = String(filename) === source, protection = String(filename) === protectionSource;
+      if (mapped && !nativeWorker.output || protection && !nativeWorker.protectionOutput) throw new Error('fixed native Worker fixture is not compiled');
+      super(mapped ? nativeWorker.output : protection ? nativeWorker.protectionOutput : filename, options);
+      if (mapped || protection) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
   } };
 });
-beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); });
+beforeAll(async () => {
+  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+});
 afterAll(() => {
   console.info('W2 P1/P4 native Worker physical lifecycle', { starts: nativeWorker.starts, exits: nativeWorker.exits });
-  if (nativeWorker.root) rmSync(nativeWorker.root, { recursive: true, force: true, maxRetries: 3 });
+  for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
 });
 
 // Frozen R4 shape declarations let behavioral tests reach today's real
@@ -135,7 +141,7 @@ async function fixture() {
     const snapshot = (await host.recoverTask(taskId)).snapshot;
     const eventIndex = snapshot.events.findIndex(event => event.type === 'task_terminal');
     const event = snapshot.events[eventIndex];
-    expect(snapshot.status).toBe('completed');
+    expect(snapshot.status, JSON.stringify(snapshot.events.slice(-3))).toBe('completed');
     expect(event?.type).toBe('task_terminal');
     if (!event || event.type !== 'task_terminal') throw new Error('actual committed terminal is missing');
     // The harness has no factory Goal callback. Explicitly consume the exact

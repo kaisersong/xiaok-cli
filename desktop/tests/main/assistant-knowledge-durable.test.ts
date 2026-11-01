@@ -39,7 +39,7 @@ it('refuses agent or scheduler requests and forged stable identities at the actu
  expect(store.listSources(input.collectionId!)).toEqual([]);
 });
 it('refuses an outer transaction without committing or rolling back its owner',()=>{
- const db=store._db as DatabaseSync;db.exec('BEGIN IMMEDIATE');try{expect(()=>store.ensureAssistantSource!(sourceInput(),'user')).toThrow('outer_transaction');expect(db.isTransaction).toBe(true);expect(store.getSource(input.targetId)).toBeUndefined();}finally{db.exec('ROLLBACK');}
+ const db=store._db as DatabaseSync;db.exec('BEGIN IMMEDIATE');try{expect(()=>store.ensureAssistantSource!(sourceInput(),'user')).toThrow('outer_transaction');expect(()=>db.exec('BEGIN')).toThrow('cannot start a transaction within a transaction');expect(store.getSource(input.targetId)).toBeUndefined();}finally{db.exec('ROLLBACK');}
 });
 it('does not borrow another source with the same content or erase a prior pending target',async()=>{
  const other=store.addSource({collectionId:input.collectionId!,kind:'paste',title:'other'},'user');
