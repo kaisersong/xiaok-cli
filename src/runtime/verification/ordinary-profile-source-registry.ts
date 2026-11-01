@@ -149,16 +149,19 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   // Unchanged observations preserve bytes and generation after the stale sweep.
   if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
+  const existingSources=sources;
   sources=[...sources.filter(row=>row!==prior),merged];
   const next={version:layout?2:(original?.version??1),uid:loc.uid,generation:String(generation),legacyInventoryRequired:true as const,sources};
   const validated=parseOrdinaryProfileSources(next,loc.uid);
   let bytes:string;
   try{bytes=serializeOrdinaryProfileSourceStorage(validated);}
   catch(error){if(!(error instanceof Error)||!error.message.startsWith('profile_source_registry_capacity'))throw error;
+   const existingBytes=Buffer.byteLength(serializeOrdinaryProfileSourceStorage({...validated,version:original?.version??1,generation:original?.generation??'1',sources:existingSources}));
+   const capacityDetails=`limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); current usage ${existingBytes} bytes, ${existingSources.length} active records. Registry: ${loc.path}. 删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理；也可以用编辑器打开该文件删除不再使用的项目条目（先备份）。`;
    try{serializeOrdinaryProfileSourceStorage({...validated,sources:[merged]});}
    catch(singleError){if(!(singleError instanceof Error)||!singleError.message.startsWith('profile_source_registry_capacity'))throw singleError;
-    fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes at ${loc.path}. Reduce source path or metadata size; removing the registry will not resolve this.`);}
-   fail(`capacity: registry at ${loc.path} has ${sources.length-1} active records and cannot fit the current source (limit ${MAX_BYTES} bytes). Clean up project directories that are no longer used, then retry.`);}
+    fail(`capacity: current source itself exceeds registry limit; ${capacityDetails} Reduce source path or metadata size.`);}
+   fail(`capacity: registry cannot fit the current source; ${capacityDetails}`);}
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();

@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {lstatSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
+import {serializeOrdinaryProfileSourceStorage} from '../../../src/runtime/verification/ordinary-profile-source-storage-codec.js';
 import {registerOrdinaryProfileSource,readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 const state=vi.hoisted(()=>({stats:new Map<string,bigint>(),errors:new Map<string,string>(),template:'',bug:false,capacitySuffix:false,calls:0,warn:vi.fn()}));
 vi.mock('node:fs',async load=>{const fs=await load<typeof import('node:fs')>();return {...fs,
@@ -24,6 +25,18 @@ function seed(){
  writeFileSync(registry,JSON.stringify({version:1,uid:userInfo().uid,generation:'1',legacyInventoryRequired:true,sources}));
  const current=join(root,'3'.repeat(80000));state.stats.set(current,1002n);return {paths,current};
 }
+function expectCapacity(action:()=>void,existing:NonNullable<ReturnType<typeof readOrdinaryProfileSources>>){
+ const bytes=Buffer.byteLength(serializeOrdinaryProfileSourceStorage(existing));
+ let message='';try{action();}catch(error){if(!(error instanceof Error))throw error;message=error.message;}
+ expect(message).toContain('profile_source_registry_capacity:');
+ expect(message).toContain('limit 524288 bytes (512 KiB)');
+ expect(message).toContain(`current usage ${bytes} bytes`);
+ expect(message).toContain(`${existing.sources.length} active records`);
+ expect(message).toContain(registry);
+ expect(message).toContain('删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理');
+ expect(message).toContain('也可以用编辑器打开该文件删除不再使用的项目条目（先备份）');
+ expect(message).not.toMatch(/remov(e|ing) (the |this |entire )?registry|delete.*registry file/i);
+}
 it('prunes the whole table across 200 deleted temporary sources',()=>{
  const directories=Array.from({length:200},()=>mkdtempSync(join(root,'source-')));
  for(const directory of directories){register(directory);expect(readOrdinaryProfileSources()!.sources).toHaveLength(1);rmSync(directory,{recursive:true});}
@@ -37,7 +50,7 @@ it.each(['EACCES','EIO'])('retains unrelated rows on %s while still pruning miss
 it('rejects a full live table without changing bytes, generation or any live row',()=>{
  const {paths,current}=seed();register(paths[0]!);
  const before=readFileSync(registry),facts=readOrdinaryProfileSources()!;
- expect(()=>register(current)).toThrow(/profile_source_registry_capacity.*registry\.json.*2 active.*clean up.*project directories.*retry/i);
+ expectCapacity(()=>register(current),facts);
  expect(readFileSync(registry)).toEqual(before);
  expect(readOrdinaryProfileSources()).toEqual(facts);
  expect(state.warn).not.toHaveBeenCalled();
@@ -55,8 +68,17 @@ it('sweeps stale rows even when registering an unchanged source',()=>{
 });
 it('reports registry path and recovery advice when the current source alone cannot fit',()=>{
  seed();const current=join(root,'4'.repeat(530000));state.stats.set(current,1003n);const before=readFileSync(registry);
- expect(()=>register(current)).toThrow(/profile_source_registry_capacity.*current source.*exceeds.*registry\.json/i);
+ const facts=readOrdinaryProfileSources()!;
+ expectCapacity(()=>register(current),facts);
+ expect(readOrdinaryProfileSources()).toEqual(facts);
  expect(readFileSync(registry)).toEqual(before);
+});
+it.each([false,true])('reports post-sweep usage on rejection without persisting partial cleanup (all stale: %s)',allStale=>{
+ const {paths}=seed();const facts=readOrdinaryProfileSources()!,before=readFileSync(registry);
+ state.errors.set(paths[0]!,'ENOENT');if(allStale)state.errors.set(paths[1]!,'ENOENT');
+ const current=join(root,'4'.repeat(530000));state.stats.set(current,1003n);
+ expectCapacity(()=>register(current),{...facts,sources:allStale?[]:[facts.sources[1]!]});
+ expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
 });
 it('reports a useful error for an existing oversized registry without reading it',()=>{
  seed();writeFileSync(registry,' '.repeat(512*1024+1));
@@ -97,8 +119,8 @@ it('prunes missing rows from compact v3 storage',()=>{
 it('bounds serialization when rejecting a full 2000-row compact live table',()=>{
  compactTable(2000);const current=join(root,'x'.repeat(160000));state.stats.set(current,99999n);state.calls=0;
  const before=readFileSync(registry),facts=readOrdinaryProfileSources()!;
- expect(()=>register(current)).toThrow(/profile_source_registry_capacity.*2000 active/);
- expect(state.calls).toBeLessThanOrEqual(2);
+ expectCapacity(()=>register(current),facts);
+ expect(state.calls).toBeLessThanOrEqual(4); // Includes the expected-usage serialization in expectCapacity.
  expect(readFileSync(registry)).toEqual(before);expect(readOrdinaryProfileSources()).toEqual(facts);
  expect(state.warn).not.toHaveBeenCalled();
 });

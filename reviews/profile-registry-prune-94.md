@@ -82,3 +82,24 @@ M1：恢复内容相同且 sweep 无删除时早退，不因数组位置重写�
 - `git diff --check`：exit 0。
 
 Codex 编码与对抗自审，未声称独立模型质量放行。未运行 Windows/macOS 实机或 CI；原有超限文件读取仍拒绝，O(N) 全表扫描仍保留。本轮不改权限或配置路径。测试/build/tsc/治理命令均退出，未启动持久服务；工作目录进程核对仅宿主 Codex/MCP，测试残留 0（`/tmp/fix94-r3-processes.json`）。缺陷尚未独立质量关闭，不修改外部台账状态。不 push、不合并、不发布。
+
+### 第三轮补充：容量拒写诊断（基于 2b36331a57b97a2521d52d5e6ff4084f2ff9459f）
+
+本次仅补充写入容量失败的两条提示。共同包含上限 `524288 bytes (512 KiB)`、清理失效记录后的既有 registry 序列化 UTF-8 字节数、既有活跃记录数和 registry 绝对路径。当前占用保留既有 generation/version，不含本次新增或合并后的源；全部失效时计算空 sources 的 envelope 字节。提示明确“删除或移走不再使用的项目目录后重试，失效记录会在下次写入时自动清理”和“也可以用编辑器打开该文件删除不再使用的项目条目（先备份）”，不建议删除整个 registry；单源超限仍额外提示缩短路径或减少元数据。
+
+对抗自审：不拿磁盘旧文件大小或待写候选大小冒充清理后的当前占用；拒写后的 stale sweep 不部分落盘；沿用真实 codec 的 flat/compact 选择。容量失败多一次既有记录序列化，生产调用上界从 2 调整为 3，仍与人口数量无关；测试辅助函数另一次计算期望占用，因此大表断言总计最多 4 次。成功、no-op、身份检查、锁、活记录保留及 generation 行为不改。本次不改权限、配置选择或环境处理代码。
+
+全部验证使用 `task_env=$(mktemp -d /tmp/fix94-extra-env-XXXXXX)`，创建 `$task_env/tmp`，设置 `HOME=$task_env TMPDIR=$task_env/tmp XDG_CONFIG_HOME=$task_env/config XDG_DATA_HOME=$task_env/data XDG_CACHE_HOME=$task_env/cache`；未访问真实 `~/.xiaok`。
+
+- 测试先行，未修改生产时执行 `./node_modules/.bin/vitest run tests/runtime/verification/ordinary-profile-source-registry-prune.test.ts`：4 failed / 13 passed，日志 `/tmp/fix94-extra-red.log`。
+- 修改后执行 `./node_modules/.bin/vitest run tests/runtime/verification/ordinary-profile-source-registry tests/runtime/verification/ordinary-registry-`：7 files passed / 1 failed，72 passed / 2 failed，日志 `/tmp/fix94-extra-all.log`。失败为原有 `recovers a retained registry lock only after the actual owning process exits` 和 `merges two actual process observations under the original registry lock without losing either`，均 15000ms 超时；未断言其根因或声称全部通过。
+- 额外补齐“全部记录失效”边界后，重新执行 prune 套件：18 passed，exit 0，日志 `/tmp/fix94-extra-prune-final.log`。
+- `npx tsc --noEmit -p .`：exit 0，日志 `/tmp/fix94-extra-tsc.log`。
+- `npm run governance:check`：exit 1，Oxlint 执行被 `spawnSync /usr/local/lib/nodejs/node EPERM` 阻塞，日志 `/tmp/fix94-extra-governance.log`；未更新 baseline。
+- `npm run architecture:check -- --changed`：exit 1，`spawnSync git EPERM`，日志 `/tmp/fix94-extra-architecture.log`。
+- 开工 `npm run hygiene:check` 未通过：freshness 无法核实、upstream 落后 3 提交及三个 sibling repo 缺失；日志 `/tmp/fix94-extra-hygiene.log`。按指定 HEAD 工作，未拉取。
+- 未启动持久服务；运行命令均退出，`/proc` 按工作目录核对测试残留 0，需额外清理进程 0，记录 `/tmp/fix94-extra-processes.json`。
+
+Codex 编码与自审；未做独立质量放行、Windows/macOS 实机或 CI，不 push、不合并、不发布。本次只提交生产提示、回归断言和本评审记录，不提交 dist。
+
+提交阻塞：已按要求检查 diff 并显式列出三个文件执行暂存和指定身份/消息的 commit；Git 无法创建 `/workspace/xiaok-cli/.git/worktrees/fix94/index.lock`（Read-only file system），暂存及提交均未成功。改动保留在工作区，未 push。
