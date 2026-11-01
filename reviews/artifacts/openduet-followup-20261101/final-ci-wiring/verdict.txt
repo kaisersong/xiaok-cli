@@ -1,0 +1,13 @@
+```json
+{
+  "verdict": "APPROVE",
+  "summary": "CI/test-only diff matches its stated intent: Windows npm invocation replaced with direct `node node_modules/vitest/vitest.mjs` plus explicit `--testNamePattern`, JSON assertion pins the exact two frozen test titles and success/zero-failure counts, so the prior accidental whole-file run (and any future title drift or silent reselection) now fails loudly. The afterPack gate-order test was repaired correctly: `copier`... rather, `pack-artifact-export-helper` (and all six gates) are now in the ordered stub list matching the real source order in after-pack.cjs, and named failures are injected through the real entry with `require.cache[entry]` invalidated per iteration, so ordering and fail-fast are genuinely exercised. Source after-pack.cjs is unchanged; no collector removed from the desktop matrix; permissions remain `contents: read`; no shell injection (all run inputs are literal), and test temp dirs are cleaned via afterAll rmSync.",
+  "p0": [],
+  "p1": [],
+  "p2": [
+    "artifact-export-package.test.ts 'single afterPack entry' test injects early-failure only for copy-packaged-dependencies, verify-packaged-runtime-dependencies, and verify-packaged-service-contracts; verify-packaged-main-freshness, pack-bundled-runtimes, and pack-artifact-export-helper are never fault-injected, so a future reorder or swallow after index 3 would not be caught (e.g., a trailing gate accidentally moved before service-contracts). Add the remaining three names to the injection loop.",
+    "assistant-coverage.yml foreground JSON assert checks numPassedTests/numFailedTests but only logs numPendingTests; a regression that makes one of the two selected tests skip (todo/skipIf) would still pass the gate while halving coverage. Assert numPendingTests===0 (and numTodoTests===0) alongside the exact-title deepEqual.",
+    "The gate-order test's happy-path assertion `expect(calls).toEqual(names)` uses an empty context object `{}` for every stub, so it cannot detect a gate that was changed to no longer be called with the context (e.g., a gate invoked with a derived context after a refactor). Passing a sentinel context and asserting each stub receives it would tighten this."
+  ]
+}
+```

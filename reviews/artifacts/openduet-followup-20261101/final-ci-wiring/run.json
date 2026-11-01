@@ -1,0 +1,25 @@
+{
+  "runnerPid": 11204,
+  "started": 1793524903.5546591,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "843cc28f996f91b38069e53fc767ce431e6f08119dfb0b0d95d4602546214058",
+  "status": 200,
+  "ended": 1793524922.921526,
+  "sourceDrift": [],
+  "responseSha256": "a69cf22d27eb8bf11769de5ea68a7876a3097f5659f521a6463b49746c2e0637",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 1074,
+    "completion_tokens_details": {
+      "reasoning_tokens": 580
+    },
+    "prompt_tokens": 7244,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 8318
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/final-ci-wiring-direct/response.json"
+}

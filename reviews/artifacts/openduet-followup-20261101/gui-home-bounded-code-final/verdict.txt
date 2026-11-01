@@ -1,0 +1,50 @@
+```json
+{
+  "reviewer": "Codex GPT-6 (independent static reviewer, GLM-5.3 framing honored as instructed role label only)",
+  "verdict": "APPROVE",
+  "scope": "Static review of the exact diagnostic driver copy plus the two cited production snippets. No execution, no edits, no tools.",
+  "confirmation_of_prior_concerns": {
+    "closeError_fixed_code": "Confirmed. Line 267 stores the literal 'diagnostic_close_failed_raw_message_not_retained' rather than error.message, and line 259 does the same for the main failure path. No raw exception text retained.",
+    "effective_root_env_verification": "Confirmed. Line 182 reads the real Electron main process.env (HOME, USERPROFILE, XIAOK_CONFIG_DIR, all XDG_*, APPDATA/LOCALAPPDATA, KSWARM_DATA_ROOT, INTENT_BROKER_*, XIAOK_DISABLE_GLOBAL_PLUGINS), line 170 records the launch-side split, and line 185 asserts deep equality plus HOME realpath equality against the physical account home from os.userInfo (lines 8-9, 62-64). This is genuine main-process verification, not a HOME/config-only proxy.",
+    "bounded_design_condition": "The prior conditional approval was contingent on the driver applying the confidentiality changes; this copy contains them (read-deny set with raw+canonical+symlink resolution at lines 155-160, preflight probe at 172-177 executed before app launch with status and both-deny assertion). Static condition satisfied."
+  },
+  "p0": [],
+  "p1": [],
+  "p2": [
+    {
+      "id": "P2-1",
+      "issue": "Seatbelt localhost allow rule may not actually match loopback traffic.",
+      "detail": "Line 161 uses (allow network-outbound (remote ip \"localhost:*\")). macOS sandbox-exec ip filters are typically specified with numeric addresses (e.g. 127.0.0.1:0) and this form may silently fail to match, and it does not cover ::1. Because the default is deny network-outbound, failure mode is over-restriction (fail-closed), not a leak, so this is not a P1; but it can cause spurious test failures or mask the intended localhost carve-out.",
+      "recommendation": "Use (remote ip \"127.0.0.1:0\") and (remote ip \"::1:0\") if loopback is genuinely required, or drop the allow entirely since ports 4400/4318 are asserted free and no service connections are expected."
+    },
+    {
+      "id": "P2-2",
+      "issue": "Read policy is denylist-only against the real account home; reads of arbitrary non-enumerated real-home paths (e.g. documents) remain permitted by the OS policy.",
+      "detail": "HOME is the real account home by design (accepted for GUI validity), and only the enumerated sensitive set (lines 155-159) is read-denied. Residual confidentiality exposure is bounded: network egress is denied except possibly-loopback, ports are pre-asserted free, no raw stdio/exceptions are retained, and artifacts are UI screenshots of the app's own renderer. This is a hardening gap, not a material leak channel under the stated conditions.",
+      "recommendation": "For a future pass, consider (deny file-read* (subpath <accountHome>)) plus an explicit allowlist for the system paths Chromium/AppKit demonstrably needs, or record the denylist-only posture explicitly in result.acceptedOsBookkeeping."
+    },
+    {
+      "id": "P2-3",
+      "issue": "pageerror/console listeners attach only after firstWindow resolves, so renderer errors emitted during initial window creation may be missed; the strict zero-console-error assertion (lines 255-256) is also sensitive to benign Chromium network/console noise, which could cause flaky failures.",
+      "recommendation": "Attach listeners via an app 'window' event hook before firstWindow, and consider classifying console errors (network vs script) rather than a flat zero-error gate."
+    }
+  ],
+  "other_notes": [
+    "processTable regex correctly handles multi-token lstart; PID identity is guarded by start-time match for both the monitor capture and the SIGTERM/SIGKILL cleanup loop, with ESRCH tolerated — no kill-by-name/path/port.",
+    "The policy probe (lines 172-177) is spawnSync, 10s timeout, 4KB maxBuffer, fully reaped by spawnSync semantics, run under the same launch env and policy before app start, and its probeRoot is removed in a finally block; the write-probe nonexistence assertion covers the 'write actually denied' case even if the in-probe check lied.",
+    "fs.mkdirSync(output) without recursive:true naturally fails if the evidence directory already exists, satisfying the no-overwrite requirement.",
+    "CDP-based preload verification ( Debugger.getScriptSource vs ASAR-extracted bytes with substring containment) is a sound workaround for getLastWebPreferences omitting preload; contextIsolation:true and nodeIntegration:false are still asserted directly.",
+    "auditPrivateDatabases depends on node:sqlite (DatabaseSync), requiring a sufficiently new Node runtime; if unavailable it fails closed into databaseAuditError with status failed, which is acceptable.",
+    "The require reassignment at line 7 (createRequire on the script path) is valid in CJS scope for the subsequent @playwright/test and @electron/asar resolutions.",
+    "No production source is modified; the two cited snippets confirm XIAOK_CONFIG_DIR precedence and Desktop pluginRootDir defaulting to the private getConfigDir('plugins'), matching the driver's isolation claims. CLI global-plugin flag correctly treated as defense-in-depth only.",
+    "TOCTOU on assertPortFree (bind-then-close before launch) is inherent to preflight port checks and immaterial given the outbound deny and the no-adoption rule."
+  ],
+  "limitations": [
+    "Static review only; no execution, no ASAR byte verification beyond the hashes/snippets provided, and no independent verification that the cited snippets correspond to the artifact the driver will launch.",
+    "UI selectors (testids, aria labels, bilingual regexes) and runtime inactivity assertions (periodic.available false, quality.sampleCount 0, assistantJobs>=2 all paused) are assumed correct per the bounded design; static review cannot confirm renderer behavior.",
+    "Seatbelt semantics (rule ordering, literal/subpath precedence, localhost filter matching) were assessed from convention, not validated against a live sandbox-exec.",
+    "Node/Electron/Playwright version compatibility (node:sqlite, CDP scriptParsed for preload.cjs, getLastWebPreferences behavior) is taken from the comments' claims.",
+    "This approval covers the diagnostic copy as presented; any subsequent edit requires re-review."
+  ]
+}
+```

@@ -11,6 +11,10 @@
 
 ZCode 预设计票已返回 APPROVE；其余 CLI 包装轮次主动停止、无票。实际最终批准来自上述直接 API 原始响应，不按退出码推断。限域静态批准不代表全仓产品验收。
 
+## 最后 CI 与 GUI 诊断复核
+
+实际 API model=glm-5.3 的 final-ci-wiring 返回 HTTP200/stop/APPROVE，无 P0/P1，覆盖当前 workflow 和 afterPack 顺序测试。保留原 P2；其“numPendingTests=0”建议不适用名称筛选场景，精确两项 passed 名称与数量断言已阻止少跑。GUI bounded 诊断副本获得同模型限域静态批准，但实际启动仍超时，批准不替代运行。GUI 票输出中的身份自述不作为模型依据，实际 API metadata 与响应 hash 已记录。两组源码 manifest/原票见新票目录。
+
 ## 前轮历史状态
 
 作者 Codex GPT-6；独立模型 Kimi CLI 2.2.0 / kimi-code/k3。这里只记实际裁决和范围，不把源码测试、超时或无 verdict 当独立批准。全部小型 manifest/run/verdict 见 artifacts/openduet-recovery-20261101；完整 prompt/bundle/输出留在 ignored .artifacts/openduet-recovery-20261101。

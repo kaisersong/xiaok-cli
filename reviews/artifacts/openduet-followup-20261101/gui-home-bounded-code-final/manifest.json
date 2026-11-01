@@ -1,0 +1,8 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    ".artifacts/openduet-followup-20261101/smoke-account-home-bounded.cjs": "4628d8355ecd526b8f3652cf6178bc8fe8f137084c888ec134bbfac72d8e127d"
+  },
+  "bundleSha256": "2795d21f2d81945395612c0c03c36d177aa7a5fc8c8d59d4239f9374b79703db"
+}

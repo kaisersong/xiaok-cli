@@ -1,0 +1,10 @@
+{
+  "author": "Codex GPT-6",
+  "reviewer": "GLM-5.3 direct configured Zhipu API",
+  "files": {
+    ".github/workflows/assistant-coverage.yml": "17422ab5046c6b48428d6da24535727feb7a7a417792ed63b3863376c45d4085",
+    "desktop/tests/main/artifact-export-package.test.ts": "8ed6fae19e9d06f7c3353ad627cc6dc97488012e7dde20210c1c3e408c06ce77",
+    "desktop/scripts/after-pack.cjs": "084388f4c3592cc74313fa8a69ed231a1f5cb2fce466edd962e5a1090e6299a5"
+  },
+  "bundleSha256": "843cc28f996f91b38069e53fc767ce431e6f08119dfb0b0d95d4602546214058"
+}

@@ -20,6 +20,14 @@ Windows ASAR key 读取分隔符、清理夹具命名导出、最低 Node 两个
 
 真实 P1/P2/P3 与 Windows 安装包门槛仍按下文保留；hygiene 对 sibling intent-broker 既有 tracked WIP/上游落后仍失败，不整理或提交别人的改动。mydocs 的过期“未实施”状态已在独立文档 PR kaisersong/mydocs#18 更新。
 
+## 桌面恢复后继续复验
+
+用户确认桌面恢复正常后，原隔离驱动仍在 GUI 启动前超时。另经实际 GLM-5.3 静态复核的 ignored 诊断副本采用真实 account HOME、全部业务根仍独立私有目录，并保留 OS 外联/写入限制、增加敏感路径读拒绝与真实 canary 读写拒绝探针；不将 CLI 的 global-plugin flag 当 Desktop 隔离证据。原始全文件代码票曾因输出预算耗尽未产生 verdict，不当作批准；修复 closeError 原文残留并增加实际 main 全部根环境断言后，最终 HTTP200/stop/APPROVE、无 P0/P1，P2/限制原文保留。票据中的模型自述身份不作为模型证据，以原始 API responseModel=glm-5.3、响应 hash 为准。
+
+诊断实际执行 account-home-bounded-gui/result.json：OS canary readDenied/writeDenied=true、子进程已回收；Electron launch 再次 TimeoutError，未到 main 环境断言、renderer、UI 或 SQLite 审计，因此不能声称 GUI/defaults 已验收。正常 OS GUI bookkeeping 被明确接受，未修改或结束系统 talagent，也未进一步放宽沙箱。原始 stdout/stderr、错误文本没有留存；只写固定诊断错误码。原版重试与诊断版均按独立 private cwd/PID 补查并回收，具体结果见各自 cleanup manifest。当前 GUI 阻塞保留。
+
+最低 Node 的相邻 Desktop cross-platform 原完整 23 文件清单实跑 281 passed / 1 条件跳过；cross-platform-scope-local.log/json。afterPack/copier/runtime 三文件 45 passed / 1 条件跳过；afterpack-chain-green.log。远端原 Windows 和 macOS 同一旧顺序夹具失败已复现修正，不用无关 baseline 归因掩盖。最终 CI/test-only 静态票 final-ci-wiring 为实际 GLM-5.3 HTTP200/stop/APPROVE、无 P0/P1；精确两名称已保证不能少跑一项，193 项本就是名称未选中，故不采纳票中 numPendingTests=0 的建议；其余非阻断 P2 保留。
+
 ## 前轮历史记录
 
 继续原分支 feat/openduet-assistant-20261101、原草稿 PR #116。恢复起点为 9e237f85（原实现 93992a44 加 upstream 集成），没有重写或重放真实交办。设计 v3 已从 mydocs GitHub 原路径重新读取；不覆盖主 docs checkout 的其他 WIP。

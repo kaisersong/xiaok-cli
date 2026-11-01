@@ -1,0 +1,25 @@
+{
+  "runnerPid": 98131,
+  "started": 1793524805.823484,
+  "model": "glm-5.3",
+  "reasoning_effort": "low",
+  "bundleSha256": "2795d21f2d81945395612c0c03c36d177aa7a5fc8c8d59d4239f9374b79703db",
+  "status": 200,
+  "ended": 1793524871.66547,
+  "sourceDrift": [],
+  "responseSha256": "360df3c81e6efb9c9fd639fd2872dddfe52a0ea32f34decddb390d89de8ef0e0",
+  "responseModel": "glm-5.3",
+  "finishReason": "stop",
+  "usage": {
+    "completion_tokens": 3772,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2325
+    },
+    "prompt_tokens": 7155,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 10927
+  },
+  "rawResponseLocation": ".artifacts/openduet-followup-20261101/gui-home-bounded-code-final-direct/response.json"
+}
