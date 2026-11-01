@@ -74,6 +74,11 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['KIMI'],
     defaultModel: createKimiK3Variant('kimi-default'),
     availableModels: [
+      // Coding Plan IDs (not the open-platform kimi-k3.1-pro IDs).
+      // https://www.kimi.com/code/docs/en/kimi-code/models.html (2026-10-31).
+      // Keep a 256K default; the optional 1M ceiling requires an entitled plan.
+      { ...createKimiK3Variant('kimi-k3.1-pro', 'k3.1-pro', 'Kimi K3.1 Pro'), capabilities: ['tools', 'thinking', 'image_in'] },
+      { ...createKimiK3Variant('kimi-k3.1-pro-highspeed', 'k3.1-pro-highspeed', 'Kimi K3.1 Pro Highspeed'), capabilities: ['tools', 'thinking', 'image_in'] },
       createKimiK3Variant('kimi-k3'),
       createKimiK3Variant('kimi-k3-256k', 'k3-256k', 'Kimi K3 256K'),
       { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
