@@ -32,6 +32,10 @@ export function closeNativeWorkflowReadPort(port:NativeWorkflowReadPort):Promise
  void Promise.allSettled(pending).then(()=>resolveDrain());return entry.drain;
 }
 export function assertNativeWorkflowReadPort(port:NativeWorkflowReadPort):void {const entry=ports.get(port);if(!entry||entry.closed)denied();}
+/** Fixed data read only; this does not issue a checkpoint or execution grant. */
+export function readNativeWorkflowRun(port:NativeWorkflowReadPort,projectId:string,workflowRunId:string):Promise<Record<string,any>> {
+ return get(port,`/projects/${encodeURIComponent(str(projectId))}/workflows/${encodeURIComponent(str(workflowRunId))}`);
+}
 function record(value:unknown):Record<string,any>{if(!value||typeof value!=='object'||Array.isArray(value))denied();return value as Record<string,any>;}
 function str(value:unknown):string {if(typeof value!=='string'||!value||value.length>4096)denied();return value;}
 async function get(port:NativeWorkflowReadPort,path:string):Promise<Record<string,any>> {
