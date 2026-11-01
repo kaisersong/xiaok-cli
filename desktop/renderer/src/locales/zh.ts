@@ -2038,6 +2038,7 @@ export const zh: LocaleStrings = {
     connectorChangeKey: "更换",
     connectorCancelEdit: "取消",
     connectorTestConnection: "测试连接",
+    connectorTestSaveFirst: "请先保存或刷新确认当前配置，再测试连接。",
     // SystemOne 辅助决策模型（工具管理）
     systemOneTitle: "SystemOne 辅助决策模型",
     systemOneDesc: "System One（Jev）是辅助决策模型，不是 xiaok 的推理模型：它走独立的 POST /v1/systemone 端点，返回带概率的结构化答案，不生成自由文本，也不参与默认聊天模型的选择。",

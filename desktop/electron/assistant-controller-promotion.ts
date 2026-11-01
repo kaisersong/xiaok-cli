@@ -153,4 +153,3 @@ function assertKnowledgeTargetMatches(
     && metadata.assistantContentDigest === computeKbSourceContentDigest({ text: input.content });
   if (!matches) throw new Error('assistant_knowledge_target_conflict');
 }
-
