@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'tests/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
   push:
-    branches: [master]
+    branches: [master, 'feat/openduet-*']
     paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'tests/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
   workflow_dispatch: {}
 permissions:
