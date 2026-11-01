@@ -1,3 +1,22 @@
+import {AssistantAnalysisSettings} from './assistant-analysis-settings.js';
+import {bootstrapDesktopAssistantAnalysisProvider,checkDesktopAssistantAnalysisProviderSupport} from './assistant-analysis-provider.js';
+import {prepareAssistantAnalysisResources,restoreAssistantAnalysisResources} from './assistant-analysis-resources.js';
+import {readAssistantModelConfiguration} from '../../src/runtime/assistant/model-identity.js';
+import {createAssistantQualityProduct} from './assistant-quality-product.js';
+import {createAssistantQualityFilePorts} from './assistant-quality-files.js';
+import type {AssistantDesktopSnapshotPorts} from './assistant-desktop-snapshot.js';
+import {AssistantPeriodicRuntime,commitOrdinaryAssistantCheck} from './assistant-periodic-runtime.js';
+import {AssistantPeriodicPolicyService} from './assistant-periodic-policy.js';
+import {createHash} from 'node:crypto';
+import {AssistantLaunchService} from './assistant-launch-service.js';
+import {readInstalledCurrentOwner} from '../../src/runtime/verification/installed-owner-state.js';
+import {completionConsumerOwner} from '../../src/runtime/verification/completion-consumer-owner.js';
+import {AssistantCalendarSource} from './assistant-calendar-source.js';
+import {createNativeCalendarRead,verifyYzjCalendarBinary,readYzjCalendarAccount} from './assistant-calendar-native.js';
+import {DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
+import {AssistantActionService} from './assistant-action-service.js';
+import { readAssistantTaskSource,readAssistantTaskMetadata } from './assistant-task-source.js';
+import { completeAssistantSource, readAssistantKSwarmProjects } from './assistant-source-ports.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
@@ -32,7 +51,7 @@ import { scheduledRunPresentation } from './scheduled-run-presentation.js';
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
-import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
+import { dialog, app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -99,7 +118,7 @@ import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js'
 import { DesktopApplicationWindowOwner } from './desktop-application-window-owner.js';
 import { AssistantService } from './assistant-service.js';
 import { AssistantController, createAssistantCandidatePromotionTargets } from './assistant-controller.js';
-import { createAssistantPublicationContextReader } from './assistant-publication-context.js';
+import {createAssistantDerivedMainPorts} from './assistant-derived-main.js';
 import { ASSISTANT_EVENING_LOOP_ID, ASSISTANT_MORNING_LOOP_ID } from './assistant-types.js';
 import { createAssistantRuntime } from './assistant-runtime.js';
 import { createAssistantDesktopSnapshotReader } from './assistant-desktop-snapshot.js';
@@ -813,6 +832,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!desktopShutdownGate.isOpen) return window;
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    workspaceRoot:process.cwd(),
     harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
@@ -1199,10 +1219,12 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   registerUpdaterIpc(shutdownAwareIpc, updaterProducers, isMainWindowSender);
 
+  let assistantPeriodicRuntime:AssistantPeriodicRuntime|undefined;
+  let assistantPeriodicPolicy:AssistantPeriodicPolicyService|undefined;
   let globalBackgroundAutoRunEnabled = (await loadConfig()).automations?.globalBackgroundAutoRunEnabled !== false;
   const automationConfigOwner = createAutomationConfigOwner({
     getEnabled: () => globalBackgroundAutoRunEnabled,
-    onCommitted: enabled => { globalBackgroundAutoRunEnabled = enabled; },
+    onCommitted: enabled => { globalBackgroundAutoRunEnabled = enabled;assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'}); },
     persist: (enabled, source) => updateGlobalBackgroundAutoRun(enabled, source),
   });
   const automationConfigProducers = new Map<string, IpcHandlerListener>([
@@ -1284,27 +1306,27 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     getWindow: () => mainWindow,
     isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer}),
   }));
-  const assistantContextReader = createAssistantPublicationContextReader({store: loopRuntime.loopStore, evidenceStore: loopRuntime.evidenceStore, publication: loopPublicationService});
-  const assistantSnapshotReader = createAssistantDesktopSnapshotReader({
-    listTaskSnapshots: ({ from, to }) => readRecentTaskSnapshots(dataRoot, 100)
-      .filter(snapshot => snapshot.updatedAt >= from && snapshot.updatedAt <= to)
-      .map(snapshot => ({
-        id: snapshot.taskId,
-        threadId: snapshot.context?.threadId ?? snapshot.sessionId,
-        title: snapshot.understanding?.goal ?? snapshot.prompt.slice(0, 160),
-        status: snapshot.status,
-        summary: snapshot.result?.summary ?? snapshot.understanding?.nextAction,
-        updatedAt: snapshot.updatedAt,
-        artifacts: (snapshot.result?.artifacts ?? []).map(artifact => ({
-          id: artifact.artifactId,
-          title: artifact.title,
-          summary: artifact.kind,
-          updatedAt: Number.isFinite(Date.parse(artifact.createdAt)) ? Date.parse(artifact.createdAt) : snapshot.updatedAt,
-        })),
-      })),
+  const assistantCalendarSource=new AssistantCalendarSource({
+    store:loopRuntime.loopStore,
+    connect:async()=>{
+      const picked=await dialog.showOpenDialog({properties:['openFile']});
+      if(picked.canceled||picked.filePaths.length!==1)throw Error('assistant_calendar_connection_cancelled');
+      const binary=await verifyYzjCalendarBinary(picked.filePaths[0]);
+      return {binary,accountId:await readYzjCalendarAccount(binary)};
+    },
+    read:createNativeCalendarRead(()=>loopRuntime.loopStore.getAssistantCalendarConnection()),
+  });
+  const assistantDerivedPorts=createAssistantDerivedMainPorts({
+    store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,publication:loopPublicationService,
+    calendarSource:assistantCalendarSource,memoryStore:()=>getDesktopMemoryStore(dataRoot),
+    dataRoot,cwd:()=>process.cwd(),projectCwd:projectId=>projectCwdById.get(projectId),
+  });
+  const assistantContextReader=assistantDerivedPorts.contextReader;
+  const assistantSnapshotPorts:AssistantDesktopSnapshotPorts = {
+    listTaskSnapshots:query=>readAssistantTaskMetadata(dataRoot,query),
     listKSwarmProjects: async ({ from, to }) => {
-      const projects = await fetchKSwarmProjectsForMobile(kswarmService);
-      return projects.flatMap(project => {
+      const receipt = await readAssistantKSwarmProjects(kswarmService);
+      return {...receipt, items: receipt.items.flatMap(project => {
         const id = typeof project.id === 'string' ? project.id : '';
         const name = typeof project.name === 'string' ? project.name : '';
         const updatedAt = typeof project.updatedAt === 'number'
@@ -1321,9 +1343,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
           summary: typeof project.summary === 'string' ? project.summary : undefined,
           updatedAt,
         }];
-      });
+      }) };
     },
-    listTimedActions: ({ from, to }) => timedActionService.getActions().flatMap(action => {
+    listTimedActions: ({ from, to }) => completeAssistantSource(timedActionService.getActions().flatMap(action => {
       const dueAt = action.lastDueAt ?? action.nextDueAt;
       const occurrenceAt = typeof dueAt === 'number' && dueAt >= from && dueAt <= to ? dueAt : action.updatedAt;
       if (occurrenceAt < from || occurrenceAt > to) return [];
@@ -1335,8 +1357,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         dueAt,
         updatedAt: action.updatedAt,
       }];
-    }),
-    listMeetingMetadata: ({ from, to }) => knowledgeBaseStore.listMeetings()
+    })),
+    listMeetingMetadata: ({ from, to }) => completeAssistantSource(knowledgeBaseStore.listMeetings()
       .filter(meeting => meeting.updatedAt >= from && meeting.updatedAt <= to)
       .map(meeting => ({
         id: meeting.id,
@@ -1344,8 +1366,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         status: meeting.status,
         summary: meeting.failureReason || undefined,
         updatedAt: meeting.updatedAt,
-      })),
-    listKnowledgeSourceMetadata: ({ from, to }) => knowledgeBaseStore.listCollections()
+      }))),
+    listKnowledgeSourceMetadata: ({ from, to }) => completeAssistantSource(knowledgeBaseStore.listCollections()
       .flatMap(collection => knowledgeBaseStore.listSources(collection.id))
       .filter(source => source.updatedAt >= from && source.updatedAt <= to)
       .map(source => ({
@@ -1355,23 +1377,100 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         status: source.parseStatus,
         summary: typeof source.metadata.summary === 'string' ? source.metadata.summary : undefined,
         updatedAt: source.updatedAt,
-      })),
-  });
+      }))),
+  };
+  const assistantSnapshotReader=createAssistantDesktopSnapshotReader(assistantSnapshotPorts);
+  const assistantQualitySnapshotReader=createAssistantDesktopSnapshotReader({...assistantSnapshotPorts,listTaskSnapshots:query=>readAssistantTaskMetadata(dataRoot,query,10000)},{limits:{maxItemsPerScope:10000,maxSerializedBytes:3*1024*1024,maxSummaryChars:500}});
   const assistantRuntime = createAssistantRuntime({
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
+    derived:assistantDerivedPorts.derived,
     collect: async input => {
       const snapshot = await assistantSnapshotReader.collect(input);
       if (input.kind === 'evening') return snapshot;
-      return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
+      await assistantCalendarSource.collect({now:input.now,requestSource:'scheduler',signal:input.signal});
+      return assistantContextReader.buildMorningContext({snapshot,pinnedThreadIds:[...threadMetaStore.getThreadIds('pinned')]});
     },
   });
+  const assistantAnalysisSettings=new AssistantAnalysisSettings({store:loopRuntime.loopStore,
+    models:()=>{const {config}=readAssistantModelConfiguration();return Object.entries(config.models).flatMap(([modelId,model])=>checkDesktopAssistantAnalysisProviderSupport(config,modelId).supported?[{modelId,label:model.label.slice(0,200)}]:[]);},
+    bootstrap:async(modelId,prepare)=>{
+      const {resolvePythonCommand}=await import('../../src/platform/plugins/install/dependencies.js');
+      const pythonCommand=managedPythonCommand??resolvePythonCommand();
+      const resources=await (prepare?prepareAssistantAnalysisResources:restoreAssistantAnalysisResources)({dataRoot,pythonCommand});
+      return bootstrapDesktopAssistantAnalysisProvider({dataRoot:resources.dataRoot,pythonExecutable:resources.pythonExecutable,modelId});
+    },onInvalidated:()=>{assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'});},
+  });
+  await assistantAnalysisSettings.restore();
+  const qualityFiles=createAssistantQualityFilePorts({
+    chooseSave:async()=>{
+      const zh=loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)?.locale==='zh';
+      const picked=await dialog.showSaveDialog({title:zh?'导出真实案例供人工复核（案例ID、摘要与时间；已遮盖已知凭据）':'Export real cases for human review (case IDs, summaries and times; known credentials redacted)',defaultPath:'assistant-quality-review.json',filters:[{name:'JSON',extensions:['json']}]});
+      return picked.canceled||!picked.filePath?null:picked.filePath;
+    },
+    chooseOpen:async()=>{const picked=await dialog.showOpenDialog({properties:['openFile'],filters:[{name:'JSON',extensions:['json']}]});return picked.canceled||picked.filePaths.length!==1?null:picked.filePaths[0];},
+  });
+  const assistantQualityProduct=createAssistantQualityProduct({knownSecrets:()=>Object.values(readAssistantModelConfiguration().config.providers).flatMap(provider=>provider.apiKey?[provider.apiKey]:[]),store:loopRuntime.loopStore,dataRoot,provider:()=>assistantAnalysisSettings.current(),files:qualityFiles,
+    collect:async profile=>{const now=Date.now();return assistantQualitySnapshotReader.collect({kind:'morning',profile,now,window:{from:now-14*86400000,to:now}});},
+    confirmHumanReview:async kind=>{
+      const zh=loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)?.locale==='zh';
+      const text=zh?(kind==='risk_review'?'我确认这些严重风险标签由人工在模型预测前核实，并按冻结的风险规则标注。':'我确认这些行动标签和分歧裁决来自人工复核，没有将模型生成的标签冒充人工标签。'):(kind==='risk_review'?'I confirm these severe-risk labels were reviewed by a human before model predictions, under the frozen risk rules.':'I confirm the action labels and adjudications are human-reviewed; model-generated labels are not represented as human labels.');
+      const picked=await dialog.showMessageBox({type:'question',message:text,buttons:zh?['取消','确认人工复核并导入']:['Cancel','Confirm human review and import'],defaultId:0,cancelId:0});
+      return picked.response===1?{userId:'desktop-user:'+createHash('sha256').update(dataRoot).digest('hex'),text}:false;
+    },onCommitted:()=>{assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'});},
+  });
+  assistantPeriodicPolicy=new AssistantPeriodicPolicyService({store:loopRuntime.loopStore,timeZone:loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)!.timeZone,timedActionService,globalEnabled:()=>globalBackgroundAutoRunEnabled,
+    onCommitted:()=>assistantPeriodicRuntime?.cancelCurrent(),
+    qualification:()=>{const readiness=assistantPeriodicRuntime?.readiness();return readiness?.available?{qualityDigest:readiness.qualityDigest!,analysisContract:readiness.analysisContract!}:undefined;},
+    delivery:services.assistantDigestDelivery,
+  });
+  assistantPeriodicRuntime=new AssistantPeriodicRuntime({store:loopRuntime.loopStore,policy:assistantPeriodicPolicy,globalEnabled:()=>globalBackgroundAutoRunEnabled,
+    analysisPort:()=>assistantAnalysisSettings.current()?.port,quality:()=>assistantQualityProduct.quality(),
+    collect:async({now,signal})=>{
+      const profile=loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)!;
+      const profileJson=JSON.stringify(profile),snapshot=await assistantSnapshotReader.collect({kind:'morning',profile,now});signal?.throwIfAborted();
+      const structuralRevisions=new Map(timedActionService.getActions().map(action=>[JSON.stringify(['timed_action',action.id]),JSON.stringify(action.nextDueAt??null)]));
+      return {snapshot:{current:snapshot},coverage:snapshot.coverage,structuralRevisions,isCurrent:()=>JSON.stringify(loopRuntime.loopStore.getAssistantProfile(profile.id))===profileJson};
+    },
+    publish:async input=>{
+      commitOrdinaryAssistantCheck({...input,store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore});
+      if(!input.output.recommendations.length)return;
+      const source=await assistantContextReader.readMorningActionSource('scheduler');if(!source||source.runId!==input.runId||!source.isCurrent()||!input.isCurrent())return;
+      const actions=loopRuntime.loopStore.projectAssistantActions(source,Date.now()).filter(proposal=>proposal.decision==='open'&&proposal.originRunId===input.runId);
+      const revisions=actions.map(proposal=>({workItemIdentity:proposal.workItemIdentity,notifiableRevision:createHash('sha256').update(JSON.stringify([proposal.workItemIdentity,proposal.actionKind,proposal.evidenceRefs.map(ref=>input.structuralRevisions?.get(JSON.stringify([ref.kind,ref.id]))??null)])).digest('hex')}));
+      const delivery=assistantPeriodicPolicy!.prepareDigest({runId:input.runId,revisions,isCurrent:()=>source.isCurrent()&&input.isCurrent(),requestSource:'scheduler'});
+      if(delivery.status==='prepared')await assistantPeriodicPolicy!.dispatchDigest(delivery.envelope,{requestSource:'scheduler'});
+    },
+  });
+  const periodicRunner=assistantPeriodicRuntime.runner();
+  assistantPeriodicPolicy.syncSchedule({requestSource:'scheduler'});
+  desktopIngressOwners.push({name:'assistant-periodic-runtime',stopAccepting:()=>{void assistantPeriodicRuntime!.close();},abortAllActive:()=>{void assistantPeriodicRuntime!.close();},drain:deadlineMs=>desktopShutdownGate.drain(deadlineMs)});
+  registerLifetimeDisposerStep('assistant-periodic-runtime',()=>assistantPeriodicRuntime!.close());
   const assistantAwareRunner = createLoopExecutionAdapter({
     genericRunner: loopRuntime.runner,
     assistantRuntime,
+    periodicRuntime:periodicRunner,
   });
+  const assistantLaunchService=new AssistantLaunchService({store:loopRuntime.loopStore,port:services.assistantTaskAdmission,threadTargets:services.assistantThreadTargets,
+    readSource:()=>assistantContextReader.readMorningActionSource('user'),
+    readFollowUpSource:candidateId=>assistantContextReader.readAcceptedFollowUpSource(candidateId),
+    isSourceLaunchable:source=>process.env.XIAOK_ASSISTANT_LOCAL_LAUNCH_PILOT==='1'&&!loopRuntime.loopStore.getLoopRunPublicationBasis(source.runId)&&readInstalledCurrentOwner(completionConsumerOwner({ownerKind:'loop_run',ownerId:source.runId})).kind==='ordinary',
+  });
+  services.subscribeAssistantTaskTerminal(taskId=>{
+    if(!desktopShutdownGate.isOpen)return;
+    const writer=acquireAutomationWriter('assistant:terminal-projection');
+    void assistantLaunchService.observeTask({taskId,requestSource:'scheduler'}).catch(()=>{console.warn('[assistant] task projection pending');}).finally(()=>writer.release());
+  });
+  const assistantActionService=new AssistantActionService({store:loopRuntime.loopStore,profileId:DEFAULT_PERSONAL_ASSISTANT_ID,readSource:requestSource=>assistantContextReader.readMorningDisplaySource(requestSource),canStart:()=>assistantLaunchService.available()});
   const assistantController = new AssistantController({
+    actionService:assistantActionService,
+    launchService:assistantLaunchService,
+    analysisSettings:assistantAnalysisSettings,qualityReview:assistantQualityProduct,
+    periodicPolicy:assistantPeriodicPolicy,periodicRuntime:assistantPeriodicRuntime,notificationReady:()=>services.assistantDigestDelivery.available(),isGlobalBackgroundEnabled:()=>globalBackgroundAutoRunEnabled,
+    onProfileStatusChanged:()=>{assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'});},
+    calendarSource:assistantCalendarSource,
+    calendarMemory:assistantDerivedPorts.calendarMemory,
     assistantService,
     candidates: loopRuntime.loopStore,
     memoryStore: getDesktopMemoryStore(dataRoot),
@@ -1751,6 +1850,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       getMainWindow: () => mainWindow,
       loopRuntime,
       assistantRuntime,
+      periodicRuntime:periodicRunner,
       createTask: (input) => services.createBackgroundTask(input),
       executeRoomTask: createRoomScheduledTaskDispatch({
         getWorkspace: roomId=>roomWorkspaceService.getCollaborationRoomWorkspace({roomId}),
@@ -1993,6 +2093,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const taskRecovery = startDesktopTaskRecovery(desktopShutdownGate, async () => {
     debugMain('task-recovery:started');
     await services.recoverStaleTasks();
+    await assistantLaunchService.recover({requestSource:'scheduler'});
+    await assistantPeriodicPolicy!.recoverDeliveries({requestSource:'scheduler'});
     debugMain('task-recovery:completed');
   });
   void taskRecovery?.catch(error => {

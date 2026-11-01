@@ -1,3 +1,5 @@
+import {assistantDigestEnvelopeSchema,assistantNotificationSuppression,type AssistantDigestFacts,type AssistantDigestEnvelope} from '../assistant/notification-policy.js';
+import type {AssistantDigestReceipt} from '../assistant/digest-receipts.js';
 import type { ConversationActivityStore } from './store.js';
 import type { ActivityOrigin, ConversationActivity, ReportingPreference, WorkBinding, WorkWatch } from './types.js';
 import type { SerializedTaskReference } from '@modelcontextprotocol/ext-tasks/client';
@@ -37,6 +39,7 @@ export class ConversationActivityService {
     store: ConversationActivityStore; profileId: string; actorId: string;
     getThread(threadId: string): ActivityThreadIdentity | null;
     canObserveWork(watch: WorkWatch): Promise<boolean> | boolean;
+    assistantDigest?:{readFacts(envelope:AssistantDigestEnvelope):AssistantDigestFacts|undefined;now?():number;platformAvailable():boolean;notify():Promise<'shown'|'suppressed'|'failed'>};
     notify?(activity: ConversationActivity, watch: WorkWatch): Promise<'shown' | 'suppressed' | 'failed'>;
     onError?(error: unknown): void;
   }) {}
@@ -289,6 +292,33 @@ export class ConversationActivityService {
       const watch = this.options.store.getWatch(watchId)!;
       await this.publish({ threadId: watch.origin.threadId, watchId });
     }
+  }
+
+  /** Fixed producer owner only; never an agent or renderer mutation. */
+  enqueueAssistantDigest(raw:AssistantDigestEnvelope,context:{requestSource:'user'|'agent'|'scheduler'}):Promise<AssistantDigestReceipt>{
+    if(context?.requestSource!=='scheduler')return Promise.reject(Error('assistant_digest_source_denied'));
+    if(this.disposed)return Promise.reject(Error('activity_service_disposed'));
+    const envelope=assistantDigestEnvelopeSchema.parse(raw),owner=this.options.assistantDigest;
+    const suppressed=(suppressionReason:NonNullable<AssistantDigestReceipt['suppressionReason']>):AssistantDigestReceipt=>({deliveryId:envelope.deliveryId,status:'suppressed',suppressionReason});
+    let result!:AssistantDigestReceipt;
+    const deliver=async():Promise<AssistantDigestReceipt>=>{
+      if(!owner)return suppressed('platform_unavailable');
+      let initial:AssistantDigestFacts|undefined;try{initial=owner.readFacts(envelope);}catch{}
+      // No receipt for a fabricated/nonexistent main intent, even with a producer token.
+      if(!initial||JSON.stringify(initial.envelope)!==JSON.stringify(envelope))return suppressed('stale_policy');
+      const claim=this.options.store.claimAssistantDigest(envelope);if(!claim.claimed)return claim.receipt;
+      let facts:AssistantDigestFacts|undefined;try{facts=owner.readFacts(envelope);}catch{}
+      if(this.disposed||!facts)return this.options.store.finishAssistantDigest(suppressed('stale_policy'));
+      const reason=assistantNotificationSuppression({facts,envelope,now:(owner.now??Date.now)(),platformAvailable:owner.platformAvailable()});
+      if(reason)return this.options.store.finishAssistantDigest(suppressed(reason));
+      // No await between this current-policy gate and the fixed OS adapter call.
+      try{
+        const status=await owner.notify();
+        if(status==='suppressed')return this.options.store.finishAssistantDigest(suppressed('platform_unavailable'));
+        return this.options.store.finishAssistantDigest({deliveryId:envelope.deliveryId,status});
+      }catch{return this.options.store.getAssistantDigestReceipt(envelope.deliveryId)!;}
+    };
+    return this.own(async()=>{result=await deliver();}).then(()=>result);
   }
 
   notifyPending(): Promise<void> {

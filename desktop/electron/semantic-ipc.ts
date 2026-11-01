@@ -1,8 +1,16 @@
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
+import type {AssistantAnalysisStatus,AssistantAnalysisSettingsInput} from '../shared/assistant-analysis-settings-contract.js';
+import type {AssistantThreadTargetPage} from '../shared/assistant-launch-contract.js';
+import type {AssistantQualityStatus} from '../shared/assistant-quality-contract.js';
+import type {AssistantPeriodicSettings,AssistantPeriodicStatus,AssistantPeriodicCheck} from '../shared/assistant-periodic-contract.js';
+import type {AssistantLaunchService} from './assistant-launch-service.js';
+import type {AssistantCalendarStatus} from '../shared/assistant-calendar-contract.js';
+import type {AssistantActionDecisionResultDto} from '../shared/assistant-action-contract.js';
 import { registerCollaborationRoomTypedIpc } from './collaboration-room-typed-ipc.js';
 import type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../shared/collaboration-room-ipc-contract.js';
 import { registerKSwarmProjectAgentTypedIpc } from './kswarm-project-agent-typed-ipc.js';
 import { registerKSwarmTeamTypedIpc } from './kswarm-team-typed-ipc.js';
-import type { AssistantProfileDto, AssistantOverviewDto, AssistantCandidateDto, AssistantAcceptResultDto } from '../shared/assistant-ipc-contract.js';
+import type { AssistantCandidatePageDto, AssistantActionOverviewDto, AssistantProfileDto, AssistantOverviewDto, AssistantCandidateDto, AssistantAcceptResultDto } from '../shared/assistant-ipc-contract.js';
 import { registerAssistantTypedIpc } from './assistant-typed-ipc.js';
 import type { KSwarmSemanticService } from './kswarm-semantic-service.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
@@ -27,6 +35,29 @@ export interface CollaborationRoomSemanticController {
 }
 
 export interface AssistantSemanticController {
+  getCalendarMemorySettings?():Promise<AssistantCalendarMemorySettingsDto>;configureCalendarMemory?(input:AssistantCalendarMemoryInput&{requestSource:'user'}):Promise<AssistantCalendarMemorySettingsDto>;
+  getAnalysisProvider?():Promise<AssistantAnalysisStatus>;configureAnalysisProvider?(input:AssistantAnalysisSettingsInput&{requestSource:'user'}):Promise<AssistantAnalysisStatus>;listLaunchTargets?(input:{cursor?:string;requestSource:'user'}):Promise<AssistantThreadTargetPage>;
+  getQualityStatus?():Promise<AssistantQualityStatus>;
+  exportQualityReview?(input:{requestSource:'user'}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+  importQualityReview?(input:{attestHumanReview:true;requestSource:'user'}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+  revokeQualityReview?(input:{requestSource:'user'}):Promise<AssistantQualityStatus>;
+  getPeriodicStatus?():Promise<AssistantPeriodicStatus>;
+  configurePeriodic?(input:AssistantPeriodicSettings&{requestSource:'user'}):Promise<AssistantPeriodicStatus>;
+  checkPeriodic?(input:{requestSource:'user'}):Promise<AssistantPeriodicCheck>;
+  cancelLaunch?(input:Parameters<AssistantLaunchService['cancel']>[0]):ReturnType<AssistantLaunchService['cancel']>;
+  prepareReconfirmation?(input:Parameters<AssistantLaunchService['prepareReconfirmation']>[0]):ReturnType<AssistantLaunchService['prepareReconfirmation']>;
+  prepareFollowUpLaunch?(input:Parameters<AssistantLaunchService['prepareFollowUp']>[0]):ReturnType<AssistantLaunchService['prepareFollowUp']>;
+  prepareLaunch?(input:Parameters<AssistantLaunchService['prepare']>[0]):ReturnType<AssistantLaunchService['prepare']>;
+  confirmLaunch?(input:Parameters<AssistantLaunchService['confirm']>[0]):ReturnType<AssistantLaunchService['confirm']>;
+  getActionLaunch?(input:Parameters<AssistantLaunchService['get']>[0]):ReturnType<AssistantLaunchService['get']>;
+  resolveActionLaunch?(input:Parameters<AssistantLaunchService['resolve']>[0]):ReturnType<AssistantLaunchService['resolve']>;
+  getCalendarStatus?():AssistantCalendarStatus;
+  connectCalendar?(input:{requestSource:'user'}):Promise<AssistantCalendarStatus>;
+  disconnectCalendar?(input:{requestSource:'user'}):AssistantCalendarStatus;
+  getActionCandidatesPage?(input:{cursor:string}):AssistantCandidatePageDto|Promise<AssistantCandidatePageDto>;
+  dismissAction?(input:{proposalId:string;expectedRevision:number;existingThreadId?:string;requestSource:'user'}):Promise<AssistantActionDecisionResultDto>;
+  snoozeAction?(input:{proposalId:string;expectedRevision:number;snoozeUntil:number;requestSource:'user'}):Promise<AssistantActionDecisionResultDto>;
+  getActionOverview?(): AssistantActionOverviewDto | Promise<AssistantActionOverviewDto>;
   getOverview(): AssistantOverviewDto | Promise<AssistantOverviewDto>;
   activate(input: { requestSource: 'user' }): AssistantProfileDto | Promise<AssistantProfileDto>;
   pause(input: { requestSource: 'user' }): AssistantProfileDto | Promise<AssistantProfileDto>;

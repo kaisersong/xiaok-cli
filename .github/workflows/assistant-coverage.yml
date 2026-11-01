@@ -1,0 +1,141 @@
+name: Assistant source coverage
+on:
+  pull_request:
+    paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
+  push:
+    branches: [master]
+    paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  coverage:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    env:
+      # Validation only: no signing identities or publish steps in this job.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: cd desktop && npm ci --ignore-scripts
+      - name: Install the locked Electron binary after ignore-scripts
+        working-directory: desktop
+        # Run only Electron's installer, not every dependency lifecycle script.
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: ''
+          ELECTRON_OVERRIDE_DIST_PATH: ''
+        run: node node_modules/electron/install.js
+      - name: Install Linux virtual display and Electron shared libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb xauth libgtk-3-0 libnss3 libasound2t64 libgbm1 libxss1
+      - name: Verify the actual Electron Node binary
+        working-directory: desktop
+        # The ASAR import gate uses ELECTRON_RUN_AS_NODE, not Chromium. This also
+        # works without DISPLAY or Chromium sandbox privileges (including root);
+        # --no-sandbox is a Chromium flag and must not be sent to the Node probe.
+        run: |
+          node -e "const {spawnSync}=require('node:child_process');const expected=require('electron/package.json').version;const r=spawnSync(require('electron'),['--eval','console.log(process.versions.electron)'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',timeout:30000});if(r.error)throw r.error;if(r.status!==0||r.stdout.trim()!==expected){console.error(r.stderr||r.stdout);process.exit(1)}console.log('Actual Electron Node binary verified: '+expected)"
+      - run: npm run test:sandbox:build
+      - name: Formal action body and hash binding
+        run: npm run test:sandbox:run -- .test-dist/tests/runtime/verification/loop-application-binding.test.js .test-dist/tests/runtime/task-host/task-runtime-host.test.js .test-dist/tests/runtime/conversation-activity/assistant-digest.test.js .test-dist/tests/runtime/conversation-activity/assistant-quality.test.js .test-dist/tests/runtime/conversation-activity/owner-host.test.js
+      - name: Production collector, runtime, durable owner and transport
+        working-directory: desktop
+        shell: bash
+        run: |
+          electron_test_runner=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            electron_test_runner=(xvfb-run --auto-servernum)
+          fi
+          "${electron_test_runner[@]}" npm run test -- --run \
+          tests/main/assistant-periodic-runtime.test.ts \
+          tests/main/assistant-periodic-scheduling.test.ts \
+          tests/main/assistant-digest-policy.test.ts \
+          tests/main/assistant-launch.test.ts \
+          tests/main/assistant-calendar-source.test.ts \
+          tests/main/assistant-calendar-native.test.ts \
+          tests/main/assistant-analysis-budget.test.ts \
+          tests/main/assistant-action-service.test.ts \
+          tests/main/assistant-candidate-pager.test.ts \
+          tests/main/assistant-publication-context.test.ts \
+          tests/main/assistant-morning-suggestions.test.ts \
+          tests/main/assistant-action-publication.test.ts \
+          tests/main/assistant-llm.test.ts \
+          tests/main/yunzhijia-calendar-cli.test.ts \
+          tests/main/assistant-source-coverage.test.ts \
+          tests/main/assistant-desktop-snapshot.test.ts \
+          tests/main/assistant-runtime.test.ts \
+          tests/main/assistant-loop-executor.test.ts \
+          tests/main/assistant-semantic-ipc-registry.test.ts \
+          tests/main/assistant-semantic-ipc-v2.test.ts \
+          tests/main/preload-contract.test.ts \
+          tests/main/preload-sandbox.test.ts \
+          tests/renderer/assistant-home.test.tsx \
+          tests/renderer/assistant-detail.test.tsx \
+          tests/renderer/assistant-calendar.test.tsx \
+          tests/renderer/assistant-launch.test.tsx \
+          tests/renderer/assistant-periodic.test.tsx \
+          tests/main/assistant-analysis-provider-counter.test.ts \
+          tests/main/assistant-analysis-provider.test.ts \
+          tests/main/assistant-analysis-resources.test.ts \
+          tests/main/assistant-analysis-settings.test.ts \
+          tests/main/assistant-calendar-context.test.ts \
+          tests/main/assistant-calendar-memory-settings.test.ts \
+          tests/main/assistant-candidate-promotion.test.ts \
+          tests/main/assistant-candidate-store.test.ts \
+          tests/main/assistant-controller.test.ts \
+          tests/main/assistant-derived-lineage.test.ts \
+          tests/main/assistant-derived-readers.test.ts \
+          tests/main/assistant-derived-runtime.test.ts \
+          tests/main/assistant-derived-main.test.ts \
+          tests/main/assistant-derived-publication-readers.test.ts \
+          tests/main/assistant-existing-main.test.ts \
+          tests/main/assistant-goal-launch-integration.test.ts \
+          tests/main/assistant-knowledge-durable.test.ts \
+          tests/main/assistant-knowledge-independent.test.ts \
+          tests/main/assistant-launch-thread-target.test.ts \
+          tests/main/assistant-model-identity.test.ts \
+          tests/main/assistant-morning-context.test.ts \
+          tests/main/assistant-profile-store.test.ts \
+          tests/main/assistant-quality-files.test.ts \
+          tests/main/assistant-quality-population.test.ts \
+          tests/main/assistant-quality-predictions.test.ts \
+          tests/main/assistant-quality-product.test.ts \
+          tests/main/assistant-quality-workflow.test.ts \
+          tests/main/assistant-quality-review-import.test.ts \
+          tests/main/assistant-snapshot-collector.test.ts \
+          tests/main/desktop-goal-admission-readiness.bdd.test.ts \
+          tests/main/desktop-goal-assistant-consent.test.ts \
+          tests/main/desktop-goal-attachment-source.bdd.test.ts \
+          tests/main/desktop-goal-coordinator.test.ts \
+          tests/main/desktop-goal-current-completion.test.ts \
+          tests/main/desktop-goal-file-admission-revision.bdd.test.ts \
+          tests/main/desktop-goal-native-mutation.test.ts \
+          tests/main/desktop-goal-post-seal-attachment-window.bdd.test.ts \
+          tests/main/desktop-goal-publication-terminal.test.ts \
+          tests/main/desktop-goal-store-pointer-guard.test.ts \
+          tests/main/desktop-goal-workspace-revocation.bdd.test.ts \
+          tests/main/desktop-readonly-audit.test.ts \
+          tests/main/assistant-launch-binding-thread.test.ts \
+          tests/main/copy-packaged-dependencies.test.ts \
+          tests/main/packaged-runtime-imports.test.ts \
+          tests/main/packaged-runtime-dependencies.test.ts \
+          tests/main/packaged-main-freshness.test.ts \
+          tests/renderer/assistant-analysis-model.test.tsx \
+          tests/renderer/assistant-ipc-unknown-result.test.tsx \
+          tests/renderer/assistant-launch-target-picker.test.tsx \
+          tests/renderer/assistant-narration.test.tsx \
+          tests/renderer/assistant-quality.test.tsx

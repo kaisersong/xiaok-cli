@@ -1,3 +1,11 @@
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
+import type {AssistantAnalysisStatus,AssistantAnalysisSettingsInput} from '../shared/assistant-analysis-settings-contract.js';
+import type {AssistantThreadTargetPage} from '../shared/assistant-launch-contract.js';
+import type {AssistantQualityStatus} from '../shared/assistant-quality-contract.js';
+import type {AssistantPeriodicStatus,AssistantPeriodicSettings,AssistantPeriodicCheck} from '../shared/assistant-periodic-contract.js';
+import type {AssistantLaunchDraft,AssistantLaunchOperation} from '../shared/assistant-launch-contract.js';
+import type {AssistantCalendarStatus} from '../shared/assistant-calendar-contract.js';
+import type {AssistantActionDecisionResultDto} from '../shared/assistant-action-contract.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
@@ -25,7 +33,7 @@ import type { LoopCreateTemplateDto, LoopTemplatePatchDto, LoopDefinitionDto, Us
 import type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../shared/collaboration-room-ipc-contract.js';
 import type { KSwarmProjectFactDto, KSwarmProjectModeResultDto, KSwarmProjectDeleteResultDto, KSwarmAgentFactDto, KSwarmProbeFactDto, KSwarmProjectCreateDto, KSwarmAgentCreateDto } from '../shared/kswarm-project-agent-ipc-contract.js';
 import type { ProjectTeamPlanItemDto, ProjectTeamPlanDto, ProjectTeamOperationDto } from '../shared/kswarm-team-ipc-contract.js';
-import type { AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../shared/assistant-ipc-contract.js';
+import type { AssistantCandidatePageDto, AssistantActionOverviewDto, AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../shared/assistant-ipc-contract.js';
 import type {LoopRunObservationDto,AutomationRunHistoryDto} from '../shared/loop-current-view-ipc-contract.js';
 import type {LoopOutputActionResultView,LoopOutputPreviewView,LoopTaskResultView,LoopPublishedArtifactsView} from '../shared/loop-output-ipc-contract.js';
 import type { MemoryIpcEntry, MemoryImportIpcResult, MemoryStatsIpcSnapshot, MemoryPersonaIpcTrait, MemoryLayerIpcEntry, EmbeddingModelIpcEntry } from '../shared/memory-ipc-types.js';
@@ -244,6 +252,26 @@ export const PRELOAD_API_KEYS = [
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
   'kswarmStartProjectPlanning',
+  'getAssistantCandidatePage',
+  'dismissAssistantAction',
+  'snoozeAssistantAction',
+  'getAssistantActionOverview',
+  'getAssistantCalendarMemorySettings','configureAssistantCalendarMemory',
+  'getAssistantCalendarStatus','connectAssistantCalendar','disconnectAssistantCalendar',
+  'getAssistantAnalysisProvider',
+  'configureAssistantAnalysisProvider',
+  'getAssistantLaunchTargets',
+  'getAssistantQualityStatus',
+  'exportAssistantQualityReview',
+  'importAssistantQualityReview',
+  'revokeAssistantQualityReview',
+  'getAssistantPeriodicStatus',
+  'configureAssistantPeriodic',
+  'checkAssistantPeriodic',
+  'cancelAssistantLaunch',
+  'prepareAssistantReconfirmation',
+  'prepareAssistantFollowUpLaunch',
+  'prepareAssistantLaunch',  'confirmAssistantLaunch',  'getAssistantLaunch',  'resolveAssistantLaunch',
   'getAssistantOverview',
   'activateAssistant',
   'pauseAssistant',
@@ -610,6 +638,29 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kswarmRestart: 'desktop:kswarm:restart',
   kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
   kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  getAssistantCandidatePage:'desktop:assistant:getActionCandidatesPage',
+  dismissAssistantAction:'desktop:assistant:dismissAction',
+  snoozeAssistantAction:'desktop:assistant:snoozeAction',
+  getAssistantAnalysisProvider:'desktop:assistant:getAnalysisProvider',
+  configureAssistantAnalysisProvider:'desktop:assistant:configureAnalysisProvider',
+  getAssistantLaunchTargets:'desktop:assistant:listLaunchTargets',
+  getAssistantQualityStatus:'desktop:assistant:getQualityStatus',
+  exportAssistantQualityReview:'desktop:assistant:exportQualityReview',
+  importAssistantQualityReview:'desktop:assistant:importQualityReview',
+  revokeAssistantQualityReview:'desktop:assistant:revokeQualityReview',
+  getAssistantPeriodicStatus:'desktop:assistant:getPeriodicStatus',
+  configureAssistantPeriodic:'desktop:assistant:configurePeriodic',
+  checkAssistantPeriodic:'desktop:assistant:checkPeriodic',
+  cancelAssistantLaunch:'desktop:assistant:cancelLaunch',
+  prepareAssistantReconfirmation:'desktop:assistant:prepareReconfirmation',
+  prepareAssistantFollowUpLaunch:'desktop:assistant:prepareFollowUpLaunch',
+  prepareAssistantLaunch:'desktop:assistant:prepareLaunch',
+  confirmAssistantLaunch:'desktop:assistant:confirmLaunch',
+  getAssistantLaunch:'desktop:assistant:getActionLaunch',
+  resolveAssistantLaunch:'desktop:assistant:resolveActionLaunch',
+  getAssistantActionOverview: 'desktop:assistant:getActionOverview',
+  getAssistantCalendarMemorySettings:'desktop:assistant:getCalendarMemorySettings',configureAssistantCalendarMemory:'desktop:assistant:configureCalendarMemory',
+  getAssistantCalendarStatus:'desktop:assistant:getCalendarStatus',connectAssistantCalendar:'desktop:assistant:connectCalendar',disconnectAssistantCalendar:'desktop:assistant:disconnectCalendar',
   getAssistantOverview: 'desktop:assistant:getOverview',
   activateAssistant: 'desktop:assistant:activate',
   pauseAssistant: 'desktop:assistant:pause',
@@ -1085,6 +1136,17 @@ function pickDefined<T extends Record<string, unknown>>(input: T): Partial<T> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
+export function sanitizeAssistantPeriodicInput(input:{enabled?:unknown;notificationsEnabled?:unknown;intervalMinutes?:unknown;quietHours?:unknown;expectedRevision?:unknown}){
+ return Object.fromEntries(Object.entries({enabled:input?.enabled,notificationsEnabled:input?.notificationsEnabled,intervalMinutes:input?.intervalMinutes,quietHours:input?.quietHours,expectedRevision:input?.expectedRevision}).filter(([,value])=>value!==undefined));
+}
+export function sanitizeAssistantLaunchInput(input:{proposalId?:unknown;expectedRevision?:unknown;draftId?:unknown;instruction?:unknown;expectedResultDigest?:unknown;existingThreadId?:unknown;goalConsentChecked?:unknown}){
+  return Object.fromEntries(Object.entries({proposalId:input?.proposalId,expectedRevision:input?.expectedRevision,draftId:input?.draftId,instruction:input?.instruction,expectedResultDigest:input?.expectedResultDigest,existingThreadId:input?.existingThreadId,goalConsentChecked:input?.goalConsentChecked}).filter(([,value])=>value!==undefined));
+}
+export function sanitizeAssistantActionInput(input:{proposalId?:unknown;expectedRevision?:unknown;snoozeUntil?:unknown}){
+  return pickDefined({proposalId:typeof input?.proposalId==='string'?input.proposalId:'',expectedRevision:input?.expectedRevision,
+    snoozeUntil:input?.snoozeUntil});
+}
+
 export function sanitizeAssistantCandidateInput(input: { candidateId?: unknown; collectionId?: unknown }): { candidateId: string; collectionId?: string } {
   return pickDefined({
     candidateId: typeof input?.candidateId === 'string' ? input.candidateId : '',
@@ -1327,6 +1389,32 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  getAssistantCandidatePage(input:{cursor:string}):Promise<AssistantCandidatePageDto>;
+  dismissAssistantAction(input:{proposalId:string;expectedRevision:number}):Promise<AssistantActionDecisionResultDto>;
+  snoozeAssistantAction(input:{proposalId:string;expectedRevision:number;snoozeUntil:number}):Promise<AssistantActionDecisionResultDto>;
+  getAssistantAnalysisProvider():Promise<AssistantAnalysisStatus>;
+  configureAssistantAnalysisProvider(input:AssistantAnalysisSettingsInput):Promise<AssistantAnalysisStatus>;
+  getAssistantLaunchTargets(input:{cursor?:string}):Promise<AssistantThreadTargetPage>;
+  getAssistantQualityStatus():Promise<AssistantQualityStatus>;
+  exportAssistantQualityReview():Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+  importAssistantQualityReview(input:{attestHumanReview:true}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+  revokeAssistantQualityReview():Promise<AssistantQualityStatus>;
+  getAssistantPeriodicStatus():Promise<AssistantPeriodicStatus>;
+  configureAssistantPeriodic(input:AssistantPeriodicSettings):Promise<AssistantPeriodicStatus>;
+  checkAssistantPeriodic():Promise<AssistantPeriodicCheck>;
+  cancelAssistantLaunch(input:{draftId:string}):Promise<AssistantLaunchOperation>;
+  prepareAssistantReconfirmation(input:{draftId:string;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+  prepareAssistantFollowUpLaunch(input:{candidateId:string;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+  prepareAssistantLaunch(input:{proposalId:string;expectedRevision:number;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+  confirmAssistantLaunch(input:{draftId:string;instruction:string;goalConsentChecked?:boolean}):Promise<AssistantLaunchOperation>;
+  getAssistantLaunch(input:{draftId:string}):Promise<{draft:AssistantLaunchDraft;operation:AssistantLaunchOperation|null}>;
+  resolveAssistantLaunch(input:{draftId:string;expectedResultDigest:string}):Promise<AssistantLaunchOperation>;
+  getAssistantActionOverview(): Promise<AssistantActionOverviewDto>;
+  getAssistantCalendarMemorySettings():Promise<AssistantCalendarMemorySettingsDto>;
+  configureAssistantCalendarMemory(input:AssistantCalendarMemoryInput):Promise<AssistantCalendarMemorySettingsDto>;
+  getAssistantCalendarStatus():Promise<AssistantCalendarStatus>;
+  connectAssistantCalendar():Promise<AssistantCalendarStatus>;
+  disconnectAssistantCalendar():Promise<AssistantCalendarStatus>;
   getAssistantOverview(): Promise<AssistantOverviewView>;
   activateAssistant(): Promise<AssistantProfileDto>;
   pauseAssistant(): Promise<AssistantProfileDto>;
@@ -1828,6 +1916,32 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    getAssistantCandidatePage:input=>ipcRenderer.invoke('desktop:assistant:getActionCandidatesPage',{cursor:input.cursor}) as ReturnType<DesktopApi['getAssistantCandidatePage']>,
+    dismissAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:dismissAction',sanitizeAssistantActionInput(input)) as ReturnType<DesktopApi['dismissAssistantAction']>,
+    snoozeAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:snoozeAction',sanitizeAssistantActionInput(input)) as ReturnType<DesktopApi['snoozeAssistantAction']>,
+    getAssistantCalendarMemorySettings:()=>ipcRenderer.invoke('desktop:assistant:getCalendarMemorySettings') as ReturnType<DesktopApi['getAssistantCalendarMemorySettings']>,
+    configureAssistantCalendarMemory:input=>ipcRenderer.invoke('desktop:assistant:configureCalendarMemory',{enabled:input?.enabled,expectedRevision:input?.expectedRevision}) as ReturnType<DesktopApi['configureAssistantCalendarMemory']>,
+    getAssistantCalendarStatus:()=>ipcRenderer.invoke('desktop:assistant:getCalendarStatus') as ReturnType<DesktopApi['getAssistantCalendarStatus']>,
+    connectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:connectCalendar') as ReturnType<DesktopApi['connectAssistantCalendar']>,
+    disconnectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:disconnectCalendar') as ReturnType<DesktopApi['disconnectAssistantCalendar']>,
+    getAssistantAnalysisProvider:()=>ipcRenderer.invoke('desktop:assistant:getAnalysisProvider') as ReturnType<DesktopApi['getAssistantAnalysisProvider']>,
+    configureAssistantAnalysisProvider:input=>ipcRenderer.invoke('desktop:assistant:configureAnalysisProvider',{modelId:input?.modelId,expectedRevision:input?.expectedRevision}) as ReturnType<DesktopApi['configureAssistantAnalysisProvider']>,
+    getAssistantLaunchTargets:input=>ipcRenderer.invoke('desktop:assistant:listLaunchTargets',pickDefined({cursor:input?.cursor})) as ReturnType<DesktopApi['getAssistantLaunchTargets']>,
+    getAssistantQualityStatus:()=>ipcRenderer.invoke('desktop:assistant:getQualityStatus') as ReturnType<DesktopApi['getAssistantQualityStatus']>,
+    exportAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:exportQualityReview') as ReturnType<DesktopApi['exportAssistantQualityReview']>,
+    importAssistantQualityReview:input=>ipcRenderer.invoke('desktop:assistant:importQualityReview',{attestHumanReview:input?.attestHumanReview===true}) as ReturnType<DesktopApi['importAssistantQualityReview']>,
+    revokeAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:revokeQualityReview') as ReturnType<DesktopApi['revokeAssistantQualityReview']>,
+    getAssistantPeriodicStatus:()=>ipcRenderer.invoke('desktop:assistant:getPeriodicStatus') as ReturnType<DesktopApi['getAssistantPeriodicStatus']>,
+    configureAssistantPeriodic:input=>ipcRenderer.invoke('desktop:assistant:configurePeriodic',sanitizeAssistantPeriodicInput(input)) as ReturnType<DesktopApi['configureAssistantPeriodic']>,
+    checkAssistantPeriodic:()=>ipcRenderer.invoke('desktop:assistant:checkPeriodic') as ReturnType<DesktopApi['checkAssistantPeriodic']>,
+    cancelAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:cancelLaunch',{draftId:input.draftId}) as ReturnType<DesktopApi['cancelAssistantLaunch']>,
+    prepareAssistantReconfirmation:input=>ipcRenderer.invoke('desktop:assistant:prepareReconfirmation',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['prepareAssistantReconfirmation']>,
+    prepareAssistantFollowUpLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareFollowUpLaunch',pickDefined({candidateId:input.candidateId,existingThreadId:input.existingThreadId})) as ReturnType<DesktopApi['prepareAssistantFollowUpLaunch']>,
+    prepareAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['prepareAssistantLaunch']>,
+    confirmAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:confirmLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['confirmAssistantLaunch']>,
+    getAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:getActionLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['getAssistantLaunch']>,
+    resolveAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:resolveActionLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['resolveAssistantLaunch']>,
+    getAssistantActionOverview: () => ipcRenderer.invoke('desktop:assistant:getActionOverview') as ReturnType<DesktopApi['getAssistantActionOverview']>,
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
     activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
     pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,

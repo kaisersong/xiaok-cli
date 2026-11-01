@@ -1,3 +1,11 @@
+import {createAssistantThreadTargets} from './assistant-launch-thread-target.js';
+import type {AssistantGoalAdmission} from './desktop-goal-coordinator.js';
+import {readAssistantTaskSource} from './assistant-task-source.js';
+import {assertDesktopReadonlyAudit,isReadonlyAuditChildPath,createDesktopReadonlyAuditRegistry,type DesktopReadonlyAuditProfile} from './desktop-readonly-audit.js';
+import {assistantDigestEnvelopeSchema,type AssistantDigestEnvelope} from '../../src/runtime/assistant/notification-policy.js';
+import {assistantDigestReceiptSchema,type AssistantDigestReceipt} from '../../src/runtime/assistant/digest-receipts.js';
+import {createAssistantDesktopAdmission} from './assistant-desktop-admission.js';
+import type {AssistantLaunchDomain} from '../shared/assistant-launch-contract.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
 import type { MaterialAccessImportInput } from './material-access-ipc-contract.js';
 import { assertPluginActionSource, capturePluginActionInput, capturePluginActionRequest, pluginActionCode } from './plugin-action-service.js';
@@ -517,6 +525,8 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  /** Main-only branded scope for an isolated eval session; never IPC/task/model input. */
+  readonlyAuditProfile?: DesktopReadonlyAuditProfile;
   /** Main owns this object identity; it is never supplied by renderer/tools. */
   harnessOptimizationUserActor?: HarnessUserContext;
   notifyConversationActivity?: (activity: import('../../src/runtime/conversation-activity/types.js').ConversationActivity,
@@ -937,6 +947,12 @@ function sanitizeSystemOnePatch(input: DesktopSaveSystemOneConfigInput | undefin
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
+  const readonlyAudit=options.readonlyAuditProfile===undefined?undefined:assertDesktopReadonlyAudit(options.readonlyAuditProfile,options);
+  if(readonlyAudit&&(options.runner||options.pluginProviderRuntime||!process.env.XIAOK_CONFIG_DIR||realpathSync(process.env.XIAOK_CONFIG_DIR)!==readonlyAudit.configDir
+    ||!options.knowledgeDbPath||!isReadonlyAuditChildPath(readonlyAudit.dataRoot,options.knowledgeDbPath)
+    ||!options.computerUsePreferencePath||!isReadonlyAuditChildPath(readonlyAudit.dataRoot,options.computerUsePreferencePath)
+    ||!options.pluginRootDir||realpathSync(options.pluginRootDir)!==join(readonlyAudit.root,'plugins')))throw Error('readonly_audit_isolation_required');
+  const assistantTaskTerminalListeners=new Set<(taskId:string)=>void>();
   const channelMcpMutations = createChannelMcpMutationOwner(options.dataRoot);
   let roomTimedActions:TimedActionService|undefined;
   const getManagedPythonCommand = options.getManagedPythonCommand;
@@ -1032,8 +1048,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
   let goalCoordinator: DesktopGoalCoordinator | undefined;
   const builtinDescriptions = new Map<Tool, ToolDescriptionMetadata>();
-  const tools = buildToolList(undefined, undefined, [], builtinDescriptions);
-  const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools, builtinDescriptions);
+  const auditRegistry=options.readonlyAuditProfile?createDesktopReadonlyAuditRegistry(options.readonlyAuditProfile):undefined;
+  const tools = auditRegistry?.tools ?? buildToolList(undefined, undefined, [], builtinDescriptions);
+  const registry = auditRegistry?.registry ?? new DesktopOwnedToolRegistry({ autoMode: true }, tools, builtinDescriptions);
   const staticGatewayNames = new Set(options.pluginProviderRuntime ? createAllHostGateways(options.pluginProviderRuntime).map(tool => tool.definition.name) : []);
   const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
   const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
@@ -1140,10 +1157,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       ? conversationProjects.create(proposal, { ...context, requestSource: 'agent' })
       : Promise.resolve(undefined),
   };
-  registerKSwarmTools(registry, options.kswarmService, kswarmCreateProjectToolOptions);
+  if(!readonlyAudit)registerKSwarmTools(registry, options.kswarmService, kswarmCreateProjectToolOptions);
 
   // Register KB (knowledge base) tools on the main registry
-  try {
+  if(!readonlyAudit)try {
     const kbUserData = process.platform === 'win32'
       ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
       : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
@@ -1225,7 +1242,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       : buildComputerUseNeedsEnablementError();
 
   function registerComputerUseWrapper(): void {
-    if (computerUseWrapperRegistered) return;
+    if (readonlyAudit || computerUseWrapperRegistered) return;
     computerUseWrapperRegistered = true;
     const profile = process.platform === 'win32' ? WINDOWS_CUA_ABI_PROFILE : undefined;
     registry.registerTool(createComputerUseTool({
@@ -1266,6 +1283,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return { ...options.pluginDependencyStatusOptions, nativeOsArch: await windowsNativeArchitecture };
   }
   async function qualifyComputerUse(): Promise<boolean> {
+    if(readonlyAudit)return false;
     const supported = process.platform === 'darwin' || (process.platform === 'win32'
       && process.arch === 'x64' && (await dependencyStatusOptions()).nativeOsArch === 'x64');
     if (supported) registerComputerUseWrapper();
@@ -1891,7 +1909,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     required: ['brief_json'],
   }));
-  const defaultDesktopRunner = createDesktopModelRunnerWithRegistry(
+  const defaultDesktopModelRunner = createDesktopModelRunnerWithRegistry(
     registry,
     tools,
     options.dataRoot,
@@ -1899,6 +1917,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     materialRegistry,
     kswarmCreateProjectToolOptions,
     {
+      readonlyAuditProfile:options.readonlyAuditProfile,
       observationTasks,
       observationGroupHost: { getHost: () => host, observationStore: snapshotStore.observations },
       officeToMarkdown: input => officeDocumentParser.parse(input),
@@ -1906,6 +1925,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       ...(multiAgentRuntime ? { multiAgent: { runtime: multiAgentRuntime, service: multiAgentService!, catalog: multiAgentCatalog!, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } } : {}),
     },
   );
+  const defaultDesktopRunner:typeof defaultDesktopModelRunner=(input,context)=>{
+    if(options.readonlyAuditProfile)assertDesktopReadonlyAudit(options.readonlyAuditProfile,{dataRoot:options.dataRoot,workspaceRoot:options.workspaceRoot,permissionMode:input.permissionMode,materials:input.materials,executionScope:input.executionScope});
+    return defaultDesktopModelRunner(readonlyAudit?{...input,maxToolLoopIterations:Math.min(input.maxToolLoopIterations??6,6),deadlineMs:Math.min(input.deadlineMs??Infinity,120000)}:input,context);
+  };
   const restrictedArtifactRunner = createDesktopModelRunnerWithRegistry(
     artifactGenerationRegistry,
     artifactGenerationTools,
@@ -1920,9 +1943,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   );
   const localChatDescriptor = Object.freeze({ kind: 'localChat' as const, multiAgent: Boolean(multiAgentRuntime), invoke: defaultDesktopRunner });
   const localGoalDescriptor = Object.freeze({ kind: 'localGoal' as const, multiAgent: Boolean(multiAgentRuntime), invoke: defaultDesktopRunner });
-  const ordinaryRunner = coordinateRunner(options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
+  const ordinaryRunner = coordinateRunner(options.runner ?? (input => !readonlyAudit && input.executionScope?.kind === 'artifact_workspace_generation'
     ? restrictedArtifactRunner(input) : defaultDesktopRunner(input)));
   let hostDeliveryAuthority: DesktopHostDeliveryAuthority | undefined;
+  let assistantAdmission:ReturnType<typeof createAssistantDesktopAdmission>|undefined;
   const host = taskSourcePopulation.createHost({
     materialRegistry,
     groupObservationSource: multiAgentService,
@@ -1935,6 +1959,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     authorizePreparation: multiAgentService ? (taskId, marker) => multiAgentService.assertHostPreparation(taskId, marker) : undefined,
     assertTaskAdmission: snapshot => multiAgentService?.assertHostAdmission(snapshot),
+    commitAssistantStart:snapshot=>{if(!assistantAdmission)throw Error('assistant_admission_unavailable');assistantAdmission.commitStart(snapshot);},
+    assertAssistantExecutionWorkspace:snapshot=>{if(!assistantAdmission)throw Error('assistant_admission_unavailable');assistantAdmission.assertExecutionWorkspace(snapshot);},
     decideCancellation: (snapshot, reason) => multiAgentService?.decideHostCancellation(snapshot, reason) ?? Promise.resolve({ hostAbortAllowed: true }),
     getExecutionPolicy: snapshot => ({ deliveryRepair: multiAgentStore?.getRootBinding(snapshot.taskId) ? 'explicit' : 'automatic' }),
     onDeliveryReport: async report => {
@@ -1950,6 +1976,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     // Use timestamp + random suffix to ensure unique taskId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     onPersistedEvent: async input => {
+      if(input.event.type==='task_terminal'){assistantAdmission?.forget(input.taskId);for(const listener of assistantTaskTerminalListeners){try{listener(input.taskId);}catch{console.warn('[assistant] terminal projection pending');}}}
       if (input.event.type === 'task_terminal' && multiAgentService && hostDeliveryAuthority) {
         try { await multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority, taskId: input.taskId }); }
         catch (error) { console.warn('[conversation-activity] run reconciliation failed:', error instanceof Error ? error.message : 'activity_run_pending'); }
@@ -1985,13 +2012,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const localTaskHost = {
     prepareTask: async (input: TaskCreateInput) => {
       let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
+      const assistantReservation=assistantAdmission?.reservationFor(input);
       if (multiAgentService && (!input.executionScope || input.executionScope.kind === 'goal_turn')) {
         await multiAgentReady;
         const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
         await prepareMultiAgentThread(threadId);
-        prepared = await multiAgentService.prepareRoot(host, threadId, input);
+        prepared = await multiAgentService.prepareRoot(host, threadId, input,assistantReservation);
       } else {
-        prepared = await host.prepareTask(input);
+        prepared = assistantReservation?await host.prepareReservedTask(input,assistantReservation):await host.prepareTask(input);
       }
       if (currentExecutionLane() === 'foreground') {
         try {
@@ -2124,6 +2152,42 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const localChatContext = (context?: TaskCreateContext): TaskCreateContext | undefined => (
     multiAgentService ? { ...context, threadId: context?.threadId || `local_${randomUUID()}` } : context
   );
+    const createFormalUserTask=(input:TaskCreateInput,nativeActor?:NativeActor,assistantGoal?:AssistantGoalAdmission)=>{
+    if(assistantGoal&&codexTasks.selected())throw Error('assistant_native_admission_unsupported');
+    if(codexTasks.selected())return codexTasks.create(input,nativeActor);
+    return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode,threadId:input.context?.threadId},{requestSource:'user'},()=>afterLocalRecovery(()=>assistantGoal?goalCoordinator.admitAssistantUserTask(multiAgentService?{...input,context:localChatContext(input.context)}:input,assistantGoal):goalCoordinator.admitUserTask(multiAgentService?{...input,context:localChatContext(input.context)}:input))));
+  };
+  const assistantDomain=():AssistantLaunchDomain=>{
+    if(codexTasks.selected())throw Error('assistant_native_admission_unsupported');
+    if(!options.workspaceRoot)throw Error('assistant_workspace_unavailable');
+    const cwd=realpathSync(options.workspaceRoot),stat=statSync(cwd,{bigint:true});
+    if(!stat.isDirectory()||dirname(cwd)===cwd||cwd===realpathSync(homedir())||cwd!==multiAgentCwd)throw Error('assistant_workspace_unavailable');
+    const authorization=multiAgentService?.getExecutionAuthorization();
+    if(authorization&&(!authorization.executionAllowed||authorization.persistenceState!=='confirmed'))throw Error('assistant_permission_unavailable');
+    return {lane:'local',workspaceId:multiAgentWorkspaceId,cwd,device:String(stat.dev),inode:String(stat.ino),permissionRevision:authorization?.permissionRevision??0,bootId:authorization?.bootId??assistantOrdinaryBootId};
+  };
+  const assistantOrdinaryBootId=randomUUID();
+  assistantAdmission=createAssistantDesktopAdmission({host,ready:()=>afterLocalRecovery(async()=>{}),domain:assistantDomain,formalCreate:(input,authority)=>withExecutionLane('foreground',()=>createFormalUserTask(input,undefined,authority)),assertGoalScope:(scope,binding)=>goalCoordinator.assertAssistantGoalScope(scope,binding),assertGoalExecution:(scope,binding)=>goalCoordinator.assertAssistantGoalExecution(scope,binding)});
+  const assistantThreadTitles=new Map<string,string>();
+  const readAssistantOwnedThread=async(threadId:string)=>{
+    await afterLocalRecovery(async()=>{});const row=multiAgentStore?.getThread(threadId);if(!row)return undefined;
+    if(row.profileId!==multiAgentProfileId||row.workspaceId!==multiAgentWorkspaceId)return undefined;
+    multiAgentService!.assertExecutionAdmission(threadId);
+    const goal=await goalCoordinator.getGoal(threadId),latest=multiAgentStore!.getThread(threadId);
+    if(!latest||latest.threadRevision!==row.threadRevision||latest.profileId!==row.profileId||latest.workspaceId!==row.workspaceId)throw Error('assistant_thread_target_stale');
+    const group=multiAgentStore!.activeGroup(threadId);
+    return {threadId,title:(goal?.state.objective??assistantThreadTitles.get(threadId)??threadId).slice(0,500),profileId:row.profileId,workspaceId:row.workspaceId,revision:row.threadRevision??0,deleted:row.deleteState==='deleted',deletionPending:row.deleteState==='delete_pending',cleanupPending:!!group?.mutationBlockedReason,goal};
+  };
+  const assistantThreadTargets=createAssistantThreadTargets({profileId:multiAgentProfileId,goalCoordinator,read:readAssistantOwnedThread,
+    assertCurrent:target=>{const row=multiAgentStore?.getThread(target.threadId);if(!row||row.profileId!==target.profileId||row.workspaceId!==target.workspaceId||row.deleteState!=='none')throw Error('assistant_thread_target_stale');multiAgentService!.assertExecutionAdmission(target.threadId);if(multiAgentStore!.activeGroup(target.threadId)?.mutationBlockedReason)throw Error('thread_cleanup_pending');},
+    list:async(domain,input)=>{
+      await afterLocalRecovery(async()=>{});if(!multiAgentStore)throw Error('assistant_existing_thread_unsupported');
+      const source=readAssistantTaskSource(options.dataRoot,10000);for(const snapshot of source.items){const threadId=snapshot.context?.threadId;if(threadId&&!assistantThreadTitles.has(threadId))assistantThreadTitles.set(threadId,(snapshot.understanding?.goal??snapshot.prompt).slice(0,500));}
+      const page=multiAgentStore.listWorkspaceThreads({profileId:multiAgentProfileId,workspaceId:domain.workspaceId,cursor:input.cursor,limit:50}),items=[];
+      for(const row of page.items){if(row.deleteState!=='none')continue;try{const actual=await readAssistantOwnedThread(row.threadId);if(!actual)continue;const goal=actual.goal,available=!actual.cleanupPending&&(!goal||goal.state.status==='active'&&goal.activation==='armed');items.push({threadId:row.threadId,title:actual.title,available,reason:available?null:actual.cleanupPending?'thread_cleanup_pending':'goal_requires_new_thread'});}catch{/* Failed ownership/current reads never become selectable. */}}
+      return {items,nextCursor:page.nextCursor??null};
+    },
+  });
   const backgroundTaskIdentity=createBackgroundTaskIdentityController({host,assertAdmission:()=>goalCoordinator.assertBackgroundAdmission(),captureAdmission:()=>goalCoordinator.captureBackgroundAdmission(),
     create:(input,reservation,guard)=>withExecutionLane('background',()=>afterLocalRecovery(()=>goalCoordinator.admitReservedBackgroundTask(input,reservation,guard)))});
   const originalGoalStop=goalShutdownBase.ingress.stopAccepting.bind(goalShutdownBase.ingress);
@@ -2137,7 +2201,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (goal) for (const listener of goalChangedListeners) listener({ threadId, goal });
     }).catch(error => console.warn('[goal] child projection failed:', error instanceof Error ? error.message : String(error)));
   });
-  for (const tool of createGoalTools(goalCoordinator.createRegistryGoalToolHost())) {
+  for (const tool of readonlyAudit?[]:createGoalTools(goalCoordinator.createRegistryGoalToolHost())) {
     registry.registerTool(tool);
   }
 
@@ -2285,7 +2349,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const roomTools=buildToolList(undefined, undefined, [], roomDescriptions);
     const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools,metadata:roomDescriptions});
     connectorsService.bindTools(roomRegistry);
-    return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
+  return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
   };
 
   async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string, workspace?:RoomWorkspaceRunOptions,discussionSignal?:AbortSignal): Promise<{ text: string }> {
@@ -2941,6 +3005,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     closeMaterialRegistryAndArtifactFileManagerInstances,
     sealAndDrainArtifactWorkspaceServiceInstance: () => artifactWorkspaceService.sealAndDrainInstanceMutations(),
     async disposeMultiAgent(): Promise<void> {
+      assistantTaskTerminalListeners.clear();
       goalShutdown.ingress.stopAccepting();
       harnessDisposed = true;
       if (harnessRuntime) await (await harnessRuntime).dispose();
@@ -3693,11 +3758,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     stopObservationTask(taskId: string, context: {requestSource:'user';control:object}) { if(context?.requestSource!=='user'||observationTaskControls.get(taskId)!==context.control)throw new Error('observation_task_owner_required'); const live = observationTasks.get(taskId)?.live; if (!live) throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_ACTIVE'); live.stopNewCapture(); },
     async revokeObservationTask(taskId: string, context: {requestSource:'user';control:object}) { if(context?.requestSource!=='user'||observationTaskControls.get(taskId)!==context.control)throw new Error('observation_task_owner_required'); const entry=observationTasks.get(taskId); if(!entry)throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_ACTIVE'); entry.consumed=true; entry.revoked=true; entry.live?.revoke(); await host.cancelTask(taskId, 'observation_permission_revoked'); },
-    createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
-      if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
-      return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
-        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
+    /** Main-private fixed activity owner port; no notifier or generic RPC in preload. */
+    assistantDigestDelivery:{
+      async available():Promise<boolean>{try{await awaitActivityAttachment();if(!(activityService instanceof ConversationActivityAttachedService))return false;const value=await activityService.client.request<{available:boolean}>('assistantDigestReady');return value?.available===true;}catch{return false;}},
+      async send(raw:AssistantDigestEnvelope):Promise<AssistantDigestReceipt>{await awaitActivityAttachment();if(!(activityService instanceof ConversationActivityAttachedService))throw Error('assistant_notification_owner_unavailable');const envelope=assistantDigestEnvelopeSchema.parse(raw);return assistantDigestReceiptSchema.parse(await activityService.client.request('assistantDigest',envelope));},
+      async lookup(deliveryId:string):Promise<AssistantDigestReceipt|undefined>{await awaitActivityAttachment();if(!(activityService instanceof ConversationActivityAttachedService))return undefined;const result=await activityService.client.request('assistantDigestReceipt',{deliveryId});return result?assistantDigestReceiptSchema.parse(result):undefined;},
     },
+    subscribeAssistantTaskTerminal(listener:(taskId:string)=>void){assistantTaskTerminalListeners.add(listener);return ()=>{assistantTaskTerminalListeners.delete(listener);};},
+    assistantThreadTargets,
+    assistantTaskAdmission:assistantAdmission!.port,
+    createTask:(input:TaskCreateInput,nativeActor?:NativeActor)=>createFormalUserTask(input,nativeActor),
     /** Main-only binding; never exposed through preload or a model tool. */
     bindConversationRoomCreator: (creator: (input:Record<string,unknown>,context:{requestSource:'user';signal?:AbortSignal})=>Promise<unknown>) => conversationRooms.bindCreator(creator),
     bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => {
@@ -8035,6 +8105,7 @@ export function createDesktopModelRunnerWithRegistry(
     publishedInstructions?:string;
     roomExecution?:{context:RoomWorkspaceContextSources;getModelBinding?:()=>Promise<ReturnType<typeof resolveRuntimeModelBinding>>;authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined};
     nativeReadonlyOnly?: boolean;
+    readonlyAuditProfile?:DesktopReadonlyAuditProfile;
     restrictedArtifactGeneration?: boolean;
     /** Stable provider-runtime identity captured before services exist (§4). */
     pluginProviderRuntime?: GatewayRuntimeFacade;
@@ -8078,7 +8149,7 @@ export function createDesktopModelRunnerWithRegistry(
     registry.registerTool(createGetRoomMessagesPageTool());
   }
 
-  if (runnerOptions.multiAgent && registry instanceof DesktopOwnedToolRegistry) {
+  if (!nativeReadonlyOnly && runnerOptions.multiAgent && registry instanceof DesktopOwnedToolRegistry) {
     registry.registerOwnedTool({ definition: READ_MATERIAL_TOOL_DEFINITION, permission: 'safe', execute: async () => 'Error: tool_scope_unsupported' }, {
       ownerId: 'desktop-host', slotKey: 'read_material', binding: 'custom', verifiedReadOnly: true,
       bindInvocation: authority => async input => (await executeReadMaterialForDesktop(input, {
@@ -8106,9 +8177,9 @@ export function createDesktopModelRunnerWithRegistry(
     const taskStartTime = Date.now();
     const invocationId = `inv_${randomUUID()}`;
     const cacheKey = createDesktopPromptCacheAffinity(sessionId, invocationId);
-    const invocationOptions: ModelInvocationOptions | undefined = cacheKey
-      ? { cacheKey }
-      : undefined;
+    const invocationOptions: (ModelInvocationOptions & Pick<StreamOptions,'maxOutputTokens'>) | undefined = runnerOptions.readonlyAuditProfile
+      ? { ...(cacheKey?{cacheKey}:{}),maxOutputTokens:1000 }
+      : cacheKey ? { cacheKey } : undefined;
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
     if (!nativeReadonlyOnly && !runnerOptions.roomDiscussion && !runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
@@ -8208,6 +8279,7 @@ export function createDesktopModelRunnerWithRegistry(
       scopedRegistry = multi.runtime.bindRoot(rootContext, { adapter, systemPrompt, catalog: multi.catalog.catalog,
         policy: multi.catalog.catalog.snapshotPolicy(), workspaceId: multi.workspaceId, materialIds: materials.map(item => item.materialId),
         registryOptions: {
+          ...(nativeReadonlyOnly?{nativeReadonlyOnly:true}:{}),
           autoMode: (permissionMode ?? 'auto') === 'auto', permissionManager: new PermissionManager({ mode: permissionMode ?? 'auto' }),
         }, materials, materialRegistry, skillCatalog, dataRoot, agents, emitRuntimeEvent, maxIterations: maxToolLoopIterations, ...(observedGroup?{observation:observedGroup}:{}),
       });

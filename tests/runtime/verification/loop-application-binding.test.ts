@@ -192,3 +192,18 @@ it('captures all nested data, rejects getters without evaluating them, and accep
  expect(()=>createLoopApplicationBinding(accessor)).toThrow();expect(reads).toBe(0);
  reject(v=>{v.nativeGrant={};});reject(v=>{v.subject.sessionId='invented';});
 });
+
+it('binds complete v2 morning action text into the existing publication hash',()=>{
+ const raw=assistant('morning');raw.body.schemaVersion=2;
+ raw.body.recommendations[0].action={kind:'review',reason:'There is a result',nextStep:'Review evidence',instruction:'Review this task evidence without editing it.'};
+ const first=createLoopApplicationBinding(raw);
+ expect(parseLoopApplicationBinding(first)).toEqual(first);
+ raw.body.recommendations[0].action.instruction='Review the same task and list missing evidence.';
+ expect(createLoopApplicationBinding(raw).candidatePayloadHash).not.toBe(first.candidatePayloadHash);
+ raw.body.recommendations[0].action.permissionMode='yolo';
+ expect(()=>createLoopApplicationBinding(raw)).toThrow();
+});
+it('does not attach v2 authority-shaped action fields to an unversioned morning body',()=>{
+ const raw=assistant('morning');raw.body.recommendations[0].action={kind:'review',reason:'r',nextStep:'n',instruction:'i'};
+ expect(()=>createLoopApplicationBinding(raw)).toThrow();
+});

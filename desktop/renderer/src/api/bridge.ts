@@ -258,6 +258,14 @@ export const api = {
     return withThreadCompatibility(thread);
   },
 
+  async cacheAssistantLaunchThread(input:{threadId:string;taskId:string;title:string;updatedAt:number}):Promise<void>{
+    await mutateStoredThread(input.threadId,thread=>{
+      if(thread?.deletionPending)throw Error('thread_deletion_pending');
+      if(thread&&!thread.taskIds.includes(input.taskId))throw Error('assistant_thread_cache_conflict');
+      return thread??{id:input.threadId,title:input.title,status:'running',mode:'chat',createdAt:input.updatedAt,updatedAt:input.updatedAt,starred:false,gtdBucket:'inbox',pinnedAt:null,currentTaskId:input.taskId,taskIds:[input.taskId]};
+    });
+  },
+
   async getThread(id: string): Promise<ThreadRecord | null> {
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
@@ -1255,6 +1263,35 @@ export const api = {
   },
   async saveKswarmConfig(input: { maxConcurrentTasks: number }) {
     return window.xiaokDesktop.saveKswarmConfig(input);
+  },
+
+  async getAssistantCandidatePage(input:{cursor:string}){return window.xiaokDesktop.getAssistantCandidatePage(input);},
+  async dismissAssistantAction(input:{proposalId:string;expectedRevision:number}){return window.xiaokDesktop.dismissAssistantAction(input);},
+  async snoozeAssistantAction(input:{proposalId:string;expectedRevision:number;snoozeUntil:number}){return window.xiaokDesktop.snoozeAssistantAction(input);},
+  async getAssistantAnalysisProvider(){return window.xiaokDesktop.getAssistantAnalysisProvider();},
+  async configureAssistantAnalysisProvider(input:Parameters<typeof window.xiaokDesktop.configureAssistantAnalysisProvider>[0]){return window.xiaokDesktop.configureAssistantAnalysisProvider(input);},
+  async getAssistantLaunchTargets(input:{cursor?:string}){return window.xiaokDesktop.getAssistantLaunchTargets(input);},
+  async getAssistantQualityStatus(){return window.xiaokDesktop.getAssistantQualityStatus();},
+  async exportAssistantQualityReview(){return window.xiaokDesktop.exportAssistantQualityReview();},
+  async importAssistantQualityReview(input:{attestHumanReview:true}){return window.xiaokDesktop.importAssistantQualityReview(input);},
+  async revokeAssistantQualityReview(){return window.xiaokDesktop.revokeAssistantQualityReview();},
+  async getAssistantPeriodicStatus(){return window.xiaokDesktop.getAssistantPeriodicStatus();},
+  async configureAssistantPeriodic(input:Parameters<typeof window.xiaokDesktop.configureAssistantPeriodic>[0]){return window.xiaokDesktop.configureAssistantPeriodic(input);},
+  async checkAssistantPeriodic(){return window.xiaokDesktop.checkAssistantPeriodic();},
+  async cancelAssistantLaunch(input:{draftId:string}){return window.xiaokDesktop.cancelAssistantLaunch(input);},
+  async prepareAssistantReconfirmation(input:{draftId:string;existingThreadId?:string}){return window.xiaokDesktop.prepareAssistantReconfirmation(input);},
+  async prepareAssistantFollowUpLaunch(input:{candidateId:string;existingThreadId?:string}){return window.xiaokDesktop.prepareAssistantFollowUpLaunch(input);},
+  async prepareAssistantLaunch(input:Parameters<typeof window.xiaokDesktop.prepareAssistantLaunch>[0]){return window.xiaokDesktop.prepareAssistantLaunch(input);},
+  async confirmAssistantLaunch(input:Parameters<typeof window.xiaokDesktop.confirmAssistantLaunch>[0]){return window.xiaokDesktop.confirmAssistantLaunch(input);},
+  async getAssistantLaunch(input:Parameters<typeof window.xiaokDesktop.getAssistantLaunch>[0]){return window.xiaokDesktop.getAssistantLaunch(input);},
+  async resolveAssistantLaunch(input:Parameters<typeof window.xiaokDesktop.resolveAssistantLaunch>[0]){return window.xiaokDesktop.resolveAssistantLaunch(input);},
+  async getAssistantCalendarMemorySettings(){return window.xiaokDesktop.getAssistantCalendarMemorySettings();},
+  async configureAssistantCalendarMemory(input:Parameters<typeof window.xiaokDesktop.configureAssistantCalendarMemory>[0]){return window.xiaokDesktop.configureAssistantCalendarMemory({enabled:input.enabled,expectedRevision:input.expectedRevision});},
+  async getAssistantCalendarStatus(){return window.xiaokDesktop.getAssistantCalendarStatus();},
+  async connectAssistantCalendar(){return window.xiaokDesktop.connectAssistantCalendar();},
+  async disconnectAssistantCalendar(){return window.xiaokDesktop.disconnectAssistantCalendar();},
+  async getAssistantActionOverview() {
+    return window.xiaokDesktop.getAssistantActionOverview();
   },
 
   async getAssistantOverview(): Promise<AssistantOverviewView> {

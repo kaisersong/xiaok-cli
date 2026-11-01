@@ -1,3 +1,4 @@
+import {assistantDigestEnvelopeSchema} from '../assistant/notification-policy.js';
 import { chmodPrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createServer, createConnection, type Server, type Socket } from 'node:net';
@@ -90,6 +91,7 @@ export class ConversationActivityOwnerHost {
     getThread(threadId: string): ActivityThreadIdentity | null;
     canObserveWork(watch: WorkWatch): Promise<boolean> | boolean;
     authorizeProducer(threadId: string, instanceId?: string): boolean;
+    assistantDigest?:ConstructorParameters<typeof ConversationActivityService>[0]['assistantDigest'];
     notify?: ConstructorParameters<typeof ConversationActivityService>[0]['notify'];
     stopWatch?(watchId: string): void; watchBound?(watchId: string): Promise<void> | void;
     sourceHint?(source: string, workId: string): Promise<void> | void; onError?(error: unknown): void }) {
@@ -220,6 +222,9 @@ export class ConversationActivityOwnerHost {
       return () => client.active && !this.stopped && this.options.authorizeProducer(watch.origin.threadId, client.instanceId);
     };
     switch (method) {
+      case 'assistantDigestReceipt': {const input=z.object({deliveryId:z.string().uuid()}).strict().parse(params);if(client.role!=='producer')throw Error('activity_method_forbidden');return this.store.getAssistantDigestReceipt(input.deliveryId)??null;}
+      case 'assistantDigestReady': {z.object({}).strict().parse(params);if(client.role!=='producer')throw Error('activity_method_forbidden');return {available:!!this.options.assistantDigest&&this.options.assistantDigest.platformAvailable()};}
+      case 'assistantDigest': {if(client.role!=='producer')throw Error('activity_method_forbidden');return service.enqueueAssistantDigest(assistantDigestEnvelopeSchema.parse(params),{requestSource:'scheduler'});}
       case 'status': z.object({}).strict().parse(params); return { generation: ACTIVITY_OWNER_GENERATION, ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
       case 'list': { const input = z.object({ threadId: key, afterLocalSeq: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }).strict().parse(params); return service.listActivities(input.threadId, actor, input); }
       case 'work': return service.getWork(z.object({ watchId: key }).strict().parse(params).watchId, actor);

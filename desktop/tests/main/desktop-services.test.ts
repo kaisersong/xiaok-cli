@@ -11,7 +11,7 @@ import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-co
 import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
 import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, renameSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, renameSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -245,6 +245,34 @@ describe('desktop services', () => {
     rmSync(rootDir, { recursive: true, force: true });
     delete process.env.XIAOK_CONFIG_DIR;
   });
+
+  it('assistant admission uses the real foreground Room/Project/Goal prepareRoot path and a single commit',async()=>{
+    let commits=0,runs=0;
+    const services=createDesktopServices({dataRoot:join(rootDir,'assistant-data'),workspaceRoot:realpathSync(rootDir),kswarmService:mockKSwarmService(),runner:async()=>{runs++;}});
+    try{
+      const port=services.assistantTaskAdmission,domain=await port.domain();
+      const binding={operationId:'assistant-op',requestDigest:'a'.repeat(64),threadId:crypto.randomUUID()};
+      const allocation=port.allocate(binding);
+      await port.ensure({...binding,taskId:allocation.taskId,instruction:'Read the result evidence.',domain,allocation},()=>{commits++;});
+      for await(const event of services.subscribeTask(allocation.taskId)){if(event.type==='task_terminal')break;}
+      const actual=await port.lookup(allocation.taskId);
+      expect(actual?.assistantBinding).toEqual(binding);expect(actual?.context?.threadId).toBe(binding.threadId);
+      expect(commits).toBe(1);expect(runs).toBe(1);
+      await expect(port.ensure({...binding,taskId:allocation.taskId,instruction:'Read the result evidence.',domain,allocation},()=>{commits++;})).rejects.toThrow('allocation_invalid');
+    }finally{await services.closeTaskSourceWritersForMigration();await services.disposeMultiAgent();}
+  },30000);
+
+  it('assistant workspace replacement after commit blocks the actual first runner',async()=>{
+    const workspace=join(rootDir,'assistant-workspace');mkdirSync(workspace);
+    let runs=0;const services=createDesktopServices({dataRoot:join(rootDir,'assistant-data'),workspaceRoot:realpathSync(workspace),kswarmService:mockKSwarmService(),runner:async()=>{runs++;}});
+    try{
+      const port=services.assistantTaskAdmission,domain=await port.domain();
+      const binding={operationId:'assistant-workspace-op',requestDigest:'a'.repeat(64),threadId:crypto.randomUUID()};const allocation=port.allocate(binding);
+      await port.ensure({...binding,taskId:allocation.taskId,instruction:'Read evidence.',domain,allocation},()=>{renameSync(workspace,workspace+'-old');mkdirSync(workspace);});
+      for await(const event of services.subscribeTask(allocation.taskId)){if(event.type==='task_terminal')break;}
+      expect(runs).toBe(0);expect((await port.lookup(allocation.taskId))?.status).toBe('failed');
+    }finally{await services.closeTaskSourceWritersForMigration();await services.disposeMultiAgent();}
+  },30000);
 
   it('hashes the physical app.asar and restores Electron ASAR handling', () => {
     const appPath = join(rootDir, 'xiaok.app');

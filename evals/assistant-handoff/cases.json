@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "status": "cases_selected_not_measured",
+  "sourceRevision": "4b905b0882b6bb1d5c28dee7c50ce5917d0801a6",
+  "scope": "read_only_repository_work",
+  "cases": [
+    {
+      "id": "schedule-audit",
+      "source": "desktop/electron/assistant-service.ts",
+      "instruction": "梳理默认个人助理晨晚调度、暂停与补跑行为，交付含源码位置的简短说明。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "failure-triage",
+      "source": "desktop/electron/assistant-loop-executor.ts",
+      "instruction": "定位每日助理模型失败后的状态与用户可见结果，整理可复现的排查步骤。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "candidate-review",
+      "source": "desktop/electron/assistant-controller.ts",
+      "instruction": "梳理候选的采纳、忽略、失败恢复路径，列出哪些行为会写入记忆或知识库。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "project-blockers",
+      "source": "desktop/electron/kswarm-health-loop.ts",
+      "instruction": "核对项目健康检查的阻塞来源，整理来源不可用与真实无阻塞的区分方法。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "meeting-preparation",
+      "source": "desktop/electron/assistant-desktop-snapshot.ts",
+      "instruction": "核对会议元数据进入助理快照的字段和时间窗口，列出会议准备所缺的事实。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "knowledge-source-audit",
+      "source": "desktop/electron/kb-store-sqlite.ts",
+      "instruction": "核对知识来源和会议列表是否全量读取，并给出精确 SQL 位置作为证据。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "workspace-binding-audit",
+      "source": "desktop/electron/desktop-services.ts",
+      "instruction": "沿正式 createTask 准入检查工作区和 native/local lane 选择，不修改权限。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "permission-boundary-audit",
+      "source": "desktop/electron/assistant-typed-ipc.ts",
+      "instruction": "审计每日助理IPC的可信来源绑定、输出校验与越权拒绝，列出相关测试。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "restart-recovery-audit",
+      "source": "src/runtime/task-host/task-runtime-host.ts",
+      "instruction": "梳理任务跨重启恢复入口与阻塞条件，明确哪些回执不能自动重放。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    },
+    {
+      "id": "delivery-evidence-audit",
+      "source": "desktop/electron/completion-evidence-store.ts",
+      "instruction": "梳理任务完成证据的判定条件，明确回复结束与可验收交付的区别。",
+      "completionCriteria": [
+        "给出实际源码路径和行号",
+        "结论区分已核实、推断和未验证",
+        "产出可审查的简短中文说明"
+      ],
+      "allowedEffects": [
+        "读取本仓库源码和测试",
+        "在专用试点评估目录写交付说明"
+      ],
+      "forbiddenEffects": [
+        "修改生产源码或用户数据",
+        "创建外部项目或发消息",
+        "调整权限或启动定时任务"
+      ]
+    }
+  ],
+  "protocol": {
+    "paths": [
+      "A_existing_new_conversation",
+      "B_manual_prefill_then_user_send",
+      "C_formal_assistant_launch"
+    ],
+    "sameInstructionWorkspaceAcceptance": true,
+    "measurements": [
+      "operations",
+      "elapsedMs",
+      "failures",
+      "duplicateExecutions",
+      "unknownReceipts",
+      "modelUsage"
+    ],
+    "C_requiresRealProductionAdmission": true,
+    "unknownUsage": "unknown_not_zero",
+    "syntheticClicksAreNotPilotEvidence": true
+  },
+  "measurements": []
+}

@@ -219,3 +219,42 @@ describe('assistant runtime wiring', () => {
     });
   }
 });
+
+describe('assistant coverage runtime production wiring',()=>{
+ it.each(['morning','evening'] as const)('persists %s coverage before the model fails',async kind=>{
+  const {createAssistantDesktopSnapshotReader}=await import('../../electron/assistant-desktop-snapshot.js');
+  const loopStore=new LoopStore(':memory:');const evidenceStore=new CompletionEvidenceStore(':memory:');
+  try {
+   const now=Date.parse('2026-10-28T12:00:00Z');
+   loopStore.ensureBuiltInLoops(now);
+   const loopId=kind==='morning'?ASSISTANT_MORNING_LOOP_ID:ASSISTANT_EVENING_LOOP_ID;
+   loopStore.setLoopStatus(loopId,'active',now);
+   const profile=loopStore.ensureAssistantProfile({id:DEFAULT_PERSONAL_ASSISTANT_ID,status:'active',locale:'en',timeZone:'UTC',eveningTime:'22:30',morningTime:'08:30',workdays:[1,2,3,4,5],quietHours:{start:'23:00',end:'07:00'},dataScopes:['tasks'],createdAt:now,updatedAt:now});
+   const reader=createAssistantDesktopSnapshotReader({listTaskSnapshots:()=>({items:[],availability:'available',completeness:'complete'}),listKSwarmProjects:()=>[],listTimedActions:()=>[],listMeetingMetadata:()=>[],listKnowledgeSourceMetadata:()=>[]});
+   const llm={complete:vi.fn(async()=>{
+    expect(loopStore.getLatestAssistantSourceRun(profile.id)?.analysisStatus).toBe('pending');
+    throw Error('analysis_failed');
+   })};
+   const runtime=createAssistantRuntime({loopStore,evidenceStore,llmPort:llm,now:()=>now,collect:async input=>{
+    const snapshot=await reader.collect(input);
+    return kind==='morning'?{current:snapshot}:snapshot;
+   }});
+   expect((await runtime.runLoopNow(loopId,undefined,undefined,{requestSource:'user'})).status).toBe('failed');
+   expect(llm.complete).toHaveBeenCalledOnce();
+   expect(loopStore.getLatestAssistantSourceRun(profile.id)).toMatchObject({analysisStatus:'failed',coverage:expect.arrayContaining([expect.objectContaining({sourceId:'task_snapshots',status:'checked'})])});
+  }finally{evidenceStore.close();loopStore.close();}
+ });
+});
+
+it('uses this-round factual references for v2 actions and rejects invented ids before publication',async()=>{
+ const store=new LoopStore(':memory:'),evidence=new CompletionEvidenceStore(':memory:');
+ try{
+  const now=Date.parse('2026-11-01T12:00:00Z');store.ensureBuiltInLoops(now);store.setLoopStatus(ASSISTANT_MORNING_LOOP_ID,'active',now);
+  store.ensureAssistantProfile({id:DEFAULT_PERSONAL_ASSISTANT_ID,status:'active',locale:'en',timeZone:'UTC',eveningTime:'22:30',morningTime:'08:30',workdays:[1,2,3,4,5],quietHours:{start:'23:00',end:'07:00'},dataScopes:['tasks'],createdAt:now,updatedAt:now});
+  const port={complete:vi.fn().mockResolvedValue({text:JSON.stringify({schemaVersion:2,recommendations:[{title:'Review evidence',reasonCode:'result',evidenceRefs:[{kind:'task_snapshot',id:'invented'}],action:{kind:'review',reason:'A result',nextStep:'Check it',instruction:'Review evidence only.'}}]})})};
+  const runtime=createAssistantRuntime({loopStore:store,evidenceStore:evidence,llmPort:port,now:()=>now,collect:()=>({current:{items:[{reference:{kind:'task_snapshot',id:'real'}}]}})});
+  expect((await runtime.runLoopNow(ASSISTANT_MORNING_LOOP_ID,undefined,undefined,{requestSource:'user'})).status).toBe('failed');
+  expect(store.listLoopRuns(ASSISTANT_MORNING_LOOP_ID,1)[0]?.message).toContain('evidence');
+  expect(evidence.listEvidenceForOwner('loop_run',store.listLoopRuns(ASSISTANT_MORNING_LOOP_ID,1)[0]!.id)).toEqual([]);
+ }finally{evidence.close();store.close();}
+});

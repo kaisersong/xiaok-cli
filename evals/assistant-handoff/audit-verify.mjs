@@ -1,0 +1,8 @@
+import {spawn} from 'node:child_process';import {openSync,closeSync} from 'node:fs';import {join} from 'node:path';import {repo,prepare,save,preflight} from './harness.mjs';
+const root=prepare(),checks=[
+ ['readonly-tests',['--prefix','desktop','run','test','--','--run','tests/main/desktop-readonly-audit.test.ts','tests/main/desktop-readonly-audit-retained.test.ts','tests/main/desktop-multi-agent-runtime.bdd.test.ts','tests/main/desktop-multi-agent-capabilities.bdd.test.ts','tests/main/desktop-multi-agent-catalog-bridge.bdd.test.ts']],
+ ['main-build',['--prefix','desktop','run','build:main']],['governance',['run','governance:check']],['changed-architecture',['run','architecture:check','--','--changed']],
+],rows=[];
+console.log(root);save(join(root,'audit-verification-owner.json'),{pid:process.pid,startedAt:new Date().toISOString(),paidCalls:0});
+for(const [name,args]of checks.filter(([name])=>!process.argv.includes('--tests-only')||name!=='main-build')){const fd=openSync(join(root,`${name}.log`),'wx',0o600),child=spawn(process.platform==='win32'?'npm.cmd':'npm',args,{cwd:repo,shell:process.platform==='win32',stdio:['ignore',fd,fd]});save(join(root,`${name}-pid.json`),{pid:child.pid,parentPid:process.pid,args});const outcome=await new Promise(resolve=>{child.once('error',()=>resolve({code:null,error:'spawn_failed'}));child.once('close',(code,signal)=>resolve({code,signal}));});closeSync(fd);rows.push({name,pid:child.pid,reaped:true,...outcome});}
+save(join(root,'audit-verification.json'),{rows,paidCalls:0,independentKimiReview:'pending',pilotPassed:false});save(join(root,'preflight.json'),await preflight());console.log(JSON.stringify(rows));process.exitCode=rows.some(row=>row.code!==0)?1:0;

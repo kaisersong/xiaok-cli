@@ -233,7 +233,11 @@ export interface TaskMultiAgentPreparation {
   bootId: string;
 }
 
+export interface TaskAssistantBinding {operationId:string;requestDigest:string;threadId:string}
+
 export interface TaskSnapshot {
+  /** Main-issued assistant admission receipt, atomically persisted with preparation. */
+  assistantBinding?:TaskAssistantBinding;
   /** Fresh read observation only; omitted for ordinary tasks, never persisted or used as a write grant. */
   readonly currentCompletion?: Exclude<InstalledCompletionObservation,{kind:'ordinary'}>;
   /** Sticky host CAS marker; recovery requires explicit execution reauthorization even before an archive exists. */

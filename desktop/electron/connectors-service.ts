@@ -192,6 +192,7 @@ export class ConnectorsService {
 
   /** Each invocation owns its wrappers; provider configuration stays main-owned. */
   bindTools(target: ToolRegistry): void {
+    if(target.isNativeReadonlyOnly)return;
     const search = createWebSearchTool({ registry: this.registry });
     const fetchTool = createWebFetchTool({ registry: this.registry });
     // 工具 execute 前等待凭证已就绪：冷启动后第一次搜索也要走已注入 key 的

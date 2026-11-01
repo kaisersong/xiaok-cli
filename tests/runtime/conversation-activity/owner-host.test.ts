@@ -9,11 +9,11 @@ import { ACTIVITY_OWNER_GENERATION } from '../../../src/runtime/conversation-act
 describe('real authenticated owner socket and single writer', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
   afterEach(async () => { for (const stop of cleanup.splice(0).reverse()) await stop(); });
-  async function fixture() {
+  async function fixture(assistantDigest?:ConstructorParameters<typeof ConversationActivityOwnerHost>[0]['assistantDigest']) {
     const root = mkdtempSync(join(tmpdir(), 'activity-host-')); cleanup.push(() => rmSync(root, { recursive: true, force: true }));
     const options = { dataRoot: root, profileId: 'profile', actorId: 'user', getThread: (threadId: string) => threadId === 'thread' ? { threadId, profileId: 'profile', workspaceId: 'workspace', deleteState: 'none' as const } : null,
       canObserveWork: () => true, authorizeProducer: (threadId: string) => threadId === 'thread' };
-    const host = new ConversationActivityOwnerHost(options); await host.start(); cleanup.push(() => host.stop());
+    const host = new ConversationActivityOwnerHost({...options,assistantDigest}); await host.start(); cleanup.push(() => host.stop());
     const producer = new ConversationActivityOwnerClient(root, 'producer'), user = new ConversationActivityOwnerClient(root, 'user');
     cleanup.push(() => producer.dispose(), () => user.dispose());
     return { root, options, host, producer, user };
@@ -42,6 +42,16 @@ describe('real authenticated owner socket and single writer', () => {
     await vi.waitFor(() => expect(lost).toHaveBeenCalledExactlyOnceWith(f.host.ownerEpoch));
     expect(closed).not.toHaveBeenCalled(); expect(disposed).not.toHaveBeenCalled();
   });
+  it('admits only producer digest envelopes and rejects caller-selected policy/notification fields',async()=>{
+    const envelope={profileId:'default-personal-assistant' as const,deliveryId:'c71f96bc-9716-4998-a572-3f98fa797728',policyRevision:1,revisions:[{workItemIdentity:'a'.repeat(64),notifiableRevision:'b'.repeat(64)}]};
+    const notify=vi.fn(async()=> 'shown' as const);
+    const f=await fixture({readFacts:()=>({envelope,policy:{profileId:envelope.profileId,revision:1,enabled:true,notificationsEnabled:true,intervalMinutes:240,timeZone:'UTC',quietHours:{start:'22:00',end:'08:00'},qualityDigest:'c'.repeat(64),analysisContract:'qualified-test-v1'},profileActive:true,sourceCurrent:true,qualificationCurrent:true,budgetAdmitted:true}),platformAvailable:()=>true,now:()=>Date.parse('2026-11-02T12:00:00Z'),notify});
+    await expect(f.user.request('assistantDigest',envelope)).rejects.toThrow('activity_method_forbidden');
+    await expect(f.producer.request('assistantDigest',{...envelope,canNotify:true,title:'Injected private title'})).rejects.toThrow();expect(notify).not.toHaveBeenCalled();
+    expect(await f.producer.request('assistantDigest',envelope)).toMatchObject({status:'shown'});
+    expect(await f.producer.request('assistantDigest',envelope)).toMatchObject({status:'shown'});expect(notify).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects cross-thread producer association before allocating any intent', async () => {
     const f = await fixture();
     await expect(f.producer.request('prepare', { threadId: 'foreign', operationId: 'foreign', creationIdempotencyKey: 'foreign' })).rejects.toThrow('activity_producer_forbidden');

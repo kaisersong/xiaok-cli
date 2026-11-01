@@ -1,0 +1,21 @@
+# P3 有效模型身份与持久质量代际失效
+
+状态：设计/对抗自审在实现之前。作者Codex GPT-6；后续必须独立Kimi delta，不能沿用前轮将跨重启环境key列为未完成的批准。最终root emitted回归暂停，待本修复和冻结说明完成。
+
+范围：model-identity.ts、settings、LoopStore只新增窄quality identity wrapper及新测试；不改Harvey lineage或main。改前哈希及lineage只读哈希见.artifacts/assistant-model-identity-before.json。
+
+设计：固定只读配置reader生成单个domain-separated整体SHA256，输入为完整配置bytes和按providerId排序、通过已有resolveProviderTransport解析的有效transports（环境优先API key、实际endpoint、headers）。不返回transport明文或单独keyhash，不读取或写用户配置以外路径，不调用模型；对外错误固定码，不泄露JSON错误excerpt/路径/key。相同bytes与相同有效transport跨重启得到相同fingerprint，低优先级未生效env变化不误撤销；mtime modelEpoch保留，fp涵盖环境轮换。
+
+LoopStore新增main-private invalidateAssistantQualityModelIdentity(identity|null)：同一连接transaction读取质量context；没有context不变，相同有效identity不变；不匹配/reader不可用/损坏context时调用原syncAssistantQualityContext(null)，同事务删除context、generation+1、清reimport_id。其它OS owner即使仍持旧env，也因持久context删除/代际变化不能认可旧assessment。无需盲目每次启动revoke。
+
+settings恢复前先独立读实际root identity（不依赖尚未创建的provider），按窄wrapper协调持久context；current调用同样协调。检测provider或选择/revision/identity漂移，先清缓存，再持久失效，再onInvalidated取消任务；异常不能悄悄让旧provider复活。回调只在实际持久失效或活动provider失效时触发，不在相同身份/空context反复撤销。bootstrap失败也不能绕过恢复前的持久失效。原configure显式选择事务仍失效，且不改全局default。
+
+对抗自审：只比较文件mtime会漏环境key；随机salt/启动epoch会每次重启误撤销；只换主进程reader会漏持旧环境OS owner；只清缓存不改变DB会允许别的owner继续读旧assessment；只依赖bootstrap成功会在缺资源时保留旧授权；重新把旧context写回不能重绑旧generation。事务失败不可声称已撤销，必须传播失败而本地provider清除。质量assessment原文保留作审计，权限由context/generation决定。无context代表已经无资格，不能反复increment。独立Kimi审前冻结所有修改与测试哈希。
+
+测试计划：真实固定reader的跨环境轮换/endpoint/headers/优先级/不写配置/无明文异常；真实SQLite+正式workflow构造的synthetic已评估记录，close/reopen保持相同身份与人工评估，不同身份在bootstrap前撤销，旧环境独立DB owner/旧capability均失效；current漂移持久撤销及onInvalidated且恢复env不复活；窄wrapper事务故障回滚证据。测试不是实际人工pilot。
+
+## 组合入口嵌套事务补充（实现前）
+
+主线程指出实际链：pure assessment SAVEPOINT → Product workflow.readCurrentModel → providerGetter → Settings.current → LoopStore BEGIN。先加Settings+Product+真实qualified记录的正向组合红测，断言product.quality在pure reader内不调用providerGetter，身份不变资格可用、env变化资格立即拒绝、外层settings.current持久撤销使旧env owner也失效。
+
+根因修复限定为QualityProduct一条main-private readCurrentModel接线：options.readCurrentModel可测试注入，默认固定readAssistantModelIdentity，不经Settings/provider getter；其它已审Product逻辑不重构。LoopStore窄wrapper同时加同步只读fast path（无context或identity匹配即false不BEGIN），只有失配才transaction且在事务内重读比较；不改通用transaction、不吞cannot-start错误。profile grant的主线程MAX(updated_at+1,now)及bump版本两行保留，独立delta附原始ABA红/绿证据。

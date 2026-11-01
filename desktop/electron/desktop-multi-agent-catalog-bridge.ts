@@ -124,6 +124,8 @@ export class DesktopToolCatalogBridge {
     }
   }
   private bind(tool: Tool, owner: DesktopToolOwnership, authority: Readonly<DesktopInvocationAuthority>): Tool['execute'] {
+    // Preserve the exact-file scope of the proven native original.
+    if (this.options.registry.isNativeReadonlyOnly) return tool.execute;
     if (owner.binding === 'custom') {
       if (!owner.bindInvocation) throw new Error('tool_scope_unsupported'); return owner.bindInvocation(authority);
     }

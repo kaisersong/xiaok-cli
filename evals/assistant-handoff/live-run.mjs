@@ -1,0 +1,30 @@
+import {createRequire} from 'node:module';import {spawn} from 'node:child_process';
+import {readFileSync,writeFileSync,mkdirSync,openSync,closeSync,realpathSync,existsSync,unlinkSync} from 'node:fs';import {join,resolve} from 'node:path';import {homedir} from 'node:os';
+import {prepare,repo,save} from './harness.mjs';
+import {resolveRuntimeModelBinding} from '../../src/ai/providers/control-plane.ts';
+const sourceRoot=process.argv[2];if(!sourceRoot)throw Error('usage: live-run.mjs PREPARED_SESSION [case-index]');
+const sourceDirectory=realpathSync(sourceRoot),sourceSession=JSON.parse(readFileSync(join(sourceDirectory,'session.json'),'utf8'));if(realpathSync(sourceSession.root)!==sourceDirectory)throw Error('owned_source_session_required');
+const lockPath=join(sourceDirectory,'live-run.lock'),lockFd=openSync(lockPath,'wx',0o600);writeFileSync(lockFd,JSON.stringify({pid:process.pid,startedAt:new Date().toISOString()}));process.on('exit',()=>{closeSync(lockFd);unlinkSync(lockPath);});
+const ledgerPath=join(sourceDirectory,'live-budget.json'),ledger=existsSync(ledgerPath)?JSON.parse(readFileSync(ledgerPath,'utf8')):{schemaVersion:1,attempts:[]};
+if(ledger.attempts.reduce((total,row)=>total+(row.knownTotalTokens??0),0)>=100000)throw Error('live_total_known_token_budget');
+if(ledger.attempts.some(row=>['reserved','unknown','quota'].includes(row.status)))throw Error('live_budget_fenced_by_prior_unknown_or_pending');
+const index=Number(process.argv[3]??0);if(!Number.isSafeInteger(index)||index<0||index>9)throw Error('case_index_invalid');
+const raw=JSON.parse(readFileSync(join(process.env.XIAOK_CONFIG_DIR??join(homedir(),'.xiaok'),'config.json'),'utf8'));
+const binding=resolveRuntimeModelBinding(raw);if(binding.providerType!=='custom'||binding.wireModel!=='qwen3.8-flash-next'||binding.protocol!=='openai_legacy'||!binding.apiKey)throw Error('configured_custom_qwen_required');
+const root=realpathSync(prepare()),configDir=join(root,'config');
+// Minimal private selected-model configuration. No original config writes, no plugins/channels/hooks.
+writeFileSync(join(configDir,'config.json'),JSON.stringify({schemaVersion:2,defaultModelId:binding.modelId,providers:{[binding.providerId]:{type:binding.providerType,protocol:binding.protocol,apiKey:binding.apiKey,baseUrl:binding.baseUrl,headers:binding.headers}},models:{[binding.modelId]:{...raw.models[binding.modelId],provider:binding.providerId,model:binding.wireModel}},memory:{autoDistill:false}}),{mode:0o600,flag:'wx'});
+const sessionPath=join(root,'session.json'),session=JSON.parse(readFileSync(sessionPath,'utf8'));writeFileSync(sessionPath,JSON.stringify({...session,credentialsCopied:true,credentialScope:'private_selected_provider_config_only'},null,2)+'\n',{mode:0o600});
+save(join(root,'live-config-identity.json'),{providerId:binding.providerId,providerType:binding.providerType,modelId:binding.modelId,wireModel:binding.wireModel,protocol:binding.protocol,credentialPresent:true,credentialPrinted:false,originalConfigWritten:false});
+const require=createRequire(join(repo,'desktop','package.json')),binary=require('electron'),args=[join(repo,'evals/assistant-handoff/live-electron.cjs'),root,realpathSync(sourceRoot),String(index)];
+const entry={root,index,status:'reserved',createdAt:new Date().toISOString()};ledger.attempts.push(entry);writeFileSync(ledgerPath,JSON.stringify(ledger,null,2)+'\n',{mode:0o600});
+const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+console.log(JSON.stringify({root,phase:'starting_one_real_C_attempt'}));
+const fd=openSync(join(root,'live-electron.log'),'wx',0o600),child=spawn(binary,args,{cwd:repo,env,stdio:['ignore',fd,fd]});
+save(join(root,'live-supervisor-pid.json'),{pid:child.pid,parentPid:process.pid,args,startedAt:new Date().toISOString()});
+let timedOut=false;const timer=setTimeout(()=>{timedOut=true;child.kill('SIGTERM');},240000);
+const outcome=await new Promise(resolve=>{child.once('error',()=>resolve({code:null,error:'spawn_failed'}));child.once('close',(code,signal)=>resolve({code,signal}));});clearTimeout(timer);closeSync(fd);
+let evidence;try{evidence=JSON.parse(readFileSync(join(root,'live-result.json'),'utf8'));}catch{}
+entry.status=evidence?.networkFence==='quota_or_rate_limit'?'quota':!evidence||evidence.requests.some(row=>!row.usage||row.capture!=='complete')?'unknown':outcome.code===0?'completed':'blocked';entry.requests=evidence?.requests.length??null;entry.knownTotalTokens=evidence?.requests.every(row=>row.usage)?evidence.requests.reduce((sum,row)=>sum+(row.usage.total_tokens??row.usage.prompt_tokens+row.usage.completion_tokens),0):null;entry.evidence=join(root,'live-result.json');writeFileSync(ledgerPath,JSON.stringify(ledger,null,2)+'\n',{mode:0o600});
+const privateConfigPath=join(configDir,'config.json'),privateConfig=JSON.parse(readFileSync(privateConfigPath,'utf8'));for(const selected of Object.values(privateConfig.providers)){delete selected.apiKey;delete selected.headers;}writeFileSync(privateConfigPath,JSON.stringify(privateConfig),{mode:0o600});save(join(root,'credential-cleanup.json'),{privateCredentialRemoved:true,originalConfigWritten:false,afterChildExit:true});
+save(join(root,'live-supervisor.json'),{...outcome,pid:child.pid,reaped:true,timedOut,root,pilotPassed:false});console.log(JSON.stringify({root,...outcome,pid:child.pid,timedOut,pilotPassed:false},null,2));process.exitCode=outcome.code===0?0:2;

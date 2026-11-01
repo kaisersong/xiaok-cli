@@ -1,3 +1,11 @@
+export type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../../../shared/assistant-calendar-memory-contract';
+export type {AssistantAnalysisStatus,AssistantAnalysisSettingsInput} from '../../../shared/assistant-analysis-settings-contract';
+export type {AssistantThreadTargetPage} from '../../../shared/assistant-launch-contract';
+export type {AssistantQualityStatus} from '../../../shared/assistant-quality-contract';
+export type {AssistantPeriodicStatus,AssistantPeriodicSettings,AssistantPeriodicCheck} from '../../../shared/assistant-periodic-contract';
+export type {AssistantLaunchDraft,AssistantLaunchOperation,AssistantLaunchSummary} from '../../../shared/assistant-launch-contract';
+export type {AssistantCalendarStatus,AssistantCalendarSnapshot} from '../../../shared/assistant-calendar-contract';
+export type {AssistantActionProposalDto,AssistantActionDecisionResultDto} from '../../../shared/assistant-action-contract';
 import type {ScheduledActionDto,ScheduledBindingDto,ScheduledLoopCreateDto} from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { ScheduledTaskDto, ScheduledCreateDto, ScheduledUpdateDto, ScheduledUpdateResultDto, ScheduledActionDto, ScheduledRunDto, ScheduledBindingDto, ScheduledLoopCreateDto, ScheduledReminderDto, ScheduledReminderStatusDto } from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { KnowledgeCollectionDto, KnowledgeSourceDto, KnowledgeCreateCollectionInput, KnowledgeAddSourceInput, KnowledgeCollectionStateDto, KnowledgeSourceContentInput, KnowledgeSourceContentDto, KnowledgeSearchInput, KnowledgeSearchResultDto } from '../../../shared/knowledge-ipc-contract.js';
@@ -267,7 +275,7 @@ export type LearnedConstraintDeactivationReasonView = 'user' | 'stale' | 'ineffe
 
 export type LearnedConstraintView = LoopConstraintDto;
 
-export type { AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../../../shared/assistant-ipc-contract';
+export type { AssistantCandidatePageDto, AssistantActionOverviewDto, AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../../../shared/assistant-ipc-contract';
 
 export type { ProjectTeamPlanItemDto, ProjectTeamPlanDto, ProjectTeamOperationDto } from '../../../shared/kswarm-team-ipc-contract';
 

@@ -80,6 +80,10 @@ function pickDefined(input) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 }
 
+function sanitizeAssistantPeriodicInput(input){return pickDefined({enabled:input?.enabled,notificationsEnabled:input?.notificationsEnabled,intervalMinutes:input?.intervalMinutes,quietHours:input?.quietHours,expectedRevision:input?.expectedRevision});}
+function sanitizeAssistantLaunchInput(input){return pickDefined({proposalId:input?.proposalId,expectedRevision:input?.expectedRevision,draftId:input?.draftId,instruction:input?.instruction,expectedResultDigest:input?.expectedResultDigest,existingThreadId:input?.existingThreadId,goalConsentChecked:input?.goalConsentChecked});}
+function sanitizeAssistantActionInput(input){return pickDefined({proposalId:typeof input?.proposalId==='string'?input.proposalId:'',expectedRevision:input?.expectedRevision,snoozeUntil:input?.snoozeUntil});}
+
 function sanitizeAssistantCandidateInput(input) {
   return pickDefined({
     candidateId: typeof input?.candidateId === 'string' ? input.candidateId : '',
@@ -342,6 +346,32 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart'),
   kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input),
   kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input),
+  getAssistantCandidatePage:input=>ipcRenderer.invoke('desktop:assistant:getActionCandidatesPage',{cursor:input.cursor}),
+  dismissAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:dismissAction',sanitizeAssistantActionInput(input)),
+  snoozeAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:snoozeAction',sanitizeAssistantActionInput(input)),
+  getAssistantCalendarMemorySettings:()=>ipcRenderer.invoke('desktop:assistant:getCalendarMemorySettings'),
+  configureAssistantCalendarMemory:input=>ipcRenderer.invoke('desktop:assistant:configureCalendarMemory',{enabled:input?.enabled,expectedRevision:input?.expectedRevision}),
+  getAssistantCalendarStatus:()=>ipcRenderer.invoke('desktop:assistant:getCalendarStatus'),
+  connectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:connectCalendar'),
+  disconnectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:disconnectCalendar'),
+  getAssistantAnalysisProvider:()=>ipcRenderer.invoke('desktop:assistant:getAnalysisProvider'),
+  configureAssistantAnalysisProvider:input=>ipcRenderer.invoke('desktop:assistant:configureAnalysisProvider',{modelId:input?.modelId,expectedRevision:input?.expectedRevision}),
+  getAssistantLaunchTargets:input=>ipcRenderer.invoke('desktop:assistant:listLaunchTargets',pickDefined({cursor:input?.cursor})),
+  getAssistantQualityStatus:()=>ipcRenderer.invoke('desktop:assistant:getQualityStatus'),
+  exportAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:exportQualityReview'),
+  importAssistantQualityReview:input=>ipcRenderer.invoke('desktop:assistant:importQualityReview',{attestHumanReview:input?.attestHumanReview===true}),
+  revokeAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:revokeQualityReview'),
+  getAssistantPeriodicStatus:()=>ipcRenderer.invoke('desktop:assistant:getPeriodicStatus'),
+  configureAssistantPeriodic:input=>ipcRenderer.invoke('desktop:assistant:configurePeriodic',sanitizeAssistantPeriodicInput(input)),
+  checkAssistantPeriodic:()=>ipcRenderer.invoke('desktop:assistant:checkPeriodic'),
+  cancelAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:cancelLaunch',{draftId:input.draftId}),
+  prepareAssistantReconfirmation:input=>ipcRenderer.invoke('desktop:assistant:prepareReconfirmation',sanitizeAssistantLaunchInput(input)),
+  prepareAssistantFollowUpLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareFollowUpLaunch',pickDefined({candidateId:input.candidateId,existingThreadId:input.existingThreadId})),
+  prepareAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareLaunch',sanitizeAssistantLaunchInput(input)),
+  confirmAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:confirmLaunch',sanitizeAssistantLaunchInput(input)),
+  getAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:getActionLaunch',sanitizeAssistantLaunchInput(input)),
+  resolveAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:resolveActionLaunch',sanitizeAssistantLaunchInput(input)),
+  getAssistantActionOverview: () => ipcRenderer.invoke('desktop:assistant:getActionOverview'),
   getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview'),
   activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate'),
   pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause'),

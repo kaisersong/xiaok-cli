@@ -70,6 +70,13 @@ describe('AssistantService bootstrap', () => {
     ]));
   });
 
+  it('never reuses a grant revision when status changes share a clock tick or the clock moves backwards',()=>{
+    const service=new AssistantService({loopStore,timedActionService:new TimedActionService(timedActionStore,{now:()=>1000}),now:()=>1000});service.bootstrap();
+    const active=service.setStatus('active');const paused=service.setStatus('paused');const resumed=service.setStatus('active');
+    expect(paused.updatedAt).toBeGreaterThan(active.updatedAt);expect(resumed.updatedAt).toBeGreaterThan(paused.updatedAt);
+    const rolledBack=loopStore.setAssistantProfileStatus(DEFAULT_PERSONAL_ASSISTANT_ID,'paused',1)!;expect(rolledBack.updatedAt).toBeGreaterThan(resumed.updatedAt);
+  });
+
   it('projects an active profile to both loops and schedules without creating duplicates', () => {
     const timedActionService = new TimedActionService(timedActionStore, { now: () => 1_000 });
     const service = new AssistantService({ loopStore, timedActionService, now: () => 1_000 });

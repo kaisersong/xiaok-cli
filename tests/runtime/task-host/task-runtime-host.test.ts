@@ -16,6 +16,27 @@ describe('InProcessTaskRuntimeHost', () => {
   let snapshotStore: FileTaskSnapshotStore;
   let material: MaterialRecord;
 
+  it('persists assistant identity with the first checkpoint and fences the first runner at commit and execution',async()=>{
+    let commit=0,execution=0;
+    const runner=vi.fn<TaskRunner>(async()=>{});
+    const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,runner,
+      commitAssistantStart:()=>{commit++;},assertAssistantExecutionWorkspace:()=>{execution++;}});
+    const binding={operationId:'operation-one',requestDigest:'a'.repeat(64),threadId:'thread-one'};
+    const reservation=host.reserveAssistantTaskIdentity(binding);
+    const prepared=await host.prepareReservedTask({prompt:'Review evidence',materials:[],context:{threadId:'thread-one'}},reservation);
+    expect((await snapshotStore.recoverTask(prepared.taskId))?.assistantBinding).toEqual(binding);
+    await host.startTask(prepared.taskId);await host.drain();
+    expect(commit).toBe(1);expect(execution).toBe(1);expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  it('never invokes a runner if the assistant commit fence rejects',async()=>{
+    const runner=vi.fn<TaskRunner>(async()=>{});
+    const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,runner,commitAssistantStart:()=>{throw Error('source_stale');}});
+    const reservation=host.reserveAssistantTaskIdentity({operationId:'operation-one',requestDigest:'a'.repeat(64),threadId:'thread-one'});
+    const prepared=await host.prepareReservedTask({prompt:'Review evidence',materials:[],context:{threadId:'thread-one'}},reservation);
+    await host.startTask(prepared.taskId).catch(()=>{});await host.drain().catch(()=>{});expect(runner).not.toHaveBeenCalled();
+  });
+
   it('exposes a Host-bound final publication registration and rejects forged tickets', async () => {
     let rejected = false;
     const host = new InProcessTaskRuntimeHost({ materialRegistry, snapshotStore, runner: async input => {

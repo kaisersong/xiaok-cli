@@ -219,7 +219,7 @@ export class DesktopCapabilityCatalog {
     const registry = new ToolRegistry({ ...options, agentId: authority.agentId,
       // Never pass the broad global CapabilityRegistry into a scoped tool_search.
       capabilityRegistry: undefined,
-      onPrompt: (name, rawInput, invocation) => this.approve(record, name, rawInput, options.onPrompt, invocation),
+      onPrompt: options.nativeReadonlyOnly?undefined:(name, rawInput, invocation) => this.approve(record, name, rawInput, options.onPrompt, invocation),
     }, []);
     const handle: DesktopScopedRegistry = { registry, authority,
       dispose: () => {

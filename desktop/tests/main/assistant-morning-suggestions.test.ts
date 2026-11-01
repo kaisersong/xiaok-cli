@@ -39,3 +39,9 @@ describe('listLatestMorningSuggestions', () => {
     })).toEqual([]);
   });
 });
+
+it('reads v2 human explanation while keeping legacy suggestion DTO fields',()=>{
+ const output={schemaVersion:2,recommendations:[{title:'Review evidence',reasonCode:'technical_code',evidenceRefs:[{kind:'task',id:'one'}],action:{kind:'review',reason:'A result needs your review',nextStep:'Open the evidence',instruction:'Review evidence without changing it.'}}]};
+ const result=listLatestMorningSuggestions({listRuns:()=>[{id:'run',status:'success'}],listEvidence:()=>[{metadata:{assistantKind:'morning',output}}]});
+ expect(result).toEqual([{id:'run:0',title:'Review evidence',summary:'A result needs your review'}]);
+});

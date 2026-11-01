@@ -1,0 +1,11 @@
+{
+  "reviews/assistant-calendar-p2-semantics.md": "7d3f07971ca2a4a0e8e07118783b81ef42b91bab0afc8fdfdedfe095282a0f0e",
+  "reviews/assistant-calendar-p2-handoff.md": "fee1d29931ed315d237ed17cbd7e01d99a8f937ffd253d8c01094639f74959c2",
+  "desktop/electron/assistant-calendar-source.ts": "0a5747001d2021ed6b852739bd27d68fdaa92ea844b31cc358cb3c81bf8220ac",
+  "desktop/electron/assistant-calendar-store.ts": "23fa15e96885afc1172dc042b681cab577402dd30baf6da6205a76ded5e1071c",
+  "desktop/electron/assistant-calendar-context.ts": "67a0b9488f32d01968bb87effe239ed91dde949194338a1986157576194f21a7",
+  "desktop/shared/assistant-calendar-contract.ts": "bd428c66632e52a1fd097750bcf1af93414dfecf3e84dac38f3a02479a2a9206",
+  "desktop/tests/main/assistant-calendar-source.test.ts": "a08a0fa2c37ee838aa8489500fde3068d9b9b2224a46f5f1dda4fdc1865eb806",
+  "desktop/tests/main/assistant-calendar-context.test.ts": "24c9ce58d8adadc0d520de0b237abb84704b503cb24f278ffcfa70883c9af8ab",
+  "desktop/tests/main/assistant-calendar-memory-settings.test.ts": "9de3d80b24167bb047960c54eea3452d9a74da1b0c061ac89de715428246fee2"
+}

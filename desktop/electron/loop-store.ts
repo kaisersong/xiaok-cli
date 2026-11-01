@@ -1,3 +1,16 @@
+import {migrateAssistantDerivedLineage,recordAssistantDerivedSourceRun,readAssistantDerivedLineage,isAssistantDerivedRunTracked} from './assistant-derived-lineage-store.js';
+import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
+import {migrateAssistantAnalysisSelection,readAssistantAnalysisSelection,selectAssistantAnalysisModel} from './assistant-analysis-settings.js';
+import {AssistantQualityWorkflow,migrateAssistantQuality,syncAssistantQualityContext,type AssistantQualityPorts} from './assistant-quality-workflow.js';
+import {readAssistantQualityAuthorization,qualityContextSchema,type QualityModelReader} from '../../src/runtime/assistant/quality-authorization.js';
+import {ASSISTANT_CHECK_LOOP_ID} from './assistant-types.js';
+import {getAssistantDigestDelivery,claimAssistantDigestDispatch,finishAssistantDigestDelivery,listAssistantDigestRecovery,migrateAssistantPeriodicPolicy,getAssistantPeriodicPolicy,setAssistantPeriodicPolicy,prepareAssistantDigest} from './assistant-periodic-policy.js';
+import {requestAssistantLaunchCancel,findAssistantLaunchTask,listAssistantLaunchRecovery,migrateAssistantLaunch,readAssistantLaunchDraft,readAssistantLaunchOperation,listAssistantLaunchOperations,prepareAssistantLaunchDraft,confirmAssistantLaunch,claimAssistantLaunchDispatch,consumeAssistantLaunchStart,updateAssistantLaunchObservation} from './assistant-launch-store.js';
+import {reserveAssistantAnalysisForRun,sendAssistantAnalysisForRun,migrateAssistantAnalysisBudget,reserveAssistantAnalysis,sendAssistantAnalysis,settleAssistantAnalysis,readAssistantAnalysisAttempt} from './assistant-analysis-budget.js';
+import {readAssistantCalendarMemorySettings,setAssistantCalendarMemorySettings,migrateAssistantCalendar,readAssistantCalendarConnection,setAssistantCalendarConnection,writeAssistantCalendarGeneration,readAssistantCalendarGeneration} from './assistant-calendar-store.js';
+import {migrateAssistantActions,projectAssistantActions,decideAssistantAction,type AssistantActionSource} from './assistant-action-store.js';
+import {migrateAssistantSourceRuns,recordAssistantSourceRun,finishAssistantSourceAnalysis,latestAssistantSourceRun} from './assistant-source-store.js';
+import type {AssistantSourceRun} from '../shared/assistant-coverage-contract.js';
 import type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
 export type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
 import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
@@ -22,7 +35,7 @@ import {parseVerificationOperationRequestObservation,type VerificationOperationR
 import type {VerificationObligationObservation} from '../../src/runtime/verification/verification-obligation-observation.js';
 export type {LoopVerificationExecution} from './loop-verification-execution.js';
 import {createLoopApplicationBinding,parseLoopApplicationBinding,loopApplicationBindingHash,parseLoopCandidateBody,type LoopApplicationBinding,type LoopArtifactDescriptor} from '../../src/runtime/verification/loop-application-binding.js';
-import {validateEveningReflection,validateMorningBriefing,type EveningReflectionOutput,type MorningBriefingOutput} from './assistant-llm.js';
+import {validateEveningReflection,validateMorningBriefingStructure,type EveningReflectionOutput,type MorningBriefingOutput} from './assistant-llm.js';
 import type {ArtifactEvidenceRegressionScanResult} from './artifact-evidence-regression-loop.js';
 import type {KSwarmServiceHealthScanResult} from './kswarm-health-loop.js';
 import type {TaskSnapshot} from '../../src/runtime/task-host/types.js';
@@ -145,6 +158,7 @@ export interface AddConstraintInput {
 }
 
 const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description' | 'status'>> = [
+  {id:ASSISTANT_CHECK_LOOP_ID,title:'Personal assistant transaction check',description:'Opt-in bounded transaction analysis; requires quality and provider budget qualification.',status:'paused'},
   {
     id: BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION,
     title: 'Artifact Evidence Regression',
@@ -209,7 +223,90 @@ export class LoopStore {
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try { this.applySchema(); migrateLoopNativeSchema(this.db); migrateLoopArtifactExportJournal(this.db); this.connection.recordComponent('loop'); } catch(error) { this.connection.close(); throw error; }
+    try { this.applySchema(); migrateAssistantSourceRuns(this.db); migrateAssistantActions(this.db); migrateAssistantCalendar(this.db); migrateAssistantAnalysisBudget(this.db); migrateAssistantLaunch(this.db); migrateAssistantPeriodicPolicy(this.db); migrateAssistantQuality(this.db); migrateAssistantDerivedLineage(this.db); migrateAssistantAnalysisSelection(this.db); migrateLoopNativeSchema(this.db); migrateLoopArtifactExportJournal(this.db); this.connection.recordComponent('loop'); } catch(error) { this.connection.close(); throw error; }
+  }
+
+  getAssistantDigestDelivery(id:string){return getAssistantDigestDelivery(this.db,id);}
+  claimAssistantDigestDispatch(envelope:Parameters<typeof claimAssistantDigestDispatch>[1]){return this.transaction(()=>claimAssistantDigestDispatch(this.db,envelope));}
+  finishAssistantDigestDelivery(receipt:Parameters<typeof finishAssistantDigestDelivery>[1]){return this.transaction(()=>finishAssistantDigestDelivery(this.db,receipt));}
+  listAssistantDigestRecovery(){return listAssistantDigestRecovery(this.db);}
+  getAssistantPeriodicPolicy(){return getAssistantPeriodicPolicy(this.db);}
+  setAssistantPeriodicPolicy(value:Parameters<typeof setAssistantPeriodicPolicy>[1],revision:number){return this.transaction(()=>setAssistantPeriodicPolicy(this.db,value,revision));}
+  prepareAssistantDigest(input:Parameters<typeof prepareAssistantDigest>[1]){return this.transaction(()=>prepareAssistantDigest(this.db,input));}
+  requestAssistantLaunchCancel(id:string,now:number){return this.transaction(()=>requestAssistantLaunchCancel(this.db,id,now));}
+  findAssistantLaunchTask(taskId:string){return findAssistantLaunchTask(this.db,taskId);}
+  listAssistantLaunchRecovery(){return listAssistantLaunchRecovery(this.db);}
+  readAssistantLaunchDraft(id:string){return readAssistantLaunchDraft(this.db,id);}
+  readAssistantLaunchOperation(key:string,by:'id'|'draft_id'='id'){return readAssistantLaunchOperation(this.db,key,by);}
+  listAssistantLaunchOperations(){return listAssistantLaunchOperations(this.db);}
+  prepareAssistantLaunchDraft(...args:Tail<Parameters<typeof prepareAssistantLaunchDraft>>){return this.transaction(()=>prepareAssistantLaunchDraft(this.db,...args));}
+  confirmAssistantLaunch(...args:Tail<Parameters<typeof confirmAssistantLaunch>>){return this.transaction(()=>confirmAssistantLaunch(this.db,...args));}
+  claimAssistantLaunchDispatch(...args:Tail<Parameters<typeof claimAssistantLaunchDispatch>>){return this.transaction(()=>claimAssistantLaunchDispatch(this.db,...args));}
+  consumeAssistantLaunchStart(...args:Tail<Parameters<typeof consumeAssistantLaunchStart>>){return this.transaction(()=>consumeAssistantLaunchStart(this.db,...args));}
+  updateAssistantLaunchObservation(...args:Tail<Parameters<typeof updateAssistantLaunchObservation>>){return this.transaction(()=>updateAssistantLaunchObservation(this.db,...args));}
+
+  private assistantDerivedVisibility?:AssistantDerivedVisibility;
+  bindAssistantDerivedVisibility(visibility:AssistantDerivedVisibility){if(this.assistantDerivedVisibility&&this.assistantDerivedVisibility!==visibility)throw Error('assistant_derived_owner_conflict');this.assistantDerivedVisibility=visibility;}
+  private assistantRunVisible(runId:string){try{return this.assistantDerivedVisibility?.isRunVisible(runId)??true;}catch{return false;}}
+  readAssistantDerivedLineage(runId:string){return readAssistantDerivedLineage(this.db,runId);}
+  isAssistantDerivedRunTracked(runId:string){return isAssistantDerivedRunTracked(this.db,runId);}
+  recordAssistantDerivedSourceRun(input:Parameters<typeof recordAssistantDerivedSourceRun>[1],isCurrent:()=>boolean){return this.transaction(()=>{recordAssistantDerivedSourceRun(this.db,input,isCurrent);this.bumpAutomationStoreVersion();});}
+  captureAssistantMemoryConfirmationFacts(candidateId:string){
+    const read=()=>{const row=this.db.prepare('SELECT * FROM assistant_candidates WHERE id=?').get(candidateId) as AssistantCandidateRow|undefined;if(!row||row.kind!=='memory'||row.status!=='accepted')return undefined;const runRow=this.getLoopRunRow(row.run_id);if(!runRow||runRow.status!=='success'||this.getLoopRunPublicationBasis(row.run_id)||readInstalledCurrentOwner(completionConsumerOwner({ownerKind:'loop_run',ownerId:row.run_id})).kind!=='ordinary')return undefined;const members=this.db.prepare('SELECT * FROM assistant_candidates WHERE run_id=? ORDER BY id LIMIT 101').all(row.run_id);if(members.length>100)return undefined;return {candidate:this.assistantCandidateRowToRecord(row),run:this.runRowToRecord(runRow),members};};
+    const facts=read();if(!facts)return undefined;const revision=createHash('sha256').update(JSON.stringify(facts)).digest('hex');return {candidate:facts.candidate,run:facts.run,revision,isCurrent:()=>{try{const current=read();return !!current&&createHash('sha256').update(JSON.stringify(current)).digest('hex')===revision;}catch{return false;}}};
+  }
+  private visibleRunListRecord(row:LoopRunRow):LoopRun{const run=this.runRowToRecord(row);return this.assistantRunVisible(run.id)?run:{id:run.id,loopId:run.loopId,status:run.status,trigger:{kind:'source_unavailable'},evidenceIds:[],startedAt:run.startedAt,finishedAt:run.finishedAt,updatedAt:run.updatedAt,message:'assistant_source_unavailable'};}
+
+  getAssistantAnalysisSelection(){return readAssistantAnalysisSelection(this.db);}
+  selectAssistantAnalysisModel(input:Parameters<typeof selectAssistantAnalysisModel>[1]){return this.transaction(()=>{const result=selectAssistantAnalysisModel(this.db,input);syncAssistantQualityContext(this.db,null);return result;});}
+  createAssistantQualityWorkflow(ports:AssistantQualityPorts){return new AssistantQualityWorkflow(this.db,ports);}
+  syncAssistantQualityContext(input:Parameters<typeof syncAssistantQualityContext>[1]){return this.transaction(()=>syncAssistantQualityContext(this.db,input));}
+  /** Main-private identity reconciliation; old OS owners observe the same durable revocation. */
+  invalidateAssistantQualityModelIdentity(identity:ReturnType<QualityModelReader>|null){
+    const needsInvalidation=()=>{
+      const row=this.db.prepare('SELECT payload_json FROM assistant_quality_context WHERE singleton=1').get();
+      if(!row)return false;
+      try{const context=qualityContextSchema.parse(JSON.parse(String(row.payload_json)));return !identity||context.modelEpoch!==identity.modelEpoch||context.configFingerprint!==identity.configFingerprint;}catch{return true;}
+    };
+    // Matching identity is a synchronous read, safe inside a pure reader's savepoint.
+    if(!needsInvalidation())return false;
+    return this.transaction(()=>{
+      if(!needsInvalidation())return false;
+      syncAssistantQualityContext(this.db,null);
+      return true;
+    });
+  }
+  readAssistantQualityAuthorization(readModel:QualityModelReader){return readAssistantQualityAuthorization(this.db,readModel);}
+
+  reserveAssistantAnalysisForRun(input:Parameters<typeof reserveAssistantAnalysisForRun>[1],runId:string){return this.transaction(()=>reserveAssistantAnalysisForRun(this.db,input,runId));}
+  sendAssistantAnalysisForRun(input:Parameters<typeof sendAssistantAnalysisForRun>[1],runId:string){return this.transaction(()=>sendAssistantAnalysisForRun(this.db,input,runId));}
+  reserveAssistantAnalysis(input:Parameters<typeof reserveAssistantAnalysis>[1]){return this.transaction(()=>reserveAssistantAnalysis(this.db,input));}
+  sendAssistantAnalysis(input:Parameters<typeof sendAssistantAnalysis>[1]){return this.transaction(()=>sendAssistantAnalysis(this.db,input));}
+  settleAssistantAnalysis(input:Parameters<typeof settleAssistantAnalysis>[1]){return this.transaction(()=>settleAssistantAnalysis(this.db,input));}
+  readAssistantAnalysisAttempt(id:string){return readAssistantAnalysisAttempt(this.db,id);}
+
+  getAssistantCalendarMemorySettings(input:Parameters<typeof readAssistantCalendarMemorySettings>[1]){return readAssistantCalendarMemorySettings(this.db,input);}
+  setAssistantCalendarMemorySettings(input:Parameters<typeof setAssistantCalendarMemorySettings>[1]){return this.transaction(()=>{const result=setAssistantCalendarMemorySettings(this.db,input);this.bumpAutomationStoreVersion();return result;});}
+  getAssistantCalendarConnection(){return readAssistantCalendarConnection(this.db);}
+  setAssistantCalendarConnection(input:Parameters<typeof setAssistantCalendarConnection>[1]){return this.transaction(()=>{const result=setAssistantCalendarConnection(this.db,input);this.bumpAutomationStoreVersion();return result;});}
+  writeAssistantCalendarGeneration(value:Parameters<typeof writeAssistantCalendarGeneration>[1],guard:()=>boolean){return this.transaction(()=>{writeAssistantCalendarGeneration(this.db,value,guard);this.bumpAutomationStoreVersion();});}
+  getAssistantCalendarGeneration(epoch:number){return readAssistantCalendarGeneration(this.db,epoch);}
+
+  projectAssistantActions(source:AssistantActionSource,now:number){
+    return this.transaction(()=>projectAssistantActions(this.db,source,now));
+  }
+  decideAssistantAction(source:AssistantActionSource,input:Parameters<typeof decideAssistantAction>[2]){
+    return this.transaction(()=>decideAssistantAction(this.db,source,input));
+  }
+
+  recordAssistantSourceRun(input: Omit<AssistantSourceRun,'analysisStatus'>): void {
+    this.transaction(() => recordAssistantSourceRun(this.db,input));
+  }
+  finishAssistantSourceAnalysis(runId:string,status:'complete'|'failed'):void {
+    this.transaction(() => finishAssistantSourceAnalysis(this.db,runId,status));
+  }
+  getLatestAssistantSourceRun(profileId:string):AssistantSourceRun|undefined {
+    return latestAssistantSourceRun(this.db,profileId);
   }
 
   close(): void {
@@ -268,25 +365,25 @@ export class LoopStore {
     const input=captureLoopProducerValue(raw);publicationFields(input,['nativeAttemptId','expectedLatestAttemptId','requestSource','now']);
     if(input.requestSource!=='user')throw Error('loop_publication_attempt_source');publicationIdentity(input.nativeAttemptId);if(input.expectedLatestAttemptId!==null)publicationIdentity(input.expectedLatestAttemptId);
     return this.transaction(()=>{
-      const target=this.getLoopNativeAttemptTarget(input.nativeAttemptId);if(target.attempt.phase!=='ready')throw Error('loop_publication_attempt_native');this.assertLoopNativeAttemptCurrentInTransaction(input.nativeAttemptId);
+      const target=this.getLoopNativeAttemptTargetRaw(input.nativeAttemptId);if(target.attempt.phase!=='ready')throw Error('loop_publication_attempt_native');this.assertLoopNativeAttemptCurrentInTransaction(input.nativeAttemptId);
       const records=this.listLoopPublicationAttempts(target.attempt.candidateId),previous=records.at(-1);
       if((previous?.attemptId??null)!==input.expectedLatestAttemptId||previous&&(!loopPublicationTerminal(previous)||previous.status==='committed'&&previous.nativeAttemptId===target.attempt.attemptId))throw Error('loop_publication_attempt_conflict');
       if(previous&&previous.nativeAttemptId!==target.attempt.attemptId){
-        const old=this.getLoopNativeAttemptTarget(previous.nativeAttemptId).attempt,latest=this.listLoopNativeAttempts(target.attempt.candidateId).at(-1);
+        const old=this.getLoopNativeAttemptTargetRaw(previous.nativeAttemptId).attempt,latest=this.listLoopNativeAttempts(target.attempt.candidateId).at(-1);
         if(previous.status!=='committed'||target.attempt.ordinal<=old.ordinal||latest?.attemptId!==target.attempt.attemptId)throw Error('loop_publication_attempt_target');
       }
       if(records.length>=32)throw Error('loop_publication_attempt_capacity');
       if(!Number.isSafeInteger(input.now)||input.now<Math.max(target.attempt.updatedAt,previous?.updatedAt??0))throw Error('loop_publication_attempt_time');
       const next=parseLoopPublicationAttempt({attemptId:randomUUID(),nativeAttemptId:target.attempt.attemptId,candidateId:target.attempt.candidateId,bindingHash:target.attempt.bindingHash,sourceVectorHash:target.attempt.sourceVectorHash,requestSource:'user',routeJson:null,sequence:records.length+1,revision:1,status:'preparing',challenge:null,observation:null,retirement:null,createdAt:input.now,updatedAt:input.now},target);
       const written=this.db.prepare('INSERT INTO loop_publication_attempts(attempt_id,native_attempt_id,candidate_id,sequence,revision,record_json) VALUES(?,?,?,?,?,?)').run(next.attemptId,next.nativeAttemptId,next.candidateId,next.sequence,next.revision,publicationJson(next));
-      this.bumpAutomationStoreVersion();this.assertLoopNativeAttemptCurrentInTransaction(next.nativeAttemptId);if(publicationJson(this.getLoopNativeAttemptTarget(next.nativeAttemptId))!==publicationJson(target))throw Error('loop_publication_attempt_target_changed');const actual=this.getLoopPublicationAttempt(next.attemptId);
+      this.bumpAutomationStoreVersion();this.assertLoopNativeAttemptCurrentInTransaction(next.nativeAttemptId);if(publicationJson(this.getLoopNativeAttemptTargetRaw(next.nativeAttemptId))!==publicationJson(target))throw Error('loop_publication_attempt_target_changed');const actual=this.getLoopPublicationAttempt(next.attemptId);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(next))throw Error('loop_publication_attempt_conflict');return actual;
     });
   }
 
   getLoopPublicationAttempt(attemptId:string):Readonly<LoopPublicationAttempt>|undefined {
     publicationIdentity(attemptId);const row=this.db.prepare('SELECT * FROM loop_publication_attempts WHERE attempt_id=?').get(attemptId);if(!row)return undefined;
-    const target=this.getLoopNativeAttemptTarget(String(row.native_attempt_id)),actual=parseLoopPublicationAttempt(JSON.parse(String(row.record_json)),target);
+    const target=this.getLoopNativeAttemptTargetRaw(String(row.native_attempt_id)),actual=parseLoopPublicationAttempt(JSON.parse(String(row.record_json)),target);
     if(actual.attemptId!==row.attempt_id||actual.nativeAttemptId!==row.native_attempt_id||actual.candidateId!==row.candidate_id||actual.sequence!==row.sequence||actual.revision!==row.revision||publicationJson(actual)!==row.record_json)throw Error('loop_publication_attempt_corrupt');return actual;
   }
 
@@ -299,10 +396,10 @@ export class LoopStore {
     const write=consumeLoopPublicationWrite(this,raw);
     return this.transaction(()=>{
       const before=this.getLoopPublicationAttempt(write.before.attemptId);if(!before||publicationJson(before)!==publicationJson(write.before))throw Error('loop_publication_attempt_conflict');
-      const target=this.getLoopNativeAttemptTarget(before.nativeAttemptId),next=parseLoopPublicationAttempt(write.next,target);assertLoopPublicationTransition(before,next);
+      const target=this.getLoopNativeAttemptTargetRaw(before.nativeAttemptId),next=parseLoopPublicationAttempt(write.next,target);assertLoopPublicationTransition(before,next);
       if(next.status==='authorizing'){if(write.source!=='user')throw Error('loop_publication_attempt_source');this.assertLoopNativeAttemptCurrentInTransaction(before.nativeAttemptId);}
       const written=this.db.prepare('UPDATE loop_publication_attempts SET revision=?,record_json=? WHERE attempt_id=? AND revision=?').run(next.revision,publicationJson(next),before.attemptId,before.revision);
-      this.bumpAutomationStoreVersion();if(publicationJson(this.getLoopNativeAttemptTarget(before.nativeAttemptId))!==publicationJson(target))throw Error('loop_publication_attempt_target_changed');if(next.status==='authorizing')this.assertLoopNativeAttemptCurrentInTransaction(before.nativeAttemptId);const actual=this.getLoopPublicationAttempt(before.attemptId);
+      this.bumpAutomationStoreVersion();if(publicationJson(this.getLoopNativeAttemptTargetRaw(before.nativeAttemptId))!==publicationJson(target))throw Error('loop_publication_attempt_target_changed');if(next.status==='authorizing')this.assertLoopNativeAttemptCurrentInTransaction(before.nativeAttemptId);const actual=this.getLoopPublicationAttempt(before.attemptId);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(next))throw Error('loop_publication_attempt_conflict');return actual;
     });
   }
@@ -314,49 +411,69 @@ export class LoopStore {
     return this.transaction(()=>{
       const session=this.getLoopVerificationSession(input.sessionRecordId);if(!session||session.phase!=='enrolled')throw Error('loop_verification_execution_session');
       this.assertLoopNativeAttemptCurrentInTransaction(session.nativeAttemptId);
-      const previous=this.listLoopVerificationExecutions(session.id)[0];
+      const previous=this.listLoopVerificationExecutionsRaw(session.id)[0];
       if(previous){if(publicationJson(previous.exactCommand)!==publicationJson(command)||previous.expiresAt!==input.expiresAt)throw Error('loop_verification_execution_conflict');return previous;}
       const expected:LoopVerificationExecution={id:randomUUID(),sessionRecordId:session.id,nativeAttemptId:session.nativeAttemptId,candidateId:session.candidateId,obligationId:session.obligationId,
         invocation:{sessionIdentity:session.sessionId,compoundOperationId:session.operationId,validationInvocationId:session.validationInvocationId},exactCommand:command,expiresAt:input.expiresAt,
         materialRequestId:randomUUID(),verificationRequestId:randomUUID(),phase:'selecting',revision:1,createdAt:input.now,updatedAt:input.now,
         draft:null,challengeId:null,obligationObservation:null,operationId:null,attemptId:null,materialObservation:null,verificationObservation:null};
-      parseLoopVerificationExecution(expected,session,this.getLoopNativeAttemptTarget(session.nativeAttemptId));
+      parseLoopVerificationExecution(expected,session,this.getLoopNativeAttemptTargetRaw(session.nativeAttemptId));
       const written=this.db.prepare('INSERT INTO loop_verification_executions(id,session_record_id,revision,record_json) VALUES(?,?,?,?)').run(expected.id,session.id,1,publicationJson(expected));
       this.bumpAutomationStoreVersion();
-      const actual=this.getLoopVerificationExecution(expected.id);if(written.changes!==1||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_execution_commit');
+      const actual=this.getLoopVerificationExecutionRaw(expected.id);if(written.changes!==1||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_execution_commit');
       return actual!;
     });
   }
 
+  private assertAssistantPublicationCandidateVisible(candidateId:string):void {
+    const row=this.db.prepare('SELECT run_id FROM loop_publication_candidates WHERE candidate_id=?').get(candidateId);
+    if(!row)throw Error('loop_native_candidate_missing');
+    if(!this.assistantRunVisible(String(row.run_id)))throw Error('assistant_source_unavailable');
+  }
   getLoopVerificationExecution(id:string):Readonly<LoopVerificationExecution>|undefined {
+    executionIdentity(id);const row=this.db.prepare('SELECT session_record_id FROM loop_verification_executions WHERE id=?').get(id);
+    if(!row)return undefined;
+    const session=this.getLoopVerificationSession(String(row.session_record_id));if(!session)throw Error('loop_verification_execution_session');
+    this.assertAssistantPublicationCandidateVisible(session.candidateId);
+    return this.getLoopVerificationExecutionRaw(id);
+  }
+  private getLoopVerificationExecutionRaw(id:string):Readonly<LoopVerificationExecution>|undefined {
     executionIdentity(id);const row=this.db.prepare('SELECT * FROM loop_verification_executions WHERE id=?').get(id);
     if(!row)return undefined;
     const session=this.getLoopVerificationSession(String(row.session_record_id));if(!session)throw Error('loop_verification_execution_session');
-    const parsed=parseLoopVerificationExecution(JSON.parse(String(row.record_json)),session,this.getLoopNativeAttemptTarget(session.nativeAttemptId));
+    const parsed=parseLoopVerificationExecution(JSON.parse(String(row.record_json)),session,this.getLoopNativeAttemptTargetRaw(session.nativeAttemptId));
     if(parsed.id!==row.id||parsed.sessionRecordId!==row.session_record_id||parsed.revision!==row.revision)throw Error('loop_verification_execution_corrupt');
     return parsed;
   }
 
   listLoopVerificationExecutions(sessionRecordId:string):Readonly<LoopVerificationExecution>[] {
+    executionIdentity(sessionRecordId);const session=this.getLoopVerificationSession(sessionRecordId);
+    if(session)this.assertAssistantPublicationCandidateVisible(session.candidateId);
+    return this.listLoopVerificationExecutionsRaw(sessionRecordId);
+  }
+  private listLoopVerificationExecutionsRaw(sessionRecordId:string):Readonly<LoopVerificationExecution>[] {
     executionIdentity(sessionRecordId);
-    return (this.db.prepare('SELECT id FROM loop_verification_executions WHERE session_record_id=? ORDER BY id').all(sessionRecordId) as {id:string}[]).map(row=>this.getLoopVerificationExecution(row.id)!);
+    return (this.db.prepare('SELECT id FROM loop_verification_executions WHERE session_record_id=? ORDER BY id').all(sessionRecordId) as {id:string}[]).map(row=>this.getLoopVerificationExecutionRaw(row.id)!);
   }
 
   private changeLoopVerificationExecution(input:{id:string;expectedRevision:number;requestSource:string;now:number},fresh:boolean,change:(row:Readonly<LoopVerificationExecution>)=>LoopVerificationExecution):Readonly<LoopVerificationExecution> {
     if(!['user','scheduler'].includes(input.requestSource)||fresh&&input.requestSource!=='user')throw Error('loop_verification_execution_source');
-    return this.transaction(()=>{
-      const row=this.getLoopVerificationExecution(input.id);if(!row)throw Error('loop_verification_execution_missing');
+    const updated=this.transaction(()=>{
+      const row=this.getLoopVerificationExecutionRaw(input.id);if(!row)throw Error('loop_verification_execution_missing');
       if(row.revision!==input.expectedRevision)throw Error('loop_verification_execution_conflict');
       if(!Number.isSafeInteger(input.now)||input.now<row.updatedAt)throw Error('loop_verification_execution_time');
       if(fresh){this.assertLoopNativeAttemptCurrentInTransaction(row.nativeAttemptId);if(input.now>=row.expiresAt)throw Error('loop_verification_execution_expired');}
       const changed=change(row),expected={...changed,revision:row.revision+1,updatedAt:input.now};
       const session=this.getLoopVerificationSession(row.sessionRecordId)!;
-      parseLoopVerificationExecution(expected,session,this.getLoopNativeAttemptTarget(row.nativeAttemptId));
+      parseLoopVerificationExecution(expected,session,this.getLoopNativeAttemptTargetRaw(row.nativeAttemptId));
       const written=this.db.prepare('UPDATE loop_verification_executions SET revision=?,record_json=? WHERE id=? AND revision=?').run(expected.revision,publicationJson(expected),row.id,row.revision);
       this.bumpAutomationStoreVersion();
-      const actual=this.getLoopVerificationExecution(row.id);if(written.changes!==1||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_execution_commit');
+      const actual=this.getLoopVerificationExecutionRaw(row.id);if(written.changes!==1||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_execution_commit');
       return actual!;
     });
+    // Preserve the original owner's committed receipt, then deny the body read.
+    this.assertAssistantPublicationCandidateVisible(updated.candidateId);
+    return updated;
   }
 
   recordLoopVerificationMaterialStep(raw:{id:string;expectedRevision:number;step:Readonly<ValidationMaterialRequestStep>;requestSource:'user'|'agent'|'scheduler';now:number}):Readonly<LoopVerificationExecution> {
@@ -415,7 +532,7 @@ export class LoopStore {
     if(input.requestSource!=='user')throw Error('loop_verification_session_source');
     if(typeof input.sessionId!=='string'||!/^[A-Za-z0-9_-]{1,160}$/.test(input.sessionId)||typeof input.nativeAttemptId!=='string'||typeof input.obligationId!=='string')throw Error('loop_verification_session_input');
     return this.transaction(()=>{
-      const target=this.getLoopNativeAttemptTarget(input.nativeAttemptId);
+      const target=this.getLoopNativeAttemptTargetRaw(input.nativeAttemptId);
       if(target.attempt.phase!=='ready')throw Error('loop_verification_native_not_ready');
       this.assertLoopNativeAttemptCurrentInTransaction(input.nativeAttemptId);
       if(!target.definition.obligations.some(item=>item.obligationId===input.obligationId))throw Error('loop_verification_obligation');
@@ -440,7 +557,7 @@ export class LoopStore {
     if(!/^[A-Za-z0-9_-]{1,160}$/.test(String(value.sessionId))||!Object.hasOwn(phaseRevision,String(value.phase))||value.revision!==phaseRevision[String(value.phase)]
       ||typeof value.createdAt!=='number'||!Number.isSafeInteger(value.createdAt)||value.createdAt<0||typeof value.updatedAt!=='number'||!Number.isSafeInteger(value.updatedAt)||value.updatedAt<value.createdAt
       ||new Set([value.id,value.sessionId,value.operationId,value.validationInvocationId,value.enrollmentRequestId]).size!==5)throw Error('loop_verification_session_corrupt');
-    const target=this.getLoopNativeAttemptTarget(String(value.nativeAttemptId));
+    const target=this.getLoopNativeAttemptTargetRaw(String(value.nativeAttemptId));
     if(target.attempt.phase!=='ready'||target.attempt.candidateId!==value.candidateId||!target.definition.obligations.some(item=>item.obligationId===value.obligationId))throw Error('loop_verification_session_target_changed');
     return freezeLoopPublicationValue(value as unknown as LoopVerificationSession);
   }
@@ -514,7 +631,7 @@ export class LoopStore {
     const write=consumeLoopNativeReauthorization(token,this);
     return this.transaction(()=>{
       write.check();
-      const target=this.getLoopNativeAttemptTarget(write.parent.attemptId),history=this.listLoopNativeAttempts(write.parent.candidateId);
+      const target=this.getLoopNativeAttemptTargetRaw(write.parent.attemptId),history=this.listLoopNativeAttempts(write.parent.candidateId);
       if(publicationJson(target)!==write.targetJson||publicationJson(history)!==write.historyJson||history.at(-1)?.attemptId!==write.parent.attemptId)throw Error('loop_native_attempt_conflict');
       this.assertLoopNativeAttemptCurrentInTransaction(write.parent.attemptId);
       if(history.length>=32)throw Error('loop_native_attempt_capacity');
@@ -528,7 +645,7 @@ export class LoopStore {
       this.bumpAutomationStoreVersion();
       write.check(true);
       this.assertLoopNativeAttemptCurrentInTransaction(expected.attemptId);
-      if(publicationJson(this.getLoopNativeAttemptTarget(write.parent.attemptId))!==write.targetJson||publicationJson(this.listLoopNativeAttempts(expected.candidateId))!==publicationJson([...history,expected]))throw Error('loop_native_attempt_conflict');
+      if(publicationJson(this.getLoopNativeAttemptTargetRaw(write.parent.attemptId))!==write.targetJson||publicationJson(this.listLoopNativeAttempts(expected.candidateId))!==publicationJson([...history,expected]))throw Error('loop_native_attempt_conflict');
       return this.getLoopNativeAttempt(expected.attemptId)!;
     });
   }
@@ -566,6 +683,12 @@ export class LoopStore {
   }
 
   getLoopNativeAttemptTarget(attemptId:string):Readonly<{attempt:Readonly<LoopNativeAttempt>;binding:Readonly<LoopApplicationBinding>;definition:Readonly<GoalVerificationDefinition>}> {
+    const attempt=this.getLoopNativeAttempt(attemptId);
+    const row=attempt?this.db.prepare('SELECT run_id FROM loop_publication_candidates WHERE candidate_id=?').get(attempt.candidateId):undefined;
+    if(row&&!this.assistantRunVisible(String(row.run_id)))throw Error('assistant_source_unavailable');
+    return this.getLoopNativeAttemptTargetRaw(attemptId);
+  }
+  private getLoopNativeAttemptTargetRaw(attemptId:string):Readonly<{attempt:Readonly<LoopNativeAttempt>;binding:Readonly<LoopApplicationBinding>;definition:Readonly<GoalVerificationDefinition>}> {
     const attempt=this.getLoopNativeAttempt(attemptId);if(!attempt)throw Error('loop_native_attempt_missing');
     const target=this.loopNativeCandidateTarget(attempt.candidateId);
     if(attempt.bindingHash!==target.candidate.bindingHash||attempt.sourceVectorHash!==target.candidate.sourceVectorHash||attempt.configurationRevision!==target.basis.configuration.revision||attempt.definitionHash!==nativeDefinitionHash(target.definition))throw Error('loop_native_attempt_target_changed');
@@ -582,7 +705,7 @@ export class LoopStore {
     if(!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<1||typeof input.phase!=='string'||!Object.hasOwn(LOOP_NATIVE_PHASE_EDGES,input.phase))throw Error('loop_native_attempt_input');
     if(input.requestSource==='scheduler'&&['enrolling','binding'].includes(input.phase))throw Error('loop_native_attempt_source');
     return this.transaction(()=>{
-      const target=this.getLoopNativeAttemptTarget(input.attemptId),row=target.attempt,history=this.listLoopNativeAttempts(row.candidateId);
+      const target=this.getLoopNativeAttemptTargetRaw(input.attemptId),row=target.attempt,history=this.listLoopNativeAttempts(row.candidateId);
       if(row.revision!==input.expectedRevision)throw Error('loop_native_attempt_conflict');
       if(!LOOP_NATIVE_PHASE_EDGES[row.phase].includes(input.phase))throw Error('loop_native_attempt_transition');
       if(!Number.isSafeInteger(input.now)||input.now<row.updatedAt||!Number.isSafeInteger(row.revision+1))throw Error('loop_native_attempt_time');
@@ -592,27 +715,28 @@ export class LoopStore {
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(expected))throw Error('loop_native_attempt_conflict');
       this.bumpAutomationStoreVersion();
       if(['enrolling','binding','ready'].includes(input.phase))this.assertLoopNativeAttemptCurrentInTransaction(row.attemptId);
-      if(publicationJson(this.getLoopNativeAttemptTarget(row.attemptId))!==publicationJson({...target,attempt:expected})
+      if(publicationJson(this.getLoopNativeAttemptTargetRaw(row.attemptId))!==publicationJson({...target,attempt:expected})
         ||publicationJson(this.listLoopNativeAttempts(row.candidateId))!==publicationJson(history.map(r=>r.attemptId===row.attemptId?expected:r)))throw Error('loop_native_attempt_conflict');
       return actual;
     });
   }
 
   private loopNativeCandidateTarget(candidateId:string) {
-    const candidate=this.getLoopPublicationCandidate(candidateId);if(!candidate)throw Error('loop_native_candidate_missing');
+    const candidate=this.getLoopPublicationCandidateRaw(candidateId);if(!candidate)throw Error('loop_native_candidate_missing');
     const basis=this.getLoopRunPublicationBasis(candidate.runId);if(!basis)throw Error('loop_publication_basis_missing');
     const definitions=basis.configuration.configuration.verificationDefinitions,stage=candidate.binding.subject.stage;
     const definition=parseGoalVerificationDefinition(stage?definitions.stages[stage.stageKind]:definitions.run);
     return {candidate,basis,definition};
   }
   private assertLoopNativeCandidateCurrent(candidate:Readonly<StoredLoopPublicationCandidate>):void {
+    if(!this.assistantRunVisible(candidate.runId))throw Error('assistant_source_unavailable');
     const basis=this.assertLoopPublicationBasisCurrent(candidate.runId);
     const actual=this.captureLoopPublicationCandidateInTransaction({runId:candidate.runId,stageId:candidate.stageId,expectedResultRevision:1},basis);
     if(actual.candidateId!==candidate.candidateId||actual.bindingHash!==candidate.bindingHash||actual.sourceVectorHash!==candidate.sourceVectorHash)throw Error('loop_native_candidate_changed');
   }
   private assertLoopNativeAttemptCurrentInTransaction(attemptId:string):void {
-    const target=this.getLoopNativeAttemptTarget(attemptId);
-    this.assertLoopNativeCandidateCurrent(this.getLoopPublicationCandidate(target.attempt.candidateId)!);
+    const target=this.getLoopNativeAttemptTargetRaw(attemptId);
+    this.assertLoopNativeCandidateCurrent(this.getLoopPublicationCandidateRaw(target.attempt.candidateId)!);
   }
 
   /** Only the original live begin result can open a producer. Persisted JSON is
@@ -645,9 +769,9 @@ export class LoopStore {
             this.stageAssistantCandidatesInTransaction(current.runId,normalized.candidates,copied.now);
             body={kind:'assistant-evening',summary:normalized.summary,candidates:this.assistantPublicationRows(current.runId).map(row=>this.assistantPublicationValue(row)),artifacts:copied.artifacts};
           }else{
-            const normalized=validateMorningBriefing(copied.output);
+            const normalized=validateMorningBriefingStructure(copied.output);
             if(publicationJson(normalized)!==publicationJson(copied.output))throw Error('loop_publication_output_shape');
-            body={kind:'assistant-morning',recommendations:normalized.recommendations,artifacts:copied.artifacts};
+            body={kind:'assistant-morning',...(normalized.schemaVersion===2?{schemaVersion:2}:{}),recommendations:normalized.recommendations,artifacts:copied.artifacts};
           }
           this.writeLoopProducerResult(current,body,null,[],copied.now);
         });
@@ -766,13 +890,13 @@ export class LoopStore {
     if(evaluation.status==='failed'&&!['executor_crash','executor_failed','validation_failed','evidence_missing','evidence_kind_mismatch','unknown'].includes(evaluation.failureKind)
       ||evaluation.status==='blocked'&&(typeof evaluation.nextActionKind!=='string'||!evaluation.nextActionKind))throw Error('loop_template_outcome_evaluation');
     const execute=this.publicationStage(basis.runId,input.executeStageId,'execute'),verify=this.publicationStage(basis.runId,input.verifyStageId,'verify'),execution=this.loopStageExecutionResult(execute.id);
-    if(!execution||this.loopProducerResult(basis.runId)||this.getLoopBusinessProjection(basis.runId))throw Error('loop_template_outcome_original');
+    if(!execution||this.loopProducerResult(basis.runId)||this.getLoopBusinessProjectionRaw(basis.runId))throw Error('loop_template_outcome_original');
     this.assertExecutionResultCurrent(execution,basis,execute);
     const metadata=JSON.parse(verify.metadata_json),taskId=JSON.parse(execute.metadata_json).taskId;
     if(execute.status!=='running'||verify.status!=='running'||metadata.taskId!==taskId||metadata.localEvaluationStarted!==true||metadata.localEvaluation!==undefined)throw Error('loop_template_outcome_original');
     const snapshot=()=>{
       const facts=this.readLoopPublicationResults(basis.runId);
-      return {storeVersion:(this.db.prepare("SELECT * FROM automation_store_metadata WHERE key='version'").get() as unknown as {key:string;value:number}|undefined)??null,rows:this.rawLoopProjectionRows(basis.runId),basis:this.getLoopRunPublicationBasis(basis.runId),definition:this.getLoopDefinitionRow(basis.loopId),configuration:this.getLoopPublicationConfiguration(basis.loopId),template:this.db.prepare('SELECT * FROM user_loop_templates WHERE loop_id=?').get(basis.loopId),facts:{result:facts.result??null,executions:facts.executions},candidates:this.listLoopPublicationCandidates(basis.runId)};
+      return {storeVersion:(this.db.prepare("SELECT * FROM automation_store_metadata WHERE key='version'").get() as unknown as {key:string;value:number}|undefined)??null,rows:this.rawLoopProjectionRows(basis.runId),basis:this.getLoopRunPublicationBasis(basis.runId),definition:this.getLoopDefinitionRow(basis.loopId),configuration:this.getLoopPublicationConfiguration(basis.loopId),template:this.db.prepare('SELECT * FROM user_loop_templates WHERE loop_id=?').get(basis.loopId),facts:{result:facts.result??null,executions:facts.executions},candidates:this.listLoopPublicationCandidatesRaw(basis.runId)};
     };
     const before=snapshot();
     if(!before.storeVersion||!Number.isSafeInteger(before.storeVersion.value)||before.storeVersion.value<0||before.storeVersion.value>=Number.MAX_SAFE_INTEGER)throw Error('loop_template_outcome_version');
@@ -817,7 +941,7 @@ export class LoopStore {
   captureLoopPublicationCandidate(raw:{runId:string;stageId:string|null;expectedResultRevision:number},producer:Readonly<LoopPublicationProducer>):Readonly<StoredLoopPublicationCandidate> {
     const input=JSON.parse(publicationJson(raw));if(Object.keys(input).sort().join(',')!=='expectedResultRevision,runId,stageId')throw Error('loop_publication_capture_shape');
     return this.transaction(()=>{
-      const basis=this.assertLoopPublicationProducer(producer,true);if(input.runId!==basis.runId)throw Error('loop_publication_capture_run');
+      const basis=this.assertLoopPublicationProducer(producer,true);if(!this.assistantRunVisible(input.runId))throw Error('assistant_source_unavailable');if(input.runId!==basis.runId)throw Error('loop_publication_capture_run');
       return this.captureLoopPublicationCandidateInTransaction(input,basis);
     });
   }
@@ -828,13 +952,14 @@ export class LoopStore {
     const input=JSON.parse(publicationJson(raw));
     if(Object.keys(input).sort().join(',')!=='requestSource,runId'||!['user','scheduler'].includes(input.requestSource))throw Error('loop_publication_recovery_source');
     if(typeof input.runId!=='string'||!input.runId)throw Error('loop_publication_recovery_run');
+    if(!this.assistantRunVisible(input.runId))throw Error('assistant_source_unavailable');
     return this.transaction(()=>{
       const basis=this.assertLoopPublicationBasisCurrent(input.runId),result=this.loopProducerResult(input.runId);
       const executions=this.db.prepare('SELECT stage_id FROM loop_stage_execution_results WHERE run_id=? ORDER BY stage_id').all(input.runId) as {stage_id:string}[];
       if(!result&&!executions.length)throw Error('loop_publication_result_missing');
       for(const execution of executions)this.captureLoopPublicationCandidateInTransaction({runId:input.runId,stageId:execution.stage_id,expectedResultRevision:1},basis);
       if(result)for(const stageId of result.stage_id===null?[null]:[result.stage_id,null])this.captureLoopPublicationCandidateInTransaction({runId:input.runId,stageId,expectedResultRevision:result.revision},basis);
-      return this.listLoopPublicationCandidates(input.runId);
+      return this.listLoopPublicationCandidatesRaw(input.runId);
     });
   }
 
@@ -843,6 +968,9 @@ export class LoopStore {
     return {run,stages:this.db.prepare('SELECT * FROM loop_stages WHERE run_id=? ORDER BY id COLLATE BINARY').all(runId) as unknown as LoopStageRow[],members:this.db.prepare('SELECT * FROM assistant_candidates WHERE run_id=? ORDER BY id COLLATE BINARY').all(runId) as unknown as AssistantCandidateRow[]};
   }
   getLoopBusinessProjection(runId:string):Readonly<LoopBusinessProjection>|undefined {
+    return this.assistantRunVisible(runId)?this.getLoopBusinessProjectionRaw(runId):undefined;
+  }
+  private getLoopBusinessProjectionRaw(runId:string):Readonly<LoopBusinessProjection>|undefined {
     const row=this.db.prepare('SELECT * FROM loop_projection_origins WHERE run_id=?').get(runId) as {run_id:string;origin_hash:string;record_json:string}|undefined;
     const generations=this.db.prepare('SELECT * FROM loop_projection_generations WHERE run_id=? ORDER BY generation').all(runId) as unknown as {run_id:string;generation:number;generation_hash:string;record_json:string}[];
     if(!row){if(generations.length)throw Error('loop_projection_origin_missing');return undefined;}
@@ -858,26 +986,27 @@ export class LoopStore {
     return freezeProjection(result!);
   }
   private normalizedLoopProjectionRows(runId:string):LoopProjectionRows {
-    const rows=this.rawLoopProjectionRows(runId),projection=this.getLoopBusinessProjection(runId);
+    const rows=this.rawLoopProjectionRows(runId),projection=this.getLoopBusinessProjectionRaw(runId);
     if(projection)this.assistantPromotionHistory(rows);
     return projection?normalizeLoopProjectionRows(rows,projection.origin):rows;
   }
-  getLoopBusinessProjectionTarget(runId:string):Readonly<LoopBusinessProjectionTarget> {return this.transaction(()=>this.loopBusinessProjectionTarget(runId));}
+  getLoopBusinessProjectionTarget(runId:string):Readonly<LoopBusinessProjectionTarget> {if(!this.assistantRunVisible(runId))throw Error('assistant_source_unavailable');return this.transaction(()=>this.loopBusinessProjectionTarget(runId));}
   private loopBusinessProjectionTarget(runId:string):Readonly<LoopBusinessProjectionTarget> {
     publicationIdentity(runId);const basis=this.assertLoopPublicationBasisCurrent(runId),facts=this.readLoopPublicationResults(runId);
     if(!facts.result)throw Error('loop_projection_result_missing');
-    const candidates=this.listLoopPublicationCandidates(runId),rows=this.rawLoopProjectionRows(runId),body=JSON.parse(facts.result.body_json);
+    const candidates=this.listLoopPublicationCandidatesRaw(runId),rows=this.rawLoopProjectionRows(runId),body=JSON.parse(facts.result.body_json);
     const stageIds=body.kind==='builtin-diagnostic'?[facts.result.stage_id]:body.kind==='user-template'?[body.executeStageId,body.verifyStageId]:[];
     if(stageIds.some((id:unknown)=>typeof id!=='string')||new Set(stageIds).size!==stageIds.length||rows.stages.length!==stageIds.length||rows.stages.some(s=>!stageIds.includes(s.id))||candidates.length!==stageIds.length+1||candidates.filter(c=>c.stageId===null).length!==1||candidates.some(c=>c.stageId!==null&&!stageIds.includes(c.stageId)))throw Error('loop_projection_inventory');
     if(body.kind!=='assistant-evening'&&rows.members.length)throw Error('loop_projection_inventory');
     const publications=candidates.map(c=>{this.assertLoopNativeCandidateCurrent(c);const p=this.listLoopPublicationAttempts(c.candidateId).at(-1);if(!p||p.status!=='committed'||!p.observation||p.observation.status!=='committed')throw Error('loop_projection_not_published');this.assertLoopNativeAttemptCurrentInTransaction(p.nativeAttemptId);return p;});
-    const natives=publications.map(p=>this.getLoopNativeAttemptTarget(p.nativeAttemptId)),projection=this.getLoopBusinessProjection(runId)??null;
+    const natives=publications.map(p=>this.getLoopNativeAttemptTargetRaw(p.nativeAttemptId)),projection=this.getLoopBusinessProjectionRaw(runId)??null;
     const promotionIntents=this.assistantPromotionHistory(rows);
     const vector=publicationJson({promotionIntents,basis,configuration:this.getLoopPublicationConfiguration(basis.loopId),definition:this.getLoopDefinitionRow(basis.loopId),facts,rows,candidates,publications,natives,projection});
     return freezeProjection({runId,vector,rows,candidates,publications,executions:facts.executions.map(e=>JSON.parse(e.task_snapshot_json) as TaskSnapshot),projection});
   }
   applyLoopBusinessProjection(raw:{ticket:object;runId:string;requestSource:'user'|'agent'|'scheduler'}):Readonly<LoopBusinessProjection> {
     const entry=consumeLoopBusinessProjection(this,raw),{target,observation,now,signal}=entry;
+    if(!this.assistantRunVisible(target.runId))throw Error('assistant_source_unavailable');
     return this.transaction(()=>{
       const current=this.loopBusinessProjectionTarget(target.runId);if(current.vector!==target.vector)throw Error('loop_projection_conflict');
       signal.throwIfAborted();
@@ -933,14 +1062,19 @@ export class LoopStore {
       // Preserve the original vector for pre-existing terminal candidates.
       const sourceVectorHash=publicationHash(publicationJson({basis,result,stage,templateStages,members,...(execution?{execution}: {})})),subjectKey=publicationJson(subject);
       const old=this.db.prepare('SELECT candidate_id,source_vector_hash FROM loop_publication_candidates WHERE subject_key=? ORDER BY revision DESC LIMIT 1').get(subjectKey) as {candidate_id:string;source_vector_hash:string}|undefined;
-      if(old){if(old.source_vector_hash!==sourceVectorHash)throw Error('loop_publication_candidate_source_changed');return this.getLoopPublicationCandidate(old.candidate_id)!;}
+      if(old){if(old.source_vector_hash!==sourceVectorHash)throw Error('loop_publication_candidate_source_changed');return this.getLoopPublicationCandidateRaw(old.candidate_id)!;}
       const candidateId=randomUUID(),binding=createLoopApplicationBinding({version:1,kind:'loop',subject,candidateId,candidateRevision:1,originalTriggerJson:basis.originalTriggerJson,logicalRunKey:basis.logicalRunKey,contract:basis.contract,body});
       this.db.prepare("INSERT INTO loop_publication_candidates(candidate_id,run_id,stage_id,subject_key,revision,binding_json,binding_hash,source_vector_hash,publication_state,created_at) VALUES(?,?,?,?,?,?,?,?, 'captured',?)").run(candidateId,basis.runId,stage?.id??null,subjectKey,1,publicationJson(binding),loopApplicationBindingHash(binding),sourceVectorHash,result.terminal_at);
       for(const row of members)this.db.prepare('INSERT INTO loop_publication_candidate_members(candidate_id,assistant_candidate_id,original_row_json) VALUES(?,?,?)').run(candidateId,row.id,publicationJson(row));
-      this.bumpAutomationStoreVersion();return this.getLoopPublicationCandidate(candidateId)!;
+      this.bumpAutomationStoreVersion();return this.getLoopPublicationCandidateRaw(candidateId)!;
   }
 
   getLoopPublicationCandidate(candidateId:string):Readonly<StoredLoopPublicationCandidate>|undefined {
+    const row=this.db.prepare('SELECT run_id FROM loop_publication_candidates WHERE candidate_id=?').get(candidateId);
+    if(row&&!this.assistantRunVisible(String(row.run_id)))return undefined;
+    return this.getLoopPublicationCandidateRaw(candidateId);
+  }
+  private getLoopPublicationCandidateRaw(candidateId:string):Readonly<StoredLoopPublicationCandidate>|undefined {
     const row=this.db.prepare('SELECT * FROM loop_publication_candidates WHERE candidate_id=?').get(candidateId) as {candidate_id:string;run_id:string;stage_id:string|null;subject_key:string;revision:number;binding_json:string;binding_hash:string;source_vector_hash:string;publication_state:'captured';created_at:number}|undefined;
     if(!row)return undefined;const binding=parseLoopApplicationBinding(JSON.parse(row.binding_json));
     if(binding.candidateId!==row.candidate_id||binding.subject.runId!==row.run_id||binding.candidateRevision!==row.revision||(binding.subject.stage?.stageId??null)!==row.stage_id||publicationJson(binding.subject)!==row.subject_key||publicationJson(binding)!==row.binding_json||loopApplicationBindingHash(binding)!==row.binding_hash||row.publication_state!=='captured')throw Error('loop_publication_candidate_corrupt');
@@ -948,7 +1082,10 @@ export class LoopStore {
   }
 
   listLoopPublicationCandidates(runId:string):Readonly<StoredLoopPublicationCandidate>[] {
-    return (this.db.prepare('SELECT candidate_id FROM loop_publication_candidates WHERE run_id=? ORDER BY candidate_id').all(runId) as {candidate_id:string}[]).map(row=>this.getLoopPublicationCandidate(row.candidate_id)!);
+    return this.assistantRunVisible(runId)?this.listLoopPublicationCandidatesRaw(runId):[];
+  }
+  private listLoopPublicationCandidatesRaw(runId:string):Readonly<StoredLoopPublicationCandidate>[] {
+    return (this.db.prepare('SELECT candidate_id FROM loop_publication_candidates WHERE run_id=? ORDER BY candidate_id').all(runId) as {candidate_id:string}[]).map(row=>this.getLoopPublicationCandidateRaw(row.candidate_id)!);
   }
 
   /** Historical read only. Current permission/configuration is checked by each
@@ -959,11 +1096,12 @@ export class LoopStore {
     let cachedProtectedSuccess=false;if(run.status==='success'){try{this.assertRawLoopSuccess(runId);}catch{cachedProtectedSuccess=true;}}
     return freezeLoopPublicationValue({runId,executionPhase:terminalResultPresent||run.status!=='running'?'execution_terminal':facts.executions.length?'awaiting_verification':'executing',
       businessState:cachedProtectedSuccess||terminalResultPresent&&run.status==='running'?'publication_pending':run.status,terminalResultPresent,
-      executionStageIds:facts.executions.map(row=>row.stage_id),candidateIds:this.listLoopPublicationCandidates(runId).map(row=>row.candidateId)});
+      executionStageIds:facts.executions.map(row=>row.stage_id),candidateIds:(this.db.prepare('SELECT candidate_id FROM loop_publication_candidates WHERE run_id=? ORDER BY candidate_id').all(runId) as {candidate_id:string}[]).map(row=>row.candidate_id)});
   }
 
   private assertLoopPublicationProducer(producer:object,forCapture=false):Readonly<LoopRunPublicationBasis> {
     const entry=this.publicationProducers.get(producer);if(!entry)throw Error('loop_publication_producer_required');
+    if(!this.assistantRunVisible(entry.runId))throw Error('assistant_source_unavailable');
     const basis=this.assertLoopPublicationBasisCurrent(entry.runId);
     if(!forCapture&&this.loopProducerResult(entry.runId))throw Error('loop_publication_result_exists');
     if(publicationJson(basis)!==entry.basisJson)throw Error('loop_publication_producer_stale');return basis;
@@ -1477,7 +1615,8 @@ export class LoopStore {
 
   setAssistantProfileStatus(id: AssistantProfile['id'], status: AssistantProfile['status'], now: number): AssistantProfile | undefined {
     return this.transaction(() => {
-      this.db.prepare('update assistant_profiles set status = ?, updated_at = ? where id = ?').run(status, now, id);
+      this.db.prepare('update assistant_profiles set status = ?, updated_at = MAX(updated_at + 1, ?) where id = ?').run(status, now, id);
+      this.bumpAutomationStoreVersion();
       return this.getAssistantProfile(id);
     });
   }
@@ -1504,20 +1643,24 @@ export class LoopStore {
 
   getAssistantCandidate(id: string): AssistantCandidate | undefined {
     const row = this.db.prepare('select * from assistant_candidates where id = ?').get(id) as AssistantCandidateRow | undefined;
-    return row ? this.assistantCandidateRowToRecord(row) : undefined;
+    return row&&this.assistantRunVisible(row.run_id) ? this.assistantCandidateRowToRecord(row) : undefined;
   }
 
+  private getAssistantCandidateRaw(id:string):AssistantCandidate|undefined {
+    const row=this.db.prepare('SELECT * FROM assistant_candidates WHERE id=?').get(id) as AssistantCandidateRow|undefined;
+    return row?this.assistantCandidateRowToRecord(row):undefined;
+  }
   listAssistantCandidates(input: { statuses?: AssistantCandidateStatus[] } = {}): AssistantCandidate[] {
     const statuses = input.statuses;
     const rows = statuses?.length
       ? typedRows<AssistantCandidateRow>(this.db.prepare(`select * from assistant_candidates where status in (${statuses.map(() => '?').join(',')}) order by created_at asc`).all(...statuses))
       : typedRows<AssistantCandidateRow>(this.db.prepare('select * from assistant_candidates order by created_at asc').all());
-    return rows.map(row => this.assistantCandidateRowToRecord(row));
+    return rows.filter(row=>this.assistantRunVisible(row.run_id)).map(row => this.assistantCandidateRowToRecord(row));
   }
 
   private assistantPromotionHistory(rows:LoopProjectionRows,allowLegacy=false):Readonly<AssistantPromotionIntent>[] {
     const ids=this.db.prepare('SELECT i.candidate_id FROM assistant_promotion_intents i JOIN assistant_candidates c ON c.id=i.candidate_id WHERE c.run_id=? ORDER BY i.candidate_id COLLATE BINARY').all(rows.run.id) as unknown as {candidate_id:string}[];
-    const intents=ids.map(row=>this.getAssistantPromotionIntent(row.candidate_id)!);
+    const intents=ids.map(row=>this.getAssistantPromotionIntentRaw(row.candidate_id)!);
     for(const member of rows.members){const intent=intents.find(i=>i.candidateId===member.id);if(!allowLegacy&&['accepting','accepted'].includes(member.status)&&!intent)throw Error('assistant_promotion_intent_missing');if(intent&&member.status!==intent.state)throw Error('assistant_promotion_intent_state');}
     return intents;
   }
@@ -1533,15 +1676,21 @@ export class LoopStore {
     const member=this.getAssistantCandidate(candidateId);if(!member)throw Error('assistant_candidate_not_found');
     if(this.getAssistantCandidatePublicationMode(candidateId)!=='ordinary')throw Error('assistant_promotion_changed');
     const rows=this.rawLoopProjectionRows(member.runId),route=readInstalledCurrentOwner(completionConsumerOwner({ownerKind:'loop_run',ownerId:member.runId}));
-    if(route.kind!=='ordinary'||rows.run.status!=='success'||this.getLoopBusinessProjection(member.runId))throw Error('assistant_promotion_changed');
+    if(route.kind!=='ordinary'||rows.run.status!=='success'||this.getLoopBusinessProjectionRaw(member.runId))throw Error('assistant_promotion_changed');
     const promotionIntents=this.assistantPromotionHistory(rows,true);
     return freezeProjection({runId:member.runId,rows,vector:publicationJson({rows,promotionIntents,route})});
   }
   getAssistantPromotionIntent(candidateId:string):Readonly<AssistantPromotionIntent>|undefined {
+    const row=this.db.prepare('SELECT run_id FROM assistant_candidates WHERE id=?').get(candidateId);
+    if(!row)return undefined;
+    if(!this.assistantRunVisible(String(row.run_id)))throw Error('assistant_source_unavailable');
+    return this.getAssistantPromotionIntentRaw(candidateId);
+  }
+  private getAssistantPromotionIntentRaw(candidateId:string):Readonly<AssistantPromotionIntent>|undefined {
     const row=this.db.prepare('SELECT * FROM assistant_promotion_intents WHERE candidate_id=?').get(candidateId) as {candidate_id:string;revision:number;record_json:string}|undefined;
     if(!row)return undefined;const value=parseAssistantPromotionIntent(JSON.parse(row.record_json));
     if(value.candidateId!==row.candidate_id||value.revision!==row.revision||publicationJson(value)!==row.record_json)throw Error('assistant_promotion_corrupt');
-    const member=this.getAssistantCandidate(candidateId),t=value.target;
+    const member=this.getAssistantCandidateRaw(candidateId),t=value.target;
     const stable=member?`assistant-${member.kind==='memory'?'memory':member.kind==='knowledge'?'source':'follow-up'}:${member.id}`:undefined;
     if(t.targetId!==stable||member?.decidedAt!==value.updatedAt||(member?.kind==='knowledge'&&!t.collectionId)||(member?.kind==='memory'&&member.scope==='project'&&(!t.projectId||!t.projectCwd)))throw Error('assistant_promotion_target');
     if(!member||member.runId!==value.runId||member.title!==t.title||member.content!==t.content||member.scope!==t.scope||member.projectId!==t.projectId||publicationJson(member.evidenceRefs)!==publicationJson(t.provenance.evidenceRefs)||member.targetId!==t.targetId||member.targetKind!==member.kind||member.status!==value.state||(value.state==='accepted'&&member.acceptedTargetRef!==value.targetRef))throw Error('assistant_promotion_changed');
@@ -1552,7 +1701,7 @@ export class LoopStore {
     return this.transaction(()=>{
       const readTarget=()=>entry.mode==='ordinary'?this.ordinaryAssistantPromotionTarget(entry.member.id):this.loopBusinessProjectionTarget(entry.target.runId);
       entry.check();const before=readTarget();
-      if(before.vector!==entry.target.vector||JSON.stringify(this.getAssistantCandidate(entry.member.id))!==JSON.stringify(entry.member)||publicationJson(this.getAssistantPromotionIntent(entry.member.id)??null)!==publicationJson(entry.before??null))throw Error('assistant_promotion_conflict');
+      if(before.vector!==entry.target.vector||JSON.stringify(this.getAssistantCandidate(entry.member.id))!==JSON.stringify(entry.member)||publicationJson(this.getAssistantPromotionIntentRaw(entry.member.id)??null)!==publicationJson(entry.before??null))throw Error('assistant_promotion_conflict');
       const after=parseAssistantPromotionIntent(entry.after),member=this.getAssistantCandidate(entry.member.id)!;
       if(!Number.isSafeInteger(after.updatedAt)||after.updatedAt<member.createdAt||after.candidateId!==member.id||after.runId!==member.runId)throw Error('assistant_promotion_time');
       if(!entry.before){
@@ -1566,7 +1715,7 @@ export class LoopStore {
       this.bumpAutomationStoreVersion();
       entry.check();
       entry.signal.throwIfAborted();
-      const actual=this.getAssistantPromotionIntent(member.id);if(publicationJson(actual)!==publicationJson(after))throw Error('assistant_promotion_write');
+      const actual=this.getAssistantPromotionIntentRaw(member.id);if(publicationJson(actual)!==publicationJson(after))throw Error('assistant_promotion_write');
       const expected=JSON.parse(before.vector);expected.promotionIntents=[...expected.promotionIntents.filter((i:AssistantPromotionIntent)=>i.candidateId!==member.id),after].sort((a:AssistantPromotionIntent,b:AssistantPromotionIntent)=>a.candidateId<b.candidateId?-1:a.candidateId>b.candidateId?1:0);expected.rows.members=expected.rows.members.map((row:AssistantCandidateRow)=>row.id===member.id?{...row,status:after.state,target_kind:member.kind,target_id:after.target.targetId,accepted_target_ref:after.targetRef,decided_at:after.updatedAt}:row);
       if(readTarget().vector!==publicationJson(expected))throw Error('assistant_promotion_changed');
       entry.signal.throwIfAborted();return actual!;
@@ -1581,7 +1730,7 @@ export class LoopStore {
     const mode=this.getAssistantCandidatePublicationMode(candidateId);
     if(requestSource!=='user'&&(mode==='protected'||requestSource!==undefined))throw Error('assistant_candidate_user_only');
     return this.transaction(() => {
-      const before=this.getAssistantCandidate(candidateId),intent=this.getAssistantPromotionIntent(candidateId);
+      const before=this.getAssistantCandidate(candidateId),intent=this.getAssistantPromotionIntentRaw(candidateId);
       if(mode==='protected'&&intent)throw Error('assistant_candidate_reject_conflict');
 
       this.db.prepare(`
@@ -1589,7 +1738,7 @@ export class LoopStore {
         where id = ? and status in ('pending', 'accept_failed')
       `).run(now, candidateId);
       this.bumpAutomationStoreVersion();
-      const actual=this.getAssistantCandidate(candidateId),afterIntent=this.getAssistantPromotionIntent(candidateId);
+      const actual=this.getAssistantCandidate(candidateId),afterIntent=this.getAssistantPromotionIntentRaw(candidateId);
       const expected=before&&['pending','accept_failed'].includes(before.status)?{...before,status:'rejected',decidedAt:now}:before;
       if(JSON.stringify(actual)!==JSON.stringify(expected)||publicationJson(afterIntent??null)!==publicationJson(intent??null))throw Error('assistant_candidate_reject_conflict');
       return actual;
@@ -1683,12 +1832,12 @@ export class LoopStore {
       order by started_at desc, id desc
       limit ?
     `).all(loopId, Math.max(0, limit)));
-    return rows.map(row => this.runRowToRecord(row));
+    return rows.map(row => this.visibleRunListRecord(row));
   }
 
   getLoopRun(runId: string): LoopRun | undefined {
     const row = this.getLoopRunRow(runId);
-    return row ? this.runRowToRecord(row) : undefined;
+    return row&&this.assistantRunVisible(row.id) ? this.runRowToRecord(row) : undefined;
   }
 
   findLoopRunsByTimedActionRunId(timedActionRunId: string): LoopRun[] {
@@ -1699,7 +1848,7 @@ export class LoopStore {
       where trigger_json like ?
       order by started_at desc, id desc
     `).all('%"timedActionRunId"%'));
-    return rows.map(row=>this.runRowToRecord(row)).filter(run=>run.trigger.timedActionRunId===needle);
+    return rows.filter(row=>parseJson<LoopRunTrigger>(row.trigger_json).timedActionRunId===needle).map(row=>this.visibleRunListRecord(row));
   }
 
   findLoopRunByTimedActionRunId(timedActionRunId:string):LoopRun|undefined {
@@ -1821,6 +1970,9 @@ export class LoopStore {
   }
 
   listLoopStages(runId: string): LoopStage[] {
+    return this.assistantRunVisible(runId)?this.listLoopStagesRaw(runId):[];
+  }
+  private listLoopStagesRaw(runId: string): LoopStage[] {
     const rows = typedRows<LoopStageRow>(this.db.prepare(`
       select * from loop_stages
       where run_id = ?
@@ -2426,7 +2578,7 @@ export class LoopStore {
     if (previousRunStatus !== 'running') return;
     if (input.status === 'success') {
       this.assertRawLoopSuccess(runId);
-      for(const stage of this.listLoopStages(runId))assertOrdinaryLoopOwner('loop_stage',stage.id);
+      for(const stage of this.listLoopStagesRaw(runId))assertOrdinaryLoopOwner('loop_stage',stage.id);
       this.db.prepare(`
         update loop_stages
         set status = 'skipped', finished_at = ?, updated_at = ?,
@@ -2670,3 +2822,5 @@ function legacyScheduleFieldsIn(input: CreateUserLoopTemplateInput): IgnoredLega
   if (Object.prototype.hasOwnProperty.call(input, 'autoRunApproved')) fields.push('autoRunApproved');
   return fields;
 }
+
+type Tail<T extends unknown[]> = T extends [unknown,...infer R]?R:never;

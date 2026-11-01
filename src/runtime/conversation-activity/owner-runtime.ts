@@ -9,6 +9,8 @@ import { ActivityTaskSnapshotReader, ActivityNativeGroupReader } from './owner-s
 import { ConversationActivitySources, type ProjectActivityPage } from './sources.js';
 import { ActivityOwnerMcp } from './owner-mcp.js';
 import { z } from 'zod';
+import {readAssistantDigestFacts} from '../assistant/digest-facts.js';
+import {showAssistantDigestOwnerNotification} from './owner-notification.js';
 import { showActivityOwnerNotification } from './owner-notification.js';
 import { ActivitySourceSupervisor, type ActivityManagedSource } from './source-supervisor.js';
 
@@ -57,6 +59,7 @@ export async function startConversationActivityOwner(config: ActivityOwnerConfig
       return method === 'mcpInputs' ? mcp.activities.inputs(input.watchId, actor) : mcp.activities.cancel(input.watchId, actor);
     },
     ready: () => ready, notify: showActivityOwnerNotification,
+    ...(config.identity.kind==='desktop'?{assistantDigest:{readFacts:(envelope:import('../assistant/notification-policy.js').AssistantDigestEnvelope)=>readAssistantDigestFacts(config.dataRoot,envelope),platformAvailable:()=>process.platform==='darwin'||process.platform==='linux',notify:showAssistantDigestOwnerNotification}}:{}),
     sourceControl: async (method, params) => {
       if (method === 'sourceProtected') { if (Object.keys(params).length !== 1 || !Number.isSafeInteger(params.pid) || Number(params.pid) <= 0) throw new Error('activity_source_request_invalid'); return supervisor.protectedPid(Number(params.pid)); }
       if (Object.keys(params).some(key => !['name','ownerEpoch'].includes(key)) || params.ownerEpoch !== host.ownerEpoch || !['kswarm','broker'].includes(String(params.name))) throw new Error('activity_source_stale_lease');

@@ -1,3 +1,4 @@
+import {migrateAssistantDigestReceipts,getAssistantDigestReceipt,claimAssistantDigest,finishAssistantDigest} from '../assistant/digest-receipts.js';
 import { pathToFileURL } from 'node:url';
 import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -155,6 +156,7 @@ export class ConversationActivityStore {
         PRAGMA user_version=4;
         COMMIT;
       `);
+      migrateAssistantDigestReceipts(this.db);
       this.db.prepare(`INSERT OR IGNORE INTO source_event_retention SELECT event_key,COALESCE(json_extract(content_json,'$.occurredAt'),?),json_extract(content_json,'$.kind') FROM source_events`).run(this.now());
       this.secureSidecars();
     } catch (error) {
@@ -162,6 +164,10 @@ export class ConversationActivityStore {
       throw error;
     }
   }
+
+  getAssistantDigestReceipt(deliveryId:string){return getAssistantDigestReceipt(this.db,deliveryId);}
+  claimAssistantDigest(input:Parameters<typeof claimAssistantDigest>[1]){return this.transaction(()=>claimAssistantDigest(this.db,input));}
+  finishAssistantDigest(input:Parameters<typeof finishAssistantDigest>[1]){return this.transaction(()=>finishAssistantDigest(this.db,input));}
 
   private transaction<T>(fn: () => T): T {
     if (this.readOnly) throw new Error('conversation_activity_readonly');

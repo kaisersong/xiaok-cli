@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {captureScheduledMutation,captureScheduledTarget,captureScheduledRequest,assertScheduledCreator,assertUserScheduledId} from './scheduled-mutation-authority.js';
 import {SCHEDULED_CREATE_INPUT_SCHEMA,SCHEDULED_UPDATE_INPUT_SCHEMA,SCHEDULED_LOOP_CREATE_INPUT_SCHEMA,SCHEDULED_ASSISTANT_INPUT_SCHEMA,SCHEDULED_ROOM_TARGET_SCHEMA,SCHEDULED_ACTION_SCHEMA} from '../shared/scheduled-timed-action-ipc-contract.js';
-import {ASSISTANT_EVENING_LOOP_ID,ASSISTANT_MORNING_LOOP_ID,DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
+import {ASSISTANT_CHECK_LOOP_ID,ASSISTANT_EVENING_LOOP_ID,ASSISTANT_MORNING_LOOP_ID,DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
 import type { ReminderRecord } from './reminder-store.js';
 import type { TimedActionStore } from './timed-action-store.js';
 import type {
@@ -403,12 +403,24 @@ export class TimedActionService {
     return this.store.deleteAction(id);
   }
 
+  ensureAssistantPeriodicSchedule(raw:{intervalMinutes:number;status:'active'|'paused'},request:TimedActionMutationRequest):TimedActionRecord{
+    const actor=captureScheduledRequest(request);assertScheduledCreator(actor,['scheduler']);if(actor.ownerId!==DEFAULT_PERSONAL_ASSISTANT_ID)throw Error('scheduled_assistant_owner_forbidden');
+    const input=captureScheduledMutation(raw,z.object({intervalMinutes:z.number().int().min(30).max(1440),status:z.enum(['active','paused'])}).strict());
+    const id='assistant:default-personal-assistant:check',existing=this.getMutationTarget(id),trigger={kind:'interval' as const,intervalMinutes:input.intervalMinutes};
+    if(existing){
+      if(!this.isOwnedFixedAssistant(existing))throw Error('scheduled_assistant_identity_conflict');
+      if(existing.trigger.kind!=='interval'||existing.trigger.intervalMinutes!==input.intervalMinutes)this.store.updateActionDefinition(id,{title:'Personal assistant transaction check',trigger,executor:{kind:'loop',loopId:ASSISTANT_CHECK_LOOP_ID},policy:{minIntervalMinutes:30},now:this.now()});
+      if(existing.status!==input.status)this.store.setActionStatus(id,input.status,this.now());return this.store.getAction(id)!;
+    }
+    return this.store.createAction({id,title:'Personal assistant transaction check',trigger,executor:{kind:'loop',loopId:ASSISTANT_CHECK_LOOP_ID},policy:{minIntervalMinutes:30},status:input.status,source:'system',ownerKind:'assistant',ownerId:DEFAULT_PERSONAL_ASSISTANT_ID,userApprovedAuto:true,now:this.now()});
+  }
+
   ensureAssistantLoopSchedule(input: { id: string; loopId: string; title: string; time: string; timeZone: string; workdays: number[]; status: 'active' | 'paused' }, request?: TimedActionMutationRequest): TimedActionRecord {
     const actor = captureScheduledRequest(request);
     assertScheduledCreator(actor, ['scheduler']);
     if (actor.ownerId !== DEFAULT_PERSONAL_ASSISTANT_ID) throw Error('scheduled_assistant_owner_forbidden');
     input = captureScheduledMutation(input, SCHEDULED_ASSISTANT_INPUT_SCHEMA);
-    if (!this.isFixedAssistantIdentity(input.id, input.loopId)) throw Error('scheduled_assistant_identity_forbidden');
+    if (input.loopId===ASSISTANT_CHECK_LOOP_ID||!this.isFixedAssistantIdentity(input.id, input.loopId)) throw Error('scheduled_assistant_identity_forbidden');
     const [hour, minute] = input.time.split(':').map(Number);
     const existing = this.getMutationTarget(input.id);
     if (existing) {
@@ -435,7 +447,7 @@ export class TimedActionService {
     return action ? captureScheduledTarget(action, SCHEDULED_ACTION_SCHEMA) : undefined;
   }
   private isFixedAssistantIdentity(id: string, loopId: string): boolean {
-    return (id === 'assistant:default-personal-assistant:evening' && loopId === ASSISTANT_EVENING_LOOP_ID) || (id === 'assistant:default-personal-assistant:morning' && loopId === ASSISTANT_MORNING_LOOP_ID);
+    return (id==='assistant:default-personal-assistant:check'&&loopId===ASSISTANT_CHECK_LOOP_ID)||(id === 'assistant:default-personal-assistant:evening' && loopId === ASSISTANT_EVENING_LOOP_ID) || (id === 'assistant:default-personal-assistant:morning' && loopId === ASSISTANT_MORNING_LOOP_ID);
   }
   private isOwnedFixedAssistant(action: TimedActionRecord, allowLegacy = false): boolean {
     return action.source === 'system' && action.executor.kind === 'loop' && this.isFixedAssistantIdentity(action.id, action.executor.loopId) && ((action.ownerKind === 'assistant' && action.ownerId === DEFAULT_PERSONAL_ASSISTANT_ID) || (allowLegacy && action.ownerKind === 'migration' && action.ownerId === 'legacy-migration'));

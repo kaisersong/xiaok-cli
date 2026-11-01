@@ -141,6 +141,8 @@ export interface InProcessTaskRuntimeHostOptions {
   getExecutionPolicy?: (snapshot: TaskSnapshot) => TaskExecutionPolicy;
   authorizePreparation?: (taskId: string, marker: TaskMultiAgentPreparation) => void;
   assertTaskAdmission?: (snapshot: TaskSnapshot) => Promise<void> | void;
+  commitAssistantStart?: (snapshot:TaskSnapshot)=>void;
+  assertAssistantExecutionWorkspace?: (snapshot:TaskSnapshot)=>void;
   decideCancellation?: (snapshot: TaskSnapshot, reason: string) => Promise<TaskCancellationDecision>;
   /** Fixed main-owned adapter; the exact durable report is the checking ACK. */
   onDeliveryReport?: (report: HostDeliveryReport) => Promise<HostDeliveryReport>;
@@ -429,6 +431,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly pendingTerminalPersistedEvents = new Map<string, PersistedTaskEvent>();
   private stoppedAcceptingReason: string | null = null;
   private readonly identityReservations = new WeakSet<TaskIdentityReservation>();
+  private readonly assistantIdentityBindings=new WeakMap<TaskIdentityReservation,NonNullable<TaskSnapshot['assistantBinding']>>();
   private readonly admissionPromises = new Map<string, Promise<void>>();
   private readonly deliveryVerifier = new DeliveryVerifier();
   /** Failure fallback only. Successful delivery always rereads and verifies. */
@@ -476,6 +479,12 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return reservation;
   }
 
+  /** Main-private allocation; no input or renderer task id is accepted. */
+  reserveAssistantTaskIdentity(binding:NonNullable<TaskSnapshot['assistantBinding']>):TaskIdentityReservation {
+    if(!binding||!binding.operationId||binding.operationId.length>160||!binding.threadId||binding.threadId.length>160||!/^[a-f0-9]{64}$/.test(binding.requestDigest))throw Error('assistant_identity_invalid');
+    const reservation=this.reserveTaskIdentity();this.assistantIdentityBindings.set(reservation,Object.freeze({...binding}));return reservation;
+  }
+
   async prepareTask(input: TaskCreateInput, preparation?: {
     reservation: TaskIdentityReservation; marker: TaskMultiAgentPreparation;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
@@ -494,7 +503,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.options.authorizePreparation(taskId, marker);
       this.identityReservations.delete(preparation.reservation);
     }
-    return this.prepareTaskSnapshot(input, taskId, marker);
+    return this.prepareTaskSnapshot(input, taskId, marker, preparation?this.assistantIdentityBindings.get(preparation.reservation):undefined);
   }
 
   /** Main-only ordinary identity path; multiagent hosts must supply their real marker. */
@@ -507,14 +516,15 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if(!valid)throw Error('invalid or consumed task identity reservation');
     if(this.stoppedAcceptingReason)throw Error(`shutting_down: ${this.stoppedAcceptingReason}`);
     if(this.options.authorizePreparation||input.executionScope)throw Error('multi_agent_preparation_required');
-    return this.prepareTaskSnapshot(input,reservation.taskId);
+    return this.prepareTaskSnapshot(input,reservation.taskId,undefined,this.assistantIdentityBindings.get(reservation));
   }
 
   assertTaskIdentityReservation(reservation: TaskIdentityReservation): void {
     if(this.stoppedAcceptingReason||!this.identityReservations.has(reservation))throw Error('invalid or consumed task identity reservation');
   }
 
-  private async prepareTaskSnapshot(input:TaskCreateInput,taskId:string,marker?:TaskMultiAgentPreparation):Promise<{taskId:string;understanding?:TaskUnderstanding}> {
+  private async prepareTaskSnapshot(input:TaskCreateInput,taskId:string,marker?:TaskMultiAgentPreparation,assistantBinding?:TaskSnapshot['assistantBinding']):Promise<{taskId:string;understanding?:TaskUnderstanding}> {
+    if(assistantBinding&&input.context?.threadId!==assistantBinding.threadId)throw Error('assistant_identity_thread_mismatch');
     if (input.permissionMode) {
       this.permissionModes.set(taskId, input.permissionMode);
     }
@@ -545,6 +555,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       events: [],
       context: contextHistory.audit,
       executionScope: input.executionScope,
+      ...(assistantBinding?{assistantBinding:{...assistantBinding}}:{}),
       ...(marker ? { multiAgentPreparation: marker } : {}),
       usage: { inputTokens: 0, outputTokens: 0, known: false },
       createdAt: this.now(),
@@ -1217,6 +1228,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       const current = await this.requireSnapshot(taskId);
       assertTaskSource(captureTaskSource(snapshot), current);
       if (TERMINAL_STATUSES.has(current.status) || this.cancellationSettlements.has(taskId)) return;
+      if(current.assistantBinding&&!current.events.some(event=>event.type==='task_execution_started')){
+        if(!this.options.commitAssistantStart)throw Error('assistant_start_commit_unavailable');
+        const receipt:unknown=this.options.commitAssistantStart(current);if(receipt!==undefined)throw Error('assistant_start_commit_must_be_sync');
+      }
       this.activeExecutions.set(taskId, execution);
       const event: DesktopTaskEvent = { type: 'task_execution_started', taskId };
       const next: TaskSnapshot = { ...current, status: 'running', events: [...current.events, event], updatedAt: this.now() };
@@ -1269,6 +1284,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
     try {
       if (this.activeExecutions.get(taskId) !== execution || controller.signal.aborted || this.cancellingTaskIds.has(taskId)) return;
+      if(snapshot.assistantBinding&&!snapshot.events.some(event=>event.type==='task_execution_started')){
+        if(!this.options.assertAssistantExecutionWorkspace)throw Error('assistant_execution_workspace_unavailable');
+        const receipt:unknown=this.options.assertAssistantExecutionWorkspace(snapshot);if(receipt!==undefined)throw Error('assistant_execution_guard_must_be_sync');
+      }
       await this.options.runner({
         taskId,
         sessionId: snapshot.sessionId,

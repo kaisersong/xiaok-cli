@@ -1,3 +1,5 @@
+import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
+import {createHash} from 'node:crypto';
 import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
@@ -65,6 +67,13 @@ export class CompletionEvidenceValidationError extends Error {
 }
 
 export class CompletionEvidenceStore {
+  private assistantDerivedVisibility?:AssistantDerivedVisibility;
+  bindAssistantDerivedVisibility(visibility:AssistantDerivedVisibility){if(this.assistantDerivedVisibility&&this.assistantDerivedVisibility!==visibility)throw Error('assistant_derived_owner_conflict');this.assistantDerivedVisibility=visibility;}
+  private assistantEvidenceVisible(ownerKind:CompletionOwnerKind,ownerId:string){try{return this.assistantDerivedVisibility?.isEvidenceVisible({ownerKind,ownerId})??true;}catch{return false;}}
+  captureAssistantMemoryEvidenceFacts(runId:string,ids:readonly string[]){
+    const read=()=>{const evidence=this.db.prepare("SELECT * FROM completion_evidence WHERE owner_kind='loop_run' AND owner_id=? AND orphaned_at IS NULL ORDER BY id LIMIT 101").all(runId);if(!ids.length||evidence.length>100)return undefined;const selected=evidence.filter(row=>ids.includes(String(row.id)));if(selected.length!==new Set(ids).size)return undefined;const records=this.db.prepare("SELECT * FROM completion_records WHERE owner_kind='loop_run' AND owner_id=? AND status='completed' AND ok=1 ORDER BY created_at DESC,id DESC LIMIT 1").get(runId);if(!records)return undefined;const committed=JSON.parse(String(records.evidence_ids_json)) as unknown;if(!Array.isArray(committed)||ids.some(id=>!committed.includes(id)))return undefined;return {selected,records};};
+    const facts=read();if(!facts)return undefined;const revision=createHash('sha256').update(JSON.stringify(facts)).digest('hex');return {revision,isCurrent:()=>{try{const current=read();return !!current&&createHash('sha256').update(JSON.stringify(current)).digest('hex')===revision;}catch{return false;}}};
+  }
   private readonly connection:LoopDatabaseLease;
   private get db():DatabaseSync{return this.connection.database;}
 
@@ -156,6 +165,7 @@ export class CompletionEvidenceStore {
   }
 
   listEvidenceForOwner(ownerKind: CompletionOwnerKind, ownerId: string): StoredCompletionEvidenceRecord[] {
+    if(!this.assistantEvidenceVisible(ownerKind,ownerId))return [];
     const rows = typedRows<CompletionEvidenceRow>(this.db.prepare(`
       select * from completion_evidence
       where owner_kind = ? and owner_id = ? and orphaned_at is null
@@ -184,7 +194,7 @@ export class CompletionEvidenceStore {
       select * from completion_records${where}
       order by created_at asc, id asc
     `).all(...params));
-    return rows.map(row => this.completionRecordRowToRecord(row));
+    return rows.filter(row=>this.assistantEvidenceVisible(row.owner_kind,row.owner_id)).map(row => this.completionRecordRowToRecord(row));
   }
 
   markEvidenceOrphaned(evidenceId: string, now: number): boolean {

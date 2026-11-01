@@ -246,6 +246,26 @@ describe('preload API contract', () => {
       'kswarmRestart',
       'kswarmResumeWorkflowRun',
       'kswarmStartProjectPlanning',
+      'getAssistantCandidatePage',
+      'dismissAssistantAction',
+      'snoozeAssistantAction',
+      'getAssistantActionOverview',
+      'getAssistantCalendarMemorySettings','configureAssistantCalendarMemory',
+      'getAssistantCalendarStatus','connectAssistantCalendar','disconnectAssistantCalendar',
+      'getAssistantAnalysisProvider',
+      'configureAssistantAnalysisProvider',
+      'getAssistantLaunchTargets',
+      'getAssistantQualityStatus',
+      'exportAssistantQualityReview',
+      'importAssistantQualityReview',
+      'revokeAssistantQualityReview',
+      'getAssistantPeriodicStatus',
+      'configureAssistantPeriodic',
+      'checkAssistantPeriodic',
+      'cancelAssistantLaunch',
+      'prepareAssistantReconfirmation',
+      'prepareAssistantFollowUpLaunch',
+      'prepareAssistantLaunch',      'confirmAssistantLaunch',      'getAssistantLaunch',      'resolveAssistantLaunch',
       'getAssistantOverview',
       'activateAssistant',
       'pauseAssistant',
@@ -806,6 +826,7 @@ describe('preload API contract', () => {
     };
     const api = createPreloadApi(ipcRenderer);
 
+    await api.getAssistantActionOverview();
     await api.getAssistantOverview();
     await api.activateAssistant();
     await api.pauseAssistant();
@@ -813,6 +834,7 @@ describe('preload API contract', () => {
     await api.acceptAssistantCandidate({ candidateId: 'candidate-1', collectionId: 'collection-1', requestSource: 'agent' } as any);
     await api.rejectAssistantCandidate({ candidateId: 'candidate-2', requestSource: 'agent' } as any);
 
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:getActionOverview');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:getOverview');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:activate');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:pause');
@@ -1343,4 +1365,14 @@ describe('Small configuration complete4 transport bridge contracts', () => {
     await expect((api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).saveSkillDebugConfig!({ enabled: false })).rejects.toBe(failure);
     expect(ipc.invoke).toHaveBeenCalledTimes(1);
   });
+});
+
+describe('Calendar memory bounded semantic transport',()=>{
+ it.each(['typescript','sandbox-cjs'] as const)('%s forwards only enabled and expectedRevision, never owner/profile/source',async implementation=>{
+  const port={invoke:vi.fn(),on:vi.fn(),off:vi.fn()};const loaded=implementation==='sandbox-cjs'?loadRuntimePreloadApi():null;const api=loaded?.api??createPreloadApi(port),ipc=loaded?.ipcRenderer??port;
+  ipc.invoke.mockResolvedValue({enabled:false,revision:4});
+  await (api as any).getAssistantCalendarMemorySettings();expect(ipc.invoke).toHaveBeenLastCalledWith('desktop:assistant:getCalendarMemorySettings');
+  await (api as any).configureAssistantCalendarMemory({enabled:true,expectedRevision:4,ownerId:'forged',profileId:'forged',requestSource:'agent',path:'/forged'});expect(ipc.invoke).toHaveBeenLastCalledWith('desktop:assistant:configureCalendarMemory',{enabled:true,expectedRevision:4});
+  ipc.invoke.mockRejectedValueOnce(Error('revision_conflict'));await expect((api as any).configureAssistantCalendarMemory({enabled:false,expectedRevision:4})).rejects.toThrow('revision_conflict');
+ });
 });

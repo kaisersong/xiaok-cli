@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGetAssistantOverview, mockActivateAssistant } = vi.hoisted(() => ({
+const { mockGetAssistantOverview, mockActivateAssistant,mockConfigureCalendarMemory } = vi.hoisted(() => ({
   mockGetAssistantOverview: vi.fn(),
   mockActivateAssistant: vi.fn(),
+  mockConfigureCalendarMemory:vi.fn(),
 }));
 
 vi.mock('../../renderer/src/components/ChatInput', () => ({
-  ChatInput: () => <div data-testid="chat-input" />,
+  ChatInput: ({value,onChange}:{value:string;onChange:(value:string)=>void}) => <textarea data-testid="chat-input" value={value} onChange={event=>onChange(event.target.value)} />,
 }));
 
 vi.mock('../../renderer/src/api', () => ({
@@ -32,6 +33,7 @@ vi.mock('../../renderer/src/shared/desktop', () => ({
     systemUsername: 'Tester',
     getAssistantOverview: mockGetAssistantOverview,
     activateAssistant: mockActivateAssistant,
+    configureAssistantCalendarMemory:mockConfigureCalendarMemory,
   }),
 }));
 
@@ -143,4 +145,56 @@ describe('WelcomePage assistant integration', () => {
     expect(mockActivateAssistant).toHaveBeenCalledTimes(1);
     expect(mockGetAssistantOverview).toHaveBeenCalledTimes(2);
   });
+});
+
+it('shows unknown coverage for legacy data without claiming an all-clear', () => {
+ renderCard({profile:{status:'active',eveningTime:'22:30',morningTime:'08:30'},suggestions:[],pendingCandidateCount:0});
+ expect(screen.getByText('历史结果或尚未检查，来源覆盖未知。')).toBeInTheDocument();
+});
+it('keeps incomplete sources and failed analysis visible outside the collapsed details', () => {
+ renderCard({profile:{status:'active',eveningTime:'22:30',morningTime:'08:30'},suggestions:[],pendingCandidateCount:0,coverageState:'known',analysisStatus:'failed',coverage:[{sourceId:'kswarm_projects',status:'unavailable',requestedWindow:{from:1,to:2},recordCount:0,includedCount:0,checkedAt:2,freshUntil:3,errorCode:'source_unavailable'}]});
+ expect(screen.getByText('部分来源未完整检查，请查看覆盖详情。')).toBeVisible();
+ expect(screen.getByText('来源已采集，建议分析未完成。')).toBeVisible();
+ expect(screen.getByText('检查来源')).toBeInTheDocument();
+ expect(screen.getByText('项目')).toBeInTheDocument();
+});
+
+it('offers draft/dismiss/snooze only for an identified v2 proposal and never exposes a Start action',()=>{
+ const proposal={schemaVersion:2 as const,id:'assistant-action-'+ 'a'.repeat(64),profileId:'default-personal-assistant' as const,revision:3,workItemIdentity:'a'.repeat(64),originRunId:'run',sourceVector:'b'.repeat(64),actionKind:'review' as const,title:'审查结果',reason:'有交付待审',nextStep:'检查证据',instruction:'只读核查交付证据。',evidenceRefs:[{kind:'task',id:'one'}],decision:'open' as const,createdAt:1,updatedAt:1,validUntil:9e15,snoozeUntil:null,startAvailability:'unavailable' as const};
+ const draft=vi.fn(),dismiss=vi.fn(),snooze=vi.fn();
+ renderCard({profile:{status:'active',eveningTime:'22:30',morningTime:'08:30'},suggestions:[{id:proposal.id,title:proposal.title,summary:proposal.reason}],pendingCandidateCount:0,proposals:[proposal]}, {onPrepareDraft:draft,onDismissAction:dismiss,onSnoozeAction:snooze});
+ fireEvent.click(screen.getByRole('button',{name:'整理为草稿'}));expect(draft).toHaveBeenCalledWith(proposal.instruction);
+ fireEvent.click(screen.getByRole('button',{name:'忽略'}));expect(dismiss).toHaveBeenCalledWith(proposal.id,3);
+ fireEvent.click(screen.getByRole('button',{name:'稍后（2小时）'}));expect(snooze).toHaveBeenCalledWith(proposal.id,3);
+ expect(screen.queryByRole('button',{name:'开始处理'})).not.toBeInTheDocument();
+});
+it('prefills an actual home input without submitting and preserves an existing user draft',async()=>{
+ const proposal={schemaVersion:2,id:'assistant-action-'+'a'.repeat(64),profileId:'default-personal-assistant',revision:1,workItemIdentity:'a'.repeat(64),originRunId:'run',sourceVector:'b'.repeat(64),actionKind:'review',title:'Review task',reason:'Review result',nextStep:'Read evidence',instruction:'只读审查证据，不修改原任务。',evidenceRefs:[{kind:'task',id:'one'}],decision:'open',createdAt:1,updatedAt:1,validUntil:9e15,snoozeUntil:null,startAvailability:'unavailable'};
+ mockGetAssistantOverview.mockResolvedValue({profile:{status:'active',eveningTime:'22:30',morningTime:'08:30'},suggestions:[{id:proposal.id,title:proposal.title,summary:proposal.reason}],proposals:[proposal],candidates:[],pendingCandidateCount:0});
+ render(<LocaleProvider><MemoryRouter><WelcomePage/></MemoryRouter></LocaleProvider>);
+ fireEvent.click(await screen.findByRole('button',{name:'整理为草稿'}));
+ expect(screen.getByTestId('chat-input')).toHaveValue(proposal.instruction);
+ expect(screen.getByText(/草稿已填入输入框，尚未发送/)).toBeInTheDocument();
+ fireEvent.change(screen.getByTestId('chat-input'),{target:{value:'我已有的个人草稿'}});
+ expect(screen.getByRole('button',{name:'整理为草稿'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'整理为草稿'}));
+ expect(screen.getByTestId('chat-input')).toHaveValue('我已有的个人草稿');
+});
+it('passes independent calendar memory consent through Welcome and HomeCard without optimistic success',async()=>{
+ mockGetAssistantOverview.mockReset();mockConfigureCalendarMemory.mockReset();const overview=(enabled:boolean,revision:number)=>({profile:{status:'active',eveningTime:'21:30',morningTime:'08:30'},suggestions:[],candidates:[],pendingCandidateCount:0,calendarMemory:{enabled,revision}});
+ mockGetAssistantOverview.mockResolvedValueOnce(overview(false,4)).mockResolvedValue(overview(true,5));let complete!:(value:any)=>void;mockConfigureCalendarMemory.mockImplementation(()=>new Promise(resolve=>{complete=resolve}));
+ render(<LocaleProvider><MemoryRouter><WelcomePage/></MemoryRouter></LocaleProvider>);fireEvent.click(await screen.findByText('云之家日历'));fireEvent.click(screen.getByRole('checkbox',{name:'日历准备建议使用已确认记忆'}));
+ expect(mockConfigureCalendarMemory).toHaveBeenCalledExactlyOnceWith({enabled:true,expectedRevision:4});expect(screen.getByRole('checkbox')).not.toBeChecked();expect(screen.getByRole('checkbox')).toBeDisabled();complete({enabled:true,revision:5});
+ await waitFor(()=>expect(screen.getByRole('checkbox')).toBeChecked());expect(screen.getByRole('checkbox')).not.toBeDisabled();expect(mockGetAssistantOverview).toHaveBeenCalledTimes(2);
+});
+it('refreshes calendar memory revision after conflict and keeps authoritative state with an error',async()=>{
+ mockGetAssistantOverview.mockReset();mockConfigureCalendarMemory.mockReset();const overview=(revision:number)=>({profile:{status:'active',eveningTime:'21:30',morningTime:'08:30'},suggestions:[],candidates:[],pendingCandidateCount:0,calendarMemory:{enabled:true,revision}});
+ mockGetAssistantOverview.mockResolvedValueOnce(overview(9)).mockResolvedValue(overview(10));mockConfigureCalendarMemory.mockRejectedValue(Error('revision_conflict'));
+ render(<LocaleProvider><MemoryRouter><WelcomePage/></MemoryRouter></LocaleProvider>);fireEvent.click(await screen.findByText('云之家日历'));fireEvent.click(screen.getByRole('checkbox'));
+ expect(mockConfigureCalendarMemory).toHaveBeenCalledWith({enabled:false,expectedRevision:9});expect(await screen.findByRole('alert')).toBeTruthy();expect(screen.getByRole('checkbox')).toBeChecked();expect(screen.getByRole('checkbox')).not.toBeDisabled();fireEvent.click(screen.getByRole('checkbox'));expect(mockConfigureCalendarMemory).toHaveBeenLastCalledWith({enabled:false,expectedRevision:10});await waitFor(()=>expect(screen.getByRole('checkbox')).not.toBeDisabled());
+});
+it('keeps model and periodic settings identities separate when their revisions match',()=>{
+ const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+ try{renderCard({profile:{status:'active',eveningTime:'22:30',morningTime:'08:30'},suggestions:[],pendingCandidateCount:0,analysisProvider:{revision:0,selectedModelId:null,models:[],state:'not_configured',reason:null},periodic:{revision:0,enabled:false,notificationsEnabled:false,intervalMinutes:240,quietHours:{start:'22:00',end:'08:00'},available:false,reason:'quality_unverified',notificationsAvailable:false}},{onConfigureAnalysis:vi.fn(),onSavePeriodic:vi.fn(),onCheckPeriodic:vi.fn()});expect(errors.mock.calls.filter(call=>String(call[0]).includes('same key'))).toEqual([]);
+ }finally{errors.mockRestore();}
 });

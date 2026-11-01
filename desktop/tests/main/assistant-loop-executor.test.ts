@@ -114,3 +114,17 @@ describe('assistant loop executor', () => {
     });
   });
 });
+
+it('rejects external sources on protected publication without a common fence and never falls back ordinary',async()=>{
+ const ordinary=vi.fn(),publish=vi.fn(),complete=vi.fn();
+ const executor=createAssistantLoopExecutor({getProfile:()=>activeProfile,collect:()=>({}),beginDerivedCapture:()=>({finish:async()=>({lineage:{version:1,profileId:activeProfile.id,profileRevision:'a'.repeat(64),parents:[],calendar:{epoch:1,observationRevision:'a'.repeat(64),events:[]}},context:{kind:'data',calendar:{status:'partial',events:[]},personalization:{kind:'data',status:'disabled',memories:[]}},items:[],isCurrent:()=>true})}),complete,stageCandidates:ordinary,recordEvidence:ordinary,finishSuccess:ordinary,finishFailure:vi.fn()});
+ expect((await executor.execute({kind:'morning',runId:'run',now:1,publicationProducer:{recordAssistantOutput:publish} as never})).status).toBe('failed');
+ expect(complete).not.toHaveBeenCalled();expect(publish).not.toHaveBeenCalled();expect(ordinary).not.toHaveBeenCalled();
+});
+it('never sends naked external or untracked inherited source text to the model',async()=>{
+ for(const snapshot of [{calendar:{events:[{title:'private'}]}},{current:{items:[]},derivedRunIds:['old-private-run']}]){
+  const complete=vi.fn(),recordEvidence=vi.fn();
+  const executor=createAssistantLoopExecutor({getProfile:()=>activeProfile,collect:()=>snapshot,complete,stageCandidates:vi.fn(),recordEvidence,finishSuccess:vi.fn(),finishFailure:vi.fn()});
+  expect((await executor.execute({kind:'morning',runId:'run',now:1})).status).toBe('failed');expect(complete).not.toHaveBeenCalled();expect(recordEvidence).not.toHaveBeenCalled();
+ }
+});

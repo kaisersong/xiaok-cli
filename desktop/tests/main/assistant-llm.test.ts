@@ -63,3 +63,29 @@ describe('assistant no-tool structured LLM', () => {
     })).rejects.toThrow('assistant_json_invalid');
   });
 });
+
+describe('morning action protocol v2',()=>{
+ const reference={kind:'task_snapshot',id:'task-1'};
+ const recommendation={title:'整理任务结果',reasonCode:'task_result',evidenceRefs:[reference],action:{kind:'review',reason:'有结果待审查',nextStep:'先检查证据',instruction:'整理此任务的结果与证据，不修改原任务。'}};
+ const value=()=>({schemaVersion:2,recommendations:[structuredClone(recommendation)]});
+ it('accepts bounded actions tied to this round and preserves their exact text',()=>{
+  const input=value();const result=validateMorningBriefing(input,{evidenceRefs:[reference]});
+  expect(result).toEqual(input);
+ });
+ it('rejects invented references or missing evidence context',()=>{
+  expect(()=>validateMorningBriefing(value(),{evidenceRefs:[{...reference,id:'other'}]})).toThrow('evidence');
+  expect(()=>validateMorningBriefing(value())).toThrow('context');
+ });
+ it.each(['permissionMode','shell','toolName','dedupeKey'])('rejects model-supplied authority field %s',field=>{
+  const input=value();(input.recommendations[0]!.action as any)[field]='danger';
+  expect(()=>validateMorningBriefing(input,{evidenceRefs:[reference]})).toThrow();
+ });
+ it('rejects overlong/blank instruction and too many references rather than clipping',()=>{
+  for(const instruction of [' ', 'x'.repeat(4001)]){
+   const input=value();input.recommendations[0]!.action.instruction=instruction;
+   expect(()=>validateMorningBriefing(input,{evidenceRefs:[reference]})).toThrow();
+  }
+  const input=value();input.recommendations[0]!.evidenceRefs=Array.from({length:21},()=>reference);
+  expect(()=>validateMorningBriefing(input,{evidenceRefs:[reference]})).toThrow();
+ });
+});

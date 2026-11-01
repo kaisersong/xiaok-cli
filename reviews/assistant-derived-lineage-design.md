@@ -1,0 +1,47 @@
+# P2 普通 assistant 正式派生遮蔽
+
+2026-11-01。独占runtime/executor/publication-context；不改main/IPC/renderer/P3/LoopStore/CompletionEvidenceStore。前轮工程台账/AGENTS及本轮hygiene已读/跑，sibling intent-broker仍落后且有已有改动，保留。
+
+## 设计（实现前）
+
+新增assistant-derived-lineage.ts和store。lineage包含version/profileId/完整profile指纹、calendar epoch/观测snapshot revision及实际输入event的id+observationRevision、memory owner/consent revision/逐条id+内容hash+accepted candidate确认指纹，以及继承来源runId+lineage hash。只存最小身份/摘要，不另存来源正文。
+
+普通run：已知runId→capture开始固定profile/owner/calendar epoch/memory consent revision→collect→capture结束读取受控calendar context/按需确认记忆；前后授权不同即失败。剔除旧collector的裸calendar/personalization，只有受控capture能注入来源正文。recordCollection以同一个Loop DB事务调用recordAssistantSourceRun及lineage insert，要求db.isTransaction；失败不调用模型。模型后/每次staging/evidence/finish前同步重验capture/profile/parent refs。record lineage先于模型；所有已写半成品都可由同一run gate遮蔽。无hook的普通内部晨报保留；裸外部正文无lineage直接拒绝，不悄悄发布。
+
+main注入captureDerived与recordDerivedCollection两个hook、publication reader的derivedVisibility；reader hooks由主线程接同一个isRunVisible/isEvidenceVisible/isCandidateVisible。profile不存在/paused/状态或scope/revision变化、calendar epoch或已引用event revision不匹配、memory consent关闭或revision变化/内容变更/删除/accepted确认变化，整份混合派生隐藏。父run递归验证并校验lineage hash，继承撤权；循环/深度超限fail closed。无lineage为旧内部run，不能伪造新run fallback：capture开启的新run必须原子record后才能模型。
+
+受保护route：共同fence尚不存在，任何含外部或继承派生的run不得recordAssistantOutput，也不得降级ordinary；明确assistant_derived_protected_unsupported。没有派生的原保护route保持原owner。原受保护memory publication无法同步验证时不作为确认资格，不冒用普通candidate。
+
+## 用户准备路径
+
+受控calendar context只给未来48h及窗口内observed_changed的有界event，带calendar_observation展示ref，allDay/cancelled/occurrence仍未知。模型可生成prepare/安排观测变化提示，不据参会断言必须行动。v2输出仍由正式runtime验证本轮refs并写ordinary evidence/summary；publication reader展示该类建议，但整个含calendar派生run不提供launch source，不能用模型改成task ref绕过。
+
+记忆独立opt-in：读取现有MemoryStore；正式canUse来自publication reader的confirmMemory函数，验证原assistant candidate status=accepted/kind=memory、精确memory://backend/id、targetId/provenance、scope/project cwd、title/content与现存memory一致、当前ordinary原run publication/visibility。保护route无共同同步proof则拒绝。无可确认记忆返回空状态或unavailable，绝不伪造确认。
+
+## 实现前对抗自审
+
+- 撤权发生在collect/LLM/异步callback任一await：恢复后检查；错误正文用稳定code，外部错误不能写进失败日志。
+- 事后撤权不能仅删除source card：run/evidence/candidate/suggestions及下一轮继承均用同一持久gate；主线程必须把实际readers挂上。
+- lineage/source-run不能分两个事务；store拒绝非事务调用，冲突与staging故障回滚测试用实际SQLite。
+- 候选来源当前性不可只看accepted status，必须原run/route/完整candidate指纹；memory正文被改写也无资格。
+- protected producer提交无共同授权fence：unsupported；不能先给模型外部数据再不受控写protected。
+- 输入含旧derived summaries必须继承父run；publication mapper显式带derivedRunIds，模型无法扩展此可信集合。
+- 整份来源不可分离则隐藏；pending/failed run同样gate，未知不能当无承诺。wrapper安装与UI迟到失效仍需main集成验收，不宣称此子任务完成全部产品接线。
+
+## 接口收敛/主线程审读裁决
+
+缺lineage时不查默认profile，不影响artifact/health/userloop证据。owner必须提供isTrackedAssistantRun；新独立marker和lineage同事务写入，marker保留到原owner确定全部正文已删除，不能只清lineage导致legacy降级。protected route在每个同步发布guard和reader gate重验，模型期间转protected也明确unsupported，不写ordinary正文或伪造protected失败回执。
+
+记忆确认使用readMemoryConfirmationFacts(candidateId)的有限raw事实与同步isCurrent尾闭包；有derived gate时禁止fallback公共candidate/run reader，避免visibility递归。保护publication当前同步证明不足仍拒绝。所有lineage store写入须有确切morning/evening运行中owner；runtime在调用模型前读回核对已持久lineage。
+
+## main 接手增补（实现前）
+
+用户授权本线程独占main.ts P2接线，其余P3/settings/picker不变。增加assistant-derived-main.ts作为main实际调用的窄组合，集成测试直接调用它及实际LoopStore/EvidenceStore/CalendarSource/Runtime/ActionService。固定owner=desktop-user:sha256(dataRoot)、profile=DEFAULT_PERSONAL_ASSISTANT_ID，cwd由main实际process.cwd取值。绑定两store同一个visibility；组合raw accepted-candidate事实和raw committed evidence事实的revision/current，绝不公共getter递归。
+
+calendarMemory controller口只接受enabled/expectedRevision/user，owner/profile由闭包固定；只读status不暴露owner/dataRoot。读配置走独立表，mutation继续原事务与automation version invalidation。morning collect刷新calendar，session.finish从最终source context取数据；evening保持原native来源范围，只记录profile lineage，不把日历正文偷偷扩到晚报。P3 collect和质量抽样不变。导出原生窗口文案只声称案例ID/摘要/时间且已遮盖已知凭据，不声称任意秘密已排除。
+
+对抗：store绑定后raw确认仍可用；memory关闭/删除/原接受候选变化会隐藏新产物；默认开关不随calendar自动开；不能由IPC owner/profile/cwd重定向；公开getRun被隐藏时runtime不得猜running；所有实际集成测试用临时SQLite和合成日历port，不在真实用户日历写入。main完成后审计公开publication/body兄弟入口，保证读取遮蔽不改变owner内部执行身份事实。
+
+## 兄弟入口最小修复设计/自审
+
+实读LoopStore公开get/listLoopPublicationCandidates返回binding.body，getLoopBusinessProjection含origin.before/after rows，getLoopBusinessProjectionTarget及getLoopNativeAttemptTarget也含body。class内部identity/normalization/current校验复用这些public方法，直接过滤会把执行身份藏成不存在。因此：为四类正文reader拆private Raw方法，仅public读入口visibility gate；类内身份/幂等/历史校验使用raw。生命周期terminalResultPresent及candidateIds走raw，不修改执行日志/terminal事实。当前性assert/new capture/recovery/project显式assistant_source_unavailable拒绝，不返回空假执行历史。public projection/native target拒绝时抛明确拒绝，而不是candidate_missing。其他非assistant无lineage业务不变。测试必须证明：公开正文不可读，而同一原native attempt/lifecycle identity仍在；不通过屏蔽raw identity触发scanner/model/task重跑。

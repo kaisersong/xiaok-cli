@@ -1,3 +1,4 @@
+import {ASSISTANT_CHECK_LOOP_ID} from './assistant-types.js';
 import {createLoopDatabaseOwnerGroup} from './loop-database-owner.js';
 import {readLoopCompletedRun} from './loop-completion-consumer.js';
 import {captureLoopRunContext,assertOrdinaryLoopOwner,type LoopRunContext} from './loop-run-context.js';
@@ -86,6 +87,7 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
   return {
     async runLoopNow(loopId, trigger, signal, rawContext) {
       const context=captureLoopRunContext(rawContext);
+      if(loopId===ASSISTANT_CHECK_LOOP_ID)return {status:'skipped',reason:'missing_loop'};
       const startedAt = now();
       assertRecoveredStaleRuns(options.loopStore.recoverStaleRuns(startedAt, staleAfterMs));
       const effectiveTrigger = trigger ?? { kind: 'manual' };

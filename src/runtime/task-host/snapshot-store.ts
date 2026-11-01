@@ -584,7 +584,7 @@ function applyJournalRecord(snapshot: TaskSnapshot, record: JournalRecord): Task
 
 const CAPTURED_TASK_FIELDS = new Set([
   'taskId', 'sessionId', 'status', 'prompt', 'materials', 'events', 'understanding', 'result',
-  'salvage', 'context', 'executionScope', 'multiAgentPreparation', 'hostDelivery', 'usage',
+  'salvage', 'context', 'assistantBinding', 'executionScope', 'multiAgentPreparation', 'hostDelivery', 'usage',
   'createdAt', 'updatedAt', 'executionProtected', 'protectedObservationClosure', 'currentCompletion',
 ]);
 function capturedIdentity(value: unknown): asserts value is string {

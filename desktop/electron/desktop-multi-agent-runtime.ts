@@ -183,7 +183,7 @@ export class DesktopMultiAgentRuntime {
       beforeOpaqueInvocation: () => this.options.worktrees?.beforeOpaqueInvocation(context.groupId, context.agentId, context.cwd),
       ...(this.options.approvals ? { requestApproval: invocation => this.options.approvals!.requestApproval({ context, invocation }) } : {}),
     }, runtime.registryOptions);
-    for (const tool of createDesktopMultiAgentTools({ service: this.options.service, context, agents: runtime.agents,
+    for (const tool of scope.registry.isNativeReadonlyOnly?[]:createDesktopMultiAgentTools({ service: this.options.service, context, agents: runtime.agents,
       allowedControls: runtime.controls,
       createSeed: (input, toolContext) => this.createSeed(context, runtime, input, toolContext),
     })) { const wrapped: import('../../src/types.js').Tool={ ...tool, execute: async (input, toolContext) => {
