@@ -1,10 +1,10 @@
 name: Assistant source coverage
 on:
   pull_request:
-    paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
+    paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'tests/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
   push:
     branches: [master]
-    paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
+    paths: ['desktop/**', 'src/runtime/loop/**', 'src/runtime/assistant/**', 'tests/runtime/assistant/**', 'src/runtime/conversation-activity/**', 'tests/runtime/conversation-activity/**', 'src/runtime/verification/loop-application-binding.ts', 'tests/runtime/verification/loop-application-binding.test.ts', 'tests/runtime/task-host/**', 'src/runtime/task-host/**', 'tests/support/**', 'package*.json', '.github/workflows/assistant-coverage.yml']
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -51,7 +51,7 @@ jobs:
           node -e "const {spawnSync}=require('node:child_process');const expected=require('electron/package.json').version;const r=spawnSync(require('electron'),['--eval','console.log(process.versions.electron)'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',timeout:30000});if(r.error)throw r.error;if(r.status!==0||r.stdout.trim()!==expected){console.error(r.stderr||r.stdout);process.exit(1)}console.log('Actual Electron Node binary verified: '+expected)"
       - run: npm run test:sandbox:build
       - name: Formal action body and hash binding
-        run: npm run test:sandbox:run -- .test-dist/tests/runtime/verification/loop-application-binding.test.js .test-dist/tests/runtime/task-host/task-runtime-host.test.js .test-dist/tests/runtime/conversation-activity/assistant-digest.test.js .test-dist/tests/runtime/conversation-activity/assistant-quality.test.js .test-dist/tests/runtime/conversation-activity/owner-host.test.js
+        run: npm run test:sandbox:run -- .test-dist/tests/runtime/assistant/model-identity.test.js .test-dist/tests/runtime/verification/loop-application-binding.test.js .test-dist/tests/runtime/task-host/task-runtime-host.test.js .test-dist/tests/runtime/conversation-activity/assistant-digest.test.js .test-dist/tests/runtime/conversation-activity/assistant-quality.test.js .test-dist/tests/runtime/conversation-activity/owner-host.test.js
       - name: Production collector, runtime, durable owner and transport
         working-directory: desktop
         shell: bash
@@ -92,6 +92,7 @@ jobs:
           tests/main/assistant-analysis-provider.test.ts \
           tests/main/assistant-analysis-resources.test.ts \
           tests/main/assistant-analysis-settings.test.ts \
+          tests/main/assistant-analysis-identity-revocation.test.ts \
           tests/main/assistant-calendar-context.test.ts \
           tests/main/assistant-calendar-memory-settings.test.ts \
           tests/main/assistant-candidate-promotion.test.ts \
@@ -129,6 +130,10 @@ jobs:
           tests/main/desktop-goal-store-pointer-guard.test.ts \
           tests/main/desktop-goal-workspace-revocation.bdd.test.ts \
           tests/main/desktop-readonly-audit.test.ts \
+          tests/main/desktop-readonly-audit-retained.test.ts \
+          tests/main/loop-store.test.ts \
+          tests/main/completion-evidence-store.test.ts \
+          tests/main/automation-overview.test.ts \
           tests/main/assistant-launch-binding-thread.test.ts \
           tests/main/copy-packaged-dependencies.test.ts \
           tests/main/packaged-runtime-imports.test.ts \
@@ -139,3 +144,6 @@ jobs:
           tests/renderer/assistant-launch-target-picker.test.tsx \
           tests/renderer/assistant-narration.test.tsx \
           tests/renderer/assistant-quality.test.tsx
+      - name: Existing foreground admission and workspace revocation
+        working-directory: desktop
+        run: npm run test -- --run tests/main/desktop-services.test.ts -t "assistant admission|assistant workspace replacement"
