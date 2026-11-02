@@ -926,6 +926,52 @@ function countOccurrences(text: string, needle: string): number {
   return text.split(needle).length - 1;
 }
 
+// #128：用例在 try 内断言先失败时，finally 不会走到 `await pending`，会话仍在等输入；
+// harness.restore() 随后摘掉 stdin 监听，会话变成孤儿，afterEach 删掉临时目录后它才 finalize，
+// 迟到的写入就撞上已删除的目录。这里登记每个会话，finally 在 restore 之前先结算：
+// 未结束的会话通过真实 stdin 送 Ctrl+U、Ctrl+D 走产品的正常退出路径，再等它 finalize 完。
+// 结算只为收尾：会话的拒绝在这里吞掉，不覆盖用例本来的断言错误。
+// 残余窗口：Ctrl+D 只在输入框读输入时生效。断言若在回合进行中失败（会话没回到输入态），
+// 这两个字节会被忽略，等到收尾上限后仍会 restore，teardown 依旧可能先于 finalization；
+// 这种情况不再致命，靠的是产品侧 FileTranscriptLogger 对已删除目录的降级，不是这个 helper。
+// 每个用例的 finally 都会 splice 清空 liveChats，所以登记项不会串到下一个用例。
+const liveChats: Array<{ settled: boolean; done: Promise<void> }> = [];
+// 收尾上限，不是用例超时：会话卡在非输入状态时不让 finally 一直挂到用例超时；超过上限会打印诊断，
+// 之后的迟到写入由产品侧（FileTranscriptLogger 对已删除目录的降级）兜住。
+const LATE_CHAT_SETTLE_LIMIT_MS = 5_000;
+// 模块加载时取原始 stderr：会话运行中 process.stderr.write 被 chat 包装成“先写 transcript”，
+// 收尾诊断如果走包装层，会被同一个 ENOENT 打断并盖掉用例原本的失败。
+const rawStderrWrite = process.stderr.write.bind(process.stderr);
+function teardownNote(message: string): void {
+  try { rawStderrWrite(`[chat-interactive-runtime] ${message}\n`); } catch { /* 诊断不能让收尾失败 */ }
+}
+
+function trackChat<T>(pending: Promise<T>): Promise<T> {
+  const entry = { settled: false, done: Promise.resolve() };
+  entry.done = pending.then(() => { entry.settled = true; }, () => { entry.settled = true; });
+  liveChats.push(entry);
+  return pending;
+}
+
+async function settleLateChats(harness: ReturnType<typeof createTtyHarness>): Promise<void> {
+  for (const entry of liveChats.splice(0)) {
+    if (entry.settled) continue;
+    try {
+      harness.send('\x15');
+      harness.send('\x04');
+    } catch (error) {
+      teardownNote(`收尾时向会话送 EOF 失败: ${String(error)}`);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = await Promise.race([
+      entry.done.then(() => false),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), LATE_CHAT_SETTLE_LIMIT_MS); }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (expired) teardownNote(`会话在 ${LATE_CHAT_SETTLE_LIMIT_MS}ms 内未结束，teardown 将先于 finalization`);
+  }
+}
+
 async function removeTempDirWithRetry(dir: string): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -1278,7 +1324,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const harness=createTtyHarness(180,40),tty=process.stdout.isTTY;process.stdout.isTTY=true;
     const sigints=process.listeners('SIGINT'),resizes=process.stdout.listeners('resize');
     try{
-      const program=new Command();registerChatCommands(program);const pending=program.parseAsync(['node','xiaok','chat']);
+      const program=new Command();registerChatCommands(program);const pending=trackChat(program.parseAsync(['node','xiaok','chat']));
       await waitForInputTurnReady(harness);expect(harness.screen.text()).toContain(alias);expect(harness.screen.text()).toContain('XIAOK_CONFIG_DIR');
       harness.send('hello\r');await waitFor(()=>adapterCalls.length>0);await waitForInputTurnReady(harness);
       harness.send('/exit\r');await pending;
@@ -1287,7 +1333,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }finally{
       for(const listener of process.listeners('SIGINT'))if(!sigints.includes(listener))process.removeListener('SIGINT',listener);
       for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener)&&isResizeListener(listener))process.stdout.removeListener('resize',listener);
-      harness.restore();process.stdout.isTTY=tty;attachSpy.mockRestore();
+      await settleLateChats(harness); harness.restore();process.stdout.isTTY=tty;attachSpy.mockRestore();
     }
   },20_000);
 
@@ -1317,7 +1363,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         try {
           const program = new Command();
           registerChatCommands(program);
-          const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+          const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
           await waitForInputTurnReady(harness);
           expect(harness.output.normalized).not.toMatch(/这个项目自带了|逐条确认|\[y\/N\]|已开启后台任务跟进/);
           expect(readdirSync(configDir)).not.toContain('project-rule-adoptions.json');
@@ -1332,7 +1378,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
             if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
             process.stdout.removeListener('resize', listener);
           }
-          harness.restore();
+          await settleLateChats(harness); harness.restore();
         }
       }
     } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
@@ -1366,7 +1412,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
     try {
       const program = new Command(); registerChatCommands(program);
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
       await waitForInputTurnReady(harness);
       setPastedImagePath(0, file);
       harness.send('inspect [image 0]'); harness.send('\r');
@@ -1398,7 +1444,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
       for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
       for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -1420,7 +1466,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const sigint=process.listeners('SIGINT'), resize=process.stdout.listeners('resize');
     try {
       const program=new Command();registerChatCommands(program);
-      const pending=program.parseAsync(['node','xiaok','chat','--auto']);
+      const pending=trackChat(program.parseAsync(['node','xiaok','chat','--auto']));
       await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或 provider id'));
       harness.send(provider+'\r');
       await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或服务 id'));
@@ -1440,7 +1486,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     } finally {
       for(const listener of process.listeners('SIGINT'))if(!sigint.includes(listener))process.removeListener('SIGINT',listener);
       for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener as () => void);
-      harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
+      await settleLateChats(harness); harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
     }
   },20_000);
 
@@ -1462,7 +1508,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const resizeListeners=process.stdout.listeners('resize');
     try {
       const program=new Command(); registerChatCommands(program);
-      const pending=program.parseAsync(['node','xiaok','chat','--auto']);
+      const pending=trackChat(program.parseAsync(['node','xiaok','chat','--auto']));
       await waitForInputTurnReady(harness);
       harness.send(`问题输入恢复回归 ${scenario}`); harness.send('\r');
       await waitFor(()=>expect(harness.screen.text()).toContain('方案二'));
@@ -1492,7 +1538,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     } finally {
       for(const listener of process.listeners('SIGINT')) if(!sigintListeners.includes(listener))process.removeListener('SIGINT',listener);
       for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener as () => void);
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
       crashSpy.mockRestore();
     }
   },20_000);
@@ -1521,7 +1567,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           const program = new Command();
           registerChatCommands(program);
           const args = ['node','xiaok','chat','--auto', ...(sessionId ? ['--resume',sessionId] : [])];
-          const pending = program.parseAsync(args);
+          const pending = trackChat(program.parseAsync(args));
           // Surface startup failures immediately instead of hanging on a missing prompt.
           let startupError: unknown;
           void pending.catch(error => {startupError = error;});
@@ -1556,7 +1602,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         } finally {
           for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
           for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
-          harness.restore();
+          await settleLateChats(harness); harness.restore();
         }
       }
     } finally {crashSpy.mockRestore();}
@@ -1593,7 +1639,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--auto']));
 
       await waitForInputTurnReady(harness);
       harness.send('/exit');
@@ -1626,7 +1672,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -1677,7 +1723,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--auto']));
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -1709,7 +1755,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -1752,7 +1798,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -1788,7 +1834,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -1828,7 +1874,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -1882,7 +1928,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -1922,7 +1968,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -1961,7 +2007,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -1995,7 +2041,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2022,7 +2068,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2069,7 +2115,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     let pending: Promise<unknown> | undefined;
     try {
       const program = new Command(); registerChatCommands(program);
-      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
       await waitForInputTurnReady(harness);
       harness.send('Check permission draft handoff'); harness.send('\r');
       await waitFor(() => { expect(streamStarted).toBe(true); });
@@ -2100,7 +2146,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
             if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
             process.stdout.removeListener('resize', listener);
           }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2134,7 +2180,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2193,7 +2239,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2231,7 +2277,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2267,7 +2313,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2315,7 +2361,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2375,7 +2421,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2412,7 +2458,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2461,7 +2507,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2496,7 +2542,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2524,7 +2570,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2591,7 +2637,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       chatModule.registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2621,7 +2667,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2664,7 +2710,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       chatModule.registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2704,7 +2750,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2777,7 +2823,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
       await waitFor(() => {
@@ -2819,7 +2865,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2891,7 +2937,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
       harness.send('resume 继续提问');
@@ -2926,7 +2972,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -2960,7 +3006,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -2992,7 +3038,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3030,7 +3076,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       harness.send('\x1b[Z');
@@ -3084,7 +3130,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3118,7 +3164,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -3168,7 +3214,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3183,7 +3229,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
     try {
       const program = new Command(); registerChatCommands(program);
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--auto']));
       await waitForInputTurnReady(h);
       h.send('/mode\r');
       await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：auto）'));
@@ -3210,7 +3256,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
             if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
             process.stdout.removeListener('resize', listener);
           }
-      h.restore();
+      await settleLateChats(h); h.restore();
     }
   }, 20_000);
 
@@ -3245,7 +3291,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -3293,7 +3339,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3328,7 +3374,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       harness.send(localPath);
@@ -3354,7 +3400,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3389,7 +3435,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       harness.send(`${sourcePath} 生成报告，然后生成幻灯片`);
@@ -3417,7 +3463,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3453,7 +3499,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -3507,7 +3553,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3569,7 +3615,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         const program = new Command();
         registerChatCommands(program);
 
-        const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+        const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
         await waitForInputTurnReady(harness);
         harness.send('/models');
@@ -3604,7 +3650,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
             process.stdout.removeListener('resize', listener as () => void);
           }
         }
-        harness.restore();
+        await settleLateChats(harness); harness.restore();
       }
     }
 
@@ -3617,7 +3663,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         const program = new Command();
         registerChatCommands(program);
 
-        const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+        const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
         await waitForInputTurnReady(secondHarness);
         await waitFor(() => {
@@ -3638,7 +3684,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
             process.stdout.removeListener('resize', listener as () => void);
           }
         }
-        secondHarness.restore();
+        await settleLateChats(secondHarness); secondHarness.restore();
       }
     }
   }, 20_000);
@@ -3700,7 +3746,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     try {
       const program = new Command();
       registerChatCommands(program);
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       harness.send('/models');
@@ -3741,7 +3787,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3877,7 +3923,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     try {
       const program = new Command();
       registerChatCommands(program);
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--skill-debug']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--skill-debug']));
 
       await waitForInputTurnReady(harness);
 
@@ -3943,7 +3989,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -3977,7 +4023,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4005,7 +4051,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4045,7 +4091,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       chatModule.registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       harness.send('! sudo -v');
@@ -4075,7 +4121,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4109,7 +4155,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -4173,7 +4219,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4210,7 +4256,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4271,7 +4317,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         }
       }
       handlerSpy.mockRestore();
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4308,7 +4354,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4388,7 +4434,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4422,7 +4468,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4479,7 +4525,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4513,7 +4559,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4554,7 +4600,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4588,7 +4634,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4647,7 +4693,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4692,7 +4738,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4768,7 +4814,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4821,7 +4867,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -4886,7 +4932,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -4958,7 +5004,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -5010,7 +5056,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -5064,7 +5110,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -5110,7 +5156,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -5145,7 +5191,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -5188,7 +5234,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -5342,7 +5388,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
 
@@ -5443,7 +5489,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 30_000);
 
@@ -5615,7 +5661,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
 
@@ -5690,7 +5736,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -5863,7 +5909,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
 
@@ -5962,7 +6008,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 30_000);
 
@@ -5984,7 +6030,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
 
@@ -6038,7 +6084,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -6060,7 +6106,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
 
@@ -6104,7 +6150,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -6126,7 +6172,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
 
       await waitForInputTurnReady(harness);
 
@@ -6161,7 +6207,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -6195,7 +6241,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -6247,7 +6293,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -6281,7 +6327,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -6331,7 +6377,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -6365,7 +6411,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -6403,7 +6449,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
     }
   }, 20_000);
 
@@ -6437,7 +6483,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
 
       await waitForInputTurnReady(harness);
 
@@ -6481,7 +6527,80 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           process.stdout.removeListener('resize', listener as () => void);
         }
       }
-      harness.restore();
+      await settleLateChats(harness); harness.restore();
+    }
+  }, 20_000);
+
+  // #128：断言先失败时 finally 若不等 pending，afterEach 会先删临时目录，会话随后才 close/finalize。
+  // 这里确定性注入同一顺序：会话就绪后先删整个 fixture 目录，再让 /exit 迟到触发 finalization。
+  // 修复前 finalization 的输出写入 FileTranscriptLogger.record() 的 appendFileSync，报 ENOENT
+  // （编译后 ui/transcript.js:76），经 handleFatalError 走 process.exit(1)。
+  // Windows 不允许删除仍被打开的文件（见 removeTempDirWithRetry），这一顺序在 Windows 上构造不出来。
+  it.skipIf(process.platform === 'win32')('finishes a late /exit without crashing after teardown already removed the fixture directory (#128)', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-teardown-race-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } }, defaultMode: 'interactive', contextBudget: 4000, channels: {} }));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const crashReporter = await import('../../src/utils/crash-reporter.js');
+    const { FileTranscriptLogger } = await import('../../src/ui/transcript.js');
+    // 只计数、不改行为：证明删目录之后确实还有 transcript 写入走到 record()，降级分支不是空跑。
+    const recordSpy = vi.spyOn(FileTranscriptLogger.prototype, 'record');
+    const fatalErrors: unknown[] = [];
+    // 只记录、不落盘：fixture 目录已删，真实 reportCrash 会把崩溃报告写回被删的路径。
+    const crashSpy = vi.spyOn(crashReporter, 'reportCrash').mockImplementation(async (error) => {
+      fatalErrors.push(error);
+      throw error;
+    });
+    const harness = createTtyHarness(100, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<unknown> | undefined;
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      await waitForInputTurnReady(harness);
+      harness.send('teardown race turn');
+      harness.send('\r');
+      await waitFor(() => expect(adapterCalls.some((call) => call.lastUserText === 'teardown race turn')).toBe(true));
+      await waitForInputTurnReady(harness);
+
+      rmSync(rootDir, { recursive: true, force: true });
+      expect(existsSync(rootDir)).toBe(false);
+      const recordsBeforeRemoval = recordSpy.mock.calls.length;
+
+      harness.send('/exit');
+      harness.send('\r');
+      const settled = await pending.then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }));
+      pending = undefined;
+
+      const describeError = (error: unknown) => error instanceof Error
+        ? `${(error as NodeJS.ErrnoException).code ?? ''} ${error.message}\n${error.stack ?? ''}`
+        : String(error);
+      expect(fatalErrors.map(describeError)).toEqual([]);
+      expect(settled.ok ? 'resolved' : describeError(settled.error)).toBe('resolved');
+      expect(harness.output.normalized).not.toMatch(/ENOENT|崩溃报告|chat_finalization_unconfirmed/u);
+      // 不能靠重建目录“修好”：transcript 不应把被 teardown 删除的目录写回来。
+      expect(existsSync(join(configDir, 'transcripts'))).toBe(false);
+      expect(recordSpy.mock.calls.length).toBeGreaterThan(recordsBeforeRemoval);
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
+      }
+      await settleLateChats(harness); harness.restore();
+      crashSpy.mockRestore();
+      recordSpy.mockRestore();
     }
   }, 20_000);
 });
