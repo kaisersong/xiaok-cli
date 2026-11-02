@@ -35,8 +35,9 @@ describe.skipIf(process.platform==='win32')('profile account physical paths',()=
  it('rejects user target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const alias=link('dotfiles',dir('shared/home'));process.env.HOME=alias;reject(alias);});
  it('reports unreadable link targets from statSync',()=>{const target=dir('physical'),alias=link('dotfiles',target);process.env.HOME=alias;fake.errors.set('stat:'+target,'EACCES');reject(alias,'unreadable');});
  it('escapes NUL in invalid config path diagnostics',()=>{
-  // #123：forks 池里 process.env 是真实环境块，setenv 在 NUL 处截断（'bad\0path' 读回 'bad'），
-  // 只有 threads 的 env 普通对象拷贝能存 NUL。这里显式换成普通对象承载含 NUL 的值，被测入口仍读 process.env。
+  // #123：真实进程的 process.env 是环境块，setenv 在 NUL 处截断（'bad\0path' 读回 'bad'），
+  // 只有 worker_threads 的 env 普通对象拷贝能存 NUL，旧写法因此依赖 pool。这里显式换成普通对象承载含 NUL 的值，
+  // 与 pool 无关；被测入口仍读 process.env。
   // 真实进程环境不可能含 NUL：产品侧该分支是 defensive-only，本用例只证明诊断会转义，不证明该路径真实可达。
   const realEnv=process.env,badPath=join(root,'bad\0path');
   Object.defineProperty(process,'env',{value:{...realEnv,XIAOK_CONFIG_DIR:badPath},writable:true,configurable:true,enumerable:true});

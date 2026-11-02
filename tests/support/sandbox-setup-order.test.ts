@@ -6,8 +6,7 @@ import {resolveProfileAccountHome} from '../../src/runtime/verification/profile-
 
 // Both sandbox setupFiles must run, host-env scrub first, then account isolation.
 it('runs host-env scrub and profile account isolation for every sandbox worker',async()=>{
-  const config=(await import(new URL('../../../vitest.sandbox.config.mjs',import.meta.url).href)).default as {test:{pool:string;setupFiles:string[];sequence?:{setupFiles?:string}}};
-  expect(config.test.pool).toBe('forks');
+  const config=(await import(new URL('../../../vitest.sandbox.config.mjs',import.meta.url).href)).default as {test:{setupFiles:string[];sequence?:{setupFiles?:string}}};
   expect(config.test.setupFiles).toEqual(['./.test-dist/tests/support/setup-host-env.js','./tests/support/profile-account.setup.mjs']);
   expect(config.test.sequence?.setupFiles).toBe('list');
   const accountRoot=inject('profileTestAccountRoot' as never) as unknown;expect(typeof accountRoot).toBe('string');

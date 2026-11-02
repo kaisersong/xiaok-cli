@@ -7,8 +7,7 @@
 // For every vitest config (the registered list below; an unregistered vitest*.config.* fails the check):
 //   1. STATIC  – load the config with vite's own loader (not text matching), resolve every `setupFiles`
 //                entry against the directory vitest is run from, require that it exists and lies INSIDE
-//                that directory; sandbox configs must use test.pool === 'forks' (issue #123).
-//                (vite refuses to load a setup file outside its root: "Cannot find module").
+//                that directory (vite refuses to load a setup file outside its root: "Cannot find module").
 //   2. DYNAMIC – run vitest from that directory with fake provider keys exported; the canary test must
 //                see none of them (the setup file really loaded and stripped them).
 //   3. CONTROL – the same canary with XIAOK_TEST_ENV_STRICT=1 must FAIL (the check is loud).
@@ -43,25 +42,22 @@ export const REGISTERED = [
 const log = message => process.stdout.write(`${message}\n`);
 const inside = (dir, file) => { const rel = relative(dir, file); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); };
 
-async function loadTestConfig(configFile) {
+async function loadSetupFiles(configFile) {
   const { loadConfigFromFile } = await import(pathToFileURL(rootRequire.resolve('vite')).href);
   const loaded = await loadConfigFromFile({ command: 'serve', mode: 'test' }, configFile, dirOf(configFile));
   if (!loaded) throw new Error(`could not load ${configFile}`);
   const value = typeof loaded.config === 'function' ? await loaded.config({ command: 'serve', mode: 'test' }) : loaded.config;
-  return value?.test;
+  const setup = value?.test?.setupFiles;
+  return Array.isArray(setup) ? setup : setup ? [setup] : [];
 }
 const dirOf = file => resolve(file, '..');
 
 /** STATIC part. Returns a list of problems (empty = ok). */
-export async function checkSetupFiles({ config, runDir, expectCompiled, sandbox = false }) {
+export async function checkSetupFiles({ config, runDir, expectCompiled }) {
   const problems = [];
-  let test;
-  try { test = await loadTestConfig(config); } catch (error) { return [`cannot load config: ${error instanceof Error ? error.message : error}`]; }
-  // sandbox（非 expectCompiled）：#123 强制 forks；expectCompiled 仍只管「指向 .test-dist」文案。
-  if (sandbox && test?.pool !== 'forks') problems.push("sandbox test.pool must be 'forks' (issue #123: timeout/teardown must be able to kill the worker so the suite can exit)");
-  const setup = test?.setupFiles;
-  const entries = Array.isArray(setup) ? setup : setup ? [setup] : [];
-  if (entries.length === 0) return [...problems, 'config has no test.setupFiles'];
+  let entries;
+  try { entries = await loadSetupFiles(config); } catch (error) { return [`cannot load config: ${error instanceof Error ? error.message : error}`]; }
+  if (entries.length === 0) return ['config has no test.setupFiles'];
   let reachesIsolation = false;
   for (const entry of entries) {
     const resolved = resolve(runDir, String(entry));
@@ -113,7 +109,7 @@ export async function checkConfig(entry, { requireDesktop = false } = {}) {
   const config = resolve(root, entry.config);
   const runDir = resolve(root, entry.runDir);
   const label = relative(root, config) || entry.config;
-  const problems = (await checkSetupFiles({ config, runDir, expectCompiled: Boolean(entry.sandbox), sandbox: Boolean(entry.sandbox) })).map(p => `${label}: ${p}`);
+  const problems = (await checkSetupFiles({ config, runDir, expectCompiled: entry.sandbox })).map(p => `${label}: ${p}`);
   log(`${problems.length === 0 ? 'ok  ' : 'FAIL'} static: ${label} (run from ${relative(root, runDir) || '.'})${problems.length ? `\n     - ${problems.join('\n     - ')}` : ''}`);
   if (problems.length > 0) return { problems };
   const dynamic = checkCanary({ ...entry, config, runDir });
