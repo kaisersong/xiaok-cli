@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { rm as rmAsync } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { defaultOwnerRetirementDependencies, retireOutdatedOwner, type OwnerRetirementDependencies, type OwnerRetirementOutcome } from '../../src/runtime/conversation-activity/owner-retire.js';
@@ -439,16 +439,33 @@ export async function teardownCaseOwners(input: {
 /**
  * 删临时目录（原在 chat-interactive-runtime.test.ts，移到这里以便单测；第 7 轮 codex Major2）。
  * 每次删除（含第一次）启动前都看截止时刻，截止后跳过并写 stderr；退避也不越过截止。
- * 删除走异步 fs.promises.rm（libuv 线程池，不占事件循环）并与截止时刻赛跑（第 9 轮 codex Major）：
- * 到截止还没删完就写 stderr 并返回，删除留在后台继续（结果只记 stderr），所以单次慢删除也拖不过截止。
+ * posix 上删除走异步 fs.promises.rm（libuv 线程池，不占事件循环）并与截止时刻赛跑（第 9 轮 codex Major）：
+ * 到截止还没删完就写 stderr 并返回，删除留在后台继续，后台删除失败时再写一条 stderr，所以单次慢删除也拖不过截止。
+ * win32 上用同步 rmSync（见 tempDirRemoverFor）：已启动的单次同步删除不可中断，最坏超出量是这一次删除的耗时。
  * 删不掉只写 stderr、不判失败——
  * POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
  * 持有会话文件句柄时临时目录删不掉，rm 报 EPERM（Windows job 上 66 个用例
  * 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，由 CI 机器回收。
  */
+export type TempDirRemover = (dir: string) => void | Promise<void>;
+
+/**
+ * 按平台选删除方式（#146 CTO 裁定，2026-11-03）：
+ * - win32 用同步 rmSync（回到 03324462 之前的行为）。19218bcf 把它改成 fs.promises.rm 与截止时刻赛跑后，
+ *   run 41508957282 的 windows-2022 terminal job 从 chat-interactive-runtime 第 7 个用例起每个都跑满 20s 超时，
+ *   最后一个 job OOM、另一个被取消；master 和 03324462 上同一批用例在 Windows 上 9–13 分钟跑完。
+ *   确切机制没在 Windows 上复现（推测：EPERM 失败的异步删除在后台堆积/与下一个用例的会话文件争用），
+ *   所以 Windows 回到已在 CI 上验证过的同步路径。
+ * - posix 继续走异步删除，与截止时刻赛跑，单次慢删除拖不过截止。
+ */
+export function tempDirRemoverFor(platform: NodeJS.Platform = process.platform): TempDirRemover {
+  if (platform === 'win32') return (target) => { rmSync(target, { recursive: true, force: true }); };
+  return (target) => rmAsync(target, { recursive: true, force: true });
+}
+
 export async function removeTempDirWithRetry(
   dir: string, deadline = Number.POSITIVE_INFINITY,
-  rm: (dir: string) => void | Promise<void> = (target) => rmAsync(target, { recursive: true, force: true }),
+  rm: TempDirRemover = tempDirRemoverFor(),
   report: (message: string) => void = (message) => { process.stderr.write(message); },
 ): Promise<void> {
   // 第 8 轮 codex Major：截止后不再启动任何删除（含第一次），多目录时慢删除不会把后续目录拖过截止。

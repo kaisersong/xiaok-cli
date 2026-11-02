@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   awaitOwnerStatus, awaitProcessGone, deadlineBoundOwnerList, deadlineBoundRetireDependencies, POST_TEARDOWN_RESERVE_MS, ownerPathPrefixes, ownersWithPrefixes, processExists, PS_SCAN_RESERVE_MS, psTimeoutFor,
-  RECLAIM_RESERVE_MS, REMOVE_RESERVE_MS, RETIRE_MIN_MS, reclaimAndReport, teardownOverrunError, reclaimLateOwners, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS,
+  RECLAIM_RESERVE_MS, REMOVE_RESERVE_MS, RETIRE_MIN_MS, reclaimAndReport, teardownOverrunError, reclaimLateOwners, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, tempDirRemoverFor,
   teardownCaseOwners, type ActivityOwnerProcess, type ActivityOwnerSurvivor,
 } from '../../support/activity-owner-teardown.js';
 import { retireOutdatedOwner } from '../../../src/runtime/conversation-activity/owner-retire.js';
@@ -397,6 +397,36 @@ describe('activity owner teardown gate (#145)', () => {
     let ok = 0;
     await removeTempDirWithRetry('/case/z', Date.now() + 1_000, () => { ok += 1; }, () => { throw new Error('不应报告'); });
     expect(ok).toBe(1);
+  });
+
+  // #146 CTO 裁定（Windows 回归）：win32 必须走同步 rmSync，只有 posix 走异步删除与截止赛跑。
+  it('tempDirRemoverFor removes synchronously on win32 and asynchronously on posix', async () => {
+    const makeDir = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'xiaok-rm-platform-'));
+      roots.push(dir);
+      mkdirSync(join(dir, 'nested'));
+      writeFileSync(join(dir, 'nested', 'session.jsonl'), 'x');
+      return dir;
+    };
+    const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    try {
+      Object.defineProperty(process, 'platform', { ...original, value: 'win32' });
+      const winDir = makeDir();
+      // 默认参数按调用时的 process.platform 选择
+      const winResult = tempDirRemoverFor()(winDir);
+      expect(winResult).toBeUndefined();
+      expect(existsSync(winDir)).toBe(false);
+    } finally { Object.defineProperty(process, 'platform', original); }
+    const explicitWin = makeDir();
+    expect(tempDirRemoverFor('win32')(explicitWin)).toBeUndefined();
+    expect(existsSync(explicitWin)).toBe(false);
+    for (const platform of ['linux', 'darwin'] as const) {
+      const dir = makeDir();
+      const result = tempDirRemoverFor(platform)(dir);
+      expect(result).toBeInstanceOf(Promise);
+      await result;
+      expect(existsSync(dir)).toBe(false);
+    }
   });
 
   // 第 7 轮 DS M3：阻塞 ps 的超时取所在阶段的剩余时间，到期就不读（timeout=0 在 execFileSync 里是不限时）。
