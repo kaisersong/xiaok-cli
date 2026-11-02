@@ -20,7 +20,7 @@ const compactionErrorCodes = new Set([
   'memory_store_closed', 'memory_model_unavailable',
   'memory_compaction_busy', 'memory_compaction_forbidden',
 ]);
-import { segmentChinese } from './segment.js';
+import { segmentChinese, segmentChineseAsync } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
 import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
 
@@ -105,6 +105,8 @@ export class LayeredMemoryStore implements MemoryStore {
   private compactTimer?: ReturnType<typeof setInterval>;
   private compacting = false;
   private closed = false;
+  // Writes waiting on off-thread segmentation; close() lets them finish before closing the database.
+  private readonly pendingWrites = new Set<Promise<unknown>>();
 
   constructor(config: LayeredMemoryConfig) {
     this.dbPath = config.dbPath;
@@ -138,9 +140,22 @@ export class LayeredMemoryStore implements MemoryStore {
     if (this.compactionConfig.autoCompact && !this.compactTimer && !this.closed) this.startAutoCompact();
   }
 
-  async save(record: MemoryRecord): Promise<void> {
+  private trackWrite<T>(start: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error('memory_store_closed'));
+    const write = start();
+    this.pendingWrites.add(write);
+    const done = () => { this.pendingWrites.delete(write); };
+    write.then(done, done);
+    return write;
+  }
+
+  save(record: MemoryRecord): Promise<void> {
+    return this.trackWrite(() => this.saveSegmented(record));
+  }
+
+  private async saveSegmented(record: MemoryRecord): Promise<void> {
     const id = record.id || crypto.randomUUID();
-    const segmented = segmentChinese(record.title + ' ' + record.summary);
+    const segmented = await segmentChineseAsync(record.title + ' ' + record.summary);
     const scope = record.scope || 'global';
     const cwd = record.cwd || null;
     const memType = record.type || null;
@@ -202,9 +217,13 @@ export class LayeredMemoryStore implements MemoryStore {
     };
   }
 
-  async writeRawMessage(sessionId: string, role: string, content: string): Promise<void> {
+  writeRawMessage(sessionId: string, role: string, content: string): Promise<void> {
+    return this.trackWrite(() => this.writeRawMessageSegmented(sessionId, role, content));
+  }
+
+  private async writeRawMessageSegmented(sessionId: string, role: string, content: string): Promise<void> {
     const id = crypto.randomUUID();
-    const segmented = segmentChinese(content);
+    const segmented = await segmentChineseAsync(content);
     this.db.prepare(
       `INSERT INTO memory_l0_raw (id, session_id, role, content, segmented_content) VALUES (?, ?, ?, ?, ?)`
     ).run(id, sessionId, role, content, segmented);
@@ -410,7 +429,12 @@ export class LayeredMemoryStore implements MemoryStore {
     this.embeddingClient.close().catch((err) => {
       logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
     });
-    this.db.close();
+    if (this.pendingWrites.size === 0) {
+      this.db.close();
+      return;
+    }
+    // A write accepted before close is still waiting for segmentation: let it land, then close.
+    void Promise.allSettled([...this.pendingWrites]).then(() => this.db.close());
   }
 
   private searchResultToRecord(r: { id: string; layer: number; content: string; metadata: Record<string, unknown> }): MemoryRecord {
