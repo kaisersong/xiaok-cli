@@ -89,18 +89,19 @@ export const OWNER_STARTUP_STATUS_WAIT_MS = 5_000;
 /**
  * 收尾的时间预算（#145 第 6/7 轮 DS M1/M3、codex Major1/2）：整个 afterEach 收尾共用一个注入的截止时刻 D，
  * 每个阶段只用到自己的截止时刻；阻塞的 ps 读取也带剩余时间作超时。不调大 hookTimeout。
- * - TEARDOWN_BUDGET_MS = 9s，按仓库里最小的 hookTimeout（vitest.config.ts 默认 10s）定，sandbox 配置（30s）下同样成立；
- *   剩 1s 给预算之后的 resetModules / clearAllMocks / resetAdapterState。
+ * - TEARDOWN_BUDGET_MS = 8s，按仓库里最小的 hookTimeout（vitest.config.ts 未设，取 vitest 默认 10s）定，sandbox 配置（30s）下同样成立；
+ *   之后留 POST_TEARDOWN_RESERVE_MS = 1s 给 resetModules / clearAllMocks / resetAdapterState，8s + 1s 严格小于 10s（第 9 轮 DS B1），
+ *   hook 末尾还会核对实际总耗时，越界时报可读的失败而不是 vitest 的裸超时。
  * - 退休阶段截止 D - REMOVE_RESERVE_MS - RECLAIM_RESERVE_MS：首次 ps、等 status、产品退休入口都在
  *   “退休截止 - PS_SCAN_RESERVE_MS” 之前收口，留出的 PS_SCAN_RESERVE_MS 给阶段末尾那次 ps。
  * - 删目录阶段截止 D - RECLAIM_RESERVE_MS：每个目录先删一次，退避重试不越过截止（单次 rmSync 本身不可中断，
- *   临时目录删除是毫秒级）。
+ *   截止后不再启动新的删除，跳过的目录写 stderr）。
  * - 回收阶段截止 D：一次 ps 扫描 → SIGTERM → kill(pid,0) 轮询到 D - PS_SCAN_RESERVE_MS → 仍在的共用一次 ps 快照确认。
  * - 等 status 最多 min(5s, 剩余 - RETIRE_MIN_MS)：给产品退休入口（身份校验、待办读取、退出等待）留 RETIRE_MIN_MS；
  *   产品入口的每个异步依赖都与截止时刻赛跑（经产品已有的依赖注入，见 deadlineBoundRetireDependencies）。
  */
-export const TEARDOWN_BUDGET_MS = 9_000;
-/** 预算之后的 resetModules / clearAllMocks / resetAdapterState 留的余量；TEARDOWN_BUDGET_MS + 它 ≤ 各配置的 hookTimeout 有单测从配置取值断言。 */
+export const TEARDOWN_BUDGET_MS = 8_000;
+/** 预算之后的 resetModules / clearAllMocks / resetAdapterState 留的余量；TEARDOWN_BUDGET_MS + 它 < 各配置的 hookTimeout 有单测从配置取值断言，hook 末尾核对实际总耗时。 */
 export const POST_TEARDOWN_RESERVE_MS = 1_000;
 export const RECLAIM_RESERVE_MS = 2_000;
 export const REMOVE_RESERVE_MS = 1_000;
@@ -152,7 +153,7 @@ export function deadlineBoundRetireDependencies(
   onBudget: (step: string) => void = () => {},
 ): Partial<OwnerRetirementDependencies> {
   const real = { ...defaultOwnerRetirementDependencies(), ...base };
-  const expired = (step: string) => () => { onBudget(step); throw new Error(`收尾预算已用完：${step}（#145）`); };
+  const expired = (step: string) => () => { onBudget(`${step} 被截断`); throw new Error(`收尾预算已用完：${step}（#145）`); };
   return {
     ...base,
     readStatusFile: (path) => raceDeadline(real.readStatusFile(path), deadline, expired('readStatusFile')),
@@ -160,11 +161,11 @@ export function deadlineBoundRetireDependencies(
     readUid: (pid) => raceDeadline(real.readUid(pid), deadline, expired('readUid')),
     readPendingTasks: (dataRoot) => {
       if (remainingMs(deadline) < PENDING_READ_MIN_MS) { onBudget('readPendingTasks 未启动'); return Promise.resolve('unknown' as const); }
-      return raceDeadline(real.readPendingTasks(dataRoot), deadline, () => { onBudget('readPendingTasks'); return 'unknown' as const; });
+      return raceDeadline(real.readPendingTasks(dataRoot), deadline, () => { onBudget('readPendingTasks 被截断'); return 'unknown' as const; });
     },
     sleep: (ms) => {
       const left = remainingMs(deadline);
-      if (left < ms) onBudget('退出等待');
+      if (left < ms) onBudget('退出等待被截断');
       return left > 0 ? real.sleep(Math.min(ms, left)) : Promise.resolve();
     },
   };
@@ -254,7 +255,7 @@ export async function retireActivityOwnersUnder(dirs: readonly string[], depende
         // 预算已不允许等待（第 7 轮 DS minor 1）：不归咎于产品，记 teardown_deadline。
         const reason: OwnerSurvivorReason = onDisk ? 'status_pid_mismatch' : !existsSync(dataRoot) ? 'data_root_gone' : statusWaitMs === 0 ? 'teardown_deadline' : 'missing_status';
         const budget = reason === 'teardown_deadline' ? '没有剩余预算等 status'
-          : reason === 'missing_status' && statusWaitMs < OWNER_STARTUP_STATUS_WAIT_MS ? `status 等待被预算压到 ${statusWaitMs}ms` : undefined;
+          : reason === 'missing_status' && statusWaitMs < OWNER_STARTUP_STATUS_WAIT_MS ? `status 只等了 ${statusWaitMs}ms（产品上限 ${OWNER_STARTUP_STATUS_WAIT_MS}ms，被收尾预算压短；只说明没等满上限）` : undefined;
         outcomes.set(owner.pid, budget === undefined ? { reason } : { reason, budget });
         return;
       }
@@ -262,7 +263,7 @@ export async function retireActivityOwnersUnder(dirs: readonly string[], depende
       const cut: string[] = [];
       const outcome = await retire(dataRoot, status, ownerDeadline, (step) => { if (!cut.includes(step)) cut.push(step); });
       const reason: OwnerSurvivorReason = outcome === 'retired' ? 'retired_but_alive' : outcome;
-      outcomes.set(owner.pid, cut.length ? { reason, budget: `预算到期截断：${cut.join('、')}` } : { reason });
+      outcomes.set(owner.pid, cut.length ? { reason, budget: `收尾预算不足：${cut.join('、')}` } : { reason });
     } catch (error) {
       outcomes.set(owner.pid, { reason: 'teardown_error', error });
     }

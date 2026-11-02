@@ -8,7 +8,7 @@ import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition }
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createTeardownSteps } from '../support/teardown-steps.js';
-import { listActivityOwnerProcesses, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners } from '../support/activity-owner-teardown.js';
+import { listActivityOwnerProcesses, POST_TEARDOWN_RESERVE_MS, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -1235,9 +1235,10 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   afterEach(async () => {
     // #145（codex M2）：每一步独立收尾，任何一步抛错都不能跳过后面的删目录 / resetModules / clearAllMocks /
     // resetAdapterState，否则会污染之后的用例；所有错误最后汇总抛出。
-    // 整个收尾共用一个注入的截止时刻（TEARDOWN_BUDGET_MS = 9s，小于仓库里最小的 hookTimeout 10s；
+    // 整个收尾共用一个注入的截止时刻（TEARDOWN_BUDGET_MS = 8s，加上之后 1s 余量仍严格小于仓库里最小的 hookTimeout 10s；
     // 阶段划分见 activity-owner-teardown.ts），各阶段只用到自己的截止时刻。
-    const teardownDeadline = Date.now() + TEARDOWN_BUDGET_MS;
+    const teardownStartedAt = Date.now();
+    const teardownDeadline = teardownStartedAt + TEARDOWN_BUDGET_MS;
     const teardown = createTeardownSteps('用例收尾（#145）');
     const step = teardown.step;
     await step(() => observeOwnCrashReports());
@@ -1265,6 +1266,11 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     await step(() => vi.resetModules());
     await step(() => vi.clearAllMocks());
     await step(() => resetAdapterState());
+    // 第 9 轮 DS B1：核对实际总耗时，越过“预算 + 余量”时报可读的失败，而不是等 vitest 的裸 hook 超时。
+    const teardownElapsedMs = Date.now() - teardownStartedAt;
+    if (teardownElapsedMs > TEARDOWN_BUDGET_MS + POST_TEARDOWN_RESERVE_MS) {
+      teardown.fail(new Error(`用例收尾耗时 ${teardownElapsedMs}ms，超过预算 ${TEARDOWN_BUDGET_MS}ms + 余量 ${POST_TEARDOWN_RESERVE_MS}ms（#145）`));
+    }
     if (ownerSurvivors.length) {
       // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
       // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
