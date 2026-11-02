@@ -33,11 +33,6 @@ jobs:
         os: [ubuntu-latest, macos-15]
         node: ['22.14.0', '24']
         shard: [1, 2, 3]
-        # Fewer macOS jobs reduce the shared 5-slot queue. First-round durations
-        # predict <=703s of cases per 2-way shard (original step cap: 900s).
-        exclude:
-          - os: macos-15
-            shard: 3
     runs-on: ${{ matrix.os }}
     # Job ceiling only; original per-case/config deadlines are unchanged.
     timeout-minutes: 25
@@ -84,7 +79,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs collect vitest.config.ts
           tests/runtime/verification/intent-publication-dependencies.test.ts
-          ci-shard-reports/registration ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} ${{ matrix.os == 'macos-15' && 2 || 3 }}
+          ci-shard-reports/registration ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} 3
       - name: Run the original Intent publication cases on this shard
         # Original known failures remain non-blocking; collection/audit failures do not.
         continue-on-error: true
@@ -130,7 +125,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
           ${{ github.event.pull_request.head.sha || github.sha }}
-          ubuntu-latest-node-22.14.0:3,ubuntu-latest-node-24:3,macos-15-node-22.14.0:2,macos-15-node-24:2 3
+          ubuntu-latest-node-22.14.0:3,ubuntu-latest-node-24:3,macos-15-node-22.14.0:3,macos-15-node-24:3 3
       - name: Preserve original nine blocking suites and evidence gates
         shell: bash
         env:

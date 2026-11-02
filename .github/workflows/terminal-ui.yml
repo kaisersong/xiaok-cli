@@ -34,6 +34,8 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - 'vitest*.config.*'
+      - 'tests/support/tty.ts'
+      - 'tests/support/owned-chat-fixture.ts'
       - '.github/actions/**'
       - '.github/scripts/**'
       - '.github/ci/**'
@@ -81,10 +83,12 @@ jobs:
       - run: npm run build:release
         if: matrix.shard == 1
       - run: npm run test:sandbox:build
-      - name: Test image layout and questions (original other 25 files)
+      - name: Test image layout and questions (original 25 plus fixture contracts)
         if: matrix.shard == 1
         run: >
           npm run test:sandbox:run --
+          .test-dist/tests/ui/tty-harness.test.js
+          .test-dist/tests/ui/owned-chat-fixture.test.js
           .test-dist/tests/ui/input-keyboard-protocol.test.js
           .test-dist/tests/ui/input.test.js
           .test-dist/tests/ui/mode-selector.test.js

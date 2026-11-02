@@ -16,6 +16,7 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - 'vitest*.config.*'
+      - 'tests/support/tty.ts'
       - '.github/actions/**'
       - '.github/scripts/**'
       - '.github/ci/**'
