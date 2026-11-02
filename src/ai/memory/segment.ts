@@ -4,8 +4,10 @@ import { accessSync, constants as fsConstants } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, win32 } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { createLogger } from '../../utils/logger.js';
 
 const require = createRequire(import.meta.url);
+const logger = createLogger('memory:segment', { stderr: false });
 
 interface JiebaModule {
   cut(text: string): string[];
@@ -193,13 +195,34 @@ function joinParts(text: string, cuts: (run: string) => string[]): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
+// Whether nodejieba's native binding can be loaded, without loading any dictionary.
+// nodejieba's index.js only requires its binding lazily (inside load()/cut()), so
+// require('nodejieba') alone does not prove it; require the binding at the same
+// path nodejieba uses (shared require cache, so no second dlopen later).
+let nativeBindingLoadable: boolean | null = null;
+function nativeBindingAvailable(): boolean {
+  if (jieba) return true;
+  if (nativeBindingLoadable === null) {
+    try {
+      require(join(dirname(require.resolve('nodejieba')), 'build', 'Release', 'nodejieba.node'));
+      nativeBindingLoadable = true;
+    } catch {
+      nativeBindingLoadable = false;
+    }
+  }
+  return nativeBindingLoadable;
+}
+
 /**
  * Text without Chinese never reaches jieba, so its output does not depend on
- * the dictionary. Produce it without loading: same result as the jieba path
- * when the dictionaries are usable, and the raw text when they are not.
+ * the dictionary. Produce it without loading the dictionary: same result as the
+ * jieba path when the dictionaries are readable and the native binding loads,
+ * and the raw text when either is missing (as master's failed getJieba()).
+ * Not covered: readable dictionaries whose native load() then throws — that is
+ * only discovered by loading, which this path exists to avoid.
  */
 function segmentWithoutChinese(text: string): string {
-  return dictionariesAvailable() ? joinParts(text, () => []) : text;
+  return dictionariesAvailable() && nativeBindingAvailable() ? joinParts(text, () => []) : text;
 }
 
 /**
@@ -272,6 +295,13 @@ interface SegmentationWorker {
 }
 
 const WORKER_KEY = Symbol.for('xiaok.segment.worker');
+/**
+ * Upper bound for the off-thread dictionary load (normally ~1s). A load that
+ * hangs (dictionary on a stalled network drive, native load never returning)
+ * must not leave the first turn waiting forever: past this point the worker is
+ * dropped and callers fall back to the synchronous path.
+ */
+export const SEGMENTATION_WORKER_READY_DEADLINE_MS = 10_000;
 type WorkerHolder = Record<symbol, SegmentationWorker | null | undefined>;
 
 function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions>): SegmentationWorker {
@@ -286,14 +316,22 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
   worker.unref();
   let settleReady!: (ok: boolean) => void;
   const ready = new Promise<boolean>(resolve => { settleReady = resolve; });
-  const fail = (_reason: string) => {
+  let failed = false;
+  const fail = (reason: string) => {
     alive = false;
+    if (!failed) {
+      failed = true;
+      logger.debug('segmentation worker unavailable; falling back to synchronous segmentation', { reason });
+    }
+    clearTimeout(readyDeadline);
     settleReady(false);
     for (const resolve of pending.values()) resolve({ unavailable: true });
     pending.clear();
   };
+  const readyDeadline = setTimeout(() => { fail('ready deadline exceeded'); void worker.terminate(); }, SEGMENTATION_WORKER_READY_DEADLINE_MS);
+  readyDeadline.unref();
   worker.on('message', (message: { type: string; id?: number; cuts?: string[][]; cutError?: string; error?: string }) => {
-    if (message.type === 'ready') settleReady(true);
+    if (message.type === 'ready') { clearTimeout(readyDeadline); settleReady(true); }
     else if (message.type === 'failed') { fail(message.error ?? 'load failed'); void worker.terminate(); }
     else if (message.type === 'cut' && message.id !== undefined) {
       const resolve = pending.get(message.id);
@@ -321,7 +359,7 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
         release();
       }
     },
-    async terminate() { alive = false; await worker.terminate(); },
+    async terminate() { alive = false; clearTimeout(readyDeadline); await worker.terminate(); },
   };
 }
 
@@ -332,8 +370,11 @@ function segmentationWorker(): SegmentationWorker | null {
   let created: SegmentationWorker | null = null;
   try {
     const paths = readableDictionaryPaths();
-    if (paths !== null) created = startWorker(require.resolve('nodejieba'), nativeLoadOptions(paths));
-  } catch {
+    // Same asar rewrite as the dictionaries: in a packaged Electron app the worker
+    // requires the unpacked copy of nodejieba (JS entry + native binding).
+    if (paths !== null) created = startWorker(rewriteAsarPath(require.resolve('nodejieba')), nativeLoadOptions(paths));
+  } catch (error) {
+    logger.debug('segmentation worker could not start', { error: error instanceof Error ? error.message : String(error) });
     created = null;
   }
   holder[WORKER_KEY] = created;
@@ -377,10 +418,15 @@ export function segmentQueryAsync(query: string): Promise<string> {
   return segmentChineseAsync(query);
 }
 
-/** Test-only: stop the per-process worker so the next async call starts a new one. */
+/**
+ * Test-only hook (not used by product code): stop the per-process worker so the
+ * next async call starts a new one. Terminates before clearing the slot so a
+ * concurrent caller cannot start a second worker while the old one still holds
+ * its dictionary.
+ */
 export async function resetSegmentationWorkerForTests(): Promise<void> {
   const holder = globalThis as unknown as WorkerHolder;
   const worker = holder[WORKER_KEY];
-  holder[WORKER_KEY] = undefined;
   await worker?.terminate();
+  if (holder[WORKER_KEY] === worker) holder[WORKER_KEY] = undefined;
 }

@@ -105,6 +105,8 @@ export class LayeredMemoryStore implements MemoryStore {
   private compactTimer?: ReturnType<typeof setInterval>;
   private compacting = false;
   private closed = false;
+  /** Set when close() had to wait for pending writes; repeated close() calls return the same wait. */
+  private closing: Promise<void> | undefined;
   // Writes waiting on off-thread segmentation; close() lets them finish before closing the database.
   private readonly pendingWrites = new Set<Promise<unknown>>();
 
@@ -420,8 +422,13 @@ export class LayeredMemoryStore implements MemoryStore {
     return (del0 + del1) > 0;
   }
 
-  close(): void {
-    if (this.closed) return;
+  /**
+   * Close the store. Returns a promise only when writes accepted before close are
+   * still waiting for off-thread segmentation; callers on an exit path must await
+   * it (chat finalization does) so those writes land before the process exits.
+   */
+  close(): void | Promise<void> {
+    if (this.closed) return this.closing;
     this.closed = true;
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
@@ -434,7 +441,8 @@ export class LayeredMemoryStore implements MemoryStore {
       return;
     }
     // A write accepted before close is still waiting for segmentation: let it land, then close.
-    void Promise.allSettled([...this.pendingWrites]).then(() => this.db.close());
+    this.closing = Promise.allSettled([...this.pendingWrites]).then(() => { this.db.close(); });
+    return this.closing;
   }
 
   private searchResultToRecord(r: { id: string; layer: number; content: string; metadata: Record<string, unknown> }): MemoryRecord {

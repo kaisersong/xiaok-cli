@@ -46,7 +46,20 @@ describe('native dictionary paths through the shared segmentation entry', () => 
     const segment = await import('../../../src/ai/memory/segment.js');
     expect(segment.segmentQuery('  /work/project   dir ')).toBe('/work/project dir');
     expect(native.load).not.toHaveBeenCalled();
-    expect(native.require).not.toHaveBeenCalled();
+    // 只确认原生 binding 能加载（与 nodejieba 内部同一路径），不碰词典。
+    expect(native.require.mock.calls).toEqual([[join(base, 'build', 'Release', 'nodejieba.node')]]);
+  });
+
+  // 评审（DS m1 / codex minor）：词典可读但原生 binding 缺失时，master 的 getJieba() 失败、返回原文；无中文路径也要返回原文。
+  it('returns text without Chinese unchanged when the native binding is missing, like master', async () => {
+    native.require.mockImplementation((id: string) => {
+      if (id.endsWith('nodejieba.node')) throw Object.assign(new Error('binding missing'), { code: 'MODULE_NOT_FOUND' });
+      return { load: native.load, cut: native.cut };
+    });
+    const segment = await import('../../../src/ai/memory/segment.js');
+    expect(segment.segmentQuery('  /work/project   dir ')).toBe('  /work/project   dir ');
+    expect(await segment.segmentQueryAsync('  /work/project   dir ')).toBe('  /work/project   dir ');
+    expect(native.load).not.toHaveBeenCalled();
   });
 
   it('passes all five Windows dictionary namespace paths to readability checks and native load', async () => {
