@@ -1,14 +1,9 @@
 name: Desktop startup and room recovery
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'desktop/**'
-      - 'src/runtime/task-host/**'
-      - 'tests/runtime/task-host/**'
-      - 'package*.json'
-      - '.github/workflows/desktop-startup-room-recovery.yml'
   pull_request:
     paths:
       - 'desktop/**'
@@ -16,10 +11,28 @@ on:
       - 'tests/runtime/task-host/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/vitest*.config.*'
+      - 'desktop/tsconfig*.json'
+      - 'desktop/tests/setup.ts'
+      - 'desktop/tests/setup-host-env.ts'
+      - 'desktop/tests/profile-account.setup.mjs'
   workflow_dispatch: {}
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   recovery:
@@ -28,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-14]
+        os: [ubuntu-latest, windows-2022, macos-15]
         node: ['22.14.0', '24']
     steps:
       - uses: actions/checkout@v4

@@ -5,8 +5,17 @@ import { createHash } from 'node:crypto';
 const [dataRoot, phase] = process.argv.slice(2);
 const digest = text => createHash('sha256').update(text).digest('hex');
 const now = Date.UTC(2026, 9, 20, 12);
+// The fixture owns these resources until EOF or OS-enforced process death.
+const owned = [];
+process.stdin.once('end', async () => {
+  for (const resource of owned) {
+    if ('dispose' in resource) await resource.dispose();
+    else resource.release();
+  }
+});
 if (phase === 'initializing') {
   const lock = acquireHarnessOwnerLock(dataRoot);
+  owned.push(lock);
   const prepared = await new HarnessOptimizationLifecycle(lock).prepare();
   process.stdout.write(`${JSON.stringify({ ready: true, ownerId: prepared.witness.ownerId })}\n`);
   process.stdin.resume();
@@ -15,6 +24,7 @@ if (phase === 'initializing') {
   let manifest;
   const host = await createHarnessOptimizationRuntime({ dataRoot, profileId: 'profile', workspaceId: 'workspace',
     authorizeUser: ctx => ctx === actor, manifestLookup: () => manifest, now: () => now });
+  owned.push(host);
   const state = await host.api.read();
   if (state.status !== 'ready') throw Error(state.reason);
   manifest = { id: 'manifest', ownerId: state.ownerId, profileId: 'profile', workspaceId: 'workspace',

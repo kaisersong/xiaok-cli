@@ -1,22 +1,28 @@
 name: Windows ordinary-session native helper
 on:
+  merge_group: {}
   workflow_dispatch:
   push:
-    paths:
-      - src/runtime/verification/windows-installation-absence.ts
-      - src/runtime/verification/native/windows-installation-absence*
-      - data/verification/windows/**
-      - scripts/verification/*windows-absence.mjs
-      - tests/scripts/windows-absence*.test.mjs
-      - .github/workflows/windows-absence.yml
+    branches: [master]
   pull_request:
     paths:
-      - src/runtime/verification/windows-installation-absence.ts
-      - src/runtime/verification/native/windows-installation-absence*
-      - data/verification/windows/**
-      - scripts/verification/*windows-absence.mjs
-      - tests/scripts/windows-absence*.test.mjs
-      - .github/workflows/windows-absence.yml
+      - 'src/runtime/verification/windows-installation-absence.ts'
+      - 'src/runtime/verification/native/windows-installation-absence*'
+      - 'data/verification/windows/**'
+      - 'scripts/verification/*windows-absence.mjs'
+      - 'tests/scripts/windows-absence*.test.mjs'
+      - '.github/workflows/windows-absence.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   script-tests:
     # These tests sit in the trigger paths below but nothing used to execute them,

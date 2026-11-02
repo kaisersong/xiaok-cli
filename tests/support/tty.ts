@@ -283,6 +283,11 @@ function replayTerminal(raw: string, maxRows?: number): { lines: string[]; image
   return { lines: lines.map((line) => line.replace(/\s+$/g, '')), images };
 }
 
+function notifyWriteCallback(encodingOrCallback: unknown, callback: unknown): void {
+  const notify = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback;
+  if (typeof notify === 'function') process.nextTick(() => notify());
+}
+
 export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarnessOptions): TtyHarness {
   const emitter = new EventEmitter();
   let raw = '';
@@ -298,6 +303,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
   const originalOn = process.stdin.on;
   const originalOnce = process.stdin.once;
   const originalRemoveListener = process.stdin.removeListener;
+  const originalOff = process.stdin.off;
   let nextStdoutWriteError: Error | null = null;
 
   process.stdout.columns = columns;
@@ -324,18 +330,25 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
     return process.stdin;
   }) as typeof process.stdin.removeListener;
 
-  process.stdout.write = ((chunk: WritableChunk) => {
+  process.stdin.off = ((event: string, listener: (...args: any[]) => void) => {
+    emitter.off(event, listener);
+    return process.stdin;
+  }) as typeof process.stdin.off;
+
+  process.stdout.write = ((chunk: WritableChunk, encodingOrCallback?: unknown, callback?: unknown) => {
     if (nextStdoutWriteError) {
       const error = nextStdoutWriteError;
       nextStdoutWriteError = null;
       throw error;
     }
     raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    notifyWriteCallback(encodingOrCallback, callback);
     return true;
   }) as typeof process.stdout.write;
   if (options?.captureStderr) {
-    process.stderr.write = ((chunk: WritableChunk) => {
+    process.stderr.write = ((chunk: WritableChunk, encodingOrCallback?: unknown, callback?: unknown) => {
       raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      notifyWriteCallback(encodingOrCallback, callback);
       return true;
     }) as typeof process.stderr.write;
   }
@@ -382,6 +395,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
       process.stdin.on = originalOn;
       process.stdin.once = originalOnce;
       process.stdin.removeListener = originalRemoveListener;
+      process.stdin.off = originalOff;
       emitter.removeAllListeners();
     },
   };

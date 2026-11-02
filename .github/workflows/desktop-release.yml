@@ -17,6 +17,10 @@ permissions:
 env:
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   create-release:
     runs-on: ubuntu-latest
@@ -29,7 +33,7 @@ jobs:
 
   build-mac:
     needs: create-release
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -37,7 +41,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -270,7 +276,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
