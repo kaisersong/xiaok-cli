@@ -52,6 +52,17 @@ jobs:
         os: [ubuntu-latest, windows-2022, macos-15]
         node: ['22.14.0', '24']
         shard: [1, 2, 3]
+        # Windows cases are ~8-10s each. Linux/macOS restore the full single
+        # case set: extra preparation and shared-runner queue outweighed sharding.
+        exclude:
+          - os: ubuntu-latest
+            shard: 2
+          - os: ubuntu-latest
+            shard: 3
+          - os: macos-15
+            shard: 2
+          - os: macos-15
+            shard: 3
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -103,7 +114,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs collect vitest.sandbox.config.mjs
           .test-dist/tests/commands/chat-interactive-runtime.test.js
-          ci-shard-reports/terminal ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} 3
+          ci-shard-reports/terminal ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} ${{ matrix.os == 'windows-2022' && 3 || 1 }}
       - name: Run original interactive cases on this shard
         run: node .github/scripts/ci-plan.mjs run ci-shard-reports/terminal
       - name: Require actual interactive case coverage
@@ -114,6 +125,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terminal-cases-${{ matrix.os }}-${{ matrix.node }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
           path: ci-shard-reports/terminal/
           if-no-files-found: error
       - uses: actions/setup-python@v5
@@ -169,7 +181,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
           ${{ github.sha }}
-          ubuntu-latest-node-22.14.0,ubuntu-latest-node-24,windows-2022-node-22.14.0,windows-2022-node-24,macos-15-node-22.14.0,macos-15-node-24 3
+          ubuntu-latest-node-22.14.0:1,ubuntu-latest-node-24:1,windows-2022-node-22.14.0:3,windows-2022-node-24:3,macos-15-node-22.14.0:1,macos-15-node-24:1 3
       - name: Preserve original blocking suite status
         shell: bash
         env:

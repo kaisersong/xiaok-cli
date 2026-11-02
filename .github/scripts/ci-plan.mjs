@@ -96,12 +96,21 @@ function audit(directory) {
  auditReceipt(manifest,report,load(join(directory,'run-receipt.json')));
  save(join(directory,'audit.json'),{head:manifest.head,group:manifest.group,index:manifest.index,inventoryHash:manifest.inventoryHash,selected:manifest.selected,passed:report.numPassedTests,failed:report.numFailedTests});
 }
+export function groupShardCounts(groups, defaultTotal) {
+ const seen=new Set();
+ return groups.map(spec=>{
+  const parts=spec.split(':');const group=parts[0];const total=parts.length===2?Number(parts[1]):Number(defaultTotal);
+  if(parts.length>2||!group||seen.has(group)||!Number.isInteger(total)||total<1||total>256)throw new Error('Invalid or duplicate shard group/count');
+  seen.add(group);return {group,total};
+ });
+}
 function aggregate(root,expectedHead,groups,total) {
+ const plans=groupShardCounts(groups,total);
  const manifests=[];
  function walk(dir){for(const entry of readdirSync(dir,{withFileTypes:true})){const path=join(dir,entry.name);if(entry.isDirectory())walk(path);else if(entry.name==='manifest.json'){const manifest=load(path);const audit=load(join(dir,'audit.json'));const report=load(join(dir,'results.json'));auditCases(manifest.selected,report,manifest.inventory);auditReceipt(manifest,report,load(join(dir,'run-receipt.json')));if(audit.head!==manifest.head||audit.index!==manifest.index||audit.inventoryHash!==manifest.inventoryHash)throw new Error('Audit metadata mismatch');manifests.push(manifest);}}}
  walk(root);
- if(manifests.length!==groups.length*total)throw new Error('Missing or extra shard manifests');
- for(const group of groups){const items=manifests.filter(m=>m.group===group).sort((a,b)=>a.index-b.index);if(items.length!==total)throw new Error(`Missing group: ${group}`);const first=items[0];const partitions=partitionCases(first.inventory,total);
+ if(manifests.length!==plans.reduce((sum,plan)=>sum+plan.total,0))throw new Error('Missing or extra shard manifests');
+ for(const {group,total} of plans){const items=manifests.filter(m=>m.group===group).sort((a,b)=>a.index-b.index);if(items.length!==total)throw new Error(`Missing group: ${group}`);const first=items[0];const partitions=partitionCases(first.inventory,total);
   for(let i=0;i<total;i++){const m=items[i];if(m.index!==i+1||m.total!==total||m.head!==expectedHead||m.configHash!==first.configHash||m.inventoryHash!==digest(m.inventory)||m.inventoryHash!==first.inventoryHash||JSON.stringify(m.selected)!==JSON.stringify(partitions[i]))throw new Error(`Shard coverage mismatch: ${group}/${i+1}`);}
  }
  console.log(`Verified ${manifests.length} shards across ${groups.length} OS/Node groups; complete case coverage, original natural skips retained.`);

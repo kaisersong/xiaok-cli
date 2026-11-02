@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { isDocsOnly, changedPaths, partitionCases, canonicalName, auditCases, auditReceipt, digest } from '../scripts/ci-plan.mjs';
+import { isDocsOnly, changedPaths, partitionCases, canonicalName, auditCases, auditReceipt, digest, groupShardCounts } from '../scripts/ci-plan.mjs';
 test('only PR prose in explicit documentation locations may skip execution', () => {
   for (const files of [['README.md'], ['README.zh-CN.md','docs/design/plan.md']]) assert.equal(isDocsOnly(files,'pull_request'),true);
   for (const path of ['package-lock.json','desktop/package-lock.json','.github/workflows/governance.yml','.github/scripts/ci-plan.mjs','vitest.config.ts','desktop/vitest.config.ts','src/ai/prompts/README.md','skills/foo.md','docs','docs/tool.mjs','AGENTS.md','README.md\ncode.ts']) assert.equal(isDocsOnly(['README.md',path],'pull_request'),false,path);
@@ -36,4 +36,9 @@ test('complete results cannot hide missing, stale or abnormal process terminatio
  auditReceipt(manifest,report,receipt);
  for(const invalid of [undefined,{...receipt,signal:'SIGTERM'},{...receipt,error:'spawn error'},{...receipt,head:'stale'},{...receipt,exitCode:1},{...receipt,exitCode:2}])assert.throws(()=>auditReceipt(manifest,report,invalid));
  auditReceipt(manifest,{...report,numFailedTests:1},{...receipt,exitCode:1});
+});
+
+test('per-platform shard counts reject invalid and duplicate groups', () => {
+ assert.deepEqual(groupShardCounts(['linux:1','windows:3','mac:2'],3),[{group:'linux',total:1},{group:'windows',total:3},{group:'mac',total:2}]);
+ for(const groups of [['linux:0'],['linux:NaN'],['linux:2','linux:1'],['linux:1.5'],[':1']])assert.throws(()=>groupShardCounts(groups,3));
 });

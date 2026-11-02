@@ -27,6 +27,13 @@ on:
       - '.github/actions/**'
       - '.github/scripts/**'
       - '.github/ci/**'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/vitest*.config.*'
+      - 'desktop/tsconfig*.json'
+      - 'desktop/tests/setup.ts'
+      - 'desktop/tests/setup-host-env.ts'
+      - 'desktop/tests/profile-account.setup.mjs'
   workflow_dispatch: {}
 
 concurrency:

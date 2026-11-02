@@ -14,6 +14,7 @@ test('real Vitest preserves structural names, regex/newline/parameter cases and 
   const m=JSON.parse(readFileSync(join(dir,'1/manifest.json'),'utf8'));
   assert.equal(m.inventory.length,4);assert.equal(m.inventory.filter(x=>x.mode==='skip').length,1);assert.ok(m.inventory.some(x=>x.parts.includes('outer > label')));assert.ok(m.inventory.some(x=>x.parts.some(p=>p.includes('\n'))));
   invoke('aggregate',dir,head,'fixture','2');
+  invoke('aggregate',dir,head,'fixture:2','3');
   rmSync(join(dir,'2/audit.json'));assert.throws(()=>invoke('aggregate',dir,head,'fixture','2'));
  } finally {rmSync(dir,{recursive:true,force:true});}
 });

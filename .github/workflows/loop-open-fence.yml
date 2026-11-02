@@ -32,6 +32,7 @@ on:
       - '.github/actions/**'
       - '.github/scripts/**'
       - '.github/ci/**'
+      - 'desktop/vitest*.config.*'
   workflow_dispatch: {}
 permissions:
   contents: read

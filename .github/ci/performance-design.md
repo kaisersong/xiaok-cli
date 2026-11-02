@@ -21,3 +21,11 @@
 ## 验证
 
 先针对classifier和分片分配写测试，包括真实git rename/delete、配置/lockfile/运行时Markdown、空diff、非PR、分片全集和重复全名。增加真实Vitest夹具验证嵌套、正则字符、换行、参数化、skip及重名拒绝，再实现；现有治理检查与新增回归都跑。分片属于需实测候选：按完整文件A/B检查逐用例结果及afterAll诊断清理；实际端到端收益不足5%则撤回。两次相同输入build:release测得6.876s/6.597s：clean-cli-build显式清dist/.tsbuildinfo是避免已跟踪陈旧产物进入发布的有意门槛，不为暖构建数字删除此校验；另测原本支持增量的test:sandbox:build两次。推送后按精确SHA追踪、收集并第二轮复查，报告墙钟及runner总分钟分别列示。
+
+## 首轮实测后的第二轮设计
+
+首轮SHA f007c57c6f6764b12576dcdf27ac1862406ca9e3。Windows原单job843/863s，新三片252–409s；保留三片。Ubuntu24原411s，新三片runner合计497s、整组最后完成775s；Linux回完整单片。macOS共享队列575–818s以上且三片重复准备，Terminal回完整单片。Registration macOS候选2片，仍覆盖22 runnable+1自然skip；须按首轮逐用例实测总时长估计11例片最大耗时，在原15min上限内留余量再决定。Linux仍3片。
+
+聚合显式指定每OS/Node期望分片数，拒绝0/NaN/重复group/重复index及多缺artifact；单片仍执行完整收集、退出回执和audit。原OS/Node组合展开后集合不变。Desktop相关workflow仅补齐已使用的lock/config/setup输入触发，不缩减原路径。首轮全部终态后才推第二轮，避免取消首轮污染比较。
+
+首轮registration两片实测时长投影：macOS22.14.0最大702.394s，加入20%波动及30s开销为872.872s；macOS24最大649.523s，同口径809.428s，均低于保留的900s步骤上限。因此第二轮试验macOS两片，实际CI验收，若超时不放宽上限。
