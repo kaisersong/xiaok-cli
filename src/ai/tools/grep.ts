@@ -1,7 +1,7 @@
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
-import { runBoundedGlob } from './bounded-glob.js';
-import { readFileSync, statSync } from 'fs';
+import { runBoundedGrep, formatSearchPath } from './bounded-glob.js';
+import {getSandboxSearchGuard,type SearchPathGuard} from '../../platform/sandbox/search-scope.js';
 import { resolve } from 'path';
 import type { Tool } from '../../types.js';
 import { appendPaginationNotice, paginateItems, truncateText } from './truncation.js';
@@ -23,36 +23,6 @@ function canRunCommand(command: string): boolean {
   return result.status === 0 && !result.error;
 }
 
-function buildRegex(pattern: string): RegExp {
-  try {
-    return new RegExp(pattern);
-  } catch (error) {
-    throw new Error(`无效正则: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal): Promise<string[]> {
-  signal?.throwIfAborted();
-  const resolvedPath = resolve(searchPath);
-  const stats = statSync(resolvedPath);
-  if (stats.isFile()) {
-    return [resolvedPath];
-  }
-
-  const patterns = fileGlob
-    ? [fileGlob]
-    : type
-      ? (TYPE_GLOBS[type] ?? [`**/*.${type}`])
-      : ['**/*'];
-
-  return (await runBoundedGlob({ patterns,
-    cwd: resolvedPath,
-    dot: true,
-    skipInaccessible: true,
-    ignore: ['**/.git/**', '**/node_modules/**'],
-  }, signal)).map(entry => entry.path);
-}
-
 export async function runFallbackGrepSearch(input: {
   pattern: string;
   path?: string;
@@ -61,6 +31,7 @@ export async function runFallbackGrepSearch(input: {
   output_mode?: string;
   type?: string;
   signal?: AbortSignal;
+  guard?:SearchPathGuard;
 }): Promise<string[]> {
   const {
     pattern,
@@ -70,53 +41,13 @@ export async function runFallbackGrepSearch(input: {
     output_mode = 'lines',
     type,
   } = input;
-  const matcher = buildRegex(pattern);
-  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal);
-  const results: string[] = [];
-
-  for (const file of files) {
-    input.signal?.throwIfAborted();
-    let lines: string[];
-    try {
-      lines = readFileSync(file, 'utf-8').split(/\r?\n/);
-    } catch {
-      continue;
-    }
-
-    const matchedIndexes = lines
-      .map((line, index) => (matcher.test(line) ? index : -1))
-      .filter((index) => index >= 0);
-
-    if (matchedIndexes.length === 0) {
-      continue;
-    }
-
-    if (output_mode === 'files') {
-      results.push(file);
-      continue;
-    }
-
-    if (output_mode === 'count') {
-      results.push(`${file}:${matchedIndexes.length}`);
-      continue;
-    }
-
-    const includedIndexes = new Set<number>();
-    for (const matchIndex of matchedIndexes) {
-      const start = Math.max(0, matchIndex - context);
-      const end = Math.min(lines.length - 1, matchIndex + context);
-      for (let index = start; index <= end; index += 1) {
-        includedIndexes.add(index);
-      }
-    }
-
-    const orderedIndexes = [...includedIndexes].sort((a, b) => a - b);
-    for (const lineIndex of orderedIndexes) {
-      results.push(`${file}:${lineIndex + 1}:${lines[lineIndex]}`);
-    }
-  }
-
-  return results;
+  const patterns=fileGlob?[fileGlob]:type?(TYPE_GLOBS[type]??[`**/*.${type}`]):['**/*'];
+  const entries=await runBoundedGrep({cwd:resolve(searchPath),patterns,dot:true,
+    ignore:['**/.git/**','**/node_modules/**'],grep:{pattern,context,outputMode:output_mode}},input.signal,input.guard);
+  return entries.map(entry=>{
+    const file=formatSearchPath(entry.path);
+    return output_mode==='files'?file:output_mode==='count'?`${file}:${entry.count}`:`${file}:${entry.lineNo}:${entry.text}`;
+  });
 }
 
 export const grepTool: Tool = {
@@ -163,7 +94,22 @@ export const grepTool: Tool = {
       max_chars?: number;
     };
 
-    // 优先使用 rg（ripgrep），回退到 grep，再回退到纯 Node 搜索。
+    const guard=getSandboxSearchGuard(toolContext);
+    if(guard){
+      try{
+        // Never probe external programs or hand them a recursively searched root
+        // when the host has installed a per-invocation sandbox policy.
+        const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard});
+        if(!lines.length)return '（无匹配结果）';
+        const page=paginateItems(lines,offset,head_limit);
+        return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset);
+      }catch(error){
+        toolContext?.signal?.throwIfAborted();
+        const code=error instanceof Error?error.message:'';
+        return `Error: ${/^(?:glob_[a-z_]+|grep_[a-z_]+|native_readonly_sandbox_changed)$/.test(code)||code==='sandbox denied search path'?code:'grep_search_failed'}`;
+      }
+    }
+    // 非 sandbox 调用保留 rg → grep → worker Node fallback。
     const hasRg = canRunCommand('rg');
     const hasGrep = !hasRg && canRunCommand('grep');
     const cmd = hasRg ? 'rg' : 'grep';

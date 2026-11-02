@@ -1,5 +1,6 @@
 import type { Tool } from '../../types.js';
-import { runBoundedGlob } from './bounded-glob.js';
+import { runBoundedGlob, formatSearchPath } from './bounded-glob.js';
+import {getSandboxSearchGuard} from '../../platform/sandbox/search-scope.js';
 import { appendPaginationNotice, paginateItems, truncateText } from './truncation.js';
 
 export const globTool: Tool = {
@@ -37,9 +38,9 @@ export const globTool: Tool = {
       type?: 'file' | 'directory' | 'all';
     };
     try {
-      const files = await runBoundedGlob({ patterns: pattern, cwd, type }, context?.signal);
+      const files = await runBoundedGlob({ patterns: pattern, cwd, type }, context?.signal,getSandboxSearchGuard(context));
       if (files.length === 0) return '（无匹配文件）';
-      const page = paginateItems(files.map((file) => file.path), offset, head_limit);
+      const page = paginateItems(files.map((file) => formatSearchPath(file.path)), offset, head_limit);
       const truncated = truncateText(page.items.join('\n'), max_chars);
       return appendPaginationNotice(truncated.text, page.nextOffset);
     } catch (e) {
