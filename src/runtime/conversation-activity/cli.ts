@@ -119,15 +119,19 @@ export class CliConversationActivities {
 export async function probeReplacementOwner(dataRoot: string, disconnectedEpoch: string, cancelled: () => boolean = () => false): Promise<boolean> {
   const deadline = Date.now() + 1500;
   while (!cancelled() && Date.now() < deadline) {
-    const client = new ConversationActivityOwnerClient(dataRoot, 'producer');
+    // Constructing the client re-validates the data root; if that throws (root removed or
+    // no longer private while the owner went away) it must count as "no successor", not
+    // escape as an unhandled rejection from the fire-and-forget disconnect handler (#145).
+    let client: ConversationActivityOwnerClient | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      client = new ConversationActivityOwnerClient(dataRoot, 'producer');
       const status = await Promise.race([
         client.request<{ ownerEpoch?: string; ready?: boolean }>('status'),
         new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); }),
       ]);
       if (status?.ownerEpoch && status.ready !== false) return status.ownerEpoch !== disconnectedEpoch;
-    } catch {} finally { clearTimeout(timer); client.dispose(); }
+    } catch {} finally { clearTimeout(timer); client?.dispose(); }
     if (!cancelled() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now())));
   }
   return false;

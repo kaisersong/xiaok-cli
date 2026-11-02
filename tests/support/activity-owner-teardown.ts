@@ -1,50 +1,66 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { retireOutdatedOwner, type OwnerRetirementOutcome } from '../../src/runtime/conversation-activity/owner-retire.js';
 import { ACTIVITY_STORAGE_NAMES } from '../../src/runtime/conversation-activity/storage-permissions.js';
 
 /**
- * #145/#143：进程内跑 chat 的用例每次都会拉起一个独立的 activity owner（detached，
- * 空闲 20 分钟才退出）。用例删了临时目录却不收 owner，单个测试文件就会累积几十个
- * 常驻 node 进程（每个约 64MB），在 3 vCPU / 7GB 的 macos-15 runner 上把后半程用例的
- * 启动拖过 waitForInputTurnReady 的窗口。用例收尾时用产品自带的、带身份校验的
- * retireOutdatedOwner 收掉本用例临时目录里的 owner，并确认进程确实退出。
+ * #145：进程内跑 chat 的用例每次都会拉起一个独立的 activity owner（detached，空闲 20 分钟
+ * 才退出）。用例删了临时目录却不收 owner，跑完一个测试文件会累积几十个常驻 node 进程
+ * （本地实测峰值 52~60 个、合计 RSS 3.6~4.4GB，见 PR 正文的原始日志）。
+ *
+ * 发现：按进程表找 argv 指向本用例目录的 owner-entry 进程（不依赖目录布局，也能发现
+ * 还没写 status 文件的 owner）。owner 启动时把 dataRoot realpath 过（macOS 的 tmpdir
+ * 是 /var → /private/var），所以比对前先把用例目录 realpath。
+ * 收掉：用产品自带、带身份校验的 retireOutdatedOwner（status 文件、cmdline、uid、无待办）。
  */
-export interface ActivityOwnerTeardownResult { dataRoot: string; pid: unknown; outcome: OwnerRetirementOutcome | 'not_running' }
+export type OwnerSurvivorReason =
+  | Exclude<OwnerRetirementOutcome, 'retired'>   // 产品明确拒绝收（kept_pending / kept_unknown）或身份校验未过
+  | 'missing_status'                               // 进程在，但没有可用的 status 文件
+  | 'retired_but_alive';                           // 产品报 retired，进程却仍在
+export interface ActivityOwnerSurvivor { pid: number; configPath: string; reason: OwnerSurvivorReason }
+export interface ActivityOwnerProcess { pid: number; configPath: string }
 
-function findActivityDataRoots(dir: string, depth: number, out: string[]): void {
-  if (depth < 0) return;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name === 'node_modules') continue;
-    const child = join(dir, entry.name);
-    if (entry.name === 'conversation-activity') {
-      for (const root of readdirSync(child, { withFileTypes: true })) {
-        if (root.isDirectory() && existsSync(join(child, root.name, ACTIVITY_STORAGE_NAMES.status))) out.push(join(child, root.name));
-      }
-      continue;
-    }
-    findActivityDataRoots(child, depth - 1, out);
+/** 进程表里所有 activity owner（argv 末尾是 activity-owner.config.json）。仅 POSIX。 */
+export function listActivityOwnerProcesses(entryScript?: string): ActivityOwnerProcess[] {
+  if (process.platform === 'win32') return [];
+  const out = execFileSync('ps', ['-axww', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const owners: ActivityOwnerProcess[] = [];
+  for (const line of out.split('\n')) {
+    const match = /^\s*(\d+)\s+(.*\S)\s*$/.exec(line);
+    if (!match) continue;
+    const command = match[2];
+    const marker = command.indexOf('owner-entry.js ');
+    if (marker < 0 || !command.endsWith(ACTIVITY_STORAGE_NAMES.config)) continue;
+    if (entryScript && !command.includes(entryScript)) continue;
+    owners.push({ pid: Number(match[1]), configPath: command.slice(marker + 'owner-entry.js '.length) });
   }
+  return owners;
 }
 
-function isAlive(pid: unknown): boolean {
-  if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+function canonical(dir: string): string | undefined {
+  try { return realpathSync(dir); } catch { return undefined; }
 }
 
-/** 收掉 dirs 下所有 activity owner；返回仍存活（未能收掉）的 owner，调用方据此判失败。 */
-export async function retireActivityOwnersUnder(dirs: readonly string[]): Promise<ActivityOwnerTeardownResult[]> {
-  const roots: string[] = [];
-  for (const dir of dirs) findActivityDataRoots(dir, 4, roots);
-  const survivors: ActivityOwnerTeardownResult[] = [];
-  for (const dataRoot of roots) {
+function ownersUnder(roots: readonly string[]): ActivityOwnerProcess[] {
+  const prefixes = roots.map(canonical).filter((root): root is string => Boolean(root)).map((root) => root.endsWith(sep) ? root : root + sep);
+  return listActivityOwnerProcesses().filter((owner) => prefixes.some((prefix) => owner.configPath.startsWith(prefix)));
+}
+
+/**
+ * 收掉 dirs（须仍存在）下所有 activity owner；返回没能收掉的 owner 及原因，调用方据此判失败。
+ * 收完后重新查进程表，只认 argv 仍指向本目录的进程，避免 pid 复用造成误报。
+ */
+export async function retireActivityOwnersUnder(dirs: readonly string[]): Promise<ActivityOwnerSurvivor[]> {
+  const reasons = new Map<number, OwnerSurvivorReason>();
+  for (const owner of ownersUnder(dirs)) {
+    const dataRoot = dirname(owner.configPath);
     let status: { pid?: unknown; ownerEpoch?: unknown; rootHash?: unknown };
-    try { status = JSON.parse(readFileSync(join(dataRoot, ACTIVITY_STORAGE_NAMES.status), 'utf8')); } catch { continue; }
-    if (!isAlive(status.pid)) continue;
+    try { status = JSON.parse(readFileSync(join(dataRoot, ACTIVITY_STORAGE_NAMES.status), 'utf8')); }
+    catch { reasons.set(owner.pid, 'missing_status'); continue; }
+    if (status.pid !== owner.pid) { reasons.set(owner.pid, 'missing_status'); continue; }
     const outcome = await retireOutdatedOwner(dataRoot, status);
-    if (isAlive(status.pid)) survivors.push({ dataRoot, pid: status.pid, outcome });
+    reasons.set(owner.pid, outcome === 'retired' ? 'retired_but_alive' : outcome);
   }
-  return survivors;
+  return ownersUnder(dirs).map((owner) => ({ ...owner, reason: reasons.get(owner.pid) ?? 'missing_status' }));
 }
