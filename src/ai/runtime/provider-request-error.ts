@@ -1,4 +1,4 @@
-import { isAbortError } from './abort-utils.js';
+import { associateModelFailure, classifyModelFailure, readModelFailureField as data } from './model-failure.js';
 
 const KIMI_REQUEST_FAILED = 'KIMI_K3_PROVIDER_REQUEST_FAILED';
 const TRANSPORT_CODES = new Set([
@@ -43,55 +43,41 @@ function statusKind(status: number): string {
 }
 
 /** Extract only fixed-vocabulary diagnostics. Never retain the original error or its cause/body. */
-export function createKimiProviderRequestError(raw: unknown, retryable: boolean): Error & KimiProviderRequestDiagnostic {
-  const diagnostic: KimiProviderRequestDiagnostic = { code: KIMI_REQUEST_FAILED, retryable, failureKind: 'unknown' };
-  const seen = new Set<object>();
-  let current = raw;
-  let aborted = false;
-  while (current && typeof current === 'object' && !seen.has(current) && seen.size < 16) {
-    seen.add(current);
-    const record = current as Record<string, unknown>;
-    const status = httpStatus(record.status);
-    if (status !== undefined && (diagnostic.status === undefined || permanentStatus(status))) {
-      diagnostic.status = status;
-      diagnostic.failureKind = statusKind(status);
-    }
-    diagnostic.transportCode ??= knownCode(record.code, TRANSPORT_CODES);
-    const body = record.error && typeof record.error === 'object' ? record.error as Record<string, unknown> : undefined;
-    diagnostic.providerCode ??= knownCode(record.code, PROVIDER_CODES) ?? knownCode(body?.code, PROVIDER_CODES);
-    if (isAbortError(current)) aborted = true;
-    else if (diagnostic.failureKind === 'unknown') {
-      if (record.name === 'TimeoutError' || record.name === 'APIConnectionTimeoutError') diagnostic.failureKind = 'timeout';
-      else if (record.name === 'APIConnectionError') diagnostic.failureKind = 'transport';
-    }
-    current = record.cause;
-  }
-  if (aborted) diagnostic.failureKind = 'aborted';
-  if (diagnostic.failureKind === 'unknown' && diagnostic.transportCode) diagnostic.failureKind = 'transport';
-  if (permanentStatus(diagnostic.status) || PERMANENT_PROVIDER_CODES.has(diagnostic.providerCode ?? '') || diagnostic.failureKind === 'aborted') {
-    diagnostic.retryable = false;
-  } else if (diagnostic.status === 408 || diagnostic.status === 429 || (diagnostic.status ?? 0) >= 500
-    || diagnostic.transportCode || diagnostic.failureKind === 'timeout' || diagnostic.failureKind === 'transport') {
-    diagnostic.retryable = true;
-  }
-  return Object.assign(new Error(KIMI_REQUEST_FAILED), {
+export function createKimiProviderRequestError(raw: unknown, retryable: boolean, providerResponse = false): Error & KimiProviderRequestDiagnostic {
+  const failure = classifyModelFailure(raw, 'kimi');
+  if (providerResponse && failure.category === 'internal') { failure.source = 'provider'; failure.category = 'unknown'; }
+  const kind = failure.status !== undefined ? statusKind(failure.status)
+    : failure.category === 'network' ? 'transport' : failure.category;
+  const diagnostic: KimiProviderRequestDiagnostic = {
+    code: KIMI_REQUEST_FAILED,
+    retryable: ['internal', 'unknown'].includes(failure.category) ? retryable : failure.retryable,
+    failureKind: FAILURE_KINDS.has(kind) ? kind : 'unknown',
+    status: failure.status,
+    transportCode: knownCode(failure.transportCode, TRANSPORT_CODES),
+    providerCode: knownCode(failure.providerCode, PROVIDER_CODES),
+  };
+  if (failure.category === 'aborted') diagnostic.failureKind = 'aborted';
+  const error = Object.assign(new Error(KIMI_REQUEST_FAILED), {
     name: diagnostic.failureKind === 'aborted' ? 'AbortError' : 'KimiK3ProviderRequestError', ...diagnostic,
   });
+  associateModelFailure(error, { ...failure, retryable: diagnostic.retryable });
+  return error;
 }
 
 /** Revalidate fields at the diagnostic sink; never spread an arbitrary exception into logs/UI. */
 export function getKimiProviderRequestDiagnostic(error: unknown): KimiProviderRequestDiagnostic | undefined {
   if (!error || typeof error !== 'object') return undefined;
-  const e = error as Record<string, unknown>;
-  if (e.code !== KIMI_REQUEST_FAILED) return undefined;
-  const status = httpStatus(e.status);
+  if (data(error, 'code') !== KIMI_REQUEST_FAILED) return undefined;
+  const status = httpStatus(data(error, 'status'));
+  const kind = knownCode(data(error, 'failureKind'), FAILURE_KINDS) ?? 'unknown';
+  const providerCode = knownCode(data(error, 'providerCode'), PROVIDER_CODES);
   return {
     code: KIMI_REQUEST_FAILED,
-    retryable: e.retryable === true && !permanentStatus(status) && !PERMANENT_PROVIDER_CODES.has(String(e.providerCode)) && e.failureKind !== 'aborted',
+    retryable: data(error, 'retryable') === true && !permanentStatus(status) && !PERMANENT_PROVIDER_CODES.has(providerCode ?? '') && kind !== 'aborted',
     status,
-    failureKind: typeof e.failureKind === 'string' && FAILURE_KINDS.has(e.failureKind) ? e.failureKind : 'unknown',
-    transportCode: knownCode(e.transportCode, TRANSPORT_CODES),
-    providerCode: knownCode(e.providerCode, PROVIDER_CODES),
+    failureKind: kind,
+    transportCode: knownCode(data(error, 'transportCode'), TRANSPORT_CODES),
+    providerCode,
   };
 }
 

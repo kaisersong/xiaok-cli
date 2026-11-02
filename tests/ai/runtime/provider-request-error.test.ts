@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic, formatKimiProviderRequestError } from '../../../src/ai/runtime/provider-request-error.js';
 import { normalizeRuntimeError } from '../../../src/ai/runtime/runtime-errors.js';
 
@@ -32,6 +32,15 @@ describe('safe Kimi request diagnostics', () => {
     const error = createKimiProviderRequestError(cycle, true);
     expect(normalizeRuntimeError(error)).toMatchObject({ code: 'runtime_aborted', retryable: false });
     expect(error.cause).toBeUndefined();
+  });
+  it('does not execute accessors at the diagnostic sink', () => {
+    const getter = vi.fn(() => { throw Error('PRIVATE_CANARY'); });
+    const error = Object.assign(new Error('fixed'), { code: 'KIMI_K3_PROVIDER_REQUEST_FAILED' });
+    for (const key of ['status', 'retryable', 'failureKind', 'transportCode', 'providerCode']) Object.defineProperty(error, key, { get: getter });
+    expect(getKimiProviderRequestDiagnostic(error)).toMatchObject({ failureKind: 'unknown', retryable: false });
+    const marker = Object.defineProperty({}, 'code', { get: getter });
+    expect(getKimiProviderRequestDiagnostic(marker)).toBeUndefined();
+    expect(getter).not.toHaveBeenCalled();
   });
   it('drops arbitrary fields and revalidates metadata at the sink', () => {
     const error = createKimiProviderRequestError(Object.assign(new Error('PRIVATE_CANARY'), {

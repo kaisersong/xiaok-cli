@@ -1,3 +1,4 @@
+import { createModelProviderError, getModelFailure, type ModelFailureProvider } from '../runtime/model-failure.js';
 import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
@@ -299,11 +300,13 @@ function requestLimitError(
 async function runProviderOperation<T>(
   strictKimiK3: boolean,
   operation: () => Promise<T>,
+  provider?: ModelFailureProvider,
 ): Promise<T> {
   try {
     return await operation();
   } catch (error) {
     if (!strictKimiK3) {
+      if (provider && error instanceof OpenAI.APIError && !isAbortError(error)) throw createModelProviderError(error, provider);
       // SDK SSE errors have no HTTP failure status. Exclude transport/abort
       // subclasses, preserving their original cancellation and cause semantics.
       if (error instanceof OpenAI.APIError && error.constructor === OpenAI.APIError && error.status === undefined) {
@@ -311,8 +314,8 @@ async function runProviderOperation<T>(
       }
       throw error;
     }
-    const sanitized = createKimiProviderRequestError(error, isRetryableError(error));
-    usageLogger.info('kimiProviderRequestFailed', getKimiProviderRequestDiagnostic(sanitized));
+    const sanitized = createKimiProviderRequestError(error, isRetryableError(error), error instanceof OpenAI.APIError);
+    usageLogger.info('kimiProviderRequestFailed', { ...getKimiProviderRequestDiagnostic(sanitized), failure: getModelFailure(sanitized) });
     throw sanitized;
   }
 }
@@ -444,7 +447,7 @@ export class OpenAIAdapter implements ModelAdapter {
     this.client = new OpenAI({
       apiKey: init.apiKey,
       baseURL: init.harnessContext.identity.canonicalBaseUrl,
-      maxRetries: strictKimiK3 ? 0 : MAX_RETRIES,
+      maxRetries: strictKimiK3 || init.harnessContext.identity.providerType === 'first_party' && ['glm', 'kimi'].includes(init.harnessContext.identity.providerId) ? 0 : MAX_RETRIES,
       defaultHeaders: init.resolvedHeaders,
       ...(strictKimiK3
         ? { fetch: createStrictKimiNoRedirectFetch() }
@@ -676,6 +679,8 @@ export class OpenAIAdapter implements ModelAdapter {
           || isKimiTerminalBoundaryError(error)
           || options?.semanticSummaryAttempt !== undefined
           || emittedAny
+          || (getModelFailure(error)?.retryAfterMs ?? 0) > 0
+          || getModelFailure(error)?.retryAfterTooLong === true
           || !isRetryableError(error)
           || attempt >= MAX_RETRIES
         ) {
@@ -1012,9 +1017,12 @@ export class OpenAIAdapter implements ModelAdapter {
     const client = semantic ? this.client.withOptions({ fetch: guardedFetch, maxRetries: 0 })
       : options?.providerDisclosure ? this.client.withOptions({ fetch: guardedFetch }) : this.client;
     authorizeDispatch?.();
+    const identity = this.harnessContext.identity;
+    const diagnosticProvider: ModelFailureProvider | undefined = identity.providerType === 'first_party' && (identity.providerId === 'glm' || identity.providerId === 'kimi') ? identity.providerId : undefined;
     const stream = await runProviderOperation(
       strictKimiK3,
       () => client.chat.completions.create(request, { signal }),
+      diagnosticProvider,
     );
 
     const toolBuffers = new Map<number, BufferedToolCall>();
@@ -1041,6 +1049,7 @@ export class OpenAIAdapter implements ModelAdapter {
         const iteration = await runProviderOperation(
           strictKimiK3,
           () => streamIterator.next(),
+          diagnosticProvider,
         );
         // The SDK can turn its own transport abort into EOF. Do not drain an
         // interrupted argument buffer or report successful completion from it.
@@ -1176,6 +1185,10 @@ export class OpenAIAdapter implements ModelAdapter {
         }
 
         if (choice?.finish_reason) {
+          const finish = String(choice.finish_reason);
+          if (finish === 'content_filter' || diagnosticProvider === 'glm' && ['sensitive', 'network_error'].includes(finish)) {
+            throw createModelProviderError({ error: { code: finish === 'network_error' ? '1234' : diagnosticProvider === 'glm' ? '1301' : 'content_filter' } }, diagnosticProvider ?? 'other');
+          }
           if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
             await streamIterator.return?.();
             throw new Error('memory_output_incomplete');
