@@ -7,7 +7,7 @@ import { Command } from 'commander';
 import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
-import { listActivityOwnerProcesses, retireActivityOwnersUnder } from '../support/activity-owner-teardown.js';
+import { listActivityOwnerProcesses, ownerPathPrefixes, ownersWithPrefixes, retireActivityOwnersUnder } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -1185,7 +1185,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     for (const type of process.getActiveResourcesInfo()) resourceTypes[type] = (resourceTypes[type] ?? 0) + 1;
     diagnosticWrite(`[fixture-worker-resources] ${JSON.stringify({ stage, caseOrdinal: diagnosticCase,
       knownFixtureRoots: diagnosticRoots.size, workerActiveResourcesOnly: resourceTypes,
-      // #145：本文件拉起、仍存活的 activity owner 数（Windows 未测）与主机空闲内存，供 CI 日志对照。
+      // #145：全机口径——进程表里入口是本构建 owner-entry.js 的存活 owner 数（含同一 job 里更早的文件留下的），
+      // 不是本用例的增量；用来看累积曲线。Windows 未测。另附主机空闲内存，供 CI 日志对照。
       liveDetachedProcessCount: countLiveActivityOwners(),
       hostFreeMemMB: Math.round(freemem() / 1048576) /* macOS 的 freemem 不含 inactive/purgeable，只作粗略参考 */ })}\n`);
   };
@@ -1272,9 +1273,18 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     // #145：删目录前先收掉本用例拉起的 activity owner（detached，空闲 20 分钟才退），否则
     // 一个文件跑完累积几十个常驻进程。收不掉的按原因判本用例失败（闸门）。
     // Windows：产品的身份校验不支持（retireOutdatedOwner 恒为 kept_unverified），不收也不判，PR 中列为未覆盖项。
+    const ownerPrefixes = process.platform === 'win32' ? [] : ownerPathPrefixes(caseDirs);
     const ownerSurvivors = process.platform === 'win32' ? [] : await retireActivityOwnersUnder(caseDirs);
     for (const dir of caseDirs) {
       await removeTempDirWithRetry(dir);
+    }
+    // 删目录之后再按同一组前缀（删除前算好的原始路径 + realpath）扫一次：扫描之后才拉起的 owner，
+    // argv 指向已删目录，以后任何用例都认领不到，必须在这里报出来。
+    if (process.platform !== 'win32') {
+      const known = new Set(ownerSurvivors.map((owner) => owner.pid));
+      for (const owner of ownersWithPrefixes(ownerPrefixes)) {
+        if (!known.has(owner.pid)) ownerSurvivors.push({ ...owner, reason: 'late_after_removal' });
+      }
     }
 
     vi.resetModules();
@@ -1282,7 +1292,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     resetAdapterState();
     if (ownerSurvivors.length) {
       // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
-      // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位。
+      // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
       throw new Error(`用例收尾后仍有 activity owner 存活（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason} config=${owner.configPath}`).join('; ')}`);
     }
   });
@@ -1585,6 +1595,9 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   it.skipIf(process.platform==='win32')('retires the activity owner a case started so later cases do not inherit detached owners (#145)', async () => {
     // 用符号链接别名作为用例根目录：macOS 的 tmpdir 是 /var → /private/var，owner 的 argv
     // 是 realpath 后的路径；teardown 必须按 realpath 认领，否则在 macOS 上收不掉。
+    // owner 入口是编译产物（与 owner-process.test 相同，需在 .test-dist 下跑：npm run test:sandbox）；
+    // 源码 runner 下入口不存在、owner 起不来，这里明确报出而不是让闸门空转。
+    expect(existsSync(ownerEntryScript), `owner 入口不存在：${ownerEntryScript}（请用 npm run test:sandbox 在 .test-dist 下运行）`).toBe(true);
     const realRoot = join(tmpdir(), `xiaok-chat-owner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const rootDir = `${realRoot}-alias`;
     mkdirSync(realRoot, { recursive: true });
