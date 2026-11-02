@@ -7,7 +7,8 @@ import { Command } from 'commander';
 import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
-import { listActivityOwnerProcesses, ownerPathPrefixes, ownersWithPrefixes, retireActivityOwnersUnder } from '../support/activity-owner-teardown.js';
+import { createTeardownSteps } from '../support/teardown-steps.js';
+import { listActivityOwnerProcesses, ownerPathPrefixes, reclaimLateOwners, retireActivityOwnersUnder, type ActivityOwnerSurvivor } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -1250,51 +1251,71 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   });
 
   afterEach(async () => {
-    observeOwnCrashReports();
-    cwdSpy?.mockRestore();
-    cwdSpy = undefined;
-    if (originalConfigDir === undefined) {
-      delete process.env.XIAOK_CONFIG_DIR;
-    } else {
-      process.env.XIAOK_CONFIG_DIR = originalConfigDir;
-    }
-    if (originalHome === undefined) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = originalHome;
-    }
-    if (originalDisableGlobalPlugins === undefined) {
-      delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
-    } else {
-      process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
-    }
+    // #145（codex M2）：每一步独立收尾，任何一步抛错都不能跳过后面的删目录 / resetModules / clearAllMocks /
+    // resetAdapterState，否则会污染之后的用例；所有错误最后汇总抛出。
+    const teardown = createTeardownSteps('用例收尾（#145）');
+    const step = teardown.step;
+    await step(() => observeOwnCrashReports());
+    await step(() => { cwdSpy?.mockRestore(); cwdSpy = undefined; });
+    await step(() => {
+      if (originalConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+      if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+      if (originalDisableGlobalPlugins === undefined) delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
+      else process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
+    });
 
     const caseDirs = tempDirs.splice(0);
     // #145：删目录前先收掉本用例拉起的 activity owner（detached，空闲 20 分钟才退），否则
-    // 一个文件跑完累积几十个常驻进程。收不掉的按原因判本用例失败（闸门）。
+    // 一个文件跑完累积几十个常驻进程。还在启动中的 owner 先等它的 status 落盘再收；收不掉的按原因判本用例失败（闸门）。
     // Windows：产品的身份校验不支持（retireOutdatedOwner 恒为 kept_unverified），不收也不判，PR 中列为未覆盖项。
-    const ownerPrefixes = process.platform === 'win32' ? [] : ownerPathPrefixes(caseDirs);
-    const ownerSurvivors = process.platform === 'win32' ? [] : await retireActivityOwnersUnder(caseDirs);
-    for (const dir of caseDirs) {
-      await removeTempDirWithRetry(dir);
+    const posix = process.platform !== 'win32';
+    // undefined = 前缀没算成（那一步的错误已记下），区别于“算过但为空”。
+    let ownerPrefixes: string[] | undefined;
+    let retireStepFailed = false;
+    const ownerSurvivors: ActivityOwnerSurvivor[] = [];
+    if (posix) {
+      await step(() => { ownerPrefixes = ownerPathPrefixes(caseDirs); });
+      retireStepFailed = !await step(async () => { ownerSurvivors.push(...await retireActivityOwnersUnder(caseDirs)); });
     }
-    // 删目录之后再按同一组前缀（删除前算好的原始路径 + realpath）扫一次：扫描之后才拉起的 owner，
-    // argv 指向已删目录，以后任何用例都认领不到，必须在这里报出来。
-    if (process.platform !== 'win32') {
-      const known = new Set(ownerSurvivors.map((owner) => owner.pid));
-      for (const owner of ownersWithPrefixes(ownerPrefixes)) {
-        if (!known.has(owner.pid)) ownerSurvivors.push({ ...owner, reason: 'late_after_removal' });
-      }
+    // 收尾中途才出现的 owner 没走退休入口，先从结果里拿出来，删目录后和迟到的一起回收。
+    const appearedOwners = ownerSurvivors.filter((owner) => owner.reason === 'appeared_during_teardown');
+    const appeared = new Set(appearedOwners.map((owner) => owner.pid));
+    const attempted = ownerSurvivors.filter((owner) => !appeared.has(owner.pid));
+    ownerSurvivors.splice(0, ownerSurvivors.length, ...attempted);
+    for (const dir of caseDirs) await step(() => removeTempDirWithRetry(dir));
+    // 删目录之后再按同一组前缀（删除前算好的原始路径 + realpath）扫一次，把仍在的 owner 全部回收（SIGTERM + 确认退出）：
+    // 既包括没走退休入口的（删目录后才拉起、收尾中途出现、退休那一步整体出错），也包括走了入口但没收掉的
+    // （kept_*、missing_status、teardown_error 等）——它们照样判本用例失败，但不能留在进程表里继续累积。
+    // 这次扫描之后才拉起的 owner 认领不到，这是收尾无法闭合的窗口。
+    const prefixes = ownerPrefixes;
+    if (posix && prefixes?.length) {
+      const attemptedReason = new Map(attempted.map((owner) => [owner.pid, owner.reason]));
+      await step(async () => {
+        const reclaimed = await reclaimLateOwners(prefixes, new Set(), {
+          reasonFor: (pid) => attemptedReason.get(pid) ?? (appeared.has(pid) ? 'appeared_during_teardown' : retireStepFailed ? 'unretired_after_error' : 'late_after_removal'),
+        });
+        const byPid = new Map(reclaimed.map((owner) => [owner.pid, owner]));
+        const merged = attempted.map((owner) => {
+          const again = byPid.get(owner.pid);
+          return again ? { ...owner, reclaimed: again.reclaimed, error: owner.error ?? again.error } : owner;
+        });
+        ownerSurvivors.splice(0, ownerSurvivors.length, ...merged, ...reclaimed.filter((owner) => !attemptedReason.has(owner.pid)));
+      });
+    }
+    // 回收那一步整体失败时（例如 ps 不可用），收尾中途出现的 owner 也要留在报告里。
+    for (const owner of appearedOwners) {
+      if (!ownerSurvivors.some((survivor) => survivor.pid === owner.pid)) ownerSurvivors.push(owner);
     }
 
-    vi.resetModules();
-    vi.clearAllMocks();
-    resetAdapterState();
+    await step(() => vi.resetModules());
+    await step(() => vi.clearAllMocks());
+    await step(() => resetAdapterState());
     if (ownerSurvivors.length) {
       // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
       // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
-      throw new Error(`用例收尾后仍有 activity owner 存活（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason} config=${owner.configPath}`).join('; ')}`);
+      teardown.fail(new Error(`用例收尾后仍有 activity owner 存活（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
     }
+    teardown.finish();
   });
 
   it.skipIf(process.platform==='win32')('starts without session persistence when the config link is unsafe', async () => {
