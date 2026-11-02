@@ -94,6 +94,40 @@ describe('PluginClaimLock v2', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
+  it('treats a removed claims directory as already released', async () => {
+    const dir = claimsDir();
+    const { a } = twoContenders(dir);
+    const cap = await a.acquire();
+    rmSync(dir, { recursive: true, force: true });
+
+    // Without the ENOENT branches, these real filesystem calls fail with scandir ENOENT.
+    expect(() => a.release(cap)).not.toThrow();
+    expect(a['listClaims']()).toEqual([]);
+    expect(() => a.release(cap)).not.toThrow();
+  });
+
+  it('propagates directory scan errors other than ENOENT', async () => {
+    const dir = claimsDir();
+    const { a } = twoContenders(dir);
+    const cap = await a.acquire();
+    rmSync(dir, { recursive: true, force: true });
+    writeFileSync(dir, 'not a directory');
+
+    // Node maps "not a directory" to ENOTDIR on POSIX; Windows/libuv may use ENOTDIR or EINVAL.
+    // Either way the bug-fix is: non-ENOENT scan failures must still throw (not be swallowed).
+    const expectNonEnoent = (fn: () => unknown) => {
+      try {
+        fn();
+        throw new Error('expected directory scan to throw');
+      } catch (error) {
+        expect((error as NodeJS.ErrnoException).code).not.toBe('ENOENT');
+        expect((error as NodeJS.ErrnoException).code).toBeTruthy();
+      }
+    };
+    expectNonEnoent(() => a['listClaims']());
+    expectNonEnoent(() => a.release(cap));
+  });
+
   it('reclaims a dead claim without deleting the live winner (the v1 double-owner bug)', async () => {
     const dir = claimsDir();
     const { a, b, alive } = twoContenders(dir);
