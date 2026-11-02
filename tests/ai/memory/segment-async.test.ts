@@ -95,6 +95,67 @@ describe('off-thread segmentation (#145 / #147)', () => {
     expect(events).toEqual(['embed:late', 'embedding.close']);
   });
 
+  // 第 2 轮 codex 对 M3 的复核（CTO 裁定：核实属实就补）：向量是在 embedding 返回之后才写的，
+  // close 必须等这一步落库，再关 embedding 引擎和数据库，否则最后一条记忆缺向量。
+  it('waits for the vector of a record saved just before close before closing the database', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-seg-async-'));
+    const config = { dbPath: path.join(tmpDir, 'memory.db'), embedding: { apiUrl: 'http://127.0.0.1:9/v1', model: 'none', dimensions: 8 }, compaction: { autoCompact: false } };
+    const s = new LayeredMemoryStore(config);
+    const embedding = (s as unknown as { embeddingClient: { embed(text: string): Promise<Float32Array> } }).embeddingClient;
+    // 真实 embedAndStore（await embed 之后写 memory_embeddings），只把 embed 换成晚一点返回的固定向量。
+    embedding.embed = async () => { await new Promise((resolve) => setTimeout(resolve, 50)); return new Float32Array(8).fill(0.5); };
+    const write = s.save({ id: 'vec-late', scope: 'global', title: '关闭前', summary: '关闭前写入的记忆', tags: [], updatedAt: Date.now(), type: 'user' });
+    await s.close();
+    await write;
+    store = new LayeredMemoryStore(config);
+    const row = (store as unknown as { db: { prepare(sql: string): { get(...args: unknown[]): unknown } } }).db
+      .prepare('SELECT layer FROM memory_embeddings WHERE memory_id = ?').get('vec-late');
+    expect(row).toEqual({ layer: 1 });
+  });
+
+  // 第 2 轮 DS M5：两次 close。在途写未完成时第二次 close 返回同一个等待；完成后再 close 不抛、不重复关库。
+  it('a second close while writes are pending returns the same wait, and a later close is a no-op', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-seg-async-'));
+    const s = new LayeredMemoryStore({ dbPath: path.join(tmpDir, 'memory.db'), embedding: { apiUrl: 'http://127.0.0.1:9/v1', model: 'none', dimensions: 8 }, compaction: { autoCompact: false } });
+    const embedding = (s as unknown as { embeddingClient: { close(): Promise<void>; embedAndStore(...args: unknown[]): Promise<void> } }).embeddingClient;
+    let embeddingCloses = 0;
+    embedding.embedAndStore = async () => {};
+    embedding.close = async () => { embeddingCloses += 1; };
+    const write = s.save({ id: 'twice', scope: 'global', title: '两次关闭', summary: '两次关闭之前的写入', tags: [], updatedAt: Date.now(), type: 'user' });
+    const first = s.close();
+    const second = s.close();
+    expect(first).toBeInstanceOf(Promise);
+    expect(second).toBe(first);
+    await first;
+    await write;
+    expect(() => s.close()).not.toThrow();
+    await s.close();
+    expect(embeddingCloses).toBe(1);
+  });
+
+  // CTO 裁定（Minor 6）：退出路径 await close()，等待必须有上限；到期照常关库并记日志。
+  it('stops waiting for a write that never lands at the close deadline', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-seg-async-'));
+    const s = new LayeredMemoryStore({ dbPath: path.join(tmpDir, 'memory.db'), embedding: { apiUrl: 'http://127.0.0.1:9/v1', model: 'none', dimensions: 8 }, compaction: { autoCompact: false } });
+    const embedding = (s as unknown as { embeddingClient: { close(): Promise<void>; embedAndStore(...args: unknown[]): Promise<void> } }).embeddingClient;
+    let embeddingClosed = false;
+    embedding.embedAndStore = () => new Promise<void>(() => {});
+    embedding.close = async () => { embeddingClosed = true; };
+    await s.save({ id: 'stuck', scope: 'global', title: '卡住', summary: '向量永远写不完', tags: [], updatedAt: Date.now(), type: 'user' });
+    const { MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS } = await import('../../../src/ai/memory/layered-store.js');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let closed = false;
+      const closing = Promise.resolve(s.close()).then(() => { closed = true; });
+      await vi.advanceTimersByTimeAsync(MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS - 1);
+      expect(closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await closing;
+      expect(closed).toBe(true);
+      expect(embeddingClosed).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('a raw message written just before close still lands with the same segmentation', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-seg-async-'));
     const dbPath = path.join(tmpDir, 'memory.db');

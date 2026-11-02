@@ -287,21 +287,44 @@ parentPort.on('message', ({ id, runs }) => {
 
 /** cuts on success; cutError when nodejieba itself threw; unavailable when the worker is gone. */
 interface CutReply { cuts?: string[][]; cutError?: string; unavailable?: true }
+/** Why the async path fell back to the synchronous one; logged with the time spent waiting. */
+type FallbackReason = 'worker could not start' | 'ready deadline exceeded' | 'cut deadline exceeded' | 'load failed' | 'worker exited' | 'worker error';
 interface SegmentationWorker {
   /** Resolves true once the dictionary is loaded, false if the worker cannot load it. */
   whenReady(): Promise<boolean>;
+  /** Why the worker became unusable, once it has; undefined while it is usable. */
+  failureReason(): FallbackReason | undefined;
   cut(runs: string[]): Promise<CutReply>;
   terminate(): Promise<void>;
 }
 
 const WORKER_KEY = Symbol.for('xiaok.segment.worker');
 /**
- * Upper bound for the off-thread dictionary load (normally ~1s). A load that
- * hangs (dictionary on a stalled network drive, native load never returning)
- * must not leave the first turn waiting forever: past this point the worker is
- * dropped and callers fall back to the synchronous path.
+ * Upper bound for the off-thread dictionary load. Normal loads take ~0.3–1.5s
+ * (first-screen p90 ≈ 0.6s, cold max ≈ 1.5s on the #147 runs), so 10s is far
+ * above them; a normal environment does not reach it (measured trigger count
+ * in #150). A load that hangs (dictionary on a stalled network drive, native
+ * load never returning) must not leave the first turn waiting forever: past
+ * this point the worker is dropped and callers fall back to the synchronous
+ * path, which segments exactly as master does (CTO ruling on #150: never skip
+ * segmentation). The fallback is logged with its reason and timings.
  */
 export const SEGMENTATION_WORKER_READY_DEADLINE_MS = 10_000;
+/**
+ * Upper bound for one cut() round trip once the worker is ready (normally a few
+ * ms). Past it the worker is treated as stuck, dropped, and the call falls back
+ * to the identical synchronous segmentation, so a first turn or close() never
+ * waits on a stuck worker indefinitely.
+ */
+export const SEGMENTATION_WORKER_CUT_DEADLINE_MS = 5_000;
+/**
+ * Budget for the synchronous fallback load on the calling thread. A native
+ * synchronous call cannot be preempted on its own thread, so this is a reported
+ * bound, not an abort: a fallback load over it is logged as such. The fallback
+ * load happens at most once per process (the loaded dictionary is reused), so
+ * the worst case equals master's single synchronous load.
+ */
+export const SEGMENTATION_SYNC_FALLBACK_BUDGET_MS = 5_000;
 type WorkerHolder = Record<symbol, SegmentationWorker | null | undefined>;
 
 function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions>): SegmentationWorker {
@@ -310,18 +333,20 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
   let nextId = 0;
   let waiting = 0;
   let alive = true;
+  // Set by terminate(): an exit we asked for is not a fallback and is not logged as one.
+  let stopping = false;
   // Only hold the process open while a caller is waiting on the worker.
   const hold = () => { if (waiting++ === 0) worker.ref(); };
   const release = () => { if (--waiting === 0) worker.unref(); };
   worker.unref();
   let settleReady!: (ok: boolean) => void;
   const ready = new Promise<boolean>(resolve => { settleReady = resolve; });
-  let failed = false;
-  const fail = (reason: string) => {
+  let failure: FallbackReason | undefined;
+  const fail = (reason: FallbackReason, detail?: string) => {
     alive = false;
-    if (!failed) {
-      failed = true;
-      logger.debug('segmentation worker unavailable; falling back to synchronous segmentation', { reason });
+    if (failure === undefined) {
+      failure = reason;
+      if (!stopping) logger.warn('segmentation worker unavailable; falling back to synchronous segmentation', { reason, ...(detail ? { detail } : {}) });
     }
     clearTimeout(readyDeadline);
     settleReady(false);
@@ -332,34 +357,40 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
   readyDeadline.unref();
   worker.on('message', (message: { type: string; id?: number; cuts?: string[][]; cutError?: string; error?: string }) => {
     if (message.type === 'ready') { clearTimeout(readyDeadline); settleReady(true); }
-    else if (message.type === 'failed') { fail(message.error ?? 'load failed'); void worker.terminate(); }
+    else if (message.type === 'failed') { fail('load failed', message.error); void worker.terminate(); }
     else if (message.type === 'cut' && message.id !== undefined) {
       const resolve = pending.get(message.id);
       pending.delete(message.id);
       resolve?.(message.cutError === undefined ? { cuts: message.cuts } : { cutError: message.cutError });
     }
   });
-  worker.on('error', error => fail(String(error)));
+  worker.on('error', error => fail('worker error', String(error)));
   worker.on('exit', () => fail('worker exited'));
   return {
     async whenReady() {
       hold();
       try { return await ready; } finally { release(); }
     },
+    failureReason: () => failure,
     async cut(runs) {
       if (!alive) return { unavailable: true };
       hold();
+      let cutDeadline: ReturnType<typeof setTimeout> | undefined;
       try {
         const id = nextId++;
         return await new Promise<CutReply>(resolve => {
           pending.set(id, resolve);
+          // A cut that never answers marks the worker stuck: drop it and let this and
+          // every later call fall back to the identical synchronous segmentation.
+          cutDeadline = setTimeout(() => { fail('cut deadline exceeded'); void worker.terminate(); }, SEGMENTATION_WORKER_CUT_DEADLINE_MS);
           worker.postMessage({ id, runs });
         });
       } finally {
+        clearTimeout(cutDeadline);
         release();
       }
     },
-    async terminate() { alive = false; clearTimeout(readyDeadline); await worker.terminate(); },
+    async terminate() { stopping = true; alive = false; clearTimeout(readyDeadline); await worker.terminate(); },
   };
 }
 
@@ -374,7 +405,7 @@ function segmentationWorker(): SegmentationWorker | null {
     // requires the unpacked copy of nodejieba (JS entry + native binding).
     if (paths !== null) created = startWorker(rewriteAsarPath(require.resolve('nodejieba')), nativeLoadOptions(paths));
   } catch (error) {
-    logger.debug('segmentation worker could not start', { error: error instanceof Error ? error.message : String(error) });
+    logger.warn('segmentation worker could not start; falling back to synchronous segmentation', { reason: 'worker could not start', detail: error instanceof Error ? error.message : String(error) });
     created = null;
   }
   holder[WORKER_KEY] = created;
@@ -398,6 +429,7 @@ export function prewarmSegmentation(): void {
 export async function segmentChineseAsync(text: string): Promise<string> {
   if (!HAS_CHINESE_RE.test(text)) return segmentWithoutChinese(text);
   if (jieba || jiebaLoadFailed) return segmentChinese(text);
+  const startedAt = Date.now();
   const worker = segmentationWorker();
   if (worker && await worker.whenReady()) {
     const runs = Array.from(text.matchAll(CHINESE_RE), match => match[0]);
@@ -409,7 +441,23 @@ export async function segmentChineseAsync(text: string): Promise<string> {
     // nodejieba threw inside cut(): the sync path returns the raw text then too.
     if (reply.cutError !== undefined) return text;
   }
-  // Worker unavailable: same segmentation on the calling thread.
+  // Worker unavailable: same segmentation on the calling thread (never skipped).
+  return segmentChineseFallback(text, worker?.failureReason() ?? 'worker could not start', Date.now() - startedAt);
+}
+
+/**
+ * The synchronous fallback, timed. The first fallback in a process loads the
+ * dictionary on the calling thread (as master always does); that load and the
+ * time already spent waiting on the worker are logged once, with the reason.
+ */
+function segmentChineseFallback(text: string, reason: FallbackReason, waitedMs: number): string {
+  if (jieba || jiebaLoadFailed) return segmentChinese(text);
+  const loadStartedAt = Date.now();
+  const loaded = getJieba() !== null;
+  const syncLoadMs = Date.now() - loadStartedAt;
+  const details = { reason, waitedMs, syncLoadMs, loaded, budgetMs: SEGMENTATION_SYNC_FALLBACK_BUDGET_MS };
+  if (syncLoadMs > SEGMENTATION_SYNC_FALLBACK_BUDGET_MS) logger.warn('synchronous segmentation fallback load exceeded its budget', details);
+  else logger.warn('synchronous segmentation fallback load finished', details);
   return segmentChinese(text);
 }
 

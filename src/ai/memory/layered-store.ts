@@ -91,6 +91,14 @@ export function createLLMFromAdapter(adapter: ModelAdapter): (prompt: string) =>
   };
 }
 
+/**
+ * Upper bound for close() waiting on pending writes (#150, CTO ruling: exit waits are bounded).
+ * Above the segmentation worker's ready deadline (10s) plus a normal synchronous fallback load,
+ * so a write accepted just before close still lands in a normal environment; past it the
+ * database closes anyway and the remaining writes fail with a logged warning.
+ */
+export const MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS = 15_000;
+
 export class LayeredMemoryStore implements MemoryStore {
   private db: Database.Database;
   private dbPath: string;
@@ -185,9 +193,13 @@ export class LayeredMemoryStore implements MemoryStore {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, JSON.stringify([id]), record.title, JSON.stringify(record.tags || []), scope, memType, cwd, JSON.stringify(record.provenance ?? {}));
 
-    this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
+    // The vector row is written after the embedding resolves; track it like the other
+    // pending writes so close() waits for it before closing the database (#150 M3).
+    const vectorWrite = this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
       logger.warn('embedAndStore failed', { id, error: err instanceof Error ? err.message : String(err) });
     });
+    this.pendingWrites.add(vectorWrite);
+    void vectorWrite.finally(() => { this.pendingWrites.delete(vectorWrite); });
   }
 
   async listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]> {
@@ -456,10 +468,31 @@ export class LayeredMemoryStore implements MemoryStore {
       this.db.close();
       return;
     }
-    // A write accepted before close is still waiting for segmentation: let it land (and
-    // start its embedding) before the embedding engine and the database close (第 2 轮 DS M3).
-    this.closing = Promise.allSettled([...this.pendingWrites]).then(() => { closeEmbedding(); this.db.close(); });
+    // A write accepted before close is still waiting for segmentation or for its vector:
+    // let it land before the embedding engine and the database close (第 2 轮 DS M3).
+    // Bounded (CTO ruling on #150, Minor 6): exit paths await this, so it must not wait forever.
+    this.closing = this.waitForPendingWrites().then(() => { closeEmbedding(); this.db.close(); });
     return this.closing;
+  }
+
+  /** Wait until no write is pending (writes may add their vector write while landing), up to the close deadline. */
+  private async waitForPendingWrites(): Promise<void> {
+    const startedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<'deadline'>((resolve) => {
+      timer = setTimeout(() => resolve('deadline'), MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS);
+    });
+    try {
+      while (this.pendingWrites.size > 0) {
+        const outcome = await Promise.race([Promise.allSettled([...this.pendingWrites]), deadline]);
+        if (outcome === 'deadline') {
+          logger.warn('memory close deadline reached; closing with writes still pending', {
+            pending: this.pendingWrites.size, waitedMs: Date.now() - startedAt, deadlineMs: MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS,
+          });
+          return;
+        }
+      }
+    } finally { clearTimeout(timer); }
   }
 
   private searchResultToRecord(r: { id: string; layer: number; content: string; metadata: Record<string, unknown> }): MemoryRecord {
