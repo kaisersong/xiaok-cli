@@ -38,7 +38,8 @@ async function boundedTaskRead(read: () => Promise<PendingTasks>): Promise<Pendi
     return await Promise.race([read(), new Promise<PendingTasks>(resolve => { timer = setTimeout(() => resolve('unknown'), 5000); })]);
   } catch { return 'unknown'; } finally { clearTimeout(timer); }
 }
-function defaults(): OwnerRetirementDependencies {
+/** The real dependencies retireOutdatedOwner uses; exported so callers can wrap individual steps (e.g. with a deadline). */
+export function defaultOwnerRetirementDependencies(): OwnerRetirementDependencies {
   return {
     readPendingTasks, platform: process.platform, currentPid: process.pid, currentUid: process.getuid?.(),
     readStatusFile: async path => JSON.parse(await readFile(path, 'utf8')) as ActivityOwnerRetirementStatus,
@@ -61,7 +62,7 @@ function matchesCommand(command: string[] | string, configPath: string): boolean
 }
 /** Retire only an authenticated, independently verified owner; never its children. */
 export async function retireOutdatedOwner(dataRoot: string, status: ActivityOwnerRetirementStatus, dependencies: Partial<OwnerRetirementDependencies> = {}): Promise<OwnerRetirementOutcome> {
-  const deps = { ...defaults(), ...dependencies };
+  const deps = { ...defaultOwnerRetirementDependencies(), ...dependencies };
   if (!['linux', 'darwin'].includes(deps.platform)) return 'kept_unverified';
   const pid = status.pid;
   if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0 || pid === deps.currentPid

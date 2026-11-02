@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  awaitOwnerStatus, awaitProcessGone, deadlineBoundRetireDependencies, ownerPathPrefixes, ownersWithPrefixes, processExists, RECLAIM_RESERVE_MS,
-  reclaimAndReport, reclaimLateOwners, REMOVE_RESERVE_MS, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, type ActivityOwnerProcess, type ActivityOwnerSurvivor,
+  awaitOwnerStatus, awaitProcessGone, deadlineBoundRetireDependencies, ownerPathPrefixes, ownersWithPrefixes, processExists, PS_SCAN_RESERVE_MS, psTimeoutFor,
+  RECLAIM_RESERVE_MS, reclaimAndReport, reclaimLateOwners, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS,
+  teardownCaseOwners, type ActivityOwnerProcess, type ActivityOwnerSurvivor,
 } from '../../support/activity-owner-teardown.js';
 import { retireOutdatedOwner } from '../../../src/runtime/conversation-activity/owner-retire.js';
 import { createTeardownSteps } from '../../support/teardown-steps.js';
@@ -290,19 +291,21 @@ describe('activity owner teardown gate (#145)', () => {
     expect(survivors).toEqual([{ ...gone.owner, reason: 'data_root_gone' }]);
   });
 
-  // DS 第 6 轮 M1 / codex Major1：收尾预算是注入的截止时刻。产品退休入口里待办读取永不返回、SIGTERM 后进程永不退出、
-  // owner 永不写 status，这三种最坏情况都必须在各自阶段的截止时刻结束，整段收尾不超过 TEARDOWN_BUDGET_MS（< 默认 hookTimeout 10s）。
-  it('finishes the worst-case teardown within the injected budget', async () => {
-    expect(TEARDOWN_BUDGET_MS).toBeLessThan(10_000);
+  // DS 第 6/7 轮 M1/M3、codex 第 6/7 轮 Major1/2：整段 afterEach 的 owner 收尾（teardownCaseOwners，实际编排）在注入的截止时刻内结束。
+  // 最坏情况同时出现：每次 ps 都要 900ms、待办读取永不返回、SIGTERM 后进程永不退出、owner 永不写 status、目录永远删不掉。
+  // 范围：不含预算之后的 resetModules / clearAllMocks（TEARDOWN_BUDGET_MS 给它们留了 1s）。
+  it('finishes the whole owner teardown within the injected budget in the worst case', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
       const started = Date.now();
       const hookDeadline = started + TEARDOWN_BUDGET_MS;
-      const retireDeadline = hookDeadline - RECLAIM_RESERVE_MS - REMOVE_RESERVE_MS;
+      const removeDeadline = hookDeadline - RECLAIM_RESERVE_MS;
       const pendingForever = makeOwner(41032);
       const neverExits = makeOwner(41033);
       const noStatus = makeOwner(41034, null);
       const owners = [pendingForever.owner, neverExits.owner, noStatus.owner];
+      let psReads = 0;
+      const slowPs = () => { psReads += 1; vi.setSystemTime(Date.now() + 900); return owners; };
       const identity = (pending: 'none' | 'never') => ({
         platform: 'linux' as const, currentPid: process.pid, currentUid: 1000,
         readStatusFile: async (path: string) => JSON.parse(readFileSync(path, 'utf8')),
@@ -311,33 +314,120 @@ describe('activity owner teardown gate (#145)', () => {
         readPendingTasks: () => pending === 'none' ? Promise.resolve('none' as const) : new Promise<never>(() => {}),
         kill: () => {}, isAlive: async () => true,
       });
+      const rmAttempts: number[] = [];
+      const teardown = createTeardownSteps('t');
       let settled = false;
-      const retiring = retireActivityOwnersUnder([pendingForever.root, neverExits.root, noStatus.root], {
-        list: () => owners,
-        deadline: retireDeadline,
-        // owner 永不写 status：用永不触发的 watcher，只有截止时刻能结束等待。
-        awaitStatus: (dataRoot, pid, deadlineMs) => awaitOwnerStatus(dataRoot, pid, deadlineMs, () => ({ close: () => {}, on: () => undefined as never })),
-        retire: (dataRoot, status, until) => retireOutdatedOwner(dataRoot, status as never,
-          deadlineBoundRetireDependencies(until, identity(dataRoot === neverExits.dataRoot ? 'none' : 'never'))),
+      const running = teardownCaseOwners({
+        dirs: [pendingForever.root, neverExits.root, noStatus.root], deadline: hookDeadline, posix: true, step: teardown.step,
+        removeDir: (dir, until) => removeTempDirWithRetry(dir, until, () => { rmAttempts.push(Date.now()); throw new Error('EBUSY'); }, () => {}),
+        retire: {
+          list: slowPs,
+          // owner 永不写 status：用永不触发的 watcher，只有截止时刻能结束等待。
+          awaitStatus: (dataRoot, pid, deadlineMs) => awaitOwnerStatus(dataRoot, pid, deadlineMs, () => ({ close: () => {}, on: () => undefined as never })),
+          retire: (dataRoot, status, until) => retireOutdatedOwner(dataRoot, status as never,
+            deadlineBoundRetireDependencies(until, identity(dataRoot === neverExits.dataRoot ? 'none' : 'never'))),
+        },
+        reclaim: { list: slowPs, kill: () => {}, exists: () => true },
       }).then((value) => { settled = true; return value; });
-      await vi.advanceTimersByTimeAsync(retireDeadline - started - 1);
-      expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(await retiring).toEqual([
-        { ...pendingForever.owner, reason: 'kept_unknown' },
-        { ...neverExits.owner, reason: 'kept_unverified' },
-        { ...noStatus.owner, reason: 'missing_status' },
-      ]);
-      expect(Date.now()).toBe(retireDeadline);
-      // 回收阶段：SIGTERM 之后永不退出的 owner，到 hook 截止时刻判 reclaimed=false。
-      const reclaiming = reclaimLateOwners(ownerPathPrefixes([pendingForever.root]), {
-        list: () => [pendingForever.owner], kill: () => {}, deadline: hookDeadline,
-        awaitGone: (pid) => awaitProcessGone(pid, () => true, hookDeadline - Date.now(), () => true),
-      });
-      await vi.advanceTimersByTimeAsync(hookDeadline - Date.now());
-      expect(await reclaiming).toEqual([{ ...pendingForever.owner, reason: 'late_after_removal', reclaimed: false }]);
-      expect(Date.now() - started).toBeLessThanOrEqual(TEARDOWN_BUDGET_MS);
+      while (!settled && Date.now() <= hookDeadline) await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(true);
+      expect(Date.now()).toBeLessThanOrEqual(hookDeadline);
+      const report = await running;
+      expect(report).toEqual({ reclaimFailed: false, survivors: [
+        { ...pendingForever.owner, reason: 'kept_unknown', reclaimed: false },
+        { ...neverExits.owner, reason: 'kept_unverified', reclaimed: false },
+        { ...noStatus.owner, reason: 'missing_status', reclaimed: false },
+      ] });
+      // 退休阶段首尾各一次、回收扫描一次、三个未退的 owner 共用最后一次快照：共 4 次 ps。
+      expect(psReads).toBe(4);
+      expect(rmAttempts.length).toBeGreaterThanOrEqual(3);
+      expect(rmAttempts.every((at) => at <= removeDeadline)).toBe(true);
+      expect(teardown.errors).toEqual([]);
     } finally { vi.useRealTimers(); }
+  });
+
+  // 第 7 轮 codex Major1：到期仍在的 owner 共用一次进程表快照；pid 已被复用的判已退；快照读失败时错误附在每个 owner 上。
+  it('confirms all still-alive owners with one shared process-table snapshot', async () => {
+    const a = makeOwner(41040);
+    const b = makeOwner(41041);
+    const c = makeOwner(41042);
+    const prefixes = ownerPathPrefixes([a.root, b.root, c.root]);
+    let reads = 0;
+    const tables = [[a.owner, b.owner, c.owner], [a.owner]];
+    const result = await reclaimLateOwners(prefixes, { list: () => tables[reads++]!, kill: () => {}, awaitGone: async () => false });
+    expect(reads).toBe(2);
+    expect(result.map((owner) => [owner.pid, owner.reclaimed])).toEqual([[41040, false], [41041, true], [41042, true]]);
+    const failure = new Error('ps 超时');
+    let calls = 0;
+    const failed = await reclaimLateOwners(prefixes, {
+      list: () => { calls += 1; if (calls > 1) throw failure; return [a.owner, b.owner]; }, kill: () => {}, awaitGone: async () => false,
+    });
+    expect(failed).toEqual([{ ...a.owner, reason: 'late_after_removal', reclaimed: false, error: failure }, { ...b.owner, reason: 'late_after_removal', reclaimed: false, error: failure }]);
+  });
+
+  // 第 7 轮 codex Major2：第一次总会删；之后每次重试前看截止时刻，退避不越过截止；删不掉只报告、不抛。
+  it('removeTempDirWithRetry never retries past its deadline', async () => {
+    const reports: string[] = [];
+    let attempts = 0;
+    await removeTempDirWithRetry('/case/x', Date.now() - 1, () => { attempts += 1; throw new Error('EBUSY'); }, (message) => reports.push(message));
+    expect(attempts).toBe(1);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain('EBUSY');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const until = Date.now() + 250;
+      const at: number[] = [];
+      const done = removeTempDirWithRetry('/case/y', until, () => { at.push(Date.now()); throw new Error('EBUSY'); }, () => {});
+      await vi.advanceTimersByTimeAsync(1_000);
+      await done;
+      expect(at.every((time) => time <= until)).toBe(true);
+      expect(at.length).toBe(2);
+    } finally { vi.useRealTimers(); }
+    let ok = 0;
+    await removeTempDirWithRetry('/case/z', Date.now() + 1_000, () => { ok += 1; }, () => { throw new Error('不应报告'); });
+    expect(ok).toBe(1);
+  });
+
+  // 第 7 轮 DS M3：阻塞 ps 的超时取所在阶段的剩余时间，到期就不读（timeout=0 在 execFileSync 里是不限时）。
+  it('psTimeoutFor caps the ps timeout by the remaining budget and refuses an expired one', () => {
+    expect(psTimeoutFor(Date.now() + 60_000)).toBe(1_000);
+    expect(psTimeoutFor(Date.now() + 60_000, 400)).toBe(400);
+    const left = psTimeoutFor(Date.now() + 300);
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThanOrEqual(300);
+    expect(() => psTimeoutFor(Date.now() - 1)).toThrow('收尾预算已用完');
+  });
+
+  // 第 7 轮 DS M2：darwin 上读 cmdline/uid 是 ps；注入后这些读取到期即拒绝（产品 catch → kept_unverified），不再需要按平台预留。
+  it('deadline-bound retire dependencies reject slow identity reads at the deadline and skip a late pending read', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      let pendingReads = 0;
+      const deadline = Date.now() + 1_000;
+      const deps = deadlineBoundRetireDependencies(deadline, {
+        readCmdline: () => new Promise<never>(() => {}), readUid: () => new Promise<never>(() => {}),
+        readPendingTasks: async () => { pendingReads += 1; return 'none'; },
+      });
+      const cmdline = deps.readCmdline!(1).catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await cmdline).toContain('readCmdline');
+      expect(await deps.readPendingTasks!('/case')).toBe('unknown');
+      expect(pendingReads).toBe(0);
+      const fresh = deadlineBoundRetireDependencies(Date.now() + 1_000, { readPendingTasks: async () => { pendingReads += 1; return 'none'; } });
+      expect(await fresh.readPendingTasks!('/case')).toBe('none');
+      expect(pendingReads).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // 第 7 轮 DS minor 1：预算已不允许等 status 时，没有 status 记 teardown_deadline，不归咎于产品（missing_status）。
+  it('reports teardown_deadline instead of missing_status when the budget left no time to wait', async () => {
+    const { root, owner } = makeOwner(41043, null);
+    const waits: number[] = [];
+    const survivors = await retireActivityOwnersUnder([root], {
+      list: () => [owner], deadline: Date.now() + PS_SCAN_RESERVE_MS, awaitStatus: async (_d, _p, ms) => { waits.push(ms); return undefined; },
+    });
+    expect(waits).toEqual([0]);
+    expect(survivors).toEqual([{ ...owner, reason: 'teardown_deadline' }]);
   });
 
   it('skips the product entry with teardown_deadline when the identity checks no longer fit the budget', async () => {
@@ -362,14 +452,14 @@ describe('owner teardown report (#145)', () => {
       retired: [owner(1, 'appeared_during_teardown')], retireStepFailed: false, prefixes,
       reclaim: async (_prefixes, reasonFor) => [owner(1, reasonFor(1), { reclaimed: true })],
     });
-    expect(report).toEqual({ survivors: [owner(1, 'appeared_during_teardown', { reclaimed: true })] });
+    expect(report).toEqual({ survivors: [owner(1, 'appeared_during_teardown', { reclaimed: true })], reclaimFailed: false });
   });
 
   it('keeps every retire-phase detail, including appeared owners, when the reclaim step fails', async () => {
     const failure = new Error('ps 不可用');
     const retired = [owner(1, 'kept_pending'), owner(2, 'appeared_during_teardown'), owner(3, 'teardown_error', { error: new Error('retire rejected') })];
     const report = await reclaimAndReport({ retired, retireStepFailed: false, prefixes, reclaim: async () => { throw failure; } });
-    expect(report.reclaimError).toBe(failure);
+    expect(report).toMatchObject({ reclaimFailed: true, error: failure });
     expect(report.survivors).toEqual([retired[0], retired[2], retired[1]]);
   });
 

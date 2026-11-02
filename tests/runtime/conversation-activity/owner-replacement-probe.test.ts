@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { probeReplacementOwner } from '../../../src/runtime/conversation-activity/cli.js';
+import { handleOwnerDisconnect, probeReplacementOwner } from '../../../src/runtime/conversation-activity/cli.js';
 import { ConversationActivityOwnerClient } from '../../../src/runtime/conversation-activity/owner-client.js';
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 it.each(['new', 'old'])('requires a live different epoch: %s', async epoch => {
@@ -36,4 +36,20 @@ it.skipIf(process.platform === 'win32')('treats an unusable data root as no succ
     await vi.advanceTimersByTimeAsync(1500);
     expect(await pending).toBe(false);
   } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+// #145（第 7 轮 DS M4）：断连处理是 fire-and-forget，onOwnerReplaced / onError 自身抛错都不能变成未处理拒绝。
+it('keeps the disconnect reaction from rejecting when the callbacks throw', async () => {
+  const errors: unknown[] = [];
+  const replacedFailure = new Error('flush failed');
+  await expect(handleOwnerDisconnect(async () => true, () => false, {
+    onOwnerReplaced: () => { throw replacedFailure; }, onError: error => { errors.push(error); },
+  })).resolves.toBeUndefined();
+  expect(errors).toEqual([replacedFailure]);
+  await expect(handleOwnerDisconnect(async () => { throw new Error('probe failed'); }, () => false, {
+    onError: () => { throw new Error('diagnostics failed'); },
+  })).resolves.toBeUndefined();
+  let replaced = 0;
+  await handleOwnerDisconnect(async () => true, () => true, { onOwnerReplaced: () => { replaced += 1; } });
+  expect(replaced).toBe(0);
 });

@@ -8,7 +8,7 @@ import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition }
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createTeardownSteps } from '../support/teardown-steps.js';
-import { listActivityOwnerProcesses, ownerPathPrefixes, RECLAIM_RESERVE_MS, reclaimAndReport, REMOVE_RESERVE_MS, reclaimLateOwners, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, type ActivityOwnerSurvivor } from '../support/activity-owner-teardown.js';
+import { listActivityOwnerProcesses, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -929,27 +929,6 @@ function countOccurrences(text: string, needle: string): number {
   return text.split(needle).length - 1;
 }
 
-// deadline：#145 收尾预算（Date.now 时基）。原有的退避重试不变，但不越过截止时刻，保证整个 afterEach 小于 hookTimeout。
-async function removeTempDirWithRetry(dir: string, deadline = Number.POSITIVE_INFINITY): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      const left = deadline - Date.now();
-      if (left <= 0) break;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(200 * (attempt + 1), 1_000, left)));
-    }
-  }
-  // POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
-  // 持有会话文件句柄时临时目录删不掉，rmSync 报 EPERM（Windows job 上 66 个用例
-  // 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，
-  // 由 CI 机器回收。
-  process.stderr.write(`[chat-interactive-runtime] 未能清理临时目录 ${dir}: ${String(lastError)}\n`);
-}
-
 function normalizeAssistantLine(line: string): string {
   const trimmed = line.trim();
   return trimmed.startsWith('● ') ? trimmed.slice(2) : trimmed;
@@ -1256,8 +1235,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   afterEach(async () => {
     // #145（codex M2）：每一步独立收尾，任何一步抛错都不能跳过后面的删目录 / resetModules / clearAllMocks /
     // resetAdapterState，否则会污染之后的用例；所有错误最后汇总抛出。
-    // 整个收尾共用一个截止时刻（预算 TEARDOWN_BUDGET_MS < 默认 hookTimeout 10s，见 activity-owner-teardown.ts）：
-    // 退休阶段 → 删目录（REMOVE_RESERVE_MS）→ 回收阶段（RECLAIM_RESERVE_MS），各阶段只用到自己的截止时刻。
+    // 整个收尾共用一个注入的截止时刻（TEARDOWN_BUDGET_MS = 9s，小于仓库里最小的 hookTimeout 10s；
+    // 阶段划分见 activity-owner-teardown.ts），各阶段只用到自己的截止时刻。
     const teardownDeadline = Date.now() + TEARDOWN_BUDGET_MS;
     const teardown = createTeardownSteps('用例收尾（#145）');
     const step = teardown.step;
@@ -1273,26 +1252,14 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const caseDirs = tempDirs.splice(0);
     // #145：删目录前先收掉本用例拉起的 activity owner（detached，空闲 20 分钟才退），否则
     // 一个文件跑完累积几十个常驻进程。还在启动中的 owner 先等它的 status 落盘再收；收不掉的按原因判本用例失败（闸门）。
-    // Windows：产品的身份校验不支持（retireOutdatedOwner 恒为 kept_unverified），不收也不判，PR 中列为未覆盖项。
-    const posix = process.platform !== 'win32';
-    // undefined = 前缀没算成（那一步的错误已记下），区别于“算过但为空”。
-    let ownerPrefixes: string[] | undefined;
-    let retireStepFailed = false;
-    const retired: ActivityOwnerSurvivor[] = [];
-    if (posix) {
-      await step(() => { ownerPrefixes = ownerPathPrefixes(caseDirs); });
-      retireStepFailed = !await step(async () => {
-        retired.push(...await retireActivityOwnersUnder(caseDirs, { deadline: teardownDeadline - RECLAIM_RESERVE_MS - REMOVE_RESERVE_MS }));
-      });
-    }
-    for (const dir of caseDirs) await step(() => removeTempDirWithRetry(dir, teardownDeadline - RECLAIM_RESERVE_MS));
-    // 删目录之后按删除前算好的前缀（原始路径 + realpath）再扫一次，把仍在的 owner 全部回收（SIGTERM + 确认退出），
-    // 合并与报告规则见 reclaimAndReport（有单测）。这次扫描之后才拉起的 owner 认领不到，这是收尾无法闭合的窗口。
-    const report = await reclaimAndReport({
-      retired, retireStepFailed, prefixes: posix ? ownerPrefixes : undefined,
-      reclaim: (prefixes, reasonFor) => reclaimLateOwners(prefixes, { reasonFor, deadline: teardownDeadline }),
+    // 删目录之后按删除前算好的前缀（原始路径 + realpath）再扫一次，把仍在的 owner 全部回收（SIGTERM + 确认退出）。
+    // 编排、合并与报告规则见 teardownCaseOwners / reclaimAndReport（有单测）。回收扫描之后才拉起的 owner 认领不到，这是收尾无法闭合的窗口。
+    // Windows：产品的身份校验不支持（retireOutdatedOwner 恒为 kept_unverified），不收也不判，只删目录，PR 中列为未覆盖项。
+    const report = await teardownCaseOwners({
+      dirs: caseDirs, deadline: teardownDeadline, posix: process.platform !== 'win32', step,
+      removeDir: (dir, deadline) => removeTempDirWithRetry(dir, deadline),
     });
-    if (report.reclaimError !== undefined) teardown.fail(report.reclaimError);
+    if (report.reclaimFailed) teardown.fail(report.error);
     const ownerSurvivors = report.survivors;
 
     await step(() => vi.resetModules());
@@ -1301,7 +1268,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     if (ownerSurvivors.length) {
       // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
       // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
-      teardown.fail(new Error(`用例收尾后仍有 activity owner 存活（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
+      teardown.fail(new Error(`用例收尾发现未按产品入口正常退休的 activity owner（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
     }
     teardown.finish();
   });

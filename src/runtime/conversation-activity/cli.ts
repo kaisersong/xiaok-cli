@@ -41,12 +41,7 @@ export class CliConversationActivities {
     const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
     this.profileId = profileId;
     this.stopDisconnect = options.ownerClient?.onDisconnect(epoch => {
-      void probeReplacementOwner(root, epoch, () => this.disposed).then(replaced => {
-        if (replaced && !this.disposed) options.onOwnerReplaced?.();
-      }, error => {
-        // A throwing diagnostics callback must not turn this fire-and-forget chain back into an unhandled rejection (#145).
-        try { options.onError?.(error); } catch {}
-      });
+      void handleOwnerDisconnect(() => probeReplacementOwner(root, epoch, () => this.disposed), () => this.disposed, options);
     });
     this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
     this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
@@ -119,6 +114,20 @@ export class CliConversationActivities {
 }
 
 /** A short, read-only attachment provides positive evidence of replacement. */
+/**
+ * Fire-and-forget reaction to an owner disconnect. Neither the probe, the replacement
+ * callback nor the diagnostics callback may turn it into an unhandled rejection (#145):
+ * a throwing onOwnerReplaced goes to onError, and a throwing onError is dropped.
+ */
+export function handleOwnerDisconnect(
+  probe: () => Promise<boolean>, disposed: () => boolean,
+  callbacks: { onOwnerReplaced?(): void; onError?(error: unknown): void },
+): Promise<void> {
+  return probe()
+    .then(replaced => { if (replaced && !disposed()) callbacks.onOwnerReplaced?.(); })
+    .catch(error => { try { callbacks.onError?.(error); } catch {} });
+}
+
 export async function probeReplacementOwner(dataRoot: string, disconnectedEpoch: string, cancelled: () => boolean = () => false): Promise<boolean> {
   const deadline = Date.now() + 1500;
   while (!cancelled() && Date.now() < deadline) {
