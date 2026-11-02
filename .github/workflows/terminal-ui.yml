@@ -15,6 +15,7 @@ on:
       - 'tests/ui/**'
       - 'tests/commands/chat-interactive-runtime.test.ts'
       - 'src/runtime/verification/**'
+      - 'tests/runtime/verification/known-directory-writer-root.test.ts'
       - 'tests/ai/memory/background-diagnostics.test.ts'
       - 'tests/utils/logger.test.ts'
       - 'tests/ai/tools/ask-user*.test.ts'
@@ -42,6 +43,7 @@ on:
       - 'tests/ui/**'
       - 'tests/commands/chat-interactive-runtime.test.ts'
       - 'src/runtime/verification/**'
+      - 'tests/runtime/verification/known-directory-writer-root.test.ts'
       - 'tests/ai/memory/background-diagnostics.test.ts'
       - 'tests/utils/logger.test.ts'
       - 'tests/ai/tools/ask-user*.test.ts'
@@ -111,6 +113,7 @@ jobs:
           .test-dist/tests/ai/tools/ask-user-question.test.js
           .test-dist/tests/ai/tools/ask-user.test.js
           .test-dist/tests/commands/chat-interactive-runtime.test.js
+          .test-dist/tests/runtime/verification/known-directory-writer-root.test.js
       - uses: actions/setup-python@v5
         if: runner.os == 'Linux'
         with:

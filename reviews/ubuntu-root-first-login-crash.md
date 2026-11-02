@@ -26,4 +26,5 @@ GLM-5.3 通过真实 provider adapter 独立审查设计及完整 fence 模块�
 - npm 1.6.1 原包在 UID 0 OS 观察注入下，真实 CLI/PTY 得到 ready、AggregateError 与 chat.js 1503/351/5088/5184，完整重现用户的四个位置。只应用单文件补丁后同入口进入 K3 输入框、保存会话并可 /exit；不是 Ubuntu 实机运行。
 - 临时安装器 `scripts/apply-ubuntu-root-startup-hotfix.mjs`：真实 npm 原文件 SHA-256 门槛、语法检查、原文件备份、单次替换、重复执行与版本/文件不匹配时无写入均通过。仅适用于 npm 1.6.1 原文件。
 - GLM-5.3 对最终源码与 10 条回归再次独立审查，APPROVE，无 P0/P1；另审安装器，APPROVE。
+- 新回归接入 Terminal UI 的 Node 22.14.0/24 矩阵，Linux/macOS 执行，Windows 因没有 POSIX UID API 明确跳过；push/PR 的 path filter 包含新用例。最终包装后的 10 项复跑通过，GLM-5.3 对 CI 与平台边界增量审查 APPROVE。
 - 原 Ubuntu 尚待应用补丁复跑；没有发布新版或宣称用户机器已修复。

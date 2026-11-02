@@ -1,5 +1,5 @@
 import {setProfileTestHome} from '../../support/profile-home-env.js';
-import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -28,6 +28,7 @@ import {FileSessionStore} from '../../../src/ai/runtime/session-store/file-store
 import {AgentSessionState} from '../../../src/ai/runtime/session.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 
+describe.skipIf(process.platform==='win32')('POSIX ordinary writer account',()=>{
 let root:string;
 beforeEach(()=>{
  root=realpathSync(mkdtempSync(join(tmpdir(),'known-root-writer-')));
@@ -66,4 +67,5 @@ it.each(['effective','account'] as const)('rejects a root %s UID mismatch',kind=
 it('still rejects a root home owned by another UID',()=>{
  account.ownerUid=1001;
  expect(()=>createKnownDirectoryWriterFence(root,'session-root').assertOpen()).toThrow('known_writer_fence_directory');
+});
 });
