@@ -1175,14 +1175,19 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   const diagnosticReadFailures: unknown[] = [];
   let diagnosticCase = 0;
   const ownerEntryScript = fileURLToPath(new URL('../../src/runtime/conversation-activity/owner-entry.js', import.meta.url));
+  // 诊断不得改变被测行为：ps 不可用（EAGAIN、精简镜像）时降级为说明文字，不抛错。
+  const countLiveActivityOwners = (): number | string => {
+    if (process.platform === 'win32') return 'UNKNOWN_NOT_MEASURED_ON_WINDOWS';
+    try { return listActivityOwnerProcesses(ownerEntryScript).length; } catch (error) { return `ps_unavailable:${(error as NodeJS.ErrnoException).code ?? 'error'}`; }
+  };
   const reportWorkerResources = (stage: string): void => {
     const resourceTypes: Record<string, number> = {};
     for (const type of process.getActiveResourcesInfo()) resourceTypes[type] = (resourceTypes[type] ?? 0) + 1;
     diagnosticWrite(`[fixture-worker-resources] ${JSON.stringify({ stage, caseOrdinal: diagnosticCase,
       knownFixtureRoots: diagnosticRoots.size, workerActiveResourcesOnly: resourceTypes,
       // #145：本文件拉起、仍存活的 activity owner 数（Windows 未测）与主机空闲内存，供 CI 日志对照。
-      liveDetachedProcessCount: process.platform === 'win32' ? 'UNKNOWN_NOT_MEASURED' : listActivityOwnerProcesses(ownerEntryScript).length,
-      hostFreeMemMB: Math.round(freemem() / 1048576) })}\n`);
+      liveDetachedProcessCount: countLiveActivityOwners(),
+      hostFreeMemMB: Math.round(freemem() / 1048576) /* macOS 的 freemem 不含 inactive/purgeable，只作粗略参考 */ })}\n`);
   };
   const retainOwnCrashReports = (): void => {
     for (const root of tempDirs) diagnosticRoots.add(root);
@@ -1610,6 +1615,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
 
       // chat 退出后 owner 仍按设计常驻（空闲 20 分钟才退）：这正是会在用例之间累积的进程。
       const activityDir = join(configDir, 'conversation-activity');
+      // owner 在 listen 之后才写 status 文件：显式等待该状态，而不是假设它已落盘。
+      await waitFor(() => readdirSync(activityDir, { withFileTypes: true }).some((entry) => entry.isDirectory() && existsSync(join(activityDir, entry.name, 'activity-owner.status.json'))));
       const dataRoots = readdirSync(activityDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join(activityDir, entry.name));
       expect(dataRoots).toHaveLength(1);
       ownerPid = (JSON.parse(readFileSync(join(dataRoots[0], 'activity-owner.status.json'), 'utf8')) as { pid: number }).pid;

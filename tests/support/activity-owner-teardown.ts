@@ -15,8 +15,9 @@ import { ACTIVITY_STORAGE_NAMES } from '../../src/runtime/conversation-activity/
  * 收掉：用产品自带、带身份校验的 retireOutdatedOwner（status 文件、cmdline、uid、无待办）。
  */
 export type OwnerSurvivorReason =
-  | Exclude<OwnerRetirementOutcome, 'retired'>   // 产品明确拒绝收（kept_pending / kept_unknown）或身份校验未过
+  | Exclude<OwnerRetirementOutcome, 'retired'>   // kept_pending / kept_unknown：产品按策略保留；kept_unverified：身份校验未过
   | 'missing_status'                               // 进程在，但没有可用的 status 文件
+  | 'status_pid_mismatch'                          // status 文件记录的不是这个进程
   | 'retired_but_alive';                           // 产品报 retired，进程却仍在
 export interface ActivityOwnerSurvivor { pid: number; configPath: string; reason: OwnerSurvivorReason }
 export interface ActivityOwnerProcess { pid: number; configPath: string }
@@ -53,14 +54,15 @@ function ownersUnder(roots: readonly string[]): ActivityOwnerProcess[] {
  */
 export async function retireActivityOwnersUnder(dirs: readonly string[]): Promise<ActivityOwnerSurvivor[]> {
   const reasons = new Map<number, OwnerSurvivorReason>();
-  for (const owner of ownersUnder(dirs)) {
+  // 并行收：每个 owner 最坏约 8s（待办读取 5s + 退出等待 3s），串行会让多 owner 退化成 hook 超时。
+  await Promise.all(ownersUnder(dirs).map(async (owner) => {
     const dataRoot = dirname(owner.configPath);
     let status: { pid?: unknown; ownerEpoch?: unknown; rootHash?: unknown };
     try { status = JSON.parse(readFileSync(join(dataRoot, ACTIVITY_STORAGE_NAMES.status), 'utf8')); }
-    catch { reasons.set(owner.pid, 'missing_status'); continue; }
-    if (status.pid !== owner.pid) { reasons.set(owner.pid, 'missing_status'); continue; }
+    catch { reasons.set(owner.pid, 'missing_status'); return; }
+    if (status.pid !== owner.pid) { reasons.set(owner.pid, 'status_pid_mismatch'); return; }
     const outcome = await retireOutdatedOwner(dataRoot, status);
     reasons.set(owner.pid, outcome === 'retired' ? 'retired_but_alive' : outcome);
-  }
+  }));
   return ownersUnder(dirs).map((owner) => ({ ...owner, reason: reasons.get(owner.pid) ?? 'missing_status' }));
 }

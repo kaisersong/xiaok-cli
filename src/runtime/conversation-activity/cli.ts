@@ -43,7 +43,7 @@ export class CliConversationActivities {
     this.stopDisconnect = options.ownerClient?.onDisconnect(epoch => {
       void probeReplacementOwner(root, epoch, () => this.disposed).then(replaced => {
         if (replaced && !this.disposed) options.onOwnerReplaced?.();
-      });
+      }, error => options.onError?.(error));
     });
     this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
     this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
