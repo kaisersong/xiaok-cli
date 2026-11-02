@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, symlinkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, symlinkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { freemem, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -1268,7 +1268,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     if (ownerSurvivors.length) {
       // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
       // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
-      teardown.fail(new Error(`用例收尾发现未按产品入口正常退休的 activity owner（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
+      teardown.fail(new Error(`用例收尾发现未按产品入口正常退休的 activity owner（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.budget === undefined ? '' : ` budget=${owner.budget}`}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
     }
     teardown.finish();
   });

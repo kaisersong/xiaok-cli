@@ -25,7 +25,11 @@ export type OwnerSurvivorReason =
   | 'appeared_during_teardown'                     // 第一次扫描之后、收尾过程中才出现的 owner，未走退休入口
   | 'unretired_after_error'                        // 退休那一步整体出错（例如 ps 不可用）而没被尝试的 owner
   | 'late_after_removal';                          // 删目录之后才出现、argv 指向已删目录的 owner
-export interface ActivityOwnerSurvivor { pid: number; configPath: string; reason: OwnerSurvivorReason; error?: unknown; reclaimed?: boolean }
+export interface ActivityOwnerSurvivor {
+  pid: number; configPath: string; reason: OwnerSurvivorReason; error?: unknown; reclaimed?: boolean;
+  /** 收尾预算截断了哪一步（第 8 轮 DS M3）：有值时可能是机器慢、不一定是泄漏，失败消息里单独写出。 */
+  budget?: string;
+}
 export interface ActivityOwnerProcess { pid: number; configPath: string }
 
 /**
@@ -72,6 +76,8 @@ export function ownerPathPrefixes(dirs: readonly string[]): string[] {
 }
 
 export function ownersWithPrefixes(prefixes: readonly string[], list: () => ActivityOwnerProcess[] = listActivityOwnerProcesses): ActivityOwnerProcess[] {
+  // 没有前缀就不读进程表（第 8 轮 DS minor 7：空用例不白跑阻塞 ps）。
+  if (!prefixes.length) return [];
   return list().filter((owner) => prefixes.some((prefix) => owner.configPath.startsWith(prefix)));
 }
 
@@ -94,6 +100,8 @@ export const OWNER_STARTUP_STATUS_WAIT_MS = 5_000;
  *   产品入口的每个异步依赖都与截止时刻赛跑（经产品已有的依赖注入，见 deadlineBoundRetireDependencies）。
  */
 export const TEARDOWN_BUDGET_MS = 9_000;
+/** 预算之后的 resetModules / clearAllMocks / resetAdapterState 留的余量；TEARDOWN_BUDGET_MS + 它 ≤ 各配置的 hookTimeout 有单测从配置取值断言。 */
+export const POST_TEARDOWN_RESERVE_MS = 1_000;
 export const RECLAIM_RESERVE_MS = 2_000;
 export const REMOVE_RESERVE_MS = 1_000;
 export const PS_SCAN_RESERVE_MS = 1_000;
@@ -114,6 +122,14 @@ export function psTimeoutFor(deadline: number, cap = 1_000): number {
   return Math.min(cap, left);
 }
 
+/** 收尾里默认的进程表读取：每次都带截止时刻剩余的时间作 ps 超时，已到期就不读（第 8 轮 DS M2：可单测的接线）。 */
+export function deadlineBoundOwnerList(
+  deadline: number,
+  list: (entryScript?: string, timeoutMs?: number) => ActivityOwnerProcess[] = listActivityOwnerProcesses,
+): () => ActivityOwnerProcess[] {
+  return () => list(undefined, psTimeoutFor(deadline));
+}
+
 /** 到截止时刻就以 onDeadline 结束的等待；截止前完成则返回原结果。计时器总会清掉。 */
 function raceDeadline<T>(work: Promise<T>, deadline: number, onDeadline: () => T | Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -130,17 +146,27 @@ function raceDeadline<T>(work: Promise<T>, deadline: number, onDeadline: () => T
  * - 退出等待的 sleep 到期后立即返回（产品的 3s 循环随即用完 → kept_unverified）。
  * 这些结果都判失败，并在回收阶段 SIGTERM。
  */
-export function deadlineBoundRetireDependencies(deadline: number, base: Partial<OwnerRetirementDependencies> = {}): Partial<OwnerRetirementDependencies> {
+export function deadlineBoundRetireDependencies(
+  deadline: number, base: Partial<OwnerRetirementDependencies> = {},
+  /** 某一步因预算到期而被截断时回调（第 8 轮 DS M3：区分“预算不足”与“owner 真收不掉”）。 */
+  onBudget: (step: string) => void = () => {},
+): Partial<OwnerRetirementDependencies> {
   const real = { ...defaultOwnerRetirementDependencies(), ...base };
-  const expired = (step: string) => () => { throw new Error(`收尾预算已用完：${step}（#145）`); };
+  const expired = (step: string) => () => { onBudget(step); throw new Error(`收尾预算已用完：${step}（#145）`); };
   return {
     ...base,
     readStatusFile: (path) => raceDeadline(real.readStatusFile(path), deadline, expired('readStatusFile')),
     readCmdline: (pid) => raceDeadline(real.readCmdline(pid), deadline, expired('readCmdline')),
     readUid: (pid) => raceDeadline(real.readUid(pid), deadline, expired('readUid')),
-    readPendingTasks: (dataRoot) => remainingMs(deadline) >= PENDING_READ_MIN_MS
-      ? raceDeadline(real.readPendingTasks(dataRoot), deadline, () => 'unknown' as const) : Promise.resolve('unknown' as const),
-    sleep: (ms) => { const left = remainingMs(deadline); return left > 0 ? real.sleep(Math.min(ms, left)) : Promise.resolve(); },
+    readPendingTasks: (dataRoot) => {
+      if (remainingMs(deadline) < PENDING_READ_MIN_MS) { onBudget('readPendingTasks 未启动'); return Promise.resolve('unknown' as const); }
+      return raceDeadline(real.readPendingTasks(dataRoot), deadline, () => { onBudget('readPendingTasks'); return 'unknown' as const; });
+    },
+    sleep: (ms) => {
+      const left = remainingMs(deadline);
+      if (left < ms) onBudget('退出等待');
+      return left > 0 ? real.sleep(Math.min(ms, left)) : Promise.resolve();
+    },
   };
 }
 
@@ -188,7 +214,7 @@ export function awaitOwnerStatus(dataRoot: string, pid: number, deadlineMs = OWN
 
 export interface RetireActivityOwnersDependencies {
   list: () => ActivityOwnerProcess[];
-  retire: (dataRoot: string, status: OwnerStatus, deadline: number) => Promise<OwnerRetirementOutcome>;
+  retire: (dataRoot: string, status: OwnerStatus, deadline: number, onBudget: (step: string) => void) => Promise<OwnerRetirementOutcome>;
   awaitStatus: (dataRoot: string, pid: number, deadlineMs: number) => Promise<OwnerStatus | undefined>;
   /** 退休阶段的截止时刻（Date.now 时基），含阶段末尾那次 ps；默认 now + TEARDOWN_BUDGET_MS - RECLAIM_RESERVE_MS - REMOVE_RESERVE_MS。 */
   deadline: number;
@@ -208,12 +234,12 @@ export async function retireActivityOwnersUnder(dirs: readonly string[], depende
   const deadline = dependencies.deadline ?? Date.now() + TEARDOWN_BUDGET_MS - RECLAIM_RESERVE_MS - REMOVE_RESERVE_MS;
   // 每个 owner 的等待与退休在 ownerDeadline 前收口，留 PS_SCAN_RESERVE_MS 给阶段末尾的 ps。
   const ownerDeadline = deadline - PS_SCAN_RESERVE_MS;
-  const list = dependencies.list ?? (() => listActivityOwnerProcesses(undefined, psTimeoutFor(deadline)));
-  const retire = dependencies.retire ?? ((dataRoot, status, until) => retireOutdatedOwner(
-    dataRoot, status as Parameters<typeof retireOutdatedOwner>[1], deadlineBoundRetireDependencies(until, dependencies.retireDependencies)));
+  const list = dependencies.list ?? deadlineBoundOwnerList(deadline);
+  const retire = dependencies.retire ?? ((dataRoot, status, until, onBudget) => retireOutdatedOwner(
+    dataRoot, status as Parameters<typeof retireOutdatedOwner>[1], deadlineBoundRetireDependencies(until, dependencies.retireDependencies, onBudget)));
   const awaitStatus = dependencies.awaitStatus ?? ((dataRoot, pid, deadlineMs) => awaitOwnerStatus(dataRoot, pid, deadlineMs));
   const prefixes = ownerPathPrefixes(dirs);
-  const outcomes = new Map<number, { reason: OwnerSurvivorReason; error?: unknown }>();
+  const outcomes = new Map<number, { reason: OwnerSurvivorReason; error?: unknown; budget?: string }>();
   // 并行收，共用同一个截止时刻：等 status 最多 min(5s, 剩余 - RETIRE_MIN_MS)，产品退休入口由注入的截止时刻收口。
   // 每个分支自己 catch，Promise.all 不会提前拒绝。
   await Promise.all(ownersWithPrefixes(prefixes, list).map(async (owner) => {
@@ -227,12 +253,16 @@ export async function retireActivityOwnersUnder(dirs: readonly string[], depende
       if (!status) {
         // 预算已不允许等待（第 7 轮 DS minor 1）：不归咎于产品，记 teardown_deadline。
         const reason: OwnerSurvivorReason = onDisk ? 'status_pid_mismatch' : !existsSync(dataRoot) ? 'data_root_gone' : statusWaitMs === 0 ? 'teardown_deadline' : 'missing_status';
-        outcomes.set(owner.pid, { reason });
+        const budget = reason === 'teardown_deadline' ? '没有剩余预算等 status'
+          : reason === 'missing_status' && statusWaitMs < OWNER_STARTUP_STATUS_WAIT_MS ? `status 等待被预算压到 ${statusWaitMs}ms` : undefined;
+        outcomes.set(owner.pid, budget === undefined ? { reason } : { reason, budget });
         return;
       }
-      if (remainingMs(ownerDeadline) < RETIRE_ENTRY_MIN_MS) { outcomes.set(owner.pid, { reason: 'teardown_deadline' }); return; }
-      const outcome = await retire(dataRoot, status, ownerDeadline);
-      outcomes.set(owner.pid, { reason: outcome === 'retired' ? 'retired_but_alive' : outcome });
+      if (remainingMs(ownerDeadline) < RETIRE_ENTRY_MIN_MS) { outcomes.set(owner.pid, { reason: 'teardown_deadline', budget: '没有剩余预算进入产品退休入口' }); return; }
+      const cut: string[] = [];
+      const outcome = await retire(dataRoot, status, ownerDeadline, (step) => { if (!cut.includes(step)) cut.push(step); });
+      const reason: OwnerSurvivorReason = outcome === 'retired' ? 'retired_but_alive' : outcome;
+      outcomes.set(owner.pid, cut.length ? { reason, budget: `预算到期截断：${cut.join('、')}` } : { reason });
     } catch (error) {
       outcomes.set(owner.pid, { reason: 'teardown_error', error });
     }
@@ -261,7 +291,7 @@ export interface ReclaimLateOwnersDependencies {
 export async function reclaimLateOwners(prefixes: readonly string[], dependencies: Partial<ReclaimLateOwnersDependencies> = {}): Promise<ActivityOwnerSurvivor[]> {
   const kill = dependencies.kill ?? ((pid, signal) => process.kill(pid, signal));
   const deadline = dependencies.deadline ?? Date.now() + RECLAIM_RESERVE_MS;
-  const list = dependencies.list ?? (() => listActivityOwnerProcesses(undefined, psTimeoutFor(deadline)));
+  const list = dependencies.list ?? deadlineBoundOwnerList(deadline);
   // 轮询只用 kill(pid,0)，到 deadline - PS_SCAN_RESERVE_MS 为止；仍在的 owner 共用最后一次 ps 快照确认（第 7 轮 codex Major1）。
   const awaitGone = dependencies.awaitGone ?? ((pid) => awaitProcessGone(pid, () => true, remainingMs(deadline - PS_SCAN_RESERVE_MS), dependencies.exists ?? processExists));
   const reasonFor = dependencies.reasonFor ?? (() => 'late_after_removal' as const);

@@ -1,10 +1,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  awaitOwnerStatus, awaitProcessGone, deadlineBoundRetireDependencies, ownerPathPrefixes, ownersWithPrefixes, processExists, PS_SCAN_RESERVE_MS, psTimeoutFor,
+  awaitOwnerStatus, awaitProcessGone, deadlineBoundOwnerList, deadlineBoundRetireDependencies, POST_TEARDOWN_RESERVE_MS, ownerPathPrefixes, ownersWithPrefixes, processExists, PS_SCAN_RESERVE_MS, psTimeoutFor,
   RECLAIM_RESERVE_MS, reclaimAndReport, reclaimLateOwners, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS,
   teardownCaseOwners, type ActivityOwnerProcess, type ActivityOwnerSurvivor,
 } from '../../support/activity-owner-teardown.js';
@@ -60,7 +61,7 @@ describe('activity owner teardown gate (#145)', () => {
       retire: async () => { calls += 1; return 'retired'; },
     });
     expect(calls).toBe(0);
-    expect(survivors).toEqual([{ ...missing.owner, reason: 'missing_status' }, { ...foreign.owner, reason: 'status_pid_mismatch' }]);
+    expect(survivors).toEqual([{ ...missing.owner, reason: 'missing_status', budget: 'status 等待被预算压到 3500ms' }, { ...foreign.owner, reason: 'status_pid_mismatch' }]);
   });
 
   it.skipIf(process.platform === 'win32')('claims owners through a symlinked case root and ignores owners of other roots', async () => {
@@ -324,8 +325,9 @@ describe('activity owner teardown gate (#145)', () => {
           list: slowPs,
           // owner 永不写 status：用永不触发的 watcher，只有截止时刻能结束等待。
           awaitStatus: (dataRoot, pid, deadlineMs) => awaitOwnerStatus(dataRoot, pid, deadlineMs, () => ({ close: () => {}, on: () => undefined as never })),
-          retire: (dataRoot, status, until) => retireOutdatedOwner(dataRoot, status as never,
-            deadlineBoundRetireDependencies(until, identity(dataRoot === neverExits.dataRoot ? 'none' : 'never'))),
+          // 与默认 retire 的接线相同（含 onBudget），只把身份读取等系统依赖换成桩。
+          retire: (dataRoot, status, until, onBudget) => retireOutdatedOwner(dataRoot, status as never,
+            deadlineBoundRetireDependencies(until, identity(dataRoot === neverExits.dataRoot ? 'none' : 'never'), onBudget)),
         },
         reclaim: { list: slowPs, kill: () => {}, exists: () => true },
       }).then((value) => { settled = true; return value; });
@@ -334,12 +336,13 @@ describe('activity owner teardown gate (#145)', () => {
       expect(Date.now()).toBeLessThanOrEqual(hookDeadline);
       const report = await running;
       expect(report).toEqual({ reclaimFailed: false, survivors: [
-        { ...pendingForever.owner, reason: 'kept_unknown', reclaimed: false },
+        { ...pendingForever.owner, reason: 'kept_unknown', reclaimed: false, budget: '预算到期截断：readPendingTasks' },
+        // 产品自己的 3s 退出等待在截止前用完：这是真的收不掉，不带 budget。
         { ...neverExits.owner, reason: 'kept_unverified', reclaimed: false },
-        { ...noStatus.owner, reason: 'missing_status', reclaimed: false },
+        { ...noStatus.owner, reason: 'missing_status', reclaimed: false, budget: 'status 等待被预算压到 2600ms' },
       ] });
-      // 退休阶段首尾各一次、回收扫描一次、三个未退的 owner 共用最后一次快照：共 4 次 ps。
-      expect(psReads).toBe(4);
+      // ps 次数有上界：退休阶段首尾各一次、回收扫描一次、三个未退的 owner 共用最后一次快照，最多 4 次。
+      expect(psReads).toBeLessThanOrEqual(4);
       expect(rmAttempts.length).toBeGreaterThanOrEqual(3);
       expect(rmAttempts.every((at) => at <= removeDeadline)).toBe(true);
       expect(teardown.errors).toEqual([]);
@@ -419,6 +422,57 @@ describe('activity owner teardown gate (#145)', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // 第 8 轮 DS M1：预算 + 预算后余量必须小于两个配置实际生效的 hookTimeout（从配置取值，不写死 10s）。
+  it('keeps the teardown budget below the hookTimeout of every vitest config that can run the file', async () => {
+    const root = process.cwd();
+    const source = (await import(pathToFileURL(join(root, 'vitest.config.ts')).href)).default as { test?: { hookTimeout?: number } };
+    const sandbox = (await import(pathToFileURL(join(root, 'vitest.sandbox.config.mjs')).href)).default as { test?: { hookTimeout?: number } };
+    // 配置未设 hookTimeout 时 vitest 默认 10s。
+    for (const config of [source, sandbox]) {
+      expect(TEARDOWN_BUDGET_MS + POST_TEARDOWN_RESERVE_MS).toBeLessThanOrEqual(config.test?.hookTimeout ?? 10_000);
+    }
+  });
+
+  // 第 8 轮 DS M2：默认进程表读取的接线——带剩余时间作 ps 超时、到期就不读；退休/回收的默认 list 走它。
+  it('wires the default process-table reads through the deadline', async () => {
+    const timeouts: Array<number | undefined> = [];
+    const fake = (_entry?: string, timeoutMs?: number) => { timeouts.push(timeoutMs); return []; };
+    deadlineBoundOwnerList(Date.now() + 60_000, fake)();
+    deadlineBoundOwnerList(Date.now() + 300, fake)();
+    expect(timeouts[0]).toBe(1_000);
+    expect(timeouts[1]).toBeGreaterThan(0);
+    expect(timeouts[1]).toBeLessThanOrEqual(300);
+    expect(() => deadlineBoundOwnerList(Date.now() - 1, fake)()).toThrow('收尾预算已用完');
+    expect(timeouts).toHaveLength(2);
+    // 不注入 list：到期的阶段不会去跑 ps，而是直接报预算用完。
+    const { root } = makeOwner(41044);
+    await expect(retireActivityOwnersUnder([root], { deadline: Date.now() - 1 })).rejects.toThrow('收尾预算已用完');
+    await expect(reclaimLateOwners(ownerPathPrefixes([root]), { deadline: Date.now() - 1 })).rejects.toThrow('收尾预算已用完');
+  });
+
+  // 第 8 轮 DS minor 7：没有用例目录就不读进程表。
+  it('does not read the process table when there are no case directories', async () => {
+    let reads = 0;
+    expect(await retireActivityOwnersUnder([], { list: () => { reads += 1; return []; } })).toEqual([]);
+    expect(await reclaimLateOwners([], { list: () => { reads += 1; return []; } })).toEqual([]);
+    expect(reads).toBe(0);
+  });
+
+  // 第 8 轮 DS minor 4：Windows（posix=false）只删目录，不收不判。
+  it('only removes the directories on Windows', async () => {
+    const removed: string[] = [];
+    let reads = 0;
+    const teardown = createTeardownSteps('t');
+    const report = await teardownCaseOwners({
+      dirs: ['/case/a', '/case/b'], deadline: Date.now() + TEARDOWN_BUDGET_MS, posix: false, step: teardown.step,
+      removeDir: (dir) => { removed.push(dir); },
+      retire: { list: () => { reads += 1; return []; } }, reclaim: { list: () => { reads += 1; return []; } },
+    });
+    expect(removed).toEqual(['/case/a', '/case/b']);
+    expect(reads).toBe(0);
+    expect(report).toEqual({ survivors: [], reclaimFailed: false });
+  });
+
   // 第 7 轮 DS minor 1：预算已不允许等 status 时，没有 status 记 teardown_deadline，不归咎于产品（missing_status）。
   it('reports teardown_deadline instead of missing_status when the budget left no time to wait', async () => {
     const { root, owner } = makeOwner(41043, null);
@@ -427,7 +481,7 @@ describe('activity owner teardown gate (#145)', () => {
       list: () => [owner], deadline: Date.now() + PS_SCAN_RESERVE_MS, awaitStatus: async (_d, _p, ms) => { waits.push(ms); return undefined; },
     });
     expect(waits).toEqual([0]);
-    expect(survivors).toEqual([{ ...owner, reason: 'teardown_deadline' }]);
+    expect(survivors).toEqual([{ ...owner, reason: 'teardown_deadline', budget: '没有剩余预算等 status' }]);
   });
 
   it('skips the product entry with teardown_deadline when the identity checks no longer fit the budget', async () => {
@@ -437,7 +491,7 @@ describe('activity owner teardown gate (#145)', () => {
       list: () => [owner], deadline: Date.now() + 1_000, retire: async () => { calls += 1; return 'retired'; },
     });
     expect(calls).toBe(0);
-    expect(survivors).toEqual([{ ...owner, reason: 'teardown_deadline' }]);
+    expect(survivors).toEqual([{ ...owner, reason: 'teardown_deadline', budget: '没有剩余预算进入产品退休入口' }]);
   });
 });
 

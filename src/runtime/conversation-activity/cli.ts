@@ -113,7 +113,6 @@ export class CliConversationActivities {
   }
 }
 
-/** A short, read-only attachment provides positive evidence of replacement. */
 /**
  * Fire-and-forget reaction to an owner disconnect. Neither the probe, the replacement
  * callback nor the diagnostics callback may turn it into an unhandled rejection (#145):
@@ -128,6 +127,7 @@ export function handleOwnerDisconnect(
     .catch(error => { try { callbacks.onError?.(error); } catch {} });
 }
 
+/** A short, read-only attachment provides positive evidence of replacement. */
 export async function probeReplacementOwner(dataRoot: string, disconnectedEpoch: string, cancelled: () => boolean = () => false): Promise<boolean> {
   const deadline = Date.now() + 1500;
   while (!cancelled() && Date.now() < deadline) {
