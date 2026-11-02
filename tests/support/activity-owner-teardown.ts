@@ -436,17 +436,6 @@ export async function teardownCaseOwners(input: {
   });
 }
 
-/**
- * 删临时目录（原在 chat-interactive-runtime.test.ts，移到这里以便单测；第 7 轮 codex Major2）。
- * 每次删除（含第一次）启动前都看截止时刻，截止后跳过并写 stderr；退避也不越过截止。
- * posix 上删除走异步 fs.promises.rm（libuv 线程池，不占事件循环）并与截止时刻赛跑（第 9 轮 codex Major）：
- * 到截止还没删完就写 stderr 并返回，删除留在后台继续，后台删除失败时再写一条 stderr，所以单次慢删除也拖不过截止。
- * win32 上用同步 rmSync（见 tempDirRemoverFor）：已启动的单次同步删除不可中断，最坏超出量是这一次删除的耗时。
- * 删不掉只写 stderr、不判失败——
- * POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
- * 持有会话文件句柄时临时目录删不掉，rm 报 EPERM（Windows job 上 66 个用例
- * 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，由 CI 机器回收。
- */
 export type TempDirRemover = (dir: string) => void | Promise<void>;
 
 /**
@@ -463,6 +452,18 @@ export function tempDirRemoverFor(platform: NodeJS.Platform = process.platform):
   return (target) => rmAsync(target, { recursive: true, force: true });
 }
 
+/**
+ * 删临时目录（原在 chat-interactive-runtime.test.ts，移到这里以便单测；第 7 轮 codex Major2）。
+ * 每次删除（含第一次）启动前都看截止时刻，截止后跳过并写 stderr；退避也不越过截止。
+ * posix 上删除走异步 fs.promises.rm（libuv 线程池，不占事件循环）并与截止时刻赛跑（第 9 轮 codex Major）：
+ * 到截止还没删完就写 stderr 并返回，删除留在后台继续，后台删除失败时再写一条 stderr，所以单次慢删除也拖不过截止。
+ * 因此 posix 上本函数返回时目录可能仍在后台删除中，或只删了一部分（第 10 轮 DS Minor6）。
+ * win32 上用同步 rmSync（见 tempDirRemoverFor）：已启动的单次同步删除不可中断，最坏超出量是这一次删除的耗时。
+ * 删不掉只写 stderr、不判失败——
+ * POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
+ * 持有会话文件句柄时临时目录删不掉，rm 报 EPERM（Windows job 上 66 个用例
+ * 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，由 CI 机器回收。
+ */
 export async function removeTempDirWithRetry(
   dir: string, deadline = Number.POSITIVE_INFINITY,
   rm: TempDirRemover = tempDirRemoverFor(),
