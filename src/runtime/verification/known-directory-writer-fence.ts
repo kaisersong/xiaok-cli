@@ -25,7 +25,7 @@ function canonical(path:string):string{
 }
 /** No directory or registry creation on the ordinary admission read path. */
 function location(){
- const account=userInfo(),uid=process.getuid?.();if(!uid||uid!==process.geteuid?.()||account.uid!==uid)fail('user');
+ const account=userInfo(),uid=process.getuid?.();if(uid===undefined||!Number.isSafeInteger(uid)||uid<0||uid!==process.geteuid?.()||account.uid!==uid)fail('user');
  const home=account.homedir,base=join(home,'.xiaok');chain(home);const original=directory(home,uid),paths=[base,join(base,'profile-sources'),join(base,'profile-sources','writer-fences')];
  const observed:Array<{path:string;identity:string;mode:number}>=[];
  let absent=false;
