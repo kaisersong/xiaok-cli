@@ -34,7 +34,16 @@ describe.skipIf(process.platform==='win32')('profile account physical paths',()=
  it('rejects system target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const target=dir('shared/home'),alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=alias;reject(alias);});
  it('rejects user target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const alias=link('dotfiles',dir('shared/home'));process.env.HOME=alias;reject(alias);});
  it('reports unreadable link targets from statSync',()=>{const target=dir('physical'),alias=link('dotfiles',target);process.env.HOME=alias;fake.errors.set('stat:'+target,'EACCES');reject(alias,'unreadable');});
- it('escapes NUL in invalid config path diagnostics',()=>{process.env.XIAOK_CONFIG_DIR=join(root,'bad\0path');expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});});
+ it('escapes NUL in invalid config path diagnostics',()=>{
+  // #123：forks 池里 process.env 是真实环境块，setenv 在 NUL 处截断（'bad\0path' 读回 'bad'），
+  // 只有 threads 的 env 普通对象拷贝能存 NUL。这里显式换成普通对象承载含 NUL 的值，被测入口仍读 process.env。
+  const realEnv=process.env,badPath=join(root,'bad\0path');
+  Object.defineProperty(process,'env',{value:{...realEnv,XIAOK_CONFIG_DIR:badPath},writable:true,configurable:true,enumerable:true});
+  try{
+   expect(process.env.XIAOK_CONFIG_DIR).toBe(badPath);
+   expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});
+  }finally{Object.defineProperty(process,'env',{value:realEnv,writable:true,configurable:true,enumerable:true});}
+ });
  it('rejects sticky system targets owned by a non-root user',()=>{const target=dir('shared',uid,0o1777);dir('shared/home');const alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=join(alias,'home');reject(alias);});
  it('reports unreadable path components',()=>{const home=dir('home');process.env.HOME=home;fake.errors.set(home,'EACCES');reject(home,'unreadable');});
  it('rejects writable system link parents',()=>{const target=dir('physical'),alias=link('var',target,0);stat(root,0,0o777);process.env.HOME=alias;reject(alias);});
