@@ -240,6 +240,27 @@ try {
 let _desktopMemoryStore: MemoryStore | null = null;
 let _desktopMemoryStoreDataRoot: string | null = null;
 let _desktopMemoryStoreBackend: 'layered' | 'fallback' = 'fallback';
+// Stores replaced on a data-root switch or discarded after a failed open. Their close()
+// may still be waiting for writes accepted before it (#150 M3); shutdown waits for them.
+const _retiringDesktopMemoryCloses = new Set<Promise<void>>();
+
+function retireDesktopMemoryStore(store: MemoryStore | null | undefined): void {
+  const closing = store?.close?.();
+  if (!closing) return;
+  const tracked: Promise<void> = Promise.resolve(closing)
+    .catch((error) => { console.warn('[memory] retired store close failed:', (error as Error).message); })
+    .finally(() => { _retiringDesktopMemoryCloses.delete(tracked); });
+  _retiringDesktopMemoryCloses.add(tracked);
+}
+
+/**
+ * Close the desktop memory store for dataRoot and wait for every retired store's close.
+ * Resolves only once each SQLite handle is closed, so the caller may exit or remove files.
+ */
+export async function closeDesktopMemoryStore(dataRoot: string): Promise<void> {
+  await getDesktopMemoryStore(dataRoot).close?.();
+  while (_retiringDesktopMemoryCloses.size > 0) await Promise.allSettled([..._retiringDesktopMemoryCloses]);
+}
 
 type DesktopFallbackMemoryStore = MemoryStore & {
   getStats(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
@@ -327,7 +348,7 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     return _desktopMemoryStore;
   }
 
-  _desktopMemoryStore?.close?.();
+  retireDesktopMemoryStore(_desktopMemoryStore);
   _desktopMemoryStore = null;
   let store: MemoryStore;
   let layeredCandidate: MemoryStore | undefined;
@@ -369,7 +390,7 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     store = layeredStore;
     layeredCandidate = undefined;
   } catch (err) {
-    layeredCandidate?.close?.();
+    retireDesktopMemoryStore(layeredCandidate);
     console.warn('[memory] LayeredMemoryStore unavailable (native module issue), using fallback:', (err as Error).message);
     store = createFallbackMemoryStore(dataRoot);
     _desktopMemoryStoreBackend = 'fallback';

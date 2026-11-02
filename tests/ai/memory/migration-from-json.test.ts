@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { LayeredMemoryStore, resolveLayeredConfig } from '../../../src/ai/memory/layered-store.js';
+import { closeStoreAndRemove } from './helpers/close-store.js';
 
 describe('migration from JSON', () => {
   it('should import legacy memory entries and make them searchable', async () => {
@@ -47,8 +48,7 @@ describe('migration from JSON', () => {
     expect(stats.l0).toBe(3);
     expect(stats.l1).toBe(3);
 
-    store.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await closeStoreAndRemove(store, tmpDir);
   });
 
   it('should handle delete correctly', async () => {
@@ -69,8 +69,7 @@ describe('migration from JSON', () => {
     expect(store.getStats().l1).toBe(0);
     expect(store.getStats().l0).toBe(0);
 
-    store.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await closeStoreAndRemove(store, tmpDir);
   });
 
   it('should handle clearAll', async () => {
@@ -93,7 +92,6 @@ describe('migration from JSON', () => {
     expect(store.getStats().l0).toBe(0);
     expect(store.getStats().l1).toBe(0);
 
-    store.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await closeStoreAndRemove(store, tmpDir);
   });
 });

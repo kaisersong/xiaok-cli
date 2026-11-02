@@ -39,6 +39,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import {
   createDesktopServices,
   getDesktopMemoryBackend,
+  closeDesktopMemoryStore,
   getDesktopMemoryStore,
   resumeOneScriptWorkflow,
 } from './desktop-services.js';
@@ -866,7 +867,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       activityOwnerNoticeOnce(code);
     },
   ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
-  registerLifetimeDisposerStep('local-memory', async () => { await getDesktopMemoryStore(dataRoot).close?.(); });
+  registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
     if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
