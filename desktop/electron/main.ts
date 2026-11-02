@@ -2146,7 +2146,9 @@ const packagedKimiSmokeResultPath = process.env.XIAOK_KIMI_PACKAGED_SMOKE_RESULT
 if (packagedKimiSmokeResultPath) {
   app.whenReady().then(async () => {
     const { runPackagedKimiSmoke } = await import('./kimi-packaged-smoke.js');
-    await runPackagedKimiSmoke(packagedKimiSmokeResultPath);
+    await runPackagedKimiSmoke(packagedKimiSmokeResultPath, {
+      packagedApp: { resourcesPath: process.resourcesPath, isPackaged: app.isPackaged },
+    });
     app.exit(0);
   }).catch((error) => {
     console.error('[main] packaged Kimi smoke failed:', error);

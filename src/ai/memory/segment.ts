@@ -296,6 +296,8 @@ interface SegmentationWorker {
   failureReason(): FallbackReason | undefined;
   cut(runs: string[]): Promise<CutReply>;
   terminate(): Promise<void>;
+  /** nodejieba entry and dictionaries this worker loads, and whether the load finished. */
+  describe(): { entry: string; options: ReturnType<typeof nativeLoadOptions>; ready: boolean };
 }
 
 const WORKER_KEY = Symbol.for('xiaok.segment.worker');
@@ -342,6 +344,7 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
   let settleReady!: (ok: boolean) => void;
   const ready = new Promise<boolean>(resolve => { settleReady = resolve; });
   let failure: FallbackReason | undefined;
+  let isReady = false;
   const fail = (reason: FallbackReason, detail?: string) => {
     alive = false;
     if (failure === undefined) {
@@ -356,7 +359,7 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
   const readyDeadline = setTimeout(() => { fail('ready deadline exceeded'); void worker.terminate(); }, SEGMENTATION_WORKER_READY_DEADLINE_MS);
   readyDeadline.unref();
   worker.on('message', (message: { type: string; id?: number; cuts?: string[][]; cutError?: string; error?: string }) => {
-    if (message.type === 'ready') { clearTimeout(readyDeadline); settleReady(true); }
+    if (message.type === 'ready') { clearTimeout(readyDeadline); isReady = true; settleReady(true); }
     else if (message.type === 'failed') { fail('load failed', message.error); void worker.terminate(); }
     else if (message.type === 'cut' && message.id !== undefined) {
       const resolve = pending.get(message.id);
@@ -391,6 +394,7 @@ function startWorker(entry: string, options: ReturnType<typeof nativeLoadOptions
       }
     },
     async terminate() { stopping = true; alive = false; clearTimeout(readyDeadline); await worker.terminate(); },
+    describe: () => ({ entry, options, ready: isReady && alive }),
   };
 }
 
@@ -459,6 +463,37 @@ function segmentChineseFallback(text: string, reason: FallbackReason, waitedMs: 
   if (syncLoadMs > SEGMENTATION_SYNC_FALLBACK_BUDGET_MS) logger.warn('synchronous segmentation fallback load exceeded its budget', details);
   else logger.warn('synchronous segmentation fallback load finished', details);
   return segmentChinese(text);
+}
+
+/** Where segmentation was loaded from in this process; see segmentationRuntimeInfo. */
+export interface SegmentationRuntimeInfo {
+  /** nodejieba entry the worker required (asar-rewritten), null when no worker started. */
+  workerEntry: string | null;
+  /** Dictionary paths the worker handed to the native load, null when no worker started. */
+  dictionaryPaths: ReturnType<typeof nativeLoadOptions> | null;
+  /** The worker loaded the dictionary and is still usable. */
+  workerReady: boolean;
+  /** Why the worker became unusable, null while it is usable or not started. */
+  failureReason: FallbackReason | null;
+  /** The dictionary was loaded on the calling thread (the synchronous path ran). */
+  synchronousLoad: boolean;
+}
+
+/**
+ * Read-only view of the segmentation runtime, for the packaged desktop smoke
+ * (#150 M6): it proves the async path loaded nodejieba through the worker from
+ * the packaged app, not from a development node_modules, and did not fall back.
+ */
+export function segmentationRuntimeInfo(): SegmentationRuntimeInfo {
+  const worker = (globalThis as unknown as WorkerHolder)[WORKER_KEY];
+  const described = worker ? worker.describe() : null;
+  return {
+    workerEntry: described?.entry ?? null,
+    dictionaryPaths: described?.options ?? null,
+    workerReady: described?.ready ?? false,
+    failureReason: worker?.failureReason() ?? null,
+    synchronousLoad: jieba !== null,
+  };
 }
 
 /** Async form of segmentQuery; see segmentChineseAsync. */
