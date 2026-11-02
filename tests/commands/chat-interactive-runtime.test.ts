@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
+import { retireActivityOwnersUnder } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -1258,13 +1259,21 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
     }
 
-    for (const dir of tempDirs.splice(0)) {
+    const caseDirs = tempDirs.splice(0);
+    // #145：先收掉本用例拉起的 activity owner 再删目录，否则 detached owner 会常驻
+    // 20 分钟，一个文件跑完累积几十个，把后半程用例的启动拖过提示符等待窗口。
+    // Windows 上产品的身份校验不支持（retireOutdatedOwner 返回 kept_unverified），不做闸门。
+    const ownerSurvivors = process.platform === 'win32' ? [] : await retireActivityOwnersUnder(caseDirs);
+    for (const dir of caseDirs) {
       await removeTempDirWithRetry(dir);
     }
 
     vi.resetModules();
     vi.clearAllMocks();
     resetAdapterState();
+    if (ownerSurvivors.length) {
+      throw new Error(`用例收尾后仍有 activity owner 存活（#145）：${JSON.stringify(ownerSurvivors)}`);
+    }
   });
 
   it.skipIf(process.platform==='win32')('starts without session persistence when the config link is unsafe', async () => {
@@ -1561,6 +1570,45 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       }
     } finally {crashSpy.mockRestore();}
   }, 20000);
+
+  it.skipIf(process.platform==='win32')('retires the activity owner a case started so later cases do not inherit detached owners (#145)', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-owner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } },
+      defaultMode: 'interactive', contextBudget: 4000, channels: {},
+    }, null, 2));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    let ownerPid: number | undefined;
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+
+      // chat 退出后 owner 仍按设计常驻（空闲 20 分钟才退）：这正是会在用例之间累积的进程。
+      const activityDir = join(configDir, 'conversation-activity');
+      const [dataRoot] = readdirSync(activityDir).map((entry) => join(activityDir, entry));
+      ownerPid = (JSON.parse(readFileSync(join(dataRoot, 'activity-owner.status.json'), 'utf8')) as { pid: number }).pid;
+      expect(() => process.kill(ownerPid!, 0)).not.toThrow();
+
+      expect(await retireActivityOwnersUnder([rootDir])).toEqual([]);
+      expect(() => process.kill(ownerPid!, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+    } finally {
+      harness.restore();
+    }
+  });
 
   it('releases session ownership when exiting with slash exit', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-exit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
