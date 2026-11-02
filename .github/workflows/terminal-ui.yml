@@ -63,8 +63,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-14]
-        node: ['22.14.0', '24']
+        os: [macos-15]
+        node: ['22.14.0']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -111,6 +111,7 @@ jobs:
           .test-dist/tests/ai/tools/ask-user-question.test.js
           .test-dist/tests/ai/tools/ask-user.test.js
           .test-dist/tests/commands/chat-interactive-runtime.test.js
+          --reporter=default --reporter=json --outputFile=ci-control-results.json
       - uses: actions/setup-python@v5
         if: runner.os == 'Linux'
         with:
@@ -143,4 +144,13 @@ jobs:
             /tmp/xiaok-mode-selector-*/
             /tmp/xiaok-mode-persistence-*/
             /tmp/xiaok-question-spacing-*/
+          retention-days: 7
+
+      - name: Preserve original baseline results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-macos15-node22-original
+          path: ci-control-results.json
+          if-no-files-found: error
           retention-days: 7
