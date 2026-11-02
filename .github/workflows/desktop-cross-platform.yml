@@ -9,15 +9,9 @@ name: Desktop Cross-Platform Tests
 # needs the sidecar repos and has unrelated Windows temp-dir teardown flakiness.
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'desktop/**'
-      - 'src/ai/runtime/**'
-      - 'src/ai/adapters/**'
-      - 'src/platform/mcp/python-server.ts'
-      - 'tests/platform/mcp/python-server.test.ts'
-      - '.github/workflows/desktop-cross-platform.yml'
   pull_request:
     paths:
       - 'desktop/**'
@@ -26,7 +20,18 @@ on:
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - '.github/workflows/desktop-cross-platform.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   cross-platform-tests:
@@ -35,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, macos-14]
+        os: [windows-2022, macos-15]
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +48,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -109,7 +116,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 

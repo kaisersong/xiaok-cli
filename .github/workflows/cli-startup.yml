@@ -1,18 +1,9 @@
 name: CLI Startup
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/platform/runtime/**'
-      - 'src/utils/atomic-file.ts'
-      - 'dist/platform/runtime/**'
-      - 'tests/platform/runtime/**'
-      - 'tests/utils/atomic-file.test.ts'
-      - 'scripts/apply-health-cache-hotfix.mjs'
-      - 'tests/scripts/health-cache-hotfix.test.mjs'
-      - 'data/hotfixes/windows-health-cache-1.5.7/**'
-      - '.github/workflows/cli-startup.yml'
   pull_request:
     paths:
       - 'src/platform/runtime/**'
@@ -21,7 +12,18 @@ on:
       - 'scripts/apply-health-cache-hotfix.mjs'
       - 'tests/scripts/health-cache-hotfix.test.mjs'
       - '.github/workflows/cli-startup.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   startup:
@@ -31,7 +33,7 @@ jobs:
         include:
           - { os: windows-2022, node: '24' }
           - { os: windows-2022, node: '22' }
-          - { os: macos-14, node: '24' }
+          - { os: macos-15, node: '24' }
           - { os: ubuntu-latest, node: '24' }
     runs-on: ${{ matrix.os }}
     steps:

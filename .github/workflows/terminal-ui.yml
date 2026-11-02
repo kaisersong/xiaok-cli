@@ -1,33 +1,8 @@
 name: Terminal UI
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/ui/**'
-      - 'src/commands/chat.ts'
-      - 'src/commands/chat-permission-mode.ts'
-      - 'tests/commands/chat-permission-mode.test.ts'
-      - 'tests/e2e/mode-persistence.py'
-      - 'src/commands/registry.ts'
-      - 'src/ai/memory/layered-store.ts'
-      - 'src/utils/logger.ts'
-      - 'src/ai/tools/ask-user*.ts'
-      - 'tests/ui/**'
-      - 'tests/commands/chat-interactive-runtime.test.ts'
-      - 'src/runtime/verification/**'
-      - 'tests/ai/memory/background-diagnostics.test.ts'
-      - 'tests/utils/logger.test.ts'
-      - 'tests/ai/tools/ask-user*.test.ts'
-      - 'tests/e2e/inline-image*'
-      - 'tests/e2e/askuser-short-menu.py'
-      - 'tests/e2e/question-transcript-spacing.py'
-      - 'tests/e2e/thinking-draft-handoff.py'
-      - 'tests/e2e/footer-return.py'
-      - 'tests/e2e/ghostty-vt-footer.mjs'
-      - 'tests/support/ghostty-vt*'
-      - 'tests/e2e/memory-background-footer.py'
-      - 'tests/e2e/mode-selector.py'
-      - '.github/workflows/terminal-ui.yml'
   pull_request:
     paths:
       - 'src/ui/**'
@@ -55,16 +30,28 @@ on:
       - 'tests/e2e/memory-background-footer.py'
       - 'tests/e2e/mode-selector.py'
       - '.github/workflows/terminal-ui.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   terminal:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-14]
+        os: [ubuntu-latest, windows-2022, macos-15]
         node: ['22.14.0', '24']
+        shard: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -81,8 +68,10 @@ jobs:
       - shell: bash
         run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty nodejieba
       - run: npm run build:release
+        if: matrix.shard == 1
       - run: npm run test:sandbox:build
-      - name: Test image layout, questions and actual chat entry
+      - name: Test image layout and questions (original other 25 files)
+        if: matrix.shard == 1
         run: >
           npm run test:sandbox:run --
           .test-dist/tests/ui/input-keyboard-protocol.test.js
@@ -110,16 +99,32 @@ jobs:
           .test-dist/tests/ui/transcript-buffer.test.js
           .test-dist/tests/ai/tools/ask-user-question.test.js
           .test-dist/tests/ai/tools/ask-user.test.js
+      - name: Collect complete interactive case inventory (including natural skips)
+        run: >-
+          node .github/scripts/ci-plan.mjs collect vitest.sandbox.config.mjs
           .test-dist/tests/commands/chat-interactive-runtime.test.js
+          ci-shard-reports/terminal ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} 3
+      - name: Run original interactive cases on this shard
+        run: node .github/scripts/ci-plan.mjs run ci-shard-reports/terminal
+      - name: Require actual interactive case coverage
+        if: always()
+        run: node .github/scripts/ci-plan.mjs audit ci-shard-reports/terminal
+      - name: Preserve interactive shard identities and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-cases-${{ matrix.os }}-${{ matrix.node }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-shard-reports/terminal/
+          if-no-files-found: error
       - uses: actions/setup-python@v5
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         with:
           python-version: '3.13'
       - name: Install tmux for isolated real TTY tests
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Check retained image cells and short-menu interaction in real TTYs
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         run: |
           python tests/e2e/inline-image-scrollback.py
           python tests/e2e/askuser-short-menu.py
@@ -131,7 +136,7 @@ jobs:
           python tests/e2e/mode-selector.py
           python tests/e2e/mode-persistence.py
       - name: Retain synthetic Thinking draft failure evidence
-        if: failure() && runner.os == 'Linux'
+        if: failure() && runner.os == 'Linux' && matrix.shard == 1
         uses: actions/upload-artifact@v4
         with:
           name: thinking-draft-failure-${{ matrix.node }}
@@ -144,3 +149,29 @@ jobs:
             /tmp/xiaok-mode-persistence-*/
             /tmp/xiaok-question-spacing-*/
           retention-days: 7
+
+  interactive-coverage:
+    needs: terminal
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: terminal-cases-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-shard-downloads
+      - name: Require all original OS/Node case sets and successful jobs
+        env:
+          RESULT: ${{ needs.terminal.result }}
+        run: >-
+          node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
+          ${{ github.sha }}
+          ubuntu-latest-node-22.14.0,ubuntu-latest-node-24,windows-2022-node-22.14.0,windows-2022-node-24,macos-15-node-22.14.0,macos-15-node-24 3
+      - name: Preserve original blocking suite status
+        shell: bash
+        env:
+          RESULT: ${{ needs.terminal.result }}
+        run: test "$RESULT" = success
