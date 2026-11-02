@@ -2742,8 +2742,8 @@ describe('OpenAIAdapter', () => {
     });
     const normalized = normalizeRuntimeError(caught);
     expect(normalized).toMatchObject({ code: 'model_failed', retryable: false });
-    expect(normalized.message).toContain('http_status=401');
-    expect(normalized.message).toContain('provider_code=invalid_api_key');
+    expect(normalized.message).toContain('HTTP 401');
+    expect(normalized.message).toContain('业务码 invalid_api_key');
     for (const output of [String(caught), JSON.stringify(caught), JSON.stringify(normalized)]) {
       expect(output).not.toContain('PRIVATE_REASONING_CANARY');
       expect(output).not.toContain('sk-private-key');

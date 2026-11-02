@@ -12,7 +12,7 @@ export type AgentRuntimeEvent =
   | { type: 'run_started'; runId: string }
   | { type: 'execution_health'; invocationId?: string; runId: string; state: import('../../runtime/execution-health.js').ExecutionHealthState }
   | { type: 'model_request_started'; runId: string }
-  | { type: 'model_recovery'; runId: string; attempt: number; delayMs: number; remainingMs: number }
+  | { type: 'model_recovery'; runId: string; attempt: number; delayMs: number; remainingMs: number; failure?: import('./model-failure.js').ModelFailureDiagnostic }
   | { type: 'assistant_text'; runId: string; delta: string }
   | { type: 'tool_started'; runId: string; toolName: string; input: Record<string, unknown> }
   | { type: 'tool_finished'; runId: string; invocationId: string; toolName: string; ok: boolean }

@@ -66,7 +66,7 @@ try:
     assert (project / 'tool-count.txt').read_text().splitlines() == ['once']
     (root / 'recovered-pane.txt').write_text(pane)
     send('PERMANENT_TTY_CASE: report the provider error')
-    pane = until(lambda p: 'model_failed' in p and 'http_status=401' in p)
+    pane = until(lambda p: 'model_failed' in p and 'HTTP 401' in p)
     time.sleep(0.2)
     requests = [json.loads(line) for line in (root / 'requests.jsonl').read_text().splitlines()]
     assert len(requests) == 4, requests
