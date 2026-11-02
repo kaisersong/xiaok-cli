@@ -16,6 +16,8 @@ on:
       - 'src/ai/runtime/**'
       - 'src/ai/adapters/**'
       - 'src/ai/providers/kimi-models.ts'
+      - 'src/ai/memory/segment.ts'
+      - 'src/ai/memory/layered-store.ts'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - 'scripts/read-kimi-coding-models.mjs'
@@ -29,6 +31,8 @@ on:
       - 'src/ai/runtime/**'
       - 'src/ai/adapters/**'
       - 'src/ai/providers/kimi-models.ts'
+      - 'src/ai/memory/segment.ts'
+      - 'src/ai/memory/layered-store.ts'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
       - 'scripts/read-kimi-coding-models.mjs'
@@ -74,7 +78,7 @@ jobs:
               BASE="$(git rev-parse "$HEAD^")"
             fi
           fi
-          PATTERN='^(src/ai/providers/kimi-models\.ts|desktop/electron/kimi-packaged-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
+          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
           # Fail-closed: if git diff cannot run (bad/missing objects), force smoke on.
           # Previously a failed diff landed in the else branch → run_smoke=false (M1).
           if ! DIFF_OUT="$(git diff --name-only "$BASE" "$HEAD" 2>/tmp/packaged-kimi-diff.err)"; then

@@ -10,6 +10,8 @@ on:
       - 'tests/e2e/mode-persistence.py'
       - 'src/commands/registry.ts'
       - 'src/ai/memory/layered-store.ts'
+      - 'src/ai/memory/segment.ts'
+      - 'tests/ai/memory/segment-*.test.ts'
       - 'src/utils/logger.ts'
       - 'src/ai/tools/ask-user*.ts'
       - 'tests/ui/**'
@@ -37,6 +39,8 @@ on:
       - 'tests/e2e/mode-persistence.py'
       - 'src/commands/registry.ts'
       - 'src/ai/memory/layered-store.ts'
+      - 'src/ai/memory/segment.ts'
+      - 'tests/ai/memory/segment-*.test.ts'
       - 'src/utils/logger.ts'
       - 'src/ai/tools/ask-user*.ts'
       - 'tests/ui/**'
@@ -77,9 +81,24 @@ jobs:
         uses: ./.github/actions/node-headers
       - shell: bash
         run: bash .github/scripts/retry.sh npm ci --ignore-scripts
+      # Real nodejieba stays in CI (#150 Minor 8). Cache only its built binding, keyed on
+      # OS + Node ABI + the lockfile, so a cache hit skips the prebuilt download / source build.
+      - name: Cache nodejieba native binding
+        id: nodejieba-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules/nodejieba/build/Release
+          key: nodejieba-${{ runner.os }}-${{ runner.arch }}-node${{ matrix.node }}-${{ hashFiles('package-lock.json') }}
       # Memory search assertions exercise Chinese/English token boundaries.
       - shell: bash
-        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty nodejieba
+        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty
+      - shell: bash
+        if: steps.nodejieba-cache.outputs.cache-hit != 'true'
+        run: bash .github/scripts/retry.sh npm rebuild nodejieba
+      - name: Verify nodejieba binding loads
+        shell: bash
+        run: |
+          node -e "const j=require('nodejieba');j.load();const o=j.cut('南京市长江大桥').join(' ');console.log(o);if(o!=='南京市 长江大桥'){console.error('nodejieba cut mismatch='+o);process.exit(1)}"
       - run: npm run build:release
       - run: npm run test:sandbox:build
       - name: Test image layout, questions and actual chat entry
@@ -102,6 +121,9 @@ jobs:
           .test-dist/tests/ai/memory/background-diagnostics.test.js
           .test-dist/tests/ai/memory/layered-store.test.js
           .test-dist/tests/ai/memory/segment.test.js
+          .test-dist/tests/ai/memory/segment-async.test.js
+          .test-dist/tests/ai/memory/segment-worker-fallback.test.js
+          .test-dist/tests/ai/memory/segment-native-paths.test.js
           .test-dist/tests/ai/memory/compaction.test.js
           .test-dist/tests/ai/memory/distillation-repair.test.js
           .test-dist/tests/utils/logger.test.js
