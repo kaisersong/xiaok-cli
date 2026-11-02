@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 async function crash(phase: string) {
   const root = mkdtempSync(join(tmpdir(), 'harness-crash-')); roots.push(root);
-  const child = spawn(process.execPath, [resolve('tests/fixtures/harness-optimization-child.mjs'), root, phase], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--expose-gc', resolve('tests/fixtures/harness-optimization-child.mjs'), root, phase], { stdio: ['pipe', 'pipe', 'pipe'] });
   const audit = { pid: child.pid, phase, closed: false }; childAudit.push(audit);
   const closed = once(child, 'close').then(value => { audit.closed = true; return value; }); children.push({ process: child, closed });
   writeFileSync(join(root, 'owned-child-pid.json'), JSON.stringify({ pid: child.pid, phase }));
