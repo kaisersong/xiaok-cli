@@ -8,7 +8,7 @@ import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition }
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createTeardownSteps } from '../support/teardown-steps.js';
-import { listActivityOwnerProcesses, POST_TEARDOWN_RESERVE_MS, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners } from '../support/activity-owner-teardown.js';
+import { listActivityOwnerProcesses, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners, teardownOverrunError } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -1266,11 +1266,9 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     await step(() => vi.resetModules());
     await step(() => vi.clearAllMocks());
     await step(() => resetAdapterState());
-    // 第 9 轮 DS B1：核对实际总耗时，越过“预算 + 余量”时报可读的失败，而不是等 vitest 的裸 hook 超时。
-    const teardownElapsedMs = Date.now() - teardownStartedAt;
-    if (teardownElapsedMs > TEARDOWN_BUDGET_MS + POST_TEARDOWN_RESERVE_MS) {
-      teardown.fail(new Error(`用例收尾耗时 ${teardownElapsedMs}ms，超过预算 ${TEARDOWN_BUDGET_MS}ms + 余量 ${POST_TEARDOWN_RESERVE_MS}ms（#145）`));
-    }
+    // 第 9/10 轮 DS：核对实际总耗时，越过“预算 + 余量”时报可读的失败（上面三步是同步重置，只能事后核对）。
+    const overrun = teardownOverrunError(Date.now() - teardownStartedAt);
+    if (overrun) teardown.fail(overrun);
     if (ownerSurvivors.length) {
       // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
       // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。

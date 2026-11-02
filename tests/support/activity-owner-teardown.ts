@@ -104,14 +104,28 @@ export const OWNER_STARTUP_STATUS_WAIT_MS = 5_000;
 export const TEARDOWN_BUDGET_MS = 8_000;
 /** 预算之后的 resetModules / clearAllMocks / resetAdapterState 留的余量；TEARDOWN_BUDGET_MS + 它 < 各配置的 hookTimeout 有单测从配置取值断言，hook 末尾核对实际总耗时。 */
 export const POST_TEARDOWN_RESERVE_MS = 1_000;
+// 第 10 轮 DS M1：预算降到 8s 时，从删目录保留量里挪回 0.5s 给退休阶段（5.5s，等 status 最多 3s）。
+// 回收阶段保留 2s 不动：扫描一次 ps（≤1s）+ 最后共用快照（≤1s），最坏情况用例在 ps 每次 900ms 时验证。
+// 删目录阶段 0.5s：删除是异步的，常态毫秒级，截止后留在后台。
 export const RECLAIM_RESERVE_MS = 2_000;
-export const REMOVE_RESERVE_MS = 1_000;
+export const REMOVE_RESERVE_MS = 500;
 export const PS_SCAN_RESERVE_MS = 1_000;
 export const RETIRE_MIN_MS = 1_500;
 /** 剩余不足这个值就不再拉起待办读取 worker（它会打开用例目录里的 SQLite）。 */
 export const PENDING_READ_MIN_MS = 500;
 /** 剩余不足这个值就不再进入产品退休入口。 */
 export const RETIRE_ENTRY_MIN_MS = 300;
+
+/**
+ * hook 总耗时核对（第 10 轮 DS M2/M3）：超过“预算 + 余量”返回可读错误，否则 undefined。
+ * 预算之后的 resetModules / clearAllMocks / resetAdapterState 都是同步的内存重置，无法与截止时刻赛跑，
+ * 只能事后核对；它们若真卡住，vitest 的 hook 超时会先触发。
+ */
+export function teardownOverrunError(elapsedMs: number, budgetMs = TEARDOWN_BUDGET_MS, reserveMs = POST_TEARDOWN_RESERVE_MS): Error | undefined {
+  return elapsedMs > budgetMs + reserveMs
+    ? new Error(`用例收尾耗时 ${elapsedMs}ms，超过预算 ${budgetMs}ms + 余量 ${reserveMs}ms（#145）`)
+    : undefined;
+}
 
 export function remainingMs(deadline: number, now: () => number = Date.now): number {
   return Math.max(0, deadline - now());
@@ -452,11 +466,11 @@ export async function removeTempDirWithRetry(
         ? await Promise.race([attemptRm, new Promise<'deadline'>((resolve) => { timer = setTimeout(() => resolve('deadline'), remainingMs(deadline)); })])
         : await attemptRm;
       if (result === 'removed') return;
-      attemptRm.then(
-        () => report(`[chat-interactive-runtime] 临时目录 ${dir} 在收尾预算之后才删完\n`),
-        (error) => report(`[chat-interactive-runtime] 未能清理临时目录 ${dir}（收尾预算之后）: ${String(error)}\n`),
-      );
-      report(`[chat-interactive-runtime] 收尾预算用完，临时目录 ${dir} 仍在后台删除\n`);
+      // 第 10 轮 DS M3 / minor 3：只在后台删除失败时再报一次；报告本身抛错（如 EPIPE）也不能变成未处理拒绝。
+      attemptRm.catch((error) => {
+        try { report(`[chat-interactive-runtime] 未能清理临时目录 ${dir}（收尾预算之后，后台删除失败）: ${String(error)}\n`); } catch { /* 报告失败只能丢弃 */ }
+      });
+      report(`[chat-interactive-runtime] 收尾预算用完，临时目录 ${dir} 仍在后台删除（用例结束后可能仍在删除或只删了一部分）\n`);
       return;
     } catch (error) {
       lastError = error;

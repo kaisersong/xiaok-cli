@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   awaitOwnerStatus, awaitProcessGone, deadlineBoundOwnerList, deadlineBoundRetireDependencies, POST_TEARDOWN_RESERVE_MS, ownerPathPrefixes, ownersWithPrefixes, processExists, PS_SCAN_RESERVE_MS, psTimeoutFor,
-  RECLAIM_RESERVE_MS, reclaimAndReport, reclaimLateOwners, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS,
+  RECLAIM_RESERVE_MS, REMOVE_RESERVE_MS, RETIRE_MIN_MS, reclaimAndReport, teardownOverrunError, reclaimLateOwners, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS,
   teardownCaseOwners, type ActivityOwnerProcess, type ActivityOwnerSurvivor,
 } from '../../support/activity-owner-teardown.js';
 import { retireOutdatedOwner } from '../../../src/runtime/conversation-activity/owner-retire.js';
@@ -337,15 +337,19 @@ describe('activity owner teardown gate (#145)', () => {
       expect(settled).toBe(true);
       expect(Date.now()).toBeLessThanOrEqual(hookDeadline);
       const report = await running;
+      // 第 10 轮 DS minor 1：等 status 的时长由常量推出——退休截止 = D − 删目录保留 − 回收保留，再留阶段末尾 ps，
+      // 减去首次 ps（900ms）与产品退休入口的保留。
+      const statusWaitMs = TEARDOWN_BUDGET_MS - REMOVE_RESERVE_MS - RECLAIM_RESERVE_MS - PS_SCAN_RESERVE_MS - 900 - RETIRE_MIN_MS;
       expect(report).toEqual({ reclaimFailed: false, survivors: [
         { ...pendingForever.owner, reason: 'kept_unknown', reclaimed: false, budget: '收尾预算不足：readPendingTasks 被截断' },
         // 产品自己的 3s 退出等待在截止前用完：这是真的收不掉，不带 budget。
         { ...neverExits.owner, reason: 'kept_unverified', reclaimed: false },
-        { ...noStatus.owner, reason: 'missing_status', reclaimed: false, budget: 'status 只等了 1600ms（产品上限 5000ms，被收尾预算压短；只说明没等满上限）' },
+        { ...noStatus.owner, reason: 'missing_status', reclaimed: false, budget: `status 只等了 ${statusWaitMs}ms（产品上限 5000ms，被收尾预算压短；只说明没等满上限）` },
       ] });
       // ps 次数：退休阶段首尾各一次、回收扫描一次、三个未退的 owner 共用最后一次快照，共 4 次（fake timers 下确定，第 9 轮 DS minor 2）。
       expect(psReads).toBe(4);
-      expect(rmAttempts.length).toBeGreaterThanOrEqual(3);
+      // 删目录阶段只有 REMOVE_RESERVE_MS（0.5s）加退休阶段省下的时间：删不掉时退避重试，截止后的目录跳过（写 stderr）。
+      expect(rmAttempts.length).toBeGreaterThanOrEqual(1);
       expect(rmAttempts.every((at) => at <= removeDeadline)).toBe(true);
       expect(teardown.errors).toEqual([]);
     } finally { vi.useRealTimers(); }
@@ -521,12 +525,52 @@ describe('activity owner teardown gate (#145)', () => {
 
   it('removes a real directory with the default asynchronous removal', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'xiaok-owner-rm-'));
+    roots.push(dir);
     mkdirSync(join(dir, 'nested'), { recursive: true });
     writeFileSync(join(dir, 'nested', 'file.txt'), 'x');
     const reports: string[] = [];
     await removeTempDirWithRetry(dir, Date.now() + 5_000, undefined, (message) => reports.push(message));
     expect(existsSync(dir)).toBe(false);
     expect(reports).toEqual([]);
+  });
+
+  // 第 10 轮 DS M3：后台删除只在失败时再报一次，报告本身抛错也不会变成未处理拒绝。
+  it('reports a background removal failure once and swallows a failing reporter', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let failLater!: (error: Error) => void;
+      const reports: string[] = [];
+      const done = removeTempDirWithRetry('/case/bg', Date.now() + 500, () => new Promise<void>((_resolve, reject) => { failLater = reject; }), (message) => reports.push(message));
+      await vi.advanceTimersByTimeAsync(500);
+      await done;
+      expect(reports).toEqual([expect.stringContaining('/case/bg 仍在后台删除')]);
+      failLater(new Error('EBUSY late'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reports).toHaveLength(2);
+      expect(reports[1]).toContain('后台删除失败');
+      expect(reports[1]).toContain('EBUSY late');
+      let failAgain!: (error: Error) => void;
+      let calls = 0;
+      const second = removeTempDirWithRetry('/case/bg2', Date.now() + 500, () => new Promise<void>((_resolve, reject) => { failAgain = reject; }), () => { calls += 1; if (calls > 1) throw new Error('EPIPE'); });
+      await vi.advanceTimersByTimeAsync(500);
+      await second;
+      failAgain(new Error('EBUSY'));
+      await vi.advanceTimersByTimeAsync(0);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(calls).toBe(2);
+      expect(unhandled).toEqual([]);
+    } finally { process.off('unhandledRejection', onUnhandled); vi.useRealTimers(); }
+  });
+
+  // 第 10 轮 DS M3：hook 总耗时核对是纯函数，越界才给错误。
+  it('flags a teardown that overran the budget plus reserve', () => {
+    expect(teardownOverrunError(TEARDOWN_BUDGET_MS + POST_TEARDOWN_RESERVE_MS)).toBeUndefined();
+    const error = teardownOverrunError(TEARDOWN_BUDGET_MS + POST_TEARDOWN_RESERVE_MS + 1);
+    expect(error?.message).toContain(`${TEARDOWN_BUDGET_MS + POST_TEARDOWN_RESERVE_MS + 1}ms`);
+    expect(teardownOverrunError(100, 50, 25)?.message).toContain('预算 50ms + 余量 25ms');
   });
 
   // 第 9 轮 codex minor 2：退休入口抛错时，已记录的预算截断步骤不丢。
