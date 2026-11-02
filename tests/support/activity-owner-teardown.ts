@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, rmSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, watch, type FSWatcher } from 'node:fs';
+import { rm as rmAsync } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { defaultOwnerRetirementDependencies, retireOutdatedOwner, type OwnerRetirementDependencies, type OwnerRetirementOutcome } from '../../src/runtime/conversation-activity/owner-retire.js';
 import { ACTIVITY_STORAGE_NAMES } from '../../src/runtime/conversation-activity/storage-permissions.js';
@@ -94,8 +95,8 @@ export const OWNER_STARTUP_STATUS_WAIT_MS = 5_000;
  *   hook 末尾还会核对实际总耗时，越界时报可读的失败而不是 vitest 的裸超时。
  * - 退休阶段截止 D - REMOVE_RESERVE_MS - RECLAIM_RESERVE_MS：首次 ps、等 status、产品退休入口都在
  *   “退休截止 - PS_SCAN_RESERVE_MS” 之前收口，留出的 PS_SCAN_RESERVE_MS 给阶段末尾那次 ps。
- * - 删目录阶段截止 D - RECLAIM_RESERVE_MS：每个目录先删一次，退避重试不越过截止（单次 rmSync 本身不可中断，
- *   截止后不再启动新的删除，跳过的目录写 stderr）。
+ * - 删目录阶段截止 D - RECLAIM_RESERVE_MS：异步删除与截止时刻赛跑，退避重试不越过截止，截止后不再启动新的删除；
+ *   没删完的留在后台继续，跳过/未完成的目录写 stderr。
  * - 回收阶段截止 D：一次 ps 扫描 → SIGTERM → kill(pid,0) 轮询到 D - PS_SCAN_RESERVE_MS → 仍在的共用一次 ps 快照确认。
  * - 等 status 最多 min(5s, 剩余 - RETIRE_MIN_MS)：给产品退休入口（身份校验、待办读取、退出等待）留 RETIRE_MIN_MS；
  *   产品入口的每个异步依赖都与截止时刻赛跑（经产品已有的依赖注入，见 deadlineBoundRetireDependencies）。
@@ -245,6 +246,8 @@ export async function retireActivityOwnersUnder(dirs: readonly string[], depende
   // 每个分支自己 catch，Promise.all 不会提前拒绝。
   await Promise.all(ownersWithPrefixes(prefixes, list).map(async (owner) => {
     const dataRoot = dirname(owner.configPath);
+    // 第 9 轮 codex minor 2：cut 放在 try 外，异常路径也保留被预算截断的步骤。
+    const cut: string[] = [];
     try {
       const statusWaitMs = Math.min(OWNER_STARTUP_STATUS_WAIT_MS, Math.max(0, remainingMs(ownerDeadline) - RETIRE_MIN_MS));
       // 到期分类看 pid（DS 第 6 轮 minor 1）：status 恰在到期瞬间落盘且是它，照常走退休入口。
@@ -260,12 +263,11 @@ export async function retireActivityOwnersUnder(dirs: readonly string[], depende
         return;
       }
       if (remainingMs(ownerDeadline) < RETIRE_ENTRY_MIN_MS) { outcomes.set(owner.pid, { reason: 'teardown_deadline', budget: '没有剩余预算进入产品退休入口' }); return; }
-      const cut: string[] = [];
       const outcome = await retire(dataRoot, status, ownerDeadline, (step) => { if (!cut.includes(step)) cut.push(step); });
       const reason: OwnerSurvivorReason = outcome === 'retired' ? 'retired_but_alive' : outcome;
       outcomes.set(owner.pid, cut.length ? { reason, budget: `收尾预算不足：${cut.join('、')}` } : { reason });
     } catch (error) {
-      outcomes.set(owner.pid, { reason: 'teardown_error', error });
+      outcomes.set(owner.pid, cut.length ? { reason: 'teardown_error', error, budget: `收尾预算不足：${cut.join('、')}` } : { reason: 'teardown_error', error });
     }
   }));
   return ownersWithPrefixes(prefixes, list).map((owner) => ({ ...owner, ...(outcomes.get(owner.pid) ?? { reason: 'appeared_during_teardown' as const }) }));
@@ -423,15 +425,16 @@ export async function teardownCaseOwners(input: {
 /**
  * 删临时目录（原在 chat-interactive-runtime.test.ts，移到这里以便单测；第 7 轮 codex Major2）。
  * 每次删除（含第一次）启动前都看截止时刻，截止后跳过并写 stderr；退避也不越过截止。
- * 已启动的单次 rmSync 不可中断：最坏超出量是最后一次删除本身的耗时（已知限制，见 #146 正文）。
+ * 删除走异步 fs.promises.rm（libuv 线程池，不占事件循环）并与截止时刻赛跑（第 9 轮 codex Major）：
+ * 到截止还没删完就写 stderr 并返回，删除留在后台继续（结果只记 stderr），所以单次慢删除也拖不过截止。
  * 删不掉只写 stderr、不判失败——
  * POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
- * 持有会话文件句柄时临时目录删不掉，rmSync 报 EPERM（Windows job 上 66 个用例
+ * 持有会话文件句柄时临时目录删不掉，rm 报 EPERM（Windows job 上 66 个用例
  * 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，由 CI 机器回收。
  */
 export async function removeTempDirWithRetry(
   dir: string, deadline = Number.POSITIVE_INFINITY,
-  rm: (dir: string) => void = (target) => rmSync(target, { recursive: true, force: true }),
+  rm: (dir: string) => void | Promise<void> = (target) => rmAsync(target, { recursive: true, force: true }),
   report: (message: string) => void = (message) => { process.stderr.write(message); },
 ): Promise<void> {
   // 第 8 轮 codex Major：截止后不再启动任何删除（含第一次），多目录时慢删除不会把后续目录拖过截止。
@@ -442,15 +445,25 @@ export async function removeTempDirWithRetry(
   let lastError: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (attempt > 0 && remainingMs(deadline) <= 0) break;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attemptRm = Promise.resolve().then(() => rm(dir)).then(() => 'removed' as const);
     try {
-      rm(dir);
+      const result = Number.isFinite(deadline)
+        ? await Promise.race([attemptRm, new Promise<'deadline'>((resolve) => { timer = setTimeout(() => resolve('deadline'), remainingMs(deadline)); })])
+        : await attemptRm;
+      if (result === 'removed') return;
+      attemptRm.then(
+        () => report(`[chat-interactive-runtime] 临时目录 ${dir} 在收尾预算之后才删完\n`),
+        (error) => report(`[chat-interactive-runtime] 未能清理临时目录 ${dir}（收尾预算之后）: ${String(error)}\n`),
+      );
+      report(`[chat-interactive-runtime] 收尾预算用完，临时目录 ${dir} 仍在后台删除\n`);
       return;
     } catch (error) {
       lastError = error;
       const left = remainingMs(deadline);
       if (left <= 0) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(200 * (attempt + 1), 1_000, left)));
-    }
+    } finally { clearTimeout(timer); }
   }
   report(`[chat-interactive-runtime] 未能清理临时目录 ${dir}: ${String(lastError)}\n`);
 }

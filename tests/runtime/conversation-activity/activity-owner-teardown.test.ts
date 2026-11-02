@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -493,6 +493,52 @@ describe('activity owner teardown gate (#145)', () => {
       expect(reports).toEqual([expect.stringContaining('跳过删除临时目录 /case/d')]);
       expect(report).toEqual({ survivors: [], reclaimFailed: false });
     } finally { vi.useRealTimers(); }
+  });
+
+  // 第 9 轮 codex Major：单次删除本身卡住也不能拖过截止——删除是异步的，与截止时刻赛跑，没删完的留在后台。
+  it('does not let a single hanging removal hold the hook past the remove deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const deadline = Date.now() + TEARDOWN_BUDGET_MS;
+      const removeDeadline = deadline - RECLAIM_RESERVE_MS;
+      const reports: string[] = [];
+      const started: string[] = [];
+      let settled = false;
+      const teardown = createTeardownSteps('t');
+      const running = teardownCaseOwners({
+        dirs: ['/case/hang', '/case/next'], deadline, posix: false, step: teardown.step,
+        removeDir: (dir, until) => removeTempDirWithRetry(dir, until, (target) => { started.push(target); return new Promise<void>(() => {}); }, (message) => reports.push(message)),
+      }).then((value) => { settled = true; return value; });
+      while (!settled && Date.now() <= deadline) await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(true);
+      expect(Date.now()).toBeLessThanOrEqual(removeDeadline);
+      expect(await running).toEqual({ survivors: [], reclaimFailed: false });
+      expect(started).toEqual(['/case/hang']);
+      expect(reports).toEqual([expect.stringContaining('/case/hang 仍在后台删除'), expect.stringContaining('跳过删除临时目录 /case/next')]);
+      expect(teardown.errors).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('removes a real directory with the default asynchronous removal', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xiaok-owner-rm-'));
+    mkdirSync(join(dir, 'nested'), { recursive: true });
+    writeFileSync(join(dir, 'nested', 'file.txt'), 'x');
+    const reports: string[] = [];
+    await removeTempDirWithRetry(dir, Date.now() + 5_000, undefined, (message) => reports.push(message));
+    expect(existsSync(dir)).toBe(false);
+    expect(reports).toEqual([]);
+  });
+
+  // 第 9 轮 codex minor 2：退休入口抛错时，已记录的预算截断步骤不丢。
+  it('keeps the budget steps when the retire entry throws after a deadline cut', async () => {
+    const { root, owner } = makeOwner(41050);
+    const failure = new Error('收尾预算已用完：readCmdline（#145）');
+    const survivors = await retireActivityOwnersUnder([root], {
+      list: () => [owner], deadline: Date.now() + 60_000,
+      awaitStatus: (dataRoot, pid) => awaitOwnerStatus(dataRoot, pid, 0),
+      retire: async (_dataRoot, _status, _until, onBudget) => { onBudget('readCmdline 被截断'); throw failure; },
+    });
+    expect(survivors).toEqual([{ ...owner, reason: 'teardown_error', error: failure, budget: '收尾预算不足：readCmdline 被截断' }]);
   });
 
   // 第 8 轮 DS minor 4：Windows（posix=false）只删目录，不收不判。
