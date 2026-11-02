@@ -311,3 +311,14 @@ jobs:
             throw 'Packaged Kimi smoke did not write its result'
           }
           node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
+
+      # Upload the exact packaged app that just passed the smoke (incl. the
+      # segmentation assertion), so it can be re-tested on a real Windows machine
+      # (#150 M6). Runs only after the smoke step succeeded.
+      - name: Upload smoke-verified Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaok-win-unpacked-${{ github.sha }}
+          path: desktop/release/win-unpacked
+          if-no-files-found: error
+          retention-days: 7
