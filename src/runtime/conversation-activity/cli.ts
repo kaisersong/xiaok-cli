@@ -122,7 +122,7 @@ export function handleOwnerDisconnect(
   probe: () => Promise<boolean>, disposed: () => boolean,
   callbacks: { onOwnerReplaced?(): void; onError?(error: unknown): void },
 ): Promise<void> {
-  return probe()
+  return Promise.resolve().then(probe)
     .then(replaced => { if (replaced && !disposed()) callbacks.onOwnerReplaced?.(); })
     .catch(error => { try { callbacks.onError?.(error); } catch {} });
 }

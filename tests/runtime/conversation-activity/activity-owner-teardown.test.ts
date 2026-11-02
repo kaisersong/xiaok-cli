@@ -373,9 +373,11 @@ describe('activity owner teardown gate (#145)', () => {
     const reports: string[] = [];
     let attempts = 0;
     await removeTempDirWithRetry('/case/x', Date.now() - 1, () => { attempts += 1; throw new Error('EBUSY'); }, (message) => reports.push(message));
-    expect(attempts).toBe(1);
+    expect(attempts).toBe(0);
     expect(reports).toHaveLength(1);
-    expect(reports[0]).toContain('EBUSY');
+    expect(reports[0]).toContain('跳过删除');
+    await removeTempDirWithRetry('/case/w', Date.now() + 50, () => { attempts += 1; throw new Error('EBUSY'); }, (message) => reports.push(message));
+    expect(reports[1]).toContain('EBUSY');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
       const until = Date.now() + 250;
@@ -456,6 +458,30 @@ describe('activity owner teardown gate (#145)', () => {
     expect(await retireActivityOwnersUnder([], { list: () => { reads += 1; return []; } })).toEqual([]);
     expect(await reclaimLateOwners([], { list: () => { reads += 1; return []; } })).toEqual([]);
     expect(reads).toBe(0);
+  });
+
+  // 第 8 轮 codex Major：删除本身耗时时，多目录不会在截止后再启动删除。
+  it('does not start removing further directories once the remove deadline passed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const deadline = Date.now() + TEARDOWN_BUDGET_MS;
+      const removeDeadline = deadline - RECLAIM_RESERVE_MS;
+      const started: Array<{ dir: string; at: number }> = [];
+      const reports: string[] = [];
+      const teardown = createTeardownSteps('t');
+      const report = await teardownCaseOwners({
+        dirs: ['/case/a', '/case/b', '/case/c', '/case/d'], deadline, posix: false, step: teardown.step,
+        // 每次删除消耗 3s（模拟慢盘）。
+        removeDir: (dir, until) => removeTempDirWithRetry(dir, until, (target) => {
+          started.push({ dir: target, at: Date.now() });
+          vi.setSystemTime(Date.now() + 3_000);
+        }, (message) => reports.push(message)),
+      });
+      expect(started.every(({ at }) => at < removeDeadline)).toBe(true);
+      expect(started.map(({ dir }) => dir)).toEqual(['/case/a', '/case/b', '/case/c']);
+      expect(reports).toEqual([expect.stringContaining('跳过删除临时目录 /case/d')]);
+      expect(report).toEqual({ survivors: [], reclaimFailed: false });
+    } finally { vi.useRealTimers(); }
   });
 
   // 第 8 轮 DS minor 4：Windows（posix=false）只删目录，不收不判。

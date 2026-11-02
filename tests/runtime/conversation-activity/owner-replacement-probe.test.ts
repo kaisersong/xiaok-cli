@@ -49,6 +49,9 @@ it('keeps the disconnect reaction from rejecting when the callbacks throw', asyn
   await expect(handleOwnerDisconnect(async () => { throw new Error('probe failed'); }, () => false, {
     onError: () => { throw new Error('diagnostics failed'); },
   })).resolves.toBeUndefined();
+  const syncFailure = new Error('probe threw synchronously');
+  await expect(handleOwnerDisconnect(() => { throw syncFailure; }, () => false, { onError: error => { errors.push(error); } })).resolves.toBeUndefined();
+  expect(errors).toEqual([replacedFailure, syncFailure]);
   let replaced = 0;
   await handleOwnerDisconnect(async () => true, () => true, { onOwnerReplaced: () => { replaced += 1; } });
   expect(replaced).toBe(0);

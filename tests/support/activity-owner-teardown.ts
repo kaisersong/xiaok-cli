@@ -421,7 +421,8 @@ export async function teardownCaseOwners(input: {
 
 /**
  * 删临时目录（原在 chat-interactive-runtime.test.ts，移到这里以便单测；第 7 轮 codex Major2）。
- * 第一次总会删（单次 rmSync 不可中断，临时目录删除是毫秒级）；之后每次重试前都看截止时刻，退避也不越过截止。
+ * 每次删除（含第一次）启动前都看截止时刻，截止后跳过并写 stderr；退避也不越过截止。
+ * 已启动的单次 rmSync 不可中断：最坏超出量是最后一次删除本身的耗时（已知限制，见 #146 正文）。
  * 删不掉只写 stderr、不判失败——
  * POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
  * 持有会话文件句柄时临时目录删不掉，rmSync 报 EPERM（Windows job 上 66 个用例
@@ -432,6 +433,11 @@ export async function removeTempDirWithRetry(
   rm: (dir: string) => void = (target) => rmSync(target, { recursive: true, force: true }),
   report: (message: string) => void = (message) => { process.stderr.write(message); },
 ): Promise<void> {
+  // 第 8 轮 codex Major：截止后不再启动任何删除（含第一次），多目录时慢删除不会把后续目录拖过截止。
+  if (remainingMs(deadline) <= 0) {
+    report(`[chat-interactive-runtime] 收尾预算用完，跳过删除临时目录 ${dir}\n`);
+    return;
+  }
   let lastError: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (attempt > 0 && remainingMs(deadline) <= 0) break;
