@@ -51,7 +51,7 @@ describe('native dictionary paths through the shared segmentation entry', () => 
   });
 
   // 评审（DS m1 / codex minor）：词典可读但原生 binding 缺失时，master 的 getJieba() 失败、返回原文；无中文路径也要返回原文。
-  it('returns text without Chinese unchanged when the native binding is missing, like master', async () => {
+  it('returns text without Chinese unchanged when the native binding is missing (master returns it unchanged when its load throws)', async () => {
     native.require.mockImplementation((id: string) => {
       if (id.endsWith('nodejieba.node')) throw Object.assign(new Error('binding missing'), { code: 'MODULE_NOT_FOUND' });
       return { load: native.load, cut: native.cut };
