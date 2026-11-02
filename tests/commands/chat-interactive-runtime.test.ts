@@ -935,7 +935,10 @@ function countOccurrences(text: string, needle: string): number {
 // 这两个字节会被忽略，等到收尾上限后仍会 restore，teardown 依旧可能先于 finalization；
 // 这种情况不再致命，靠的是产品侧 FileTranscriptLogger 对已删除目录的降级，不是这个 helper。
 // 每个用例的 finally 都会 splice 清空 liveChats，所以登记项不会串到下一个用例。
-const liveChats: Array<{ settled: boolean; done: Promise<void> }> = [];
+const liveChats: Array<{ settled: boolean; rejected: boolean; error?: unknown; done: Promise<void> }> = [];
+// 收尾期间才结束且以失败告终的会话：trackChat 给 pending 挂了处理器，原本会冒成 unhandled rejection
+// 的迟到失败在这里登记，由 afterEach 统一断言，既不吞掉信号，也不在 finally 里覆盖用例原本的错误。
+const lateChatFailures: string[] = [];
 // 收尾上限，不是用例超时：会话卡在非输入状态时不让 finally 一直挂到用例超时；超过上限会打印诊断，
 // 之后的迟到写入由产品侧（FileTranscriptLogger 对已删除目录的降级）兜住。
 const LATE_CHAT_SETTLE_LIMIT_MS = 5_000;
@@ -947,8 +950,11 @@ function teardownNote(message: string): void {
 }
 
 function trackChat<T>(pending: Promise<T>): Promise<T> {
-  const entry = { settled: false, done: Promise.resolve() };
-  entry.done = pending.then(() => { entry.settled = true; }, () => { entry.settled = true; });
+  const entry: (typeof liveChats)[number] = { settled: false, rejected: false, done: Promise.resolve() };
+  entry.done = pending.then(
+    () => { entry.settled = true; },
+    (error: unknown) => { entry.settled = true; entry.rejected = true; entry.error = error; },
+  );
   liveChats.push(entry);
   return pending;
 }
@@ -969,6 +975,11 @@ async function settleLateChats(harness: ReturnType<typeof createTtyHarness>): Pr
     ]);
     if (timer) clearTimeout(timer);
     if (expired) teardownNote(`会话在 ${LATE_CHAT_SETTLE_LIMIT_MS}ms 内未结束，teardown 将先于 finalization`);
+    else if (entry.rejected) {
+      const detail = entry.error instanceof Error ? `${entry.error.message}\n${entry.error.stack ?? ''}` : String(entry.error);
+      teardownNote(`会话在收尾时以失败结束: ${detail}`);
+      lateChatFailures.push(detail);
+    }
   }
 }
 
@@ -1311,6 +1322,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     vi.resetModules();
     vi.clearAllMocks();
     resetAdapterState();
+    // 放在清理之后：迟到失败要报出来，但不能让临时目录和 mock 漏清。
+    expect(lateChatFailures.splice(0)).toEqual([]);
   });
 
   it.skipIf(process.platform==='win32')('starts without session persistence when the config link is unsafe', async () => {
@@ -6548,16 +6561,16 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
     const { registerChatCommands } = await import('../../src/commands/chat.js');
-    const crashReporter = await import('../../src/utils/crash-reporter.js');
     const { FileTranscriptLogger } = await import('../../src/ui/transcript.js');
     // 只计数、不改行为：证明删目录之后确实还有 transcript 写入走到 record()，降级分支不是空跑。
     const recordSpy = vi.spyOn(FileTranscriptLogger.prototype, 'record');
-    const fatalErrors: unknown[] = [];
-    // 只记录、不落盘：fixture 目录已删，真实 reportCrash 会把崩溃报告写回被删的路径。
-    const crashSpy = vi.spyOn(crashReporter, 'reportCrash').mockImplementation(async (error) => {
-      fatalErrors.push(error);
-      throw error;
-    });
+    // 崩溃链的终点是 handleFatalError -> process.exit(1)。handleFatalError 在模块内部直接调用 reportCrash，
+    // spy 导出的 reportCrash 拦不到，所以直接记录 process.exit：只要有人想退出进程，这个用例就失败。
+    const exitCodes: unknown[] = [];
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: unknown) => {
+      exitCodes.push(code);
+      throw new Error(`process.exit(${String(code)}) during #128 teardown race`);
+    }) as typeof process.exit);
     const harness = createTtyHarness(100, 24);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
@@ -6585,7 +6598,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const describeError = (error: unknown) => error instanceof Error
         ? `${(error as NodeJS.ErrnoException).code ?? ''} ${error.message}\n${error.stack ?? ''}`
         : String(error);
-      expect(fatalErrors.map(describeError)).toEqual([]);
+      expect(exitCodes).toEqual([]);
       expect(settled.ok ? 'resolved' : describeError(settled.error)).toBe('resolved');
       expect(harness.output.normalized).not.toMatch(/ENOENT|崩溃报告|chat_finalization_unconfirmed/u);
       // 不能靠重建目录“修好”：transcript 不应把被 teardown 删除的目录写回来。
@@ -6599,7 +6612,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         if (!stdoutResizeListeners.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
       }
       await settleLateChats(harness); harness.restore();
-      crashSpy.mockRestore();
+      exitSpy.mockRestore();
       recordSpy.mockRestore();
     }
   }, 20_000);
