@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => ({
-  mode: 'throw' as 'throw' | 'never-ready' | 'cut-error',
+  mode: 'throw' as 'throw' | 'never-ready' | 'cut-error' | 'delayed-ready',
+  emitReady: undefined as undefined | (() => void),
   workers: [] as Array<{ terminated: boolean }>,
 }));
 vi.mock('node:worker_threads', async (importOriginal) => {
@@ -16,10 +17,13 @@ vi.mock('node:worker_threads', async (importOriginal) => {
       if (fake.mode === 'throw') throw new Error('worker threads unavailable');
       fake.workers.push(this);
       if (fake.mode === 'cut-error') queueMicrotask(() => this.emit('message', { type: 'ready' }));
+      if (fake.mode === 'delayed-ready') fake.emitReady = () => this.emit('message', { type: 'ready' });
     }
     ref() {} unref() {}
-    postMessage(message: { id: number }) {
-      queueMicrotask(() => this.emit('message', { type: 'cut', id: message.id, cutError: 'native cut threw' }));
+    postMessage(message: { id: number; runs: string[] }) {
+      // delayed-ready：按固定词表切分，证明结果来自 worker 而不是主线程同步路径。
+      if (fake.mode === 'delayed-ready') queueMicrotask(() => this.emit('message', { type: 'cut', id: message.id, cuts: message.runs.map(() => ['南京市', '长江大桥']) }));
+      else queueMicrotask(() => this.emit('message', { type: 'cut', id: message.id, cutError: 'native cut threw' }));
     }
     async terminate() { this.terminated = true; this.emit('exit', 1); return 1; }
   }
@@ -59,6 +63,21 @@ describe('segmentation worker fallbacks (#145 / #147)', () => {
     expect(fake.workers[0]?.terminated).toBe(true);
     expect(result).toBe(segment.segmentChinese(QUERY));
     expect(result).toContain('南京市 长江大桥');
+  });
+
+  // 第 2 轮 codex Major 1：首轮早于词典加载完成到来时，要等 ready 再分词；等待期间事件循环照常推进。
+  it('holds a first call that arrives before the dictionary is ready until ready, without blocking the event loop', async () => {
+    fake.mode = 'delayed-ready';
+    const segment = await import('../../../src/ai/memory/segment.js');
+    let settled = false;
+    const pending = segment.segmentChineseAsync('南京市长江大桥').then((value) => { settled = true; return value; });
+    let ticks = 0;
+    for (let i = 0; i < 20; i += 1) { await new Promise((resolve) => setImmediate(resolve)); ticks += 1; }
+    expect(ticks).toBe(20);
+    expect(settled).toBe(false);
+    expect(fake.emitReady).toBeTypeOf('function');
+    fake.emitReady!();
+    expect(await pending).toBe('南京市 长江大桥');
   });
 
   it('returns the raw text when nodejieba throws inside the worker, as the synchronous path does', async () => {

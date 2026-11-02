@@ -18,6 +18,7 @@ import { getBuiltinToolIdentity } from '../../src/ai/tools/native-tool-identity.
 import type { ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
 import { createDesktopMemoryLlm, getActiveMemoryEmbeddingModel } from './memory-distillation.js';
 import { MODEL_REGISTRY } from '../../src/ai/memory/model-registry.js';
+import { migrateLegacyUserMemories, type LegacyUserMemoryEntry } from '../../src/ai/memory/legacy-json-migration.js';
 import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
 import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
 import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
@@ -354,33 +355,8 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     if (existsSync(legacyPath)) {
       try {
         const raw = readFileSync(legacyPath, 'utf-8');
-        const entries = JSON.parse(raw) as Array<{
-          id: string; content: string; tags: string[]; createdAt?: number;
-          scope?: 'global' | 'project'; cwd?: string; type?: 'user' | 'feedback' | 'project' | 'reference';
-          provenance?: MemoryRecord['provenance'];
-        }>;
-        if (Array.isArray(entries)) {
-          for (const entry of entries) {
-            void layeredStore.save({
-              id: entry.id,
-              scope: entry.scope ?? 'global',
-              cwd: entry.cwd,
-              title: (entry.content || '').slice(0, 80),
-              summary: entry.content || '',
-              tags: entry.tags || [],
-              updatedAt: entry.createdAt || Date.now(),
-              type: entry.type ?? 'user',
-              provenance: entry.provenance,
-            });
-          }
-          for (const entry of entries) {
-            const migrated = layeredStore.getById(entry.id);
-            if (!migrated || migrated.scope !== (entry.scope ?? 'global') || migrated.cwd !== entry.cwd
-              || JSON.stringify(migrated.provenance) !== JSON.stringify(entry.provenance)) {
-              throw new Error(`memory migration verification failed: ${entry.id}`);
-            }
-          }
-        }
+        const entries = JSON.parse(raw) as LegacyUserMemoryEntry[];
+        if (Array.isArray(entries)) migrateLegacyUserMemories(layeredStore, entries);
         // Rename to .migrated to avoid re-import
         renameSync(legacyPath, legacyPath + '.migrated');
       } catch (error) {

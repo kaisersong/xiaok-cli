@@ -155,9 +155,22 @@ export class LayeredMemoryStore implements MemoryStore {
     return this.trackWrite(() => this.saveSegmented(record));
   }
 
+  /**
+   * Synchronous save (master semantics: the rows exist when this returns). For callers
+   * that must read the record back in the same tick, such as the desktop legacy JSON
+   * migration (第 2 轮 DS B1). Segments on the main thread; only used off the first screen.
+   */
+  saveSync(record: MemoryRecord): void {
+    if (this.closed) throw new Error('memory_store_closed');
+    this.insertRecord(record, segmentChinese(record.title + ' ' + record.summary));
+  }
+
   private async saveSegmented(record: MemoryRecord): Promise<void> {
+    this.insertRecord(record, await segmentChineseAsync(record.title + ' ' + record.summary));
+  }
+
+  private insertRecord(record: MemoryRecord, segmented: string): void {
     const id = record.id || crypto.randomUUID();
-    const segmented = await segmentChineseAsync(record.title + ' ' + record.summary);
     const scope = record.scope || 'global';
     const cwd = record.cwd || null;
     const memType = record.type || null;
@@ -433,15 +446,19 @@ export class LayeredMemoryStore implements MemoryStore {
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
     }
-    this.embeddingClient.close().catch((err) => {
-      logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
-    });
+    const closeEmbedding = () => {
+      this.embeddingClient.close().catch((err) => {
+        logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
+      });
+    };
     if (this.pendingWrites.size === 0) {
+      closeEmbedding();
       this.db.close();
       return;
     }
-    // A write accepted before close is still waiting for segmentation: let it land, then close.
-    this.closing = Promise.allSettled([...this.pendingWrites]).then(() => { this.db.close(); });
+    // A write accepted before close is still waiting for segmentation: let it land (and
+    // start its embedding) before the embedding engine and the database close (第 2 轮 DS M3).
+    this.closing = Promise.allSettled([...this.pendingWrites]).then(() => { closeEmbedding(); this.db.close(); });
     return this.closing;
   }
 

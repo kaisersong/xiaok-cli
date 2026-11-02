@@ -77,6 +77,24 @@ describe('off-thread segmentation (#145 / #147)', () => {
     expect(segmented).toContain('南京市 长江大桥');
   });
 
+  // 第 2 轮 DS M3：close 时有在途写，embedding 引擎要等写入落库（并发起向量写入）之后才关。
+  it('closes the embedding engine only after the in-flight write landed', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-seg-async-'));
+    const s = new LayeredMemoryStore({
+      dbPath: path.join(tmpDir, 'memory.db'),
+      embedding: { apiUrl: 'http://127.0.0.1:9/v1', model: 'none', dimensions: 8 },
+      compaction: { autoCompact: false },
+    });
+    const events: string[] = [];
+    const embedding = (s as unknown as { embeddingClient: { close(): Promise<void>; embedAndStore(...args: unknown[]): Promise<void> } }).embeddingClient;
+    embedding.embedAndStore = async (id: unknown) => { events.push(`embed:${String(id)}`); };
+    embedding.close = async () => { events.push('embedding.close'); };
+    const write = s.save({ id: 'late', scope: 'global', title: '关闭前', summary: '关闭前写入的记忆', tags: [], updatedAt: Date.now(), type: 'user' });
+    await s.close();
+    await write;
+    expect(events).toEqual(['embed:late', 'embedding.close']);
+  });
+
   it('a raw message written just before close still lands with the same segmentation', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-seg-async-'));
     const dbPath = path.join(tmpDir, 'memory.db');
