@@ -25,6 +25,7 @@ on:
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
       - 'tests/e2e/ghostty-vt-footer.mjs'
+      - 'tests/e2e/welcome-frame-width.py'
       - 'tests/support/ghostty-vt*'
       - 'tests/e2e/memory-background-footer.py'
       - 'tests/e2e/mode-selector.py'
@@ -53,6 +54,7 @@ on:
       - 'tests/e2e/thinking-draft-handoff.py'
       - 'tests/e2e/footer-return.py'
       - 'tests/e2e/ghostty-vt-footer.mjs'
+      - 'tests/e2e/welcome-frame-width.py'
       - 'tests/support/ghostty-vt*'
       - 'tests/e2e/memory-background-footer.py'
       - 'tests/e2e/mode-selector.py'
@@ -92,6 +94,7 @@ jobs:
           .test-dist/tests/ui/mode-selector.test.js
           .test-dist/tests/commands/chat-permission-mode.test.js
           .test-dist/tests/ui/repl-renderer.test.js
+          .test-dist/tests/ui/render.test.js
           .test-dist/tests/ui/keyboard-protocol.test.js
           .test-dist/tests/ui/windows-input-handoff.test.js
           .test-dist/tests/ui/busy-input-capture.test.js
@@ -121,6 +124,9 @@ jobs:
       - name: Install tmux for isolated real TTY tests
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Test welcome cells in isolated real PTYs
+        if: runner.os == 'Linux'
+        run: python3 tests/e2e/welcome-frame-width.py
       - name: Check retained image cells and short-menu interaction in real TTYs
         if: runner.os == 'Linux'
         run: |

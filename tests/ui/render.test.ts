@@ -12,7 +12,8 @@ import {
   formatHistoryBlock,
   type HistoryMessageBlock,
 } from '../../src/ui/render.js';
-import { getDisplayWidth } from '../../src/ui/display-width.js';
+import { getDisplayWidth, stripAnsi } from '../../src/ui/display-width.js';
+import { sliceByDisplayColumns } from '../../src/ui/text-metrics.js';
 
 describe('renderInputSeparator', () => {
   let originalColumns: number | undefined;
@@ -356,6 +357,43 @@ describe('renderWelcomeScreen', () => {
     expect(visibleLines.some((line) => line.startsWith('+'))).toBe(true);
     expect(visibleLines.some((line) => line.startsWith('|'))).toBe(true);
     expect(visibleLines.every((line) => getDisplayWidth(line) <= 102)).toBe(true);
+  });
+
+  it.each([50, 64, 80, 120].flatMap(columns => [false, true].flatMap(colors =>
+    [false, true].map(tmux => ({columns, colors, tmux})),
+  )))('contains real-length metadata in every cell at $columns columns (colors=$colors, tmux=$tmux)', ({columns, colors, tmux}) => {
+    process.stdout.columns = columns;
+    setColorsEnabled(colors);
+    if (tmux) process.env.TMUX = 'isolated-welcome-test';
+    else delete process.env.TMUX;
+    delete process.env.TERM_PROGRAM;
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => { lines.push(args.join(' ')); }) as typeof console.log;
+
+    const rows = renderWelcomeScreen({
+      model: 'kimi-' + '长模型'.repeat(6),
+      cwd: '/workspace/' + '中文目录'.repeat(12),
+      sessionId: 'sess_00000000-1111-4222-8333-444444444444',
+      mode: 'auto',
+      version: '1.6.1',
+    });
+
+    const visible = lines.filter(Boolean).map(stripAnsi);
+    const frameWidth = getDisplayWidth(visible[0]);
+    expect(frameWidth).toBeLessThan(columns);
+    // Screenshot regression: fitting the terminal alone is insufficient;
+    // every content row must fit the frame's exact cells and divider position.
+    expect(visible.every(line => getDisplayWidth(line) === frameWidth)).toBe(true);
+    const vertical = tmux ? '|' : '│';
+    const content = visible.filter(line => line.startsWith(vertical));
+    expect(content.every(line => sliceByDisplayColumns(line, 33, 1) === vertical)).toBe(true);
+    expect(content.every(line => line.endsWith(vertical))).toBe(true);
+    expect(content.some(line => line.includes('Session:'))).toBe(true);
+    expect(content.some(line => line.includes('Version:'))).toBe(true);
+    expect(visible.some(line => line.includes('...'))).toBe(true);
+    expect(rows).toBe(lines.length);
+    // No partial color escape remains after clipping a colored cell.
+    expect(visible.every(line => !line.includes('\x1b'))).toBe(true);
   });
 });
 

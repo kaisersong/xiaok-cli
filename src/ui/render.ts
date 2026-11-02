@@ -6,7 +6,7 @@ import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getToolActivityLabel, getUiCopy, type UiLocale } from './locale.js';
 import { publicAgentSummary } from '../ai/agents/subagent-presentation.js';
-import { getDisplayWidth, stripAnsi } from './display-width.js';
+import { getDisplayWidth, stripAnsi, truncateAnsi } from './text-metrics.js';
 import { BUILD_TIME } from '../build-info.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -248,13 +248,18 @@ export function renderWelcomeScreen(opts: {
 
   const padVisible = (text: string, width: number) => {
     const visibleWidth = getDisplayWidth(stripAnsi(text));
-    if (visibleWidth >= width) return text;
+    if (visibleWidth > width) {
+      const suffix = '.'.repeat(Math.min(3, width));
+      const clipped = truncateAnsi(text, width - suffix.length);
+      const reset = colorsEnabled ? '\x1b[0m' : '';
+      return clipped + suffix + reset + ' '.repeat(width - getDisplayWidth(clipped) - suffix.length);
+    }
     return text + " ".repeat(width - visibleWidth);
   };
 
   const centerVisible = (text: string, width: number) => {
     const visibleWidth = getDisplayWidth(stripAnsi(text));
-    if (visibleWidth >= width) return text;
+    if (visibleWidth >= width) return padVisible(text, width);
     const leftPad = Math.floor((width - visibleWidth) / 2);
     const rightPad = width - visibleWidth - leftPad;
     return " ".repeat(leftPad) + text + " ".repeat(rightPad);
