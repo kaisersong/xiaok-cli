@@ -12,6 +12,6 @@ it('compound native bash cannot fall through to an unsupervised host shell',asyn
 });
 it('native final authorization invokes the fixed host isolated port with frozen actual command parameters',async()=>{
  const f=fixture(),executeIsolatedCommand=vi.fn(async actual=>{expect(Object.isFrozen(actual)).toBe(true);return 'qualified backend result';});
- const result=await f.registry.executeTool('bash',{command:'printf isolated > marker',workdir:f.root,timeout_ms:71,max_chars:500},{...mcpTestContext(new AbortController().signal),compoundPhase:{executeIsolatedCommand} as any});
- expect(result).toBe('qualified backend result');expect(executeIsolatedCommand).toHaveBeenCalledWith({command:'printf isolated > marker',workdir:f.root,timeoutMs:71,maxChars:500},expect.any(Function));expect(existsSync(join(f.root,'marker'))).toBe(false);
+ const result=await f.registry.executeTool('bash',{command:'printf isolated > marker',workdir:f.root,timeout_ms:71,max_chars:1024},{...mcpTestContext(new AbortController().signal),compoundPhase:{executeIsolatedCommand} as any});
+ expect(result).toBe('qualified backend result');expect(executeIsolatedCommand).toHaveBeenCalledWith({command:'printf isolated > marker',workdir:f.root,timeoutMs:71,maxChars:1024},expect.any(Function));expect(existsSync(join(f.root,'marker'))).toBe(false);
 });

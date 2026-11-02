@@ -1,27 +1,13 @@
 import { measureCollector, observationMetricsEnabled } from '../../runtime/trace/observation-metrics.js';
 import { spawn, type ChildProcess } from 'child_process';
 import type { Tool, ToolExecutionContext } from '../../types.js';
-import { truncateText } from './truncation.js';
+import { BASH_TIMEOUT_MAX, BASH_OUTPUT_MIN, BASH_OUTPUT_MAX, validateBashLimits } from './bash-limits.js';
+import { BoundedShellOutput, WindowsElevationDetector, renderShellOutput } from './bash-output.js';
 import { classifyBashCommand } from './bash-safety.js';
 import { drainExitedWindowsShell, INHERITED_SHELL_OUTPUT_NOTICE } from '../../utils/shell-output-drain.js';
-import { StringDecoder } from 'node:string_decoder';
 import { beginToolObservation } from '../../runtime/sol-pi/collector-port.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const WINDOWS_ELEVATION_OUTPUT_PATTERNS = [
-  /需要管理员权限/i,
-  /以管理员身份运行/i,
-  /请手动运行/i,
-  /requested operation requires elevation/i,
-  /requires?\s+(?:administrator|admin|elevat)/i,
-  /(?:administrator|admin|elevat)\s+(?:privileges|rights|permissions?)\s+(?:are\s+)?required/i,
-  /run\s+(?:manually\s+)?as\s+administrator/i,
-];
-
-function outputRequestsWindowsElevation(output: string): boolean {
-  return WINDOWS_ELEVATION_OUTPUT_PATTERNS.some(pattern => pattern.test(output));
-}
-
 function terminateChildProcessTree(child: ChildProcess): void {
   if (process.platform === 'win32' && child.pid) {
     try {
@@ -77,9 +63,9 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
       type: 'object',
       properties: {
         command: { type: 'string', description: '要执行的 shell 命令' },
-        timeout_ms: { type: 'number', description: `超时毫秒数（默认 ${DEFAULT_TIMEOUT_MS}）` },
+        timeout_ms: { type: 'integer', minimum: 1, maximum: BASH_TIMEOUT_MAX, description: `超时毫秒数（默认 ${DEFAULT_TIMEOUT_MS}）` },
         workdir: { type: 'string', description: '命令执行目录（可选，默认当前目录）' },
-        max_chars: { type: 'number', description: '输出字符上限（默认 12000）' },
+        max_chars: { type: 'integer', minimum: BASH_OUTPUT_MIN, maximum: BASH_OUTPUT_MAX, description: '输出字符上限（默认 12000）' },
       },
       required: ['command'],
     },
@@ -92,6 +78,9 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
       workdir?: string;
       max_chars?: number;
     };
+
+    const invalidLimits = validateBashLimits(timeout_ms, max_chars);
+    if (invalidLimits) return invalidLimits;
 
     const risk = classifyBashCommand(command);
     if (risk.level === 'block') {
@@ -121,7 +110,13 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
       const observation = beginToolObservation(context?.observationCollector, {
         toolName: 'bash', source: { command, workdir },
       });
-      const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+      const stdout = new BoundedShellOutput(Math.min(max_chars, 65536));
+      const stderr = new BoundedShellOutput(Math.min(max_chars, 65536));
+      const elevation = {stdout:new WindowsElevationDetector(),stderr:new WindowsElevationDetector()};
+      const output = (status: string, notice = '') => {
+        const header = [status, notice].filter(Boolean).join('\n');
+        return `${header}${header ? '\n' : ''}${renderShellOutput(stdout, stderr, max_chars - header.length - 1)}`;
+      };
 
       const collectMetrics = observationMetricsEnabled();
       const collectionStarted = collectMetrics ? performance.now() : 0;
@@ -148,8 +143,8 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
         }
         settled = true;
         stopOutputDrain();
-        observation.append(decoders.stdout.end());
-        observation.append(decoders.stderr.end());
+        observation.append(stdout.end());
+        observation.append(stderr.end());
         observation.finalize({ executionState: terminalExited ? 'terminal' : 'termination_pending',
           ...(terminalExited ? { outcome: aborted ? 'cancelled' : terminationKind ?? (exitCode === 0 ? 'success' : 'error') } : {}),
           ...(aborted ? { incompleteReason: 'cancelled' } : terminationKind ? { incompleteReason: terminationKind === 'timeout' ? 'timeout' : 'terminated_for_elevation' }
@@ -184,27 +179,15 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
         } else complete();
       };
 
-      let stdout = '';
-      let stderr = '';
       const handleOutput = (stream: 'stdout' | 'stderr', data: Buffer) => {
-        if (!settled) observation.append(decoders[stream].write(data));
+        const chunk = !settled ? (stream === 'stdout' ? stdout : stderr).write(data) : '';
+        if (!settled) observation.append(chunk);
         if (collectMetrics) { collectedBytes += data.byteLength; collectedChunks++; }
         context?.executionProgress?.progress();
         if (aborted || settled || terminationResult) return;
-        const chunk = data.toString();
-        if (stream === 'stdout') {
-          stdout += chunk;
-        } else {
-          stderr += chunk;
-        }
-
-        const output = `${stdout}\n${stderr}`;
-        if (process.platform === 'win32' && outputRequestsWindowsElevation(output)) {
+        if (process.platform === 'win32' && elevation[stream].write(chunk)) {
           terminationKind = 'error';
-          terminationResult = truncateText(
-            `Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`,
-            max_chars,
-          ).text;
+          terminationResult = output('Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。');
           if (!normalExitObserved) terminateChildProcessTree(child);
         }
       };
@@ -215,7 +198,7 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
       timer = setTimeout(() => {
         if (aborted || terminationResult) return;
         terminationKind = 'timeout';
-        terminationResult = truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text;
+        terminationResult = output(`Error: 命令超时（>${timeout_ms}ms）`);
         terminateChildProcessTree(child);
       }, timeout_ms);
 
@@ -224,11 +207,12 @@ export function createBashTool(options: BashApprovalOptions = {}): BashTool {
         if (settled) {
           return;
         }
-        const output = [stdout, stderr, inheritedOutput ? INHERITED_SHELL_OUTPUT_NOTICE : ''].filter(Boolean).join('\n').trim();
+        observation.append(stdout.end());observation.append(stderr.end());
+        const notice = inheritedOutput ? INHERITED_SHELL_OUTPUT_NOTICE : '';
         if (code !== 0) {
-          finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text, code, true, inheritedOutput);
+          finish(output(`Error (exit ${code}):`, notice), code, true, inheritedOutput);
         } else {
-          finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text, 0, true, inheritedOutput);
+          finish(output('', notice), 0, true, inheritedOutput);
         }
       };
       stopOutputDrain = drainExitedWindowsShell(child, {
@@ -263,6 +247,8 @@ export function createInteractiveBashTool(run: Tool['execute'], options: BashApp
   const tool = createBashTool(options);
   return { ...tool, async execute(input, context) {
     context?.signal?.throwIfAborted();
+    const invalidLimits = validateBashLimits(input.timeout_ms === undefined ? DEFAULT_TIMEOUT_MS : input.timeout_ms, input.max_chars === undefined ? 12_000 : input.max_chars);
+    if (invalidLimits) return invalidLimits;
     const command = String(input.command ?? '');
     if (!/\bsudo\b/.test(command)) return tool.execute(input, context);
     const risk = classifyBashCommand(command);
