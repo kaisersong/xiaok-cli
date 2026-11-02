@@ -1713,6 +1713,80 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }
   }, 20_000);
 
+  // #147 临时测量（只在 tmp/startup-timing-147 分支，不进 #146）：首屏 ❯ 出现前要等多久、其中 attach 占多少。
+  // 场景：cold = 新配置目录，owner 不存在（首屏前要拉起 owner）；warm = 同一目录再启动，owner 在跑且空闲；
+  // busy = owner 在跑但被 SIGSTOP 挂起（不响应，仅 POSIX）。每次启动前 resetModules，模拟新进程的模块加载；
+  // 第 0 轮还包含本 worker 第一次加载模块的成本，单独标出。输出 [startup-timing-147] JSON 行，测试本身不做断言。
+  it('measures first-screen startup timing for #147', async () => {
+    const rounds = Number(process.env.XIAOK_STARTUP_TIMING_ROUNDS ?? 5);
+    const rows: Array<Record<string, unknown>> = [];
+    const launch = async (configDir: string, projectDir: string, scenario: string, round: number, afterPrompt?: () => void): Promise<void> => {
+      vi.resetModules();
+      process.env.XIAOK_CONFIG_DIR = configDir;
+      cwdSpy?.mockRestore(); cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+      const loader = await import('../../src/runtime/conversation-activity/cli-loader.js');
+      const segment = await import('../../src/ai/memory/segment.js');
+      const originalAttach = loader.attachCliConversationActivitiesWithinBudget;
+      const originalSegment = segment.segmentQuery;
+      let attachMs: number | undefined; let attachOutcome = 'not_called'; let segmentMs = 0;
+      let deferred = false;
+      const attachSpy = vi.spyOn(loader, 'attachCliConversationActivitiesWithinBudget').mockImplementation(async (options, budget, deps) => {
+        const started = performance.now();
+        const wrapped = { ...options, onDebug: (event: string, detail: string) => { if (event === 'cli_activity_startup_deferred') deferred = true; options.onDebug?.(event, detail); } };
+        try { const result = await originalAttach(wrapped, budget, deps); attachOutcome = result ? 'attached' : (deferred ? 'deferred_budget' : 'none'); return result; }
+        finally { attachMs = performance.now() - started; }
+      });
+      const segmentSpy = vi.spyOn(segment, 'segmentQuery').mockImplementation((query: string) => {
+        const started = performance.now(); try { return originalSegment(query); } finally { segmentMs += performance.now() - started; }
+      });
+      const harness = createTtyHarness(120, 24);
+      const tty = process.stdout.isTTY; process.stdout.isTTY = true;
+      const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
+      const importStarted = performance.now();
+      const { registerChatCommands } = await import('../../src/commands/chat.js');
+      const importMs = performance.now() - importStarted;
+      try {
+        const program = new Command(); registerChatCommands(program);
+        const started = performance.now();
+        const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+        let promptMs: number | undefined;
+        while (performance.now() - started < 60_000) {
+          if (harness.screen.lines().some((line) => line.includes('❯'))) { promptMs = performance.now() - started; break; }
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        rows.push({ platform: process.platform, node: process.version, scenario, round, promptMs: promptMs === undefined ? null : Math.round(promptMs),
+          attachMs: attachMs === undefined ? null : Math.round(attachMs), attachOutcome, segmentMs: Math.round(segmentMs), chatModuleImportMs: Math.round(importMs) });
+        process.stderr.write(`[startup-timing-147] ${JSON.stringify(rows.at(-1))}\n`);
+        afterPrompt?.();
+        await waitForInputTurnReady(harness);
+        harness.send('/exit\r'); await pending;
+      } finally {
+        for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
+        for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
+        harness.restore(); process.stdout.isTTY = tty; attachSpy.mockRestore(); segmentSpy.mockRestore();
+      }
+    };
+    const config = JSON.stringify({ schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } }, defaultMode: 'interactive', contextBudget: 4000, channels: {} });
+    for (let round = 0; round < rounds; round++) {
+      const rootDir = join(tmpdir(), `xiaok-startup-timing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      tempDirs.push(rootDir);
+      const configDir = join(rootDir, 'config'); const projectDir = join(rootDir, 'project');
+      mkdirSync(configDir, { recursive: true }); mkdirSync(projectDir, { recursive: true });
+      writeFileSync(join(configDir, 'config.json'), config);
+      await launch(configDir, projectDir, 'cold_owner_absent', round);
+      await launch(configDir, projectDir, 'warm_owner_idle', round);
+      if (process.platform !== 'win32') {
+        const owners = ownersWithPrefixes(ownerPathPrefixes([rootDir]));
+        for (const owner of owners) process.kill(owner.pid, 'SIGSTOP');
+        const resume = (): void => { for (const owner of owners) { try { process.kill(owner.pid, 'SIGCONT'); } catch { /* 已退出 */ } } };
+        // 量完首屏立刻恢复 owner，避免退出流程卡在被挂起的 owner 上。
+        try { await launch(configDir, projectDir, `busy_owner_stopped(n=${owners.length})`, round, resume); }
+        finally { resume(); }
+      }
+    }
+    process.stderr.write(`[startup-timing-147-summary] ${JSON.stringify(rows)}\n`);
+  }, 600_000);
+
   it('runs a fork skill through the interactive slash flow and honors the skill model override', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
