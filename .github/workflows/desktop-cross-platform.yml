@@ -78,7 +78,7 @@ jobs:
               BASE="$(git rev-parse "$HEAD^")"
             fi
           fi
-          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
+          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|desktop/electron/packaged-segmentation-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
           # Fail-closed: if git diff cannot run (bad/missing objects), force smoke on.
           # Previously a failed diff landed in the else branch → run_smoke=false (M1).
           if ! DIFF_OUT="$(git diff --name-only "$BASE" "$HEAD" 2>/tmp/packaged-kimi-diff.err)"; then
@@ -140,6 +140,7 @@ jobs:
           tests/main/desktop-text-repetition.test.ts
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/kimi-packaged-smoke.test.ts
+          tests/main/packaged-segmentation-smoke.test.ts
           tests/main/windows-kimi-packaged-smoke-contract.test.ts
           tests/main/kimi-harness-contract.test.ts
           tests/main/kimi-reasoning-admission.test.ts
@@ -194,6 +195,17 @@ jobs:
       - name: Install desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+
+      - name: Build nodejieba native binding for packaged segmentation (#150 M6)
+        # npm ci --ignore-scripts skips nodejieba's node-pre-gyp install, so the
+        # packaged app would ship without build/Release/nodejieba.node and the
+        # packaged segmentation smoke step fails closed. N-API binding: a Node
+        # build loads under Electron (electron-builder npmRebuild=false).
+        shell: bash
+        run: |
+          cd desktop
+          bash ../.github/scripts/retry.sh npm rebuild nodejieba
+          node -e "const j=require('nodejieba');const o=j.cut('南京市长江大桥').join(' ');console.log(require.resolve('nodejieba'),o);if(o!=='南京市 长江大桥')process.exit(1)"
 
       - name: Clone desktop sidecar repositories
         run: |
