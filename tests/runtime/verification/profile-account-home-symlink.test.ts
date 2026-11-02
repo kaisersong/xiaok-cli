@@ -37,10 +37,11 @@ describe.skipIf(process.platform==='win32')('profile account physical paths',()=
  it('escapes NUL in invalid config path diagnostics',()=>{
   // #123：forks 池里 process.env 是真实环境块，setenv 在 NUL 处截断（'bad\0path' 读回 'bad'），
   // 只有 threads 的 env 普通对象拷贝能存 NUL。这里显式换成普通对象承载含 NUL 的值，被测入口仍读 process.env。
+  // 真实进程环境不可能含 NUL：产品侧该分支是 defensive-only，本用例只证明诊断会转义，不证明该路径真实可达。
   const realEnv=process.env,badPath=join(root,'bad\0path');
   Object.defineProperty(process,'env',{value:{...realEnv,XIAOK_CONFIG_DIR:badPath},writable:true,configurable:true,enumerable:true});
   try{
-   expect(process.env.XIAOK_CONFIG_DIR).toBe(badPath);
+   expect(process.env.XIAOK_CONFIG_DIR).toBe(badPath); // 前置条件：确认 NUL 未被截断，否则下一断言失败原因会被误读
    expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});
   }finally{Object.defineProperty(process,'env',{value:realEnv,writable:true,configurable:true,enumerable:true});}
  });

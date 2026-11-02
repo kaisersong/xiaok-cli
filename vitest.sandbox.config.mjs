@@ -21,9 +21,10 @@ export default {
     // afterEach 清理临时目录在 Windows 上会因文件句柄重试而超过默认 10s。
     hookTimeout: 30_000,
     fileParallelism: false,
-    // #123（观察口径）：threads 下重 verification 用例超时后 runner 收不住，全量只能外部 kill（exit 143）。
-    // forks 下 worker 是独立子进程，超时/teardown 可杀掉 worker，套件能写完报告并退出。
-    // 验收=进程能退出并写出 JSON，不是用例全绿；yolo spread 本配置继承 forks。
+    // #123：全量“停在第 42 个文件之后”是按大小降序排在第 43 起的几个 verification 文件各跑 14–29 分钟、
+    // 非 TTY reporter 无输出所致（threads/forks 皆然，慢文件跟 #105/#98），不是该位置挂死。
+    // 另有独立的真挂死：threads 下 verification-obligation-observation 主进程 RPC 饿死只能外部 kill；
+    // forks 下 worker 是独立子进程，同文件能跑完、写报告并退出。yolo spread 本配置继承 forks。
     pool: 'forks',
   },
 };
