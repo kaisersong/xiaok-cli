@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -269,10 +269,21 @@ describe.skipIf(process.platform === 'win32')('yzj serve child process with a re
     return { child, exitWithinLimit, waitForOutput, output: () => output };
   }
 
+  /** The running child keeps its pid file under the temporary home, never under the real ~/.xiaok. */
+  function expectPidFileInTempHome(child: ChildProcess) {
+    const tempPid = join(base, 'home', '.xiaok', 'state', 'yzj', 'serve.pid');
+    expect(existsSync(tempPid)).toBe(true);
+    expect(readFileSync(tempPid, 'utf8').trim()).toBe(String(child.pid));
+    const realPid = join(priorEnv.HOME ?? priorEnv.USERPROFILE ?? tmpdir(), '.xiaok', 'state', 'yzj', 'serve.pid');
+    expect(existsSync(realPid) && readFileSync(realPid, 'utf8').trim() === String(child.pid)).toBe(false);
+    return tempPid;
+  }
+
   it('SIGINT with the last write in flight and a leftover handle: exits 0 within the limit and the row is in memory.db', async () => {
     // The leftover ref'd timer would keep the child alive forever if serve relied on the event loop draining.
     const run = startChild('release-on-close', true);
     await run.waitForOutput('[yzj] gateway started');
+    const tempPid = expectPidFileInTempHome(run.child);
     const signalledAt = Date.now();
     run.child.kill('SIGINT');
     const result = await run.exitWithinLimit();
@@ -283,11 +294,13 @@ describe.skipIf(process.platform === 'win32')('yzj serve child process with a re
     expect(run.output()).toContain('[yzj-test] memory store close() started');
     expect(readRawRow(join(base, 'config', 'memory.db'), LAST_MESSAGE), run.output())
       .toEqual({ session_id: 'yzj-dry-run-probe', role: 'user', content: LAST_MESSAGE });
+    expect(existsSync(tempPid)).toBe(false);
   }, 30_000);
 
   it(`a second SIGINT while shutdown waits on the write exits ${YZJ_SERVE_EXIT_CODES.SIGINT} at once`, async () => {
     const run = startChild('hold');
     await run.waitForOutput('[yzj] gateway started');
+    const tempPid = expectPidFileInTempHome(run.child);
     run.child.kill('SIGINT');
     await run.waitForOutput('[yzj] shutting down (SIGINT)');
     const secondAt = Date.now();
@@ -298,5 +311,6 @@ describe.skipIf(process.platform === 'win32')('yzj serve child process with a re
       .toEqual({ code: YZJ_SERVE_EXIT_CODES.SIGINT, signal: null });
     expect((result as { at: number }).at - secondAt).toBeLessThan(EXIT_WITHIN_MS);
     expect(run.output()).not.toContain('shutdown did not finish');
+    expect(existsSync(tempPid)).toBe(false);
   }, 30_000);
 });
