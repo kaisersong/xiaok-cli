@@ -1,4 +1,5 @@
 #!/bin/sh
 set -e
 
+node scripts/check-staged-file-tokens.mjs
 node scripts/check-external-docs.mjs
