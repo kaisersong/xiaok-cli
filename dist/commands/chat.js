@@ -1,3 +1,6 @@
+import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
+import { inspectProfileAccountHome, ProfileAccountHomeError } from '../runtime/verification/profile-account-home.js';
+import { getUiCopy } from '../ui/locale.js';
 import { readNativeLookupRows, readNativeJournalLength, readNativeLookupSubjects, readIntentText } from '../runtime/intent-delegation/chat-intent-data.js';
 import { confirmChatPermission } from './chat-permission.js';
 import { getResumeHistoryMessages } from '../ui/resume-history.js';
@@ -356,6 +359,18 @@ async function runChat(initialInput, opts) {
         }
         return finalization;
     };
+    const finalizeChatWithDiagnostics = async () => {
+        try {
+            await finalizeChat();
+        }
+        catch (error) {
+            try {
+                log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
+            }
+            catch { }
+            throw error;
+        }
+    };
     let signalExit;
     let finishTerminal = () => { };
     let writeSignalExitNotice = async () => { };
@@ -470,6 +485,42 @@ async function runChat(initialInput, opts) {
             ? resolveCompoundHostStorage({ configRoot: getConfigDir() }) : undefined;
         const sessionStoreRoot = compoundStorage?.canonicalRoot ?? getConfigDir('sessions');
         const sessionStore = createFileSessionStore(sessionStoreRoot);
+        // Unexpected resolver errors keep the previous behaviour: surface at the first save.
+        let profileInspection;
+        try {
+            profileInspection = inspectProfileAccountHome();
+        }
+        catch {
+            profileInspection = { ok: true };
+        }
+        let sessionPersistenceDisabled = !profileInspection.ok;
+        let sessionStorageNotice = profileInspection.ok ? undefined : getUiCopy().sessionStorageDisabled(profileInspection.path, profileInspection.reason);
+        const flushPrintStorageNotice = () => {
+            if (opts.print && sessionStorageNotice) {
+                process.stderr.write(sessionStorageNotice + '\n');
+                sessionStorageNotice = undefined;
+            }
+        };
+        flushPrintStorageNotice();
+        const disableSessionPersistence = (error) => {
+            if (!sessionPersistenceDisabled)
+                sessionStorageNotice = getUiCopy().sessionStorageDisabled(error.path, error.reason);
+            sessionPersistenceDisabled = true;
+            flushPrintStorageNotice();
+        };
+        const saveSession = sessionStore.save.bind(sessionStore);
+        sessionStore.save = async (...args) => {
+            if (sessionPersistenceDisabled)
+                return;
+            try {
+                await saveSession(...args);
+            }
+            catch (error) {
+                if (!(error instanceof ProfileAccountHomeError))
+                    throw error;
+                disableSessionPersistence(error);
+            }
+        };
         const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
         const skillEvalStore = new SessionSkillEvalStore(sessionStore, { withMutationLease: async (targetSession, work) => {
                 if (targetSession !== sessionId)
@@ -1069,6 +1120,14 @@ async function runChat(initialInput, opts) {
             signal?.throwIfAborted();
             return answer;
         }
+        function writeQuestionTranscript(text) {
+            if (replRenderer.hasActiveScrollRegion()) {
+                scrollRegion.writeAtContentCursor(text);
+            }
+            else {
+                process.stdout.write(text);
+            }
+        }
         const workflowTools = [
             createAskUserTool({
                 ask: async (question, placeholder, interaction, signal) => {
@@ -1085,6 +1144,7 @@ async function runChat(initialInput, opts) {
                                 renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
                                 clearFrame: () => askUserClearFrame?.(),
                                 readText: readQuestionText,
+                                writeTranscript: writeQuestionTranscript,
                                 signal,
                             });
                             return [...result.labels, result.otherText]
@@ -1159,6 +1219,7 @@ async function runChat(initialInput, opts) {
                 renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
                 clearFrame: () => askUserClearFrame?.(),
                 readText: readQuestionText,
+                writeTranscript: writeQuestionTranscript,
             }),
             createInstallSkillTool({
                 cwd,
@@ -2688,6 +2749,8 @@ async function runChat(initialInput, opts) {
             const activityCanWrite = canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready';
             cliActivities?.flush(activityCanWrite, writeOrchestrationBlock);
             if (activityCanWrite) {
+                if (sessionStorageNotice && writeOrchestrationBlock(sessionStorageNotice))
+                    sessionStorageNotice = undefined;
                 const notice = activityStartupNotices.take();
                 if (notice) {
                     if (writeOrchestrationBlock(notice.text))
@@ -2696,6 +2759,8 @@ async function runChat(initialInput, opts) {
             }
         };
         const persistSessionBody = async (options = {}) => {
+            if (sessionPersistenceDisabled)
+                return;
             if (options.refreshIntentLedger ?? true) {
                 await refreshIntentLedger();
             }
@@ -2734,7 +2799,16 @@ async function runChat(initialInput, opts) {
             if (observationSession && historyBasis !== undefined)
                 observationSession.notePublishedHistory(snapshot, historyBasis);
         };
-        const persistSession = (...args) => trackSessionWrite(() => persistSessionBody(...args));
+        const persistSession = (...args) => trackSessionWrite(async () => {
+            try {
+                await persistSessionBody(...args);
+            }
+            catch (error) {
+                if (!(error instanceof ProfileAccountHomeError))
+                    throw error;
+                disableSessionPersistence(error);
+            }
+        });
         const pauseCurrentGoalForInterruption = async (reason, requestSource) => {
             try {
                 if (isGoalArmed() && currentGoalState?.status === 'active') {
@@ -3753,6 +3827,7 @@ async function runChat(initialInput, opts) {
                 endStreamingPhaseForInterrupt();
                 flushSubAgentNotices();
                 if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
+                    toolExplorer.reset();
                     turnHadAskUserQuestion = true;
                     maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
                     return;
@@ -4593,7 +4668,7 @@ async function runChat(initialInput, opts) {
                             const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
                             const selectedProvider = config.providers[selected.provider];
                             const catalogRuntimeEligible = selected.provider !== 'kimi'
-                                || variant?.model !== 'k3'
+                                || !isKimiCodingModel(variant?.model)
                                 || (selectedProvider?.protocol === 'openai_legacy'
                                     && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl));
                             const variantRuntimeOptions = variant && selectedProvider && catalogRuntimeEligible
@@ -4999,7 +5074,7 @@ async function runChat(initialInput, opts) {
         }
         finally {
             try {
-                await finalizeChat();
+                await finalizeChatWithDiagnostics();
             }
             finally {
                 finishTerminal();

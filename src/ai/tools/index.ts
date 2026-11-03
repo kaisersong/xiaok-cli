@@ -6,7 +6,7 @@ import {captureToolDescriptionMetadata,BUILTIN_READ_DESCRIPTION,type ToolDescrip
 import { isIntentProducerTool } from './intent-delegation.js';
 import { isObservationDelegationTool } from '../../runtime/sol-pi/delegation-tool-brand.js';
 import {registerBuiltinToolIdentity,inheritBuiltinToolIdentity,getBuiltinToolIdentity,isNativeReadonlyExecutionEligible} from './native-tool-identity.js';
-import {getCompoundSandboxPreparation,inheritCompoundSandboxPreparation} from '../../platform/sandbox/tool-wrappers.js';
+import {getCompoundSandboxPreparation,inheritCompoundSandboxPreparation,isScopedSandboxReadonlyTool} from '../../platform/sandbox/tool-wrappers.js';
 import { IntersectedPermissionManager } from '../permissions/intersection.js';
 import { measureToolResult, observationMetricsEnabled } from '../../runtime/trace/observation-metrics.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -103,6 +103,8 @@ export interface CompoundRegistryExecutionPort {
 export interface RegistryOptions {
   /** Host-only review role; native object identity is the sole admission authority. */
   nativeReadonlyOnly?: boolean;
+  /** Host-only readonly model boundary: every admitted tool needs path scope. */
+  requireSandboxScope?: boolean;
   compoundExecution?: CompoundRegistryExecutionPort;
   toolIdleTimeoutMs?: number;
   capabilityRegistry?: CapabilityRegistry;
@@ -158,14 +160,18 @@ export type ToolPreparationResult = {readonly kind:'prepared';readonly invocatio
 
 const observationPermissionAuthorities = new WeakMap<object, object>();
 
+const scopedNativeReadonlyRegistries=new WeakSet<object>();
+export function isScopedNativeReadonlyRegistry(registry:unknown):boolean {return typeof registry==='object'&&registry!==null&&scopedNativeReadonlyRegistries.has(registry);}
 export class ToolRegistry {
   #nativeReadonlyOnly: boolean;
+  #requireSandboxScope: boolean;
   get isNativeReadonlyOnly(): boolean { return this.#nativeReadonlyOnly; }
 
   private admitsNativeReadonly(tool: Tool | undefined): boolean {
     if (!this.#nativeReadonlyOnly) return Boolean(tool);
     if (!tool) return false;
-    try { return getBuiltinToolIdentity(tool) === 'readonly' && isNativeReadonlyExecutionEligible(tool); } catch { return false; }
+    try { return getBuiltinToolIdentity(tool) === 'readonly' && isNativeReadonlyExecutionEligible(tool)
+      && (!this.#requireSandboxScope||isScopedSandboxReadonlyTool(tool)); } catch { return false; }
   }
 
   private assertNativeReadonlyTree(tool: Tool, seen = new Set<Tool>()): void {
@@ -199,6 +205,8 @@ export class ToolRegistry {
 
   constructor(options: ToolRegistryOptions, tools?: Tool[],metadata?:ReadonlyMap<Tool,ToolDescriptionMetadata>) {
     this.#nativeReadonlyOnly = options.nativeReadonlyOnly === true;
+    this.#requireSandboxScope=this.#nativeReadonlyOnly&&options.requireSandboxScope===true;
+    if(this.#requireSandboxScope)scopedNativeReadonlyRegistries.add(this);
     Object.defineProperty(this, 'isNativeReadonlyOnly', { get: () => this.#nativeReadonlyOnly, configurable: false });
     if (this.#nativeReadonlyOnly) {
       if (options.compoundExecution || options.onToolObserved || options.protectedOutputGuard || options.onPrompt) throw Error('native_readonly_external_callback_denied');

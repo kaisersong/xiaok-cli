@@ -32,6 +32,7 @@ export interface AskQuestionParams {
     renderFrame?: (lines: string[]) => boolean | void;
     clearFrame?: () => void;
     readText?: (question: string, signal?: AbortSignal) => Promise<string | null>;
+    writeTranscript?: (text: string) => void;
     signal?: AbortSignal;
 }
 export interface AskQuestionResult {

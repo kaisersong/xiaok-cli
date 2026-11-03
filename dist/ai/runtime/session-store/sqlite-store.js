@@ -1,3 +1,4 @@
+import { createKnownDirectoryWriterFence } from '../../../runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinarySQLiteWriter } from '../../../runtime/verification/ordinary-source-writer-observation.js';
 import { consumeIntentParentCandidateWrite } from '../../../runtime/intent-delegation/publication-host.js';
 import { consumeIntentReceiverWrite } from '../../../runtime/intent-delegation/receiver-publication-host.js';
@@ -23,12 +24,28 @@ import { assertKimiK3DurableResumeSupported, toDurableSessionSnapshot, } from '.
 import { applySessionStoreSchema } from './schema.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
 import { rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
+const knownSqliteSessionWriters = new WeakMap();
+const acceptedSqliteSessionForks = new WeakMap();
+function assertKnownSqliteSessionWriter(owner, rootLockHeld = false, acceptedFork) {
+    const writer = knownSqliteSessionWriters.get(owner);
+    if (!writer)
+        throw Error('known_writer_fence_owner');
+    if (rootLockHeld || acceptedFork !== undefined) {
+        if (!rootLockHeld || !acceptedFork || acceptedSqliteSessionForks.get(acceptedFork) !== owner)
+            throw Error('known_writer_fence_owner');
+        return;
+    }
+    writer.fence?.assertOpen();
+}
+import { nativeJournalLengthData } from '../../../runtime/intent-delegation/data.js';
 export class SQLiteSessionStore {
     dbPath;
     db;
     constructor(dbPath) {
         this.dbPath = dbPath;
         assertOrdinarySourceWriterRoute();
+        knownSqliteSessionWriters.set(this, { fence: dbPath === ':memory:' || dbPath === '' ? undefined : createKnownDirectoryWriterFence(dirname(dbPath), 'sqlite-db') });
+        assertKnownSqliteSessionWriter(this);
         mkdirSync(dirname(dbPath), { recursive: true });
         this.db = new Database(dbPath);
         try {
@@ -69,6 +86,7 @@ export class SQLiteSessionStore {
         return freezeIntentNativeLedger(captureIntentSnapshot(snapshot).intentDelegation);
     }
     async recordIntentReceiverPublication(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = consumeIntentReceiverWrite(this, raw);
         this.assertIntentNativeLease(input.sessionId, input.requestSource, lease);
         const snapshot = this.readSnapshot(input.sessionId);
@@ -81,6 +99,7 @@ export class SQLiteSessionStore {
         return candidate;
     }
     async recordIntentVerificationOperation(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentVerificationOperation(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, allowedKinds: ['direct-mutation', 'recovery'] });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -93,6 +112,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async observeIntentVerificationEnrollment(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentVerificationObservation(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, allowedKinds: ['direct-mutation', 'recovery'] });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -105,6 +125,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async claimIntentVerificationEnrollment(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentVerificationClaim(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -117,6 +138,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async reserveIntentVerificationExecution(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentVerificationReserve(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -129,6 +151,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async retryIntentPublicationApplication(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentPublicationRetry(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -141,6 +164,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async observeIntentPublicationApplication(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentPublicationObservation(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, allowedKinds: ['direct-mutation', 'recovery'] });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -153,6 +177,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async claimIntentPublicationApplication(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentPublicationClaim(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -165,6 +190,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async reserveIntentParentPublicationCandidate(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = consumeIntentParentCandidateWrite(this, raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -177,6 +203,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async reserveIntentPublicationCandidate(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentPublicationRequest(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -189,6 +216,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async reserveIntentNativeContract(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentNativeRequest('reserve', raw);
         this.commitNativeIntent(input, lease);
         const intentId = input.nativeAction === 'reserve' ? input.plan.intentId : ('intentId' in input ? input.intentId : '');
@@ -198,6 +226,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async advanceIntentNativeContractSubject(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentNativeRequest('advance', raw);
         this.commitNativeIntent(input, lease);
         const intentId = input.nativeAction === 'reserve' ? input.plan.intentId : ('intentId' in input ? input.intentId : '');
@@ -207,6 +236,7 @@ export class SQLiteSessionStore {
         return row;
     }
     async retryIntentNativeContractSubject(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentNativeRequest('retry', raw);
         this.commitNativeIntent(input, lease);
         const intentId = input.nativeAction === 'reserve' ? input.plan.intentId : ('intentId' in input ? input.intentId : '');
@@ -216,10 +246,12 @@ export class SQLiteSessionStore {
         return row;
     }
     async transitionIntentSessionOwnership(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentNativeRequest('ownership', raw);
         this.commitNativeIntent(input, lease);
     }
     commitNativeIntent(input, lease) {
+        assertKnownSqliteSessionWriter(this);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, ...(input.nativeAction !== 'advance' || input.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) });
         const snapshot = this.readSnapshot(input.sessionId);
         if (!snapshot)
@@ -227,6 +259,7 @@ export class SQLiteSessionStore {
         this.commitSnapshot(snapshot, undefined, undefined, lease, false, input);
     }
     async recordIntentProducerAction(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentProducerRequest(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource, kind: 'direct-mutation' });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -235,6 +268,7 @@ export class SQLiteSessionStore {
         this.commitSnapshot(snapshot, undefined, undefined, lease, false, input);
     }
     async recordIntentExecutionTerminal(raw) {
+        assertKnownSqliteSessionWriter(this);
         const { input, lease } = captureIntentExecutionRequest(raw);
         assertSessionExecutionLease(lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId, requestSource: input.requestSource });
         const snapshot = this.readSnapshot(input.sessionId);
@@ -243,25 +277,29 @@ export class SQLiteSessionStore {
         this.commitSnapshot(snapshot, undefined, undefined, lease, false, input);
     }
     async save(snapshot, options) {
+        assertKnownSqliteSessionWriter(this);
         this.commitSnapshot(snapshot, undefined, undefined, options?.lease);
     }
     async compareAndSave(input) {
+        assertKnownSqliteSessionWriter(this);
         assertSessionExecutionLease(input.lease, { root: dirname(this.dbPath), sessionIdentity: input.nextSnapshot.sessionId });
         return this.commitSnapshot(input.nextSnapshot, input);
     }
     mutationInProgress = false;
-    commitSnapshot(snapshot, cas, forkSourceId, executionLease, rootLockHeld = false, terminal) {
+    commitSnapshot(snapshot, cas, forkSourceId, executionLease, rootLockHeld = false, terminal, acceptedFork) {
+        assertKnownSqliteSessionWriter(this, rootLockHeld, acceptedFork);
         if (this.mutationInProgress)
             throw Error('session_commit_reentrant');
         this.mutationInProgress = true;
         try {
-            return this.commitSnapshotLocked(captureIntentSnapshot(snapshot), cas, forkSourceId, executionLease, rootLockHeld, terminal);
+            return this.commitSnapshotLocked(captureIntentSnapshot(snapshot), cas, forkSourceId, executionLease, rootLockHeld, terminal, acceptedFork);
         }
         finally {
             this.mutationInProgress = false;
         }
     }
-    commitSnapshotLocked(snapshot, cas, forkSourceId, executionLease, rootLockHeld = false, terminal) {
+    commitSnapshotLocked(snapshot, cas, forkSourceId, executionLease, rootLockHeld = false, terminal, acceptedFork) {
+        assertKnownSqliteSessionWriter(this, rootLockHeld, acceptedFork);
         const releaseExecution = acquireSessionStoreExecutionGuard(dirname(this.dbPath), snapshot.sessionId, cas?.lease ?? executionLease, rootLockHeld);
         try {
             const durableSnapshot = toDurableSessionSnapshot(snapshot);
@@ -292,7 +330,7 @@ export class SQLiteSessionStore {
                         nextSnapshot = applyIntentProducerAction(originalSnapshot, terminal, producerRoutes);
                     }
                     else {
-                        const existing = originalSnapshot.intentDelegation?.intents.find(i => i.intentId === terminal.intentId)?.executionTerminals?.find(e => e.kind === terminal.kind && e.identity === terminal.identity && e.status === terminal.status && e.recordedAt === terminal.recordedAt);
+                        const existing = originalSnapshot.intentDelegation?.intents.find(i => i.intentId === terminal.intentId)?.executionTerminals?.find((e) => e.kind === terminal.kind && e.identity === terminal.identity && e.status === terminal.status && e.recordedAt === terminal.recordedAt);
                         assertSessionExecutionLease(executionLease, { root: dirname(this.dbPath), sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...(existing ? {} : { kind: 'direct-mutation' }) });
                         nextSnapshot = appendIntentExecutionTerminal(originalSnapshot, terminal);
                     }
@@ -396,7 +434,7 @@ export class SQLiteSessionStore {
                     if (JSON.stringify(tail?.intentDelegation ?? null) !== JSON.stringify(nextSnapshot.intentDelegation ?? null) || tail?.storeRevision !== nextSnapshot.storeRevision || tail?.historyDigest !== nextSnapshot.historyDigest)
                         throw Error('intent_producer_readback');
                 }
-                return { snapshot: { ...nextSnapshot, protectedObservationClosure }, protectedPublication: protectedObservationClosure !== undefined || nextSnapshot.executionProtected === true || !!nextSnapshot.intentDelegation?.nativeContracts?.length, storeRevision: nextSnapshot.storeRevision, historyDigest: nextSnapshot.historyDigest };
+                return { snapshot: { ...nextSnapshot, protectedObservationClosure }, protectedPublication: protectedObservationClosure !== undefined || nextSnapshot.executionProtected === true || !!nativeJournalLengthData(nextSnapshot.intentDelegation?.nativeContracts), storeRevision: nextSnapshot.storeRevision, historyDigest: nextSnapshot.historyDigest };
             });
             const protectedPublication = saveTransaction.immediate(durableSnapshot);
             // The committed closure stays sticky if this final durability barrier fails.
@@ -431,6 +469,7 @@ export class SQLiteSessionStore {
         }).immediate();
     }
     async markSessionMigrated(input) {
+        assertKnownSqliteSessionWriter(this);
         if (this.mutationInProgress)
             throw Error('session_commit_reentrant');
         this.mutationInProgress = true;
@@ -442,6 +481,7 @@ export class SQLiteSessionStore {
         }
     }
     markSessionMigratedLocked(input) {
+        assertKnownSqliteSessionWriter(this);
         assertSessionExecutionLease(input.lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId });
         const marker = migrationMarkerFromInput(input);
         this.db.transaction(() => {
@@ -519,15 +559,19 @@ export class SQLiteSessionStore {
         }));
     }
     async fork(sessionId) {
+        assertKnownSqliteSessionWriter(this);
         const releaseRoot = acquireSaveLock(join(dirname(this.dbPath), '.session-store-lock'));
         let releaseSource = () => { };
         try {
+            assertKnownSqliteSessionWriter(this);
             releaseSource = acquireSessionStoreExecutionGuard(dirname(this.dbPath), sessionId, undefined, true);
         }
         catch (error) {
             releaseRoot();
             throw error;
         }
+        const acceptedFork = Object.freeze({});
+        acceptedSqliteSessionForks.set(acceptedFork, this);
         try {
             const source = await this.load(sessionId);
             if (!source) {
@@ -559,7 +603,7 @@ export class SQLiteSessionStore {
                     : undefined,
                 skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
             };
-            const committed = this.commitSnapshot(forked, undefined, source.sessionId, undefined, true);
+            const committed = this.commitSnapshot(forked, undefined, source.sessionId, undefined, true, undefined, acceptedFork);
             return { ...forked, ...committed };
         }
         finally {
@@ -567,7 +611,12 @@ export class SQLiteSessionStore {
                 releaseSource();
             }
             finally {
-                releaseRoot();
+                try {
+                    releaseRoot();
+                }
+                finally {
+                    acceptedSqliteSessionForks.delete(acceptedFork);
+                }
             }
         }
     }

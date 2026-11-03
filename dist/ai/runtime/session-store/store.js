@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from '../../providers/kimi-models.js';
 import { validateCompoundOperationLedger, mergeCompoundOperationLedgers } from '../../../runtime/sol-pi/compound-operation.js';
 import { isDeepStrictEqual } from 'node:util';
 import { validateSemanticCompactionLedger, mergeSemanticCompactionLedgers } from '../../../runtime/sol-pi/semantic-compaction-ledger.js';
@@ -12,7 +13,7 @@ export class KimiK3DurableResumeUnsupportedError extends Error {
     }
 }
 export function isKimiK3DurableModel(model) {
-    return model === 'k3' || model === 'k3-256k';
+    return isKimiCodingModel(model);
 }
 export function toDurableSessionSnapshot(snapshot) {
     const messages = structuredClone(snapshot.messages);

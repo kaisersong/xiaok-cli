@@ -1,11 +1,39 @@
 import { isDeepStrictEqual } from 'node:util';
 import { readInstalledCurrentOwner } from '../verification/installed-owner-state.js';
 import { parseIntentBusinessContract } from '../verification/intent-business-contract.js';
-import { intentHostSubjectOwner } from '../verification/intent-host-subject.js';
+import { intentHostSubjectOwner, parseIntentHostSubject } from '../verification/intent-host-subject.js';
 import { readCurrentIntentPublicationDependencies } from './published-dependencies.js';
 import { parseIntentNativeContracts } from './native-contract-journal.js';
 import { captureIntentData, hasProtectedIntentProducerHistory } from './intent-commit-boundary.js';
 import { assertSessionWriteOwnership } from './ownership.js';
+// These local readers do not issue capabilities or claim a full Modern record/ledger.
+function providerStages(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_provider_contract_changed');
+    return value;
+}
+function providerSteps(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_provider_stage_changed');
+    return value;
+}
+function isTerminalObject(value) {
+    return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+function terminalData(value) {
+    if (!isTerminalObject(value))
+        throw Error('intent_provider_execution_pending');
+    return value;
+}
+function assertProviderSubject(value) {
+    // Reuse the real public parser; keep the original literal object/descriptor identity.
+    parseIntentHostSubject(value);
+}
+function currentOwnershipData(value) {
+    if (value === undefined || value === null)
+        throw Error('intent_provider_basis_changed');
+    return value;
+}
 /** Fixed issuer helper. The returned closure can only reject changed local
  * facts; it never issues a provider/native/business capability. */
 export async function prepareIntentProviderCurrent(input) {
@@ -32,25 +60,26 @@ export async function prepareIntentProviderCurrent(input) {
         throw Error('intent_provider_native_contract_required');
     const pick = (value, keys) => Object.fromEntries(keys.map(key => [key, value[key]]));
     const contract = native.contract, body = pick(record, Object.keys(contract).filter(key => !['version', 'verification', 'stages'].includes(key)));
-    const stages = record.stages.map(stage => { const expected = contract.stages.find(value => value.stageId === stage.stageId); if (!expected)
-        throw Error('intent_provider_contract_changed'); return { ...pick(stage, Object.keys(expected).filter(key => !['verification', 'steps'].includes(key))), verification: expected.verification, steps: stage.steps.map(step => pick(step, ['stepId', 'key', 'order', 'role', 'skillName', 'dependsOn', 'riskTier'])) }; });
+    const stages = providerStages(record.stages).map(stage => { const expected = contract.stages.find(value => value.stageId === stage.stageId); if (!expected)
+        throw Error('intent_provider_contract_changed'); return { ...pick(stage, Object.keys(expected).filter(key => !['verification', 'steps'].includes(key))), verification: expected.verification, steps: providerSteps(stage.steps).map(step => pick(step, ['stepId', 'key', 'order', 'role', 'skillName', 'dependsOn', 'riskTier'])) }; });
     const actual = parseIntentBusinessContract({ ...body, version: 1, verification: contract.verification, stages });
     if (!isDeepStrictEqual(actual, contract))
         throw Error('intent_provider_contract_changed');
-    const stage = record.stages.find(value => value.stageId === record.activeStageId);
-    if (!stage || !stage.steps.some(step => step.stepId === record.activeStepId) || !isDeepStrictEqual(record.steps, stage.steps) || record.activeStepId !== stage.activeStepId)
+    const stage = providerStages(record.stages).find(value => value.stageId === record.activeStageId);
+    if (!stage || !providerSteps(stage.steps).some(step => step.stepId === record.activeStepId) || !isDeepStrictEqual(record.steps, stage.steps) || record.activeStepId !== stage.activeStepId)
         throw Error('intent_provider_stage_changed');
-    if (record.executionTerminals?.some(terminal => terminal.kind === 'step' && terminal.identity === record.activeStepId))
+    if (record.executionTerminals?.some(terminal => terminalData(terminal).kind === 'step' && terminalData(terminal).identity === record.activeStepId))
         throw Error('intent_provider_execution_pending');
     if (['completed', 'publication_pending', 'waiting_user'].includes(record.overallStatus) || ['completed', 'publication_pending', 'failed'].includes(stage.status))
         throw Error('intent_provider_execution_pending');
     const subject = { version: 1, sessionId, intentId: record.intentId, stageId: stage.stageId }, owner = intentHostSubjectOwner(subject), route = readInstalledCurrentOwner(owner);
     if (route.kind !== 'migrated' && route.kind !== 'protected-unregistered')
         throw Error('intent_provider_owner_unavailable');
+    assertProviderSubject(subject);
     const observed = await readCurrentIntentPublicationDependencies(subject, signal);
     current();
     if (!isDeepStrictEqual(observed.registration.contract, contract) || !isDeepStrictEqual(observed.subject, subject) || !isDeepStrictEqual(observed.registration.owner, route.owner))
         throw Error('intent_provider_contract_changed');
-    return () => { current(); assertSessionWriteOwnership(read(sessionId), instanceId, 'send intent provider request'); if (!isDeepStrictEqual(readInstalledCurrentOwner(owner), route))
+    return () => { current(); assertSessionWriteOwnership(currentOwnershipData(read(sessionId)), instanceId, 'send intent provider request'); if (!isDeepStrictEqual(readInstalledCurrentOwner(owner), route))
         throw Error('intent_provider_route_changed'); signal.throwIfAborted(); };
 }

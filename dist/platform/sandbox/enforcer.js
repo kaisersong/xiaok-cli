@@ -14,6 +14,7 @@ export function createSandboxEnforcer(policy) {
                 ? { allowed: true }
                 : { allowed: false, reason: decision.reason ?? 'path denied' };
         },
+        getSearchScope() { return policy.getSearchScope(); },
         enforceNetwork() {
             const decision = policy.checkNetworkAccess();
             return decision.allowed

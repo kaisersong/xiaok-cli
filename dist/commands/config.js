@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
 import { getProviderModelVariant, getProviderProfile, listProviderProfiles } from '../ai/providers/registry.js';
 import { resolveSystemOneConfig, setSystemOneConfig, SYSTEM_ONE_DEFAULT_BASE_URL, SYSTEM_ONE_DEFAULT_MODEL, } from '../ai/providers/system-one-config.js';
@@ -28,7 +29,7 @@ function sanitizeModelIdPart(value) {
 }
 function copyCatalogModelEntry(providerId, variant, providerConfig) {
     const copyRuntimeOptions = variant.runtimeOptions && (providerId !== 'kimi'
-        || variant.model !== 'k3'
+        || !isKimiCodingModel(variant.model)
         || (providerConfig.protocol === 'openai_legacy'
             && isOfficialKimiK3OpenAIEndpoint(providerConfig.baseUrl)));
     return {

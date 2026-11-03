@@ -1,6 +1,7 @@
 import { hasProtectedIntentProducerHistory } from './intent-commit-boundary.js';
 import { readInstalledCurrentOwner } from '../verification/installed-owner-state.js';
 import { cloneSessionIntentLedger } from './types.js';
+import { checkIntentEvent } from './runtime-event-data.js';
 const TERMINAL_INTENT_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export function wireIntentDelegationToRuntimeSync(options) {
     let latestLedger;
@@ -140,7 +141,7 @@ function emitIntentCreated(hooks, sessionId, entry, after) {
     if (!created) {
         return;
     }
-    hooks.emit({
+    hooks.emit(checkIntentEvent({
         type: 'intent_created',
         sessionId,
         turnId: entry.turnId,
@@ -148,10 +149,10 @@ function emitIntentCreated(hooks, sessionId, entry, after) {
         templateId: created.templateId,
         deliverable: created.deliverable,
         riskTier: created.riskTier,
-    });
-    const initialStage = created.stages.find((stage) => stage.stageId === created.activeStageId) ?? created.stages[0];
+    }));
+    const initialStage = stageRows(created.stages).find((stage) => stage.stageId === created.activeStageId) ?? stageRows(created.stages)[0];
     if (initialStage) {
-        hooks.emit({
+        hooks.emit(checkIntentEvent({
             type: 'stage_activated',
             sessionId,
             turnId: entry.turnId,
@@ -159,8 +160,8 @@ function emitIntentCreated(hooks, sessionId, entry, after) {
             stageId: initialStage.stageId,
             label: initialStage.label,
             order: initialStage.order,
-            totalStages: created.stages.length,
-        });
+            totalStages: stageRows(created.stages).length,
+        }));
     }
 }
 function emitStepUpdateTraces(hooks, sessionId, entry, after) {
@@ -176,9 +177,9 @@ function emitStepUpdateTraces(hooks, sessionId, entry, after) {
     const requestedBreadcrumb = typeof entry.toolInput.breadcrumb === 'string' ? entry.toolInput.breadcrumb.trim() : '';
     const requestedReceipt = typeof entry.toolInput.receipt_note === 'string' ? entry.toolInput.receipt_note.trim() : '';
     if (beforeIntent?.activeStageId !== afterIntent.activeStageId) {
-        const activeStage = afterIntent.stages.find((stage) => stage.stageId === afterIntent.activeStageId);
+        const activeStage = stageRows(afterIntent.stages).find((stage) => stage.stageId === afterIntent.activeStageId);
         if (activeStage) {
-            hooks.emit({
+            hooks.emit(checkIntentEvent({
                 type: 'stage_activated',
                 sessionId,
                 turnId: entry.turnId,
@@ -186,52 +187,52 @@ function emitStepUpdateTraces(hooks, sessionId, entry, after) {
                 stageId: activeStage.stageId,
                 label: activeStage.label,
                 order: activeStage.order,
-                totalStages: afterIntent.stages.length,
-            });
+                totalStages: stageRows(afterIntent.stages).length,
+            }));
         }
     }
     if (requestedStatus === 'running' && isStepRunning(afterIntent, activeStepId)) {
         const beforeStatus = beforeIntent?.steps.find((step) => step.stepId === activeStepId)?.status;
         if (!beforeIntent || beforeStatus !== 'running') {
-            hooks.emit({
+            hooks.emit(checkIntentEvent({
                 type: 'step_activated',
                 sessionId,
                 turnId: entry.turnId,
                 intentId: afterIntent.intentId,
                 stepId: activeStepId,
-            });
+            }));
         }
     }
     const breadcrumbs = entry.before
         ? diffBreadcrumbs(entry.before, after).filter((breadcrumb) => matchesRequestedBreadcrumb(breadcrumb, afterIntent.intentId, activeStepId, requestedStatus, requestedBreadcrumb))
         : resolveBreadcrumbFromInput(after, afterIntent.intentId, activeStepId, requestedStatus, requestedBreadcrumb);
     for (const breadcrumb of breadcrumbs) {
-        hooks.emit({
+        hooks.emit(checkIntentEvent({
             type: 'breadcrumb_emitted',
             sessionId,
             turnId: entry.turnId,
-            intentId: breadcrumb.intentId,
-            stepId: breadcrumb.stepId,
-            status: breadcrumb.status,
-            message: breadcrumb.message,
-        });
+            intentId: readableTraceData(breadcrumb).intentId,
+            stepId: readableTraceData(breadcrumb).stepId,
+            status: readableTraceData(breadcrumb).status,
+            message: readableTraceData(breadcrumb).message,
+        }));
     }
     if (!requestedReceipt) {
         return;
     }
     if (after.receipt
-        && after.receipt.intentId === afterIntent.intentId
-        && after.receipt.stepId === activeStepId
-        && after.receipt.note === requestedReceipt
+        && readableTraceData(after.receipt).intentId === afterIntent.intentId
+        && readableTraceData(after.receipt).stepId === activeStepId
+        && readableTraceData(after.receipt).note === requestedReceipt
         && (!entry.before || hasReceiptChanged(entry.before, after))) {
-        hooks.emit({
+        hooks.emit(checkIntentEvent({
             type: 'receipt_emitted',
             sessionId,
             turnId: entry.turnId,
-            intentId: after.receipt.intentId,
-            stepId: after.receipt.stepId,
-            note: after.receipt.note,
-        });
+            intentId: readableTraceData(after.receipt).intentId,
+            stepId: readableTraceData(after.receipt).stepId,
+            note: readableTraceData(after.receipt).note,
+        }));
     }
 }
 function emitSalvageTrace(hooks, sessionId, entry, after) {
@@ -241,20 +242,20 @@ function emitSalvageTrace(hooks, sessionId, entry, after) {
     if (!intentId || summary.length === 0 || !after.salvage) {
         return;
     }
-    if (after.salvage.intentId !== intentId || !sameSummary(after.salvage.summary, summary) || after.salvage.reason !== reason) {
+    if (readableTraceData(after.salvage).intentId !== intentId || !sameSummary(after.salvage.summary, summary) || readableTraceData(after.salvage).reason !== reason) {
         return;
     }
     if (entry.before && !hasSalvageChanged(entry.before, after)) {
         return;
     }
-    hooks.emit({
+    hooks.emit(checkIntentEvent({
         type: 'salvage_emitted',
         sessionId,
         turnId: entry.turnId,
         intentId,
         summary: [...summary],
         reason,
-    });
+    }));
 }
 function emitArtifactTrace(hooks, sessionId, entry, after) {
     const intent = resolveIntentForInput(after, entry.toolInput);
@@ -264,20 +265,20 @@ function emitArtifactTrace(hooks, sessionId, entry, after) {
         return;
     }
     const artifact = intent.artifacts?.[intent.artifacts.length - 1];
-    if (!artifact || artifact.stageId !== stageId || artifact.label !== label) {
+    if (!artifact || readableTraceData(artifact).stageId !== stageId || readableTraceData(artifact).label !== label) {
         return;
     }
-    hooks.emit({
+    hooks.emit(checkIntentEvent({
         type: 'artifact_recorded',
         sessionId,
         turnId: entry.turnId,
         intentId: intent.intentId,
         stageId,
-        artifactId: artifact.artifactId,
-        label: artifact.label,
-        kind: artifact.kind,
-        path: artifact.path,
-    });
+        artifactId: readableTraceData(artifact).artifactId,
+        label: readableTraceData(artifact).label,
+        kind: readableTraceData(artifact).kind,
+        path: readableTraceData(artifact).path,
+    }));
 }
 async function patchActiveIntent(options, patch, onPatched) {
     const ledger = await options.ledgerStore.load(options.sessionId);
@@ -344,10 +345,11 @@ function resolveBreadcrumbFromInput(after, intentId, stepId, status, breadcrumb)
     return matchesRequestedBreadcrumb(latest, intentId, stepId, status, breadcrumb) ? [latest] : [];
 }
 function matchesRequestedBreadcrumb(breadcrumb, intentId, stepId, status, message) {
-    return breadcrumb.intentId === intentId
-        && breadcrumb.stepId === stepId
-        && breadcrumb.status === status
-        && breadcrumb.message === message;
+    const value = readableTraceData(breadcrumb);
+    return value.intentId === intentId
+        && value.stepId === stepId
+        && value.status === status
+        && value.message === message;
 }
 function hasReceiptChanged(before, after) {
     if (!after.receipt) {
@@ -355,10 +357,10 @@ function hasReceiptChanged(before, after) {
     }
     const previous = before.receipt;
     return !previous
-        || previous.intentId !== after.receipt.intentId
-        || previous.stepId !== after.receipt.stepId
-        || previous.note !== after.receipt.note
-        || previous.createdAt !== after.receipt.createdAt;
+        || readableTraceData(previous).intentId !== readableTraceData(after.receipt).intentId
+        || readableTraceData(previous).stepId !== readableTraceData(after.receipt).stepId
+        || readableTraceData(previous).note !== readableTraceData(after.receipt).note
+        || readableTraceData(previous).createdAt !== readableTraceData(after.receipt).createdAt;
 }
 function hasSalvageChanged(before, after) {
     if (!after.salvage) {
@@ -366,13 +368,28 @@ function hasSalvageChanged(before, after) {
     }
     const previous = before.salvage;
     return !previous
-        || previous.intentId !== after.salvage.intentId
-        || previous.reason !== after.salvage.reason
-        || previous.createdAt !== after.salvage.createdAt
+        || readableTraceData(previous).intentId !== readableTraceData(after.salvage).intentId
+        || readableTraceData(previous).reason !== readableTraceData(after.salvage).reason
+        || readableTraceData(previous).createdAt !== readableTraceData(after.salvage).createdAt
         || !sameSummary(previous.summary, after.salvage.summary);
 }
 function readStepStatus(value) {
     return value === 'blocked' || value === 'completed' || value === 'failed' ? value : 'running';
+}
+function isTraceObject(value) {
+    return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+// Property-readable DATA only, not a record/event/producer assertion. No fields are invented.
+function readableTraceData(value) {
+    if (!isTraceObject(value))
+        throw Error('intent_runtime_trace_object');
+    return value;
+}
+// Identity-preserving container check at each original .stages evaluation point.
+function stageRows(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_runtime_stage_array');
+    return value;
 }
 function readSummary(value) {
     return Array.isArray(value)

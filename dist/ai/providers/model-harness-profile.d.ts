@@ -1,3 +1,4 @@
+import { type StrictKimiK3ProfileId } from './kimi-models.js';
 import type { MessageBlock, UsageStats } from '../../types.js';
 import { type ModelCapabilities } from '../runtime/model-capabilities.js';
 import { type NormalizedKimiSchema } from './kimi-tool-schema.js';
@@ -35,7 +36,7 @@ export type KimiUsageDiagnostic = {
 };
 export type KimiUsageDiagnosticSink = (diagnostic: KimiUsageDiagnostic) => void;
 export interface ModelHarnessProfile {
-    readonly id: 'generic-openai' | 'kimi-k3-coding-openai' | 'kimi-k3-256k-coding-openai';
+    readonly id: 'generic-openai' | StrictKimiK3ProfileId;
     normalizeToolSchema?: (schema: Record<string, unknown>) => NormalizedKimiSchema;
     serializeReasoning?: (blocks: MessageBlock[], dialect: ReasoningKeyName, preservedThinkingEnabled: boolean) => {
         field: ReasoningKeyName;

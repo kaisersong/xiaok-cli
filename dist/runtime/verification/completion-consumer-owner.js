@@ -1,13 +1,13 @@
-import { createHash } from 'node:crypto';
+import { ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataCryptoCreateHash, ownDataHashPrototypeDigest, ownDataHashPrototypeUpdate, ownDataObjectFreeze, ownDataObjectKeys, ownDataRegExpPrototypeTest } from './application-native-intrinsics.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 /** Shared enrollment/read/publication identity mapping. Original loop IDs retain
  * their exact bytes and kind; no trim, case folding, or metadata fallback. */
 export function completionConsumerOwner(raw) {
-    if (!raw || Object.keys(raw).sort().join(',') !== 'ownerId,ownerKind' || typeof raw.ownerId !== 'string' || !raw.ownerId || Buffer.byteLength(raw.ownerId) > 160 || /[\x00-\x1f\x7f]/.test(raw.ownerId))
+    if (!raw || ownDataArrayPrototypeJoin(ownDataArrayPrototypeSort(ownDataObjectKeys(raw)), ',') !== 'ownerId,ownerKind' || typeof raw.ownerId !== 'string' || !raw.ownerId || ownDataBufferByteLength(raw.ownerId) > 160 || ownDataRegExpPrototypeTest(/[\x00-\x1f\x7f]/, raw.ownerId))
         throw Error('completion_consumer_owner');
     if (raw.ownerKind === 'loop_stage' || raw.ownerKind === 'loop_run')
-        return Object.freeze({ ownerKind: 'loop', ownerId: (raw.ownerKind === 'loop_stage' ? 'loop-stage:' : 'loop-run:') + createHash('sha256').update(json({ version: 1, kind: raw.ownerKind, id: raw.ownerId })).digest('hex') });
-    if (!['task', 'intent', 'goal', 'project'].includes(raw.ownerKind))
+        return ownDataObjectFreeze({ ownerKind: 'loop', ownerId: (raw.ownerKind === 'loop_stage' ? 'loop-stage:' : 'loop-run:') + ownDataHashPrototypeDigest(ownDataHashPrototypeUpdate(ownDataCryptoCreateHash('sha256'), json({ version: 1, kind: raw.ownerKind, id: raw.ownerId })), 'hex') });
+    if (!ownDataArrayPrototypeIncludes(['task', 'intent', 'goal', 'project'], raw.ownerKind))
         throw Error('completion_consumer_owner');
-    return Object.freeze({ ownerKind: raw.ownerKind, ownerId: raw.ownerId });
+    return ownDataObjectFreeze({ ownerKind: raw.ownerKind, ownerId: raw.ownerId });
 }

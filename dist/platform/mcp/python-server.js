@@ -5,9 +5,15 @@ import { posix, win32 } from 'node:path';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const MCP_V2_IMPORT_CHECK = 'from mcp.server.mcpserver import MCPServer';
+export function buildManagedPythonChildEnv(baseEnv) {
+    return { ...baseEnv, PYTHONDONTWRITEBYTECODE: '1' };
+}
 async function canImportMcpV2(pythonCommand) {
     try {
-        await execFileAsync(pythonCommand, ['-c', MCP_V2_IMPORT_CHECK], { timeout: 15_000 });
+        await execFileAsync(pythonCommand, ['-B', '-c', MCP_V2_IMPORT_CHECK], {
+            timeout: 15_000,
+            env: buildManagedPythonChildEnv(process.env),
+        });
         return true;
     }
     catch {
@@ -35,10 +41,11 @@ export async function resolveBuiltinSlideRendererConfig(server, options = {}) {
     return {
         ...server,
         command: managedPython,
-        env: {
+        args: ['-B', ...(server.args ?? [])],
+        env: buildManagedPythonChildEnv({
             ...server.env,
             PYTHONUTF8: '1',
             PYTHONIOENCODING: 'utf-8',
-        },
+        }),
     };
 }

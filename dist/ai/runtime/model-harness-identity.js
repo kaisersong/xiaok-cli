@@ -1,3 +1,4 @@
+import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { OpenAIAdapter } from '../adapters/openai.js';
 export function resolveRegisteredModelHarnessProfile(adapter) {
     return adapter instanceof OpenAIAdapter
@@ -6,8 +7,7 @@ export function resolveRegisteredModelHarnessProfile(adapter) {
 }
 export function resolveRegisteredStrictKimiK3Profile(adapter) {
     const profileId = resolveRegisteredModelHarnessProfile(adapter);
-    return profileId === 'kimi-k3-coding-openai'
-        || profileId === 'kimi-k3-256k-coding-openai'
+    return isStrictKimiK3ProfileId(profileId)
         ? profileId
         : undefined;
 }

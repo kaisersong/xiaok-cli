@@ -48,12 +48,12 @@ export function extractSandboxAllowedPaths(rules) {
     return prefixes;
 }
 const readonlyPolicyProofs = new WeakMap();
-const arrayPrototype = Array.prototype, some = arrayPrototype.some, includes = arrayPrototype.includes, push = arrayPrototype.push;
+const arrayPrototype = Array.prototype, some = arrayPrototype.some, includes = arrayPrototype.includes, push = arrayPrototype.push, map = arrayPrototype.map, every = arrayPrototype.every;
 const stringReplace = String.prototype.replace;
 function safeRuleArray(value) {
     if (!value || typeof value !== 'object' || types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== arrayPrototype)
         return false;
-    if (arrayPrototype.some !== some || arrayPrototype.includes !== includes || arrayPrototype.push !== push || String.prototype.replace !== stringReplace)
+    if (arrayPrototype.some !== some || arrayPrototype.includes !== includes || arrayPrototype.push !== push || arrayPrototype.map !== map || arrayPrototype.every !== every || String.prototype.replace !== stringReplace)
         return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     return Reflect.ownKeys(descriptors).every(key => key === 'length' || typeof key === 'string' && /^(0|[1-9][0-9]*)$/.test(key) && 'value' in descriptors[key] && typeof descriptors[key].value === 'string');
@@ -77,7 +77,8 @@ export function createSandboxPolicy(options) {
         ? Array.from(options.allowedPaths)
         : [];
     const allowlist = [...(options.pathAllowlist ?? legacyAllowlist)];
-    const denylist = options.pathDenylist ?? [];
+    const sourceDenylist = options.pathDenylist;
+    const denylist = [...(sourceDenylist ?? [])];
     const allowedEnv = new Set(options.allowedEnv ?? []);
     const policy = {
         checkPath(path) {
@@ -94,6 +95,12 @@ export function createSandboxPolicy(options) {
                 // 无法规范化的路径（含 NUL、符号链接环等）一律拒绝（fail-closed）
                 return { allowed: false, reason: 'path could not be normalized' };
             }
+        },
+        getSearchScope() {
+            return Object.freeze({
+                allowedPaths: Object.freeze(allowlist.map(path => resolveRealPath(resolve(path)))),
+                deniedPaths: Object.freeze(denylist.map(path => resolveRealPath(resolve(path)))),
+            });
         },
         filterEnv(env) {
             return Object.fromEntries(Object.entries(env).filter(([key]) => allowedEnv.has(key)));
@@ -120,7 +127,8 @@ export function createSandboxPolicy(options) {
             if (!current || !('value' in current) || current.value !== functions[key].value)
                 return false;
         }
-        return safeRuleArray(allowlist) && safeRuleArray(denylist) && safeNetworkOption(options);
+        return safeRuleArray(allowlist) && safeRuleArray(denylist) && safeNetworkOption(options)
+            && (!sourceDenylist || safeRuleArray(sourceDenylist) && sourceDenylist.length === denylist.length && sourceDenylist.every((path, index) => path === denylist[index]));
     });
     return policy;
 }

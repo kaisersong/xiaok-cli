@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { createReadTool } from '../../ai/tools/read.js';
+import { createWriteTool } from '../../ai/tools/write.js';
+import { createEditTool } from '../../ai/tools/edit.js';
+import { assertWorkspacePath } from '../../ai/permissions/workspace.js';
+import { writeFileAtomicallySync } from '../../utils/atomic-file.js';
 const ports = new WeakMap();
 const checkpoints = new WeakMap();
 const registryBindings = new WeakMap();
+const artifactRegistryChecks = new WeakMap();
 function denied() { throw Error('workflow_stored_restrictions_denied'); }
 /** Concrete fixed HTTP reader only. This does not attest a Main instance or mint a grant. */
 export function createNativeWorkflowReadPort() {
@@ -29,6 +36,10 @@ export function closeNativeWorkflowReadPort(port) {
 }
 export function assertNativeWorkflowReadPort(port) { const entry = ports.get(port); if (!entry || entry.closed)
     denied(); }
+/** Fixed data read only; this does not issue a checkpoint or execution grant. */
+export function readNativeWorkflowRun(port, projectId, workflowRunId) {
+    return get(port, `/projects/${encodeURIComponent(str(projectId))}/workflows/${encodeURIComponent(str(workflowRunId))}`);
+}
 function record(value) { if (!value || typeof value !== 'object' || Array.isArray(value))
     denied(); return value; }
 function str(value) { if (typeof value !== 'string' || !value || value.length > 4096)
@@ -102,11 +113,21 @@ function restriction(value) {
         if (permission[key] !== undefined && (!Array.isArray(permission[key]) || permission[key].some((item) => typeof item !== 'string')))
             denied();
     const readonly = !!readOnlyCategory || booleans.every(key => permission[key] === false);
-    // Mixed restrictive policies require the artifact-only/fine-grained successor.
-    // Until that exists, never silently leave an explicitly denied capability live.
+    // Mixed restrictive policies require a concrete artifact-only successor;
+    // ordinary full-tool dispatch must never leave a denied capability live.
     return { readonly, requiresReadonlyOrSuccessor: booleans.some(key => permission[key] === false) || ['deniedCommandIds', 'deniedCommands'].some(key => permission[key]?.length) };
 }
 const builtinWorkflowSources = Object.freeze({ builtin: 'project-diagnose', 'builtin-smoke': 'agent-review-smoke', po_generated: 'po-generated-task-workflow', po_generated_project: 'po-generated-project-workflow' });
+function poPermission(value, aggregate) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return false;
+    const permission = record(value), kinds = permission.toolCategories;
+    if (!Array.isArray(kinds) || kinds.length !== 2 || kinds[0] !== 'read_project_state' || kinds[1] !== 'write_artifact' || permission.allowWrite !== true)
+        return false;
+    if (['allowShell', 'allowNetwork', 'allowRenderer'].some(key => aggregate ? permission[key] !== false : permission[key] !== undefined && permission[key] !== false))
+        return false;
+    return ['deniedCommandIds', 'deniedCommands'].every(key => permission[key] === undefined || Array.isArray(permission[key]) && permission[key].length === 0);
+}
 async function facts(port, binding) {
     const project = await get(port, `/projects/${encodeURIComponent(binding.projectId)}`);
     const projectData = record(project.project), workspace = record(project.workspace);
@@ -160,19 +181,148 @@ async function facts(port, binding) {
     }
     else
         denied();
-    const restrictions = [run.permissions, specPermission, specNodePermission, nodePermission].map(restriction);
-    const readonly = node.kind === 'review' || restrictions.some(value => value.readonly);
-    if (!readonly && restrictions.some(value => value.requiresReadonlyOrSuccessor))
+    const permissions = [run.permissions, specPermission, specNodePermission, nodePermission];
+    const restrictions = permissions.map(restriction);
+    const artifactOnly = node.kind === 'agent_task' && (run.source === 'po_generated' && run.workflowId === 'po-generated-task-workflow' && node.id === 'worker-produce-deliverable'
+        || run.source === 'po_generated_project' && run.workflowId === 'po-generated-project-workflow' && node.id === 'worker-produce-project-deliverable');
+    if (artifactOnly && (!poPermission(run.permissions, true) || !poPermission(specPermission, true) || !poPermission(specNodePermission, false) || nodePermission != null && !poPermission(nodePermission, false)))
         denied();
-    const fingerprint = createHash('sha256').update(JSON.stringify({ binding, root, sourceIdentity, permissions: [run.permissions ?? null, specPermission ?? null, specNodePermission ?? null, nodePermission ?? null], assignedAgent: node.assignedAgent, participantId: runtime.participantId })).digest('hex');
-    return { root, readonly, fingerprint };
+    const readonly = node.kind === 'review' || restrictions.some(value => value.readonly);
+    if (!readonly && !artifactOnly && restrictions.some(value => value.requiresReadonlyOrSuccessor))
+        denied();
+    const rootStat = artifactOnly ? statSync(root) : undefined;
+    const fingerprint = createHash('sha256').update(JSON.stringify({ binding, root, sourceIdentity, permissions: permissions.map(value => value ?? null), assignedAgent: node.assignedAgent, participantId: runtime.participantId, ...(rootStat ? { rootIdentity: [rootStat.dev, rootStat.ino] } : {}) })).digest('hex');
+    return { root, readonly, artifactOnly, fingerprint };
 }
 export async function createNativeWorkflowRestrictionCheckpoint(port, input) { assertNativeWorkflowReadPort(port); const binding = Object.freeze({ ...input }); for (const key of ['projectId', 'workflowRunId', 'workflowId', 'nodeId', 'nodeKind', 'handoffId', 'participantId'])
     str(binding[key]); if (!Number.isSafeInteger(binding.attempt) || binding.attempt < 1)
     denied(); const current = await facts(port, binding); const checkpoint = Object.freeze(Object.create(null)); checkpoints.set(checkpoint, { port, binding, ...current }); return { checkpoint, readonly: current.readonly, root: current.root }; }
-export function bindNativeWorkflowRestrictionCheckpoint(registry, checkpoint) { if (!checkpoints.has(checkpoint) || registryBindings.has(registry))
+export function bindNativeWorkflowRestrictionCheckpoint(registry, checkpoint) { const stored = checkpoints.get(checkpoint); if (!stored || stored.artifactOnly && !artifactRegistryChecks.has(registry) || registryBindings.has(registry))
     denied(); registryBindings.set(registry, checkpoint); }
 export async function assertNativeRegistryCheckpointCurrent(registry) { const checkpoint = registryBindings.get(registry); if (!checkpoint)
     return; const stored = checkpoints.get(checkpoint); if (!stored)
-    denied(); const current = await facts(stored.port, stored.binding); if (current.fingerprint !== stored.fingerprint || current.readonly !== stored.readonly || current.root !== stored.root)
-    denied(); }
+    denied(); artifactRegistryChecks.get(registry)?.(); const current = await facts(stored.port, stored.binding); if (current.fingerprint !== stored.fingerprint || current.readonly !== stored.readonly || current.artifactOnly !== stored.artifactOnly || current.root !== stored.root)
+    denied(); artifactRegistryChecks.get(registry)?.(); }
+/** A dispatch description/boolean cannot select this authority. */
+export function isNativeWorkflowArtifactCheckpoint(checkpoint) { return checkpoints.get(checkpoint)?.artifactOnly === true; }
+/**
+ * Ordinary workspace confinement, not a same-UID directory-race/native writer
+ * capability. No UI/editor lease or artifact-workspace scope is fabricated.
+ */
+export async function createNativeWorkflowArtifactRegistry(checkpoint) {
+    const stored = checkpoints.get(checkpoint);
+    if (!stored?.artifactOnly)
+        denied();
+    const { ToolRegistry: WorkflowToolRegistry } = await import('../../ai/tools/index.js');
+    const current = await facts(stored.port, stored.binding);
+    if (current.fingerprint !== stored.fingerprint)
+        denied();
+    const root = stored.root, artifacts = join(root, 'artifacts');
+    mkdirSync(artifacts, { recursive: true });
+    const rootIdentity = lstatSync(root), artifactIdentity = lstatSync(artifacts);
+    const assertPaths = () => {
+        const rootNow = lstatSync(root), artifactNow = lstatSync(artifacts);
+        if (!rootNow.isDirectory() || !artifactNow.isDirectory() || rootNow.isSymbolicLink() || artifactNow.isSymbolicLink()
+            || realpathSync(root) !== root || realpathSync(artifacts) !== artifacts
+            || rootNow.dev !== rootIdentity.dev || rootNow.ino !== rootIdentity.ino || artifactNow.dev !== artifactIdentity.dev || artifactNow.ino !== artifactIdentity.ino)
+            denied();
+    };
+    assertPaths();
+    let constructing = true, installing = true, closed = false;
+    const tools = [], owned = new Set();
+    // Import the canonical owner only at execution time, after checkpoint brand
+    // validation. Re-read facts after that await before constructing any tools.
+    class ArtifactRegistry extends WorkflowToolRegistry {
+        constructor() { super({ autoMode: true, capabilitySearch: false }, []); this.sealRegistryOptions(); }
+        preflightToolRegistration(tool) { if (!constructing && (!installing || !owned.has(tool)))
+            denied(); super.preflightToolRegistration(tool); }
+        registerDeferredTool() { return denied(); }
+        forkForObservation() { return denied(); }
+        forkForCompoundObservation() { return denied(); }
+        installCompoundExecutionPort() { return denied(); }
+        dispose() { closed = true; super.dispose(); }
+    }
+    const registry = new ArtifactRegistry();
+    registry.unregisterTool('tool_search');
+    constructing = false;
+    const read = createReadTool({ cwd: root, allowOutsideCwd: false });
+    tools.push({ permission: read.permission, definition: read.definition, async execute(input, context) {
+            await assertNativeRegistryCheckpointCurrent(registry);
+            context?.signal?.throwIfAborted();
+            assertPaths();
+            return read.execute(input, context);
+        } });
+    for (const name of ['write', 'edit']) {
+        const original = name === 'write' ? createWriteTool({ cwd: artifacts, allowOutsideCwd: false }) : createEditTool({ cwd: artifacts, allowOutsideCwd: false });
+        tools.push({ permission: 'write', definition: { ...original.definition, description: `${original.definition.description} 只能写入当前 workflow 项目的 artifacts；严禁改项目源码、其他项目或任何目录外文件。` }, async execute(input, context) {
+                await assertNativeRegistryCheckpointCurrent(registry);
+                context?.signal?.throwIfAborted();
+                // No caller compound/file hook may suspend the confinement check-to-write
+                // interval. Keep the final check and ordinary atomic write synchronous.
+                if (context?.compoundPhase)
+                    denied();
+                assertPaths();
+                if (typeof input.file_path !== 'string')
+                    denied();
+                const file = assertWorkspacePath(resolve(artifacts, input.file_path), artifacts, 'write', false);
+                let content;
+                if (name === 'write') {
+                    if (typeof input.content !== 'string')
+                        denied();
+                    content = input.content;
+                }
+                else {
+                    if (typeof input.old_string !== 'string' || !input.old_string || typeof input.new_string !== 'string')
+                        denied();
+                    const before = readFileSync(file, 'utf8'), parts = before.split(input.old_string);
+                    if (parts.length !== 2)
+                        throw Error('workflow_artifact_edit_not_unique');
+                    content = parts.join(input.new_string);
+                }
+                context?.signal?.throwIfAborted();
+                context?.assertPermissionApproval?.();
+                assertPaths();
+                assertWorkspacePath(file, artifacts, 'write', false);
+                mkdirSync(dirname(file), { recursive: true });
+                assertPaths();
+                assertWorkspacePath(file, artifacts, 'write', false);
+                writeFileAtomicallySync(file, content);
+                if (context?.toolInvocationId)
+                    context.runtimeFactSink?.emit({ invocationId: context.toolInvocationId, toolName: name, factKind: 'file_mutation', normalizedFilePaths: [file] });
+                return `已写入: ${file}`;
+            } });
+    }
+    function freeze(value) { if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+        for (const child of Object.values(value))
+            freeze(child);
+        Object.freeze(value);
+    } }
+    for (const tool of tools) {
+        freeze(tool);
+        owned.add(tool);
+        registry.registerTool(tool);
+    }
+    installing = false;
+    const preflight = Object.getOwnPropertyDescriptor(ArtifactRegistry.prototype, 'preflightToolRegistration');
+    if (!preflight || typeof preflight.value !== 'function')
+        denied();
+    Object.defineProperty(registry, 'preflightToolRegistration', { value: preflight.value, writable: false, configurable: false });
+    const unchanged = registry.captureObservationRegistryCurrent();
+    const entries = tools.map(tool => ({ tool, name: tool.definition.name, execute: tool.execute }));
+    artifactRegistryChecks.set(registry, () => {
+        if (closed)
+            denied();
+        assertPaths();
+        try {
+            unchanged();
+        }
+        catch {
+            denied();
+        }
+        if (entries.some(({ tool, name, execute }) => registry.getRegisteredTool(name) !== tool || tool.definition.name !== name || tool.execute !== execute || tool.companionTools?.length))
+            denied();
+    });
+    bindNativeWorkflowRestrictionCheckpoint(registry, checkpoint);
+    Object.freeze(tools);
+    return { registry, tools };
+}

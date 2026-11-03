@@ -15,6 +15,10 @@ export declare class ConversationMcpActivities {
     private readonly restorations;
     private readonly controllers;
     private disposed;
+    private closing?;
+    private readonly callbackWork;
+    /** Reserve before calling any observer/read producer that may reenter close. */
+    private ownCallback;
     constructor(options: {
         store: ConversationActivityStore;
         service: ConversationActivityApi;
@@ -38,10 +42,12 @@ export declare class ConversationMcpActivities {
         requested: true;
     }>;
     observer(taskId: string, invocationId: string, connection: McpClientConnection): Promise<McpTaskObserver | undefined>;
+    private createObserver;
     private observe;
     private schedule;
     private restore;
     private drive;
     stopWatch(watchId: string): void;
+    close(): Promise<void>;
     dispose(): void;
 }

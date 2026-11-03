@@ -3,6 +3,19 @@ import { type InstalledControllerLifetime } from './installed-controller-lifetim
 import { createInstalledRootBrokerClient } from './root-broker-client.js';
 import type { ControllerPeer } from './controller-public-daemon.js';
 import type { ValidationMaterialInvocation } from './product-material-authorization.js';
+/** Read the exact original builder rejection; there is no caller-issued drain token. */
+export declare function readInstalledFailedStackDrain(error: unknown, assembly: object, lifetime: InstalledControllerLifetime): object | undefined;
+export declare function readInstalledCleanupOwner(component: object, slot: 'execution' | 'materials' | 'probe'): {
+    lifetime: InstalledControllerLifetime;
+    kind: "normal" | "maintenance";
+} | undefined;
+export declare function assertInstalledStackDrained(stack: object, lifetime: InstalledControllerLifetime): void;
+export declare function isInstalledConstructionPending(ticket: object): boolean;
+export declare function claimInstalledMaintenanceExecutionConstruction(ticket: object, lifetime: InstalledControllerLifetime, owner: object): void;
+export declare function claimInstalledMaintenanceMaterialsConstruction(ticket: object, lifetime: InstalledControllerLifetime, owner: object): void;
+export declare function bindInstalledMaintenanceExecutionConstruction(ticket: object, value: object, raw: object): void;
+export declare function bindInstalledMaintenanceMaterialsConstruction(ticket: object, value: object, materials: object): void;
+export declare function assertInstalledMaintenanceConstructionReady(ticket: object): void;
 export declare function assertInstalledStackCapacityComponent(ticket: object, owner: object, slot: string, component: object, engine?: object): void;
 export declare function assertInstalledExecutionStack(value: object, lifetime: Readonly<InstalledControllerLifetime>): void;
 /** Fixed installed stack, not a factory for caller-provided engines or keys.
@@ -131,7 +144,17 @@ export declare function createInstalledExecutionStack(input: {
             readProfileFile(handle: object, sourceId: string, entryIndex: number, offset: number, length: number, signal?: AbortSignal): Promise<Buffer<ArrayBuffer>>;
             readProfileSqlitePage(handle: object, sourceId: string, pageNo: number, signal?: AbortSignal): Promise<Buffer<ArrayBuffer>>;
             checkProfileCapture(handle: object, signal?: AbortSignal): Promise<void>;
+            isProfileCaptureReleased(handle: object): boolean;
             releaseProfileCapture(handle: object, signal?: AbortSignal): Promise<void>;
+            observeProfilePhysicalSqliteFiles(handle: object, signal?: AbortSignal): Promise<object>;
+            readProfilePhysicalSqliteFiles(token: object): readonly Readonly<{
+                sourceId: string;
+                suffix: string;
+                device: string;
+                inode: string;
+                byteLength: string;
+                sha256: string;
+            }>[];
             authorizePublicationOperation(raw: unknown, signal?: AbortSignal): Promise<Readonly<{
                 version: 1;
                 purpose: "completion-publication";
@@ -262,20 +285,8 @@ export declare function createInstalledExecutionStack(input: {
                     escapeSuite: string;
                 }>;
             }>;
-            qualify(signal?: AbortSignal): Promise<Readonly<{
-                qualificationId: string;
-                engineBinding: {
-                    engineId: string;
-                    incarnation: string;
-                };
-                isolationPolicyHash: string;
-                evidenceHashes: {
-                    osIdentity: string;
-                    engineInspection: string;
-                    escapeSuite: string;
-                };
-            }>>;
-            close(): void;
+            qualify(signal?: AbortSignal): Promise<import("./installed-engine-qualification.js").QualificationReport>;
+            close(): Promise<void>;
         }>;
         materials: Readonly<{
             prepareRequest: (raw: unknown, peerInput: ControllerPeer, signal: AbortSignal) => Promise<import("./material-request.js").MaterialPrepareResult>;
@@ -601,6 +612,39 @@ export declare function createInstalledExecutionStack(input: {
                 caseInvocationId: string;
                 input: Buffer;
             }) => Promise<import("./independent-recipes.js").BlackboxObservation>>[0]): Promise<import("./independent-recipes.js").BlackboxObservation>;
+            close(): Promise<void>;
+        }>;
+    }>;
+    close(): Promise<void>;
+}>>;
+/** Fixed root-only mapped-resource owner. No qualification, new admission, or caller factories. */
+export declare function createInstalledMaintenanceStack(input: {
+    assembly: object;
+    lifetime: InstalledControllerLifetime;
+    sharedCapacity: ReturnType<typeof createInstalledSharedCapacity>;
+    broker: ReturnType<typeof createInstalledRootBrokerClient>;
+    batch: object;
+    signal?: AbortSignal;
+}): Promise<Readonly<{
+    privateHost: Readonly<{
+        execution: Readonly<{
+            inspectExecution: (rawExpected: import("../isolated-execution/physical-quiescence.js").QuiescenceExpectation) => Promise<import("./maintenance-execution.js").MaintenanceQuiescenceReceipt>;
+            cleanupExecution: (rawExpected: import("../isolated-execution/physical-quiescence.js").QuiescenceExpectation) => Promise<import("./maintenance-execution.js").MaintenanceQuiescenceReceipt>;
+            assertQuiescent: (receipt: object, expected: import("../isolated-execution/physical-quiescence.js").QuiescenceExpectation) => void;
+            close: () => Promise<void>;
+            deletionAuthority: Readonly<{
+                assertDeleted(proof: object, proposal: Readonly<import("./blob-budget.js").BlobReservationProposal>): void;
+            }>;
+        }>;
+        staging: Readonly<{
+            cleanupResource(resourceId: string, signal?: AbortSignal): Promise<void>;
+            sweepOnce(): Promise<void>;
+            getStatus(): Readonly<{
+                started: boolean;
+                running: boolean;
+                lastOutcome: "deleted" | "idle" | "deferred";
+                lastError: string | undefined;
+            }>;
             close(): Promise<void>;
         }>;
     }>;

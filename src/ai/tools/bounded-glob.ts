@@ -1,3 +1,4 @@
+import { validateScopedPatterns, type SearchScope } from './search-scope.mjs';
 import { Worker } from 'node:worker_threads';
 
 export interface GlobSearchInput {
@@ -7,13 +8,16 @@ export interface GlobSearchInput {
   dot?: boolean;
   ignore?: string[];
   skipInaccessible?: boolean;
+  /** Authenticated host-only scope; never copied from raw tool input. */
+  searchScope?: SearchScope;
+  grep?: { pattern: string; context: number; outputMode: string; directFile: boolean };
 }
-export interface GlobEntry { path: string; mtimeMs: number }
+export interface GlobEntry { path: string; mtimeMs: number; text?: string }
 export const GLOB_LIMITS = Object.freeze({
   maxEntries: 50_000, maxDirectories: 10_000, maxResults: 5_000, maxPathBytes: 2 * 1024 * 1024,
 });
 export type GlobLimits = { -readonly [K in keyof typeof GLOB_LIMITS]: number };
-const ERROR_CODES = new Set(['glob_scan_limit', 'glob_result_limit', 'glob_search_failed', 'glob_worker_heap_config']);
+const ERROR_CODES = new Set(['glob_scan_limit', 'glob_result_limit', 'glob_search_failed', 'glob_worker_heap_config', 'grep_scan_limit', 'grep_result_limit', 'grep_invalid_regex']);
 
 /** Host-only options can reduce budgets; tool arguments cannot increase them. */
 export function createBoundedGlobRunner(options: {
@@ -25,8 +29,8 @@ export function createBoundedGlobRunner(options: {
     const value = options.limits?.[key];
     if (value !== undefined && Number.isSafeInteger(value) && value > 0) limits[key] = Math.min(value, limits[key]);
   }
-  const timeoutMs = Math.min(10_000, Math.max(1, options.timeoutMs ?? 10_000));
-  const maxWorkers = Math.min(2, Math.max(1, options.maxWorkers ?? 2));
+  const timeoutMs = Math.min(10_000, Math.max(1, Number.isFinite(options.timeoutMs) ? Math.floor(options.timeoutMs!) : 10_000));
+  const maxWorkers = Math.min(2, Math.max(1, Number.isFinite(options.maxWorkers) ? Math.floor(options.maxWorkers!) : 2));
   return {
     get activeCount() { return activeCount; },
     async search(input: GlobSearchInput, signal?: AbortSignal): Promise<GlobEntry[]> {
@@ -36,6 +40,7 @@ export function createBoundedGlobRunner(options: {
         || patterns.join('').length > 2048 || typeof input.cwd !== 'string' || input.cwd.length > 10_240) {
         throw new Error('glob_invalid_input');
       }
+      validateScopedPatterns(patterns, input.searchScope);
       if (activeCount >= maxWorkers) throw new Error('glob_busy');
       const worker = new Worker(options.workerUrl ?? new URL('./glob-worker.mjs', import.meta.url), {
         workerData: { input, limits },

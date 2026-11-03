@@ -42,6 +42,11 @@ export interface SkillMeta {
 export interface SkillLoadOptions {
     builtinRoots?: string[];
     extraRoots?: string[];
+    /** Optional Desktop completeness observation; default CLI tolerance is unchanged. */
+    onDiscoveryIssue?: (issue: {
+        kind: 'directory_unavailable' | 'skill_read_unavailable' | 'skill_parse_invalid' | 'resource_discovery_unavailable';
+        path: string;
+    }) => void;
 }
 export interface ResolvedSkillRoots {
     builtinRoots: string[];

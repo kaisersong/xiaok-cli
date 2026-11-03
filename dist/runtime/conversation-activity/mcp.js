@@ -1,3 +1,4 @@
+import { assertObserverPromiseAmbient, observeTrustedObserverPromise, ObserverNativePromise } from './observer-promise-contract.js';
 import { Ajv } from 'ajv';
 import { createHash } from 'node:crypto';
 import { normalizeMcpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
@@ -14,6 +15,27 @@ export class ConversationMcpActivities {
     restorations = new Map();
     controllers = new Map();
     disposed = false;
+    closing;
+    callbackWork = new Set();
+    /** Reserve before calling any observer/read producer that may reenter close. */
+    ownCallback(begin) {
+        assertObserverPromiseAmbient(); // Before Promise chains AND actual producer.
+        let completed, failed;
+        const reservation = new ObserverNativePromise((resolve, reject) => { completed = resolve; failed = reject; });
+        this.callbackWork.add(reservation);
+        observeTrustedObserverPromise(reservation, () => { this.callbackWork.delete(reservation); }, () => { this.callbackWork.delete(reservation); });
+        try {
+            // All begin sites below return this module's own native async Promise.
+            // No raw.then access; native await skips own then and Symbol.species.
+            const raw = begin();
+            observeTrustedObserverPromise(raw, completed, failed);
+            return raw;
+        }
+        catch (error) {
+            failed(error);
+            return ObserverNativePromise.reject(error);
+        }
+    }
     constructor(options) {
         this.options = options;
     }
@@ -132,61 +154,95 @@ export class ConversationMcpActivities {
         void this.restore(watch, connection).catch(error => this.options.onError?.(error));
         return { requested: true };
     }
-    async observer(taskId, invocationId, connection) {
+    observer(taskId, invocationId, connection) {
+        if (this.disposed)
+            return ObserverNativePromise.resolve(undefined);
+        return this.ownCallback(() => this.createObserver(taskId, invocationId, connection));
+    }
+    async createObserver(taskId, invocationId, connection) {
         if (this.disposed || !connection.tasks?.capabilities.execution)
             return;
         await this.options.endpointReady?.(connection);
+        if (this.disposed)
+            return;
         const threadId = await this.options.originThread(taskId);
-        if (!threadId)
+        if (!threadId || this.disposed)
             return;
         const operationId = `mcp:${invocationId}`;
         await this.options.service.prepareAssociation({ threadId, operationId, creationIdempotencyKey: operationId }, { requestSource: 'user', actorId: this.options.actorId });
+        if (this.disposed)
+            return;
         let watch;
         return {
-            handle: async (reference) => {
+            handle: reference => {
                 if (this.disposed || this.connections.get(reference.endpointId) !== connection)
-                    throw new Error('activity_mcp_connection_superseded');
-                watch = await this.options.service.bindWork({ operationId, watchId: operationId, source: 'mcp', logicalSourceId: reference.endpointId,
-                    sourceDataEpoch: operationId, workId: reference.taskId, runId: invocationId }, reference);
-                if (!this.options.externalObserver?.(connection))
-                    this.schedule(watch, reference, connection);
+                    return ObserverNativePromise.reject(new Error('activity_mcp_connection_superseded'));
+                return this.ownCallback(async () => {
+                    watch = await this.options.service.bindWork({ operationId, watchId: operationId, source: 'mcp', logicalSourceId: reference.endpointId,
+                        sourceDataEpoch: operationId, workId: reference.taskId, runId: invocationId }, reference);
+                    if (!this.disposed && !this.options.externalObserver?.(connection))
+                        this.schedule(watch, reference, connection);
+                });
             },
-            event: async (reference) => { if (watch && !this.options.externalObserver?.(connection))
+            event: async (reference) => { if (!this.disposed && watch && !this.options.externalObserver?.(connection))
                 await this.observe(watch, reference, connection); },
-            unavailable: async () => { if (watch)
-                await this.options.service.sourceUnavailable(watch.watchId, 'reconnecting', 'activity_mcp_subscription_unavailable'); },
-            detached: () => { if (watch && !this.options.externalObserver?.(connection))
+            unavailable: () => {
+                if (this.disposed || !watch)
+                    return ObserverNativePromise.resolve();
+                const watchId = watch.watchId;
+                return this.ownCallback(async () => { await this.options.service.sourceUnavailable(watchId, 'reconnecting', 'activity_mcp_subscription_unavailable'); });
+            },
+            detached: () => { if (!this.disposed && watch && !this.options.externalObserver?.(connection))
                 void this.restore(watch, connection).catch(error => this.options.onError?.(error)); },
-            immediate: () => { this.options.service.forgetUnboundAssociation(operationId); },
+            immediate: () => { if (!this.disposed)
+                this.options.service.forgetUnboundAssociation(operationId); },
         };
     }
     observe(watch, reference, connection) {
+        if (this.disposed || this.connections.get(reference.endpointId) !== connection)
+            return ObserverNativePromise.resolve();
         const existing = this.reads.get(watch.watchId);
         if (existing)
             return existing;
-        const pending = (async () => {
-            if (!await this.options.service.canReadSource(watch.watchId))
-                return;
-            const task = await connection.tasks.task(reference.taskId).snapshot(this.controllers.get(watch.watchId)?.signal);
-            this.delays.set(watch.watchId, Math.max(30_000, task.suggestedPollIntervalMs ?? 0));
+        return this.ownCallback(() => {
             const current = () => !this.disposed && this.connections.get(reference.endpointId) === connection;
-            if (!current())
-                return;
-            const kind = task.status === 'working' ? 'progress' : task.status;
-            const legacyOutcome = task.status === 'completed' && reference.generation === 'v1' ? await connection.tasks.task(reference.taskId).result({ signal: this.controllers.get(watch.watchId)?.signal }) : undefined;
-            const result = (legacyOutcome ? ('result' in legacyOutcome ? legacyOutcome.result : undefined) : task.raw.result);
-            await this.options.service.acceptEvent(watch.watchId, { schemaVersion: 1,
-                eventId: createHash('sha256').update(JSON.stringify(canonical(task.raw))).digest('hex'), source: 'mcp',
-                logicalSourceId: watch.logicalSourceId, sourceDataEpoch: watch.sourceDataEpoch, workId: watch.workId, runId: watch.runId,
-                transportGeneration: watch.generation, kind, sourceRevision: task.lastUpdatedAt,
-                receivedAt: Date.now(), summary: (task.statusMessage ?? (result ? normalizeMcpRuntimeToolResult(result).summary : undefined))?.slice(0, 1024), evidenceRefs: [],
-                ...(task.status === 'completed' ? { businessOutcome: result?.isError === true ? 'error' : 'success' } : {}),
-            }, current);
-            await this.options.service.confirmFreshness(watch.watchId);
-        })().finally(() => { if (this.reads.get(watch.watchId) === pending)
-            this.reads.delete(watch.watchId); });
-        this.reads.set(watch.watchId, pending);
-        return pending;
+            const state = { finished: false };
+            const pending = (async () => {
+                try {
+                    if (!await this.options.service.canReadSource(watch.watchId) || !current())
+                        return;
+                    const task = await connection.tasks.task(reference.taskId).snapshot(this.controllers.get(watch.watchId)?.signal);
+                    this.delays.set(watch.watchId, Math.max(30_000, task.suggestedPollIntervalMs ?? 0));
+                    if (!current())
+                        return;
+                    const kind = task.status === 'working' ? 'progress' : task.status;
+                    const legacyOutcome = task.status === 'completed' && reference.generation === 'v1' ? await connection.tasks.task(reference.taskId).result({ signal: this.controllers.get(watch.watchId)?.signal }) : undefined;
+                    if (!current())
+                        return;
+                    const result = (legacyOutcome ? ('result' in legacyOutcome ? legacyOutcome.result : undefined) : task.raw.result);
+                    await this.options.service.acceptEvent(watch.watchId, { schemaVersion: 1,
+                        eventId: createHash('sha256').update(JSON.stringify(canonical(task.raw))).digest('hex'), source: 'mcp',
+                        logicalSourceId: watch.logicalSourceId, sourceDataEpoch: watch.sourceDataEpoch, workId: watch.workId, runId: watch.runId,
+                        transportGeneration: watch.generation, kind, sourceRevision: task.lastUpdatedAt,
+                        receivedAt: Date.now(), summary: (task.statusMessage ?? (result ? normalizeMcpRuntimeToolResult(result).summary : undefined))?.slice(0, 1024), evidenceRefs: [],
+                        ...(task.status === 'completed' ? { businessOutcome: result?.isError === true ? 'error' : 'success' } : {}),
+                    }, current);
+                    if (!current())
+                        return;
+                    await this.options.service.confirmFreshness(watch.watchId);
+                }
+                finally {
+                    state.finished = true;
+                    const registered = state.raw;
+                    if (registered && this.reads.get(watch.watchId) === registered)
+                        this.reads.delete(watch.watchId);
+                }
+            })();
+            state.raw = pending;
+            if (!state.finished)
+                this.reads.set(watch.watchId, pending);
+            return pending;
+        });
     }
     schedule(watch, reference, connection) {
         if (this.disposed || this.retries.has(watch.watchId))
@@ -207,13 +263,29 @@ export class ConversationMcpActivities {
         this.retries.set(watch.watchId, timer);
     }
     restore(watch, connection) {
+        if (this.disposed || this.connections.get(watch.logicalSourceId) !== connection)
+            return ObserverNativePromise.resolve();
         const existing = this.restorations.get(watch.watchId);
         if (existing)
             return existing;
-        const pending = this.drive(watch, connection).finally(() => { if (this.restorations.get(watch.watchId) === pending)
-            this.restorations.delete(watch.watchId); });
-        this.restorations.set(watch.watchId, pending);
-        return pending;
+        return this.ownCallback(() => {
+            const state = { finished: false };
+            const pending = (async () => {
+                try {
+                    await this.drive(watch, connection);
+                }
+                finally {
+                    state.finished = true;
+                    const registered = state.raw;
+                    if (registered && this.restorations.get(watch.watchId) === registered)
+                        this.restorations.delete(watch.watchId);
+                }
+            })();
+            state.raw = pending;
+            if (!state.finished)
+                this.restorations.set(watch.watchId, pending);
+            return pending;
+        });
     }
     async drive(watch, connection) {
         if (this.controllers.has(watch.watchId) || this.disposed)
@@ -299,6 +371,38 @@ export class ConversationMcpActivities {
         if (timer)
             clearTimeout(timer);
         this.retries.delete(watchId);
+    }
+    close() {
+        if (this.closing)
+            return this.closing;
+        assertObserverPromiseAmbient();
+        let completed, failed;
+        this.closing = new ObserverNativePromise((resolve, reject) => { completed = resolve; failed = reject; });
+        const failures = [];
+        try {
+            this.dispose();
+        }
+        catch (error) {
+            failures.push(error);
+        }
+        const active = [...this.reads.values(), ...this.restorations.values(), ...this.callbackWork];
+        // All work is already running and individually observed. Awaiting each real
+        // native Promise does not allocate via ambient species or abandon siblings.
+        void (async () => {
+            for (const raw of active) {
+                try {
+                    await raw;
+                }
+                catch (error) {
+                    failures.push(error);
+                }
+            }
+            if (failures.length)
+                failed(new AggregateError([...new Set(failures)], 'activity_mcp_observation_close_failed'));
+            else
+                completed();
+        })();
+        return this.closing;
     }
     dispose() {
         this.disposed = true;

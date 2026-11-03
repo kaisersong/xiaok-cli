@@ -1,3 +1,4 @@
+import { type SearchScope } from './search-scope.mjs';
 export interface GlobSearchInput {
     patterns: string | string[];
     cwd: string;
@@ -5,10 +6,19 @@ export interface GlobSearchInput {
     dot?: boolean;
     ignore?: string[];
     skipInaccessible?: boolean;
+    /** Authenticated host-only scope; never copied from raw tool input. */
+    searchScope?: SearchScope;
+    grep?: {
+        pattern: string;
+        context: number;
+        outputMode: string;
+        directFile: boolean;
+    };
 }
 export interface GlobEntry {
     path: string;
     mtimeMs: number;
+    text?: string;
 }
 export declare const GLOB_LIMITS: Readonly<{
     maxEntries: 50000;

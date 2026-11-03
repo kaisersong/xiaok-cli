@@ -78,6 +78,7 @@ IMPORTANT: Ask before execution when a material scope or cost tradeoff needs the
                         renderFrame: options.renderFrame,
                         clearFrame: options.clearFrame,
                         readText: options.readText,
+                        writeTranscript: options.writeTranscript,
                         signal: context?.signal,
                     });
                 }

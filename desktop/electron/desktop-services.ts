@@ -184,6 +184,8 @@ import {
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import { createKbTools } from './kb-tools.js';
 import { captureProjectPlanningInput } from './project-planning-service.js';
+import { buildScopedNativeReadonlyTools } from '../../src/ai/tools/scoped-native-readonly.js';
+import { isScopedNativeReadonlyRegistry } from '../../src/ai/tools/index.js';
 import { createKbStoreSqlite } from './kb-store-sqlite.js';
 import { createKbRetriever } from './kb-retrieval.js';
 import { createSourceExtractor } from './kb-source-extractor.js';
@@ -2188,10 +2190,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const artifactScope = taskOptions.workflowRestrictionCheckpoint && isNativeWorkflowArtifactCheckpoint(taskOptions.workflowRestrictionCheckpoint)
       ? await createNativeWorkflowArtifactRegistry(taskOptions.workflowRestrictionCheckpoint) : undefined;
     const scopedDescriptions = new Map<Tool, ToolDescriptionMetadata>();
-    const builtScopedTools = artifactScope?.tools ?? buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions);
+    const builtScopedTools = artifactScope?.tools ?? (taskOptions.nativeReadonlyOnly
+      ? buildScopedNativeReadonlyTools({cwd:workspaceRoot,readOnlyPaths:taskOptions.readOnlyPaths ?? []},scopedDescriptions)
+      : buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions));
     const scopedTools = taskOptions.nativeReadonlyOnly
       ? builtScopedTools.filter(tool => getBuiltinToolIdentity(tool) === 'readonly') : builtScopedTools;
-    const scopedRegistry = artifactScope?.registry ?? new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
+    const scopedRegistry = artifactScope?.registry ?? new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly, requireSandboxScope:taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
     if(taskOptions.workflowRestrictionCheckpoint&&!artifactScope)bindNativeWorkflowRestrictionCheckpoint(scopedRegistry,taskOptions.workflowRestrictionCheckpoint);
     const scopedHost = taskSourcePopulation.createHost({
       // This scoped owner is bounded by the KSwarm queue/run clocks.
@@ -2688,7 +2692,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       },
       reviewDecision: null,
     };
-    }, {workflowRestrictionCheckpoint:restriction.checkpoint,workflowDeadline,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly});
+    }, {workflowRestrictionCheckpoint:restriction.checkpoint,workflowDeadline,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly,
+      ...(restriction.readonly?{readOnlyPaths:[restriction.root]}:{})});
   }
 
   async function runKSwarmAssignPo({ payload, targetParticipantId, startAfterPlanning }: { payload: Record<string, unknown>; targetParticipantId?: string; startAfterPlanning?: boolean }) {
@@ -7265,7 +7270,7 @@ type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'acti
 
 interface KSwarmCreateProjectToolOptions {
   createRoom?: (input: Record<string,unknown>, context:{taskId:string;signal?:AbortSignal})=>Promise<Record<string,unknown>>;
-  enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
+  enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => import('./kswarm-initial-plan-bootstrap.js').KSwarmBootstrapEnqueueResult;
   finalizeProjectProposal?: (proposal: Record<string, unknown>, context: { taskId: string; signal: AbortSignal }) => Promise<Record<string, unknown> | undefined>;
 }
 
@@ -8044,6 +8049,7 @@ export function createDesktopModelRunnerWithRegistry(
   } = {},
 ): (input: TaskRunnerInput, rootContext?: DesktopAgentExecutionContext) => Promise<void> {
   const nativeReadonlyOnly = registry.isNativeReadonlyOnly;
+  if(nativeReadonlyOnly&&!isScopedNativeReadonlyRegistry(registry))throw Error('native_readonly_scope_required');
   const cwd = runnerOptions.cwd ?? runnerOptions.multiAgent?.cwd ?? process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });

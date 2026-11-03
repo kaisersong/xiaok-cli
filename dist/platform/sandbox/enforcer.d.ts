@@ -9,6 +9,10 @@ export declare function createSandboxEnforcer(policy: SandboxPolicy): {
         allowed: false;
         reason: string;
     };
+    getSearchScope(): Readonly<{
+        allowedPaths: readonly string[];
+        deniedPaths: readonly string[];
+    }>;
     enforceNetwork(): {
         allowed: true;
         reason?: undefined;

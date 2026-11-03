@@ -38,6 +38,10 @@ export interface SqliteSourceCapture {
     sha256: string;
     physicalFiles: readonly Readonly<SqliteSourcePhysicalFile>[];
 }
+export interface SqliteSourcePhysicalObservation extends SqliteSourcePhysicalFile {
+    readonly index: number;
+    readonly sha256: string;
+}
 /** This is a private native-process driver, not an authorization or full-set
  * issuer. The installed broker supplies its pinned helper and approved sources.
  * Only the full broker composition may turn actual captures into an import cap. */
@@ -47,11 +51,17 @@ export declare function startSqliteSourceCustody(input: {
     sources: readonly SqliteCustodySource[];
     signal: AbortSignal;
 }): Promise<Readonly<{
+    /** A fresh observation of every original physical file, never retirement or
+     * evidence that a previous reviewed logical snapshot remains unchanged. */
+    capturePhysicalFiles(maximumPhysicalBytes?: number): Promise<Readonly<{}>>;
     checkCurrent(): Promise<void>;
     capture(maximumBytes?: number): Promise<Readonly<{}>>;
     close: () => Promise<void>;
 }>>;
 export declare function readSqliteSourceCapture(owner: object, token: object): readonly Readonly<SqliteSourceCapture>[];
+/** Immutable observed hashes only; a later physical action requires a new
+ * actual observation and its separate native authorization/currentness gate. */
+export declare function readSqliteSourcePhysicalFiles(owner: object, token: object): readonly Readonly<SqliteSourcePhysicalObservation>[];
 export declare function readSqliteSourceSchema(owner: object, token: object, index: number): readonly Readonly<{
     type: string;
     name: string;

@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
+import { win32 } from 'node:path';
+import { performance } from 'node:perf_hooks';
 const VALID_HOOKS = new Set([
     'PreToolUse',
     'PostToolUse',
@@ -105,6 +107,10 @@ function shouldMatch(config, eventName, payload) {
 function normalizeConfig(raw) {
     if (typeof raw === 'string')
         return { type: 'command', command: raw };
+    if (raw.outputFormat !== undefined && raw.outputFormat !== 'json')
+        throw new Error('hook_output_format_invalid');
+    if (raw.outputFormat === 'json' && raw.async)
+        throw new Error('hook_json_async_unsupported');
     const config = !raw.type ? { ...raw, type: 'command' } : raw;
     if (config.events && config.events.length > 0) {
         const filtered = config.events.filter((event) => {
@@ -133,11 +139,44 @@ function buildPayload(eventName, data, ctx) {
         ...data,
     });
 }
-function interpretExitCode(result, eventName) {
+function interpretExitCode(result, eventName, config) {
     // Parse structured JSON from stdout
     const trimmed = result.stdout.trim();
     let parsed = {};
-    if (trimmed.startsWith('{')) {
+    if (config.outputFormat === 'json') {
+        try {
+            const value = JSON.parse(trimmed);
+            if (!value || typeof value !== 'object' || Array.isArray(value))
+                throw new Error('invalid object');
+            parsed = value;
+            const fields = [
+                ['updatedInput', field => field !== null && typeof field === 'object' && !Array.isArray(field)],
+                ['preventContinuation', field => typeof field === 'boolean'],
+                ['additionalContext', field => typeof field === 'string'],
+                ['message', field => typeof field === 'string'],
+                ['reason', field => typeof field === 'string'],
+                ['decision', field => field === 'allow' || field === 'deny'],
+                ['ok', field => typeof field === 'boolean'],
+            ];
+            for (const [key, valid] of fields) {
+                if (Object.hasOwn(parsed, key) && !valid(parsed[key]))
+                    throw new Error('invalid field');
+            }
+        }
+        catch {
+            if (BLOCKING_EVENTS.has(eventName))
+                return {
+                    ok: false, preventContinuation: true, decision: 'deny',
+                    errorCode: 'hook_invalid_json_output', message: 'hook_invalid_json_output',
+                };
+            return { message: 'hook_invalid_json_output' };
+        }
+        // Prompt control is consumed only after the declared output is validated.
+        if (config.type === 'prompt' && parsed['ok'] === false) {
+            result = { ...result, exitCode: 2, stderr: parsed['reason'] ?? 'Blocked by prompt hook' };
+        }
+    }
+    else if (trimmed.startsWith('{')) {
         try {
             parsed = JSON.parse(trimmed);
         }
@@ -168,70 +207,233 @@ function interpretExitCode(result, eventName) {
         message: result.stderr.trim() || `Hook exited with code ${result.exitCode}`,
     };
 }
-// ---------------------------------------------------------------------------
-// Executors
-// ---------------------------------------------------------------------------
+const commandClosureFacts = new WeakMap();
+// New, private physical cleanup latency after the original child/stdio close.
+// This does not extend the hook's business timeout or authorize another signal.
+const COMMAND_GROUP_CLEANUP_WINDOW_MS = 250;
+const COMMAND_GROUP_REPROBE_INTERVAL_MS = 10;
 function executeCommand(config, timeoutMs, payloadJson, signal, extraEnv) {
-    signal.throwIfAborted();
-    return new Promise((resolve, reject) => {
+    const timeoutText = `hook timeout after ${timeoutMs}ms`;
+    const closure = { timeoutError: new Error(timeoutText), joinedTimeout: false };
+    let resolve, reject;
+    const raw = new Promise((yes, no) => { resolve = yes; reject = no; });
+    commandClosureFacts.set(raw, closure);
+    let groupPollTimer;
+    let groupDeadlineTimer;
+    const clearGroupTimers = () => {
+        clearTimeout(groupPollTimer);
+        clearTimeout(groupDeadlineTimer);
+        groupPollTimer = undefined;
+        groupDeadlineTimer = undefined;
+    };
+    try {
+        signal.throwIfAborted();
         let stdout = '', stderr = '';
         const errors = new Set();
+        const windows = process.platform === 'win32';
         const child = spawn(config.command, [], {
             shell: config.shell || true,
-            detached: process.platform !== 'win32',
+            detached: !windows,
             windowsHide: true,
             env: { ...process.env, ...extraEnv, XIAOK_HOOK_PAYLOAD: payloadJson },
             stdio: 'pipe',
         });
+        const originalPid = child.pid;
+        const positivePid = originalPid !== undefined && Number.isSafeInteger(originalPid) && originalPid > 0 ? originalPid : undefined;
         const remember = (error) => { errors.add(error); };
+        let rootExited = false, childClosed = false, treeTerminationRequested = false, treePending = false, settled = false;
+        let groupPending = false;
+        let groupGone = false, treeSucceeded = false;
+        let terminal;
+        const finish = () => {
+            const closed = terminal;
+            if (!closed || treePending || groupPending || settled)
+                return;
+            settled = true;
+            if (closed.signal && !errors.size)
+                remember(new Error(`hook terminated by ${closed.signal}`));
+            const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
+            if (unknown.length === 1 && unknown[0] === closure.timeoutError && (windows ? treeSucceeded : groupGone)) {
+                closure.joinedTimeout = true;
+            }
+            if (unknown.length) {
+                const rejection = unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed');
+                if (unknown.includes(closure.timeoutError))
+                    closure.timeoutRejection = { rejection, text: timeoutText };
+                reject(rejection);
+            }
+            else if (errors.size)
+                reject(signal.reason);
+            else
+                resolve({ exitCode: closed.code ?? 1, stdout, stderr });
+        };
+        const observeClosedGroup = (pgid) => {
+            groupPending = true;
+            const fail = (error) => {
+                if (!groupPending)
+                    return;
+                clearGroupTimers();
+                groupPending = false;
+                remember(error);
+                finish();
+            };
+            const unconfirmed = () => fail(new Error('hook_process_group_unconfirmed'));
+            let lastClock;
+            const clock = () => {
+                try {
+                    const now = performance.now();
+                    if (!Number.isFinite(now) || now < 0 || now > Number.MAX_SAFE_INTEGER - COMMAND_GROUP_CLEANUP_WINDOW_MS
+                        || (lastClock !== undefined && now < lastClock)) {
+                        fail(new Error('hook_process_group_clock_invalid'));
+                        return undefined;
+                    }
+                    lastClock = now;
+                    return now;
+                }
+                catch (error) {
+                    fail(error);
+                    return undefined;
+                }
+            };
+            const started = clock();
+            if (started === undefined)
+                return;
+            const deadline = started + COMMAND_GROUP_CLEANUP_WINDOW_MS;
+            // Independent hard stop also bounds polling if the clock stops advancing.
+            // Neither timer nor the absolute monotonic deadline is reset by a probe.
+            groupDeadlineTimer = setTimeout(unconfirmed, COMMAND_GROUP_CLEANUP_WINDOW_MS);
+            const probe = () => {
+                if (!groupPending)
+                    return;
+                groupPollTimer = undefined;
+                const before = clock();
+                if (before === undefined)
+                    return;
+                if (before >= deadline) {
+                    unconfirmed();
+                    return;
+                }
+                let absent = false;
+                try {
+                    process.kill(-pgid, 0);
+                }
+                catch (error) {
+                    if (error?.code !== 'ESRCH') {
+                        fail(error);
+                        return;
+                    }
+                    absent = true;
+                }
+                const after = clock();
+                if (after === undefined)
+                    return;
+                // Even an ESRCH observed across the boundary cannot be backdated.
+                if (after >= deadline) {
+                    unconfirmed();
+                    return;
+                }
+                if (absent) {
+                    clearGroupTimers();
+                    groupPending = false;
+                    groupGone = true;
+                    finish();
+                }
+                else {
+                    groupPollTimer = setTimeout(probe, Math.min(COMMAND_GROUP_REPROBE_INTERVAL_MS, deadline - after));
+                }
+            };
+            probe();
+        };
         const terminate = () => {
+            // Raw completion may still await readonly group observation. A late
+            // abort/timer must never signal a closed or potentially recycled PID.
+            if (childClosed)
+                return;
             try {
-                if (process.platform !== 'win32' && child.pid)
-                    process.kill(-child.pid, 'SIGTERM');
-                else
+                if (!windows && positivePid !== undefined)
+                    process.kill(-positivePid, 'SIGTERM');
+                else if (!windows)
                     child.kill('SIGTERM');
+                else {
+                    if (treeTerminationRequested)
+                        return;
+                    treeTerminationRequested = true;
+                    // A completed shell PID cannot identify an extant descendant tree.
+                    if (rootExited || child.exitCode != null || child.signalCode != null) {
+                        remember(new Error('hook_windows_process_tree_unconfirmed'));
+                        return;
+                    }
+                    const pid = originalPid, systemRoot = process.env.SystemRoot;
+                    // A failed spawn has no PID/tree; still join its original close/error.
+                    if (pid === undefined) {
+                        child.kill('SIGTERM');
+                        return;
+                    }
+                    if (!Number.isSafeInteger(pid) || pid <= 0 || !systemRoot || !win32.isAbsolute(systemRoot)) {
+                        remember(new Error('hook_windows_process_tree_identity_unconfirmed'));
+                        child.kill('SIGTERM');
+                        return;
+                    }
+                    // Only this original, still-live shell PID is addressed. No shell,
+                    // image-name matching, caller environment override, or detached killer.
+                    treePending = true;
+                    try {
+                        const killer = spawn(win32.join(systemRoot, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], {
+                            shell: false, stdio: 'ignore', windowsHide: true,
+                        });
+                        killer.on('error', remember);
+                        killer.once('close', code => {
+                            if (code !== 0)
+                                remember(new Error(`hook_windows_tree_termination_failed:${String(code)}`));
+                            else
+                                treeSucceeded = true;
+                            treePending = false;
+                            finish();
+                        });
+                    }
+                    catch (error) {
+                        treePending = false;
+                        remember(error);
+                        finish();
+                    }
+                }
             }
             catch (error) {
                 if (error?.code !== 'ESRCH')
                     remember(error);
             }
         };
-        const abort = () => { remember(signal.reason); terminate(); };
+        const abort = () => { if (childClosed)
+            return; remember(signal.reason); terminate(); };
         signal.addEventListener('abort', abort, { once: true });
-        const timer = setTimeout(() => { remember(new Error(`hook timeout after ${timeoutMs}ms`)); terminate(); }, timeoutMs);
+        const timer = setTimeout(() => { if (childClosed)
+            return; remember(closure.timeoutError); terminate(); }, timeoutMs);
         child.stdout.on('data', chunk => { stdout += chunk; });
         child.stderr.on('data', chunk => { stderr += chunk; });
         child.stdin.on('error', error => { if (error.code !== 'EPIPE')
             remember(error); });
         child.on('error', remember);
+        child.once('exit', () => { rootExited = true; });
         // exit does not prove stdio or descendants have ended.
         child.once('close', (code, terminationSignal) => {
+            childClosed = true;
             clearTimeout(timer);
             signal.removeEventListener('abort', abort);
-            if (process.platform !== 'win32' && child.pid) {
-                try {
-                    process.kill(-child.pid, 0);
-                    remember(new Error('hook_process_group_unconfirmed'));
-                }
-                catch (error) {
-                    if (error?.code !== 'ESRCH')
-                        remember(error);
-                }
-            }
-            if (terminationSignal && !errors.size)
-                remember(new Error(`hook terminated by ${terminationSignal}`));
-            const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
-            if (unknown.length)
-                reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
-            else if (errors.size)
-                reject(signal.reason);
+            terminal = { code, signal: terminationSignal };
+            if (!windows && positivePid !== undefined)
+                observeClosedGroup(positivePid);
             else
-                resolve({ exitCode: code ?? 1, stdout, stderr });
+                finish();
         });
         child.stdin.end(payloadJson);
         if (signal.aborted)
             abort();
-    });
+    }
+    catch (error) {
+        clearGroupTimers();
+        reject(error);
+    }
+    return raw;
 }
 function executeHttp(config, timeoutMs, payloadJson, signal) {
     signal.throwIfAborted();
@@ -283,6 +485,8 @@ async function executePrompt(config, payloadJson, promptExecutor) {
     {
         const response = await promptExecutor(fullPrompt, config.model);
         const trimmed = response.trim();
+        if (config.outputFormat === 'json')
+            return { exitCode: 0, stdout: trimmed, stderr: '' };
         // Parse LLM response — expect {ok: true} or {ok: false, reason: "..."}
         if (trimmed.startsWith('{')) {
             try {
@@ -317,9 +521,11 @@ export function createHooksRunner(config = {}) {
     const own = (work) => {
         pending.add(work);
         void work.then(() => pending.delete(work), error => {
-            pending.delete(work);
-            if (error !== closeReason)
+            const closure = commandClosureFacts.get(work);
+            const joinedTimeout = closure?.joinedTimeout === true && error === closure.timeoutError;
+            if (error !== closeReason && !joinedTimeout)
                 failures.add(error);
+            pending.delete(work);
         });
         return work;
     };
@@ -384,6 +590,7 @@ export function createHooksRunner(config = {}) {
                 merged.async = true;
                 continue;
             }
+            let commandRaw;
             try {
                 let result;
                 const hookType = hook.type ?? 'command';
@@ -394,9 +601,10 @@ export function createHooksRunner(config = {}) {
                     result = await ownRaw(executePrompt(hook, payloadJson, config.promptExecutor)).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }));
                 }
                 else {
-                    result = await ownRaw(executeCommand(hook, timeout, payloadJson, signal, extraEnv));
+                    commandRaw = executeCommand(hook, timeout, payloadJson, signal, extraEnv);
+                    result = await ownRaw(commandRaw);
                 }
-                const interpreted = interpretExitCode(result, eventName);
+                const interpreted = interpretExitCode(result, eventName, hook);
                 if (interpreted.ok === false || (eventName === 'PermissionRequest' && interpreted.decision === 'deny')) {
                     // Blocking result — return immediately
                     return {
@@ -404,6 +612,7 @@ export function createHooksRunner(config = {}) {
                         message: interpreted.message,
                         preventContinuation: true,
                         decision: interpreted.decision,
+                        ...(interpreted.errorCode ? { errorCode: interpreted.errorCode } : {}),
                     };
                 }
                 if (eventName === 'PermissionRequest' && result.exitCode !== 0)
@@ -423,17 +632,22 @@ export function createHooksRunner(config = {}) {
                     merged.message = interpreted.message;
             }
             catch (error) {
+                const commandRecord = commandRaw ? commandClosureFacts.get(commandRaw) : undefined;
+                const timeoutRejection = commandRecord?.timeoutRejection;
+                const message = commandRecord && timeoutRejection && timeoutRejection.rejection === error && error !== commandRecord.timeoutError
+                    ? `${String(error)}; ${timeoutRejection.text}`
+                    : String(error);
                 if (eventName === 'PermissionRequest') {
                     // A failed approval bridge has no decision. The registry must still
                     // ask locally; keep running later hooks so an explicit deny wins.
                     permissionHookFailed = true;
                 }
                 else if (BLOCKING_EVENTS.has(eventName)) {
-                    return { ok: false, message: String(error) };
+                    return { ok: false, message };
                 }
                 merged.message = merged.message
-                    ? `${merged.message}\n${String(error)}`
-                    : String(error);
+                    ? `${merged.message}\n${message}`
+                    : message;
             }
         }
         // Never use an allow from another hook to bypass local confirmation when
@@ -476,6 +690,8 @@ export function createHooksRunner(config = {}) {
         },
         async runPostHooks(toolName, input) {
             const result = await runHooks('PostToolUse', { tool_name: toolName, tool_input: input });
+            if (result.errorCode === 'hook_invalid_json_output')
+                throw new Error(result.errorCode);
             return result.message ? [result.message] : [];
         },
     };

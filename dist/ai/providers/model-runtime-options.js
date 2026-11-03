@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from './kimi-models.js';
 const KIMI_K3_OPENAI_ENDPOINT = 'https://api.kimi.com/coding/v1';
 const KIMI_K3_RUNTIME_OPTIONS = {
     contextLimit: 262_144,
@@ -85,7 +86,7 @@ export function getDefaultModelReasoningEffort(efforts) {
 }
 export function resolveModelRuntimeOptions(input) {
     const useKimiK3Fallback = input.protocol === 'openai_legacy'
-        && (input.wireModel === 'k3' || input.wireModel === 'k3-256k')
+        && isKimiCodingModel(input.wireModel)
         && isOfficialKimiK3OpenAIEndpoint(input.baseUrl);
     const fallbackOptions = useKimiK3Fallback ? KIMI_K3_RUNTIME_OPTIONS : undefined;
     const fallbackConstraints = useKimiK3Fallback ? KIMI_K3_RUNTIME_CONSTRAINTS : undefined;

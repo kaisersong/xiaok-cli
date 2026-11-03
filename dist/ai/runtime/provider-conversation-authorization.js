@@ -1,3 +1,4 @@
+import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { measureProviderStream } from '../../runtime/trace/observation-metrics.js';
 import { computeEphemeralProviderTranscriptDigest, } from './provider-transcript-digest.js';
 import { resolveRegisteredStrictKimiK3Profile } from './model-harness-identity.js';
@@ -42,8 +43,7 @@ function streamOwnedProviderConversation(input, surfaceKind) {
     const profileId = resolveRegisteredStrictKimiK3Profile(input.adapter);
     if (!profileId) {
         const claimedProfileId = readClaimedHarnessProfileId(input.adapter);
-        if (claimedProfileId === 'kimi-k3-coding-openai'
-            || claimedProfileId === 'kimi-k3-256k-coding-openai') {
+        if (isStrictKimiK3ProfileId(claimedProfileId)) {
             throw new Error('KIMI_K3_PROFILE_CAPABILITY_REQUIRED');
         }
         return measureProviderStream({ messages: input.messages, surface: surfaceKind }, () => input.options === undefined

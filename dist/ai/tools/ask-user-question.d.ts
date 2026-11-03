@@ -12,5 +12,6 @@ export interface AskUserQuestionToolOptions {
     renderFrame?: (lines: string[]) => boolean | void;
     clearFrame?: () => void;
     readText?: AskQuestionParams['readText'];
+    writeTranscript?: AskQuestionParams['writeTranscript'];
 }
 export declare function createAskUserQuestionTool(options?: AskUserQuestionToolOptions): Tool;

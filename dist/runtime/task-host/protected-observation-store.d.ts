@@ -1,3 +1,4 @@
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/stored-snapshot-types.js';
 import { type CompoundHostStorage } from '../sol-pi/compound-host-storage.js';
 import { type openCompoundExecutionDomain } from '../sol-pi/compound-execution-domain.js';
 import { type SessionStore, type PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
@@ -5,7 +6,7 @@ import type { SessionExecutionLease } from '../../ai/runtime/session-store/execu
 import { type ManagedCompoundAdmission } from '../sol-pi/compound-managed-admission.js';
 import { type AgentSessionSnapshot } from '../../ai/runtime/session.js';
 import { type ProtectedObservationClosure } from '../../ai/runtime/protected-observation-closure.js';
-export declare function desktopObservationSessionId(taskId: string): string;
+export { desktopObservationSessionId } from './protected-observation-reader.js';
 /** Main-owned session sidecar. No delete/clear API: stale task journals cannot erase protection or execution ledgers. */
 export interface DesktopExecutionPersistence {
     readonly root: string;
@@ -37,7 +38,7 @@ export declare class DesktopTaskObservationStore {
     }>;
     /** Main-only complete durable view, including registered canonical aliases.
      * It returns no writer and never derives a root from an untrusted marker. */
-    loadSessionSnapshot(taskId: string): Promise<PersistedSessionSnapshot | null>;
+    loadSessionSnapshot(taskId: string): Promise<StoredSessionSnapshot | null>;
     readProtection(taskId: string): Promise<{
         closure?: ProtectedObservationClosure;
         executionProtected?: true;
@@ -53,4 +54,3 @@ export declare class DesktopTaskObservationStore {
     save(taskId: string, closure: ProtectedObservationClosure): Promise<void>;
     persistSession(taskId: string, snapshot: AgentSessionSnapshot): Promise<void>;
 }
-export {};

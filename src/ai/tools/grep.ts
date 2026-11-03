@@ -1,3 +1,5 @@
+import { getSearchScope } from './search-scope-context.js';
+import { permitsSearchPath, type SearchScope } from './search-scope.mjs';
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
 import { runBoundedGlob } from './bounded-glob.js';
@@ -31,7 +33,7 @@ function buildRegex(pattern: string): RegExp {
   }
 }
 
-async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal): Promise<string[]> {
+async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal, searchScope?: SearchScope): Promise<string[]> {
   signal?.throwIfAborted();
   const resolvedPath = resolve(searchPath);
   const stats = statSync(resolvedPath);
@@ -47,6 +49,7 @@ async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?
 
   return (await runBoundedGlob({ patterns,
     cwd: resolvedPath,
+    searchScope,
     dot: true,
     skipInaccessible: true,
     ignore: ['**/.git/**', '**/node_modules/**'],
@@ -61,6 +64,7 @@ export async function runFallbackGrepSearch(input: {
   output_mode?: string;
   type?: string;
   signal?: AbortSignal;
+  searchScope?: SearchScope;
 }): Promise<string[]> {
   const {
     pattern,
@@ -70,12 +74,24 @@ export async function runFallbackGrepSearch(input: {
     output_mode = 'lines',
     type,
   } = input;
+  if (input.searchScope) {
+    const resolved = resolve(searchPath);
+    if (!permitsSearchPath(resolved, input.searchScope)) throw new Error('search_scope_denied');
+    const patterns = fileGlob ? [fileGlob] : type ? (TYPE_GLOBS[type] ?? ['**/*.' + type]) : ['**/*'];
+    const entries = await runBoundedGlob({
+      cwd: resolved, patterns, dot: true, skipInaccessible: true, ignore: ['**/.git/**', '**/node_modules/**'],
+      searchScope: input.searchScope,
+      grep: { pattern, context, outputMode: output_mode, directFile: statSync(resolved).isFile() },
+    }, input.signal);
+    return entries.map(entry => entry.text ?? '');
+  }
   const matcher = buildRegex(pattern);
-  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal);
+  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal, input.searchScope);
   const results: string[] = [];
 
   for (const file of files) {
     input.signal?.throwIfAborted();
+    if (!permitsSearchPath(file, input.searchScope)) continue;
     let lines: string[];
     try {
       lines = readFileSync(file, 'utf-8').split(/\r?\n/);
@@ -164,8 +180,9 @@ export const grepTool: Tool = {
     };
 
     // 优先使用 rg（ripgrep），回退到 grep，再回退到纯 Node 搜索。
-    const hasRg = canRunCommand('rg');
-    const hasGrep = !hasRg && canRunCommand('grep');
+    const searchScope = getSearchScope(toolContext);
+    const hasRg = !searchScope && canRunCommand('rg');
+    const hasGrep = !searchScope && !hasRg && canRunCommand('grep');
     const cmd = hasRg ? 'rg' : 'grep';
     const args = hasRg
       ? [
@@ -202,6 +219,7 @@ export const grepTool: Tool = {
         output_mode,
         type,
         signal: toolContext?.signal,
+        searchScope,
       })).join('\n').trim();
     if (!output) return '（无匹配结果）';
     const page = paginateItems(output.split(/\r?\n/), offset, head_limit);

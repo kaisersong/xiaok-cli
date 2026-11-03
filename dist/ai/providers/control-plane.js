@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from './kimi-models.js';
 import { getSupportedModelReasoningEfforts } from './model-reasoning-effort.js';
 import { normalizeConfig } from './normalize.js';
 import { findCatalogModel, getProviderProfile } from './registry.js';
@@ -37,12 +38,12 @@ export function resolveRuntimeModelBinding(rawConfig, requestedModelId) {
         throw new Error('custom 模型需要配置 baseUrl。请运行: xiaok config set model custom --base-url <url>');
     }
     const catalogRuntimeModel = providerId === 'kimi'
-        && (catalogModel?.model === 'k3' || catalogModel?.model === 'k3-256k')
+        && isKimiCodingModel(catalogModel?.model)
         && (providerConfig.protocol !== 'openai_legacy'
             || !isOfficialKimiK3OpenAIEndpoint(transport.baseUrl))
         ? undefined
         : catalogModel;
-    const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || ((wireModel === 'k3' || wireModel === 'k3-256k')
+    const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || (isKimiCodingModel(wireModel)
         && providerConfig.protocol === 'openai_legacy'
         && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl));
     const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions

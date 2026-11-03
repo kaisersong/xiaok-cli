@@ -1,6 +1,6 @@
 import type { SemanticSummaryProviderScope } from './semantic-summary-attempt.js';
 import type { CompoundOperationRecord } from './compound-operation.js';
-import type { PersistedSessionSnapshot } from '../../ai/runtime/session-store/store.js';
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/store.js';
 import type { AgentSessionState } from '../../ai/runtime/session.js';
 import type { CompoundRegistryExecutionPort } from '../../ai/tools/index.js';
 import { type SessionExecutionChain } from '../../ai/runtime/session-store/execution-chain.js';
@@ -50,7 +50,7 @@ export declare function captureCompoundFollowupPreparationSupervision(tree: Comp
     session: AgentSessionState;
     nativeInvocationId: string;
 }>): () => void;
-export declare function captureCompoundExistingBranchSupervision(tree: CompoundTreeOwner, chain: SessionExecutionChain, leafLease: SessionExecutionLease, candidate?: PersistedSessionSnapshot, record?: DirectOperationRecord | CompoundOperationRecord): () => void;
+export declare function captureCompoundExistingBranchSupervision(tree: CompoundTreeOwner, chain: SessionExecutionChain, leafLease: SessionExecutionLease, candidate?: StoredSessionSnapshot, record?: DirectOperationRecord | CompoundOperationRecord): () => void;
 export declare function captureCompoundSemanticSupervision(tree: CompoundTreeOwner, lease: SessionExecutionLease, semanticScope: SemanticSummaryProviderScope): () => void;
 /** One actual final-authorized native invocation owns this scope. Async work
  * retaining an ALS store after native return cannot allocate another child. */

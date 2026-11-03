@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from './kimi-models.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
 import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions, } from './model-runtime-options.js';
 import { getProviderModelVariant, getProviderProfile } from './registry.js';
@@ -64,11 +65,11 @@ function buildFirstPartyConfig(providerId, overrides, modelOverride) {
     const protocol = overrides.protocol ?? profile.protocol;
     const baseUrl = overrides.baseUrl ?? profile.baseUrl;
     const kimiK3RuntimeEligible = providerId === 'kimi'
-        && (wireModel === 'k3' || wireModel === 'k3-256k')
+        && isKimiCodingModel(wireModel)
         && protocol === 'openai_legacy'
         && isOfficialKimiK3OpenAIEndpoint(baseUrl);
     const catalogRuntimeEligible = providerId !== 'kimi'
-        || catalogVariant?.model !== 'k3'
+        || !isKimiCodingModel(catalogVariant?.model)
         || kimiK3RuntimeEligible;
     const { runtimeOptions } = resolveModelRuntimeOptions({
         protocol,

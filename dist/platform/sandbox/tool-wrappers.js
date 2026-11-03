@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+import { withSearchScope } from '../../ai/tools/search-scope-context.js';
 import { types } from 'node:util';
 import { isReadonlySandboxEnforcer } from './enforcer.js';
 import { inheritBuiltinToolIdentity } from '../../ai/tools/native-tool-identity.js';
@@ -30,11 +32,11 @@ export function applySandboxToTools(tools, enforcer, optionsOrCallback) {
     const options = normalizeOptions(optionsOrCallback);
     return tools.map(tool => {
         const name = tool.definition.name;
-        if (!['bash', 'read', 'write', 'edit'].includes(name))
+        if (!['bash', 'read', 'write', 'edit', 'grep', 'glob'].includes(name))
             return tool;
         const prepare = async (input, context, allowPrompt) => {
             context?.signal?.throwIfAborted();
-            const path = name === 'bash' ? input.workdir : input.file_path;
+            const path = name === 'bash' ? input.workdir : ['grep', 'glob'].includes(name) ? (input.path ?? process.cwd()) : input.file_path;
             if (typeof path === 'string') {
                 const decision = enforcer.enforceFile(path);
                 if (!decision.allowed) {
@@ -57,6 +59,10 @@ export function applySandboxToTools(tools, enforcer, optionsOrCallback) {
                     return denial;
                 context?.signal?.throwIfAborted();
                 context?.assertPermissionApproval?.();
+                if (name === 'grep' || name === 'glob') {
+                    const path = realpathSync(typeof input.path === 'string' ? input.path : process.cwd());
+                    return tool.execute({ ...input, path }, withSearchScope(context, enforcer.getSearchScope()));
+                }
                 return tool.execute(input, context);
             } };
         inheritBuiltinToolIdentity(tool, wrapped, () => {

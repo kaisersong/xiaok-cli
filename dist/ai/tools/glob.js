@@ -1,3 +1,4 @@
+import { getSearchScope } from './search-scope-context.js';
 import { runBoundedGlob } from './bounded-glob.js';
 import { appendPaginationNotice, paginateItems, truncateText } from './truncation.js';
 export const globTool = {
@@ -21,7 +22,7 @@ export const globTool = {
     async execute(input, context) {
         const { pattern, path: cwd = process.cwd(), offset = 0, head_limit = 50, max_chars = 12_000, type = 'file', } = input;
         try {
-            const files = await runBoundedGlob({ patterns: pattern, cwd, type }, context?.signal);
+            const files = await runBoundedGlob({ patterns: pattern, cwd, type, searchScope: getSearchScope(context) }, context?.signal);
             if (files.length === 0)
                 return '（无匹配文件）';
             const page = paginateItems(files.map((file) => file.path), offset, head_limit);

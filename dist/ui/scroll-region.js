@@ -55,6 +55,36 @@ function getSafeRenderWidth(width) {
 export class ScrollRegionManager {
     stream;
     active = false;
+    permissionScreenActive = false;
+    invalidatePermissionScreen;
+    permissionPendingSize = null;
+    /** The main buffer must not be repainted or scrolled while its modal is elsewhere. */
+    suspendForPermissionScreen(onContent) {
+        if (this.permissionScreenActive)
+            throw new Error('Permission screen already active');
+        this.permissionScreenActive = true;
+        this.invalidatePermissionScreen = onContent;
+        let released = false;
+        return () => {
+            if (released)
+                return;
+            released = true;
+            this.permissionScreenActive = false;
+            this.invalidatePermissionScreen = undefined;
+            const size = this.permissionPendingSize;
+            this.permissionPendingSize = null;
+            if (size)
+                this.updateSize(size.rows, size.columns);
+            else
+                this.setScrollRegion();
+        };
+    }
+    restoreMainForContent() {
+        if (this.permissionScreenActive)
+            this.invalidatePermissionScreen?.();
+        if (this.permissionScreenActive)
+            throw new Error('Permission screen still owns output');
+    }
     config;
     lastActivityLine = '';
     lastActivityRow = null;
@@ -116,6 +146,24 @@ export class ScrollRegionManager {
     }
     clampCursorRow(row) {
         return Math.max(1, Math.min(row, this.getScrollBottom()));
+    }
+    semanticOutput() {
+        return this.stream.isTTY ? '\x1b]133;C\x07' : '';
+    }
+    semanticInput() {
+        return this.stream.isTTY ? '\x1b]133;B\x07' : '';
+    }
+    semanticPrompt(startRow, endRow) {
+        if (!this.stream.isTTY)
+            return '';
+        let output = '';
+        // Mark every chrome row: shrinking may clip the first row. Explicitly
+        // opt into prompt redraw even through SSH without shell integration.
+        // CUP puts A at column zero, so its fresh-line rule cannot add a newline.
+        for (let row = startRow; row <= endRow; row++) {
+            output += `\x1b[${row};1H\x1b]133;${row === startRow ? 'A;redraw=1' : 'P;k=s'}\x07`;
+        }
+        return output;
     }
     maxInputRows() {
         return Math.max(1, Math.min(MAX_INPUT_ROWS, this.config.rows - this.config.gapHeight - 4));
@@ -253,7 +301,7 @@ export class ScrollRegionManager {
             lines = [...children.slice(page * slots, (page + 1) * slots), allLines[allLines.length - 1]];
         }
         const firstRow = activityRow - lines.length + 1;
-        let output = this.composeActivityClear();
+        let output = this.semanticOutput() + this.composeActivityClear();
         // Clear old rows before scrolling so stale activity never enters history.
         // Single-line activity keeps its existing overlay behavior.
         if (lines.length > 1) {
@@ -408,6 +456,10 @@ export class ScrollRegionManager {
      * Update terminal size.
      */
     updateSize(rows, columns) {
+        if (this.permissionScreenActive) {
+            this.permissionPendingSize = { rows, columns };
+            return;
+        }
         const previousScrollBottom = this.getScrollBottom();
         const hadChrome = this._footerVisible || this.lastActivityRow !== null || this.hasActiveOverlayPrompt();
         const pulledHistoryRows = Math.min(Math.max(0, rows - this.config.rows), Math.max(0, this._totalRows - this._cursorRow));
@@ -490,8 +542,10 @@ export class ScrollRegionManager {
      * Restores normal terminal scrolling and clears footer area.
      */
     end() {
+        this.restoreMainForContent();
         if (!this.active)
             return;
+        this.stream.write(this.semanticOutput());
         this.active = false;
         // Reset scroll region to full terminal
         this.stream.write(`\x1b[0m\x1b[?25h${RESET_SCROLL_REGION}`);
@@ -516,6 +570,7 @@ export class ScrollRegionManager {
         this.clearActiveOverlayPrompt();
     }
     resumeAfterExternalCommand(options) {
+        this.restoreMainForContent();
         if (this.active) {
             this.renderFooter(options);
             return;
@@ -568,6 +623,7 @@ export class ScrollRegionManager {
         return this.active;
     }
     renderPromptFrame(frame) {
+        this.restoreMainForContent();
         if (!this.active)
             return;
         const owner = frame.owner ?? 'input';
@@ -602,6 +658,7 @@ export class ScrollRegionManager {
      * @param cursor - Cursor position in the input value
      */
     renderInput(inputValue, cursor) {
+        this.restoreMainForContent();
         if (!this.active) {
             // Not in scroll region mode, use inline rendering
             const cursorWidth = getDisplayWidth(inputValue.slice(0, cursor));
@@ -621,6 +678,12 @@ export class ScrollRegionManager {
      * After rendering, cursor is positioned at input line for typing.
      */
     updateFooter(inputPrompt, summaryLine, statusLine) {
+        if (this.permissionScreenActive) {
+            this.lastInputPrompt = inputPrompt;
+            this.lastSummaryLine = summaryLine ?? this.lastSummaryLine;
+            this.lastStatusLine = statusLine ?? this.lastStatusLine;
+            return;
+        }
         if (!this.active)
             return;
         this.lastInputPrompt = inputPrompt;
@@ -695,7 +758,7 @@ export class ScrollRegionManager {
         const inputEndRow = this.getInputBarRow();
         // Reset scroll region to allow writing to footer area. Batch the footer
         // redraw into a single terminal write so prompt/status don't flicker apart.
-        let footerOutput = `${RESET_SCROLL_REGION}${SHOW_CURSOR}${previousActivityClear}`;
+        let footerOutput = `${this.semanticOutput()}${RESET_SCROLL_REGION}${SHOW_CURSOR}${previousActivityClear}`;
         // Clear previous and current editor rows. This prevents stale rows when
         // the input grows or shrinks between redraws.
         const previousOverlayStartRow = previousOverlayRows > 0
@@ -727,6 +790,7 @@ export class ScrollRegionManager {
                     footerOutput += this.getClearScreenRowSequence(row);
             }
         }
+        footerOutput += this.semanticPrompt(currentFooterClearStartRow, statusBarRow);
         for (let index = 0; index < INPUT_PADDING_ROWS; index += 1) {
             const row = inputStartRow + index;
             footerOutput += `\x1b[${row};1H`;
@@ -780,6 +844,12 @@ export class ScrollRegionManager {
         this.stream.write(footerOutput);
     }
     renderFooter(options) {
+        if (this.permissionScreenActive) {
+            this.lastInputPrompt = options?.inputPrompt ?? this.lastInputPrompt;
+            this.lastSummaryLine = options?.summaryLine ?? this.lastSummaryLine;
+            this.lastStatusLine = options?.statusLine ?? this.lastStatusLine;
+            return;
+        }
         if (this.hasActiveOverlayPrompt() && this._activeOverlayKind === 'queued' && this.lastOverlayLines.length > 0) {
             this.renderPromptFrame({
                 inputValue: this.lastInputValue,
@@ -817,7 +887,7 @@ export class ScrollRegionManager {
         return output;
     }
     renderOverlayPromptFrame(frame) {
-        this.stream.write(this.composeActivityClear());
+        this.stream.write(this.semanticOutput() + this.composeActivityClear());
         const overlayKind = frame.overlayKind ?? 'generic';
         const isPermissionOverlay = overlayKind === 'permission';
         const keepStatusLineVisible = ((isPermissionOverlay && !shouldSkipPermissionOverlayReserve())
@@ -869,6 +939,7 @@ export class ScrollRegionManager {
         for (let row = clearStartRow; row <= statusBarRow; row += 1) {
             this.clearScreenRow(row);
         }
+        this.stream.write(this.semanticPrompt(leadingGapStartRow, statusBarRow));
         for (let row = leadingGapStartRow; row < overlayStartRow; row += 1) {
             this.clearScreenRow(row);
             this.stream.write(this.padLine('', cols, false));
@@ -929,20 +1000,20 @@ export class ScrollRegionManager {
     positionCursorForPermissionOverlay(inputFrameRows) {
         const safeRow = Math.max(1, this.getInputStartRow(inputFrameRows) - 1);
         this._terminalCursorRow = safeRow;
-        this.stream.write(`\x1b[${safeRow};1H`);
+        this.stream.write(`\x1b[${safeRow};1H${this.semanticInput()}`);
     }
     positionCursorForOverlayInput(inputState, inputRows) {
         const inputTextStartRow = this.getInputTextStartRow(inputRows);
         if (!this.lastInputValue || !inputState) {
             this._terminalCursorRow = inputTextStartRow;
-            this.stream.write(`\x1b[${inputTextStartRow};${this.getCursorBase()}H`);
+            this.stream.write(`\x1b[${inputTextStartRow};${this.getCursorBase()}H${this.semanticInput()}`);
             return;
         }
         const cursorVisibleLine = Math.max(0, Math.min(inputState.cursorVisualLine - inputState.visibleStart, inputState.visibleLines.length - 1));
         const cursorRow = inputTextStartRow + cursorVisibleLine;
         const cursorCol = this.getCursorBase() + inputState.cursorColumn;
         this._terminalCursorRow = cursorRow;
-        this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
+        this.stream.write(`\x1b[${cursorRow};${cursorCol}H${this.semanticInput()}`);
     }
     /**
      * Position the cursor in the input bar for typing.
@@ -955,20 +1026,21 @@ export class ScrollRegionManager {
     getInputCursorSequence() {
         if (!this.lastInputValue) {
             this._terminalCursorRow = this.getInputTextStartRow(1);
-            return `\x1b[${this._terminalCursorRow};${this.getCursorBase()}H`;
+            return `\x1b[${this._terminalCursorRow};${this.getCursorBase()}H${this.semanticInput()}`;
         }
         const state = this.getFooterInputState(this.lastInputValue, this.lastInputCursor);
         const cursorVisibleLine = Math.max(0, Math.min(state.cursorVisualLine - state.visibleStart, state.visibleLines.length - 1));
         const cursorRow = this.getInputTextStartRow(state.visibleLines.length) + cursorVisibleLine;
         const cursorCol = this.getCursorBase() + state.cursorColumn;
         this._terminalCursorRow = cursorRow;
-        return `\x1b[${cursorRow};${cursorCol}H`;
+        return `\x1b[${cursorRow};${cursorCol}H${this.semanticInput()}`;
     }
     /**
      * Clear the last input value.
      * Call this after user submits input so the footer shows placeholder during turn.
      */
     clearLastInput(options) {
+        this.restoreMainForContent();
         this.lastInputValue = '';
         this.lastInputCursor = 0;
         if (options?.inputPrompt) {
@@ -988,6 +1060,8 @@ export class ScrollRegionManager {
      * Does NOT reposition the cursor — content continues from current position.
      */
     clearActivityLine() {
+        if (this.permissionScreenActive)
+            return;
         if (!this.active)
             return;
         this.lastActivityLine = '';
@@ -1000,6 +1074,7 @@ export class ScrollRegionManager {
         this.lastActivityRow = null;
     }
     clearOverlayPromptState() {
+        this.restoreMainForContent();
         if (this.active) {
             this.clearPromptChromeRows();
         }
@@ -1010,8 +1085,10 @@ export class ScrollRegionManager {
         this.lastOverlayClearStartRow = 0;
     }
     positionCursorAtContentCursor() {
+        this.restoreMainForContent();
         if (!this.active)
             return;
+        this.stream.write(this.semanticOutput());
         const targetRow = this.clampCursorRow(this._cursorRow);
         this.clearActivityIfContentWillUseRow(targetRow);
         this._terminalCursorRow = targetRow;
@@ -1031,8 +1108,10 @@ export class ScrollRegionManager {
      * required blank safety rows before the fixed footer.
      */
     positionAfterContent(contentRows) {
+        this.restoreMainForContent();
         if (!this.active)
             return;
+        this.stream.write(this.semanticOutput());
         const scrollBottom = this.getScrollBottom();
         // Content starts at row 1, ends at row `contentRows`
         // Leave gapHeight blank rows: position at contentEnd + gapHeight + 1.
@@ -1049,8 +1128,10 @@ export class ScrollRegionManager {
      * Call this before writing any content to the scroll region.
      */
     beginContentStreaming() {
+        this.restoreMainForContent();
         if (!this.active)
             return;
+        this.stream.write(this.semanticOutput());
         // A tool interrupt may end a partial assistant row without rendering a
         // visible tool block. Finalize it only when another assistant segment
         // actually starts: visible tool blocks already advance the cursor and must
@@ -1084,6 +1165,7 @@ export class ScrollRegionManager {
      * Restore footer after content streaming completes.
      */
     endContentStreaming(options) {
+        this.restoreMainForContent();
         if (!this.active)
             return;
         // The activity overlay owns the last scroll-region row. If assistant text
@@ -1107,8 +1189,10 @@ export class ScrollRegionManager {
      * Call this before writing any content to the scroll region.
      */
     prepareForContent() {
+        this.restoreMainForContent();
         if (!this.active)
             return;
+        this.stream.write(this.semanticOutput());
         // Clear the activity line (scroll region bottom)
         const scrollBottom = this.getScrollBottom();
         this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
@@ -1121,6 +1205,8 @@ export class ScrollRegionManager {
      * after rendering - do NOT use [s/[u as it resets attributes.
      */
     renderActivity(activityLine) {
+        if (this.permissionScreenActive)
+            return;
         if (!this.active) {
             // Not in scroll region mode, use inline rendering
             this.stream.write(`\r${CLEAR_LINE}${activityLine}`);
@@ -1160,6 +1246,8 @@ export class ScrollRegionManager {
      * Cursor stays at activity line after clearing.
      */
     clearActivity() {
+        if (this.permissionScreenActive)
+            return;
         if (!this.active) {
             this.stream.write(`\r${CLEAR_LINE}`);
             return;
@@ -1175,6 +1263,10 @@ export class ScrollRegionManager {
      * Update status line only (without re-rendering everything).
      */
     updateStatusLine(statusLine) {
+        if (this.permissionScreenActive) {
+            this.lastStatusLine = statusLine;
+            return;
+        }
         this.lastStatusLine = statusLine;
         if (this.active) {
             if (this.isRendererPermissionOverlayActive() && shouldSkipPermissionOverlayReserve()) {
@@ -1234,6 +1326,7 @@ export class ScrollRegionManager {
         };
     }
     setWelcomeRows(rows) {
+        this.restoreMainForContent();
         this._welcomeRows = rows;
         this._pastWelcome = true;
         this._totalRows = rows;
@@ -1242,6 +1335,7 @@ export class ScrollRegionManager {
         this._cursorCol = 0;
     }
     clearContentArea() {
+        this.restoreMainForContent();
         if (!this.active)
             return;
         const scrollBottom = this.getScrollBottom();
@@ -1260,6 +1354,7 @@ export class ScrollRegionManager {
         this._hasStreamedContent = false;
     }
     clearVisibleViewport() {
+        this.restoreMainForContent();
         if (!this.active)
             return;
         const scrollBottom = this.getScrollBottom();
@@ -1270,6 +1365,7 @@ export class ScrollRegionManager {
         this.setScrollRegion();
     }
     advanceContentCursor(rows) {
+        this.restoreMainForContent();
         if (!this.active)
             return;
         this._totalRows += rows;
@@ -1277,6 +1373,7 @@ export class ScrollRegionManager {
         this._cursorUncertain = false;
     }
     advanceContentCursorByRenderedText(text, options) {
+        this.restoreMainForContent();
         if (!this.active || text.length === 0)
             return;
         const cols = this.config.columns;
@@ -1311,6 +1408,7 @@ export class ScrollRegionManager {
         this._cursorUncertain = false;
     }
     setContentCursor(row) {
+        this.restoreMainForContent();
         if (!this.active)
             return;
         this._totalRows = row;
@@ -1323,10 +1421,12 @@ export class ScrollRegionManager {
         return this.getScrollBottom();
     }
     writeAtContentCursor(text, options) {
+        this.restoreMainForContent();
         if (!this.active) {
             this.stream.write(text);
             return;
         }
+        this.stream.write(this.semanticOutput());
         const shouldRestoreFooter = options?.clearPromptChrome !== false
             && this._footerVisible
             && !this._contentStreaming
@@ -1398,6 +1498,7 @@ export class ScrollRegionManager {
      * inflate the row bookkeeping by thousands of phantom rows.
      */
     writeRawBlock(text, rows, options) {
+        this.restoreMainForContent();
         const logger = options?.logger;
         const stationary = options?.cursorStationary === true;
         const availableRows = this.active ? this.getScrollBottom() : (this.stream.rows ?? 24);
@@ -1410,6 +1511,7 @@ export class ScrollRegionManager {
                 logger?.recordOutput('stdout', `${options.placeholder}\n`);
             return;
         }
+        this.stream.write(this.semanticOutput());
         const shouldRestoreFooter = options?.clearPromptChrome !== false
             && this._footerVisible
             && !this._contentStreaming
@@ -1462,6 +1564,7 @@ export class ScrollRegionManager {
         }
     }
     writeSubmittedInput(text) {
+        this.restoreMainForContent();
         if (!this.active) {
             this.stream.write(text);
             return;
@@ -1510,6 +1613,7 @@ export class ScrollRegionManager {
     getNewlineCallback() {
         const self = this;
         return function newlineCallback() {
+            self.restoreMainForContent();
             if (self._cursorCol === 0) {
                 self.clearActivityIfContentWillUseRow(self.clampCursorRow(self._cursorRow));
             }
@@ -1532,6 +1636,7 @@ export class ScrollRegionManager {
         return function columnAdvanceCallback(visibleWidth) {
             if (!self.active || visibleWidth <= 0)
                 return;
+            self.restoreMainForContent();
             const cols = Math.max(1, self.config.columns);
             const end = self._cursorCol + visibleWidth;
             const rowsAdvanced = Math.floor((end - 1) / cols);
@@ -1558,6 +1663,7 @@ export class ScrollRegionManager {
         }
     }
     syncContentCursorFromRenderedLines(lines) {
+        this.restoreMainForContent();
         if (!this.active || lines.length === 0)
             return;
         const cols = this.config.columns;

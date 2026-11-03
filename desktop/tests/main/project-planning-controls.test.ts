@@ -23,3 +23,10 @@ it.each([undefined, 'agent', 'scheduler', 'unknown'])('public planning service d
   try { Reflect.apply(f.service.startProjectPlanning, f.service, [input, source]); } catch (failure) { error = failure; }
   expect(reads).toBe(0); expect(error).toBeInstanceOf(Error); expect((error as Error).message).toBe('project_planning_source_forbidden');
 });
+it.each(['queued','running','succeeded','launch_unknown'] as const)('real planning IPC preserves truthful %s progress',async status=>{
+ const f=await fixture();
+ f.service.startProjectPlanning=(()=>({ok:true,status})) as typeof f.service.startProjectPlanning;
+ const input={projectId:'p',projectName:'p',goal:'g',requirements:'',planningGuidance:'',poAgent:'po',members:[]};
+ const result=await Reflect.apply(f.listeners.get(channel)!,undefined,[{sender:f.sender,senderFrame:f.frame},input]);
+ expect(result).toEqual({ok:true,status});expect(f.gate.outstanding).toBe(0);
+});

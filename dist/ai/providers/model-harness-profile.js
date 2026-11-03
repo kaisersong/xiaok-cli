@@ -1,3 +1,5 @@
+import { KIMI_CODING_PROFILES } from './kimi-models.js';
+import { isKimiCodingModel } from './kimi-models.js';
 import { modelCapabilitiesFromFlags, resolveModelCapabilities, } from '../runtime/model-capabilities.js';
 import { normalizeKimiToolSchema, } from './kimi-tool-schema.js';
 import { canonicalizeOfficialKimiK3OpenAIEndpoint, isOfficialKimiK3OpenAIEndpoint, } from './model-runtime-options.js';
@@ -129,6 +131,14 @@ export const KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE = Object.freeze({
     ...KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
     id: 'kimi-k3-256k-coding-openai',
 });
+const KIMI_K31_CODING_OPENAI_HARNESS_PROFILE = Object.freeze({
+    ...KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
+    id: KIMI_CODING_PROFILES['k3.1-pro'],
+});
+const KIMI_K31_HIGHSPEED_CODING_OPENAI_HARNESS_PROFILE = Object.freeze({
+    ...KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
+    id: KIMI_CODING_PROFILES['k3.1-pro-highspeed'],
+});
 export function observeReasoningDialect(state, delta) {
     const hasReasoningContent = Object.prototype.hasOwnProperty.call(delta, 'reasoning_content');
     const hasReasoning = Object.prototype.hasOwnProperty.call(delta, 'reasoning');
@@ -186,16 +196,19 @@ export function isKimiK3CodingHarnessBinding(identity) {
     return identity.providerId === 'kimi'
         && identity.providerType === 'first_party'
         && identity.protocol === 'openai_legacy'
-        && (identity.wireModel === 'k3' || identity.wireModel === 'k3-256k')
+        && isKimiCodingModel(identity.wireModel)
         && isOfficialKimiK3OpenAIEndpoint(identity.canonicalBaseUrl);
 }
 export function resolveModelHarnessProfile(identity) {
     if (!isKimiK3CodingHarnessBinding(identity)) {
         return GENERIC_OPENAI_HARNESS_PROFILE;
     }
-    return identity.wireModel === 'k3-256k'
-        ? KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE
-        : KIMI_K3_CODING_OPENAI_HARNESS_PROFILE;
+    switch (identity.wireModel) {
+        case 'k3.1-pro': return KIMI_K31_CODING_OPENAI_HARNESS_PROFILE;
+        case 'k3.1-pro-highspeed': return KIMI_K31_HIGHSPEED_CODING_OPENAI_HARNESS_PROFILE;
+        case 'k3-256k': return KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE;
+        default: return KIMI_K3_CODING_OPENAI_HARNESS_PROFILE;
+    }
 }
 export function buildOpenAIHarnessContext(input) {
     const identity = Object.freeze({

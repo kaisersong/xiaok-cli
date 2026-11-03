@@ -1,5 +1,6 @@
 import type { SessionExecutionLease } from './execution-authority.js';
 import type { PersistedSessionSnapshot } from './store.js';
+import type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 export interface SessionMigrationInput {
     sessionId: string;
     expectedSnapshotHash: string;
@@ -18,4 +19,6 @@ export declare function captureMigrationMarker(value: unknown): SessionMigration
 export declare function migrationMarkerFromInput(input: SessionMigrationInput): SessionMigrationMarker;
 /** Canonical full durable snapshot; distinct from provider history digest. */
 export declare function computeSessionSnapshotHash(snapshot: PersistedSessionSnapshot): string;
+export declare function computeSessionSnapshotHash(snapshot: StoredSessionSnapshot): string;
 export declare function freezeMigrationSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export declare function freezeMigrationSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot;

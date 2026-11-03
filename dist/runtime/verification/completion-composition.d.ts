@@ -437,7 +437,7 @@ export declare function createVerificationCompletionComposition(input: {
                 byteLength: number;
             }>;
             capture(payloadId: string, rawOwner: import("./proof-authority.js").VerificationOwner): Readonly<{
-                readBytes: () => Buffer<ArrayBuffer>;
+                readBytes: () => Buffer<ArrayBufferLike>;
                 assertCurrent: () => void;
             }>;
             read(payloadId: string, rawOwner: import("./proof-authority.js").VerificationOwner): Buffer;

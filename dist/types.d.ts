@@ -33,6 +33,10 @@ export type StreamChunk = {
     id: string;
     name: string;
     input: Record<string, unknown>;
+}
+/** Transport activity only; buffered tool arguments are not executable yet. */
+ | {
+    type: 'tool_input_progress';
 } | {
     type: 'usage';
     usage: UsageStats;
@@ -268,6 +272,10 @@ export interface Config {
         };
     };
 }
+export type ConfigV2Input = Omit<Config, 'intentBoundary'> & {
+    intentBoundary?: Config['intentBoundary'];
+};
+export type ConfigInput = ConfigV2Input | LegacyConfig;
 export declare const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig;
 export declare const DEFAULT_CONFIG: Config;
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */

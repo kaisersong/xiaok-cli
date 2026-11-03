@@ -61,6 +61,7 @@ export declare class DockerEngineTransport {
         HostConfig: Record<string, unknown>;
         Config: Record<string, unknown>;
         Image: string;
+        NetworkSettings?: unknown;
     }>;
     kill(id: string): Promise<void>;
     logs(id: string): Promise<string>;

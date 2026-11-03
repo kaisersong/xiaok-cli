@@ -55,9 +55,27 @@ export function createInstalledRootBrokerClient() {
         throw Error('broker_request_budget'); return bytes; }
     async function call(method, payload, signal, timeoutMs = 125000) { current(); const bytes = request(method, payload), active = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal; const response = await callControllerIpc(socketPath, bytes, { signal: active, timeoutMs }); current(); return JSON.parse(response.toString('utf8')); }
     const sourceApprovals = new WeakMap();
+    const releasedSourceCaptures = new WeakSet();
     const sourceCaptures = new WeakMap();
-    function sourceCapture(handle) { current(); const capture = sourceCaptures.get(handle); if (!capture)
-        throw Error('broker_source_capture_brand'); return capture; }
+    function sourceCapture(handle, cleanup = false) { current(); const capture = sourceCaptures.get(handle); if (!capture)
+        throw Error('broker_source_capture_brand'); if (!cleanup && (capture.state || capture.physical === 'unknown'))
+        throw Error('broker_source_capture_unknown'); return capture; }
+    async function releaseSourceCapture(handle, signal, timeoutMs = 125000) { const value = sourceCapture(handle, true); if (value.state === 'closing')
+        throw Error('broker_source_capture_concurrent'); value.state = 'closing'; try {
+        const response = await call('sources.release', { handle: value.handle }, signal, timeoutMs);
+        if (canonicalVerificationJson(response) !== '{}')
+            throw Error('broker_source_release');
+        sourceCaptures.delete(handle);
+        releasedSourceCaptures.add(handle);
+    }
+    catch (error) {
+        value.state = 'unknown';
+        value.lastError = error;
+        throw error;
+    } }
+    async function releaseObservationBuffer(handle, capture, id) { const response = await call('sources.physical.release', { handle: capture.handle, observationId: id }, undefined, 5000); if (canonicalVerificationJson(response) !== '{}')
+        throw Error('broker_source_observation_release'); sourceCapture(handle); }
+    const physicalFacts = new WeakMap();
     function sourceBytes(value, key, position, maximum) { const response = value; if (!response || Object.keys(response).sort().join(',') !== ['bytes', key].sort().join(',') || response[key] !== position || typeof response.bytes !== 'string')
         throw Error('broker_source_page'); const bytes = Buffer.from(response.bytes, 'base64'); if (bytes.length > maximum || bytes.toString('base64') !== response.bytes)
         throw Error('broker_source_page'); return bytes; }
@@ -107,8 +125,94 @@ export function createInstalledRootBrokerClient() {
             throw Error('broker_source_range'); const bytes = sourceBytes(await call('sources.page', { handle: value.handle, sourceId, pageNo }, signal), 'pageNo', pageNo, 65536); sourceCapture(handle); return bytes; },
         async checkProfileCapture(handle, signal) { const value = sourceCapture(handle), response = await call('sources.check', { handle: value.handle }, signal); if (canonicalVerificationJson(response) !== '{}')
             throw Error('broker_source_check'); sourceCapture(handle); },
-        async releaseProfileCapture(handle, signal) { const value = sourceCapture(handle); sourceCaptures.delete(handle); const response = await call('sources.release', { handle: value.handle }, signal); if (canonicalVerificationJson(response) !== '{}')
-            throw Error('broker_source_release'); },
+        isProfileCaptureReleased(handle) { if (releasedSourceCaptures.has(handle))
+            return true; if (sourceCaptures.has(handle))
+            return false; throw Error('broker_source_capture_brand'); },
+        async releaseProfileCapture(handle, signal) { return releaseSourceCapture(handle, signal); },
+        async observeProfilePhysicalSqliteFiles(handle, signal) {
+            const value = sourceCapture(handle);
+            if (value.physical)
+                throw Error('broker_source_observation_active');
+            value.physical = 'starting';
+            let id, error, token;
+            try {
+                const manifest = await client.loadProfileCaptureManifest(handle, signal), expected = manifest.databases.flatMap(row => row.capture.physicalFiles.map(f => ({ sourceId: row.sourceId, ...f })));
+                const descriptor = await call('sources.physical.start', { handle: value.handle }, signal);
+                if (!descriptor || Object.keys(descriptor).sort().join(',') !== 'inventoryHash,manifestHash,observationBytes,observationHash,observationId,reviewHash' || typeof descriptor.observationId !== 'string' || !/^[a-f0-9-]{36}$/.test(descriptor.observationId) || descriptor.manifestHash !== value.manifestHash || descriptor.inventoryHash !== value.review.inventoryHash || descriptor.reviewHash !== createHash('sha256').update(profileSourceReviewBytes(value.review)).digest('hex') || typeof descriptor.observationHash !== 'string' || !/^[a-f0-9]{64}$/.test(descriptor.observationHash) || !Number.isSafeInteger(descriptor.observationBytes) || descriptor.observationBytes < 1 || descriptor.observationBytes > 128 * 1024 ** 2)
+                    throw Error('broker_source_observation');
+                id = descriptor.observationId;
+                value.physical = 'loading';
+                const bytes = Buffer.alloc(descriptor.observationBytes);
+                try {
+                    for (let offset = 0; offset < bytes.length; offset += 256 * 1024) {
+                        const length = Math.min(256 * 1024, bytes.length - offset), part = sourceBytes(await call('sources.physical.page', { handle: value.handle, observationId: id, offset, length }, signal), 'offset', offset, length);
+                        sourceCapture(handle);
+                        if (part.length !== length)
+                            throw Error('broker_source_observation_page');
+                        part.copy(bytes, offset);
+                        part.fill(0);
+                    }
+                    if (createHash('sha256').update(bytes).digest('hex') !== descriptor.observationHash)
+                        throw Error('broker_source_observation_hash');
+                    const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+                    if (!Buffer.from(canonicalVerificationJson(body)).equals(bytes) || !body || Object.keys(body).sort().join(',') !== 'files,inventoryHash,manifestHash,reviewHash,version' || body.version !== 1 || body.manifestHash !== descriptor.manifestHash || body.reviewHash !== descriptor.reviewHash || body.inventoryHash !== descriptor.inventoryHash || !Array.isArray(body.files) || body.files.length !== expected.length)
+                        throw Error('broker_source_observation_body');
+                    const files = body.files.map((row, index) => {
+                        if (!row || Object.keys(row).sort().join(',') !== 'byteLength,device,inode,sha256,sourceId,suffix' || typeof row.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(row.sha256))
+                            throw Error('broker_source_observation_mapping');
+                        const { sha256, ...identity } = row;
+                        if (canonicalVerificationJson(identity) !== canonicalVerificationJson(expected[index]))
+                            throw Error('broker_source_observation_mapping');
+                        return Object.freeze({ ...row });
+                    });
+                    await client.checkProfileCapture(handle, signal);
+                    sourceCapture(handle);
+                    token = Object.freeze({});
+                    physicalFacts.set(token, { handle, files: Object.freeze(files) });
+                }
+                finally {
+                    bytes.fill(0);
+                }
+            }
+            catch (cause) {
+                error = cause;
+            }
+            finally {
+                try {
+                    if (id) {
+                        value.physical = 'releasing';
+                        await releaseObservationBuffer(handle, value, id);
+                        value.physical = undefined;
+                    }
+                    else {
+                        value.physical = 'unknown';
+                        await releaseSourceCapture(handle, undefined, 5000);
+                    }
+                }
+                catch (cleanupError) {
+                    value.physical = 'unknown';
+                    try {
+                        if (id)
+                            await releaseSourceCapture(handle, undefined, 5000);
+                    }
+                    catch (closeError) {
+                        cleanupError = new AggregateError([cleanupError, closeError], 'broker_source_capture_unknown');
+                    }
+                    error = error === undefined ? cleanupError : new AggregateError([error, cleanupError], 'broker_source_observation_cleanup');
+                }
+            }
+            if (error !== undefined)
+                throw error;
+            return token;
+        },
+        readProfilePhysicalSqliteFiles(token) {
+            current();
+            const value = physicalFacts.get(token);
+            if (!value)
+                throw Error('broker_source_observation_brand');
+            sourceCapture(value.handle);
+            return value.files;
+        },
         async authorizePublicationOperation(raw, signal) { const review = parsePublicationOperationReview(raw), { tuple, ...metadata } = review; current(); const active = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal; const response = await callControllerIpc(socketPath, Buffer.from(canonicalVerificationJson(tuple)), { signal: active, timeoutMs: 5000 }); current(); const registered = JSON.parse(response.toString('utf8')); if (!registered || Object.keys(registered).sort().join(',') !== 'fullTupleHash,ticket' || typeof registered.ticket !== 'string' || !/^[a-f0-9]{64}$/.test(registered.ticket) || registered.fullTupleHash !== hashVerificationTuple(tuple))
             throw Error('broker_publication_registration'); return call('publication.authorize', { metadata, ticket: registered.ticket, fullTupleHash: registered.fullTupleHash }, signal); },
         async authorizeApplicationBinding(input, signal) { const requestSource = input.requestSource, raw = input.review; if (requestSource !== 'user')

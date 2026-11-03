@@ -1,3 +1,6 @@
+import { type KimiCodingModel } from '../../providers/kimi-models.js';
+import type { StoredSessionSnapshot } from './stored-snapshot-types.js';
+export type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 import { type CompoundOperationLedger } from '../../../runtime/sol-pi/compound-operation.js';
 import { type SemanticCompactionLedger } from '../../../runtime/sol-pi/semantic-compaction-ledger.js';
 import type { SessionExecutionLease } from './execution-authority.js';
@@ -43,34 +46,40 @@ export declare class KimiK3DurableResumeUnsupportedError extends Error {
     readonly code = "KIMI_K3_DURABLE_RESUME_UNSUPPORTED";
     constructor();
 }
-export declare function isKimiK3DurableModel(model: string | undefined): model is 'k3' | 'k3-256k';
+export declare function isKimiK3DurableModel(model: string | undefined): model is KimiCodingModel;
 export declare function toDurableSessionSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export declare function toDurableSessionSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot;
 export declare function assertKimiK3DurableResumeSupported(snapshot: PersistedSessionSnapshot): void;
+export declare function assertKimiK3DurableResumeSupported(snapshot: StoredSessionSnapshot): void;
+export declare function assertKimiK3DurableResumeSupported(snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>): void;
 export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: PersistedSessionSnapshot): void;
+export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: StoredSessionSnapshot): void;
+export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: Pick<StoredSessionSnapshot, 'model' | 'messages'>): void;
 export interface SessionCompareAndSave {
     beforeCommit?: () => void;
     expectedStoreRevision: number;
     expectedHistoryDigest: string;
-    nextSnapshot: PersistedSessionSnapshot;
+    nextSnapshot: StoredSessionSnapshot;
     lease: SessionExecutionLease;
 }
 export interface SessionCommitReceipt {
     storeRevision: number;
     historyDigest: string;
 }
-export declare function computeSessionHistoryDigest(snapshot: Pick<PersistedSessionSnapshot, 'messages'>): string;
-export declare function prepareSessionStoreCommit(previous: PersistedSessionSnapshot | null, next: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export declare function computeSessionHistoryDigest(snapshot: Pick<StoredSessionSnapshot, 'messages'>): string;
+export declare function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): PersistedSessionSnapshot;
+export declare function prepareSessionStoreCommit(previous: StoredSessionSnapshot | null, next: StoredSessionSnapshot, cas?: SessionCompareAndSave, forkSource?: StoredSessionSnapshot): StoredSessionSnapshot;
 /** Host notifications report durable facts; exceptions propagate without rolling back commits. */
 export declare class SessionCommitNotifications {
     private readonly listeners;
-    subscribe(listener: (snapshot: PersistedSessionSnapshot) => void): () => void;
-    publish(snapshot: PersistedSessionSnapshot): void;
+    subscribe(listener: (snapshot: StoredSessionSnapshot) => void): () => void;
+    publish(snapshot: StoredSessionSnapshot): void;
 }
 export declare function assertSynchronousSessionHook(hook?: () => void): void;
 export interface SessionStore {
     assertIntentNativeLease?(sessionId: string, requestSource: 'user' | 'scheduler', lease: SessionExecutionLease): void;
-    getIntentNativeLedgerSync?(sessionId: string): import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined;
-    getIntentNativeLedger?(sessionId: string): Promise<import('../../../runtime/intent-delegation/types.js').SessionIntentLedger | undefined>;
+    getIntentNativeLedgerSync?(sessionId: string): StoredSessionSnapshot['intentDelegation'];
+    getIntentNativeLedger?(sessionId: string): Promise<StoredSessionSnapshot['intentDelegation']>;
     retryIntentPublicationApplication?(input: import('../../../runtime/intent-delegation/publication-candidate-journal.js').RetryIntentPublicationInput & {
         lease: SessionExecutionLease;
     }): Promise<import('../../../runtime/intent-delegation/publication-candidate-journal.js').IntentPublicationCandidate>;
@@ -115,14 +124,14 @@ export interface SessionStore {
     recordIntentExecutionTerminal?(input: import('../../../runtime/intent-delegation/intent-commit-boundary.js').IntentExecutionTerminalInput & {
         lease: SessionExecutionLease;
     }): Promise<void>;
-    onCommit?(listener: (snapshot: PersistedSessionSnapshot) => void): () => void;
+    onCommit?(listener: (snapshot: StoredSessionSnapshot) => void): () => void;
     compareAndSave?(input: SessionCompareAndSave): Promise<SessionCommitReceipt>;
-    save(snapshot: PersistedSessionSnapshot, options?: {
+    save(snapshot: StoredSessionSnapshot, options?: {
         lease?: SessionExecutionLease;
     }): Promise<void>;
-    load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
-    loadSync?(sessionId: string): PersistedSessionSnapshot | null;
-    loadLast(): Promise<PersistedSessionSnapshot | null>;
+    load(sessionId: string): Promise<StoredSessionSnapshot | null>;
+    loadSync?(sessionId: string): StoredSessionSnapshot | null;
+    loadLast(): Promise<StoredSessionSnapshot | null>;
     list(): Promise<SessionListEntry[]>;
-    fork(sessionId: string): Promise<PersistedSessionSnapshot>;
+    fork(sessionId: string): Promise<StoredSessionSnapshot>;
 }

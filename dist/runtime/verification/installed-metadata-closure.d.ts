@@ -96,7 +96,7 @@ export declare function readInstalledMetadataClosure(lifetime: InstalledControll
             sources: readonly Readonly<{
                 sourceId: string;
                 snapshotHash: string;
-                family: "file" | "goal" | "loop" | "kswarm" | "groups" | "session" | "artifact" | "writer-lock" | "codex";
+                family: "goal" | "loop" | "kswarm" | "groups" | "file" | "session" | "artifact" | "writer-lock" | "codex";
             }>[];
             digest: string;
             relationCount: number;
@@ -120,4 +120,6 @@ export declare function readInstalledMetadataClosure(lifetime: InstalledControll
     unresolved: Unresolved[];
 }>;
 export declare function checkInstalledMetadataClosure(lifetime: InstalledControllerLifetime, handle: object): Promise<void>;
+/** Exact original capture linkage, never a caller-provided closure DTO. */
+export declare function assertInstalledMetadataClosureCapture(lifetime: InstalledControllerLifetime, handle: object, owner: object, token: object): void;
 export {};

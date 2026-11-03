@@ -1,3 +1,4 @@
+import { isKimiCodingModel } from '../providers/kimi-models.js';
 import { XIAOK_BUILD_FLAVOR } from '../../build-flavor.js';
 export function assertKimiTransportAllowed(identity, buildFlavor = XIAOK_BUILD_FLAVOR) {
     if (buildFlavor !== 'rollback') {
@@ -17,8 +18,7 @@ export function assertKimiTransportAllowed(identity, buildFlavor = XIAOK_BUILD_F
     const officialHost = endpoint.protocol === 'https:'
         && normalizedHostname === 'api.kimi.com'
         && effectivePort === '443';
-    const strictModel = identity.wireModel.toLowerCase() === 'k3'
-        || identity.wireModel.toLowerCase() === 'k3-256k';
+    const strictModel = isKimiCodingModel(identity.wireModel.toLowerCase());
     if (officialHost && strictModel) {
         throw new Error('KIMI_K3_DISABLED_IN_ROLLBACK_BUILD');
     }
