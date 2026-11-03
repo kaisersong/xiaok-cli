@@ -64,6 +64,16 @@ interface SessionSkillCatalogState {
   platform: PlatformRuntimeContext;
 }
 
+/**
+ * Exit codes of `yzjchannel serve` once a shutdown signal arrives (#150):
+ * - graceful: shutdown finished (agents stopped, memory store closed with its pending writes landed);
+ * - shutdownTimeout: shutdown did not finish within YZJ_SHUTDOWN_FORCE_EXIT_MS, forced exit;
+ * - SIGINT / SIGTERM: a second signal during shutdown, immediate exit (128 + signal number).
+ */
+export const YZJ_SERVE_EXIT_CODES = { graceful: 0, shutdownTimeout: 124, SIGINT: 130, SIGTERM: 143 } as const;
+/** Upper bound for the whole shutdown after the first signal; matches the memory close deadline. */
+export const YZJ_SHUTDOWN_FORCE_EXIT_MS = 15_000;
+
 export function shouldStartYZJWebSocket(
   yzjConfig: Pick<YZJChannelConfig, 'inboundMode'>,
   options: Pick<YZJServeOptions, 'dryRun'>,
@@ -164,6 +174,8 @@ export function registerYZJCommands(program: Command): void {
       ...options,
       webhookUrl: options.webhookUrl ?? webhookUrl,
     });
+    // Shutdown has finished; exit now so a leftover handle cannot keep the process alive.
+    process.exit(YZJ_SERVE_EXIT_CODES.graceful);
   });
 }
 
@@ -579,7 +591,16 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   });
 
   const shutdown = new AbortController();
-  const onSignal = () => {
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (shutdown.signal.aborted) {
+      // Second Ctrl+C / SIGTERM while shutting down: leave now, pending writes are abandoned.
+      process.exit(signal === 'SIGTERM' ? YZJ_SERVE_EXIT_CODES.SIGTERM : YZJ_SERVE_EXIT_CODES.SIGINT);
+    }
+    console.info(`[yzj] shutting down (${signal})`);
+    setTimeout(() => {
+      console.error(`[yzj] shutdown did not finish within ${YZJ_SHUTDOWN_FORCE_EXIT_MS}ms; exiting`);
+      process.exit(YZJ_SERVE_EXIT_CODES.shutdownTimeout);
+    }, YZJ_SHUTDOWN_FORCE_EXIT_MS).unref();
     shutdown.abort();
   };
   process.on('SIGINT', onSignal);
@@ -635,6 +656,15 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     websocketClient.start();
   }
 
+  // Test-only probe (#150 shutdown test): in dry-run, put one raw write in flight the way the
+  // agent's fire-and-forget writeRawMessage does, so a real-signal child test can check it lands.
+  const probeWrite = options.dryRun ? process.env.XIAOK_YZJ_DRY_RUN_PROBE_WRITE : undefined;
+  if (probeWrite) {
+    memoryStore.writeRawMessage?.('yzj-dry-run-probe', 'user', probeWrite).catch((error: unknown) => {
+      console.error(`[yzj][dry-run] probe write failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
   console.info(`[yzj] gateway started (mode=${yzjConfig.inboundMode}, webhook=${enableWebhook ? 'on' : 'off'})`);
 
   try {
@@ -653,6 +683,10 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
         });
       });
     }
+    // #150: writeRawMessage is fire-and-forget and waits for off-thread segmentation, so the
+    // last message can still be in flight; close() lets it land before memory.db closes.
+    // Signal handlers stay installed until then so a second signal still exits at once.
+    await memoryStore.close?.();
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
   }
