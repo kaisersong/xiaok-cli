@@ -1,4 +1,4 @@
-import { isKimiCodingModel } from './kimi-models.js';
+import { isKimiCodingRuntimeModel } from './kimi-models.js';
 import type { Config, LegacyConfig, ConfigInput, ConfigV2Input } from '../../types.js';
 import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
@@ -82,11 +82,11 @@ function buildFirstPartyConfig(
   const protocol = overrides.protocol ?? profile.protocol;
   const baseUrl = overrides.baseUrl ?? profile.baseUrl;
   const kimiK3RuntimeEligible = providerId === 'kimi'
-    && isKimiCodingModel(wireModel)
+    && isKimiCodingRuntimeModel(wireModel)
     && protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(baseUrl);
   const catalogRuntimeEligible = providerId !== 'kimi'
-    || !isKimiCodingModel(catalogVariant?.model)
+    || !isKimiCodingRuntimeModel(catalogVariant?.model)
     || kimiK3RuntimeEligible;
   const { runtimeOptions } = resolveModelRuntimeOptions({
     protocol,
@@ -159,8 +159,7 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
   const detectedProvider = detectKnownProvider(customBaseUrl);
   if (detectedProvider) {
     const legacyModel = config.models.custom?.model
-      // 迁移时不要把用户悄悄换代。原先 pin 的裸 `kimi-k2.7` 在官方任何 endpoint
-      // 都不存在，`kimi-for-coding` 才是官方在售的 Kimi K2.7 Code。
+      // 保留官方稳定别名；kimi-for-coding 由厂商原位升级至 K2.8 Preview。
       ?? (detectedProvider === 'kimi' ? 'kimi-for-coding' : undefined);
     const known = buildFirstPartyConfig(detectedProvider, {
       apiKey: config.models.custom?.apiKey,

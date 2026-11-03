@@ -81,7 +81,9 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       { ...createKimiK3Variant('kimi-k3.1-pro-highspeed', 'k3.1-pro-highspeed', 'Kimi K3.1 Pro Highspeed'), capabilities: ['tools', 'thinking', 'image_in'] },
       createKimiK3Variant('kimi-k3'),
       createKimiK3Variant('kimi-k3-256k', 'k3-256k', 'Kimi K3 256K'),
-      { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
+      // K2.8 Preview upgrades the existing wire in place (official model docs, 2026-11-03).
+      // https://www.kimi.com/code/docs/en/kimi-code/models.html
+      { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi K2.8 Preview', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { maxContextLimit: 1_048_576, reasoningEfforts: ['low', 'high', 'max'] } },
       // k2.6 / k2.5 只在开放平台 endpoint 上有效；k2.5 官方公告 8/31 下线。
       // 262,144 来自官方定价页给出的精确整数（非按 "256k" 推断）。
       { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
