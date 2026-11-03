@@ -1,3 +1,4 @@
+import { ROOM_HISTORY_PAGE_TOOL_NAME } from './room-history-page-tool.js';
 import { captureToolDescriptionMetadata, type ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
 import { isAbsolute, resolve, relative } from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
@@ -82,7 +83,7 @@ export const ROOM_UNSUPPORTED_FILE_CAPABILITIES = ['bash', 'grep', 'native codin
 export function roomUnsupportedCapabilities(context?:{localCommandsAllowed?:boolean}):readonly string[] {
     return context?.localCommandsAllowed&&process.platform!=='win32'?ROOM_UNSUPPORTED_FILE_CAPABILITIES.filter(name=>name!=='bash'):ROOM_UNSUPPORTED_FILE_CAPABILITIES;
 }
-const discussionNames = new Set(['web_search', 'web_fetch', 'tool_search', 'get_room_messages_page']);
+const discussionNames = new Set(['web_search', 'web_fetch', 'tool_search', ROOM_HISTORY_PAGE_TOOL_NAME]);
 const workspaceNames = new Set([...discussionNames, 'read', 'write', 'edit', 'read_workspace_material', 'glob', 'skill', 'skillFetchAssets', 'scheduled_task_create', 'scheduled_task_list', 'scheduled_task_cancel', 'skill_bundle_refs', 'report_progress', ...MULTI_AGENT_TOOL_NAMES]);
 /** Every additional runner registration passes the same allowlist. Private
  * notebook, global project mutation, shell and external plugin paths cannot

@@ -21,6 +21,15 @@ export interface CreateIntentPlanInput {
         deliverable: string;
     }) => number;
 }
+export interface ActiveIntentPlanningData {
+    intentId: string;
+    deliverable: string;
+    intentType?: unknown;
+    templateId?: unknown;
+}
+export interface CreateIntentPlanDataInput extends Omit<CreateIntentPlanInput, 'activeIntent'> {
+    activeIntent?: ActiveIntentPlanningData;
+}
 export type IntentPlannerResult = {
     kind: 'plan';
     plan: IntentPlanDraft;
@@ -29,3 +38,4 @@ export type IntentPlannerResult = {
     reason: 'control_command' | 'non_substantial';
 };
 export declare function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerResult;
+export declare function createIntentPlan(input: CreateIntentPlanDataInput): IntentPlannerResult;

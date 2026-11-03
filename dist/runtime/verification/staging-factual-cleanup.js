@@ -1,8 +1,11 @@
+import { persistInstalledMaintenanceRequest } from './installed-maintenance-handoff.js';
 import { readMaintenanceExecution } from './maintenance-execution.js';
 import { createHash } from 'node:crypto';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { assertControllerMaterialPipelineDatabase } from './material-pipeline.js';
 import { assertDockerRunnerDatabase } from '../isolated-execution/docker-runner.js';
+const stagingHandoffCommands = new WeakMap();
+export function inspectStagingCleanupHandoffCommand(command) { return stagingHandoffCommands.get(command); }
 function sync(value) { if (value !== undefined) {
     void Promise.resolve(value).catch(() => { });
     throw Error('staging_cleanup_sync');
@@ -27,6 +30,22 @@ export function createStagingFactualCleanup(input) {
     let busy = false, window;
     function current() { sync(currentPort()); assertControllerMaterialPipelineDatabase(materials, db); assertDockerRunnerDatabase(raw, db); if (db.inTransaction)
         throw Error('staging_cleanup_outer_transaction'); }
+    function handoff(resourceId, action) {
+        const row = db.prepare('SELECT record_json,state FROM broker_staging_intents WHERE resource_id=?').get(resourceId);
+        if (!row)
+            throw Error('staging_cleanup_resource');
+        const record = JSON.parse(row.record_json);
+        if (action === 'ack' && (row.state !== 'deleted' || db.prepare('SELECT state FROM verification_blob_reservations WHERE resource_id=?').get(resourceId)?.state !== 'released'))
+            throw Error('staging_cleanup_handoff_incomplete');
+        const command = Object.freeze({}), facts = { source: materials, database: db, kind: 'material', resourceId, expected: null, allocations: [record.allocation], action, ...(action === 'ack' ? { evidence: json(row) } : {}) };
+        stagingHandoffCommands.set(command, facts);
+        try {
+            persistInstalledMaintenanceRequest(command);
+        }
+        finally {
+            stagingHandoffCommands.delete(command);
+        }
+    }
     function scope(resourceId) { const row = db.prepare('SELECT scope_digest,record_json,state FROM broker_staging_intents WHERE resource_id=?').get(resourceId); if (!row || !['prepared', 'ready', 'published', 'deleting', 'deleted'].includes(row.state))
         throw Error('staging_cleanup_resource'); const r = JSON.parse(row.record_json); if (r.allocation?.resourceId !== resourceId || r.directory !== resourceId || r.manifest?.scopeDigest !== row.scope_digest || r.allocation?.scopeDigest !== row.scope_digest)
         throw Error('staging_cleanup_resource'); return row.scope_digest; }
@@ -85,8 +104,10 @@ export function createStagingFactualCleanup(input) {
             signal?.throwIfAborted();
             window = { resourceId, scopeDigest, inventoryHash: before.hash, receipts };
             assertCleanup(resourceId);
+            handoff(resourceId, 'request');
             deletionStarted = true;
             remove(resourceId);
+            handoff(resourceId, 'ack');
         }
         finally {
             window = undefined;

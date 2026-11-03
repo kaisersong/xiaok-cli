@@ -1,7 +1,15 @@
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
 import type { SessionStore } from '../../ai/runtime/session-store/store.js';
+import type { StoredIntentRecordInput } from './stored-intent-clone.js';
 import type { IntentLedgerRecord } from './types.js';
 import { type SessionSkillEvalState, type SkillFeedbackRecord, type SkillRoutingObservation } from './skill-eval.js';
+type StoredSkillInvocationData = {
+    intentId: string;
+    stepId: string;
+    skillName: string;
+    intent?: StoredIntentRecordInput;
+    now?: number;
+};
 export declare class SessionSkillEvalStore {
     private readonly sessionStore;
     private readonly scope;
@@ -15,6 +23,7 @@ export declare class SessionSkillEvalStore {
     assertMutationCurrent(sessionId: string): void;
     load(sessionId: string): Promise<SessionSkillEvalState | null>;
     ensureObservationsForIntent(sessionId: string, intent: IntentLedgerRecord): Promise<SessionSkillEvalState>;
+    ensureObservationsForIntent(sessionId: string, intent: StoredIntentRecordInput): Promise<SessionSkillEvalState>;
     recordSkillInvocation(sessionId: string, input: {
         intentId: string;
         stepId: string;
@@ -22,6 +31,7 @@ export declare class SessionSkillEvalStore {
         intent?: IntentLedgerRecord;
         now?: number;
     }): Promise<SessionSkillEvalState>;
+    recordSkillInvocation(sessionId: string, input: StoredSkillInvocationData): Promise<SessionSkillEvalState>;
     updateObservationStatus(sessionId: string, input: {
         intentId: string;
         stepId: string;
@@ -41,3 +51,5 @@ export declare class SessionSkillEvalStore {
     private requireSnapshot;
 }
 export declare function ensureObservationsForIntentState(state: SessionSkillEvalState, intent: IntentLedgerRecord, now?: number): SessionSkillEvalState;
+export declare function ensureObservationsForIntentState(state: SessionSkillEvalState, intent: StoredIntentRecordInput, now?: number): SessionSkillEvalState;
+export {};

@@ -5,7 +5,7 @@ import { captureIntentData, hasProtectedIntentProducerHistory } from './intent-c
 import { canonicalVerificationJson as json } from '../verification/protocol.js';
 import { applyIntentStepUpdate } from './dispatcher.js';
 import { assertSessionWriteOwnership } from './ownership.js';
-import { parseIntentProducerAction } from './producer-report.js';
+import { parseIntentProducerAction, parseIntentProducerReport } from './producer-report.js';
 const id = (v) => typeof v === 'string' && v.length > 0 && Buffer.byteLength(v) <= 160 && !/[\x00-\x1f\x7f]/.test(v);
 function shape(v, keys) { if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).sort().join(',') !== keys.split(' ').sort().join(','))
     throw Error('intent_producer_shape'); }
@@ -39,8 +39,29 @@ export function intentProducerRouteVector(ledger) {
 }
 export function assertIntentProducerRoutesCurrent(ledger, original) { if (intentProducerRouteVector(ledger) !== original)
     throw Error('intent_producer_route_changed'); }
-/** Called only by actual SessionStore primitive under its original lease/save lock.
- * These are model reports, never proof of a producer side effect or current business. */
+function isProducerReportObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function producerReportObject(value) {
+    if (!isProducerReportObject(value))
+        throw Error('intent_producer_report_data');
+    return value;
+}
+function assertProducerReportsData(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_producer_report_data');
+    const reports = value;
+    for (const report of reports) {
+        parseIntentProducerReport(report);
+        const data = producerReportObject(report);
+        producerReportObject(producerReportObject(data.action).origin);
+    }
+}
+function producerStages(value) {
+    if (!Array.isArray(value))
+        throw Error('intent_producer_stage_data');
+    return value;
+}
 export function applyIntentProducerAction(previous, input, originalRoutes) {
     let protectedMode = JSON.parse(originalRoutes).some(v => v.route.kind !== 'ordinary');
     const next = captureIntentData(previous), ledger = next.intentDelegation;
@@ -51,7 +72,9 @@ export function applyIntentProducerAction(previous, input, originalRoutes) {
         throw Error('intent_producer_intent');
     protectedMode ||= hasProtectedIntentProducerHistory(ledger);
     assertSessionWriteOwnership(ledger, input.instanceId, 'record intent producer report');
-    const reports = record.producerReports ?? [], a = input.action, prior = reports.find(r => r.action.origin.providerInvocationId === a.origin.providerInvocationId && r.action.origin.toolInvocationId === a.origin.toolInvocationId);
+    const reports = record.producerReports ?? [];
+    assertProducerReportsData(reports);
+    const a = input.action, prior = reports.find(r => r.action.origin.providerInvocationId === a.origin.providerInvocationId && r.action.origin.toolInvocationId === a.origin.toolInvocationId);
     if (prior) {
         if (!isDeepStrictEqual(prior.action, a) || prior.now !== input.now || prior.requestSource !== input.requestSource)
             throw Error('intent_producer_replay_conflict');
@@ -61,18 +84,18 @@ export function applyIntentProducerAction(previous, input, originalRoutes) {
         throw Error('intent_producer_stale');
     if (input.now < record.updatedAt || ['completed', 'cancelled', 'failed', 'publication_pending'].includes(record.overallStatus))
         throw Error('intent_producer_terminal');
-    const stage = record.stages.find(s => s.stageId === record.activeStageId);
+    const stage = producerStages(record.stages).find(s => s.stageId === record.activeStageId);
     if (!stage)
         throw Error('intent_producer_stage');
     let updated = record, artifactId = null;
     if (a.kind === 'step-report') {
         updated = applyIntentStepUpdate(record, { stepId: a.stepId, status: a.status, now: input.now });
         if (protectedMode && a.status === 'failed') {
-            updated.stages.find(s => s.stageId === stage.stageId).status = 'waiting_user';
+            producerStages(updated.stages).find(s => s.stageId === stage.stageId).status = 'waiting_user';
             updated.overallStatus = 'waiting_user';
         }
-        if (protectedMode && a.status === 'completed' && (updated.stages.find(s => s.stageId === stage.stageId)?.status === 'completed' || updated.activeStageId !== stage.stageId || updated.overallStatus === 'completed')) {
-            const ended = updated.stages.find(s => s.stageId === stage.stageId);
+        if (protectedMode && a.status === 'completed' && (producerStages(updated.stages).find(s => s.stageId === stage.stageId)?.status === 'completed' || updated.activeStageId !== stage.stageId || updated.overallStatus === 'completed')) {
+            const ended = producerStages(updated.stages).find(s => s.stageId === stage.stageId);
             ended.status = 'publication_pending';
             ended.structuralValidation = stage.structuralValidation;
             ended.semanticValidation = stage.semanticValidation;
@@ -81,7 +104,7 @@ export function applyIntentProducerAction(previous, input, originalRoutes) {
             updated.steps = ended.steps;
             updated.overallStatus = 'publication_pending';
             // The ordinary reducer's next-stage projection is not an execution fact.
-            updated.stages = updated.stages.map(s => s.stageId === stage.stageId ? s : record.stages.find(old => old.stageId === s.stageId));
+            updated.stages = producerStages(updated.stages).map(s => s.stageId === stage.stageId ? s : producerStages(record.stages).find(old => old.stageId === s.stageId));
         }
         updated.latestBreadcrumb = a.breadcrumb;
         if (a.blockedReason !== null)

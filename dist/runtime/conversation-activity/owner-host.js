@@ -32,6 +32,28 @@ export class ConversationActivityOwnerHost {
     clients = new Set();
     pending = 0;
     stopped = false;
+    closing = false;
+    sealed;
+    stopping;
+    requestWork = new Set();
+    disconnectWork = new Map();
+    shutdownErrors = [];
+    /** Seal admission now; own actual accepted request/socket callback completion. */
+    sealAndDrain() {
+        if (this.sealed)
+            return this.sealed;
+        this.closing = true;
+        const work = [...this.requestWork, ...this.disconnectWork.values()];
+        for (const client of this.clients)
+            client.socket.destroy();
+        this.sealed = (async () => {
+            const outcomes = await Promise.allSettled(work);
+            const failures = [...this.shutdownErrors, ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+            if (failures.length)
+                throw new AggregateError([...new Set(failures)], 'activity_host_drain_failed');
+        })();
+        return this.sealed;
+    }
     actor;
     now;
     lastActivity;
@@ -42,7 +64,7 @@ export class ConversationActivityOwnerHost {
     idleMs;
     unattendedMs;
     checkIdle() {
-        if (this.stopped || this.idleEmitted || !this.options.idle || this.options.ready?.() === false)
+        if (this.stopped || this.closing || this.idleEmitted || !this.options.idle || this.options.ready?.() === false)
             return;
         const now = this.now();
         const watches = this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) }));
@@ -103,7 +125,7 @@ export class ConversationActivityOwnerHost {
             }
             const credentials = createActivityOwnerCredentials(this.address);
             this.server = createServer(socket => {
-                if (this.clients.size >= 64) {
+                if (this.closing || this.clients.size >= 64) {
                     socket.destroy();
                     return;
                 }
@@ -150,12 +172,54 @@ export class ConversationActivityOwnerHost {
                             void this.request(client, message);
                     }
                 });
-                socket.on('close', () => { if (client.role) {
-                    this.lastActivity = this.now();
-                    if (![...this.clients].some(other => other !== client && other.active && other.role))
-                        this.unattendedSince = this.now();
-                } clearTimeout(handshake); client.active = false; this.clients.delete(client); for (const stop of client.subscriptions.values())
-                    stop(); client.subscriptions.clear(); void this.options.disconnected?.(client.id).catch(error => this.options.onError?.(error)); });
+                const disconnected = new Promise((resolve, reject) => socket.once('close', () => {
+                    if (client.role) {
+                        this.lastActivity = this.now();
+                        if (![...this.clients].some(other => other !== client && other.active && other.role))
+                            this.unattendedSince = this.now();
+                    }
+                    clearTimeout(handshake);
+                    client.active = false;
+                    this.clients.delete(client);
+                    const failures = [];
+                    for (const stop of client.subscriptions.values()) {
+                        try {
+                            stop();
+                        }
+                        catch (error) {
+                            failures.push(error);
+                        }
+                    }
+                    client.subscriptions.clear();
+                    let callback;
+                    try {
+                        callback = this.options.disconnected?.(client.id);
+                    }
+                    catch (error) {
+                        failures.push(error);
+                    }
+                    const finish = () => {
+                        if (failures.length)
+                            reject(new AggregateError(failures, 'activity_client_disconnect_failed'));
+                        else
+                            resolve();
+                    };
+                    void Promise.resolve(callback).then(finish, error => {
+                        failures.push(error);
+                        try {
+                            this.options.onError?.(error);
+                        }
+                        catch (observedError) {
+                            failures.push(observedError);
+                        }
+                        finish();
+                    });
+                }));
+                this.disconnectWork.set(socket, disconnected);
+                void disconnected.then(() => { this.disconnectWork.delete(socket); }, error => {
+                    this.disconnectWork.delete(socket);
+                    this.shutdownErrors.push(error);
+                });
                 socket.on('error', () => socket.destroy());
             });
             await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.address.socketPath, () => { this.server.off('error', reject); resolve(); }); });
@@ -185,7 +249,27 @@ export class ConversationActivityOwnerHost {
         }
         client.socket.write(encoded);
     }
-    async request(client, raw) {
+    request(client, raw) {
+        // Register ownership BEFORE invoking a body whose synchronous prefix may
+        // reenter stop(). This reservation settles only from the real raw Promise.
+        let completed, failed;
+        const reservation = new Promise((resolve, reject) => { completed = resolve; failed = reject; });
+        this.requestWork.add(reservation);
+        void reservation.then(() => { this.requestWork.delete(reservation); }, error => {
+            this.requestWork.delete(reservation);
+            this.shutdownErrors.push(error);
+        });
+        try {
+            const rawWork = this.performRequest(client, raw);
+            void rawWork.then(completed, failed);
+            return rawWork;
+        }
+        catch (error) {
+            failed(error);
+            return reservation;
+        }
+    }
+    async performRequest(client, raw) {
         if (!client.active || this.stopped)
             return;
         const parsed = z.object({ type: z.literal('request'), id: key, method: key, params: z.record(z.string(), z.unknown()) }).strict().safeParse(raw);
@@ -194,6 +278,10 @@ export class ConversationActivityOwnerHost {
             return;
         }
         const { id, method, params } = parsed.data;
+        if (this.closing) {
+            this.send(client, { type: 'error', id, code: 'activity_owner_closing' });
+            return;
+        }
         client.pending++;
         this.pending++;
         this.lastActivity = this.now();
@@ -370,17 +458,16 @@ export class ConversationActivityOwnerHost {
             default: throw new Error('activity_method_forbidden');
         }
     }
-    async stop() {
-        if (this.stopped)
-            return;
-        this.stopped = true;
-        if (this.idleTimer)
-            (this.options.clearInterval ?? clearInterval)(this.idleTimer);
-        this.service.dispose();
-        for (const client of this.clients)
-            client.socket.destroy();
-        if (this.server)
-            await new Promise(resolve => this.server.close(() => resolve()));
-        this.store.close();
+    stop() {
+        return this.stopping ??= (async () => {
+            await this.sealAndDrain();
+            await this.service.close();
+            this.stopped = true;
+            if (this.idleTimer)
+                (this.options.clearInterval ?? clearInterval)(this.idleTimer);
+            if (this.server)
+                await new Promise(resolve => this.server.close(() => resolve()));
+            this.store.close();
+        })();
     }
 }

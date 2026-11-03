@@ -1,3 +1,4 @@
+import { createKnownDirectoryWriterFence } from '../verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../verification/ordinary-source-writer-observation.js';
 import { assertCapturedJsonUniqueKeys } from '../verification/captured-source-json.js';
 import { createCapturedTaskDeclarationAccumulator } from './captured-task-declarations.js';
@@ -25,6 +26,7 @@ const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
  * Terminal transitions materialize the complete historical TaskSnapshot so
  * older readers keep seeing completed tasks without understanding journals.
  */
+const knownTaskWriters = new WeakMap();
 export class FileTaskSnapshotStore {
     rootDir;
     diagnostics;
@@ -39,6 +41,7 @@ export class FileTaskSnapshotStore {
         this.rootDir = rootDir;
         this.diagnostics = diagnostics;
         this.observations = new DesktopTaskObservationStore(rootDir);
+        knownTaskWriters.set(this, { fence: createKnownDirectoryWriterFence(rootDir, 'task-root') });
     }
     async save(snapshot, expectedPrevious) {
         const original = JSON.parse(JSON.stringify(snapshot));
@@ -49,6 +52,31 @@ export class FileTaskSnapshotStore {
     async closeAndDrain() {
         this.writerClosed = true;
         await this.writerQueue;
+    }
+    /** User-only cooperative fence; it grants no all-writer or migration authority. */
+    fenceKnownWriter(requestSource) {
+        const owner = knownTaskWriters.get(this);
+        if (!owner || arguments.length !== 1)
+            return Promise.reject(Error('known_writer_fence_owner'));
+        if (requestSource !== 'user')
+            return Promise.reject(Error('known_writer_fence_request_source'));
+        if (!['darwin', 'linux'].includes(process.platform))
+            return Promise.reject(Error('known_writer_fence_platform'));
+        if (owner.pending)
+            return owner.pending;
+        this.writerClosed = true;
+        const accepted = this.writerQueue;
+        const work = Promise.resolve().then(async () => { await accepted; const release = acquireSaveLock(join(this.rootDir, '.task-store.save.lock')); try {
+            owner.fence.persist();
+        }
+        finally {
+            release();
+        } });
+        owner.pending = work;
+        void work.then(() => { if (owner.pending === work)
+            owner.pending = undefined; }, () => { if (owner.pending === work)
+            owner.pending = undefined; });
+        return work;
     }
     enqueueWrite(taskId, action) {
         if (this.writerClosed)
@@ -76,6 +104,7 @@ export class FileTaskSnapshotStore {
             try {
                 try {
                     assertCurrent();
+                    knownTaskWriters.get(this).fence.assertOpen();
                     observeOrdinaryDirectoryWriter(resolved, 'task-root');
                     assertOrdinarySourceWriterRoute();
                     assertCurrent();

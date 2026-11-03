@@ -1,7 +1,9 @@
+import { canonicalVerificationJson as canonicalJson } from './protocol.js';
 import { decodeOrdinaryProfileSourceStorage, serializeOrdinaryProfileSourceStorage } from './ordinary-profile-source-storage-codec.js';
 import { createHash } from 'node:crypto';
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
+import { resolveProfileAccountHome } from './profile-account-home.js';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { acquireSaveLock } from '../../ai/runtime/session-store/mutation-lock.js';
 import { writeFileAtomicallySync, syncDirectoryTreeStrict } from '../../utils/atomic-file.js';
@@ -43,7 +45,7 @@ function location(create) {
     const account = userInfo();
     if (!Number.isSafeInteger(account.uid) || account.uid < 0)
         fail('account');
-    const home = directory(account.homedir), base = join(home.canonicalPath, '.xiaok'), root = join(base, 'profile-sources');
+    const selected = resolveProfileAccountHome(), home = directory(selected.home), base = selected.base, root = join(base, 'profile-sources');
     if (create) {
         for (const path of [base, root]) {
             try {
@@ -66,7 +68,7 @@ function location(create) {
             throw error;
         }
     }
-    const original = directory(root), assertCurrent = () => { if (JSON.stringify(directory(root)) !== JSON.stringify(original) || JSON.stringify(directory(account.homedir)) !== JSON.stringify(home))
+    const original = directory(root), assertCurrent = () => { if (JSON.stringify(directory(root)) !== JSON.stringify(original) || JSON.stringify(resolveProfileAccountHome()) !== JSON.stringify(selected) || JSON.stringify(directory(selected.home)) !== JSON.stringify(home))
         fail('identity'); };
     return { uid: account.uid, root, path: join(root, 'registry.json'), assertCurrent };
 }
@@ -95,6 +97,22 @@ function source(input) {
     const namespaceId = digest([dir.canonicalPath, input.kind, database?.basename ?? null]);
     const sourceId = digest([input.kind, dir.device, dir.inode, database ?? null]);
     return Object.freeze({ sourceId, namespaceId, kind: input.kind, directory: dir, snapshotFormat, ...(database ? { database } : {}) });
+}
+/** Missing paths and changed physical identities are stale; IO failures are not. */
+export function isStaleOrdinaryProfileSource(row, statFn = path => lstatSync(path, { bigint: true })) {
+    function changed(path, recorded) {
+        let stat;
+        try {
+            stat = statFn(path);
+        }
+        catch (error) {
+            if (['ENOENT', 'ENOTDIR'].includes(error.code ?? ''))
+                return true;
+            throw error;
+        }
+        return !stat || String(stat.dev) !== recorded.device || String(stat.ino) !== recorded.inode;
+    }
+    return changed(row.directory.canonicalPath, row.directory) || !!row.database && changed(join(row.directory.canonicalPath, row.database.basename), row.database);
 }
 function isDeviceRenumbering(prior, observed) {
     if (prior.namespaceId !== observed.namespaceId || prior.kind !== observed.kind || prior.snapshotFormat !== observed.snapshotFormat || prior.directory.canonicalPath !== observed.directory.canonicalPath || prior.directory.inode !== observed.directory.inode || prior.directory.device === observed.directory.device)
@@ -232,28 +250,38 @@ function registerSource(input, layout, expectedPhysicalIdentity) {
         loc.assertCurrent();
         if (readInstalledCurrentProfile().kind !== 'ordinary')
             fail('route');
-        const original = read(loc.path, loc.uid), priorByNamespace = original?.sources.find(row => row.namespaceId === observed.namespaceId), priorBySource = original?.sources.find(row => row.sourceId === observed.sourceId);
+        const original = read(loc.path, loc.uid);
+        let sources = [...(original?.sources ?? [])];
+        const priorByNamespace = sources.find(row => row.namespaceId === observed.namespaceId);
+        let priorBySource = sources.find(row => row.sourceId === observed.sourceId);
+        const removed = [];
+        if (priorBySource && priorBySource !== priorByNamespace && isStaleOrdinaryProfileSource(priorBySource)) {
+            removed.push(priorBySource);
+            sources = sources.filter(row => row !== priorBySource);
+            priorBySource = undefined;
+        }
         if (priorByNamespace && priorBySource && priorByNamespace !== priorBySource)
             fail('identity');
         const prior = priorByNamespace ?? priorBySource;
         let rebound = false;
         if (prior) {
             const { componentHistory: _, ...identity } = prior;
-            if (JSON.stringify(identity) !== JSON.stringify(observed)) {
-                if (prior !== priorByNamespace || !isDeviceRenumbering(prior, observed))
+            if (canonicalJson(identity) !== canonicalJson(observed)) {
+                if (prior !== priorByNamespace || !isDeviceRenumbering(prior, observed) && !isStaleOrdinaryProfileSource(prior))
                     fail('identity');
                 rebound = true;
             }
         }
-        let merged = prior ? (rebound ? (prior.componentHistory ? { ...observed, componentHistory: prior.componentHistory } : observed) : prior) : observed;
-        if (layout) {
-            const observations = [...(prior?.componentHistory?.observations ?? [])];
-            if (!observations.some(row => row.layoutHash === layout.layoutHash))
+        let merged = prior && !rebound ? prior : observed;
+        const histories = [...removed, ...(prior ? [prior] : [])].filter(row => row.kind === observed.kind && row.snapshotFormat === observed.snapshotFormat).flatMap(row => row.componentHistory ? [row.componentHistory] : []);
+        if (layout || (removed.length || rebound) && histories.length) {
+            const observations = histories.flatMap(row => row.observations).filter((row, index, all) => all.findIndex(item => item.layoutHash === row.layoutHash) === index);
+            if (layout && !observations.some(row => row.layoutHash === layout.layoutHash))
                 observations.push(layout);
             observations.sort((a, b) => a.layoutHash.localeCompare(b.layoutHash));
             merged = { ...observed, componentHistory: { historyUnknown: true, components: [...new Set(observations.flatMap(row => row.components))].sort(), observations } };
         }
-        if (prior && JSON.stringify(prior) === JSON.stringify(merged)) {
+        if (!removed.length && prior && canonicalJson(prior) === canonicalJson(merged)) {
             syncOrdinaryRegistryTree(loc.root);
             loc.assertCurrent();
             return;
@@ -261,7 +289,7 @@ function registerSource(input, layout, expectedPhysicalIdentity) {
         const generation = BigInt(original?.generation ?? '0') + 1n;
         if (generation > U64)
             fail('capacity');
-        const next = { version: layout ? 2 : (original?.version ?? 1), uid: loc.uid, generation: String(generation), legacyInventoryRequired: true, sources: prior ? original.sources.map(row => row === prior ? merged : row) : [...(original?.sources ?? []), merged] };
+        const next = { version: layout ? 2 : (original?.version ?? 1), uid: loc.uid, generation: String(generation), legacyInventoryRequired: true, sources: prior ? sources.map(row => row === prior ? merged : row) : [...sources, merged] };
         const validated = parseOrdinaryProfileSources(next, loc.uid);
         const bytes = serializeOrdinaryProfileSourceStorage(validated);
         if (Buffer.byteLength(bytes) > MAX_BYTES)

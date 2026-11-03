@@ -15,8 +15,6 @@ export declare function readSessionAliases(root: string): SessionAliasRow[];
 /** Original index schema, shared with captured bytes without filesystem reads. */
 export declare function parseSessionAliasRows(value: unknown): SessionAliasRow[];
 export declare function reserveSessionAliasBytes(root: string, requested?: boolean): number;
-/** Caller holds the shared FileSessionStore root mutation lock and actual target
- * execution lease. This low-level identity transaction does not issue grants. */
 export declare function registerSessionAliasLocked(root: string, input: SessionAliasBinding): Readonly<{
     markerPath: string;
     binding: Readonly<SessionAliasBinding>;

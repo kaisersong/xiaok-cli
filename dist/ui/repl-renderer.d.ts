@@ -6,6 +6,17 @@ export declare class ReplRenderer {
     private readonly controller;
     private readonly terminalRenderer;
     private scrollRegion;
+    private permissionScreen;
+    private permissionInvalidated;
+    private permissionNeedsScreen;
+    private onPermissionInvalidated;
+    private permissionCompletion;
+    private readonly invalidatePermissionScreen;
+    private releasePermissionScreen;
+    private readonly repaintPermissionScreen;
+    canApprovePermissionModal(): boolean;
+    pagePermissionModal(delta: number): void;
+    private finishPermissionScreen;
     private inputOverlayKind;
     constructor(stream?: NodeJS.WriteStream);
     private syncTerminalSize;
@@ -17,7 +28,7 @@ export declare class ReplRenderer {
     getState(): import("./surface-state.js").SurfaceState;
     renderInput(frame: ReplInputFrame, overlayKind?: 'generic' | 'question'): void;
     renderOverlayAtCursor(lines: string[]): void;
-    openPermissionModal(request: PermissionModalRequest): void;
+    openPermissionModal(request: PermissionModalRequest, onInvalidated?: () => void): () => void;
     handleKey(key: string): void;
     clearOverlay(): void;
     closeModal(): void;

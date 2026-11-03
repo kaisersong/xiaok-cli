@@ -1,4 +1,5 @@
 import {createNativeWorkflowReadPort,closeNativeWorkflowReadPort,assertNativeWorkflowReadPort,type NativeWorkflowReadPort} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
+import {resolvePackagedBrokerRuntime,brokerRuntimeMatchesHealth,type BrokerNodeRuntime} from './broker-node-runtime.js';
 import { buildSidecarEnv } from './sidecar-env.js';
 import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
@@ -437,6 +438,11 @@ export function resolveBackgroundNodeRuntime(options: {
     env.ELECTRON_RUN_AS_NODE = '1';
   }
   return { command, env };
+}
+
+export function resolveIntentBrokerNodeRuntime(env:NodeJS.ProcessEnv):{command:string;env:NodeJS.ProcessEnv;expected?:BrokerNodeRuntime['expected']} {
+  return resolvePackagedBrokerRuntime({isPackaged:Boolean(app?.isPackaged),resourcesPath:process.resourcesPath,env})
+    ?? resolveBackgroundNodeRuntime({env});
 }
 
 export function getKSwarmHealthServiceEntryPath(body: Record<string, unknown> | null): string | null {
@@ -883,7 +889,9 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
   async function brokerHealthCheck(): Promise<boolean> {
     const result = await fetchHealthJsonFromUrls(BROKER_HEALTH_URLS);
-    return result.ok;
+    if(!result.ok)return false;
+    const runtime=resolvePackagedBrokerRuntime({isPackaged:Boolean(app?.isPackaged),resourcesPath:process.resourcesPath,env:{}});
+    return !runtime||brokerRuntimeMatchesHealth(result.body,runtime);
   }
 
   /**
@@ -1092,8 +1100,17 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
   async function ensureBroker(): Promise<boolean> {
     if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
+    // Reachable old/external listeners are never killed to upgrade a runtime.
+    // Refuse adoption and leave an explicit degraded state instead of spawning
+    // a competing writer against an unqualified SQLite process.
+    const existingBroker = await fetchHealthJsonFromUrls(BROKER_HEALTH_URLS);
+    const requiredRuntime = resolvePackagedBrokerRuntime({isPackaged:Boolean(app?.isPackaged),resourcesPath:process.resourcesPath,env:{}});
+    if(existingBroker.ok && requiredRuntime && !brokerRuntimeMatchesHealth(existingBroker.body,requiredRuntime)){
+      logKSwarmServiceLine('broker','lifecycle','broker runtime upgrade required; preserving existing listener');
+      return false;
+    }
     // Check if broker is already running
-    if (await brokerHealthCheck()) {
+    if (existingBroker.ok) {
       // A stale token can belong to an external installation. Authentication
       // failure is not permission to kill the listener or take over its data.
       if (stopping) return false;
@@ -1146,7 +1163,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       desktopRoomToken,
       kswarmRoomToken,
     });
-    const nodeRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
+    const nodeRuntime = resolveIntentBrokerNodeRuntime(brokerEnv);
     console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
     logKSwarmServiceLine(
       'broker',
@@ -1695,7 +1712,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       mkdirSync(brokerLaunch.cwd, { recursive: true });
       const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(process.env), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
-      const brokerRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
+      const brokerRuntime = resolveIntentBrokerNodeRuntime(brokerEnv);
       const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(process.env), KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken } });
       const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
@@ -1703,7 +1720,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       return { kswarm: { url: `http://127.0.0.1:${KSWARM_PORT}`, mutationToken: desktopMutationToken,
         brokerUrl: `http://127.0.0.1:${BROKER_PORT}`, roomToken: desktopRoomToken }, managedSources: [
         { name: 'broker' as const, executable: brokerRuntime.command, entryPath: brokerLaunch.entryPath, args: brokerLaunch.nodeArgs,
-          cwd: brokerLaunch.cwd, env: strings(brokerRuntime.env), healthUrl: `http://127.0.0.1:${BROKER_PORT}/health`, expectedHealth: expected(brokerLaunch.entryPath) },
+          cwd: brokerLaunch.cwd, env: strings(brokerRuntime.env), healthUrl: `http://127.0.0.1:${BROKER_PORT}/health`, expectedHealth: {...expected(brokerLaunch.entryPath),...(brokerRuntime.expected ? {'service.runtime.node':brokerRuntime.expected.node,'service.runtime.sqlite':brokerRuntime.expected.sqlite,'service.runtime.executableSha256':brokerRuntime.expected.executableSha256,'service.runtime.execPath':brokerRuntime.command} : {})} },
         { name: 'kswarm' as const, executable: ksEnv.command, entryPath: serverPath, cwd: dirname(dirname(dirname(serverPath))),
           env: strings(ksEnv.env), healthUrl: `http://127.0.0.1:${KSWARM_PORT}/health`, expectedHealth: expected(serverPath) },
       ] };

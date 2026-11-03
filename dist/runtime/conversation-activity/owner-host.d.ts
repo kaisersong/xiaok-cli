@@ -17,6 +17,14 @@ export declare class ConversationActivityOwnerHost {
     private readonly clients;
     private pending;
     private stopped;
+    private closing;
+    private sealed?;
+    private stopping?;
+    private readonly requestWork;
+    private readonly disconnectWork;
+    private readonly shutdownErrors;
+    /** Seal admission now; own actual accepted request/socket callback completion. */
+    sealAndDrain(): Promise<void>;
     private readonly actor;
     private readonly now;
     private lastActivity;
@@ -53,6 +61,7 @@ export declare class ConversationActivityOwnerHost {
     start(): Promise<void>;
     private send;
     private request;
+    private performRequest;
     private dispatch;
     stop(): Promise<void>;
 }

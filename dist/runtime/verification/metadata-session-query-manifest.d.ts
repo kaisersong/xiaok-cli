@@ -1,4 +1,12 @@
 export declare const METADATA_SESSION_QUERIES: Readonly<{
+    readonly "groups:activity_runs": {
+        readonly table: "activity_runs";
+        readonly columns: readonly ["run_id", "group_id", "data_json", "logical_bytes"];
+    };
+    readonly "groups:activity_members": {
+        readonly table: "activity_members";
+        readonly columns: readonly ["run_id", "member_id", "group_id", "data_json", "logical_bytes"];
+    };
     readonly "groups:thread_bindings-v1-0": {
         readonly table: "thread_bindings";
         readonly columns: readonly ["thread_id", "profile_id", "workspace_id", "cwd", "active_group_id", "thread_revision"];

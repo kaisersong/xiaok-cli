@@ -1,3 +1,4 @@
+import { types as nodeTypes } from 'node:util';
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { basename, dirname, join, relative } from 'path';
 import { getBuiltinSkillRoots } from './defaults.js';
@@ -227,8 +228,29 @@ export function parseFrontmatter(raw) {
         strict: parseBoolean(fields.get('strict')) ?? false,
     };
 }
-function walkFiles(rootDir, maxDepth = 6) {
-    if (!existsSync(rootDir)) {
+function reportDiscoveryIssue(options, kind, path) {
+    options?.onDiscoveryIssue?.({ kind, path });
+}
+function discoveryPathExists(path, options, directory, kind) {
+    if (!options?.onDiscoveryIssue)
+        return existsSync(path);
+    try {
+        const info = statSync(path);
+        if (directory && !info.isDirectory()) {
+            reportDiscoveryIssue(options, kind, path);
+            return false;
+        }
+        return true;
+    }
+    catch (error) {
+        if (error && typeof error === 'object' && !nodeTypes.isProxy(error) && Object.getOwnPropertyDescriptor(error, 'code')?.value === 'ENOENT')
+            return false;
+        reportDiscoveryIssue(options, kind, path);
+        return false;
+    }
+}
+function walkFiles(rootDir, maxDepth = 6, options) {
+    if (!discoveryPathExists(rootDir, options, true, 'resource_discovery_unavailable')) {
         return [];
     }
     const files = [];
@@ -241,6 +263,7 @@ function walkFiles(rootDir, maxDepth = 6) {
             entries = readdirSync(currentDir, { withFileTypes: true });
         }
         catch {
+            reportDiscoveryIssue(options, 'resource_discovery_unavailable', currentDir);
             return;
         }
         for (const entry of entries) {
@@ -265,14 +288,14 @@ function toManifestEntry(rootDir, absolutePath, kind) {
         size: statSync(absolutePath).size,
     };
 }
-function collectSkillResources(skillRoot, folderName, kind) {
+function collectSkillResources(skillRoot, folderName, kind, options) {
     const folderPath = join(skillRoot, folderName);
-    return walkFiles(folderPath)
-        .filter((absolutePath) => existsSync(absolutePath))
+    return walkFiles(folderPath, 6, options)
+        .filter((absolutePath) => discoveryPathExists(absolutePath, options, false, 'resource_discovery_unavailable'))
         .map((absolutePath) => toManifestEntry(skillRoot, absolutePath, kind))
         .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
-function normalizeSkill(parsed, filePath, source, tier, aliases = []) {
+function normalizeSkill(parsed, filePath, source, tier, aliases = [], options) {
     const rootDir = dirname(filePath);
     const normalizedAliases = Array.from(new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias && alias !== parsed.name)));
     return {
@@ -298,9 +321,9 @@ function normalizeSkill(parsed, filePath, source, tier, aliases = []) {
             outputKinds: parsed.outputKinds,
             examples: parsed.examples,
         },
-        referencesManifest: collectSkillResources(rootDir, 'references', 'reference'),
-        scriptsManifest: collectSkillResources(rootDir, 'scripts', 'script'),
-        assetsManifest: collectSkillResources(rootDir, 'assets', 'asset'),
+        referencesManifest: collectSkillResources(rootDir, 'references', 'reference', options),
+        scriptsManifest: collectSkillResources(rootDir, 'scripts', 'script', options),
+        assetsManifest: collectSkillResources(rootDir, 'assets', 'asset', options),
         requiredReferences: parsed.requiredReferences,
         requiredScripts: parsed.requiredScripts,
         requiredSteps: parsed.requiredSteps,
@@ -308,8 +331,8 @@ function normalizeSkill(parsed, filePath, source, tier, aliases = []) {
         strict: parsed.strict,
     };
 }
-function loadSkillsFromDir(dir, source, tier) {
-    if (!existsSync(dir))
+function loadSkillsFromDir(dir, source, tier, options) {
+    if (!discoveryPathExists(dir, options, true, 'directory_unavailable'))
         return [];
     const results = [];
     let entries;
@@ -317,6 +340,7 @@ function loadSkillsFromDir(dir, source, tier) {
         entries = readdirSync(dir, { withFileTypes: true });
     }
     catch {
+        reportDiscoveryIssue(options, 'directory_unavailable', dir);
         return [];
     }
     const loadSkillFile = (filePath, displayName, aliases = []) => {
@@ -324,12 +348,14 @@ function loadSkillsFromDir(dir, source, tier) {
             const raw = readFileSync(filePath, 'utf-8');
             const parsed = parseFrontmatter(raw);
             if (!parsed) {
+                reportDiscoveryIssue(options, 'skill_parse_invalid', filePath);
                 console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${displayName}`);
                 return;
             }
-            results.push(normalizeSkill(parsed, filePath, source, tier, aliases));
+            results.push(normalizeSkill(parsed, filePath, source, tier, aliases, options));
         }
         catch {
+            reportDiscoveryIssue(options, 'skill_read_unavailable', filePath);
             console.warn(`[xiaok] Skills: 读取文件失败: ${displayName}`);
         }
     };
@@ -342,7 +368,7 @@ function loadSkillsFromDir(dir, source, tier) {
             continue;
         }
         const skillFilePath = join(dir, entry.name, 'SKILL.md');
-        if (existsSync(skillFilePath)) {
+        if (discoveryPathExists(skillFilePath, options, false, 'skill_read_unavailable')) {
             loadSkillFile(skillFilePath, `${entry.name}/SKILL.md`, [entry.name]);
         }
     }
@@ -360,9 +386,9 @@ export function resolveSkillRoots(xiaokConfigDir = getConfigDir(), cwd = process
 }
 export async function discoverSkills(xiaokConfigDir = getConfigDir(), cwd = process.cwd(), options) {
     const roots = resolveSkillRoots(xiaokConfigDir, cwd, options);
-    const builtinSkills = roots.builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system'));
-    const globalSkills = loadSkillsFromDir(roots.globalSkillsDir, 'global', 'user');
-    const projectSkills = loadSkillsFromDir(roots.projectSkillsDir, 'project', 'project');
+    const builtinSkills = roots.builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system', options));
+    const globalSkills = loadSkillsFromDir(roots.globalSkillsDir, 'global', 'user', options);
+    const projectSkills = loadSkillsFromDir(roots.projectSkillsDir, 'project', 'project', options);
     return [...builtinSkills, ...globalSkills, ...projectSkills];
 }
 export async function loadSkills(xiaokConfigDir = getConfigDir(), cwd = process.cwd(), options) {

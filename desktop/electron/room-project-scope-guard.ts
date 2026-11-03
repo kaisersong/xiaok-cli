@@ -13,15 +13,29 @@ const nonempty = (value: unknown): value is string => typeof value === 'string' 
 /** No permission cache: each agent operation checks both current authorities. */
 export function createRoomProjectScopeGuard<R extends RoomPort, W extends RoomWorkspaceBrokerPort>(options: {
   roomClient: R;
+  authorizationReadMode?: 'legacy' | 'projection';
+  authorizationContextReader?: (roomId: string, roomMessageId: string, signal: AbortSignal) => Promise<Result>;
   workspaceBroker: W;
   kswarmRequest(path: string, init?: RequestInit): Promise<{ ok: boolean; json(): Promise<unknown> }>;
 }) {
   async function authorize(roomId: unknown, roomMessageId: unknown, logicalAgentId: unknown, signal: AbortSignal) {
     if (!nonempty(roomId) || !nonempty(roomMessageId) || !nonempty(logicalAgentId)) throw new Error('room_project_identity_required');
-    const snapshot = await options.roomClient.getRoomSnapshot(roomId);
-    signal.throwIfAborted();
-    if (!snapshot.ok || !object(snapshot.room) || snapshot.room.roomId !== roomId) throw new Error('broker_unavailable');
-    const source = Array.isArray(snapshot.messages) ? snapshot.messages.find(message => object(message) && message.messageId === roomMessageId && message.roomId === roomId) : undefined;
+    let source: unknown;
+    if (options.authorizationReadMode === 'projection') {
+      if (!options.authorizationContextReader) throw new Error('broker_unavailable');
+      const context = await options.authorizationContextReader(roomId, roomMessageId, signal);
+      signal.throwIfAborted();
+      if (context.ok !== true) throw new Error(context.code === 'room_message_not_found' ? 'room_message_not_found' : 'broker_unavailable');
+      if (context.schema !== 'room-authorization-context/v1' || !object(context.room) || context.room.roomId !== roomId ||
+          !object(context.source) || context.source.roomId !== roomId || context.source.messageId !== roomMessageId ||
+          !Object.hasOwn(context.source, 'contextScope')) throw new Error('broker_unavailable');
+      source = context.source;
+    } else {
+      const snapshot = await options.roomClient.getRoomSnapshot(roomId);
+      signal.throwIfAborted();
+      if (!snapshot.ok || !object(snapshot.room) || snapshot.room.roomId !== roomId) throw new Error('broker_unavailable');
+      source = Array.isArray(snapshot.messages) ? snapshot.messages.find(message => object(message) && message.messageId === roomMessageId && message.roomId === roomId) : undefined;
+    }
     if (!object(source)) throw new Error('room_message_not_found');
     const scope = source.contextScope ?? { kind: 'room_only' };
     if (!object(scope)) throw new Error('room_scope_mismatch');

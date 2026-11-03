@@ -1,9 +1,9 @@
 import type { SessionExecutionLease } from '../../ai/runtime/session-store/execution-authority.js';
-import { type PersistedSessionSnapshot, type SessionStore } from '../../ai/runtime/session-store/store.js';
+import { type PersistedSessionSnapshot, type StoredSessionSnapshot, type SessionStore } from '../../ai/runtime/session-store/store.js';
 import { type ProductObservationPolicy } from './product-bootstrap.js';
 import { type VerifiedCapacityProfile } from './capacity-admission.js';
 import { type SemanticReservation } from './semantic-compaction-ledger.js';
-import { type SemanticSnapshotCandidate } from './semantic-snapshot.js';
+import { type SemanticSnapshotCandidate, type StoredSemanticSnapshotCandidate } from './semantic-snapshot.js';
 export interface SemanticSummaryAttempt {
     readonly opaqueSemanticSummaryAttempt: never;
 }
@@ -13,7 +13,7 @@ interface Input {
     lease: SessionExecutionLease;
     logicalInvocationId?: string;
     sessionId: string;
-    sourceSnapshot: PersistedSessionSnapshot;
+    sourceSnapshot: Readonly<Pick<StoredSessionSnapshot, 'sessionId' | 'storeRevision' | 'messages'>>;
     operationId: string;
     destination: string;
     serializedBody: string;
@@ -29,9 +29,10 @@ export declare function resolveSemanticSummaryAttempt(attempt: SemanticSummaryAt
     maxOutputTokens: number;
 };
 /** Failure remains charged. This never rewrites conversation history or refunds money. */
-export declare function finishSemanticSummaryAttempt(attempt: SemanticSummaryAttempt, status: 'settled' | 'unknown'): Promise<PersistedSessionSnapshot>;
+export declare function finishSemanticSummaryAttempt(attempt: SemanticSummaryAttempt, status: 'settled' | 'unknown'): Promise<StoredSessionSnapshot>;
 /** Commit only a host-built strict candidate; budget was already persisted independently. */
-export declare function commitSemanticSummarySnapshot(attempt: SemanticSummaryAttempt, candidate: SemanticSnapshotCandidate): Promise<PersistedSessionSnapshot>;
+export declare function commitSemanticSummarySnapshot(attempt: SemanticSummaryAttempt, candidate: SemanticSnapshotCandidate): Promise<StoredSessionSnapshot>;
+export declare function commitSemanticSummarySnapshot(attempt: SemanticSummaryAttempt, candidate: StoredSemanticSnapshotCandidate): Promise<StoredSessionSnapshot>;
 /** Borrowing is confined to the original summary runner's dynamic extent. The
  * caller never receives a lease from a getter or a serialized reservation. */
 export interface SemanticSummaryProviderScope {
@@ -45,7 +46,7 @@ export declare function reserveActiveSemanticSummaryProviderScope(facts: {
     destination: string;
 }): SemanticSummaryProviderScope | undefined;
 export declare function inspectSemanticSummaryProviderLease(scope: SemanticSummaryProviderScope, visit: (lease: SessionExecutionLease) => void): void;
-export declare function matchesSemanticSummaryProviderReservation(scope: SemanticSummaryProviderScope, snapshot: PersistedSessionSnapshot, reservation: SemanticReservation, lease: SessionExecutionLease): boolean;
+export declare function matchesSemanticSummaryProviderReservation(scope: SemanticSummaryProviderScope, snapshot: Pick<PersistedSessionSnapshot, 'sessionId'>, reservation: SemanticReservation, lease: SessionExecutionLease): boolean;
 export declare function consumeSemanticSummaryProviderScope(scope: SemanticSummaryProviderScope): void;
 export declare function settleSemanticSummaryProviderScope(scope: SemanticSummaryProviderScope, state: 'drained' | 'unknown' | 'cancelled_before_send'): void;
 export {};

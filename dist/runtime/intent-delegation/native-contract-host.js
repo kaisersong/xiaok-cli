@@ -7,6 +7,37 @@ import { intentContractOriginalRegistration, intentOriginalRegistrationHash } fr
 import { captureIntentData } from './intent-commit-boundary.js';
 import { intentNativeLedgerHash, parseIntentNativeContracts } from './native-contract-journal.js';
 import { assertSessionWriteOwnership } from './ownership.js';
+function isNativePredictionObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function nativePredictionObject(value) {
+    if (!isNativePredictionObject(value))
+        throw Error('intent_native_prediction_data');
+    return value;
+}
+function assertNativePredictionData(value, sessionId) {
+    // Keep the original nullish read/!.find behavior; this proves no presence.
+    if (value === null || value === undefined)
+        return;
+    // Validate the actual complete public journal, discarding its frozen copy.
+    parseIntentNativeContracts(value, sessionId);
+    if (!Array.isArray(value))
+        throw Error('intent_native_prediction_data');
+    for (const raw of value) {
+        const row = nativePredictionObject(raw);
+        if (typeof row.revision !== 'number' || !Array.isArray(row.subjects))
+            throw Error('intent_native_prediction_data');
+        const subjects = row.subjects;
+        for (const rawSubject of subjects) {
+            const subject = nativePredictionObject(rawSubject);
+            if (!Array.isArray(subject.attempts))
+                throw Error('intent_native_prediction_data');
+            const attempts = subject.attempts;
+            for (const attempt of attempts)
+                nativePredictionObject(attempt);
+        }
+    }
+}
 const validId = (value) => typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= 160 && !/[\x00-\x1f\x7f]/.test(value);
 /** Actual product host only. Its journal records facts; it never grants execution. */
 export function createIntentNativeContractHost(options) {
@@ -127,7 +158,9 @@ export function createIntentNativeContractHost(options) {
             if (!subject)
                 throw Error('intent_native_subjects');
             const input = { sessionId, instanceId, intentId: row.intentId, stageId, expectedRevision: row.revision, expectedRequestId: subject.attempts.at(-1).requestId, phase, retirementReason, requestSource: source, now: timestamp };
-            const after = captureIntentData(before), predicted = after.nativeContracts.find(r => r.intentId === row.intentId);
+            const after = captureIntentData(before);
+            assertNativePredictionData(after.nativeContracts, sessionId);
+            const predicted = after.nativeContracts.find(r => r.intentId === row.intentId);
             predicted.revision++;
             predicted.updatedAt = timestamp;
             after.updatedAt = timestamp;
@@ -256,10 +289,14 @@ export function createIntentNativeContractHost(options) {
                                 if (intentNativeLedgerHash(actual) === intentNativeLedgerHash(expected))
                                     return;
                                 // Accept only the exact Store-generated reserved append, never another writer.
-                                const current = actual?.nativeContracts?.find(r => r.intentId === row.intentId)?.subjects.find(s => s.stageId === stageId)?.attempts.at(-1);
+                                const currentData = actual?.nativeContracts;
+                                assertNativePredictionData(currentData, sessionId);
+                                const current = currentData?.find(r => r.intentId === row.intentId)?.subjects.find(s => s.stageId === stageId)?.attempts.at(-1);
                                 if (!current || current.requestId === attempt.requestId)
                                     throw Error('intent_native_basis_changed');
-                                const after = captureIntentData(expected), record = after.nativeContracts.find(r => r.intentId === row.intentId);
+                                const after = captureIntentData(expected);
+                                assertNativePredictionData(after.nativeContracts, sessionId);
+                                const record = after.nativeContracts.find(r => r.intentId === row.intentId);
                                 record.revision++;
                                 record.updatedAt = timestamp;
                                 after.updatedAt = timestamp;

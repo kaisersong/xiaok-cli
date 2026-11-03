@@ -79,3 +79,39 @@ export function createCollaborationRoomBrokerClient(options: {
     }),
   };
 }
+
+/** Private main-process reader: single pinned origin, no permission cache. */
+export function createRoomAuthorizationContextReader(options: {
+  token: string; origin: string; fetchImpl?: typeof fetch;
+}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const origin = new URL(options.origin);
+  if (origin.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(origin.hostname) ||
+      origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('broker_origin_invalid');
+  const object = (value: unknown): value is Record<string, any> => !!value && typeof value === 'object' && !Array.isArray(value);
+  return async (roomId: string, roomMessageId: string, signal: AbortSignal): Promise<Record<string, any>> => {
+    const unavailable = { ok: false, code: 'broker_unavailable' };
+    const valid = (value: unknown) => object(value) && value.ok === true && object(value.room) && value.room.roomId === roomId &&
+      object(value.source) && value.source.roomId === roomId && value.source.messageId === roomMessageId && Object.hasOwn(value.source, 'contextScope');
+    try {
+      signal.throwIfAborted();
+      const request = (path: string) => fetchImpl(origin.origin + path, { method: 'GET', signal, redirect: 'error', headers: { [ROOM_TOKEN_HEADER]: options.token } });
+      const response = await request(`/rooms/${encodeURIComponent(roomId)}/authorization-context?roomMessageId=${encodeURIComponent(roomMessageId)}`);
+      const value: unknown = await response.json();
+      signal.throwIfAborted();
+      if (response.status === 404 && object(value) && Object.keys(value).length === 1 && value.error === 'not_found') {
+        const legacyResponse = await request(`/rooms/${encodeURIComponent(roomId)}`);
+        const legacy: unknown = await legacyResponse.json();
+        signal.throwIfAborted();
+        if (!legacyResponse.ok || !object(legacy) || legacy.ok !== true || !object(legacy.room) || legacy.room.roomId !== roomId || !Array.isArray(legacy.messages)) return unavailable;
+        const source = legacy.messages.find(message => object(message) && message.roomId === roomId && message.messageId === roomMessageId);
+        if (!object(source)) return { ok: false, code: 'room_message_not_found' };
+        return { ok: true, schema: 'room-authorization-context/v1', room: { roomId }, source: { roomId, messageId: roomMessageId, contextScope: source.contextScope ?? { kind: 'room_only' } }, readMode: 'legacy-read' };
+      }
+      if (!response.ok || !valid(value) || !object(value) || value.schema !== 'room-authorization-context/v1') {
+        return object(value) && value.ok === false && value.code === 'room_message_not_found' && response.status === 404 ? { ok: false, code: 'room_message_not_found' } : unavailable;
+      }
+      return { ok: true, schema: value.schema, room: { roomId }, source: { roomId, messageId: roomMessageId, contextScope: value.source.contextScope }, readMode: 'projection' };
+    } catch { return unavailable; }
+  };
+}
