@@ -1,3 +1,4 @@
+import { loadCurrentRecommendedModelIds } from '../lib/model-recommendations';
 import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, Trash2, Download, X, Loader2, SlidersHorizontal } from 'lucide-react'
@@ -442,6 +443,7 @@ function ModelsSection({
     setImporting(true)
     setErr('')
     try {
+      const recommendedIds = await loadCurrentRecommendedModelIds()
       const unconfigured = available.filter((am) => !am.configured)
       const byLowerId = new Map<string, AvailableModel>()
       for (const am of unconfigured) {
@@ -470,7 +472,7 @@ function ModelsSection({
       }
       const toEnable = created.filter(
         (pm) =>
-          pm.model.toLowerCase().includes('gpt-4o-mini') &&
+          recommendedIds.has(pm.model) &&
           !embeddingIds.has(pm.model.toLowerCase()),
       )
       if (toEnable.length > 0) {

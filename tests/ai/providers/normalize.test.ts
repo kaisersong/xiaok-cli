@@ -33,7 +33,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('preserves provider default metadata for a legacy non-Kimi explicit model', () => {
+  it('uses legacy model metadata rather than a newly recommended default', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'openai',
@@ -51,10 +51,10 @@ describe('normalizeConfig', () => {
     expect(entry).toMatchObject({
       provider: 'openai',
       model: 'o3',
-      label: 'GPT-4o',
-      capabilities: ['tools'],
+      label: 'o3',
+      capabilities: ['tools', 'thinking'],
     });
-    expect(entry).not.toHaveProperty('runtimeOptions');
+    expect(entry.runtimeOptions).toEqual({ contextLimit: 200_000 });
   });
 
   it('inherits deepseek legacy wire capabilities during v1 upgrade instead of the new default', () => {
