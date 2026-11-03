@@ -75,10 +75,31 @@ function hasPendingCreation(snapshot: TaskSnapshot | null, threadId: string): bo
   return proposal;
 }
 
-interface PreparedUserTaskFact {
-  schemaVersion: 1; requestSource: 'user'; profileId: string;
+interface PreparedUserTaskBase {
+  requestSource: 'user'; profileId: string;
   taskId: string; sessionId: string; threadId: string; promptSha256: string;
   permissionMode?: string;
+}
+type PreparedUserTaskFact = PreparedUserTaskBase & ({schemaVersion:1}|{
+  schemaVersion:2;workspaceId:string;canonicalUserTaskId:string;canonicalMessageId:string;
+  sourceGoalId:string;sourceGoalEpoch:number;sourceGoalTurnId:string;
+});
+export interface ProjectUserSourceIdentity {
+  schemaVersion:1;profileId:string;workspaceId:string;threadId:string;
+  canonicalUserTaskId:string;canonicalMessageId:string;promptSha256:string;permissionMode?:string;
+  sourceGoalId:string;sourceGoalEpoch:number;sourceGoalTurnId:string;
+}
+declare const sourceProofBrand:unique symbol;
+export type ProjectUserSourceProof={readonly [sourceProofBrand]:true};
+const sourceProofs=new WeakMap<object,{identity:Readonly<ProjectUserSourceIdentity>;assertCurrent:()=>void}>();
+/** Main-only source authenticity, never creation/follow-up/dispatch authority. */
+export function resolveProjectUserSourceProof(proof:ProjectUserSourceProof):Readonly<ProjectUserSourceIdentity>{
+  const source=sourceProofs.get(proof);if(!source)throw Error('conversation_user_source_unverified');
+  source.assertCurrent();return Object.freeze({...source.identity});
+}
+function canonicalUserIds(profileId:string,workspaceId:string,threadId:string,goalId:string,epoch:number,goalTurnId:string){
+  const key=createHash('sha256').update(JSON.stringify(['main-user-input-v1',profileId,workspaceId,threadId,goalId,epoch,goalTurnId])).digest('hex');
+  return {canonicalUserTaskId:'main-user-task:'+key,canonicalMessageId:'main-user-message:'+key};
 }
 const promptDigest = (prompt: string) => createHash('sha256').update(prompt).digest('hex');
 
@@ -90,12 +111,14 @@ export class ConversationProjectService {
   private roomClient?: ConversationProjectRoomClient;
   private readonly userFactDirectory: string;
   private readonly userFactProfileId: string;
+  private readonly userFactWorkspaceId:string;
   private readonly userFactDirectoryIdentity: {dev:number;ino:number};
   private userFactsSealed = false;
   private userFactWriteFailure?: { error: unknown };
 
   constructor(private readonly options: {
     dataRoot: string;
+    workspaceRoot?:string;
     kswarmService: Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
     readPreviousUserTask?: (threadId: string, taskId: string) => Promise<TaskSnapshot | null>;
     activityHooks?: {
@@ -107,6 +130,7 @@ export class ConversationProjectService {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     this.userFactDirectory = join(this.directory, 'user-inputs');
     this.userFactProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
+    this.userFactWorkspaceId=createHash('sha256').update(resolve(options.workspaceRoot??process.cwd())).digest('hex');
     mkdirSync(this.userFactDirectory, { recursive: true, mode: 0o700 });
     const directory = lstatSync(this.userFactDirectory);
     this.userFactDirectoryIdentity = {dev:directory.dev,ino:directory.ino};
@@ -131,15 +155,27 @@ export class ConversationProjectService {
     this.assertUserFactWriter();
     if (admitted.permissionMode !== undefined && !['auto','plan','default'].includes(admitted.permissionMode)) throw Error('conversation_user_fact_mode');
     if (snapshot.status !== 'understanding' || !text(snapshot.taskId) || !text(snapshot.sessionId)) throw Error('conversation_user_preparation_mismatch');
-    const fact: PreparedUserTaskFact = { schemaVersion: 1, requestSource: 'user', profileId: this.userFactProfileId,
+    const base:PreparedUserTaskBase={requestSource: 'user', profileId: this.userFactProfileId,
       taskId: snapshot.taskId, sessionId: snapshot.sessionId, threadId, promptSha256: promptDigest(snapshot.prompt),
       ...(admitted.permissionMode === undefined ? {} : {permissionMode: admitted.permissionMode}) };
+    const scope=snapshot.executionScope;
+    const identity=scope?.kind==='goal_turn'&&scope.origin==='user'&&scope.threadId===threadId
+      && text(scope.goalId)===scope.goalId&&text(scope.goalTurnId)===scope.goalTurnId&&!!scope.goalId&&!!scope.goalTurnId
+      && Number.isSafeInteger(scope.epoch)&&scope.epoch>=0
+      ? {workspaceId:this.userFactWorkspaceId,...canonicalUserIds(this.userFactProfileId,this.userFactWorkspaceId,threadId,scope.goalId,scope.epoch,scope.goalTurnId),
+        sourceGoalId:scope.goalId,sourceGoalEpoch:scope.epoch,sourceGoalTurnId:scope.goalTurnId}:undefined;
+    const fact:PreparedUserTaskFact=identity?{schemaVersion:2,...base,...identity}:{schemaVersion:1,...base};
     const previous = this.readUserTaskFact(snapshot.taskId);
+    // Reading an old record is not evidence of its missing workspace. Preserve
+    // legacy creation compatibility without silently upgrading source authority.
+    if(previous?.schemaVersion===1&&JSON.stringify(previous)===JSON.stringify({schemaVersion:1,...base}))return true;
     if (previous && JSON.stringify(previous) !== JSON.stringify(fact)) throw Error('conversation_user_preparation_conflict');
+    if(fact.schemaVersion===2){const source=this.sourceIdentity(fact);if(existsSync(this.canonicalSourcePath(source)))this.assertCanonicalUserSource(source);}
     try {
       // Reuse ordinary Main journal IO: fsync temp, atomic rename, directory sync
       // under the existing helper's platform policy. There is no async write tail.
       this.assertUserFactDirectory();
+      if(fact.schemaVersion===2)this.writeCanonicalUserSource(this.sourceIdentity(fact));
       writeFileAtomicallySync(this.userFactPath(snapshot.taskId), JSON.stringify(fact));
       this.assertUserFactDirectory();
     } catch (error) {
@@ -152,6 +188,40 @@ export class ConversationProjectService {
   /** Called by the real Main ingress stop; all accepted async prep is still
    * drained by the existing Goal coordinator, and synchronous IO has returned. */
   sealUserTaskFacts(): void { this.userFactsSealed = true; }
+
+  readProjectUserSource(taskId:string):ProjectUserSourceProof|undefined {
+    this.assertUserFactWriter();const fact=this.readUserTaskFact(taskId);
+    if(!fact||fact.schemaVersion!==2||fact.workspaceId!==this.userFactWorkspaceId)return undefined;
+    const identity=Object.freeze(this.sourceIdentity(fact));this.assertCanonicalUserSource(identity);
+    const proof=Object.freeze(Object.create(null)) as ProjectUserSourceProof;
+    sourceProofs.set(proof,{identity,assertCurrent:()=>{
+      this.assertUserFactWriter();const current=this.readUserTaskFact(taskId);
+      if(!current||current.schemaVersion!==2||JSON.stringify(current)!==JSON.stringify(fact))throw Error('conversation_user_source_changed');
+      this.assertCanonicalUserSource(identity);
+    }});
+    return proof;
+  }
+  private sourceIdentity(fact:PreparedUserTaskFact & {schemaVersion:2}):ProjectUserSourceIdentity {
+    return {schemaVersion:1,profileId:fact.profileId,workspaceId:fact.workspaceId,threadId:fact.threadId,
+      canonicalUserTaskId:fact.canonicalUserTaskId,canonicalMessageId:fact.canonicalMessageId,promptSha256:fact.promptSha256,
+      sourceGoalId:fact.sourceGoalId,sourceGoalEpoch:fact.sourceGoalEpoch,sourceGoalTurnId:fact.sourceGoalTurnId,
+      ...(fact.permissionMode===undefined?{}:{permissionMode:fact.permissionMode})};
+  }
+  private canonicalSourcePath(identity:ProjectUserSourceIdentity):string {
+    return join(this.userFactDirectory,'canonical-'+createHash('sha256').update(identity.canonicalMessageId).digest('hex')+'.json');
+  }
+  private assertCanonicalUserSource(identity:ProjectUserSourceIdentity):void {
+    this.assertUserFactDirectory();const path=this.canonicalSourcePath(identity),file=lstatSync(path);
+    if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1||file.size>8192||process.platform!=='win32'&&((file.mode&0o077)!==0||file.uid!==process.getuid?.()))throw Error('conversation_user_fact_storage');
+    const raw=readFileSync(path,'utf8');assertCapturedJsonUniqueKeys(raw,'conversation_user_source_invalid');
+    const stored:unknown=JSON.parse(raw);const keys=Object.keys(identity);
+    if(!record(stored)||Object.keys(stored).length!==keys.length||keys.some(key=>!Object.hasOwn(stored,key)||stored[key]!==identity[key as keyof ProjectUserSourceIdentity]))throw Error('conversation_user_source_conflict');
+  }
+  private writeCanonicalUserSource(identity:ProjectUserSourceIdentity):void {
+    const path=this.canonicalSourcePath(identity);
+    if(existsSync(path)){this.assertCanonicalUserSource(identity);return;}
+    writeFileAtomicallySync(path,JSON.stringify(identity));this.assertCanonicalUserSource(identity);
+  }
 
   private assertUserFactWriter(): void {
     if (this.userFactsSealed) throw Error('conversation_user_admission_closed');
@@ -179,13 +249,20 @@ export class ConversationProjectService {
     const raw = readFileSync(path, 'utf8');
     assertCapturedJsonUniqueKeys(raw, 'conversation_user_fact_invalid');
     const value: unknown = JSON.parse(raw);
-    if (!record(value) || Object.keys(value).some(key => !['schemaVersion','requestSource','profileId','taskId','sessionId','threadId','promptSha256','permissionMode'].includes(key))
-      || value.schemaVersion !== 1 || value.requestSource !== 'user' || value.profileId !== this.userFactProfileId || value.taskId !== taskId
+    if (!record(value) || Object.keys(value).some(key => !['schemaVersion','requestSource','profileId','taskId','sessionId','threadId','promptSha256','permissionMode',
+      ...(value.schemaVersion===2?['workspaceId','canonicalUserTaskId','canonicalMessageId','sourceGoalId','sourceGoalEpoch','sourceGoalTurnId']:[])].includes(key))
+      || (value.schemaVersion !== 1 && value.schemaVersion !== 2) || value.requestSource !== 'user' || value.profileId !== this.userFactProfileId || value.taskId !== taskId
       || !text(value.sessionId) || !text(value.threadId) || typeof value.promptSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.promptSha256)
       || value.permissionMode !== undefined && !['auto','plan','default'].includes(String(value.permissionMode))) throw Error('conversation_user_fact_invalid');
-    return {schemaVersion:1,requestSource:'user',profileId:this.userFactProfileId,taskId,
+    const base:PreparedUserTaskBase={requestSource:'user',profileId:this.userFactProfileId,taskId,
       sessionId:text(value.sessionId),threadId:text(value.threadId),promptSha256:value.promptSha256,
       ...(value.permissionMode === undefined ? {} : {permissionMode:String(value.permissionMode)})};
+    if(value.schemaVersion===1)return {schemaVersion:1,...base};
+    if(typeof value.workspaceId!=='string'||!/^[a-f0-9]{64}$/.test(value.workspaceId)||typeof value.sourceGoalId!=='string'||!text(value.sourceGoalId)||text(value.sourceGoalId)!==value.sourceGoalId
+      ||typeof value.sourceGoalTurnId!=='string'||!text(value.sourceGoalTurnId)||text(value.sourceGoalTurnId)!==value.sourceGoalTurnId||!Number.isSafeInteger(value.sourceGoalEpoch)||Number(value.sourceGoalEpoch)<0)throw Error('conversation_user_fact_invalid');
+    const ids=canonicalUserIds(this.userFactProfileId,value.workspaceId,base.threadId,value.sourceGoalId,Number(value.sourceGoalEpoch),value.sourceGoalTurnId);
+    if(value.canonicalUserTaskId!==ids.canonicalUserTaskId||value.canonicalMessageId!==ids.canonicalMessageId)throw Error('conversation_user_fact_invalid');
+    return {schemaVersion:2,...base,workspaceId:value.workspaceId,...ids,sourceGoalId:value.sourceGoalId,sourceGoalEpoch:Number(value.sourceGoalEpoch),sourceGoalTurnId:value.sourceGoalTurnId};
   }
 
   bindPreparedTask(input: {

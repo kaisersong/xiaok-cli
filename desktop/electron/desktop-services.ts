@@ -976,7 +976,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
   let activityRoomClient: ConversationProjectRoomClient | undefined;
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
-  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
+  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot,workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
     readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),
     ...(activityEnabled ? { activityHooks: {
       prepare: async input => {
