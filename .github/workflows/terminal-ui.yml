@@ -12,6 +12,10 @@ on:
       - 'src/ai/memory/layered-store.ts'
       - 'src/ai/memory/segment.ts'
       - 'tests/ai/memory/segment-*.test.ts'
+      - 'src/commands/yzj.ts'
+      - 'src/utils/pid-lock.ts'
+      - 'tests/commands/yzj-serve-shutdown.test.ts'
+      - 'tests/support/yzj-serve-child-preload.ts'
       - 'src/utils/logger.ts'
       - 'src/ai/tools/ask-user*.ts'
       - 'tests/ui/**'
@@ -41,6 +45,10 @@ on:
       - 'src/ai/memory/layered-store.ts'
       - 'src/ai/memory/segment.ts'
       - 'tests/ai/memory/segment-*.test.ts'
+      - 'src/commands/yzj.ts'
+      - 'src/utils/pid-lock.ts'
+      - 'tests/commands/yzj-serve-shutdown.test.ts'
+      - 'tests/support/yzj-serve-child-preload.ts'
       - 'src/utils/logger.ts'
       - 'src/ai/tools/ask-user*.ts'
       - 'tests/ui/**'
@@ -126,6 +134,7 @@ jobs:
           .test-dist/tests/ai/memory/segment-native-paths.test.js
           .test-dist/tests/ai/memory/compaction.test.js
           .test-dist/tests/ai/memory/distillation-repair.test.js
+          .test-dist/tests/commands/yzj-serve-shutdown.test.js
           .test-dist/tests/utils/logger.test.js
           .test-dist/tests/ui/ask-question.test.js
           .test-dist/tests/ui/image-input.test.js
