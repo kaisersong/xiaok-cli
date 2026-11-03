@@ -24,3 +24,7 @@ P1，已关闭：推荐 loader 曾使用错误的 main snapshot 字段。`deskto
 本次为源码独立评审；本席未独立重跑目录测试、Desktop 构建、类型检查或治理，主流程另行保存命令与日志。厂商发布日期以主流程在设计文档中记录的官方核实依据为准，本席未逐项联网复验。既有 DeepSeek 测试失败仅获主流程转引，未在此报告认定为独立验证结果。
 
 最终结论：目录、迁移与推荐范围静态评审通过，无剩余阻断项。签名实现不由本席自审批准；root 已另行通知完成独立阅读签名 diff 和针对测试，认为精确 endpoint、source wire gate、opaque schema、visible projection 与存档回放无阻断。该签名结论为 root 的独立评审记录，完整测试与构建结果仍由主流程归档。
+
+## 叠放分支最终差异复核
+
+已只读复核提交 `917f3c5e79d6688912407e76106e2da0f310a4c3` 相对 K2.8 基线 `ab599da8` 的冲突解决及关联测试，结论通过。normalize 同时保留 K2.8 的 `isKimiCodingRuntimeModel` 元数据门禁、所有 first-party 按 wire 查兼容元数据，以及 Gemini 历史默认/协议；registry 的 K2.8 条目保留标签、图片能力、1M 窗口和 low/high/max，仅补 releaseYear=2026。K2.8 的独立严格 allowlist 未扩大，既有 generic/durable 兼容测试及保存 256K 优先断言保留；normalize 的 K2.8 1M/high 断言与当前年份目录测试也均保留。本席未重跑叠放后的测试，完整 HEAD 验证由主流程执行并归档。

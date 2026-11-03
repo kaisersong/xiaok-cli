@@ -33,3 +33,14 @@
 - 首次Desktop测试与CLI build并行触发fixture的输入变化保护（`fresh_protection_worker_input_changed`），构建结束后独立重跑通过；不修改fixture安全门禁。早期治理发现renderer直读registry的层级违规，已改读main既有snapshot后通过。
 - 未做真实厂商请求、安装包交互、发布、完整测试套件或合并前独立质量复验。hygiene开工已跑，既有主checkout/sibling改动导致非绿，未动这些改动。
 - 测试runner均已退出，没有启动常驻服务；本任务无需清理常驻进程。已有source-backed测试规则覆盖本次复盘经验；新增真实snapshot loader回归作为执行机制。
+
+## 叠放最终复验
+
+源代码HEAD `917f3c5e79d6688912407e76106e2da0f310a4c3`，父分支K2.8 `ab599da81e607eaf84855d69c2a7909d2603e134`。冲突解决保留K2.8的1M/图片/三档metadata，增加releaseYear=2026；normalize保留K2.8 runtime predicate及Gemini旧默认/协议。独立评审已核对该增量。
+
+- `npm run test:sandbox:build` + sandbox9文件（上述8文件追加kimi-k28）：396通过，原始日志 `/tmp/model-year-final-build-tests.log`、`/tmp/model-year-final-tests.log`。
+- Desktop main目录/模型/legacy及renderer推荐：23通过，174未选中；日志`/tmp/model-year-final-desktop.log`。
+- CLI production `node node_modules/typescript/bin/tsc --incremental false`、Desktop main/renderer build、Desktop typecheck、治理及增量架构通过（`/tmp/model-year-final-cli-build.log`、`model-year-final-main-build.log`、`model-year-final-renderer-build.log`、`model-year-final-typecheck.log`、`model-year-final-governance.log`、`model-year-final-architecture.log`）。
+- 最终新增提交只更新两份评审/证据文档；不改变上述源码验证对象。所有runner已退出，未启动常驻服务。
+
+从官方新增目录移出的10个wire：GPT-4o、GPT-4.1、GPT-5、o3、o4-mini、Claude Haiku4.5、GLM4.7、GLM4.5、Gemini2.5 Pro、Gemini2.5 Flash Preview。兼容表保留它们各自窗口/能力，不把旧wire映射到新默认wire。
