@@ -18,6 +18,7 @@ import { getBuiltinToolIdentity } from '../../src/ai/tools/native-tool-identity.
 import type { ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
 import { createDesktopMemoryLlm, getActiveMemoryEmbeddingModel } from './memory-distillation.js';
 import { MODEL_REGISTRY } from '../../src/ai/memory/model-registry.js';
+import { migrateLegacyUserMemories, type LegacyUserMemoryEntry } from '../../src/ai/memory/legacy-json-migration.js';
 import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
 import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
 import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
@@ -239,6 +240,27 @@ try {
 let _desktopMemoryStore: MemoryStore | null = null;
 let _desktopMemoryStoreDataRoot: string | null = null;
 let _desktopMemoryStoreBackend: 'layered' | 'fallback' = 'fallback';
+// Stores replaced on a data-root switch or discarded after a failed open. Their close()
+// may still be waiting for writes accepted before it (#150 M3); shutdown waits for them.
+const _retiringDesktopMemoryCloses = new Set<Promise<void>>();
+
+function retireDesktopMemoryStore(store: MemoryStore | null | undefined): void {
+  const closing = store?.close?.();
+  if (!closing) return;
+  const tracked: Promise<void> = Promise.resolve(closing)
+    .catch((error) => { console.warn('[memory] retired store close failed:', (error as Error).message); })
+    .finally(() => { _retiringDesktopMemoryCloses.delete(tracked); });
+  _retiringDesktopMemoryCloses.add(tracked);
+}
+
+/**
+ * Close the desktop memory store for dataRoot and wait for every retired store's close.
+ * Resolves only once each SQLite handle is closed, so the caller may exit or remove files.
+ */
+export async function closeDesktopMemoryStore(dataRoot: string): Promise<void> {
+  await getDesktopMemoryStore(dataRoot).close?.();
+  while (_retiringDesktopMemoryCloses.size > 0) await Promise.allSettled([..._retiringDesktopMemoryCloses]);
+}
 
 type DesktopFallbackMemoryStore = MemoryStore & {
   getStats(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
@@ -326,7 +348,7 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     return _desktopMemoryStore;
   }
 
-  _desktopMemoryStore?.close?.();
+  retireDesktopMemoryStore(_desktopMemoryStore);
   _desktopMemoryStore = null;
   let store: MemoryStore;
   let layeredCandidate: MemoryStore | undefined;
@@ -354,33 +376,8 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     if (existsSync(legacyPath)) {
       try {
         const raw = readFileSync(legacyPath, 'utf-8');
-        const entries = JSON.parse(raw) as Array<{
-          id: string; content: string; tags: string[]; createdAt?: number;
-          scope?: 'global' | 'project'; cwd?: string; type?: 'user' | 'feedback' | 'project' | 'reference';
-          provenance?: MemoryRecord['provenance'];
-        }>;
-        if (Array.isArray(entries)) {
-          for (const entry of entries) {
-            void layeredStore.save({
-              id: entry.id,
-              scope: entry.scope ?? 'global',
-              cwd: entry.cwd,
-              title: (entry.content || '').slice(0, 80),
-              summary: entry.content || '',
-              tags: entry.tags || [],
-              updatedAt: entry.createdAt || Date.now(),
-              type: entry.type ?? 'user',
-              provenance: entry.provenance,
-            });
-          }
-          for (const entry of entries) {
-            const migrated = layeredStore.getById(entry.id);
-            if (!migrated || migrated.scope !== (entry.scope ?? 'global') || migrated.cwd !== entry.cwd
-              || JSON.stringify(migrated.provenance) !== JSON.stringify(entry.provenance)) {
-              throw new Error(`memory migration verification failed: ${entry.id}`);
-            }
-          }
-        }
+        const entries = JSON.parse(raw) as LegacyUserMemoryEntry[];
+        if (Array.isArray(entries)) migrateLegacyUserMemories(layeredStore, entries);
         // Rename to .migrated to avoid re-import
         renameSync(legacyPath, legacyPath + '.migrated');
       } catch (error) {
@@ -393,7 +390,7 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     store = layeredStore;
     layeredCandidate = undefined;
   } catch (err) {
-    layeredCandidate?.close?.();
+    retireDesktopMemoryStore(layeredCandidate);
     console.warn('[memory] LayeredMemoryStore unavailable (native module issue), using fallback:', (err as Error).message);
     store = createFallbackMemoryStore(dataRoot);
     _desktopMemoryStoreBackend = 'fallback';

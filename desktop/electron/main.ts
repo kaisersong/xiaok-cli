@@ -39,6 +39,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import {
   createDesktopServices,
   getDesktopMemoryBackend,
+  closeDesktopMemoryStore,
   getDesktopMemoryStore,
   resumeOneScriptWorkflow,
 } from './desktop-services.js';
@@ -866,7 +867,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       activityOwnerNoticeOnce(code);
     },
   ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
-  registerLifetimeDisposerStep('local-memory', async () => { getDesktopMemoryStore(dataRoot).close?.(); });
+  registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
     if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
@@ -2146,7 +2147,9 @@ const packagedKimiSmokeResultPath = process.env.XIAOK_KIMI_PACKAGED_SMOKE_RESULT
 if (packagedKimiSmokeResultPath) {
   app.whenReady().then(async () => {
     const { runPackagedKimiSmoke } = await import('./kimi-packaged-smoke.js');
-    await runPackagedKimiSmoke(packagedKimiSmokeResultPath);
+    await runPackagedKimiSmoke(packagedKimiSmokeResultPath, {
+      packagedApp: { resourcesPath: process.resourcesPath, isPackaged: app.isPackaged },
+    });
     app.exit(0);
   }).catch((error) => {
     console.error('[main] packaged Kimi smoke failed:', error);

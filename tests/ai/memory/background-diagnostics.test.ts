@@ -4,13 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LayeredMemoryStore, createLLMFromAdapter } from '../../../src/ai/memory/layered-store.js';
 import type { ModelAdapter } from '../../../src/types.js';
+import { closeStoreAndRemove } from './helpers/close-store.js';
 
 let store: LayeredMemoryStore | undefined;
 let root: string;
-afterEach(() => {
-  store?.close(); store = undefined;
+afterEach(async () => {
+  const closing = store; store = undefined;
   vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs();
-  if (root) rmSync(root, { recursive: true, force: true });
+  await closeStoreAndRemove(closing, root);
 });
 
 describe('background memory diagnostics', () => {

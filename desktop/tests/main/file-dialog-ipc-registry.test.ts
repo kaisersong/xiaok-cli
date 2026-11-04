@@ -43,7 +43,7 @@ describe('actual file-selection IPC registry round two', () => {
     vi.unstubAllEnvs();
     const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');
     const store = getDesktopMemoryStore(join(root, 'data'));
-    if ('close' in store && typeof store.close === 'function') store.close();
+    if ('close' in store && typeof store.close === 'function') await store.close();
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
   function invoke(channel: string, ...payload: unknown[]) {

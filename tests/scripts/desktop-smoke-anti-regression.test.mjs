@@ -32,6 +32,22 @@ function profilesFixture(models) {
   return `export const KIMI_CODING_PROFILES = Object.freeze({\n${body}\n} as const);\n`;
 }
 
+// #150 M6: what the packaged app writes after cut('南京市长江大桥') through the worker.
+function passingSegmentation(overrides = {}) {
+  const unpacked = 'C:\\a\\win-unpacked\\resources\\app.asar.unpacked\\node_modules\\nodejieba';
+  return {
+    status: 'pass',
+    sample: '南京市长江大桥',
+    expected: '南京市 长江大桥',
+    output: '南京市 长江大桥',
+    elapsedMs: 812,
+    workerEntry: `${unpacked}\\index.js`,
+    nativeBinding: `${unpacked}\\build\\Release\\nodejieba.node`,
+    dictionaryDir: `${unpacked}\\submodules\\cppjieba\\dict`,
+    ...overrides,
+  };
+}
+
 function cloneBlock(pins) {
   // pins: { plugins, kswarm, broker } — null means unpinned shallow clone
   const lines = [];
@@ -107,6 +123,7 @@ test('verify-packaged-kimi-smoke-result honors --models-source fixture (kills ha
         })),
         authorizationDenyNetworkRequests: 0,
         rollbackDenyNetworkRequests: 0,
+        segmentation: passingSegmentation(),
       }),
     );
     const ok = spawnSync(
@@ -149,6 +166,7 @@ test('verify-packaged-kimi-smoke-result accepts matching live result and rejects
         })),
         authorizationDenyNetworkRequests: 0,
         rollbackDenyNetworkRequests: 0,
+        segmentation: passingSegmentation(),
       }),
     );
     const ok = spawnSync('node', [VERIFY_SCRIPT, resultPath, dir], { encoding: 'utf8' });
@@ -185,6 +203,7 @@ test('verify-packaged-kimi-smoke-result rejects missing smokeRoot even with cana
         })),
         authorizationDenyNetworkRequests: 0,
         rollbackDenyNetworkRequests: 0,
+        segmentation: passingSegmentation(),
       }),
     );
 
@@ -198,6 +217,44 @@ test('verify-packaged-kimi-smoke-result rejects missing smokeRoot even with cana
     assert.notEqual(withoutRoot.status, 0, withoutRoot.stdout + withoutRoot.stderr);
     assert.match(withoutRoot.stderr, /smokeRoot/i);
     assert.doesNotMatch(withoutRoot.stdout, /\[packaged-kimi-smoke\] pass:/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('verify-packaged-kimi-smoke-result requires the packaged Chinese segmentation step (#150 M6)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kimi-smoke-seg-'));
+  try {
+    const models = readKimiCodingModels();
+    const resultPath = join(dir, 'result.json');
+    const write = (segmentation) => writeFileSync(resultPath, JSON.stringify({
+      schemaVersion: 1,
+      status: 'pass',
+      modelResults: models.map((model) => ({ model, requests: 2, secondTurnReplayedReasoning: true })),
+      authorizationDenyNetworkRequests: 0,
+      rollbackDenyNetworkRequests: 0,
+      ...(segmentation === undefined ? {} : { segmentation }),
+    }));
+    const run = () => spawnSync('node', [VERIFY_SCRIPT, resultPath, dir], { encoding: 'utf8' });
+
+    write(passingSegmentation());
+    const ok = run();
+    assert.equal(ok.status, 0, ok.stderr || ok.stdout);
+    assert.match(ok.stdout, /segmentation pass: "南京市 长江大桥" in 812ms, nodejieba=.*app\.asar\.unpacked/);
+
+    for (const [segmentation, message] of [
+      [undefined, /segmentation result is missing/],
+      [{ status: 'not-run' }, /segmentation status is "not-run"/],
+      [passingSegmentation({ output: '南京 市长 江大桥' }), /segmentation output="南京 市长 江大桥", expected "南京市 长江大桥"/],
+      [passingSegmentation({ output: '南京市长江大桥' }), /segmentation output=/],
+      [passingSegmentation({ workerEntry: 'D:\\a\\xiaok-cli\\desktop\\node_modules\\nodejieba\\index.js' }), /workerEntry is not inside app\.asar/],
+      [passingSegmentation({ dictionaryDir: '/home/dev/xiaok-cli/node_modules/nodejieba/submodules/cppjieba/dict' }), /dictionaryDir is not inside app\.asar/],
+    ]) {
+      write(segmentation);
+      const fail = run();
+      assert.notEqual(fail.status, 0, fail.stdout);
+      assert.match(fail.stderr, message);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

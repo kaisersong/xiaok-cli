@@ -1,14 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { KIMI_CODING_PROFILES } from '../../../src/ai/providers/kimi-models.js';
+import { resetSegmentationWorkerForTests } from '../../../src/ai/memory/segment.js';
 import { runPackagedKimiSmoke } from '../../electron/kimi-packaged-smoke.js';
 
 describe('packaged Kimi Desktop smoke', () => {
   const roots: string[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
+    await resetSegmentationWorkerForTests();
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -34,6 +36,21 @@ describe('packaged Kimi Desktop smoke', () => {
       })),
       authorizationDenyNetworkRequests: 0,
       rollbackDenyNetworkRequests: 0,
+      // Outside the packaged app the segmentation step is recorded as not run,
+      // which scripts/verify-packaged-kimi-smoke-result.mjs rejects.
+      segmentation: { status: 'not-run' },
     });
+  });
+
+  // #150 M6: a segmentation failure in the packaged app fails the whole smoke (no result written).
+  it('fails the whole smoke when the packaged segmentation step fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kimi-packaged-smoke-'));
+    roots.push(root);
+    const resultPath = join(root, 'result.json');
+
+    await expect(runPackagedKimiSmoke(resultPath, {
+      packagedApp: { resourcesPath: join(root, 'resources'), isPackaged: true },
+    })).rejects.toThrow(/PACKAGED_SEGMENTATION_FAILED: nodejieba entry is outside the packaged app/);
+    expect(existsSync(resultPath)).toBe(false);
   });
 });

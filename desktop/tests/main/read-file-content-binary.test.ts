@@ -48,7 +48,7 @@ describe('desktop file content IPC binary handling', () => {
   afterEach(async () => {
     const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');
     const store = getDesktopMemoryStore(join(rootDir, 'data'));
-    if ('close' in store && typeof store.close === 'function') store.close();
+    if ('close' in store && typeof store.close === 'function') await store.close();
     rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 

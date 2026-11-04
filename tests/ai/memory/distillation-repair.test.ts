@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { LayeredMemoryStore, resolveLayeredConfig } from '../../../src/ai/memory/layered-store.js';
 import { compactL0toL1 } from '../../../src/ai/memory/compaction.js';
 import { runMigrations } from '../../../src/ai/memory/migrations.js';
+import { closeStoreAndRemove } from './helpers/close-store.js';
 
 vi.mock('../../../src/ai/memory/embedding.js', () => ({
   EmbeddingClient: class {
@@ -24,7 +25,7 @@ describe('local memory distillation repair', () => {
     store = new LayeredMemoryStore({ dbPath: join(root, 'memory.db'), compaction: { autoCompact: false } });
     db = new Database(join(root, 'memory.db'));
   });
-  afterEach(() => { store.close(); db.close(); rmSync(root, { recursive: true, force: true }); vi.useRealTimers(); });
+  afterEach(async () => { vi.useRealTimers(); await closeStoreAndRemove(store, undefined); db.close(); rmSync(root, { recursive: true, force: true }); });
 
   function seed(scope = 'global', cwd: string | null = null) {
     for (let i = 0; i < 3; i++) db.prepare(
@@ -38,7 +39,7 @@ describe('local memory distillation repair', () => {
   }
   it('defaults to automatic distillation and starts only after a model is attached', async () => {
     expect(resolveLayeredConfig().compaction?.autoCompact).toBe(true);
-    store.close();
+    await store.close();
     vi.useFakeTimers();
     store = new LayeredMemoryStore({ dbPath: join(root, 'memory.db') });
     seed(); const llm = model(); store.setLLMFn(llm);
