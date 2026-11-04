@@ -10,6 +10,7 @@ import { assertKimiTransportAllowed } from '../../src/ai/runtime/kimi-rollback-p
 import { ToolRegistry } from '../../src/ai/tools/index.js';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { runDesktopToolLoop } from './desktop-services.js';
+import { runPackagedSegmentationSmoke, type PackagedAppLocation, type PackagedSegmentationResult } from './packaged-segmentation-smoke.js';
 
 interface FakeSdkChunk {
   choices: Array<{
@@ -181,7 +182,22 @@ function verifyRollbackDeny(): void {
   }
 }
 
-export async function runPackagedKimiSmoke(resultPath: string): Promise<void> {
+export interface PackagedKimiSmokeOptions {
+  /**
+   * Set by the packaged app (main.ts). Runs the Chinese segmentation step (#150 M6)
+   * against the packaged nodejieba; a failure there fails the whole smoke. Without
+   * it (unit tests outside Electron) the step is recorded as not run, which the
+   * result verifier rejects.
+   */
+  packagedApp?: PackagedAppLocation;
+}
+
+export async function runPackagedKimiSmoke(resultPath: string, options: PackagedKimiSmokeOptions = {}): Promise<void> {
+  // First, before anything else could load the dictionary on the main thread, so the
+  // step observes the product's worker path in a fresh process.
+  const segmentation: PackagedSegmentationResult | { status: 'not-run' } = options.packagedApp
+    ? await runPackagedSegmentationSmoke(options.packagedApp)
+    : { status: 'not-run' };
   const modelResults: Array<{
     model: KimiCodingModel;
     requests: number;
@@ -233,5 +249,6 @@ export async function runPackagedKimiSmoke(resultPath: string): Promise<void> {
     modelResults,
     authorizationDenyNetworkRequests: 0,
     rollbackDenyNetworkRequests: 0,
+    segmentation,
   }, null, 2)}\n`, 'utf8');
 }

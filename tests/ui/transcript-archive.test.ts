@@ -443,6 +443,18 @@ describe('safe transcript gzip archive', () => {
     })).toThrow(expect.objectContaining({ code: 'transcript_busy' }));
   });
 
+  // #128：existsSync 之后、open 之前目录被删（会话收尾与 teardown 并发），seal 视同文件不存在，不能抛到 finalization。
+  it('treats a writer that vanished between the existence check and open as nothing to seal', () => {
+    writeEvents('sess_seal_vanished', firstEvents);
+    const gone = Object.assign(new Error('no such file or directory'), { code: 'ENOENT' });
+
+    expect(() => sealTranscriptWriter('sess_seal_vanished', dir, {
+      open: () => { throw gone; },
+      fsync: fsyncSync,
+      close: closeSync,
+    })).not.toThrow();
+  });
+
   it('refuses to create a 129th immutable segment', async () => {
     const sessionId = 'sess_segment_limit';
     for (let index = 0; index < 128; index += 1) {

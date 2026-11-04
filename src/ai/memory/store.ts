@@ -42,7 +42,8 @@ export interface MemoryStore {
   listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]>;
   search?(query: string, limit?: number): Promise<MemoryRecord[]>;
   writeRawMessage?(sessionId: string, role: string, content: string): Promise<void>;
-  close?(): void;
+  /** May return a promise when pending writes must land first; exit paths should await it. */
+  close?(): void | Promise<void>;
   compact?(request: MemoryCompactionRequest): Promise<MemoryCompactionResult>;
   getStats?(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
   getPersonaTraits?(): { trait: string; confidence: number }[];

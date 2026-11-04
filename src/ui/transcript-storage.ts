@@ -281,9 +281,17 @@ export function sealTranscriptWriter(
       operations.close(fd);
     }
   } catch (error) {
+    // The raw file vanished after the existence check (#128: its directory was removed while the
+    // session was finalizing). Same as the early return above: there is nothing left to seal.
+    if (isErrno(error, 'ENOENT')) return;
     throw mapBusyError(error, `cannot seal transcript ${sessionId}`);
   }
-  chmodOwnerReadOnly(paths.raw);
+  try {
+    chmodOwnerReadOnly(paths.raw);
+  } catch (error) {
+    if (isErrno(error, 'ENOENT')) return;
+    throw error;
+  }
 }
 
 export function readTranscriptJsonValues(
