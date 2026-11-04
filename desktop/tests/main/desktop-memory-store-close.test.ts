@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }));
 
@@ -16,6 +16,16 @@ describe('desktop memory store close (#150)', () => {
   const priorConfig = process.env.XIAOK_CONFIG_DIR;
   const base = mkdtempSync(join(tmpdir(), 'xiaok-desktop-memclose-'));
   process.env.XIAOK_CONFIG_DIR = join(base, 'config');
+  // Pay the one-time cold start (native SQLite load, migrations, first segmentation) here, not inside
+  // the case: on a cold Windows runner it can take seconds and is not what the case measures.
+  beforeAll(async () => {
+    const warmRoot = join(base, 'warm');
+    const warm = getDesktopMemoryStore(warmRoot);
+    (warm as unknown as Internals).embeddingClient.embed = async () => new Float32Array(384).fill(0.25);
+    await warm.save({ id: 'warm-up', scope: 'global', title: '预热', summary: '冷启动预热写入', tags: [], updatedAt: 1, type: 'user' });
+    await closeDesktopMemoryStore(warmRoot);
+    expect((warm as unknown as Internals).db.open).toBe(false);
+  });
   afterAll(() => {
     if (priorConfig === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = priorConfig;
     rmSync(base, { recursive: true, force: true });

@@ -607,89 +607,120 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   process.on('SIGTERM', onSignal);
 
   let server: ReturnType<typeof createServer> | null = null;
-  if (enableWebhook) {
-    const webhookHandler = createYZJWebhookHandler({
-      path: yzjConfig.webhookPath,
-      secret: yzjConfig.secret,
-      logger: console,
-      onMessage: (message) => processInboundMessage(message, 'webhook'),
-    });
-
-    server = createServer((req, res) => {
-      void webhookHandler(req, res).then((handled) => {
-        if (!handled) {
-          res.statusCode = 404;
-          res.end('Not Found');
-        }
-      }).catch((error: unknown) => {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[yzj] webhook error: ${errorMessage}`);
-        res.statusCode = 500;
-        res.end('Internal Server Error');
-      });
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      server!.once('error', reject);
-      server!.listen(yzjConfig.webhookPort, () => {
-        server!.off('error', reject);
-        console.info(`[yzj] webhook listening on http://localhost:${yzjConfig.webhookPort}${yzjConfig.webhookPath}`);
-        resolve();
-      });
-    });
-  }
-
   let websocketClient: YZJWebSocketClient | null = null;
-  if (shouldStartYZJWebSocket(yzjConfig, options)) {
-    const websocketUrl = deriveYZJWebSocketUrl(yzjConfig.webhookUrl);
-    websocketClient = new YZJWebSocketClient({
-      url: websocketUrl,
-      logger: console,
-      onReady: () => {
-        console.info('[yzj] websocket ready');
-      },
-      onDegraded: (message) => {
-        console.warn(`[yzj] websocket degraded: ${message}`);
-      },
-      onMessage: (message) => processInboundMessage(message, 'websocket'),
-    });
-    websocketClient.start();
-  }
-
-  // Test-only probe (#150 shutdown test): in dry-run, put one raw write in flight the way the
-  // agent's fire-and-forget writeRawMessage does, so a real-signal child test can check it lands.
-  const probeWrite = options.dryRun ? process.env.XIAOK_YZJ_DRY_RUN_PROBE_WRITE : undefined;
-  if (probeWrite) {
-    memoryStore.writeRawMessage?.('yzj-dry-run-probe', 'user', probeWrite).catch((error: unknown) => {
-      console.error(`[yzj][dry-run] probe write failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }
-
-  console.info(`[yzj] gateway started (mode=${yzjConfig.inboundMode}, webhook=${enableWebhook ? 'on' : 'off'})`);
-
-  try {
-    await new Promise<void>((resolve) => {
-      shutdown.signal.addEventListener('abort', () => resolve(), { once: true });
-    });
-  } finally {
-    agentService?.closeAll();
-    await disposeAllSessionSkillCatalogs(sessionSkillCatalogs);
-    websocketClient?.stop();
-    if (server) {
-      await new Promise<void>((resolve, reject) => {
+  /** Stop taking work. Every step runs even when an earlier one fails; each failure is logged and returned. */
+  const stopGateway = async (): Promise<unknown[]> => {
+    const failures: unknown[] = [];
+    const step = async (name: string, run: () => unknown) => {
+      try {
+        await run();
+      } catch (error) {
+        console.error(`[yzj] shutdown step ${name} failed: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(error);
+      }
+    };
+    await step('agents', () => agentService?.closeAll());
+    await step('skill catalogs', () => disposeAllSessionSkillCatalogs(sessionSkillCatalogs));
+    await step('websocket', () => websocketClient?.stop());
+    if (server?.listening) {
+      await step('webhook server', () => new Promise<void>((resolve, reject) => {
         server!.close((error) => {
           if (error) reject(error);
           else resolve();
         });
+      }));
+    }
+    return failures;
+  };
+
+  // #150 review: startup, the wait and the gateway cleanup may each fail; collect the failures so
+  // the memory store below is closed in every case, then rethrow them (nothing is swallowed).
+  const failures: unknown[] = [];
+  try {
+    if (enableWebhook) {
+      const webhookHandler = createYZJWebhookHandler({
+        path: yzjConfig.webhookPath,
+        secret: yzjConfig.secret,
+        logger: console,
+        onMessage: (message) => processInboundMessage(message, 'webhook'),
+      });
+
+      server = createServer((req, res) => {
+        void webhookHandler(req, res).then((handled) => {
+          if (!handled) {
+            res.statusCode = 404;
+            res.end('Not Found');
+          }
+        }).catch((error: unknown) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error(`[yzj] webhook error: ${errorMessage}`);
+          res.statusCode = 500;
+          res.end('Internal Server Error');
+        });
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(yzjConfig.webhookPort, () => {
+          server!.off('error', reject);
+          console.info(`[yzj] webhook listening on http://localhost:${yzjConfig.webhookPort}${yzjConfig.webhookPath}`);
+          resolve();
+        });
       });
     }
-    // #150: writeRawMessage is fire-and-forget and waits for off-thread segmentation, so the
-    // last message can still be in flight; close() lets it land before memory.db closes.
-    // Signal handlers stay installed until then so a second signal still exits at once.
-    await memoryStore.close?.();
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
+
+    if (shouldStartYZJWebSocket(yzjConfig, options)) {
+      const websocketUrl = deriveYZJWebSocketUrl(yzjConfig.webhookUrl);
+      websocketClient = new YZJWebSocketClient({
+        url: websocketUrl,
+        logger: console,
+        onReady: () => {
+          console.info('[yzj] websocket ready');
+        },
+        onDegraded: (message) => {
+          console.warn(`[yzj] websocket degraded: ${message}`);
+        },
+        onMessage: (message) => processInboundMessage(message, 'websocket'),
+      });
+      websocketClient.start();
+    }
+
+    // Test-only probe (#150 shutdown test): in dry-run, put one raw write in flight the way the
+    // agent's fire-and-forget writeRawMessage does, so a real-signal child test can check it lands.
+    const probeWrite = options.dryRun ? process.env.XIAOK_YZJ_DRY_RUN_PROBE_WRITE : undefined;
+    if (probeWrite) {
+      memoryStore.writeRawMessage?.('yzj-dry-run-probe', 'user', probeWrite).catch((error: unknown) => {
+        console.error(`[yzj][dry-run] probe write failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
+
+    console.info(`[yzj] gateway started (mode=${yzjConfig.inboundMode}, webhook=${enableWebhook ? 'on' : 'off'})`);
+
+    // The signal handlers are installed above, before the webhook listen await; a signal during
+    // startup has already aborted, and an abort listener added now would never fire.
+    if (!shutdown.signal.aborted) {
+      await new Promise<void>((resolve) => {
+        shutdown.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    }
+  } catch (error) {
+    failures.push(error);
   }
+  failures.push(...await stopGateway());
+  // #150: writeRawMessage is fire-and-forget and waits for off-thread segmentation, so the
+  // last message can still be in flight; close() lets it land before memory.db closes.
+  // This runs whatever failed above. Signal handlers stay installed until close() has finished
+  // so a second signal still exits at once.
+  try {
+    await memoryStore.close?.();
+  } catch (error) {
+    console.error(`[yzj] memory store close failed: ${error instanceof Error ? error.message : String(error)}`);
+    failures.push(error);
+  }
+  process.off('SIGINT', onSignal);
+  process.off('SIGTERM', onSignal);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, `yzj serve shutdown: ${failures.length} failures`);
 }
 
 async function updateYZJConfig(

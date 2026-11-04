@@ -8,6 +8,9 @@
 //   XIAOK_TEST_YZJ_GATE=hold: the gate never opens (for the second-signal case).
 // - XIAOK_TEST_YZJ_LEFTOVER_HANDLE=1: keeps one ref'd timer alive for the whole run, like a handle
 //   shutdown does not own (an agent turn or reconnect timer); serve must still exit after shutdown.
+// - XIAOK_TEST_YZJ_HOLD_LISTEN=1: the webhook server's listen() starts only once a SIGINT has been
+//   handled, so the signal lands while serve still awaits listen (before "gateway started").
+import { Server } from 'node:net';
 import { LayeredMemoryStore } from '../../src/ai/memory/layered-store.js';
 
 let release!: () => void;
@@ -32,4 +35,19 @@ if (process.env.XIAOK_TEST_YZJ_GATE === 'release-on-close') {
 
 if (process.env.XIAOK_TEST_YZJ_LEFTOVER_HANDLE === '1') {
   setInterval(() => undefined, 60_000);
+}
+
+if (process.env.XIAOK_TEST_YZJ_HOLD_LISTEN === '1') {
+  const realListen = Server.prototype.listen;
+  Server.prototype.listen = function listen(this: Server, ...args: unknown[]) {
+    console.info('[yzj-test] webhook listen held until a signal');
+    // Nothing else is ref'd while listen is held; keep the process up until the signal, as a real pending listen would.
+    const keepAlive = setInterval(() => undefined, 60_000);
+    // Added from inside listen(), i.e. after serve installed its own handler, so Node runs serve's first.
+    process.once('SIGINT', () => {
+      clearInterval(keepAlive);
+      (realListen as (...a: unknown[]) => Server).apply(this, args);
+    });
+    return this;
+  } as typeof Server.prototype.listen;
 }
