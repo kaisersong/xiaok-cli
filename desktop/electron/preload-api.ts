@@ -1,3 +1,4 @@
+import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
@@ -1385,7 +1386,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   approveTimedActionAuto(actionId: string): Promise<ScheduledActionDto | null>;
   revokeTimedActionAuto(actionId: string): Promise<ScheduledActionDto | null>;
   clearScheduledTaskRunHistory(actionId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
-  onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; dispatchStatus?: 'success' | 'failed' | 'skipped'; runtimeState?: 'accepted' | 'not_started'; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
+  onScheduledTaskDue(handler: (event: ScheduledTaskDueEvent) => void): () => void;
   listMemories(): Promise<MemoryIpcEntry[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<MemoryIpcEntry>;
   updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<MemoryIpcEntry>;

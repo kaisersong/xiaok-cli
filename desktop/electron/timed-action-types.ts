@@ -1,3 +1,4 @@
+import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 export type TimedActionTrigger =
   | { kind: 'once'; at: number }
   | { kind: 'interval'; intervalMinutes: number }
@@ -75,6 +76,7 @@ export type ExecutorRecoveryDecision =
   | { action: 'pause'; reason: string };
 
 export interface TimedActionRunRecord {
+  delivery?: ScheduledTaskDueEvent;
   runId: string;
   actionId: string;
   executorKind: TimedActionExecutorKind;
