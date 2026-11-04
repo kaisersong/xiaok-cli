@@ -12,6 +12,8 @@ $realPid = Join-Path $env:USERPROFILE '.xiaok\state\yzj\serve.pid'
 $realPidBefore = Test-Path $realPid
 $saved = @{ HOME = $env:HOME; USERPROFILE = $env:USERPROFILE; TEMP = $env:TEMP; TMP = $env:TMP; XIAOK_CONFIG_DIR = $env:XIAOK_CONFIG_DIR }
 $probeProc = $null
+$probeStart = $null
+$log = $null
 try {
   $home2 = Join-Path $tmp 'home'; $tmp2 = Join-Path $tmp 'tmp'; $cfg = Join-Path $tmp 'config'
   New-Item -ItemType Directory -Force -Path $home2, $tmp2, $cfg | Out-Null
@@ -30,7 +32,9 @@ try {
   $argList = @('--log', "`"$log`"", '--timeout', "$TimeoutSec", '--', "`"$node`"", "`"$index`"", 'yzjchannel', 'serve',
     '--webhook-url', 'https://example.invalid/hook', '--inbound-mode', 'webhook', '--webhook-port', '0', '--dry-run')
   $out = Join-Path $tmp 'probe.out'
+  $probeStart = [DateTime]::Now
   $probeProc = Start-Process -FilePath $exe -ArgumentList $argList -PassThru -NoNewWindow -RedirectStandardOutput $out
+  $null = $probeProc.Handle  # cache handle so ExitCode is readable after exit (PS 5.1)
 
   # While serving: serve.pid must exist under the temp HOME only.
   $tmpPid = Join-Path $home2 '.xiaok\state\yzj\serve.pid'
@@ -41,9 +45,14 @@ try {
 
   if (-not $probeProc.WaitForExit(($TimeoutSec + 75) * 1000)) {
     $failures.Add('probe helper hung')
-    & taskkill.exe /T /F /PID $probeProc.Id 2>&1 | Out-Host
+    try { & taskkill.exe /T /F /PID $probeProc.Id 2>$null | Out-Null } catch { Write-Host "WARN taskkill helper failed: $_" }
   }
-  $probeProc.WaitForExit()
+  if (-not $probeProc.WaitForExit(10000)) { $failures.Add('probe helper still running after kill') }
+  if ($probeProc.HasExited) {
+    $helperCode = $probeProc.ExitCode
+    Write-Host "CHECK helper exit code=$helperCode"
+    if ($helperCode -ne 0) { $failures.Add("helper exit code=$helperCode") }
+  } else { Write-Host 'WARN helper exit code unavailable (still running)' }
   $logText = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
   Write-Host '--- serve.log ---'; Write-Host $logText; Write-Host '-----------------'
   $result = ($logText -split "`r?`n") | Where-Object { $_ -like 'RESULT *' } | Select-Object -Last 1
@@ -64,27 +73,51 @@ try {
   $failures.Add("error: $_")
 } finally {
   # Kill the whole tree: helper first (/T covers node), then the node child by its logged pid in case it was orphaned.
-  if ($probeProc -and -not $probeProc.HasExited) { & taskkill.exe /T /F /PID $probeProc.Id 2>&1 | Out-Host }
+  if ($probeProc -and -not $probeProc.HasExited) {
+    try { & taskkill.exe /T /F /PID $probeProc.Id 2>$null | Out-Null } catch { Write-Host "WARN taskkill helper failed: $_" }
+  }
   $childPid = $null
   if ($log -and (Test-Path $log)) {
-    $m = Select-String -Path $log -Pattern '^CHILD pid=(\d+)' | Select-Object -First 1
-    if ($m) { $childPid = [int]$m.Matches[0].Groups[1].Value }
+    $m = Select-String -Path $log -Pattern '^CHILD pid=(\d+)\s*$' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($m) { $childPid = [int]$m.Matches[0].Groups[1].Value } else { Write-Host 'WARN could not parse CHILD pid from serve.log; orphan check skipped' }
   }
-  if ($childPid -and (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) { & taskkill.exe /T /F /PID $childPid 2>&1 | Out-Host }
+  if ($childPid) {
+    # Only kill if it is still our node child: same pid, named node, started after the probe (guards PID reuse).
+    $cp = Get-Process -Id $childPid -ErrorAction SilentlyContinue
+    if ($cp) {
+      $cpStart = $null
+      try { $cpStart = $cp.StartTime } catch { $cpStart = $null }
+      if ($cp.ProcessName -eq 'node' -and $cpStart -and $probeStart -and $cpStart -ge $probeStart) {
+        try { & taskkill.exe /T /F /PID $childPid 2>$null | Out-Null } catch { Write-Host "WARN taskkill child failed: $_" }
+      } else {
+        Write-Host "WARN pid $childPid is not our node child (name=$($cp.ProcessName) start=$cpStart); not killed"
+      }
+    }
+  }
   foreach ($k in $saved.Keys) { Set-Item "env:$k" $saved[$k] }
   Remove-Item Env:XIAOK_YZJ_DRY_RUN_PROBE_WRITE -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 300
   if ($failures.Count -gt 0 -and (Test-Path $tmp)) {
     # Keep evidence outside the temp dir before deleting it.
-    $keep = Join-Path ([IO.Path]::GetTempPath()) ('win-ctrlc-probe-fail-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    New-Item -ItemType Directory -Force -Path $keep | Out-Null
+    $keep = Join-Path ([IO.Path]::GetTempPath()) ('win-ctrlc-probe-fail-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 4))
+    $copyOk = $true
+    try { New-Item -ItemType Directory -Force -Path $keep -ErrorAction Stop | Out-Null } catch { $copyOk = $false }
     foreach ($f in @('serve.log', 'probe.out')) {
       $src = Join-Path $tmp $f
-      if (Test-Path $src) { Copy-Item -Force $src $keep -ErrorAction SilentlyContinue }
+      if ($copyOk -and (Test-Path $src)) {
+        try { Copy-Item -Force $src $keep -ErrorAction Stop } catch { $copyOk = $false }
+        if (-not (Test-Path (Join-Path $keep $f))) { $copyOk = $false }
+      }
     }
-    Write-Host "FAIL artifacts kept in: $keep"
+    if ($copyOk) {
+      Write-Host "FAIL artifacts kept in: $keep"
+      Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    } else {
+      Write-Host "FAIL artifact copy failed; original temp dir left in place: $tmp"
+    }
+  } else {
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
   }
-  Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 if ($failures.Count -eq 0) { Write-Host 'PASS win-ctrlc-probe'; exit 0 }
 $failures | ForEach-Object { Write-Host "FAIL $_" }
