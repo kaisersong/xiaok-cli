@@ -39,7 +39,10 @@ try {
   if (Test-Path $tmpPid) { Write-Host "CHECK serve.pid present in temp HOME: $tmpPid" } else { $failures.Add('serve.pid never appeared in temp HOME') }
   if ((Test-Path $realPid) -ne $realPidBefore) { $failures.Add("real serve.pid changed: $realPid") }
 
-  if (-not $probeProc.WaitForExit(($TimeoutSec + 75) * 1000)) { $probeProc.Kill(); $failures.Add('probe helper hung') }
+  if (-not $probeProc.WaitForExit(($TimeoutSec + 75) * 1000)) {
+    $failures.Add('probe helper hung')
+    & taskkill.exe /T /F /PID $probeProc.Id 2>&1 | Out-Host
+  }
   $probeProc.WaitForExit()
   $logText = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
   Write-Host '--- serve.log ---'; Write-Host $logText; Write-Host '-----------------'
@@ -60,10 +63,27 @@ try {
 } catch {
   $failures.Add("error: $_")
 } finally {
-  if ($probeProc -and -not $probeProc.HasExited) { Stop-Process -Id $probeProc.Id -Force -ErrorAction SilentlyContinue }
+  # Kill the whole tree: helper first (/T covers node), then the node child by its logged pid in case it was orphaned.
+  if ($probeProc -and -not $probeProc.HasExited) { & taskkill.exe /T /F /PID $probeProc.Id 2>&1 | Out-Host }
+  $childPid = $null
+  if ($log -and (Test-Path $log)) {
+    $m = Select-String -Path $log -Pattern '^CHILD pid=(\d+)' | Select-Object -First 1
+    if ($m) { $childPid = [int]$m.Matches[0].Groups[1].Value }
+  }
+  if ($childPid -and (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) { & taskkill.exe /T /F /PID $childPid 2>&1 | Out-Host }
   foreach ($k in $saved.Keys) { Set-Item "env:$k" $saved[$k] }
   Remove-Item Env:XIAOK_YZJ_DRY_RUN_PROBE_WRITE -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 300
+  if ($failures.Count -gt 0 -and (Test-Path $tmp)) {
+    # Keep evidence outside the temp dir before deleting it.
+    $keep = Join-Path ([IO.Path]::GetTempPath()) ('win-ctrlc-probe-fail-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Force -Path $keep | Out-Null
+    foreach ($f in @('serve.log', 'probe.out')) {
+      $src = Join-Path $tmp $f
+      if (Test-Path $src) { Copy-Item -Force $src $keep -ErrorAction SilentlyContinue }
+    }
+    Write-Host "FAIL artifacts kept in: $keep"
+  }
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 if ($failures.Count -eq 0) { Write-Host 'PASS win-ctrlc-probe'; exit 0 }
