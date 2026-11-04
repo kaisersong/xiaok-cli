@@ -1,38 +1,56 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { KIMI_CODING_PROFILES } from '../../../src/ai/providers/kimi-models.js';
+import { resetSegmentationWorkerForTests } from '../../../src/ai/memory/segment.js';
 import { runPackagedKimiSmoke } from '../../electron/kimi-packaged-smoke.js';
 
 describe('packaged Kimi Desktop smoke', () => {
   const roots: string[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
+    await resetSegmentationWorkerForTests();
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it('covers all four K3/K3.1 models, task-local multi-turn replay, auth deny, and rollback deny', async () => {
+  it('covers every KIMI_CODING_PROFILES model, task-local multi-turn replay, auth deny, and rollback deny', async () => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-kimi-packaged-smoke-'));
     roots.push(root);
     const resultPath = join(root, 'result.json');
 
     await runPackagedKimiSmoke(resultPath);
 
+    const expectedModels = Object.keys(KIMI_CODING_PROFILES);
     const serialized = readFileSync(resultPath, 'utf8');
     expect(serialized).not.toContain('PACKAGED_SMOKE_RUNTIME_ONLY');
     expect(JSON.parse(serialized)).toMatchObject({
       schemaVersion: 1,
       status: 'pass',
-      modelResults: [
-        { model: 'k3', requests: 2, secondTurnReplayedReasoning: true },
-        { model: 'k3-256k', requests: 2, secondTurnReplayedReasoning: true },
-        { model: 'k3.1-pro', requests: 2, secondTurnReplayedReasoning: true },
-        { model: 'k3.1-pro-highspeed', requests: 2, secondTurnReplayedReasoning: true },
-      ],
+      modelResults: expectedModels.map((model) => ({
+        model,
+        requests: 2,
+        secondTurnReplayedReasoning: true,
+      })),
       authorizationDenyNetworkRequests: 0,
       rollbackDenyNetworkRequests: 0,
+      // Outside the packaged app the segmentation step is recorded as not run,
+      // which scripts/verify-packaged-kimi-smoke-result.mjs rejects.
+      segmentation: { status: 'not-run' },
     });
+  });
+
+  // #150 M6: a segmentation failure in the packaged app fails the whole smoke (no result written).
+  it('fails the whole smoke when the packaged segmentation step fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kimi-packaged-smoke-'));
+    roots.push(root);
+    const resultPath = join(root, 'result.json');
+
+    await expect(runPackagedKimiSmoke(resultPath, {
+      packagedApp: { resourcesPath: join(root, 'resources'), isPackaged: true },
+    })).rejects.toThrow(/PACKAGED_SEGMENTATION_FAILED: nodejieba entry is outside the packaged app/);
+    expect(existsSync(resultPath)).toBe(false);
   });
 });

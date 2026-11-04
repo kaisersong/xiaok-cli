@@ -76,8 +76,8 @@ describe('complete16 Memory domain through real registration and preload', () =>
     vi.restoreAllMocks(); vi.unstubAllEnvs();
     for (const name of addedMethods.splice(0)) delete (store as any)[name];
   });
-  afterAll(() => {
-    store.close?.(); resetIpcSchemaRegistryForTests();
+  afterAll(async () => {
+    await store.close?.(); resetIpcSchemaRegistryForTests();
     if (priorConfig === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = priorConfig;
     rmSync(root, { recursive: true, force: true });
   });

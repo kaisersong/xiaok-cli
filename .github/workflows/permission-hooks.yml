@@ -89,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022, macos-14]
+        os: [ubuntu-latest, windows-2022, macos-15]
         node: ['22.14.0', '24']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15

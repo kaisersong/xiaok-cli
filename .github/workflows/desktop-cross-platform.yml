@@ -15,27 +15,92 @@ on:
       - 'desktop/**'
       - 'src/ai/runtime/**'
       - 'src/ai/adapters/**'
+      - 'src/ai/providers/kimi-models.ts'
+      - 'src/ai/memory/segment.ts'
+      - 'src/ai/memory/layered-store.ts'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
+      - 'scripts/read-kimi-coding-models.mjs'
+      - 'scripts/verify-packaged-kimi-smoke-result.mjs'
+      - 'scripts/check-desktop-sibling-pins.mjs'
       - '.github/workflows/desktop-cross-platform.yml'
+      - '.github/workflows/desktop-release.yml'
   pull_request:
     paths:
       - 'desktop/**'
       - 'src/ai/runtime/**'
       - 'src/ai/adapters/**'
+      - 'src/ai/providers/kimi-models.ts'
+      - 'src/ai/memory/segment.ts'
+      - 'src/ai/memory/layered-store.ts'
       - 'src/platform/mcp/python-server.ts'
       - 'tests/platform/mcp/python-server.test.ts'
+      - 'scripts/read-kimi-coding-models.mjs'
+      - 'scripts/verify-packaged-kimi-smoke-result.mjs'
+      - 'scripts/check-desktop-sibling-pins.mjs'
       - '.github/workflows/desktop-cross-platform.yml'
+      - '.github/workflows/desktop-release.yml'
   workflow_dispatch: {}
 
 jobs:
+  sibling-pin-consistency:
+    name: Desktop sibling pin consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail when cross-platform and release sibling pins drift
+        run: node scripts/check-desktop-sibling-pins.mjs
+
+  detect-packaged-kimi-smoke:
+    name: Detect packaged Kimi smoke paths
+    runs-on: ubuntu-latest
+    outputs:
+      run_smoke: ${{ steps.detect.outputs.run_smoke }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "run_smoke=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+            if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
+              BASE="$(git rev-parse "$HEAD^")"
+            fi
+          fi
+          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|desktop/electron/packaged-segmentation-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
+          # Fail-closed: if git diff cannot run (bad/missing objects), force smoke on.
+          # Previously a failed diff landed in the else branch → run_smoke=false (M1).
+          if ! DIFF_OUT="$(git diff --name-only "$BASE" "$HEAD" 2>/tmp/packaged-kimi-diff.err)"; then
+            echo "git diff failed for $BASE..$HEAD; fail-closed → run_smoke=true" >&2
+            cat /tmp/packaged-kimi-diff.err >&2 || true
+            echo "run_smoke=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$DIFF_OUT" | grep -E "$PATTERN"; then
+            echo "run_smoke=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_smoke=false" >> "$GITHUB_OUTPUT"
+          fi
+
   cross-platform-tests:
     name: Desktop path tests (${{ matrix.os }})
+    needs: [sibling-pin-consistency]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, macos-14]
+        os: [windows-2022, macos-15]
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +140,9 @@ jobs:
           tests/main/desktop-text-repetition.test.ts
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/kimi-packaged-smoke.test.ts
+          tests/main/desktop-memory-store-close.test.ts
+          tests/main/packaged-segmentation-smoke.test.ts
+          tests/main/windows-kimi-packaged-smoke-contract.test.ts
           tests/main/kimi-harness-contract.test.ts
           tests/main/kimi-reasoning-admission.test.ts
           tests/main/desktop-provider-stream-lifecycle.test.ts
@@ -100,7 +168,8 @@ jobs:
 
   windows-kimi-packaged-smoke:
     name: Windows packaged Kimi K3 smoke
-    if: github.event_name == 'workflow_dispatch'
+    needs: [sibling-pin-consistency, detect-packaged-kimi-smoke]
+    if: needs.detect-packaged-kimi-smoke.outputs.run_smoke == 'true'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -128,13 +197,28 @@ jobs:
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
 
+      - name: Build nodejieba native binding for packaged segmentation (#150 M6)
+        # npm ci --ignore-scripts skips nodejieba's node-pre-gyp install, so the
+        # packaged app would ship without build/Release/nodejieba.node and the
+        # packaged segmentation smoke step fails closed. N-API binding: a Node
+        # build loads under Electron (electron-builder npmRebuild=false).
+        shell: bash
+        run: |
+          cd desktop
+          bash ../.github/scripts/retry.sh npm rebuild nodejieba
+          node -e "const j=require('nodejieba');const o=j.cut('南京市长江大桥').join(' ');console.log(require.resolve('nodejieba'),o);if(o!=='南京市 长江大桥')process.exit(1)"
+
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 56b9df72dfbc4541cab6032d4039e2e208b8be68
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
-          git clone --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git clone --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
+          git -C ../kswarm checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
         shell: bash
@@ -227,22 +311,15 @@ jobs:
           if (-not (Test-Path -LiteralPath $resultPath)) {
             throw 'Packaged Kimi smoke did not write its result'
           }
-          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-          if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 4) {
-            throw 'Packaged Kimi smoke result is incomplete'
-          }
-          foreach ($model in @('k3', 'k3-256k', 'k3.1-pro', 'k3.1-pro-highspeed')) {
-            $entry = $result.modelResults | Where-Object { $_.model -eq $model }
-            if (-not $entry -or $entry.requests -ne 2 -or -not $entry.secondTurnReplayedReasoning) {
-              throw "Packaged Kimi multi-turn smoke failed for $model"
-            }
-          }
-          if ($result.authorizationDenyNetworkRequests -ne 0 -or $result.rollbackDenyNetworkRequests -ne 0) {
-            throw 'Packaged Kimi deny smoke observed a network request'
-          }
-          $canaryHit = Get-ChildItem -LiteralPath $smokeRoot -Recurse -File |
-            Where-Object { $_.FullName -ne $resultPath } |
-            Select-String -SimpleMatch 'PACKAGED_SMOKE_RUNTIME_ONLY' -List
-          if ($canaryHit) {
-            throw "Provider-private reasoning canary persisted at $($canaryHit.Path)"
-          }
+          node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
+
+      # Upload the exact packaged app that just passed the smoke (incl. the
+      # segmentation assertion), so it can be re-tested on a real Windows machine
+      # (#150 M6). Runs only after the smoke step succeeded.
+      - name: Upload smoke-verified Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaok-win-unpacked-${{ github.sha }}
+          path: desktop/release/win-unpacked
+          if-no-files-found: error
+          retention-days: 7
