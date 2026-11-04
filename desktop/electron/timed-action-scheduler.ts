@@ -12,6 +12,7 @@ import type {
 } from './timed-action-types.js';
 
 export interface TimedActionSchedulerOptions {
+  reconcileScheduledTasks?: (signal: AbortSignal) => Promise<void>;
   loopCompletion?:LoopTimedCompletionHost;
   /** Fixed Main shutdown-gate port; covers actual writers, not timeout races. */
   acquireWriter?: (label: string) => { release(): void };
@@ -131,6 +132,9 @@ export class TimedActionScheduler {
       if (!this.accepting) return;
       this.lastTickAt = now;
       await this.options.loopCompletion?.reconcile(recoveryController.signal);
+      if(!this.accepting||recoveryController.signal.aborted)return;
+      try { await this.options.reconcileScheduledTasks?.(recoveryController.signal); }
+      catch (error) { console.warn('[timed-action] completion reconciliation failed:', error); }
       if(!this.accepting||recoveryController.signal.aborted)return;
       this.store.releaseStaleLocks(now, this.staleAfterMs);
       const notify = this.store.claimDueActions(now, this.maxClaimPerTick, {

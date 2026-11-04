@@ -29,3 +29,16 @@ it('preserves all seventeen actual CJS timed tuples with no actor transport addi
     },
   }); await check(api, port);
 });
+
+it('forwards actual completion facts through both TS and CJS event bridges unchanged', () => {
+  for (const cjs of [false,true]) {
+    const port=ipc();let api=createPreloadApi(port as never);
+    if(cjs)runInNewContext(readFileSync(new URL('../../electron/preload.cjs',import.meta.url),'utf8'),{
+      require(name:string){if(name==='electron')return {ipcRenderer:port,contextBridge:{exposeInMainWorld(_key:string,value:typeof api){api=value;}}};if(name==='os')return os;throw Error(name);},
+    });
+    const listener=vi.fn();const unsubscribe=api.onScheduledTaskDue(listener);
+    const event={taskId:'daily',runId:'run-1',runtimeTaskId:'task_daily',completed:true,success:false,runtimeState:'failed',error:'specific failure'};
+    const registration=port.on.mock.calls.find(call=>call[0]==='desktop:scheduledTaskDue')!;
+    registration[1]({},event);expect(listener).toHaveBeenCalledWith(event);unsubscribe();expect(port.off).toHaveBeenCalled();
+  }
+});

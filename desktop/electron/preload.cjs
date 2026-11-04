@@ -432,6 +432,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples'),
   savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle),
   deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id),
+  // Payload preserves dispatch and persisted execution completion facts, including runId.
   onScheduledTaskDue(handler) {
     const channel = 'desktop:scheduledTaskDue';
     const listener = (_event, payload) => {

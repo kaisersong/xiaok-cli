@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import {canonicalVerificationJson as completionJson} from '../../src/runtime/verification/protocol.js';
 import {freezeProjection} from './loop-business-projection.js';
 import {consumeLoopTimedCompletion,type LoopTimedReceipt} from './loop-timed-completion.js';
@@ -623,10 +624,29 @@ export class TimedActionStore {
   }
 
   listRuns(actionId: string): TimedActionRunRecord[] {
-    const rows = typedRows<TimedActionRunRow>(this.db.prepare(`
-      select * from timed_action_runs where action_id = ? order by started_at desc
+    const rows = typedRows<TimedActionRunRow & {event_json: string | null}>(this.db.prepare(`
+      select r.*,d.event_json from timed_action_runs r LEFT JOIN scheduled_task_delivery_receipts d ON d.run_id=r.run_id
+      where r.action_id = ? order by r.started_at desc
     `).all(actionId));
-    return rows.map(row => this.runRowToRecord(row));
+    return rows.map(row => ({...this.runRowToRecord(row), ...(row.event_json ? {delivery: JSON.parse(row.event_json) as ScheduledTaskDueEvent} : {})}));
+  }
+
+  listPendingScheduledDeliveries(): Array<{action: TimedActionRecord; run: TimedActionRunRecord}> {
+    const rows = typedRows<TimedActionRunRow>(this.db.prepare(`
+      SELECT r.* FROM timed_action_runs r JOIN timed_actions a ON a.id=r.action_id
+      LEFT JOIN scheduled_task_delivery_receipts d ON d.run_id=r.run_id
+      WHERE r.executor_kind='agent_task' AND r.status='success' AND r.runtime_task_id IS NOT NULL
+        AND d.run_id IS NULL AND a.status!='cancelled'
+        AND json_extract(a.executor_json,'$.roomTarget') IS NULL
+      ORDER BY r.started_at,r.run_id
+    `).all());
+    return rows.map(row => ({action: this.getAction(row.action_id)!, run: this.runRowToRecord(row)}));
+  }
+
+  acknowledgeScheduledDelivery(runId: string, now: number, event: ScheduledTaskDueEvent): void {
+    this.db.prepare(`INSERT OR IGNORE INTO scheduled_task_delivery_receipts(run_id,delivered_at,event_json)
+      SELECT run_id,?,? FROM timed_action_runs WHERE run_id=? AND executor_kind='agent_task'
+        AND status='success' AND runtime_task_id IS NOT NULL`).run(now,JSON.stringify(event),runId);
   }
 
   private applySchema(): void {
@@ -682,8 +702,28 @@ export class TimedActionStore {
     this.ensureTimedActionDescriptionColumn();
     this.ensureTimedActionReviewColumns();
     this.ensureTimedActionOwnershipColumns();
+    this.ensureScheduledDeliveryReceipts();
     this.db.exec(`CREATE TABLE IF NOT EXISTS loop_timed_completion_receipts(timed_run_id TEXT PRIMARY KEY REFERENCES timed_action_runs(run_id) ON DELETE RESTRICT,record_json TEXT NOT NULL,record_hash TEXT NOT NULL);CREATE TABLE IF NOT EXISTS loop_timed_action_tombstones(action_id TEXT PRIMARY KEY REFERENCES timed_actions(id) ON DELETE RESTRICT,deleted_at INTEGER NOT NULL);`);
 
+  }
+
+  private ensureScheduledDeliveryReceipts(): void {
+    this.transaction(() => {
+      if (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_task_delivery_receipts'").get()) return;
+      this.db.exec(`CREATE TABLE scheduled_task_delivery_receipts (
+        run_id TEXT PRIMARY KEY REFERENCES timed_action_runs(run_id) ON DELETE CASCADE,
+        delivered_at INTEGER NOT NULL,
+        event_json TEXT
+      )`);
+      // Upgrade quietly baselines older history; recover only each schedule's latest recent dispatch.
+      this.db.prepare(`INSERT INTO scheduled_task_delivery_receipts(run_id,delivered_at)
+        SELECT r.run_id,0 FROM timed_action_runs r WHERE r.executor_kind='agent_task'
+          AND r.status='success' AND r.runtime_task_id IS NOT NULL AND (
+            r.started_at < ? OR EXISTS(SELECT 1 FROM timed_action_runs newer
+              WHERE newer.action_id=r.action_id AND newer.executor_kind='agent_task' AND newer.status='success'
+                AND newer.runtime_task_id IS NOT NULL AND (newer.started_at>r.started_at
+                  OR newer.started_at=r.started_at AND newer.run_id>r.run_id)))`).run(Date.now()-24*60*60_000);
+    });
   }
 
   private ensureTimedActionDescriptionColumn(): void {
