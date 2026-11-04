@@ -1,6 +1,8 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {act,cleanup,renderHook} from '@testing-library/react';
 import {useScheduledTaskBootstrap} from '../../renderer/src/hooks/useScheduledTaskBootstrap';
+import {scheduledRunPresentation} from '../../electron/scheduled-run-presentation';
+import {createScheduledTaskDeliveryReconciler} from '../../electron/scheduled-task-delivery';
 const m=vi.hoisted(()=>({due:undefined as any,runs:vi.fn(),schedules:vi.fn(),update:vi.fn(),get:vi.fn()}));
 vi.mock('../../renderer/src/shared/desktop',()=>({getDesktopApi:()=>({onScheduledTaskDue:(fn:any)=>{m.due=fn;return ()=>{};},getScheduledTasks:m.schedules,getTimedActionRuns:m.runs})}));
 vi.mock('../../renderer/src/api',()=>({api:{listThreads:vi.fn().mockResolvedValue([]),getThread:m.get,createThread:vi.fn().mockResolvedValue({id:'thread-daily',taskIds:[]}),updateThreadTaskId:m.update}}));
@@ -9,7 +11,7 @@ beforeEach(()=>{vi.clearAllMocks();localStorage.clear();m.schedules.mockResolved
 afterEach(()=>cleanup());
 it('attaches dispatched runtime immediately, but only notifies when actual completion arrives',async()=>{
  const toast=vi.fn();window.addEventListener('xiaok:scheduled-toast',toast);renderHook(()=>useScheduledTaskBootstrap());
- await act(async()=>{await m.due({taskId:'daily',runId:'run-1',runtimeTaskId:'task_daily',completed:false,success:true,lastRunAt:2});});
+ await act(async()=>{await m.due({taskId:'daily',runId:'run-1',runtimeTaskId:'task_daily',...scheduledRunPresentation({status:'success',runtimeTaskId:'task_daily'}),success:true,lastRunAt:2});});
  expect(m.update).toHaveBeenCalledWith('thread-daily','task_daily');expect(toast).not.toHaveBeenCalled();expect(localStorage.getItem('xiaok:scheduled-unread')).toBeNull();
  const done={taskId:'daily',runId:'run-1',runtimeTaskId:'task_daily',completed:true,success:true,lastRunAt:2};
  await act(async()=>{await m.due(done);await m.due(done);});
@@ -42,4 +44,14 @@ it('ignores a late history response after unmount',async()=>{
  let release:any;const held=new Promise(resolve=>{release=resolve;});m.schedules.mockReturnValue(held);
  const {unmount}=renderHook(()=>useScheduledTaskBootstrap());await act(async()=>{await Promise.resolve();});const before=localStorage.getItem('xiaok:scheduled-tasks');unmount();
  await act(async()=>{release([{...row,runtimeTaskId:'task_late'}]);});expect(localStorage.getItem('xiaok:scheduled-tasks')).toBe(before);expect(m.update).not.toHaveBeenCalled();
+});
+it('renders the actual Main completion producer payload rather than an independently invented completion shape',async()=>{
+ const toast=vi.fn();window.addEventListener('xiaok:scheduled-toast',toast);await act(async()=>{renderHook(()=>useScheduledTaskBootstrap());});
+ const emitted:any[]=[];const acknowledged=vi.fn();
+ const reconcile=createScheduledTaskDeliveryReconciler({
+  store:{listPendingScheduledDeliveries:()=>[{action:{id:'daily',title:'Daily',nextDueAt:9} as any,run:{runId:'real-main-run',runtimeTaskId:'task_actual',startedAt:2} as any}],acknowledgeScheduledDelivery:acknowledged},
+  readSnapshot:async()=>({status:'completed'}),publish:event=>{emitted.push(event);return true;},
+ });
+ await reconcile();await act(async()=>{await m.due(emitted[0]);});
+ expect(acknowledged).toHaveBeenCalled();expect(m.update).toHaveBeenCalledWith('thread-daily','task_actual');expect(toast.mock.calls[0][0].detail).toMatchObject({taskId:'daily',success:true});window.removeEventListener('xiaok:scheduled-toast',toast);
 });
