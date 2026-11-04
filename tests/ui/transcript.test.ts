@@ -54,6 +54,36 @@ describe('transcript logger', () => {
     logger.close();
   });
 
+  // #128：会话还在收尾时 transcript 目录被删（测试 teardown 或用户手动删除），
+  // 迟到的输出/按键写入不能把 ENOENT 抛进 stdout 包装层，最终变成 process.exit(1)。
+  it('stops recording without throwing or recreating the directory once the transcript directory is removed', async () => {
+    const logger = await FileTranscriptLogger.open('sess_removed_dir', dir);
+    logger.recordOutput('stdout', 'before removal\n');
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(() => logger.recordOutput('stdout', 'late stdout\n')).not.toThrow();
+    expect(() => logger.recordOutput('stderr', 'late stderr\n')).not.toThrow();
+    expect(() => logger.record({ type: 'input_key', key: '/exit', timestamp: 1 })).not.toThrow();
+    expect(() => logger.close()).not.toThrow();
+    expect(existsSync(dir)).toBe(false);
+    // close 之后的语义不变：显式 record 仍然报 writer 已关闭。
+    expect(() => logger.record({ type: 'input_key', key: 'x', timestamp: 2 })).toThrow('transcript_writer_closed');
+  });
+
+  it('still throws non-ENOENT append failures instead of silently dropping the transcript', async () => {
+    const logger = await FileTranscriptLogger.open('sess_not_a_dir', dir);
+    rmSync(dir, { recursive: true, force: true });
+    writeFileSync(dir, 'not a directory');
+    try {
+      expect(() => logger.record({ type: 'input_key', key: 'x', timestamp: 1 })).toThrow(/ENOTDIR/u);
+      // 非 ENOENT 失败后不进入“停止记录”状态，下一次写入照样报错。
+      expect(() => logger.recordOutput('stdout', 'still visible\n')).toThrow(/ENOTDIR/u);
+    } finally {
+      rmSync(dir, { force: true });
+      try { logger.close(); } catch { /* 目录已被替换成文件，这里只关心 append 语义 */ }
+    }
+  });
+
   it('detects repeated prompt growth and repeated approval titles from normalized output', () => {
     const analysis = analyzeTranscriptEvents([
       { type: 'output', stream: 'stdout', raw: '> /\n', normalized: '> /\n', timestamp: 1 },

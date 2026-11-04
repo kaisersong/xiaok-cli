@@ -87,6 +87,10 @@ function resolveTranscriptMaxBytes(): number {
 export class FileTranscriptLogger implements TranscriptLogger {
   private suppressDepth = 0;
   private closed = false;
+  // The transcript directory vanished under a live writer (#128). Recording stops for good and
+  // the transcript directory is never recreated by late writes (the file-only warning still goes
+  // through the shared logger, which manages its own logs directory).
+  private detached = false;
   private outputCapWarned = false;
   private readonly exitHandler: () => void;
 
@@ -129,6 +133,7 @@ export class FileTranscriptLogger implements TranscriptLogger {
 
   record(event: TranscriptEvent): void {
     if (this.closed) throw new TranscriptStorageError('transcript_writer_closed', `writer is closed: ${this.sessionId}`);
+    if (this.detached) return;
     // Output chunks are the runaway-growth vector (a 2026-09 EIO feedback loop
     // produced a 384GB transcript). Structural events stay small, so they keep
     // recording after the cap trips and the session remains readable.
@@ -143,7 +148,28 @@ export class FileTranscriptLogger implements TranscriptLogger {
       }
       return;
     }
-    appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+    this.append(event);
+  }
+
+  /**
+   * record() runs inside the stdout/stderr capture and input dispatch, so a throw here
+   * escapes into whatever wrote to the terminal and ends in handleFatalError ->
+   * process.exit(1). appendFileSync creates a missing file, so ENOENT means the transcript
+   * directory itself is gone (removed by teardown or by the user while the session was
+   * still finalizing): degrade to "no transcript" instead of crashing the session.
+   * Every other error still throws; disk-full or permission problems stay visible.
+   */
+  private append(event: TranscriptEvent): void {
+    try {
+      appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error;
+      this.detached = true;
+      transcriptCapLogger.warn('transcript recording stopped: transcript directory no longer exists', {
+        sessionId: this.sessionId,
+        path: this.getFilePath(),
+      });
+    }
   }
 
   private transcriptAtOutputCap(): boolean {
