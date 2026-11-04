@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {decodeStoredRoomScheduledExecutor} from './room-scheduled-target.js';
 import {canonicalVerificationJson as completionJson} from '../../src/runtime/verification/protocol.js';
 import {freezeProjection} from './loop-business-projection.js';
 import {consumeLoopTimedCompletion,type LoopTimedReceipt} from './loop-timed-completion.js';
@@ -840,7 +841,7 @@ export class TimedActionStore {
       title: row.title,
       description: row.description ?? '',
       trigger: parseJson<TimedActionTrigger>(row.trigger_json),
-      executor: parseJson<TimedActionExecutor>(row.executor_json),
+      executor: decodeStoredRoomScheduledExecutor(parseJson<TimedActionExecutor>(row.executor_json)),
       policy: parseJson<TimedActionPolicy>(row.policy_json),
       status: row.status,
       source: row.source,
