@@ -64,6 +64,7 @@ import { attachCliConversationActivitiesWithinBudget, createActivityStartupNotic
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
+import { prewarmSegmentation } from '../ai/memory/segment.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner, isEmptyConfiguredHooksRunner } from '../runtime/hooks-runner.js';
 import type { RuntimeEvent } from '../runtime/events.js';
@@ -4234,6 +4235,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           : undefined);
         interactiveNotificationsReady = true;
         flushSubAgentNotices();
+        // First screen is up: load the segmentation dictionary off the main thread so the
+        // first turn's memory search does not pay for it (#145 / #147). Idempotent.
+        prewarmSegmentation();
         input = await pendingInput;if(input!==null)nativeInputOrigin=captureNativeInputOrigin(input);
       }
 

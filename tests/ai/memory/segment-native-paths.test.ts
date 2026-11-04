@@ -28,6 +28,40 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('native dictionary paths through the shared segmentation entry', () => {
+  // #145：vi.resetModules 会重新求值 segment.js，但 Node 的 require 缓存仍返回同一个已加载词典的 nodejieba；
+  // 每次重新求值都再 load 一次（约 1s）会让每个 chat 用例首轮多卡一次。同一 nodejieba 实例只能 load 一次。
+  it('does not reload the dictionary when the module registry is reset in the same process', async () => {
+    const nodejieba = { load: native.load, cut: native.cut };
+    native.require.mockReturnValue(nodejieba);
+    const first = await import('../../../src/ai/memory/segment.js');
+    expect(first.segmentQuery('南京市长江大桥')).toBe('南京市 长江大桥');
+    vi.resetModules();
+    const second = await import('../../../src/ai/memory/segment.js');
+    expect(second.segmentQuery('南京市长江大桥')).toBe('南京市 长江大桥');
+    expect(native.load).toHaveBeenCalledTimes(1);
+  });
+
+  // #147：查询文本没有中文时（首屏前按 cwd 检索记忆就是这种），不加载词典；输出与 jieba 可用时一致。
+  it('segments text without Chinese without loading the dictionary', async () => {
+    const segment = await import('../../../src/ai/memory/segment.js');
+    expect(segment.segmentQuery('  /work/project   dir ')).toBe('/work/project dir');
+    expect(native.load).not.toHaveBeenCalled();
+    // 只确认原生 binding 能加载（与 nodejieba 内部同一路径），不碰词典。
+    expect(native.require.mock.calls).toEqual([[join(base, 'build', 'Release', 'nodejieba.node')]]);
+  });
+
+  // 评审（DS m1 / codex minor）：词典可读但原生 binding 缺失时，master 的 getJieba() 失败、返回原文；无中文路径也要返回原文。
+  it('returns text without Chinese unchanged when the native binding is missing (master returns it unchanged when its load throws)', async () => {
+    native.require.mockImplementation((id: string) => {
+      if (id.endsWith('nodejieba.node')) throw Object.assign(new Error('binding missing'), { code: 'MODULE_NOT_FOUND' });
+      return { load: native.load, cut: native.cut };
+    });
+    const segment = await import('../../../src/ai/memory/segment.js');
+    expect(segment.segmentQuery('  /work/project   dir ')).toBe('  /work/project   dir ');
+    expect(await segment.segmentQueryAsync('  /work/project   dir ')).toBe('  /work/project   dir ');
+    expect(native.load).not.toHaveBeenCalled();
+  });
+
   it('passes all five Windows dictionary namespace paths to readability checks and native load', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const namespace = vi.spyOn(win32, 'toNamespacedPath').mockImplementation(p => 'NAMESPACE:' + p);
@@ -88,6 +122,8 @@ describe('native dictionary paths through the shared segmentation entry', () => 
     const segment = await import('../../../src/ai/memory/segment.js');
     expect(segment.segmentationAvailable()).toBe(false);
     expect(segment.segmentChinese('南京市长江大桥')).toBe('南京市长江大桥');
+    // 不加载词典的非中文路径也保持 master 的退化输出：词典不可用时原样返回。
+    expect(segment.segmentQuery('  /work/project   dir ')).toBe('  /work/project   dir ');
     expect(native.access).not.toHaveBeenCalled(); expect(native.require).not.toHaveBeenCalled();
   });
 

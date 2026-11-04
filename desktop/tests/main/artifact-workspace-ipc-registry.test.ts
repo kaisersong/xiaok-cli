@@ -81,7 +81,7 @@ describe('artifact workspace entire invoke domain through production registry', 
     vi.unstubAllEnvs(); resetIpcSchemaRegistryForTests();
     const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');
     const store = getDesktopMemoryStore(join(root, 'data'));
-    if ('close' in store && typeof store.close === 'function') store.close();
+    if ('close' in store && typeof store.close === 'function') await store.close();
     rmSync(root, { recursive: true, force: true });
   });
   it('registers all 18 Artifact and 12 Activity third-round channels with exact metadata and preserves earlier rounds', () => {
