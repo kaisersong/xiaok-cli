@@ -1,3 +1,4 @@
+import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
@@ -320,6 +321,8 @@ export const PRELOAD_API_KEYS = [
   'getEmbeddingModels',
   'downloadEmbeddingModel',
   'setEmbeddingModel',
+  'getYzjCliAuthState',
+  'controlYzjCliAuth',
   'getConnectorsConfig',
   'getHarnessOptimizationConfig',
   'saveHarnessOptimizationConfig',
@@ -682,6 +685,8 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getEmbeddingModels: 'desktop:getEmbeddingModels',
   downloadEmbeddingModel: 'desktop:downloadEmbeddingModel',
   setEmbeddingModel: 'desktop:setEmbeddingModel',
+  getYzjCliAuthState: 'desktop:getYzjCliAuthState',
+  controlYzjCliAuth: 'desktop:controlYzjCliAuth',
   getConnectorsConfig: 'desktop:getConnectorsConfig',
   getHarnessOptimizationConfig: 'desktop:getHarnessOptimizationConfig',
   saveHarnessOptimizationConfig: 'desktop:saveHarnessOptimizationConfig',
@@ -1402,6 +1407,8 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getEmbeddingModels(): Promise<EmbeddingModelIpcEntry[]>;
   downloadEmbeddingModel(modelId: string): Promise<void>;
   setEmbeddingModel(modelId: string): Promise<void>;
+  getYzjCliAuthState(): Promise<YzjCliAuthState>;
+  controlYzjCliAuth(action: YzjCliAuthAction): Promise<YzjCliAuthState>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
   getHarnessOptimizationConfig(): Promise<HarnessOptimizationState>;
   saveHarnessOptimizationConfig(input: Partial<Omit<HarnessOptimizationConfig, 'schemaVersion' | 'enabled' | 'configRevision' | 'publicGeneration' | 'researchGeneration'>>): Promise<HarnessOptimizationState>;
@@ -1966,6 +1973,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,
     downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
+    getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState') as Promise<YzjCliAuthState>,
+    controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action) as Promise<YzjCliAuthState>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,
     getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig') as ReturnType<DesktopApi['getHarnessOptimizationConfig']>,
     saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input) as ReturnType<DesktopApi['saveHarnessOptimizationConfig']>,

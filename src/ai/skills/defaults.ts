@@ -8,6 +8,9 @@ export function getBuiltinSkillRoots(): string[] {
   const cwdRoot = join(process.cwd(), 'data', 'skills');
   const candidates = [
     cwdRoot,
+    ...((process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+      ? [join((process as NodeJS.Process & { resourcesPath: string }).resourcesPath, 'skills')]
+      : []),
     join(__dirname, '../../../data/skills'),
     join(__dirname, '../../../../data/skills'),
   ].filter((candidate, index, all) => existsSync(candidate) && all.indexOf(candidate) === index);

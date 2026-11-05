@@ -15,6 +15,8 @@ import { registerDaemonCommands } from './commands/reminder.js';
 import { registerReviewCommands } from './commands/review.js';
 import { registerTranscriptCommands } from './commands/transcript.js';
 import { registerYZJCommands } from './commands/yzj.js';
+import { registerYzjCliCommand } from './commands/yzj-cli.js';
+import { configureBundledYzjCli } from './runtime/bundled-yzj-cli.js';
 import { registerPluginCommands } from './commands/plugin.js';
 import { registerMemoryCommands } from './commands/memory.js';
 import { registerDiagnoseCommands } from './commands/diagnose.js';
@@ -24,6 +26,7 @@ import { registerUpdateCommand } from './commands/update.js';
 import { handleFatalError, installGlobalCrashHandlers, setCrashContext } from './utils/crash-reporter.js';
 
 installGlobalCrashHandlers();
+configureBundledYzjCli();
 
 const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -51,6 +54,7 @@ registerProtectedControllerCommands(program);
 registerChatCommands(program);
 registerObservationCommands(program);
 registerYZJCommands(program);
+registerYzjCliCommand(program);
 registerPluginCommands(program);
 registerSkillCommands(program);
 registerMemoryCommands(program);
