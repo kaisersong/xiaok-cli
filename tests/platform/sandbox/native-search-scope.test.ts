@@ -156,9 +156,10 @@ it('rejects oversized authorization messages before invoking host policy',async(
   await expect(runner.search({cwd:f.approved,patterns:'*.ts'},undefined,guard)).rejects.toThrow('glob_worker_failed');
   expect(guard).not.toHaveBeenCalled();expect(runner.activeCount).toBe(0);
 });
-it('rejects oversized input files without treating them as a successful empty search',async()=>{
+it('skips oversized input files with a visible notice rather than a silent empty search',async()=>{
   const f=fixture();writeFileSync(f.good,Buffer.alloc(8*1024*1024+1,97));
-  expect(await f.registry.executeTool('grep',{path:f.good,pattern:'not-present'})).toContain('grep_read_limit');
+  const result=await f.registry.executeTool('grep',{path:f.good,pattern:'not-present'});
+  expect(result).toContain('搜索已截断');expect(result).toContain('8MB');
 });
 it('revalidates paths that contributed a zero-match search before returning that fact',async()=>{
   const f=fixture();const runner=createBoundedGlobRunner();let calls=0;

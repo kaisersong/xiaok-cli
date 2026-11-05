@@ -136,18 +136,25 @@ async function grep(input,limits){
   if(!files)throw Error('grep_read_failed');
   let readBytes=0,textBytes=0,pathBytes=0;
   const results=[];
+  // Match master's fallback: limits truncate the result (with a reason the
+  // host turns into a notice) instead of discarding everything found so far.
+  const truncated=new Set();
   const append=entry=>{
-    textBytes+=Buffer.byteLength(entry.text);pathBytes+=Buffer.byteLength(entry.path);
-    if(results.length>=limits.maxResults||textBytes>MAX_TEXT_BYTES||pathBytes>limits.maxPathBytes)throw Error('grep_result_limit');
-    results.push(entry);
+    const nextText=textBytes+Buffer.byteLength(entry.text),nextPath=pathBytes+Buffer.byteLength(entry.path);
+    if(results.length>=limits.maxResults||nextText>MAX_TEXT_BYTES||nextPath>limits.maxPathBytes){
+      truncated.add('result_limit');return false;
+    }
+    textBytes=nextText;pathBytes=nextPath;results.push(entry);return true;
   };
+  const single=files.length===1&&rootStat.isFile();
   for(const file of files){
     await assertPath(file.path);
     let handle,body;
     try{
       const before=await fs.lstat(file.path,{bigint:true});
       if(!before.isFile()||before.isSymbolicLink())throw Error('grep_read_failed');
-      if(before.size>BigInt(MAX_FILE_BYTES)||readBytes+Number(before.size)>MAX_READ_BYTES)throw Error('grep_read_limit');
+      if(before.size>BigInt(MAX_FILE_BYTES)){truncated.add('file_too_large');continue;}
+      if(readBytes+Number(before.size)>MAX_READ_BYTES){truncated.add('read_budget');break;}
       handle=await fs.open(file.path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
       const opened=await handle.stat({bigint:true});
       const same=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
@@ -165,24 +172,29 @@ async function grep(input,limits){
       await assertPath(file.path);
       body=buffer.subarray(0,bytes).toString('utf8');readBytes+=bytes;
     }catch(error){
-      if([SCOPE_DENIED,'grep_read_limit','grep_read_failed'].includes(error?.message))throw error;
-      throw Error('grep_read_failed');
+      if(error?.message===SCOPE_DENIED)throw error;
+      // An explicitly requested single file keeps its read error; inside a
+      // directory walk an unreadable or changing file is skipped like master.
+      if(single)throw Error('grep_read_failed');
+      continue;
     }finally{await handle?.close();}
     const lines=body.split(/\r?\n/),matches=[];
     for(let i=0;i<lines.length;i++)if(matcher.test(lines[i]))matches.push(i);
     if(!matches.length)continue;
-    if(outputMode==='files'){append({path:file.path,lineNo:0,text:''});continue;}
-    if(outputMode==='count'){append({path:file.path,lineNo:0,text:'',count:matches.length});continue;}
-    const included=new Set();
-    for(const index of matches){
+    if(outputMode==='files'){if(!append({path:file.path,lineNo:0,text:''}))break;continue;}
+    if(outputMode==='count'){if(!append({path:file.path,lineNo:0,text:'',count:matches.length}))break;continue;}
+    const included=new Set(),room=limits.maxResults-results.length;
+    outer:for(const index of matches){
       for(let i=Math.max(0,index-context);i<=Math.min(lines.length-1,index+context);i++){
+        if(!included.has(i)&&included.size>=room){truncated.add('result_limit');break outer;}
         included.add(i);
-        if(included.size>limits.maxResults)throw Error('grep_result_limit');
       }
     }
-    for(const index of [...included].sort((a,b)=>a-b))append({path:file.path,lineNo:index+1,text:lines[index]});
+    let full=false;
+    for(const index of [...included].sort((a,b)=>a-b))if(!append({path:file.path,lineNo:index+1,text:lines[index]})){full=true;break;}
+    if(full||truncated.has('result_limit'))break;
   }
-  return results;
+  return {entries:results,truncated:[...truncated]};
 }
 
 try {
@@ -190,7 +202,8 @@ try {
   // the effective heap exceeds 96 MiB old + 8 MiB young and V8 internal space.
   if (getHeapStatistics().heap_size_limit > 128 * 1024 * 1024) throw new Error('glob_worker_heap_config');
   const { input, limits } = workerData;
-  parentPort.postMessage({ ok: true, entries: await (workerData.kind==='grep'?grep(input,limits):search(input, limits)) });
+  const output = workerData.kind==='grep' ? await grep(input,limits) : { entries: await search(input, limits), truncated: [] };
+  parentPort.postMessage({ ok: true, entries: output.entries, truncated: output.truncated });
 } catch (error) {
   const code = error instanceof Error && ['glob_scan_limit', 'glob_result_limit', 'glob_worker_heap_config',SCOPE_DENIED,
     'grep_invalid_input','grep_invalid_regex','grep_read_failed','grep_read_limit','grep_result_limit'].includes(error.message)

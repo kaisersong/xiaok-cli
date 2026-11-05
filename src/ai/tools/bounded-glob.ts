@@ -14,6 +14,10 @@ export interface GrepSearchInput extends GlobSearchInput {
   grep:{pattern:string; context:number; outputMode:string};
 }
 export interface GrepEntry {path:string; lineNo:number; text:string; count?:number}
+/** Why a grep result was cut short; empty when it is complete. */
+export type GrepTruncation = 'result_limit'|'file_too_large'|'read_budget';
+const TRUNCATIONS = new Set<string>(['result_limit','file_too_large','read_budget']);
+export type SearchResult<T> = T[] & {truncated?: GrepTruncation[]};
 export function formatSearchPath(path:string):string {
   return /\p{Cc}/u.test(path)?JSON.stringify(path):path;
 }
@@ -37,7 +41,7 @@ export function createBoundedGlobRunner(options: {
   const timeoutMs = Math.min(10_000, Math.max(1, options.timeoutMs ?? 10_000));
   const maxWorkers = Math.min(2, Math.max(1, options.maxWorkers ?? 2));
     async function run<T extends GlobEntry|GrepEntry>(input: GlobSearchInput|GrepSearchInput,
-      kind:'glob'|'grep', signal?: AbortSignal, guard?:SearchPathGuard): Promise<T[]> {
+      kind:'glob'|'grep', signal?: AbortSignal, guard?:SearchPathGuard): Promise<SearchResult<T>> {
       signal?.throwIfAborted();
       const patterns = typeof input.patterns === 'string' ? [input.patterns] : input.patterns;
       if (!Array.isArray(patterns) || !patterns.length || patterns.some(p => typeof p !== 'string' || !p.length)
@@ -54,8 +58,8 @@ export function createBoundedGlobRunner(options: {
       });
       activeCount++;
       worker.stdout?.resume(); worker.stderr?.resume();
-      return new Promise<T[]>((resolve, reject) => {
-        let result: T[] | undefined;
+      return new Promise<SearchResult<T>>((resolve, reject) => {
+        let result: SearchResult<T> | undefined;
         let failure: unknown;
         let authorizationId=0,authorizedPaths=0;
         const checkedPaths=new Set<string>();let checkedPathBytes=0;
@@ -96,7 +100,10 @@ export function createBoundedGlobRunner(options: {
                 if(guard && !guard(entry.path)) throw Error('sandbox denied search path');
                 if(guard)remember(entry.path);
               }
-              result = entries;
+              const truncated:unknown=message.truncated??[];
+              if(!Array.isArray(truncated)||truncated.some(reason=>typeof reason!=='string'||!TRUNCATIONS.has(reason))
+                ||(kind==='glob'&&truncated.length)) throw Error('glob_worker_failed');
+              result = kind==='grep'?Object.assign(entries,{truncated:[...new Set(truncated as GrepTruncation[])]}):entries;
             } else {
               failure ??= new Error(ERROR_CODES.has(message?.code ?? '') ? message.code : 'glob_worker_failed');
             }

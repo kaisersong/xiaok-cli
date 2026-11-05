@@ -1,6 +1,6 @@
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
-import { runBoundedGrep, formatSearchPath } from './bounded-glob.js';
+import { runBoundedGrep, formatSearchPath, type GrepTruncation } from './bounded-glob.js';
 import {getSandboxSearchGuard,type SearchPathGuard} from '../../platform/sandbox/search-scope.js';
 import { resolve } from 'path';
 import type { Tool } from '../../types.js';
@@ -32,7 +32,7 @@ export async function runFallbackGrepSearch(input: {
   type?: string;
   signal?: AbortSignal;
   guard?:SearchPathGuard;
-}): Promise<string[]> {
+}): Promise<string[] & {truncated?: GrepTruncation[]}> {
   const {
     pattern,
     path: searchPath = process.cwd(),
@@ -42,12 +42,23 @@ export async function runFallbackGrepSearch(input: {
     type,
   } = input;
   const patterns=fileGlob?[fileGlob]:type?(TYPE_GLOBS[type]??[`**/*.${type}`]):['**/*'];
-  const entries=await runBoundedGrep({cwd:resolve(searchPath),patterns,dot:true,
+  const entries=await runBoundedGrep({cwd:resolve(searchPath),patterns,dot:true,skipInaccessible:true,
     ignore:['**/.git/**','**/node_modules/**'],grep:{pattern,context,outputMode:output_mode}},input.signal,input.guard);
-  return entries.map(entry=>{
+  const lines=entries.map(entry=>{
     const file=formatSearchPath(entry.path);
     return output_mode==='files'?file:output_mode==='count'?`${file}:${entry.count}`:`${file}:${entry.lineNo}:${entry.text}`;
   });
+  return Object.assign(lines,{truncated:entries.truncated??[]});
+}
+
+const TRUNCATION_NOTICE: Record<GrepTruncation,string>={
+  result_limit:'匹配结果超过上限，只返回了前面的部分',
+  file_too_large:'跳过了超过 8MB 的文件',
+  read_budget:'累计读取超过 16MB，后面的文件没有搜索',
+};
+/** Visible note so a cut-short search is never mistaken for a complete one. */
+export function grepTruncationNotice(truncated: readonly GrepTruncation[]|undefined):string{
+  return truncated?.length?`\n（搜索已截断：${truncated.map(reason=>TRUNCATION_NOTICE[reason]).join('；')}）`:'';
 }
 
 export const grepTool: Tool = {
@@ -100,9 +111,10 @@ export const grepTool: Tool = {
         // Never probe external programs or hand them a recursively searched root
         // when the host has installed a per-invocation sandbox policy.
         const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard});
-        if(!lines.length)return '（无匹配结果）';
+        const notice=grepTruncationNotice(lines.truncated);
+        if(!lines.length)return `（无匹配结果）${notice}`;
         const page=paginateItems(lines,offset,head_limit);
-        return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset);
+        return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset)+notice;
       }catch(error){
         toolContext?.signal?.throwIfAborted();
         const code=error instanceof Error?error.message:'';
@@ -138,19 +150,24 @@ export const grepTool: Tool = {
       ]
         : [];
 
+    let notice = '';
     const output = hasRg || hasGrep
       ? (spawnSync(cmd, args, { encoding: 'utf-8', maxBuffer: 1024 * 1024 }).stdout ?? '').trim()
-      : (await runFallbackGrepSearch({
-        pattern,
-        path: searchPath,
-        glob: fileGlob,
-        context,
-        output_mode,
-        type,
-        signal: toolContext?.signal,
-      })).join('\n').trim();
-    if (!output) return '（无匹配结果）';
+      : await (async () => {
+        const lines = await runFallbackGrepSearch({
+          pattern,
+          path: searchPath,
+          glob: fileGlob,
+          context,
+          output_mode,
+          type,
+          signal: toolContext?.signal,
+        });
+        notice = grepTruncationNotice(lines.truncated);
+        return lines.join('\n').trim();
+      })();
+    if (!output) return `（无匹配结果）${notice}`;
     const page = paginateItems(output.split(/\r?\n/), offset, head_limit);
-    return appendPaginationNotice(truncateText(page.items.join('\n'), max_chars).text, page.nextOffset);
+    return appendPaginationNotice(truncateText(page.items.join('\n'), max_chars).text, page.nextOffset) + notice;
   },
 };
