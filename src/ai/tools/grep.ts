@@ -112,7 +112,7 @@ export const grepTool: Tool = {
         // when the host has installed a per-invocation sandbox policy.
         const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard});
         const notice=grepTruncationNotice(lines.truncated);
-        if(!lines.length)return `（无匹配结果）${notice}`;
+        if(!lines.length)return notice?notice.trimStart():'（无匹配结果）';
         const page=paginateItems(lines,offset,head_limit);
         return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset)+notice;
       }catch(error){
@@ -166,7 +166,8 @@ export const grepTool: Tool = {
         notice = grepTruncationNotice(lines.truncated);
         return lines.join('\n').trim();
       })();
-    if (!output) return `（无匹配结果）${notice}`;
+    // A cut-short search with nothing found must not also claim there are no matches.
+    if (!output) return notice ? notice.trimStart() : '（无匹配结果）';
     const page = paginateItems(output.split(/\r?\n/), offset, head_limit);
     return appendPaginationNotice(truncateText(page.items.join('\n'), max_chars).text, page.nextOffset) + notice;
   },

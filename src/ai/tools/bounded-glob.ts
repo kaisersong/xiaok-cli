@@ -101,8 +101,10 @@ export function createBoundedGlobRunner(options: {
                 if(guard)remember(entry.path);
               }
               const truncated:unknown=message.truncated??[];
-              if(!Array.isArray(truncated)||truncated.some(reason=>typeof reason!=='string'||!TRUNCATIONS.has(reason))
-                ||(kind==='glob'&&truncated.length)) throw Error('glob_worker_failed');
+              // Index every slot: .some() skips holes, so a sparse array would smuggle undefined through.
+              if(!Array.isArray(truncated)||truncated.length>TRUNCATIONS.size||(kind==='glob'&&truncated.length)) throw Error('glob_worker_failed');
+              for(let i=0;i<truncated.length;i++){const reason:unknown=truncated[i];
+                if(typeof reason!=='string'||!TRUNCATIONS.has(reason)) throw Error('glob_worker_failed');}
               result = kind==='grep'?Object.assign(entries,{truncated:[...new Set(truncated as GrepTruncation[])]}):entries;
             } else {
               failure ??= new Error(ERROR_CODES.has(message?.code ?? '') ? message.code : 'glob_worker_failed');
