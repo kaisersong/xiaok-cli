@@ -65,6 +65,10 @@ describe('grep fallback keeps partial results like master',()=>{
     expect(lines.some(line=>line.includes('hello visible'))).toBe(true);
     expect(lines.some(line=>line.includes('hello hidden'))).toBe(false);
   });
+  it.skipIf(!canLock)('still fails when the one file the user named explicitly cannot be read',async()=>{
+    const root=dir();const file=join(root,'named.txt');writeFileSync(file,'hello hidden');chmodSync(file,0);
+    await expect(runFallbackGrepSearch({pattern:'hello',path:file})).rejects.toThrow(/grep_read_failed/);
+  });
   it('skips a file over 8MB and reports it instead of grep_read_limit',async()=>{
     const root=dir();writeFileSync(join(root,'big.bin'),Buffer.alloc(8*1024*1024+1,97));
     const result=await grep(root);
