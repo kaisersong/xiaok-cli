@@ -1173,3 +1173,18 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.getByTestId('chat-messages')).toHaveTextContent('第一段第二段第三段');
   });
 });
+
+it('uses the explicit assistant thread on /assistant and applies draft requests without recovering again or starting execution', async () => {
+ mockCreateTask.mockResolvedValue({taskId:'task-assistant-first'});mockUpdateThreadTaskId.mockResolvedValue(undefined);
+ let next!:(event:unknown)=>void;mockSubscribeTask.mockImplementation((_id,handler)=>{next=handler;return ()=>{};});
+ mockGetThread.mockResolvedValue({id:'assistant-dedicated',title:'Assistant',status:'idle',mode:'work',createdAt:1,updatedAt:1,currentTaskId:null,taskIds:[]});
+ const ui=(draftRequest?:{id:number;text:string})=><MemoryRouter initialEntries={['/assistant']}><LocaleProvider><ChatShell threadId="assistant-dedicated" draftRequest={draftRequest} /></LocaleProvider></MemoryRouter>;
+ const view=render(ui()); await screen.findByLabelText('chat-input'); expect(mockGetThread).toHaveBeenCalledWith('assistant-dedicated');
+ const reads=mockGetThread.mock.calls.length;view.rerender(ui({id:1,text:'请继续跟进日程'}));await waitFor(()=>expect(screen.getByLabelText('chat-input')).toHaveValue('请继续跟进日程'));
+ expect(mockGetThread).toHaveBeenCalledTimes(reads);expect(mockCreateTask).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'submit-now'}));await waitFor(()=>expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({context:{threadId:'assistant-dedicated'}})));
+ expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('assistant-dedicated','task-assistant-first');
+ await act(async()=>next({type:'result',result:{summary:'第一条回复',artifacts:[]}}));
+ mockCreateTask.mockResolvedValue({taskId:'task-assistant-followup'});fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+ await waitFor(()=>expect(mockCreateTask).toHaveBeenLastCalledWith(expect.objectContaining({context:{threadId:'assistant-dedicated',taskIds:['task-assistant-first']}})));
+});

@@ -296,7 +296,7 @@ export function DesktopSettings({ onClose }: Props) {
 
       {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="px-8 py-6 max-w-[700px]">
+        <div className={`px-8 py-6 ${activeTab === 'connectors' ? 'w-full max-w-[1100px]' : 'max-w-[700px]'}`}>
           {activeTab === 'model' && <ModelPane />}
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}

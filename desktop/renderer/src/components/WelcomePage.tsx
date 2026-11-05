@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FolderKanban } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { api } from '../api';
@@ -78,7 +78,11 @@ function useTypewriter(text: string, speed = 80) {
 
 export function WelcomePage() {
   const navigate = useNavigate();
-  const [prompt, setPrompt] = useState('');
+  const location = useLocation();
+  const [prompt, setPrompt] = useState(() => {
+    const draft = location.state?.assistantDraftPrompt;
+    return typeof draft === 'string' ? draft : '';
+  });
   const [automation, setAutomation] = useState<AutomationOverviewSnapshotView | null>(null);
   const [automationLoadState, setAutomationLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [assistantSnapshot, setAssistantSnapshot] = useState<AssistantHomeSnapshot | null>(null);

@@ -1,3 +1,4 @@
+import { registerMailConnectorIpc } from '../../electron/mail-connector-typed-ipc.js';
 import { registerEnterpriseCliIpc } from '../../electron/enterprise-cli-typed-ipc.js';
 import { registerYzjCliAuthIpc } from '../../electron/yzj-cli-auth-typed-ipc.js';
 import { registerGoalPublicationIpc } from '../../electron/goal-publication-typed-ipc.js';
@@ -326,6 +327,16 @@ describe('preload API contract', () => {
       'setEmbeddingModel',
       'getEnterpriseCliConnectors',
       'controlEnterpriseCliConnector',
+      'getMailAccounts',
+      'connectMailAccount',
+      'disconnectMailAccount',
+      'setMailAccountAccess',
+      'testMailAccount',
+      'searchMailMessages',
+      'readMailMessage',
+      'getMailOAuthState',
+      'startMailOAuth',
+      'cancelMailOAuth',
       'getYzjCliAuthState',
       'controlYzjCliAuth',
       'getConnectorsConfig',
@@ -1122,6 +1133,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerKnowledgeIpc({ handle: channel => { channels.add(channel); } });
   registerScheduledTimedActionIpc({ handle: channel => { channels.add(channel); } });
   registerEnterpriseCliIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerMailConnectorIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerYzjCliAuthIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConnectorsIpc({ handle: channel => { channels.add(channel); } });
   registerRecorderWindowIpc({ handle: channel => { channels.add(channel); } }, new Map(), { isMainWindowSender: () => false, isRecorderWindowSender: () => false });
