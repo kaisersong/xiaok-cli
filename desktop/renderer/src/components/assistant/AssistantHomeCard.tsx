@@ -13,6 +13,7 @@ export interface AssistantHomeCardProps {
   onPause: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onOpenDetails: () => void;
+  onPrepareSuggestion?: (suggestion: AssistantHomeSnapshot['suggestions'][number]) => void;
 }
 
 export function AssistantHomeCard({
@@ -23,6 +24,7 @@ export function AssistantHomeCard({
   onPause,
   onResume,
   onOpenDetails,
+  onPrepareSuggestion,
 }: AssistantHomeCardProps) {
   const { t } = useLocale();
 
@@ -92,10 +94,11 @@ export function AssistantHomeCard({
                   {suggestions.map(suggestion => (
                     <li key={suggestion.id} className="flex gap-2 text-xs">
                       <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--c-accent)]" />
-                      <span className="min-w-0">
+                      <span className="min-w-0 flex-1">
                         <span className="block font-medium text-[var(--c-text-primary)]">{suggestion.title}</span>
                         <span className="mt-0.5 block text-[var(--c-text-secondary)]">{suggestion.summary}</span>
                       </span>
+                      {onPrepareSuggestion && <button type="button" aria-label={t.assistant.workspace.prepareSuggestion(suggestion.title)} onClick={() => onPrepareSuggestion(suggestion)} className="self-start shrink-0 rounded px-2 py-1 text-[11px] font-medium text-[var(--c-accent)] hover:bg-[var(--c-bg-deep)]">{t.assistant.workspace.prepare}</button>}
                     </li>
                   ))}
                 </ol>

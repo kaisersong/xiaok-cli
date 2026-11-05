@@ -1,3 +1,6 @@
+import { MailAccountStore } from './mail-account-store.js';
+import { MailConnectorService } from './mail-connector-service.js';
+import { registerMailConnectorIpc } from './mail-connector-typed-ipc.js';
 import { EnterpriseCliConnectorService } from './enterprise-cli-service.js';
 import { registerEnterpriseCliIpc } from './enterprise-cli-typed-ipc.js';
 import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-cli-runtime.js';
@@ -38,7 +41,7 @@ import { scheduledRunPresentation } from './scheduled-run-presentation.js';
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
-import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
+import { app, safeStorage, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -717,6 +720,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
+  const mailConnectors = new MailConnectorService({ store: new MailAccountStore(app.getPath('userData'), { isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(), encryptString: value => safeStorage.encryptString(value), decryptString: value => safeStorage.decryptString(value), ...(process.platform === 'linux' ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}) }), openExternal: url => shell.openExternal(url) });
+  registerMailConnectorIpc(shutdownAwareIpc, mailConnectors, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('mail-connectors', async () => { mailConnectors.dispose(); });
   const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
   const enterpriseClis = {
     dingtalk: new EnterpriseCliConnectorService('dingtalk', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'dingtalk-connection.json') }),
@@ -832,6 +838,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!desktopShutdownGate.isOpen) return window;
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    mailConnectors,
     harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
