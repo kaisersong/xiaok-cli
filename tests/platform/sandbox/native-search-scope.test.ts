@@ -160,6 +160,8 @@ it('skips oversized input files with a visible notice rather than a silent empty
   const f=fixture();writeFileSync(f.good,Buffer.alloc(8*1024*1024+1,97));
   const result=await f.registry.executeTool('grep',{path:f.good,pattern:'not-present'});
   expect(result).toContain('搜索已截断');expect(result).toContain('8MB');
+  // Nothing found but cut short: only the notice, never also "no matches".
+  expect(result).toBe('（搜索已截断：跳过了超过 8MB 的文件）');
 });
 it('revalidates paths that contributed a zero-match search before returning that fact',async()=>{
   const f=fixture();const runner=createBoundedGlobRunner();let calls=0;

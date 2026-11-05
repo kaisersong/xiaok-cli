@@ -129,6 +129,12 @@ describe('grep fallback keeps partial results like master',()=>{
   });
   it('rejects a worker that forges truncation reasons, including holes in a sparse array',async()=>{
     const root=bare();
+    // Positive control: the same fake worker with a legal reason is accepted, so the
+    // rejections below come from validation, not from a broken fixture.
+    const ok=join(root,'ok-worker.mjs');
+    writeFileSync(ok,"import {parentPort} from 'node:worker_threads';parentPort.postMessage({ok:true,entries:[],truncated:['read_budget']});");
+    const accepted=await createBoundedGlobRunner({workerUrl:pathToFileURL(ok)}).grep({cwd:root,patterns:'**/*',grep:{pattern:'hello',context:0,outputMode:'lines'}});
+    expect(accepted).toHaveLength(0);expect(accepted.truncated).toEqual(['read_budget']);
     for(const [name,forged] of [['sparse','new Array(1)'],['unknown',"['made_up']"],['oversized',"['result_limit','result_limit','result_limit','result_limit']"]] as const){
       const script=join(root,`${name}-worker.mjs`);
       writeFileSync(script,`import {parentPort} from 'node:worker_threads';parentPort.postMessage({ok:true,entries:[],truncated:${forged}});`);
@@ -138,6 +144,7 @@ describe('grep fallback keeps partial results like master',()=>{
   });
   it('shows the truncation notice through the non-sandbox tool entry when rg and grep are missing',async()=>{
     const root=dir();writeFileSync(join(root,'big.bin'),Buffer.alloc(8*1024*1024+1,97));
+    const real=(await vi.importActual<typeof import('child_process')>('child_process')).spawnSync;
     vi.mocked(spawnSync).mockImplementation((()=>({status:null,error:new Error('ENOENT')})) as never);
     try{
       const result=await grepTool.execute({pattern:'hello',path:root});
@@ -146,7 +153,7 @@ describe('grep fallback keeps partial results like master',()=>{
       const none=await grepTool.execute({pattern:'hello',path:empty});
       expect(none).toMatch(/^（搜索已截断：跳过了超过 8MB 的文件）$/);expect(none).not.toContain('无匹配');
       expect(vi.mocked(spawnSync)).toHaveBeenCalled();
-    }finally{vi.mocked(spawnSync).mockReset();vi.mocked(spawnSync).mockImplementation((await vi.importActual<typeof import('child_process')>('child_process')).spawnSync);}
+    }finally{vi.mocked(spawnSync).mockClear();vi.mocked(spawnSync).mockImplementation(real);}
   });
   it('turns every truncation reason into a visible notice and none into nothing',()=>{
     expect(grepTruncationNotice([])).toBe('');
