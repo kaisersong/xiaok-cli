@@ -1,3 +1,4 @@
+import { configureInstalledEnterpriseClis } from './runtime/enterprise-cli-runtime.js';
 import {registerProtectedControllerCommands} from './commands/protected-controller.js';
 import {registerProtectedArchiveCommands} from './commands/protected-archive.js';
 import { readFileSync } from 'node:fs';
@@ -27,6 +28,7 @@ import { handleFatalError, installGlobalCrashHandlers, setCrashContext } from '.
 
 installGlobalCrashHandlers();
 configureBundledYzjCli();
+configureInstalledEnterpriseClis();
 
 const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
