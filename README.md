@@ -165,6 +165,8 @@ Login requires personal authorization; use `auth login --device` without a brows
 
 In Desktop, open Settings → Connectors → Yunzhijia and select Sign in via browser. The default browser opens for QR authorization; Desktop shows waiting, cancel, retry, and verified sign-in states. Main owns the wait independently of ordinary shell timeouts.
 
+Connectors also supports DingTalk, Feishu, and WeCom. Their official CLIs are optional: click Download and install to download into the xiaok user tools directory, then connect through browser QR authorization. Feishu requires app setup on first use; the official WeCom CLI connects as a bot. Installed CLIs are available to subsequent tasks as `dws`, `lark-cli`, and `wecom-cli`.
+
 The managed update command uses xiaok's Node/Electron runtime and the official installer without requiring system npm. `--profile` / `--endpoint` select a business API identity/endpoint; they do not change the software distribution source.
 
 On first startup, xiaok copies the executable to `~/.xiaok/tools/yzj-cli/<platform>-<arch>/` (respecting `XIAOK_CONFIG_DIR`) and adds it to the current process PATH so agent shell commands can use `yzj-cli`. Updates modify this user copy and survive restarts and xiaok upgrades. Continue updating the CLI explicitly with `xiaok yzj-cli update`; the application installation stays read-only.

@@ -1,4 +1,5 @@
 import { useLocale } from '../../contexts/LocaleContext';
+import { EnterpriseCliConnectors } from './EnterpriseCliConnectors';
 import { YzjCliAuthCard } from './YzjCliAuthCard';
 
 export function AppConnectorsSettings() {
@@ -8,6 +9,7 @@ export function AppConnectorsSettings() {
       <h2 className="text-lg font-semibold text-[var(--c-text-primary)]">{t.nav.connectors}</h2>
       <p className="mb-6 mt-2 text-sm text-[var(--c-text-secondary)]">{t.desktopSettings.appConnectorsDesc}</p>
       <YzjCliAuthCard />
+      <EnterpriseCliConnectors />
     </div>
   );
 }

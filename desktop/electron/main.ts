@@ -1,3 +1,6 @@
+import { EnterpriseCliConnectorService } from './enterprise-cli-service.js';
+import { registerEnterpriseCliIpc } from './enterprise-cli-typed-ipc.js';
+import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-cli-runtime.js';
 import { YzjCliAuthService } from './yzj-cli-auth-service.js';
 import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
@@ -689,6 +692,7 @@ function createInitialWindow(): Promise<BrowserWindow> {
 async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
   configureBundledYzjCli();
+  configureInstalledEnterpriseClis();
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
   const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
@@ -714,6 +718,13 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
   const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
+  const enterpriseClis = {
+    dingtalk: new EnterpriseCliConnectorService('dingtalk', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'dingtalk-connection.json') }),
+    feishu: new EnterpriseCliConnectorService('feishu', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'feishu-connection.json') }),
+    wecom: new EnterpriseCliConnectorService('wecom', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'wecom-connection.json') }),
+  };
+  registerEnterpriseCliIpc(shutdownAwareIpc, enterpriseClis, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('enterprise-cli-connectors', async () => { await Promise.all(Object.values(enterpriseClis).map(service => service.dispose())); });
   registerLifetimeDisposerStep('yzj-cli-auth', () => yzjCliAuth.dispose());
   registerYzjCliAuthIpc(shutdownAwareIpc, yzjCliAuth, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (

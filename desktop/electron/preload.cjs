@@ -452,6 +452,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  getEnterpriseCliConnectors: () => ipcRenderer.invoke('desktop:getEnterpriseCliConnectors'),
+  controlEnterpriseCliConnector: (provider, action) => ipcRenderer.invoke('desktop:controlEnterpriseCliConnector', provider, action),
   getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState'),
   controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action),
   getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig'),

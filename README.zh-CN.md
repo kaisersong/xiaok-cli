@@ -165,6 +165,8 @@ xiaok yzj-cli update
 
 Desktop 可在「设置 → 连接器 → 云之家」点击「浏览器扫码登录」，默认浏览器会打开扫码授权页。界面显示等待、取消与重试，授权后自动核验身份；等待由主进程管理，不受普通 shell 超时影响。
 
+连接器还支持钉钉、飞书和企业微信。三个官方 CLI 均不默认内置，点击各自的「下载安装」后才下载到 xiaok 用户工具目录，再由浏览器扫码连接。飞书首次使用需配置应用；企微官方 CLI 使用机器人身份。安装成功后，后续任务可通过 `dws`、`lark-cli`、`wecom-cli` 调用。
+
 内置更新入口使用 xiaok 自带的 Node/Electron 运行时，查询官方发行版本并调用官方安装器，无需系统 npm。`--profile` / `--endpoint` 选择业务身份和 API 地址，不改变软件更新源。
 
 首次启动将可执行文件复制到 `~/.xiaok/tools/yzj-cli/<平台>-<架构>/`（遵循 `XIAOK_CONFIG_DIR`），并仅加入 xiaok 进程及其子进程的 PATH，因此助手可直接执行 `yzj-cli`。`update` 更新该用户副本，重启或升级 xiaok 会保留它；后续 CLI 更新仍使用 `xiaok yzj-cli update`。应用安装目录保持只读。
