@@ -3293,6 +3293,7 @@ export interface LocaleStrings {
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
     taskInterrupted: string;
+    taskExecutionInterrupted: string;
     modelKeyMissing: string;
     modelAuthFailed: string;
     modelServiceFailed: string;

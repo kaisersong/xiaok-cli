@@ -1,3 +1,4 @@
+import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
 import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
 import {pendingTaskQuestion} from '../lib/pending-task-question';
 import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
@@ -415,7 +416,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       setCurrentQuestion(null);
       setMessages(settleChatProgress);
       setStatus(event.status === 'cancelled' ? 'idle' : event.status);
-      if (event.status === 'failed' && source.lastErrorMessage === 'app_shutdown') {
+      if (event.status === 'failed' && isTaskExecutionInterruption(source.lastErrorMessage)) {
         const terminalEventCount = source.eventCount;
         void api.recoverTask(sourceTaskId).then(({snapshot}) => {
           if (!acceptsSource(source) || source.eventCount !== terminalEventCount) return;
@@ -720,7 +721,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : t.chatShell.taskExecutionFailed(reason),
+              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : msg === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -1095,7 +1096,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : t.chatShell.taskExecutionFailed(reason),
+              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : rawMessage === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }

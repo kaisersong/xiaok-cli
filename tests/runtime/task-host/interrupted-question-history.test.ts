@@ -1,3 +1,4 @@
+import{isTaskExecutionInterruption}from'../../../desktop/shared/task-interruption.js';
 import {expect,it} from 'vitest';
 import {buildHistoryFromTaskSnapshots} from '../../../src/runtime/task-host/task-runtime-host.js';
 import type {TaskSnapshot,DesktopTaskEvent} from '../../../src/runtime/task-host/types.js';
@@ -9,3 +10,7 @@ it.each(['other','app_shutdown extra'])('does not add pending question for %s',m
 it('does not add a resolved, foreign, approval or older superseded question',()=>{const variants:DesktopTaskEvent[][]=[[q,{type:'question_resolved',questionId:'qa',answerText:'Keep Q719'}],[{...q,question:{...q.question,taskId:'foreign'}}],[{...q,question:{...q.question,kind:'confirm_understanding'}}],[q,{...q,question:{...q.question,questionId:'new'}},{type:'question_resolved',questionId:'new',answerText:'done'}]];for(const events of variants){const r=buildHistoryFromTaskSnapshots([snap([...events,{type:'error',message:'app_shutdown'}])]);expect(r.history[1].content).not.toContain('Choose nonce Q719');}});
 it.each(['completed','cancelled']as const)('keeps %s history unchanged',status=>{const r=buildHistoryFromTaskSnapshots([{...snap(),status,result:{summary:'Existing result',artifacts:[]}}]);expect(r.history[1].content).toBe('Existing result');});
 it('preserves protected-history restore refusal',()=>{expect(()=>buildHistoryFromTaskSnapshots([{...snap(),executionProtected:true}])).toThrow('SOL_PI_PROTECTED_HISTORY_RESTORE_NOT_READY');});
+
+it('preserves question context after the real prior-boot interruption reason',()=>{const r=buildHistoryFromTaskSnapshots([snap([q,{type:'error',message:'multi_agent_prepare_interrupted'},{type:'task_terminal',status:'failed'}])]);expect(r.history[1].content).toContain(q.question.prompt);expect(r.history[1].content).toContain('Keep Q719');});
+
+it.each(['app_shutdown','multi_agent_prepare_interrupted','app_shutdown extra','multi_agent_prepare_interrupted extra','provider_failed','recovery_unconfirmed'])('keeps Main history eligibility aligned with the Desktop public contract: %s',message=>{const r=buildHistoryFromTaskSnapshots([snap([q,{type:'error',message}])]);expect(r.history[1].content.includes(q.question.prompt)).toBe(isTaskExecutionInterruption(message));});

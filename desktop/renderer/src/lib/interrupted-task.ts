@@ -1,3 +1,4 @@
+import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
 import type { DesktopTaskEvent, NeedsUserQuestion, TaskSnapshot } from '../../../shared/task-types';
 
 export interface InterruptedTask { taskId: string; choices?: NeedsUserQuestion['choices'] }
@@ -5,7 +6,7 @@ export interface InterruptedTask { taskId: string; choices?: NeedsUserQuestion['
 export function readTaskInterruption(snapshot: TaskSnapshot | undefined, expected: {taskId: string | null; threadId: string}): InterruptedTask | null {
   if (!snapshot || snapshot.status !== 'failed' || snapshot.taskId !== expected.taskId || snapshot.context?.threadId !== expected.threadId) return null;
   const error = snapshot.events.findLast((event): event is Extract<DesktopTaskEvent, {type: 'error'}> => event.type === 'error');
-  if (error?.message !== 'app_shutdown') return null;
+  if (!isTaskExecutionInterruption(error?.message)) return null;
   const resolved = new Set<string>();
   for (let index = snapshot.events.length - 1; index >= 0; index--) {
     const event = snapshot.events[index];

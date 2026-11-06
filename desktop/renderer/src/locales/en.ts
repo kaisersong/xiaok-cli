@@ -3460,6 +3460,7 @@ export const en: LocaleStrings = {
     goalAttachmentUnknown: "Task attachment is unconfirmed and execution may have started. Do not resubmit; reopen the conversation to view saved state.",
     taskExecutionFailed: (reason) => `Task failed: ${reason}`,
     taskInterrupted: "The app closed during the previous turn. Its history was saved.",
+    taskExecutionInterrupted: "The previous turn was interrupted. Its history was saved.",
     // 待设计师确认：缺少模型 Key 的保守文案。
     modelKeyMissing: "No model API key was found, so the task can't start. Open Settings → Models and add your API key.",
     modelAuthFailed: "Model authentication failed. The API key is invalid or expired. Reconfigure the provider in Settings.",

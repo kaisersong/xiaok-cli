@@ -2216,11 +2216,16 @@ function isValidContextSnapshot(snapshot: TaskSnapshot): boolean {
     && typeof snapshot.status === 'string';
 }
 
+// Core and Desktop have separate compile roots; the history test pins this protocol to Desktop's public predicate.
+function isTaskExecutionInterruption(message: unknown): boolean {
+  return message === 'app_shutdown' || message === 'multi_agent_prepare_interrupted';
+}
+
 function formatAssistantContext(snapshot: TaskSnapshot): string {
   const progress = formatAssistantProgressContext(snapshot);
-  // This is the persisted shutdown code, not a localized or substring match.
+  // Recognize only exact persisted interruption codes, not localized or substring matches.
   const lastError = [...snapshot.events].reverse().find((event): event is Extract<DesktopTaskEvent, {type: 'error'}> => event.type === 'error');
-  if (snapshot.status !== 'failed' || lastError?.message !== 'app_shutdown') return progress;
+  if (snapshot.status !== 'failed' || !isTaskExecutionInterruption(lastError?.message)) return progress;
   const resolved = new Set<string>();
   for (let index = snapshot.events.length - 1; index >= 0; index--) {
     const event = snapshot.events[index];
@@ -2229,7 +2234,7 @@ function formatAssistantContext(snapshot: TaskSnapshot): string {
     const question = event.question;
     // Never promote another task's question, an approval, or an older question.
     if (question.taskId !== snapshot.taskId || question.kind !== 'freeform' || resolved.has(question.questionId)) return progress;
-    return ['上一轮因应用关闭中断，以下问题尚未收到用户回答：', question.prompt,
+    return ['上一轮执行已中断，以下问题尚未收到用户回答：', question.prompt,
       ...(question.choices ?? []).map(choice => `- ${choice.label}`), '此前进展：', progress].join('\n');
   }
   return progress;
