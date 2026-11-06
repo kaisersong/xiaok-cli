@@ -1,4 +1,4 @@
-import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
+import { isKimiCodingRuntimeModel } from '../ai/providers/kimi-models.js';
 import type { Command } from 'commander';
 import type { ModelConfigEntry, ProviderConfig, ProviderModelVariant } from '../ai/providers/types.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
@@ -43,7 +43,7 @@ function copyCatalogModelEntry(
 ): ModelConfigEntry {
   const copyRuntimeOptions = variant.runtimeOptions && (
     providerId !== 'kimi'
-    || !isKimiCodingModel(variant.model)
+    || !isKimiCodingRuntimeModel(variant.model)
     || (
       providerConfig.protocol === 'openai_legacy'
       && isOfficialKimiK3OpenAIEndpoint(providerConfig.baseUrl)
