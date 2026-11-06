@@ -2217,6 +2217,25 @@ function isValidContextSnapshot(snapshot: TaskSnapshot): boolean {
 }
 
 function formatAssistantContext(snapshot: TaskSnapshot): string {
+  const progress = formatAssistantProgressContext(snapshot);
+  // This is the persisted shutdown code, not a localized or substring match.
+  const lastError = [...snapshot.events].reverse().find((event): event is Extract<DesktopTaskEvent, {type: 'error'}> => event.type === 'error');
+  if (snapshot.status !== 'failed' || lastError?.message !== 'app_shutdown') return progress;
+  const resolved = new Set<string>();
+  for (let index = snapshot.events.length - 1; index >= 0; index--) {
+    const event = snapshot.events[index];
+    if (event.type === 'question_resolved') resolved.add(event.questionId);
+    if (event.type !== 'needs_user') continue;
+    const question = event.question;
+    // Never promote another task's question, an approval, or an older question.
+    if (question.taskId !== snapshot.taskId || question.kind !== 'freeform' || resolved.has(question.questionId)) return progress;
+    return ['上一轮因应用关闭中断，以下问题尚未收到用户回答：', question.prompt,
+      ...(question.choices ?? []).map(choice => `- ${choice.label}`), '此前进展：', progress].join('\n');
+  }
+  return progress;
+}
+
+function formatAssistantProgressContext(snapshot: TaskSnapshot): string {
   const explicitSummary = snapshot.result?.summary?.trim();
   if (explicitSummary) {
     return explicitSummary;
