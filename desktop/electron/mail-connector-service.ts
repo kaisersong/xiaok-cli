@@ -38,13 +38,13 @@ export class MailConnectorService {
    const current=this.deps.store.get(id);if(this.disposed||!current||current.revision!==a.revision||(this.generation.get(id)??0)!==generation)throw Error('mail_account_changed');this.status.set(id,{status:'connected'});return value;
   }catch(error){const safe=mailError(error);if(this.deps.store.get(id)?.revision===a.revision&&(this.generation.get(id)??0)===generation)this.status.set(id,{status:safe.message==='mail_needs_reconnect'||safe.message==='mail_auth_failed'?'needs_reconnect':'error',errorCode:safe.message as MailAccountDto['errorCode']});throw safe;}finally{if(timer)clearTimeout(timer);}
  }
- async connect(raw:MailConnectInput,source:MailRequestSource):Promise<MailAccountDto>{
-  requireMailUser(source);let input:MailConnectInput;try{input=MAIL_CONNECT_SCHEMA.parse(raw);}catch{throw Error('mail_invalid_input');}if(this.disposed)throw Error('mail_account_changed');
+ async connect(raw:MailConnectInput,source:MailRequestSource,signal?:AbortSignal):Promise<MailAccountDto>{
+  requireMailUser(source);signal?.throwIfAborted();let input:MailConnectInput;try{input=MAIL_CONNECT_SCHEMA.parse(raw);}catch{throw Error('mail_invalid_input');}if(this.disposed)throw Error('mail_account_changed');
   const host=input.provider==='qq'?'imap.qq.com':input.provider==='netease163'?'imap.163.com':input.host;if(!host)throw Error('mail_invalid_input');const port=input.provider==='imap'?(input.port??993):993,email=input.email.toLowerCase();const id=accountId(input.provider,email,host,port);
   if((this.deps.store.get(id)?.revision??0)!==input.expectedRevision)throw Error('mail_stale_account');this.invalidate(id);const generation=this.generation.get(id);
   const a:MailAccountRecord={id,provider:input.provider,email,host,port,allowSend:input.allowSend,...(input.smtpHost?{smtpHost:input.smtpHost,smtpPort:input.smtpPort??465}:{}),revision:input.expectedRevision+1,lastVerifiedAt:Date.now(),auth:{kind:'password',password:input.password}};
   if(input.allowSend&&input.provider==='imap'&&!input.smtpHost)throw Error('mail_invalid_input');
-  try{await this.reader.test(a);if(this.disposed||this.generation.get(id)!==generation)throw Error('mail_account_changed');this.deps.store.put({...a,lastVerifiedAt:Date.now()},input.expectedRevision,'user');this.status.set(id,{status:'connected'});return this.list().find(row=>row.id===id)!;}catch(error){throw mailError(error);}
+  try{await this.reader.test(a);signal?.throwIfAborted();if(this.disposed||this.generation.get(id)!==generation)throw Error('mail_account_changed');this.deps.store.put({...a,lastVerifiedAt:Date.now()},input.expectedRevision,'user');this.status.set(id,{status:'connected'});return this.list().find(row=>row.id===id)!;}catch(error){throw mailError(error);}
  }
  async disconnect(raw:{id:string;expectedRevision:number},source:MailRequestSource):Promise<{ok:true}>{
   requireMailUser(source);const input=MAIL_ACCOUNT_REQUEST_SCHEMA.parse(raw);this.deps.store.remove(input.id,input.expectedRevision,'user');this.invalidate(input.id);this.status.delete(input.id);await this.oauth.cancel(undefined,'user');return {ok:true};

@@ -247,6 +247,11 @@ export const PRELOAD_API_KEYS = [
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
   'kswarmStartProjectPlanning',
+  'getPrivateMemorySettings',
+  'savePrivateMemorySettings',
+  'listCredentialInputs',
+  'submitCredentialInput',
+  'cancelCredentialInput',
   'getAssistantState',
   'ensureAssistantToday',
   'refreshAssistantSources',
@@ -254,6 +259,7 @@ export const PRELOAD_API_KEYS = [
   'startAssistantItem',
   'approveAssistantSend',
   'refuseAssistantSend',
+  'onCredentialInputsChanged',
   'onAssistantInboxChanged',
   'getAssistantOverview',
   'activateAssistant',
@@ -462,6 +468,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onSkillsChanged',
   'onReminder',
   'onScheduledTaskDue',
+  'onCredentialInputsChanged',
   'onAssistantInboxChanged',
   'onLoopConstraintAdded',
   'onKSwarmStatus',
@@ -636,6 +643,11 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kswarmRestart: 'desktop:kswarm:restart',
   kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
   kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  getPrivateMemorySettings:'desktop:credentialInput:memoryGet',
+  savePrivateMemorySettings:'desktop:credentialInput:memorySave',
+  listCredentialInputs: 'desktop:credentialInput:list',
+  submitCredentialInput: 'desktop:credentialInput:submit',
+  cancelCredentialInput: 'desktop:credentialInput:cancel',
   getAssistantState: 'desktop:assistantInbox:state',
   ensureAssistantToday: 'desktop:assistantInbox:today',
   refreshAssistantSources: 'desktop:assistantInbox:refresh',
@@ -1374,6 +1386,12 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  getPrivateMemorySettings(legacy?:Record<string,unknown>):Promise<Record<string,unknown>>;
+  savePrivateMemorySettings(input:Record<string,unknown>):Promise<Record<string,unknown>>;
+  listCredentialInputs():Promise<import('../shared/credential-input-contract.js').CredentialRequest[]>;
+  submitCredentialInput(input:import('../shared/credential-input-contract.js').CredentialSubmit):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
+  cancelCredentialInput(input:{id:string;expectedRevision:number}):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
+  onCredentialInputsChanged(handler:()=>void):()=>void;
   getAssistantState(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
   ensureAssistantToday(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
   refreshAssistantSources(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
@@ -1897,6 +1915,12 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    getPrivateMemorySettings:legacy=>ipcRenderer.invoke('desktop:credentialInput:memoryGet',legacy) as ReturnType<DesktopApi['getPrivateMemorySettings']>,
+    savePrivateMemorySettings:input=>ipcRenderer.invoke('desktop:credentialInput:memorySave',input) as ReturnType<DesktopApi['savePrivateMemorySettings']>,
+    listCredentialInputs:()=>ipcRenderer.invoke('desktop:credentialInput:list') as ReturnType<DesktopApi['listCredentialInputs']>,
+    submitCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:submit',input) as ReturnType<DesktopApi['submitCredentialInput']>,
+    cancelCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:cancel',input) as ReturnType<DesktopApi['cancelCredentialInput']>,
+    onCredentialInputsChanged(handler) {const listener=()=>handler();ipcRenderer.on('desktop:credentialInput:changed',listener);return ()=>ipcRenderer.off('desktop:credentialInput:changed',listener);},
     getAssistantState: () => ipcRenderer.invoke('desktop:assistantInbox:state') as ReturnType<DesktopApi['getAssistantState']>,
     ensureAssistantToday: () => ipcRenderer.invoke('desktop:assistantInbox:today') as ReturnType<DesktopApi['ensureAssistantToday']>,
     refreshAssistantSources: () => ipcRenderer.invoke('desktop:assistantInbox:refresh') as ReturnType<DesktopApi['refreshAssistantSources']>,

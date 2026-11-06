@@ -1,3 +1,7 @@
+import {MemoryCredentialSettingsStore} from './memory-credential-settings.js';
+import {createCredentialInputOwner} from './credential-input-consumers.js';
+import {registerCredentialInputIpc} from './credential-input-ipc.js';
+import {readProtectedJson} from '../../src/utils/protected-json-async.js';
 import { createDesktopAssistantInbox } from './desktop-assistant-inbox.js';
 import { registerAssistantInboxIpc } from './assistant-inbox-ipc.js';
 import { MailAccountStore } from './mail-account-store.js';
@@ -832,6 +836,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
+  await loadConfig();await readProtectedJson(join(dataRoot,'connectors.json'));
+  let credentialInputs:ReturnType<typeof createCredentialInputOwner>|undefined;
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
   const computerUseAppIdentity = process.platform === 'win32'
@@ -842,6 +848,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!desktopShutdownGate.isOpen) return window;
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
     mailConnectors,
     assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
     onAssistantTaskEvent: input => {assistantInbox?.service.onTask(input.snapshot,'scheduler');if(input.event.type==='task_terminal'&&input.snapshot.prompt.startsWith('[xiaok-assistant-watch:'))void assistantInbox?.service.refresh('scheduler').catch(()=>{});},
@@ -1390,7 +1397,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       })),
   });
   assistantInbox = createDesktopAssistantInbox({
-    dataRoot,crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
+    dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
     profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
     search:(query,signal)=>services.searchForAssistant(query,signal),
     launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
@@ -1401,6 +1408,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     facts:()=>readRecentTaskSnapshots(dataRoot,2000).map(snapshot=>({...snapshot,status:snapshot.executionProtected?'unknown':snapshot.status})),
   });
   services.bindAssistantTools(assistantInbox.tools,'user');
+  credentialInputs=createCredentialInputOwner({dataRoot,mail:mailConnectors,refreshConnectors:()=>services.refreshConnectorCredentials(),changed:()=>{mainWindow?.webContents.send('desktop:credentialInput:changed');mainWindow?.webContents.send('desktop:assistantInbox:changed');}});
+  registerCredentialInputIpc(shutdownAwareIpc,credentialInputs,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}),new MemoryCredentialSettingsStore(dataRoot));
+  registerLifetimeDisposerStep('credential-inputs',async()=>{credentialInputs?.dispose();});
   registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
   const inboxOwner=assistantInbox;
   registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});

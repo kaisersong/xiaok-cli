@@ -32,7 +32,8 @@ describe('config', () => {
     expect(binding.wireModel).toBe(wireModel);
     expect(binding.runtimeOptions?.reasoningEffort).toBe(effort);
     expect(binding.runtimeOptions?.contextLimit).toBe(contextLimit);
-    expect(readFileSync(path, 'utf8')).toBe(oldContent);
+    expect(readFileSync(path, 'utf8')).not.toContain('test-compat-key');
+    expect(JSON.parse(readFileSync(path,'utf8')).$xiaokCredentials).toBeDefined();
     expect(existsSync(path + '.bak')).toBe(false);
     await saveConfig(loaded);
     const reloaded = await loadConfig();
@@ -120,11 +121,8 @@ describe('config', () => {
     expect(config.channels?.yzj?.webhookPort).toBe(3100);
   });
 
-  it('renames corrupt config to .bak and returns defaults', async () => {
-    writeFileSync(join(testDir, 'config.json'), 'not valid json');
-    const config = await loadConfig();
-    expect(config).toEqual(DEFAULT_CONFIG);
-    expect(existsSync(join(testDir, 'config.json.bak'))).toBe(true);
+  it('preserves corrupt config and reports a fixed error without silently resetting it', async () => {
+    writeFileSync(getConfigPath(),'{ not json');await expect(loadConfig()).rejects.toThrow('credential_config_corrupt');expect(readFileSync(getConfigPath(),'utf8')).toBe('{ not json');expect(existsSync(getConfigPath()+'.bak')).toBe(false);
   });
 
   it('renames unknown schemaVersion config to .bak and returns defaults', async () => {
@@ -271,10 +269,8 @@ describe.skipIf(process.platform === 'win32')('config file permissions (config.j
     expect(modeOf(getConfigPath() + '.bak')).toBe(0o600);
   });
 
-  it('writes the .bak of a corrupt config as 600', async () => {
-    writeFileSync(getConfigPath(), '{ not json');
-    chmodSync(getConfigPath(), 0o644);
-    await loadConfig();
-    expect(modeOf(getConfigPath() + '.bak')).toBe(0o600);
+  it('tightens a corrupt config but preserves it for explicit recovery', async () => {
+    writeFileSync(getConfigPath(),'{ not json');chmodSync(getConfigPath(),0o644);await expect(loadConfig()).rejects.toThrow('credential_config_corrupt');expect(modeOf(getConfigPath())).toBe(0o600);expect(readFileSync(getConfigPath(),'utf8')).toBe('{ not json');
   });
 });
+it('allows explicit setup after an unknown schema was moved to the protected backup',async()=>{const root=join(tmpdir(),`credential-recovery-${Date.now()}`);mkdirSync(root,{recursive:true});const old=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=root;try{writeFileSync(getConfigPath(),JSON.stringify({schemaVersion:99}));const config=await loadConfig();config.providers.anthropic={...config.providers.anthropic,apiKey:'recovered-key'};await saveConfig(config);expect((await loadConfig()).providers.anthropic.apiKey).toBe('recovered-key');}finally{if(old===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=old;rmSync(root,{recursive:true,force:true});}});

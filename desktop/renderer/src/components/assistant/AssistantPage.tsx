@@ -1,3 +1,4 @@
+import {AssistantSecureInputs} from '../security/AssistantSecureInputs';
 import { useNavigate } from 'react-router-dom';
 import { useAssistantInbox } from '../../hooks/useAssistantInbox';
 import { AssistantBriefConversation,AssistantInboxPanel } from './AssistantBriefConversation';
@@ -22,7 +23,7 @@ export function AssistantPage() {
   const actItem = (item:AttentionItem,action:AttentionAction['action']) => {void inbox.act({id:item.id,expectedRevision:item.revision,action,...(action==='snooze'?{until:Date.now()+3600000}:{})});};
   const controls={busy:inbox.busy,onStart:(item:AttentionItem)=>{void startItem(item).catch(()=>inbox.read());},onOpen:(item:AttentionItem)=>{void openItem(item).catch(()=>inbox.read());},onAct:actItem};
   const inboxPanel=<AssistantInboxPanel state={inbox.state} controls={controls} onRefresh={()=>{void inbox.refresh();}} initializing={inbox.initializing} error={inbox.error}/>;
-  const assistantContent=<><AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
+  const assistantContent=<><AssistantSecureInputs/><AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
   const hasAssistantMessages=Boolean(inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
 
   const [ready, setReady] = useState(false);

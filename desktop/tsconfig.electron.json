@@ -10,6 +10,7 @@
   "include": [
     "electron/**/*.ts",
     "../src/utils/config.ts",
+    "../src/utils/credential-worker.ts",
     "../src/runtime/task-host/**/*.ts",
     "../src/runtime/conversation-activity/owner-pending-reader.ts",
     "../src/runtime/events.ts",
