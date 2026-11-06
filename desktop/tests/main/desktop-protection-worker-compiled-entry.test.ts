@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DesktopTaskObservationStore } from '../../../src/runtime/task-host/protected-observation-store.js';
@@ -31,6 +31,7 @@ it('fresh full production compilation supplies an actual fixed protection Worker
   for (const module of compiled.audit) expect(module.originalUrl).toBe(pathToFileURL(module.file).href);
   physical.entry = compiled.output;
   const root = mkdtempSync(join(tmpdir(), 'fresh-native-protection-account-')); cleanup.push(root);
+  mkdirSync(join(root, 'protected-observation-sessions'));
   const store = new DesktopTaskObservationStore(root, join(root, 'canonical'));
   expect(await store.readProtectionInWorker('ordinary-task')).toEqual({});
   expect(physical.starts).toBe(1); expect(physical.exits).toBe(1);
