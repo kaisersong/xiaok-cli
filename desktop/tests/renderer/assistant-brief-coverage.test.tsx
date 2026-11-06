@@ -6,9 +6,9 @@ import {AssistantCoverageView} from '../../renderer/src/components/assistant/Ass
 import type {AssistantCoverage,AssistantState} from '../../shared/assistant-inbox-contract';
 afterEach(cleanup);
 const coverage:AssistantCoverage[]=[{key:'mail:none',source:'mail',state:'unavailable',code:'not_connected',checkedAt:1793946389214},{key:'yzj_message:test',source:'yzj_message',state:'failed',code:'triage_failed',checkedAt:1793946389214}];
-function brief(c:AssistantCoverage[],locale='zh'){
+function brief(c:AssistantCoverage[],locale='zh',current=c){
  localStorage.setItem('xiaok:locale',locale);
- const state:AssistantState={items:[],briefs:[{id:'today',date:'2026-11-06',timeZone:'Asia/Shanghai',createdAt:1793946389214,needsYou:[],canWait:[],calendar:[],coverage:c}],coverage:c,outbox:[],active:true,scanning:false};
+ const state:AssistantState={items:[],briefs:[{id:'today',date:'2026-11-06',timeZone:'Asia/Shanghai',createdAt:1793946389214,needsYou:[],canWait:[],calendar:[],coverage:c}],coverage:current,outbox:[],active:true,scanning:false};
  return render(<LocaleProvider><AssistantBriefConversation state={state} controls={{busy:false,onStart:vi.fn(),onOpen:vi.fn(),onAct:vi.fn()}} onApprove={vi.fn()} onRefuse={vi.fn()}/></LocaleProvider>);
 }
 it('explains an unavailable brief without hiding reasons or implying nothing needs attention',()=>{
@@ -38,4 +38,12 @@ it('explains the same distinctions in English',()=>{
  brief(coverage,'en');
  expect(screen.getByTestId('assistant-daily-brief')).toHaveTextContent('Today’s brief could not be prepared');
  expect(screen.getByRole('list')).toHaveTextContent('AI review did not finish. Try refreshing sources later.');
+});
+
+it('shows the latest scan after recovery instead of keeping the first failed brief warning forever',()=>{
+ const latest:AssistantCoverage[]=[{...coverage[1],state:'partial',code:'limited',checkedAt:1793947389214}];
+ brief(coverage,'zh',latest);
+ expect(screen.queryByText('今日简报未能生成')).toBeNull();
+ expect(screen.getByRole('list')).not.toHaveTextContent('AI 整理未完成');
+ expect(screen.getByRole('list')).toHaveTextContent('已检查部分内容');
 });
