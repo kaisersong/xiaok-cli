@@ -142,7 +142,7 @@ export interface InProcessTaskRuntimeHostOptions {
   acquireExecutionToken?: (taskId: string) => { release(): void };
   getExecutionPolicy?: (snapshot: TaskSnapshot) => TaskExecutionPolicy;
   authorizePreparation?: (taskId: string, marker: TaskMultiAgentPreparation) => void;
-  assertTaskAdmission?: (snapshot: TaskSnapshot) => Promise<void> | void;
+  assertTaskAdmission?: (snapshot: TaskSnapshot, kind?: 'live_answer') => Promise<void> | void;
   decideCancellation?: (snapshot: TaskSnapshot, reason: string) => Promise<TaskCancellationDecision>;
   /** Fixed main-owned adapter; the exact durable report is the checking ACK. */
   onDeliveryReport?: (report: HostDeliveryReport) => Promise<HostDeliveryReport>;
@@ -807,8 +807,12 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   private async answerQuestionSourceOwned(input: { taskId: string; answer: UserAnswer }): Promise<void> {
-    if (this.options.assertTaskAdmission) await this.options.assertTaskAdmission(await this.requireSnapshot(input.taskId));
     const pending=this.liveQuestionAnswers.get(input.taskId);
+    if (this.options.assertTaskAdmission) {
+      const snapshot=await this.requireSnapshot(input.taskId);
+      if(pending)await this.options.assertTaskAdmission(snapshot,'live_answer');
+      else await this.options.assertTaskAdmission(snapshot);
+    }
     const currentQuestion=this.questions.getCurrent(input.taskId);
     if(currentQuestion?.kind==='freeform'&&!pending)throw Error('task_question_execution_not_live');
     let value:string|undefined;

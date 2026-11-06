@@ -9,6 +9,7 @@ export const zh: LocaleStrings = {
   secureCredentials:secureCredentialsZh,
   assistantInbox: assistantInboxZh,
   mailConnectors: {
+    manageProvider:(name:string)=>`管理 ${name}`,removeAccount:'移除账号',accountIdentityHint:'可在这里更新授权和发送权限；更换邮箱地址请新增账号。',
     smtpHost:'SMTP 服务器',smtpPort:'SMTP 端口',smtpHelp:'使用同一邮箱账号与授权码。465 使用 TLS；其他端口必须支持 STARTTLS。',
     authCodeTitle:'如何获取授权码？',authCodeHint:'请填写邮箱服务商生成的客户端授权码，不是邮箱登录密码。',openWebmail:(name:string)=>`打开${name}网页版`,authGuides:{qq:['登录 QQ 邮箱网页版，进入“设置 → 账号”或“账号与安全 → 安全设置”。','找到 POP3/IMAP/SMTP 服务，开启 IMAP/SMTP；已开启则点击“管理服务 → 生成授权码”。','按页面提示完成身份验证，复制生成的授权码，粘贴到上方输入框。'],netease163:['登录 163 邮箱网页版，进入“设置 → POP3/SMTP/IMAP”（部分版本在“常规设置”内）。','开启 IMAP/SMTP 服务；已开启则在“授权密码管理”中点击“新增授权密码”。','按页面提示完成身份验证，复制生成的授权密码，粘贴到上方输入框。']},
     title:'邮箱连接器', description:'连接你的邮箱，让小K整理值得关注的邮件。', search:'搜索邮箱连接器', all:'全部', connected:'已连接',
@@ -3430,6 +3431,7 @@ export const zh: LocaleStrings = {
 
   // chatShell
   chatShell: {
+    threadLoadFailed: "暂时无法打开此对话", threadLoadHelp: "请重新加载，或返回任务列表后再打开。", reloadThread: "重新加载对话", backToTasks: "返回任务列表", threadLoading: "正在读取对话…", answerFailed: "回复未能提交，请重试。", dismissError: "关闭提示",
     attachmentLabel: "附件:",
     cuUnavailable: "Computer Use 当前不可用。",
     historyUnavailable: (taskIds) => `历史任务记录暂时无法读取（${taskIds}）。会话仍保留；已有项目及产物不会因此删除，也不会自动重跑。`,

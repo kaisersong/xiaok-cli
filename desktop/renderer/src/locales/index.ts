@@ -3281,6 +3281,7 @@ export interface LocaleStrings {
 
   // chatShell
   chatShell: {
+    threadLoadFailed: string; threadLoadHelp: string; reloadThread: string; backToTasks: string; threadLoading: string; answerFailed: string; dismissError: string;
     attachmentLabel: string;
     cuUnavailable: string;
     historyUnavailable: (taskIds: string) => string;

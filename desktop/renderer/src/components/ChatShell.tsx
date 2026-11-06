@@ -4,7 +4,7 @@ import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { GoalBar } from './GoalBar';
@@ -282,6 +282,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     };
   }, [renderScope]);
   const location = useLocation();
+  const navigate = useNavigate();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
   const [observationDraft, setObservationDraft] = useState<string|null>(null);
@@ -301,6 +302,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRevision, setLoadRevision] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
   const [goalNativeMutation, setGoalNativeMutation] = useState<DesktopGoalNativeMutationProjection | null>(null);
   const [goalLoading, setGoalLoading] = useState(false);
@@ -1193,6 +1196,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    setActionError(null);
     const storedDraft = readStoredThreadDraft(taskId);
     setPrompt(draftPrompt || '');
 
@@ -1354,7 +1358,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
     }).catch((err) => {
       if (loadCurrent()) {
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(t.chatShell.threadLoadFailed);
         setStatus('failed');
       }
     });
@@ -1365,7 +1369,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
@@ -1398,6 +1402,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId || admissionPending.current === renderScope) return false;
+    setActionError(null);
     if (observationDraft && files?.length) {
       // Reuse the ordinary task error message position; no Goal panel is required.
       setMessages(previous => [...previous, {
@@ -1408,12 +1413,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       return false;
     }
 
-    if(currentQuestion?.kind==='freeform'&&files?.length){setLoadError(t.assistantInbox.answerFilesUnsupported);return false;}
+    if(currentQuestion?.kind==='freeform'&&files?.length){setActionError(t.assistantInbox.answerFilesUnsupported);return false;}
     if(currentQuestion?.kind==='freeform'&&thread?.currentTaskId&&!files?.length){
       const source=displaySourceRef.current;if(!source||!acceptsSource(source))return false;
       admissionPending.current=renderScope;
       try{await api.answerQuestion({taskId:thread.currentTaskId,answer:{questionId:currentQuestion.questionId,type:'text',text}});if(!acceptsSource(source))return false;setCurrentQuestion(null);setStatus('running');setPrompt('');return true;}
-      catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setLoadError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.taskCreateFailed);return false;}
+      catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setActionError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed);return false;}
       finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
     }
 
@@ -1519,6 +1524,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
     if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
+    setActionError(null);
     try {
     await api.answerQuestion({
       taskId: thread.currentTaskId,
@@ -1527,7 +1533,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (!acceptsSource(source) || source.terminalSeen) return;
     setCurrentQuestion(null);
     setStatus('running');
-    } catch(error) { if (acceptsSource(source)) setLoadError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.taskCreateFailed); }
+    } catch(error) { if (acceptsSource(source)) setActionError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed); }
   };
 
   const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {
@@ -1767,27 +1773,23 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
   if (loadError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--c-text-secondary)]">
-        <div className="text-red-500">
-          Failed to load thread: {loadError}
+      <section className="flex h-full flex-col items-center justify-center gap-4 p-6 text-[var(--c-text-secondary)]" aria-label={t.chatShell.threadLoadFailed}>
+        <div role="alert" className="max-w-md text-center">
+          <h2 className="text-base font-medium text-[var(--c-text-primary)]">{loadError}</h2>
+          <p className="mt-2 text-sm">{t.chatShell.threadLoadHelp}</p>
         </div>
-        <button
-          type="button"
-          className="rounded bg-[var(--c-primary)] px-4 py-2 text-white hover:opacity-90"
-          onClick={() => {
-            setLoadError(null);
-            setStatus('idle');
-            setThread(null);
-          }}
-        >
-          Retry
-        </button>
-      </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <button type="button" className="rounded border border-[var(--c-border-subtle)] px-4 py-2 text-sm hover:bg-[var(--c-bg-deep)]"
+            onClick={() => { sidebarCollapse.setCollapsed(false); navigate('/'); }}>{t.chatShell.backToTasks}</button>
+          <button type="button" className="rounded bg-[var(--c-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
+            onClick={() => { setLoadError(null); setLoadRevision(value => value + 1); }}>{t.chatShell.reloadThread}</button>
+        </div>
+      </section>
     );
   }
 
   if (!thread) {
-    return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
+    return <div role="status" className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">{t.chatShell.threadLoading}</div>;
   }
 
   // Extract generated files from multiple sources
@@ -1902,6 +1904,10 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       {!hideObservationControls && <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />}
+      {actionError && <div role="alert" className="mx-4 mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]">
+        <p>{actionError}</p>
+        <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
+      </div>}
       <ChatView
         emptyContent={emptyContent}
         conversationHeader={conversationHeader}

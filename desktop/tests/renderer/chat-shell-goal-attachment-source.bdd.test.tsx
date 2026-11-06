@@ -130,7 +130,7 @@ function Navigate() {
 }
 async function mount(strict = false, waitForA = true) {
   const content = <MemoryRouter initialEntries={[{ pathname: `/t/${threadId}`, state: { createGoal: currentGoal === null, draftPrompt: 'saved draft' } }]}>
-    <LocaleProvider><Navigate /><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider>
+    <LocaleProvider><Navigate /><Routes><Route path="/t/:taskId" element={<ChatShell />} /><Route path="/" element={<p>task list home</p>}/></Routes></LocaleProvider>
   </MemoryRouter>;
   let view!: ReturnType<typeof render>;
   await act(async () => { view = render(strict ? <StrictMode>{content}</StrictMode> : content); });
@@ -852,4 +852,41 @@ describe('pending publication uses the actual GoalBar and ChatShell without task
     expect(screen.queryByText('late old publication')).not.toBeInTheDocument();
     expect(resume).not.toHaveBeenCalled(); expect(ack).not.toHaveBeenCalled();
   });
+});
+
+
+describe('conversation failure recovery keeps the user in control',()=>{
+ it('keeps the draft, question and conversation visible when a choice reply fails',async()=>{
+  await mount();await emit(observer('A'),{type:'needs_user',question:{taskId:'A',questionId:'choice-A',kind:'confirm_understanding',prompt:'Choose next step',choices:[{id:'yes',label:'confirm step'}]}});
+  f.answerQuestion.mockRejectedValueOnce(Error('task_answer_failed'));
+  fireEvent.click(screen.getByRole('button',{name:'confirm step'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('回复未能提交，请重试。');
+  expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');
+  expect(screen.getByTestId('question')).toHaveTextContent('Choose next step');
+  expect(screen.getByTestId('display-status')).toHaveTextContent('waiting_user');
+  expect(screen.queryByText(/Failed to load thread/)).toBeNull();expect(f.createTask).not.toHaveBeenCalled();
+  f.answerQuestion.mockResolvedValueOnce(undefined);fireEvent.click(screen.getByRole('button',{name:'confirm step'}));
+  await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+  expect(screen.getByTestId('question')).toBeEmptyDOMElement();
+ });
+ it('retries a failed thread read without reloading the application or creating another task',async()=>{
+  f.getThread.mockRejectedValueOnce(Error('storage unavailable'));await mount(false,false);
+  expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法打开此对话');
+  fireEvent.click(screen.getByRole('button',{name:'重新加载对话'}));
+  await screen.findByLabelText('chat draft');expect(f.getThread).toHaveBeenCalledTimes(2);expect(f.createTask).not.toHaveBeenCalled();expect(activeIds()).toContain('A');
+ });
+ it('provides a safe return to the task list even when opened without browser history',async()=>{
+  f.getThread.mockRejectedValueOnce(Error('storage unavailable'));await mount(false,false);await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button',{name:'返回任务列表'}));await screen.findByText('task list home');expect(f.createTask).not.toHaveBeenCalled();
+ });
+ it('preserves an ordinary freeform reply after rejection without replacing the conversation',async()=>{
+  await mount();await emit(observer('A'),question('A'));f.answerQuestion.mockRejectedValueOnce(Error('task_answer_failed'));
+  fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await screen.findByRole('alert');
+  expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');expect(screen.getByTestId('question')).toHaveTextContent('A question');
+ });
+ it('still clears a rejected credential answer while keeping the question and composer available',async()=>{
+  await mount();await emit(observer('A'),question('A'));f.answerQuestion.mockRejectedValueOnce(Error('credential_secure_input_required'));
+  fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await screen.findByRole('alert');
+  expect(screen.getByLabelText('chat draft')).toHaveValue('');expect(screen.getByTestId('question')).toHaveTextContent('A question');
+ });
 });

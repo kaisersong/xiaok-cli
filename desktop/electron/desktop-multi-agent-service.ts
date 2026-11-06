@@ -2221,16 +2221,26 @@ export class DesktopMultiAgentService {
     this.assertExecutionAuthorization(this.options.store.requireGroup(binding.groupId).permissionRevision ?? 0);
   }
 
-  assertHostAdmission(snapshot: TaskSnapshot): void {
+  assertHostAdmission(snapshot: TaskSnapshot, kind?: 'live_answer'): void {
     this.assertReady();
     if (snapshot.context?.threadId) this.assertThreadAdmission(snapshot.context.threadId);
     const binding = this.options.store.getRootBinding(snapshot.taskId);
     if (!snapshot.multiAgentPreparation && !binding) return;
     if (!binding || !snapshot.multiAgentPreparation || binding.bootId !== this.options.store.bootId
-      || binding.phase !== 'queued' || encodeMultiAgentRow(this.marker(binding)) !== encodeMultiAgentRow(snapshot.multiAgentPreparation)) {
+      || encodeMultiAgentRow(this.marker(binding)) !== encodeMultiAgentRow(snapshot.multiAgentPreparation)) {
       throw new Error('multi_agent_prepare_interrupted');
     }
-    this.assertWritable(this.liveGroup(binding.groupId));
+    const group=this.liveGroup(binding.groupId);
+    this.assertWritable(group);
+    if(kind==='live_answer') {
+      const root=group.root;
+      if(binding.phase!=='active'||!root?.context||root.binding.sourceTaskId!==snapshot.taskId
+        || encodeMultiAgentRow(this.marker(root.binding))!==encodeMultiAgentRow(snapshot.multiAgentPreparation)
+        || this.options.store.requireGroup(group.id).currentRootEpoch!==binding.rootEpoch) throw Error('multi_agent_prepare_interrupted');
+      this.requireActor(root.context.actor,'agent',root.context);
+      return;
+    }
+    if(binding.phase!=='queued')throw Error('multi_agent_prepare_interrupted');
   }
 
   /** Main-only host adapter. Agent controls cannot call this root cancellation path. */
