@@ -34,7 +34,18 @@ describe.skipIf(process.platform==='win32')('profile account physical paths',()=
  it('rejects system target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const target=dir('shared/home'),alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=alias;reject(alias);});
  it('rejects user target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const alias=link('dotfiles',dir('shared/home'));process.env.HOME=alias;reject(alias);});
  it('reports unreadable link targets from statSync',()=>{const target=dir('physical'),alias=link('dotfiles',target);process.env.HOME=alias;fake.errors.set('stat:'+target,'EACCES');reject(alias,'unreadable');});
- it('escapes NUL in invalid config path diagnostics',()=>{process.env.XIAOK_CONFIG_DIR=join(root,'bad\0path');expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});});
+ it('escapes NUL in invalid config path diagnostics',()=>{
+  // #123：直接给 process.env 赋值是否保留 NUL 取决于 env 的承载方式：worker_threads 里 env 是 JS 侧持有的拷贝，保留 NUL；
+  // 主线程（forks 子进程）的 env 绑定进程环境块，赋值经 setenv 在 NUL 处截断（'bad\0path' 读回 'bad'），所以旧写法依赖 pool。
+  // 这里显式换成普通对象承载含 NUL 的值，与 pool 无关；被测入口仍读 process.env。
+  // invalid_path 分支本身可达（如含 '..' 的配置目录）；只有"环境变量含 NUL"这条输入在真实进程里不可能出现，本用例只证明该输入的诊断会转义。
+  const realEnv=process.env,badPath=join(root,'bad\0path');
+  Object.defineProperty(process,'env',{value:{...realEnv,XIAOK_CONFIG_DIR:badPath},writable:true,configurable:true,enumerable:true});
+  try{
+   expect(process.env.XIAOK_CONFIG_DIR).toBe(badPath); // 前置条件：确认 NUL 未被截断，否则下一断言失败原因会被误读
+   expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});
+  }finally{Object.defineProperty(process,'env',{value:realEnv,writable:true,configurable:true,enumerable:true});}
+ });
  it('rejects sticky system targets owned by a non-root user',()=>{const target=dir('shared',uid,0o1777);dir('shared/home');const alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=join(alias,'home');reject(alias);});
  it('reports unreadable path components',()=>{const home=dir('home');process.env.HOME=home;fake.errors.set(home,'EACCES');reject(home,'unreadable');});
  it('rejects writable system link parents',()=>{const target=dir('physical'),alias=link('var',target,0);stat(root,0,0o777);process.env.HOME=alias;reject(alias);});

@@ -21,6 +21,10 @@ export default {
     // afterEach 清理临时目录在 Windows 上会因文件句柄重试而超过默认 10s。
     hookTimeout: 30_000,
     fileParallelism: false,
+    // #123：全量“停在第 42 个文件之后”是慢 + 静默，不是该位置挂死（耗时为 forks 诊断轮实测；threads 同条件全量对照记录在 PR #131 评论）：
+    // --no-cache 下按文件大小降序跑，第 26/35/43 位的 verification-host-controller、intent-publication-dependencies、
+    // publication-operation 各跑约 14–29 分钟（慢文件跟 #98/#105），前 42 个文件合计约 3500s，第 43 个在 1h 外层超时内跑不完；
+    // 非 TTY 的 default reporter 只在文件结束时输出，期间日志不动。验收全量请用逐用例 reporter（如 --reporter=verbose --reporter=json --outputFile=<path>），不要设 1h 外层超时。
     pool: 'threads',
   },
 };
