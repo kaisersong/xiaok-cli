@@ -104,10 +104,18 @@ it('recovers completed once receipts with a 24h inclusive boundary and only each
 });
 it('returns the latest 200 action receipts in delivery order, ignoring baselines and older runs',()=>{
  const {store,path}=setup();const now=Date.now();
- for(let i=0;i<201;i++){const id=`action-${i}`,run=accepted(store,id,now+i);store.acknowledgeScheduledDelivery(run,now+i,{taskId:id,runId:run,completed:true});}
+ // Seed 200 cloned actions/runs/receipts in ONE raw transaction: ~800 autocommit store writes timed out (>5s) on Windows CI.
+ const first=accepted(store,'action-0',now);store.acknowledgeScheduledDelivery(first,now,{taskId:'action-0',runId:first,completed:true});
  const db=new DatabaseSync(path);
+ const cols=(table:string)=>(db.prepare(`pragma table_info(${table})`).all() as {name:string}[]).map(c=>c.name);
+ const actionCols=cols('timed_actions').filter(c=>c!=='id'),runCols=cols('timed_action_runs').filter(c=>!['run_id','action_id','started_at','runtime_task_id'].includes(c));
+ const cloneAction=db.prepare(`INSERT INTO timed_actions(id,${actionCols.join(',')}) SELECT ?,${actionCols.join(',')} FROM timed_actions WHERE id='action-0'`);
+ const cloneRun=db.prepare(`INSERT INTO timed_action_runs(run_id,action_id,started_at,runtime_task_id,${runCols.join(',')}) SELECT ?,?,?,?,${runCols.join(',')} FROM timed_action_runs WHERE run_id=?`);
+ const receipt=db.prepare('INSERT INTO scheduled_task_delivery_receipts(run_id,delivered_at,event_json) VALUES (?,?,?)');
+ db.exec('BEGIN IMMEDIATE');
+ for(let i=1;i<201;i++){const id=`action-${i}`,run=`run-${i}`;cloneAction.run(id);cloneRun.run(run,id,now+i,`task_${id}`,first);receipt.run(run,now+i,JSON.stringify({taskId:id,runId:run,completed:true}));}
  db.prepare("INSERT INTO timed_action_runs(run_id,action_id,executor_kind,status,started_at,runtime_task_id) VALUES ('extra','action-200','agent_task','success',?,'task_extra')").run(now+202);
- db.close();store.acknowledgeScheduledDelivery('extra',now+202,{taskId:'action-200',runId:'extra',completed:true});
+ db.exec('COMMIT');db.close();store.acknowledgeScheduledDelivery('extra',now+202,{taskId:'action-200',runId:'extra',completed:true});
  const events=store.getRecentScheduledDeliveries(now+203);
  expect(events).toHaveLength(200);expect(events[0].taskId).toBe('action-1');expect(events.at(-1)?.runId).toBe('extra');
  expect(new Set(events.map(event=>event.taskId)).size).toBe(200);
