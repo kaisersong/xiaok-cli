@@ -16,7 +16,7 @@ export function getAssistantWatchPreset(value: string | null, labels: LocaleStri
   const id = value as AssistantWatchId;
   return {
     id, name: labels[id].title, description: labels[id].description,
-    prompt: `${READ_CONTEXT}\n${INSTRUCTIONS[id]}`,
+    prompt: `[xiaok-assistant-watch:${id}]\n${READ_CONTEXT}\n${INSTRUCTIONS[id]}`,
     frequency: id === 'ai_news' ? 'daily' as const : id === 'yzj_calendar' ? 'weekdays' as const : 'hourly' as const,
     scheduleConfig: id === 'ai_news' || id === 'yzj_calendar'
       ? { hour: 8, minute: 30 } : { intervalMinutes: id === 'important_email' ? 120 : 60 },

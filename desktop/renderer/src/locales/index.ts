@@ -7,6 +7,7 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  assistantInbox: import('./assistant-inbox').AssistantInboxLabels;
   mailConnectors: import('./mail-connectors').MailConnectorLabels;
   loopPublication: import('./loop-publication').LoopPublicationLabels;
   observation: {enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;

@@ -263,6 +263,8 @@ export interface ArtifactOpenOptions {
 
 interface ChatViewProps {
   emptyContent?: ReactNode;
+  assistantContent?: ReactNode;
+  assistantHasMessages?: boolean;
   conversationHeader?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
@@ -292,7 +294,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  emptyContent, conversationHeader,
+  emptyContent, conversationHeader, assistantContent, assistantHasMessages,
   thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
@@ -302,7 +304,7 @@ export function ChatView({
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
-  const showEntry = Boolean(emptyContent) && messages.length === 0 && !streamingText && status === 'idle';
+  const showEntry = Boolean(emptyContent) && !assistantHasMessages && messages.length === 0 && !streamingText && status === 'idle';
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIndexFrameRef = useRef<number | null>(null);
@@ -447,7 +449,7 @@ export function ChatView({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
-      {!(messages.length === 0 && !streamingText && status === 'idle') && conversationHeader}
+      {(assistantHasMessages || !(messages.length === 0 && !streamingText && status === 'idle')) && conversationHeader}
       <ConversationIndexRail
         entries={promptIndexEntries}
         activeId={activePromptId}
@@ -464,6 +466,7 @@ export function ChatView({
       >
         {showEntry ? emptyContent : <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
+            {assistantContent}
             {messages.map((msg, index) => {
               const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
               const outputs = msg.role === 'result_card'
