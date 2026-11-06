@@ -3353,7 +3353,7 @@ export const en: LocaleStrings = {
     cuDismiss: "Not now",
     taskFailed: "Task stopped. Execution history was saved. Reply below to continue; if it fails again, follow the reason above or switch models.",
     interruptedContinue: "Send a reply below to continue this conversation.",
-    interruptedChoices: "Choose an option to fill the composer, then send to continue.",
+    interruptedChoices: "Click an option to continue.",
     scrollToBottom: "Jump to latest",
     conversationIndexLabel: "Prompt index",
     conversationIndexItem: (index, preview) => `Jump to prompt ${index}: ${preview}`,

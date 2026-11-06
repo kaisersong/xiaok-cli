@@ -3336,7 +3336,7 @@ export const zh: LocaleStrings = {
     cuDismiss: "暂不启用",
     taskFailed: "任务已停止，执行记录已保留。可在下方回复继续；若再次失败，请根据上方原因处理或切换模型。",
     interruptedContinue: "可在下方发送回复，继续这段对话。",
-    interruptedChoices: "选择后填入输入框，发送即可继续。",
+    interruptedChoices: "点击选项即可继续。",
     scrollToBottom: "跳到最新",
     conversationIndexLabel: "提示词索引",
     conversationIndexItem: (index, preview) => `跳到提示词 ${index}：${preview}`,

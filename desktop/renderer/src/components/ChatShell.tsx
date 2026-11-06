@@ -1417,7 +1417,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: false });
   }, [queuedPrompt, status, taskId]);
 
-  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
+  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>, intent: 'composer' | 'interrupted_choice' = 'composer') => {
     if (!taskId || admissionPending.current === renderScope) return false;
     setActionError(null);
     if (observationDraft && files?.length) {
@@ -1490,7 +1490,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     try {
       // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
-      if (observationDraft) {
+      if (observationDraft && intent === 'composer') {
         const draftId=observationDraft;setObservationDraft(null);
         newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
       } else if (files && files.length > 0) {
@@ -1536,6 +1536,18 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     } finally {
       if (admissionPending.current === renderScope) admissionPending.current = null;
     }
+  };
+
+  const handleInterruptedChoice = (choiceId: string) => {
+    const source = displaySourceRef.current;
+    if (!interruptedTask || !thread || currentQuestion || (status !== 'failed' && status !== 'idle')
+      || !source || source.scope !== renderScope || !acceptsSource(source) || !source.terminalSeen
+      || source.sourceTaskId !== interruptedTask.taskId || thread.taskIds.at(-1) !== interruptedTask.taskId
+      || admissionPending.current === renderScope) return false;
+    const choice = interruptedTask.choices?.find(item => item.id === choiceId);
+    if (!choice) return false;
+    // Normal submission owns synchronous admission/deduplication; the expired execution is never answered.
+    return handleSubmit(choice.label, undefined, 'interrupted_choice');
   };
 
   const handleAnswer = async (choiceId: string) => {
@@ -1941,6 +1953,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         status={status}
         currentQuestion={currentQuestion}
         interruptedTask={interruptedTask}
+        onInterruptedChoice={handleInterruptedChoice}
         result={result}
         generatedFiles={generatedFiles}
         prompt={prompt}

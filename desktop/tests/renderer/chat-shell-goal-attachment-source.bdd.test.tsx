@@ -8,12 +8,13 @@ import type { ThreadRecord } from '../../renderer/src/api/types';
 import type { ChatView as ActualChatView } from '../../renderer/src/components/ChatView';
 
 const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), subscribeTask: vi.fn(), updateThreadTaskId: vi.fn(),
-  createTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
+  createTask: vi.fn(), createObservationTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
+const interruptedHandler = vi.hoisted(()=>({latest:undefined as undefined|((id:string)=>unknown)}));
 vi.mock('../../renderer/src/api', () => ({ api: { ...f, getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })), updateThreadTitle: vi.fn(async () => {}), listSkills: vi.fn(async () => []) } }));
 vi.mock('../../renderer/src/layouts/AppLayout', () => ({ useSidebarCollapse: () => ({ collapsed: false, setCollapsed: f.setCollapsed }), AppLayout: () => null }));
 // Leaf presentation only: real ChatShell owns every state transition, real
 // GoalBar drives semantic handlers, and the production attachment helper runs.
-vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: ComponentProps<typeof ActualChatView>) => <>
+vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: ComponentProps<typeof ActualChatView>) => { interruptedHandler.latest=p.onInterruptedChoice;return <>
   <form onSubmit={event => { event.preventDefault(); void p.onSubmit(p.prompt); }}>
     <input aria-label="chat draft" value={p.prompt} onChange={event => p.onPromptChange(event.target.value)} />
     <button type="submit">ordinary submit</button>
@@ -29,13 +30,16 @@ vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: Compone
   <output data-testid="canvas-visible">{String(p.canvasOpen)}</output>
   <button type="button" onClick={p.onToggleCanvas}>toggle canvas</button>
   <button type="button" onClick={() => p.onQueue?.(p.prompt, [])}>queue current draft</button>
+  {p.interruptedTask?.choices?.map(choice=><button type="button" key={'interrupted-'+choice.id} onClick={()=>p.onInterruptedChoice?.(choice.id)}>{choice.label}</button>)}
   {p.currentQuestion?.choices?.map(choice => <button type="button" key={choice.id} onClick={() => p.onAnswer(choice.id)}>{choice.label}</button>)}
   {p.status === 'running' && <button type="button" onClick={p.onCancel}>stop current task</button>}
-</> }));
+</> } }));
 vi.mock('../../renderer/src/components/TaskPanel', () => ({ TaskPanel: (p: { goalContent?: ReactNode; planSteps: unknown }) =>
   <><output data-testid="plan">{JSON.stringify(p.planSteps)}</output>{p.goalContent}</> }));
 vi.mock('../../renderer/src/components/CanvasPanel', () => ({ CanvasPanel: (p: { initialPreviewContent?: string; events?: unknown }) =>
   <><output data-testid="canvas-preview">{p.initialPreviewContent}</output><output data-testid="canvas-events">{JSON.stringify(p.events)}</output></> }));
+
+vi.mock('../../renderer/src/components/ObservationControls',()=>({ObservationControls:(p:{draftId:string|null;onDraft:(id:string|null)=>void})=><><button type="button" onClick={()=>p.onDraft('observation-existing')}>stage observation</button><output data-testid="observation-draft">{p.draftId}</output></>}));
 
 import { ChatShell } from '../../renderer/src/components/ChatShell';
 import { LocaleProvider, useLocale } from '../../renderer/src/contexts/LocaleContext';
@@ -156,6 +160,8 @@ beforeEach(() => {
   f.updateThreadTaskId.mockImplementation(async (_thread: string, id: string) => { order.push(`update:${id}`); });
   f.readFileContent.mockResolvedValue({ content: 'file content' });
   f.createTask.mockResolvedValue({ taskId: 'ordinary-B' });
+  f.createObservationTask.mockResolvedValue({taskId:'observation-B'});
+  interruptedHandler.latest=undefined;
   f.subscribeTask.mockImplementation((taskId: string, handler: (event: DesktopTaskEvent) => void) => {
     order.push(`subscribe:${taskId}`);
     const item: Observer = { taskId, handler, active: true, release: vi.fn() };
@@ -935,3 +941,15 @@ it.each(['route','new source']as const)('ignores a late shutdown snapshot after 
 });
 
 it('localizes prior-boot interruption and offers only draft continuation',async()=>{f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,'failed',[{...question(id),question:{...question(id).question,choices:[{id:'one',label:'Recovered choice'}]}},{type:'error',message:'multi_agent_prepare_interrupted'},{type:'task_terminal',status:'failed'}]),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Recovered choice'));expect(screen.getByTestId('history')).toHaveTextContent('上轮执行已中断，记录已保留。');expect(screen.getByTestId('history')).not.toHaveTextContent('multi_agent_prepare_interrupted');expect(f.createTask).not.toHaveBeenCalled();expect(f.answerQuestion).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'English locale'}));await waitFor(()=>expect(screen.getByTestId('history')).toHaveTextContent('The previous turn was interrupted. Its history was saved.'));});
+
+
+describe('interrupted decisions submit with one click',()=>{
+ async function stopped(){f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,'failed',[{type:'needs_user',question:{taskId:id,questionId:'one-click',kind:'freeform',prompt:'Synthetic decision',choices:[{id:'one',label:'Synthetic reply'},{id:'two',label:'Other reply'}]}},{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}]),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('failed'));}
+ it.each(['saved draft','Synthetic reply'])('submits the chosen label immediately while handling the existing draft %s',async draft=>{await stopped();fireEvent.change(screen.getByLabelText('chat draft'),{target:{value:draft}});fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(f.createTask).toHaveBeenCalledExactlyOnceWith({prompt:'Synthetic reply',materials:[],context:{threadId,taskIds:['A']}}));await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('ordinary-B'));expect(f.answerQuestion).not.toHaveBeenCalled();expect(screen.getByLabelText('chat draft')).toHaveValue(draft==='Synthetic reply'?'':draft);expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();});
+ it('deduplicates repeated and alternate choices during pending admission',async()=>{await stopped();const pending=deferred<{taskId:string}>();f.createTask.mockReturnValueOnce(pending.promise);const one=screen.getByRole('button',{name:'Synthetic reply'}),two=screen.getByRole('button',{name:'Other reply'});fireEvent.click(one);fireEvent.click(one);fireEvent.click(two);expect(f.createTask).toHaveBeenCalledTimes(1);await act(async()=>pending.resolve({taskId:'ordinary-B'}));});
+ it('keeps choices and the draft after failure and permits an explicit one-click retry',async()=>{await stopped();f.createTask.mockRejectedValueOnce(Error('network failed'));fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('idle'));expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Synthetic reply');fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(f.createTask).toHaveBeenCalledTimes(2));expect(f.answerQuestion).not.toHaveBeenCalled();});
+ it('rejects an unknown choice and an old callback after changing thread',async()=>{await stopped();const old=interruptedHandler.latest;expect(old).toBeTypeOf('function');await act(async()=>old?.('missing'));expect(f.createTask).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'other thread'}));await act(async()=>{});await act(async()=>old?.('one'));expect(f.createTask).not.toHaveBeenCalled();});
+ it('rejects a late old choice after a newer source is promoted',async()=>{await stopped();const old=interruptedHandler.latest;fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('ordinary-B'));await act(async()=>old?.('one'));expect(f.createTask).toHaveBeenCalledTimes(1);});
+ it('does not consume or submit an unrelated observation draft',async()=>{await stopped();fireEvent.click(screen.getByRole('button',{name:'stage observation'}));fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(f.createTask).toHaveBeenCalledExactlyOnceWith({prompt:'Synthetic reply',materials:[],context:{threadId,taskIds:['A']}}));expect(f.createObservationTask).not.toHaveBeenCalled();expect(screen.getByTestId('observation-draft')).toHaveTextContent('observation-existing');});
+ it('retains the ordinary composer observation submission path',async()=>{await stopped();fireEvent.click(screen.getByRole('button',{name:'stage observation'}));fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(f.createObservationTask).toHaveBeenCalledExactlyOnceWith({draftId:'observation-existing',prompt:'saved draft',threadId}));expect(f.createTask).not.toHaveBeenCalled();});
+});

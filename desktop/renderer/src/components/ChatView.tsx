@@ -277,6 +277,7 @@ interface ChatViewProps {
   status: 'idle' | 'running' | 'waiting_user' | 'completed' | 'failed';
   currentQuestion: NeedsUserQuestion | null;
   interruptedTask?: InterruptedTask | null;
+  onInterruptedChoice?: (choiceId: string) => void | boolean | Promise<void | boolean>;
   result: TaskResult | null;
   generatedFiles: GeneratedFile[];
   prompt: string;
@@ -297,7 +298,7 @@ interface ChatViewProps {
 
 export function ChatView({
   emptyContent, conversationHeader, assistantContent, assistantHasMessages,
-  thread, messages, streamingText, status, currentQuestion, interruptedTask, result, approvalContent, activityContent, pendingApprovalCount = 0,
+  thread, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -307,16 +308,7 @@ export function ChatView({
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
   const showEntry = Boolean(emptyContent) && !assistantHasMessages && messages.length === 0 && !streamingText && status === 'idle';
-  const stagedChoice = useRef<{threadId:string;taskId:string;before:string;after:string} | null>(null);
   const canContinueInterruption = Boolean(interruptedTask && interruptedTask.taskId === thread.taskIds.at(-1) && (status === 'failed' || status === 'idle') && !currentQuestion);
-  const stageInterruptedChoice = (label: string) => {
-    if (!canContinueInterruption || !interruptedTask) return;
-    const previous = stagedChoice.current;
-    const before = previous?.threadId === thread.id && previous.taskId === interruptedTask.taskId && prompt === previous.after ? previous.before : prompt;
-    const after = before.trim() ? `${before}\n${label}` : label;
-    stagedChoice.current = {threadId:thread.id, taskId:interruptedTask.taskId, before, after};
-    onPromptChange(after);
-  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIndexFrameRef = useRef<number | null>(null);
@@ -654,9 +646,9 @@ export function ChatView({
             {/* Error */}
             {canContinueInterruption ? (
               <div role="note" className="space-y-3 py-2">
-                <p className="text-sm text-[var(--c-text-secondary)]">{interruptedTask?.choices?.length ? t.chatView.interruptedChoices : t.chatView.interruptedContinue}</p>
-                {interruptedTask?.choices?.map(choice => <button key={choice.id} type="button"
-                  onClick={() => stageInterruptedChoice(choice.label)}
+                <p className="text-sm text-[var(--c-text-secondary)]">{onInterruptedChoice && interruptedTask?.choices?.length ? t.chatView.interruptedChoices : t.chatView.interruptedContinue}</p>
+                {onInterruptedChoice && interruptedTask?.choices?.map(choice => <button key={choice.id} type="button"
+                  onClick={() => { void onInterruptedChoice?.(choice.id); }}
                   className="block rounded-lg border border-[var(--c-border)] px-4 py-2 text-left text-sm text-[var(--c-text-primary)] hover:bg-[var(--c-bg-card)]">{choice.label}</button>)}
               </div>
             ) : status === 'failed' && (
