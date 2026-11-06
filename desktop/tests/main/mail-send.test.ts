@@ -20,23 +20,23 @@ it('implicitly permits reads after connecting while every source is denied sendi
 });
 it('allows only user changes, sends once, replays accepted receipts and persists them across restart',async()=>{
  const a=await service.connect(input,'user');for(const source of [undefined,'agent','scheduler'])await expect(service.setAccess({id:a.id,expectedRevision:a.revision,allowSend:true},source as never)).rejects.toThrow('mail_user_only');
- await service.setAccess({id:a.id,expectedRevision:a.revision,allowSend:true},'user');const draft=message(a.id);const result=await service.send(draft,'agent');expect(result.status).toBe('accepted');expect(await service.send(draft,'agent')).toEqual(result);expect(send).toHaveBeenCalledTimes(1);
- service.dispose();service=new MailConnectorService({store:new MailAccountStore(root,crypto),reader:{test:vi.fn(),search:vi.fn(),read:vi.fn(),close},sender:{send,close},openExternal:vi.fn()});expect(await service.send(draft,'agent')).toEqual(result);expect(send).toHaveBeenCalledTimes(1);
- await expect(service.send({...draft,text:'changed'},'agent')).rejects.toThrow('mail_send_conflict');
+ await service.setAccess({id:a.id,expectedRevision:a.revision,allowSend:true},'user');const draft=message(a.id);const result=await service.send(draft,'user');expect(result.status).toBe('accepted');expect(await service.send(draft,'user')).toEqual(result);expect(send).toHaveBeenCalledTimes(1);
+ service.dispose();service=new MailConnectorService({store:new MailAccountStore(root,crypto),reader:{test:vi.fn(),search:vi.fn(),read:vi.fn(),close},sender:{send,close},openExternal:vi.fn()});expect(await service.send(draft,'user')).toEqual(result);expect(send).toHaveBeenCalledTimes(1);
+ await expect(service.send({...draft,text:'changed'},'user')).rejects.toThrow('mail_send_conflict');
 });
 it('does not repeat unknown deliveries even with a different requestId and after a settings update',async()=>{
  const a=await service.connect({...input,allowSend:true},'user');const draft=message(a.id);send.mockImplementationOnce(async(_a,_m,assert)=>{assert();throw Error('connection lost local-test-secret');});
- await expect(service.send(draft,'agent')).rejects.toThrow('mail_send_unknown');await service.setAccess({id:a.id,expectedRevision:1,allowSend:true},'user');
- await expect(service.send(draft,'agent')).rejects.toThrow('mail_send_unknown');await expect(service.send({...draft,requestId:randomUUID()},'agent')).rejects.toThrow('mail_send_unknown');expect(send).toHaveBeenCalledTimes(1);
+ await expect(service.send(draft,'user')).rejects.toThrow('mail_send_unknown');await service.setAccess({id:a.id,expectedRevision:1,allowSend:true},'user');
+ await expect(service.send(draft,'user')).rejects.toThrow('mail_send_unknown');await expect(service.send({...draft,requestId:randomUUID()},'user')).rejects.toThrow('mail_send_unknown');expect(send).toHaveBeenCalledTimes(1);
 });
 it('fences pending sends at the transport boundary when permission is revoked',async()=>{
- const a=await service.connect({...input,allowSend:true},'user');let finish!:()=>void;const committed=vi.fn();send.mockImplementationOnce(async(_a,_m,assertCurrent)=>{await new Promise<void>(resolve=>finish=resolve);assertCurrent();committed();return {status:'accepted'};});const pending=service.send(message(a.id),'agent');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));await service.setAccess({id:a.id,expectedRevision:1,allowSend:false},'user');finish();await expect(pending).rejects.toThrow('mail_account_changed');expect(committed).not.toHaveBeenCalled();
+ const a=await service.connect({...input,allowSend:true},'user');let finish!:()=>void;const committed=vi.fn();send.mockImplementationOnce(async(_a,_m,assertCurrent)=>{await new Promise<void>(resolve=>finish=resolve);assertCurrent();committed();return {status:'accepted'};});const pending=service.send(message(a.id),'user');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));await service.setAccess({id:a.id,expectedRevision:1,allowSend:false},'user');finish();await expect(pending).rejects.toThrow('mail_account_changed');expect(committed).not.toHaveBeenCalled();
 });
 it('records a definite late acceptance even after disconnect, keeping the delivery journal',async()=>{
- const a=await service.connect({...input,allowSend:true},'user');let finish!:(v:unknown)=>void;send.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));const draft=message(a.id),pending=service.send(draft,'agent');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));await service.disconnect({id:a.id,expectedRevision:1},'user');finish({status:'accepted',messageId:'accepted-late',accepted:draft.to,rejected:[]});expect(await pending).toMatchObject({status:'accepted',messageId:'accepted-late'});expect(store.getSendReceipt(draft.requestId)?.status).toBe('accepted');
+ const a=await service.connect({...input,allowSend:true},'user');let finish!:(v:unknown)=>void;send.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));const draft=message(a.id),pending=service.send(draft,'user');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));await service.disconnect({id:a.id,expectedRevision:1},'user');finish({status:'accepted',messageId:'accepted-late',accepted:draft.to,rejected:[]});expect(await pending).toMatchObject({status:'accepted',messageId:'accepted-late'});expect(store.getSendReceipt(draft.requestId)?.status).toBe('accepted');
 });
 it('rejects injected headers, forged sender and attachment fields before any sending',async()=>{
- const a=await service.connect({...input,allowSend:true},'user');for(const patch of [{subject:'Hi\r\nBcc: victim@example.com'},{from:'other@example.com'},{attachments:[{path:'/private/file'}]}])await expect(service.send({...message(a.id),...patch},'agent')).rejects.toThrow();expect(send).not.toHaveBeenCalled();
+ const a=await service.connect({...input,allowSend:true},'user');for(const patch of [{subject:'Hi\r\nBcc: victim@example.com'},{from:'other@example.com'},{attachments:[{path:'/private/file'}]}])await expect(service.send({...message(a.id),...patch},'user')).rejects.toThrow();expect(send).not.toHaveBeenCalled();
 });
 it('never migrates an old read grant into a send grant',async()=>{
  const a=await service.connect(input,'user');const legacy={...store.get(a.id),allowAssistant:true};delete (legacy as any).allowSend;writeFileSync(join(root,'mail-accounts','accounts.enc'),crypto.encryptString(JSON.stringify({version:1,accounts:[legacy]})));
@@ -44,11 +44,16 @@ it('never migrates an old read grant into a send grant',async()=>{
 });
 it('marks a definite provider rejection retryable only with an explicit new requestId',async()=>{
  const {MailSubmissionRejected}=await import('../../electron/mail-send-errors');const a=await service.connect({...input,allowSend:true},'user'),draft=message(a.id);send.mockImplementationOnce(async(_a,_m,assert)=>{assert();throw new MailSubmissionRejected('mail_send_rejected');});
- await expect(service.send(draft,'agent')).rejects.toThrow('mail_send_rejected');expect(store.getSendReceipt(draft.requestId)?.status).toBe('rejected');await expect(service.send(draft,'agent')).rejects.toThrow('mail_send_rejected');expect(send).toHaveBeenCalledTimes(1);expect(await service.send({...draft,requestId:randomUUID()},'agent')).toMatchObject({status:'accepted'});expect(send).toHaveBeenCalledTimes(2);
+ await expect(service.send(draft,'user')).rejects.toThrow('mail_send_rejected');expect(store.getSendReceipt(draft.requestId)?.status).toBe('rejected');await expect(service.send(draft,'user')).rejects.toThrow('mail_send_rejected');expect(send).toHaveBeenCalledTimes(1);expect(await service.send({...draft,requestId:randomUUID()},'user')).toMatchObject({status:'accepted'});expect(send).toHaveBeenCalledTimes(2);
 });
 it('does not turn a legacy read flag supplied through a live write into send permission',async()=>{
  await expect(service.connect({...input,allowAssistant:true} as never,'user')).rejects.toThrow('mail_invalid_input');expect(store.list()).toEqual([]);
 });
 it('does not enable sending for an old OAuth account without provider scope proof',async()=>{
  const id='d'.repeat(32);store.put({id,provider:'gmail',email:'me@example.com',host:'gmail.googleapis.com',port:443,allowSend:false,revision:1,auth:{kind:'oauth',clientId:'client',refreshToken:'refresh',sendAuthorized:false}},0,'user');await expect(service.setAccess({id,expectedRevision:1,allowSend:true},'user')).rejects.toThrow('mail_send_reauthorize');expect(store.get(id)?.allowSend).toBe(false);
+});
+it('cannot submit mail directly from agent or scheduler even with a standing account grant',async()=>{
+ const account=await service.connect({...input,allowSend:true},'user');
+ for(const source of ['agent','scheduler',undefined])await expect(service.send(message(account.id),source as never)).rejects.toThrow('mail_send_denied');
+ expect(send).not.toHaveBeenCalled();
 });

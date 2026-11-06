@@ -1,3 +1,4 @@
+import { registerAssistantInboxIpc } from '../../electron/assistant-inbox-ipc.js';
 import { registerMailConnectorIpc } from '../../electron/mail-connector-typed-ipc.js';
 import { registerEnterpriseCliIpc } from '../../electron/enterprise-cli-typed-ipc.js';
 import { registerYzjCliAuthIpc } from '../../electron/yzj-cli-auth-typed-ipc.js';
@@ -249,7 +250,15 @@ describe('preload API contract', () => {
       'kswarmRestart',
       'kswarmResumeWorkflowRun',
       'kswarmStartProjectPlanning',
-      'getAssistantOverview',
+      'getAssistantState',
+  'ensureAssistantToday',
+  'refreshAssistantSources',
+  'actOnAssistantItem',
+  'startAssistantItem',
+  'approveAssistantSend',
+  'refuseAssistantSend',
+  'onAssistantInboxChanged',
+  'getAssistantOverview',
       'activateAssistant',
       'pauseAssistant',
       'resumeAssistant',
@@ -1134,6 +1143,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerScheduledTimedActionIpc({ handle: channel => { channels.add(channel); } });
   registerEnterpriseCliIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerMailConnectorIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerAssistantInboxIpc({ handle: channel => { channels.add(channel); } }, {} as never, {} as never, () => false);
   registerYzjCliAuthIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConnectorsIpc({ handle: channel => { channels.add(channel); } });
   registerRecorderWindowIpc({ handle: channel => { channels.add(channel); } }, new Map(), { isMainWindowSender: () => false, isRecorderWindowSender: () => false });

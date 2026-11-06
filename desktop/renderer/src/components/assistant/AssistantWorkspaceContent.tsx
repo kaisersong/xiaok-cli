@@ -14,10 +14,10 @@ const WATCH_ICONS = { ai_news: Newspaper, yzj_messages: MessagesSquare, yzj_cale
 const surface = 'rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)]';
 const subtleButton = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] disabled:opacity-50';
 
-export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly = false }: {
+export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly = false, hideSuggestions = false }: {
   data: ReturnType<typeof useAssistantWorkspace>;
   onPrepareSuggestion?: (text: string) => void;
-  iconOnly?: boolean;
+  iconOnly?: boolean; hideSuggestions?: boolean;
 }) {
   const { t, locale } = useLocale();
   const labels = t.assistant.workspace;
@@ -57,7 +57,7 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
     if (life.current.active) setBusyCandidateId(null);
   };
   const profile = data.overview?.profile;
-  const suggestions = profile?.status === 'active' ? data.overview?.suggestions.slice(0, 3) ?? [] : [];
+  const suggestions = !hideSuggestions && profile?.status === 'active' ? data.overview?.suggestions.slice(0, 3) ?? [] : [];
   const pendingCount = data.overview?.pendingCandidateCount ?? 0;
   const history = [...(data.history ?? [])].filter(run => run.automationKind !== 'notify').sort((a, b) => b.startedAt - a.startedAt).slice(0, 12);
   const schedules = [...(data.schedules ?? [])].filter(task => !task.id.startsWith('assistant:')).sort((a, b) => (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
