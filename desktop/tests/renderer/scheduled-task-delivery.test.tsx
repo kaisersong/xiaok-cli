@@ -79,3 +79,80 @@ it('recovers a completed once notification absent from both schedule list and ca
  expect(toast).toHaveBeenCalledTimes(1);expect(JSON.parse(localStorage.getItem('xiaok:scheduled-unread')!)).toEqual({once:1});
  window.removeEventListener('xiaok:scheduled-toast',toast);
 });
+
+// Design/review: budget distinct plans, not runs. Evict only by notification time;
+// migrate the old chronological identity list before comparing a replay receipt.
+// Exercise the production hook across unmount/remount so persistence is required.
+it('retains A after 500 distinct live receipts for B, including across reload',async()=>{
+ const toast=vi.fn();window.addEventListener('xiaok:scheduled-toast',toast);
+ m.schedules.mockResolvedValue(['A','B'].map(id=>({...row,id})));
+ let hook:any;await act(async()=>{hook=renderHook(()=>useScheduledTaskBootstrap());});
+ const a={taskId:'A',runId:'a',completed:true,success:true};
+ let b:any;
+ await act(async()=>{await m.due(a);for(let i=0;i<500;i++){b={taskId:'B',runId:`b-${i}`,completed:true,success:true};await m.due(b);}});
+ expect(toast).toHaveBeenCalledTimes(501);
+ const unread=localStorage.getItem('xiaok:scheduled-unread');hook.unmount();m.recent.mockResolvedValue([a,b]);
+ await act(async()=>{renderHook(()=>useScheduledTaskBootstrap());});
+ expect(toast).toHaveBeenCalledTimes(501);expect(localStorage.getItem('xiaok:scheduled-unread')).toBe(unread);
+ window.removeEventListener('xiaok:scheduled-toast',toast);
+});
+it('retains the most recently notified plans when 1100 plans exceed the budget',async()=>{
+ const toast=vi.fn();window.addEventListener('xiaok:scheduled-toast',toast);
+ const deliveries=Array.from({length:1100},(_,i)=>({taskId:`plan-${i}`,runId:`run-${i}`,completed:true,success:true}));
+ m.schedules.mockResolvedValue(deliveries.map(d=>({...row,id:d.taskId})));
+ let hook:any;await act(async()=>{hook=renderHook(()=>useScheduledTaskBootstrap());});
+ // Deliberately non-lexical plan order, with distinct notification times.
+ const ordered=[...deliveries.slice(550),...deliveries.slice(0,550)];
+ const now=vi.spyOn(Date,'now');
+ try {
+  await act(async()=>{for(let i=0;i<ordered.length;i++){now.mockReturnValue(1000+i);await m.due(ordered[i]);}});
+ } finally {now.mockRestore();}
+ expect(toast).toHaveBeenCalledTimes(1100);
+ const stored=JSON.parse(localStorage.getItem('xiaok:scheduled-delivered-runs')!);
+ expect(Object.keys(stored)).toHaveLength(1000);
+ const unread=localStorage.getItem('xiaok:scheduled-unread');hook.unmount();m.recent.mockResolvedValue(ordered.slice(-200));
+ await act(async()=>{renderHook(()=>useScheduledTaskBootstrap());});
+ expect(toast).toHaveBeenCalledTimes(1100);expect(localStorage.getItem('xiaok:scheduled-unread')).toBe(unread);
+ window.removeEventListener('xiaok:scheduled-toast',toast);
+});
+it('migrates legacy identities, persists migration and notifies a newer receipt exactly once',async()=>{
+ localStorage.setItem('xiaok:scheduled-delivered-runs',JSON.stringify(['daily:old','other:one','daily:latest']));
+ localStorage.setItem('xiaok:scheduled-unread',JSON.stringify({daily:2,other:1}));
+ const toast=vi.fn();window.addEventListener('xiaok:scheduled-toast',toast);
+ m.recent.mockResolvedValue([{taskId:'daily',runId:'latest',completed:true,success:true},{taskId:'other',runId:'one',completed:true,success:true}]);
+ let hook:any;await act(async()=>{hook=renderHook(()=>useScheduledTaskBootstrap());});
+ expect(toast).not.toHaveBeenCalled();expect(Array.isArray(JSON.parse(localStorage.getItem('xiaok:scheduled-delivered-runs')!))).toBe(false);
+ hook.unmount();await act(async()=>{renderHook(()=>useScheduledTaskBootstrap());});
+ expect(toast).not.toHaveBeenCalled();expect(JSON.parse(localStorage.getItem('xiaok:scheduled-unread')!)).toEqual({daily:2,other:1});
+ const newer={taskId:'daily',runId:'newer',completed:true,success:true};
+ await act(async()=>{await m.due(newer);await m.due(newer);});
+ expect(toast).toHaveBeenCalledTimes(1);expect(JSON.parse(localStorage.getItem('xiaok:scheduled-unread')!)).toEqual({daily:3,other:1});
+ window.removeEventListener('xiaok:scheduled-toast',toast);
+});
+
+// QA repro shape (#156 codex Major): plan-old once, then 500 distinct filler
+// plans each once; reload still recovers plan-old and must not re-toast it.
+it('keeps plan-old after 500 distinct live filler plans so reload does not re-toast',async()=>{
+ const toast=vi.fn();window.addEventListener('xiaok:scheduled-toast',toast);
+ const oldPlan={...row,id:'plan-old',name:'Old Plan',threadId:'thread-old',runtimeTaskId:'task_old'};
+ const oldDelivery={taskId:'plan-old',runId:'run-old',runtimeTaskId:'task_old',completed:true,success:true,lastRunAt:10,title:'Old Plan'};
+ const fillers=Array.from({length:500},(_,i)=>({...row,id:`plan-fill-${i}`,name:`Fill ${i}`,threadId:`thread-fill-${i}`,runtimeTaskId:`task_fill_${i}`,lastRunAt:20+i}));
+ m.schedules.mockResolvedValue([oldPlan]);
+ let hook:any;await act(async()=>{hook=renderHook(()=>useScheduledTaskBootstrap());});
+ await act(async()=>{await m.due(oldDelivery);});
+ expect(toast).toHaveBeenCalledTimes(1);
+ expect(JSON.parse(localStorage.getItem('xiaok:scheduled-unread')!)).toEqual({'plan-old':1});
+ m.schedules.mockResolvedValue([oldPlan,...fillers]);
+ const now=vi.spyOn(Date,'now');
+ try {
+  await act(async()=>{for(let i=0;i<500;i++){now.mockReturnValue(2000+i);await m.due({taskId:`plan-fill-${i}`,runId:`run-fill-${i}`,runtimeTaskId:`task_fill_${i}`,completed:true,success:true,lastRunAt:20+i,title:`Fill ${i}`});}});
+ } finally {now.mockRestore();}
+ expect(toast).toHaveBeenCalledTimes(501);
+ const unread=localStorage.getItem('xiaok:scheduled-unread');
+ const stored=JSON.parse(localStorage.getItem('xiaok:scheduled-delivered-runs')!);
+ expect(stored['plan-old']?.identity).toBe('plan-old:run-old');
+ hook.unmount();m.recent.mockResolvedValue([oldDelivery]);m.schedules.mockResolvedValue([oldPlan,...fillers]);
+ await act(async()=>{renderHook(()=>useScheduledTaskBootstrap());});
+ expect(toast).toHaveBeenCalledTimes(501);expect(localStorage.getItem('xiaok:scheduled-unread')).toBe(unread);
+ window.removeEventListener('xiaok:scheduled-toast',toast);
+});

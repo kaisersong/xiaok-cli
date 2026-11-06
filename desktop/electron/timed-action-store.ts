@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
+import {SCHEDULED_DELIVERY_REPLAY_LIMIT, type ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import {canonicalVerificationJson as completionJson} from '../../src/runtime/verification/protocol.js';
 import {freezeProjection} from './loop-business-projection.js';
 import {consumeLoopTimedCompletion,type LoopTimedReceipt} from './loop-timed-completion.js';
@@ -641,9 +641,9 @@ export class TimedActionStore {
             JOIN timed_action_runs nr ON nr.run_id=newer.run_id
             WHERE nr.action_id=r.action_id AND newer.event_json IS NOT NULL AND newer.delivered_at<=?
               AND (newer.delivered_at>d.delivered_at OR newer.delivered_at=d.delivered_at AND newer.run_id>d.run_id))
-        ORDER BY d.delivered_at DESC,d.run_id DESC LIMIT 200
+        ORDER BY d.delivered_at DESC,d.run_id DESC LIMIT ?
       ) ORDER BY delivered_at,run_id
-    `).all(now-24*60*60_000,now,now));
+    `).all(now-24*60*60_000,now,now,SCHEDULED_DELIVERY_REPLAY_LIMIT));
     return rows.map(row => JSON.parse(row.event_json) as ScheduledTaskDueEvent);
   }
 

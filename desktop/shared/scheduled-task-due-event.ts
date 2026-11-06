@@ -1,3 +1,6 @@
+/** Recovery returns the latest receipt for each of at most this many plans. */
+export const SCHEDULED_DELIVERY_REPLAY_LIMIT = 200;
+
 /** Main-owned dispatch/execution notification; dispatch success is never completion. */
 export interface ScheduledTaskDueEvent {
   taskId: string;

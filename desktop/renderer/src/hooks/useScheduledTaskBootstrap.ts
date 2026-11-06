@@ -1,11 +1,34 @@
 import {useEffect} from 'react';
 import {getDesktopApi} from '@xiaok/shared/desktop';
-import type {ScheduledTaskDueEvent} from '../../../shared/scheduled-task-due-event';
+import {SCHEDULED_DELIVERY_REPLAY_LIMIT, type ScheduledTaskDueEvent} from '../../../shared/scheduled-task-due-event';
 import {reportScheduledReadFailure} from '../lib/scheduled-timed-action-error';
 import {collectScheduledRuntimeTaskIds, ensureAggregatedScheduledThread, mergeScheduledTaskCache} from '../lib/scheduled-task-threads';
 
 const STORAGE_KEY = 'xiaok:scheduled-tasks';
 const DELIVERED_KEY = 'xiaok:scheduled-delivered-runs';
+const DELIVERED_PLAN_LIMIT = 1000;
+if (DELIVERED_PLAN_LIMIT < SCHEDULED_DELIVERY_REPLAY_LIMIT) {
+  throw Error('scheduled_delivery_dedup_budget_below_replay_limit');
+}
+type DeliveredPlan = {identity: string; notifiedAt: number};
+
+function readDeliveredPlans(): Map<string, DeliveredPlan> {
+  const stored = JSON.parse(localStorage.getItem(DELIVERED_KEY) ?? '{}');
+  if (!Array.isArray(stored)) return new Map(Object.entries(stored));
+  // Legacy arrays are chronological. Keep the last identity per plan and use
+  // ordered synthetic times because that format did not retain timestamps.
+  const plans = new Map<string, DeliveredPlan>();
+  const baseTime = Date.now() - stored.length;
+  stored.forEach((identity: string, index: number) => {
+    const separator = identity.indexOf(':');
+    if (separator < 0) return;
+    const taskId = identity.slice(0, separator);
+    plans.delete(taskId);
+    plans.set(taskId, {identity, notifiedAt: baseTime + index});
+  });
+  localStorage.setItem(DELIVERED_KEY, JSON.stringify(Object.fromEntries(plans)));
+  return plans;
+}
 
 /** Main owns runtime facts; this single root hook projects their durable links into the UI. */
 export function useScheduledTaskBootstrap(): void {
@@ -34,12 +57,19 @@ export function useScheduledTaskBootstrap(): void {
 
     const notify = (payload: ScheduledTaskDueEvent, fallbackTitle = '') => {
       const identity = payload.runId ? `${payload.taskId}:${payload.runId}` : undefined;
-      const delivered: string[] = JSON.parse(localStorage.getItem(DELIVERED_KEY) ?? '[]');
-      if (identity && delivered.includes(identity)) return;
+      const delivered = readDeliveredPlans();
+      if (identity && delivered.get(payload.taskId)?.identity === identity) return;
       const unread = JSON.parse(localStorage.getItem('xiaok:scheduled-unread') ?? '{}');
       unread[payload.taskId] = (unread[payload.taskId] ?? 0) + 1;
       localStorage.setItem('xiaok:scheduled-unread', JSON.stringify(unread));
-      if (identity) localStorage.setItem(DELIVERED_KEY, JSON.stringify([...delivered, identity].slice(-500)));
+      if (identity) {
+        // A hot plan consumes one slot. Stable time ordering also keeps the most
+        // recently notified plan when multiple notifications share a millisecond.
+        delivered.delete(payload.taskId);
+        delivered.set(payload.taskId, {identity, notifiedAt: Date.now()});
+        const retained = [...delivered].sort((a, b) => a[1].notifiedAt - b[1].notifiedAt).slice(-DELIVERED_PLAN_LIMIT);
+        localStorage.setItem(DELIVERED_KEY, JSON.stringify(Object.fromEntries(retained)));
+      }
       window.dispatchEvent(new CustomEvent('xiaok:scheduled-unread-changed'));
       window.dispatchEvent(new CustomEvent('xiaok:scheduled-toast', {detail: {
         taskId: payload.taskId, title: payload.title ?? fallbackTitle,
