@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.10 (October 8, 2026).** CLI and Desktop metadata are aligned at **1.5.10**. Desktop restores authorized historical conversations in their original workspace after the launch directory changes. Original bindings stay intact, and revoked or mismatched workspace authorization is rejected. Installer availability is verified after the release build; use [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) for published assets. See [Version History](#version-history).
+**Latest release: 1.6.2 (November 5, 2026).** Get Desktop installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2), or install the CLI with `npm install -g xiaokcode@1.6.2`. This release improves Chinese segmentation initialization and memory-store shutdown, and fixes a conversation cleanup crash. Post-release source changes are listed separately in [Version History](#version-history).
 
 ---
 
@@ -21,7 +21,7 @@ xiaok "Review the agent coordinator and registry lifecycle independently, then c
 
 When the available tools and task support independent work, Xiaok can delegate bounded tracks automatically. You do not need to name an agent or create a project first. Simple or tightly dependent work stays with the main agent.
 
-The CLI shows **SubAgent**, its constellation codename, assignment, current activity, and a completion summary with tool-call counts and elapsed time. Names start with **Pisces, Libra**, then Aries through the remaining signs; the next cycle adds `-2`. Continuation keeps the same instance's name. Names share one accent color; terminal font support determines how italics appear.
+The CLI shows each **SubAgent** assignment, current activity, and completion summary so you can follow parallel work and its results.
 
 You can steer the choice naturally: “Do this yourself,” “Ask me before delegating,” or “Review these two independent areas in parallel.” Material unresolved choices require an answer; cancellation or an empty answer is not approval.
 
@@ -46,7 +46,7 @@ Create a loop by defining the work and output contract, choosing a trigger, pres
 **Current source highlights:**
 
 - **SubAgent collaboration:** automatic delegation for useful independent tracks, explicit assignments, messages, follow-up on the same instance, interruption, close, and visible cleanup state.
-- **Simpler system prompts:** repeated execution instructions and conflicting approval/output rules were consolidated. The CLI common layer is 5,993 characters, down from 20,687; the Desktop base is 3,239, down from 8,297. These are fixed-text measurements, not token, latency, or model-quality claims.
+- **Model selection:** Kimi K3.1 Pro and Highspeed Coding are available; capabilities and context limits depend on the selected model.
 - **Goal Mode:** persistent objectives with status, pause/resume, budgets, evidence, and controlled continuation.
 - **Room-first collaboration:** discuss with agents before creating a project; promote selected source messages through a user-confirmed path.
 - **Artifact and knowledge workflows:** previews, editing, source ingestion, local retrieval, recording/transcription, and reusable skills.
@@ -235,7 +235,7 @@ xiaok doctor --check-keys
 
 #### Kimi K3
 
-The built-in exact profiles use `k3` and `k3-256k`. Current defaults use a 262,144-token context and `high` reasoning effort; available context and effort controls are model/profile-specific.
+The built-in profiles include `k3`, `k3-256k`, `k3.1-pro`, and `k3.1-pro-highspeed`. Current defaults use a 262,144-token context and `high` reasoning effort; available context and effort controls are model/profile-specific.
 
 CLI and Desktop preserve K3 `reasoning_content` only in task-local provider conversation memory. Raw reasoning is excluded from durable task/session history, user-visible events, ordinary logs, and tool-facing context. Durable resume/continue/fork histories that already contain an assistant turn are rejected with `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`; start a new conversation for that profile.
 
@@ -249,18 +249,18 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The `desktop-v1.5.10` release build targets these assets; they become downloadable after signing, notarization, and publication checks complete:
+Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The `desktop-v1.6.2` release includes:
 
-- `xiaok-1.5.10-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.10-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.10.exe` — Windows x64 installer.
+- `xiaok-1.6.2-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.6.2-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.6.2.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
 ### Features
 
 - **Conversations and Goal Mode:** task history, prompt navigation, persistent objectives, pause/resume, and visible progress.
-- **SubAgent panel:** current-source managed collaboration with stable constellation names, assignments, activity, messages, and results.
+- **SubAgent panel:** current-source managed collaboration with assignments, activity, messages, and results.
 - **Preview / Canvas:** HTML, Markdown, PDF, report and slide previews, artifact editing, revisions, and task provenance; some advanced surfaces remain feature-gated.
 - **Projects and Rooms:** user-confirmed project creation from conversations, Kanban, workflow Graph, review gates, and recovery.
 - **Automations:** scheduled AI tasks, reminders, user loops, diagnostics, run history, and output previews.
@@ -332,7 +332,6 @@ Permission mode is separate from user intent: `auto` does not answer an unresolv
 - **Esc** requests interruption of the current running turn while preserving drafts and queued input.
 - **Ctrl+O** opens the full transcript in `$PAGER` (default `less -R`) when idle. The temporary ANSI file is private and removed on exit; unsupported environments fall back to scrollback.
 - Supported terminals display submitted images using kitty or iTerm2 protocols. Unsupported terminals, including tmux panes, use a placeholder.
-- SubAgent names use a uniform accent; CJK italics depend on terminal/font fallback and are not guaranteed by ANSI styling alone.
 
 ### Yunzhijia IM Commands
 
@@ -573,6 +572,23 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 
 ## Version History
 
+### Main-branch changes (not included in 1.6.2)
+
+- Native file search enforces tighter path scope isolation ([#135](https://github.com/kaisersong/xiaok-cli/pull/135)). Use a source build or a later release for this change.
+
+### v1.6.2 — Startup and session reliability, November 5, 2026
+
+- Load the Chinese segmentation dictionary once per process and initialize it in a background thread to reduce first-screen waits.
+- Wait for in-flight memory writes before shutdown; fix a cleanup crash when the transcript directory has been deleted.
+- Treat an already-missing account claim directory as released; improve model-list and Chinese segmentation checks in Windows packaged smoke tests.
+- Known limitations: an intermittent missing CLI prompt on macOS remains under investigation, and first cold starts under Chinese paths retain a known regression. See the [published release notes](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2).
+
+### Feature updates since 1.5.10
+
+- Support Kimi K3.1 Pro and Highspeed Coding models.
+- Focus Desktop chat results on final deliverables for easier access.
+- Improve terminal reflow, question-history spacing, and stale account-record cleanup.
+
 ### v1.5.10 — Historical workspace recovery, October 8, 2026
 
 - Restore same-profile historical conversations in their original authorized workspace after launch-directory changes.
@@ -643,7 +659,7 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 
 CLI and Desktop package metadata are **1.5.2**. This release prepares the following changes:
 
-- CLI/Desktop SubAgent spawning, messaging, waiting, and lifecycle controls with stable constellation codenames.
+- CLI/Desktop SubAgent spawning, messaging, waiting, and lifecycle controls with visible task progress and results.
 - One shared Task / SubAgent / Canvas floating surface, corrected scrolling, readable output, and a homepage collaboration prompt.
 - Independent foreground/background execution lanes and explicit queued, approval, and execution status.
 - One bounded, tool-free summary continuation after an eligible stream disconnect, preserving completed child results without replaying tools. Already-failed historical tasks are not automatically rerun.
