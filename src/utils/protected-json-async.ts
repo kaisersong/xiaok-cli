@@ -13,7 +13,7 @@ export function readProtectedJsonSync(file:string){return readProtectedJsonVersi
 
 function operate(file:string,operation:'read'|'save',value?:unknown,expectedHash?:string,signal?:AbortSignal):Promise<Versioned>{
   signal?.throwIfAborted();
-  if(!isMain()) {const store=new ProtectedJsonFile(file);if(operation==='save')store.save(value,expectedHash,()=>signal?.throwIfAborted());return Promise.resolve({value:operation==='read'?store.read():structuredClone(value) as Record<string,unknown>,digest:protectedJsonDigest(file),backupDigest:protectedJsonDigest(file+'.bak')});}
+  if(!isMain()) {if(operation==='read')return Promise.resolve(readProtectedJsonVersionedSync(file));const store=new ProtectedJsonFile(file),receipt=store.save(value,expectedHash,()=>signal?.throwIfAborted());return Promise.resolve({value:structuredClone(value) as Record<string,unknown>,...receipt});}
   return new Promise((accept,reject)=>{const state=new Int32Array(new SharedArrayBuffer(4));const worker=new Worker(new URL('./credential-worker.js',import.meta.url),{workerData:{file,operation,value,expectedHash,state:state.buffer}});let settled=false;
     const finish=(error?:Error,result?:Versioned)=>{if(settled)return;settled=true;signal?.removeEventListener('abort',abort);void worker.terminate();if(error)reject(error);else accept(result!);};
     const abort=()=>{if(Atomics.compareExchange(state,0,0,1)===0)finish(Error('credential_cancelled'));};
@@ -24,7 +24,7 @@ function operate(file:string,operation:'read'|'save',value?:unknown,expectedHash
 }
 export async function readProtectedJsonVersioned(file:string):Promise<Versioned>{const saved=cache.get(key(file));if(saved&&saved.digest===protectedJsonDigest(file)&&saved.backupDigest===protectedJsonDigest(file+'.bak'))return structuredClone(saved);const result=await operate(file,'read');cache.set(key(file),structuredClone(result));return structuredClone(result);}
 export async function readProtectedJson(file:string){return (await readProtectedJsonVersioned(file)).value;}
-export async function saveProtectedJson(file:string,value:unknown,expectedHash?:string,signal?:AbortSignal):Promise<void>{const expected=expectedHash??cache.get(key(file))?.digest??protectedJsonDigest(file);const result=await operate(file,'save',value,expected,signal);cache.set(key(file),result);}
+export async function saveProtectedJson(file:string,value:unknown,expectedHash?:string,signal?:AbortSignal):Promise<Versioned>{const expected=expectedHash??cache.get(key(file))?.digest??protectedJsonDigest(file);const result=await operate(file,'save',value,expected,signal);cache.set(key(file),structuredClone(result));return structuredClone(result);}
 export async function updateProtectedJson(file:string,update:(value:Record<string,unknown>)=>Record<string,unknown>,signal?:AbortSignal):Promise<void>{const snapshot=await readProtectedJsonVersioned(file);signal?.throwIfAborted();const expected=snapshot.digest;const next=update(snapshot.value??{});await saveProtectedJson(file,next,expected,signal);}
 
 export function updateProtectedAutomationSync(file:string,enabled:boolean,initial:Record<string,unknown>={}):void {const value=readProtectedJsonSync(file)??structuredClone(initial);const expected=protectedJsonDigest(file);new ProtectedJsonFile(file).updateAutomation(enabled,expected,initial);value.automations={...(value.automations as object??{}),globalBackgroundAutoRunEnabled:enabled};cache.set(key(file),{value,digest:protectedJsonDigest(file),backupDigest:protectedJsonDigest(file+'.bak')});}

@@ -97,7 +97,7 @@ function normalizeLoadedConfig(parsed:Record<string,unknown>|undefined):Config {
 }
 
 export async function saveConfig(config: Config): Promise<void> {
-  const path=getConfigPath();if(existsSync(path))tightenOrThrow(path);await saveProtectedJson(path,config,credentialConfigVersions.get(config));tightenOrThrow(path);
+  const path=getConfigPath();if(existsSync(path))tightenOrThrow(path);const saved=await saveProtectedJson(path,config,credentialConfigVersions.get(config));if(JSON.stringify(config)===JSON.stringify(saved.value))credentialConfigVersions.set(config,saved.digest);tightenOrThrow(path);
 }
 
 function saveConfigSync(config: Config): void {
@@ -106,7 +106,7 @@ function saveConfigSync(config: Config): void {
   // 老文件可能是 644：先收紧再写入，收紧失败就中止，避免新 Key 写进别人可读的文件。
   if (existsSync(path)) tightenOrThrow(path);
   // mode 只在新建文件时生效；写完再确认一次。
-  new ProtectedJsonFile(path).save(config,credentialConfigVersions.get(config));
+  const saved=new ProtectedJsonFile(path).save(config,credentialConfigVersions.get(config));credentialConfigVersions.set(config,saved.digest);
   tightenOrThrow(path);
 }
 
