@@ -3185,6 +3185,8 @@ export interface LocaleStrings {
     enableComputerUse: string;
     cuDismiss: string;
     taskFailed: string;
+    interruptedContinue: string;
+    interruptedChoices: string;
     scrollToBottom: string;
     conversationIndexLabel: string;
     conversationIndexItem: (index: number, preview: string) => string;
@@ -3290,6 +3292,7 @@ export interface LocaleStrings {
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
+    taskInterrupted: string;
     modelKeyMissing: string;
     modelAuthFailed: string;
     modelServiceFailed: string;

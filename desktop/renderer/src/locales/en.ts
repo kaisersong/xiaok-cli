@@ -3352,6 +3352,8 @@ export const en: LocaleStrings = {
     enableComputerUse: "Enable Computer Use",
     cuDismiss: "Not now",
     taskFailed: "Task stopped. Execution history was saved. Reply below to continue; if it fails again, follow the reason above or switch models.",
+    interruptedContinue: "Send a reply below to continue this conversation.",
+    interruptedChoices: "Choose an option to fill the composer, then send to continue.",
     scrollToBottom: "Jump to latest",
     conversationIndexLabel: "Prompt index",
     conversationIndexItem: (index, preview) => `Jump to prompt ${index}: ${preview}`,
@@ -3457,6 +3459,7 @@ export const en: LocaleStrings = {
     goalAttachmentQuerying: "Task attachment is unconfirmed. Checking its saved state without restarting it.",
     goalAttachmentUnknown: "Task attachment is unconfirmed and execution may have started. Do not resubmit; reopen the conversation to view saved state.",
     taskExecutionFailed: (reason) => `Task failed: ${reason}`,
+    taskInterrupted: "The app closed during the previous turn. Its history was saved.",
     // 待设计师确认：缺少模型 Key 的保守文案。
     modelKeyMissing: "No model API key was found, so the task can't start. Open Settings → Models and add your API key.",
     modelAuthFailed: "Model authentication failed. The API key is invalid or expired. Reconfigure the provider in Settings.",

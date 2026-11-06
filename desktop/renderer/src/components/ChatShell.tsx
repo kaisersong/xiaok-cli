@@ -1,3 +1,4 @@
+import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
 import {pendingTaskQuestion} from '../lib/pending-task-question';
 import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
@@ -67,6 +68,7 @@ interface GoalAttempt { scope: DisplayScope; requestId?: string }
 interface DisplaySource {
   scope: DisplayScope;
   sourceTaskId: string;
+  lastErrorMessage?: string;
   intentOwner: GoalAttempt | null;
   executionScope?: TaskSnapshot['executionScope'];
   eventCount: number;
@@ -300,6 +302,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [streamingText, setStreamingText] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
+  const [interruptedTask, setInterruptedTask] = useState<InterruptedTask | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -412,6 +415,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       setCurrentQuestion(null);
       setMessages(settleChatProgress);
       setStatus(event.status === 'cancelled' ? 'idle' : event.status);
+      if (event.status === 'failed' && source.lastErrorMessage === 'app_shutdown') {
+        const terminalEventCount = source.eventCount;
+        void api.recoverTask(sourceTaskId).then(({snapshot}) => {
+          if (!acceptsSource(source) || source.eventCount !== terminalEventCount) return;
+          setInterruptedTask(readTaskInterruption(snapshot, {taskId: sourceTaskId, threadId: source.scope.taskId ?? ''}));
+        }).catch(() => {}); // A closing app may no longer answer; history restore retries on next open.
+      }
       source.release?.();
       return;
     }
@@ -671,6 +681,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
       case 'error': {
         const msg = (event as { type: 'error'; message: string }).message;
+        source.lastErrorMessage = msg;
         if (lastLiveErrorRef.current?.taskKey === eventTaskKey
           && lastLiveErrorRef.current.rawMessage === msg) {
           break;
@@ -709,7 +720,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -738,6 +749,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     const previousRelease = unsubRef.current;
     const previousSource = displaySourceRef.current;
     displaySourceRef.current = source;
+    setInterruptedTask(previous => previous?.taskId === source.sourceTaskId ? previous : null);
     unsubRef.current = release;
     if (clearPresentation) {
       const partial = streamRef.current;
@@ -820,6 +832,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           source.terminalSeen = true;
           setStatus(snapshot.status === 'cancelled' ? 'idle' : snapshot.status);
           setCurrentQuestion(null);
+          setInterruptedTask(readTaskInterruption(snapshot, {taskId: prepared.taskId, threadId: prepared.threadId}));
         }
       }
     } catch { /* This one read is spent even if the transport or recovery cannot confirm it. */ }
@@ -1082,7 +1095,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }
@@ -1193,6 +1206,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setMessages([]);
     setPlanSteps([]);
     setCurrentQuestion(null);
+    setInterruptedTask(null);
     setThread(null);
     setStatus('idle');
     setLoadError(null);
@@ -1312,6 +1326,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         }
         setStatus(lastStatus);
         setCurrentQuestion(pendingTaskQuestion(lastSnapshot));
+        setInterruptedTask(readTaskInterruption(lastSnapshot, {taskId: lastTaskIdForSub, threadId: taskId}));
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
             executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
@@ -1924,6 +1939,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         streamingText={streamingText}
         status={status}
         currentQuestion={currentQuestion}
+        interruptedTask={interruptedTask}
         result={result}
         generatedFiles={generatedFiles}
         prompt={prompt}

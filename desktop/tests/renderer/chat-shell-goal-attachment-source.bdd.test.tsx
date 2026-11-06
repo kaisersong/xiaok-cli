@@ -22,6 +22,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: Compone
   <output data-testid="display-status">{p.status}</output>
   <output data-testid="stream">{p.streamingText}</output>
   <output data-testid="question">{p.currentQuestion?.prompt}</output>
+  <output data-testid="interrupted-task">{p.interruptedTask?JSON.stringify(p.interruptedTask):''}</output>
   <output data-testid="current-result">{JSON.stringify(p.result)}</output>
   <output data-testid="history">{JSON.stringify(p.messages)}</output>
   <output data-testid="files">{JSON.stringify(p.generatedFiles)}</output>
@@ -901,4 +902,34 @@ it('coalesces repeated clicks on the same live question while its reply is pendi
  await mount();await emit(observer('A'),{type:'needs_user',question:{taskId:'A',questionId:'pending-choice',kind:'freeform',prompt:'QA question',choices:[{id:'qa',label:'pending QA choice'}]}});
  const reply=deferred<void>();f.answerQuestion.mockReturnValue(reply.promise);const button=screen.getByRole('button',{name:'pending QA choice'});fireEvent.click(button);fireEvent.click(button);expect(f.answerQuestion).toHaveBeenCalledTimes(1);
  await act(async()=>reply.resolve());expect(screen.queryByRole('alert')).toBeNull();
+});
+
+
+describe('application-close interruption is separate from a live question',()=>{
+ const stoppedEvents:DesktopTaskEvent[]=[{type:'needs_user',question:{taskId:'A',questionId:'old-question',kind:'freeform',prompt:'Synthetic interrupted question',choices:[{id:'one',label:'Synthetic reply'}]}},{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}];
+ async function mountStopped(){f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,'failed',stoppedEvents),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('failed'));}
+ it('explains historical shutdown and restores draft-only choices without answering or starting work',async()=>{
+  await mountStopped();expect(screen.getByTestId('history')).toHaveTextContent('应用关闭中断了上轮执行，记录已保留。');expect(screen.getByTestId('history')).not.toHaveTextContent('app_shutdown');expect(JSON.parse(screen.getByTestId('interrupted-task').textContent!)).toEqual({taskId:'A',choices:[{id:'one',label:'Synthetic reply'}]});expect(screen.getByTestId('question')).toBeEmptyDOMElement();expect(f.createTask).not.toHaveBeenCalled();expect(f.answerQuestion).not.toHaveBeenCalled();
+ });
+ it('sends an explicit reply through a new task with history references instead of answering an expired question',async()=>{
+  await mountStopped();fireEvent.change(screen.getByLabelText('chat draft'),{target:{value:'Synthetic reply'}});fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('ordinary-B'));expect(f.createTask).toHaveBeenCalledExactlyOnceWith({prompt:'Synthetic reply',materials:[],context:{threadId,taskIds:['A']}});expect(f.answerQuestion).not.toHaveBeenCalled();expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();expect(screen.getByLabelText('chat draft')).toHaveValue('');
+ });
+ it('retains interrupted continuation and draft when new-task submission fails',async()=>{
+  await mountStopped();f.createTask.mockRejectedValueOnce(Error('runtime unavailable'));fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('idle'));expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Synthetic reply');expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');expect(f.answerQuestion).not.toHaveBeenCalled();
+ });
+ it('drops interrupted options after switching conversations',async()=>{
+  await mountStopped();fireEvent.click(screen.getByRole('button',{name:'other thread'}));await waitFor(()=>expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement());expect(f.createTask).not.toHaveBeenCalled();
+ });
+ it.each(['running','waiting_user','completed','failed','cancelled'] as const)('does not restore an older interruption after a later %s turn',async state=>{
+  f.getThread.mockResolvedValue({...thread(),currentTaskId:'C',taskIds:['A','C']});f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,id==='A'?'failed':state,id==='A'?stoppedEvents:[]),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('C'));expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();
+ });
+});
+
+
+it('recovers draft-only choices after observing a live app shutdown terminal',async()=>{
+ await mount();const q:DesktopTaskEvent={type:'needs_user',question:{taskId:'A',questionId:'live-stop',kind:'freeform',prompt:'Synthetic stop',choices:[{id:'one',label:'Live stopped choice'}]}};await emit(observer('A'),q);
+ f.recoverTask.mockResolvedValueOnce({snapshot:{...snapshot('A','failed',[q,{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}]),context:{threadId}}});await emit(observer('A'),{type:'error',message:'app_shutdown'});await emit(observer('A'),{type:'task_terminal',status:'failed'});await waitFor(()=>expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Live stopped choice'));expect(f.answerQuestion).not.toHaveBeenCalled();expect(f.createTask).not.toHaveBeenCalled();
+});
+it.each(['route','new source']as const)('ignores a late shutdown snapshot after changing %s',async target=>{
+ await mount();const pending=deferred<{snapshot:TaskSnapshot}>();f.recoverTask.mockReturnValueOnce(pending.promise);await emit(observer('A'),{type:'error',message:'app_shutdown'});await emit(observer('A'),{type:'task_terminal',status:'failed'});if(target==='route')fireEvent.click(screen.getByRole('button',{name:'other thread'}));else fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await act(async()=>{});await act(async()=>pending.resolve({snapshot:{...snapshot('A','failed',[question('A'),{type:'error',message:'app_shutdown'}]),context:{threadId}}}));expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();expect(f.answerQuestion).not.toHaveBeenCalled();
 });

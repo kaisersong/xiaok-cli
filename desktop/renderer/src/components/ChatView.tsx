@@ -1,3 +1,4 @@
+import type {InterruptedTask} from '../lib/interrupted-task';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
@@ -275,6 +276,7 @@ interface ChatViewProps {
   streamingText: string;
   status: 'idle' | 'running' | 'waiting_user' | 'completed' | 'failed';
   currentQuestion: NeedsUserQuestion | null;
+  interruptedTask?: InterruptedTask | null;
   result: TaskResult | null;
   generatedFiles: GeneratedFile[];
   prompt: string;
@@ -295,7 +297,7 @@ interface ChatViewProps {
 
 export function ChatView({
   emptyContent, conversationHeader, assistantContent, assistantHasMessages,
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
+  thread, messages, streamingText, status, currentQuestion, interruptedTask, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -305,6 +307,16 @@ export function ChatView({
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
   const showEntry = Boolean(emptyContent) && !assistantHasMessages && messages.length === 0 && !streamingText && status === 'idle';
+  const stagedChoice = useRef<{threadId:string;taskId:string;before:string;after:string} | null>(null);
+  const canContinueInterruption = Boolean(interruptedTask && interruptedTask.taskId === thread.taskIds.at(-1) && (status === 'failed' || status === 'idle') && !currentQuestion);
+  const stageInterruptedChoice = (label: string) => {
+    if (!canContinueInterruption || !interruptedTask) return;
+    const previous = stagedChoice.current;
+    const before = previous?.threadId === thread.id && previous.taskId === interruptedTask.taskId && prompt === previous.after ? previous.before : prompt;
+    const after = before.trim() ? `${before}\n${label}` : label;
+    stagedChoice.current = {threadId:thread.id, taskId:interruptedTask.taskId, before, after};
+    onPromptChange(after);
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIndexFrameRef = useRef<number | null>(null);
@@ -640,7 +652,14 @@ export function ChatView({
             )}
 
             {/* Error */}
-            {status === 'failed' && (
+            {canContinueInterruption ? (
+              <div role="note" className="space-y-3 py-2">
+                <p className="text-sm text-[var(--c-text-secondary)]">{interruptedTask?.choices?.length ? t.chatView.interruptedChoices : t.chatView.interruptedContinue}</p>
+                {interruptedTask?.choices?.map(choice => <button key={choice.id} type="button"
+                  onClick={() => stageInterruptedChoice(choice.label)}
+                  className="block rounded-lg border border-[var(--c-border)] px-4 py-2 text-left text-sm text-[var(--c-text-primary)] hover:bg-[var(--c-bg-card)]">{choice.label}</button>)}
+              </div>
+            ) : status === 'failed' && (
               <div className="flex items-start gap-3 py-2">
                 <svg viewBox="0 0 16 16" className="mt-0.5 size-4 shrink-0 text-red-500" fill="currentColor">
                   <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4.5a1 1 0 112 0v3a1 1 0 11-2 0v-3zm1 7a1 1 0 100-2 1 1 0 000 2z" />
