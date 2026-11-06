@@ -65,3 +65,50 @@ describe('scheduled task completion delivery',()=>{
   const upgraded=new TimedActionStore(path);stores.push(upgraded);expect(upgraded.listPendingScheduledDeliveries().map(r=>r.run.runId)).toEqual([recent]);
  });
 });
+
+function legacyRuns(path:string,actionId:string,now:number){
+ const db=new DatabaseSync(path);
+ const insert=db.prepare("INSERT INTO timed_action_runs(run_id,action_id,executor_kind,status,started_at,runtime_task_id) VALUES (?,?,'agent_task','success',?,?)");
+ for(let i=0;i<5;i++)insert.run(`legacy-${i}`,actionId,now-5000+i,`task_legacy_${i}`);
+ db.close();
+}
+it.each([false,true])('baselines only the latest legacy run with an existing receipt table: %s',existing=>{
+ const {store,path}=setup();const now=Date.now();const original=accepted(store,'daily',now-10000);
+ store.acknowledgeScheduledDelivery(original,now-10000,{taskId:'daily',runId:original,completed:true});
+ store.close();stores.splice(stores.indexOf(store),1);
+ const db=new DatabaseSync(path);if(!existing)db.exec('DROP TABLE scheduled_task_delivery_receipts; UPDATE timed_action_runs SET delivery_tracked=NULL');db.close();
+ legacyRuns(path,'daily',now);
+ const upgraded=new TimedActionStore(path);stores.push(upgraded);
+ expect(upgraded.listPendingScheduledDeliveries().map(row=>row.run.runId)).toEqual(['legacy-4']);
+ const reopened=new TimedActionStore(path);stores.push(reopened);
+ expect(reopened.listPendingScheduledDeliveries().map(row=>row.run.runId)).toEqual(['legacy-4']);
+});
+it('expires missing snapshots durably beyond 24h without publishing or reading them again',async()=>{
+ const {store,path}=setup();const now=Date.now();const runId=accepted(store,'missing',now);
+ const read=vi.fn(async()=>null),publish=vi.fn(()=>true);
+ const reconcile=createScheduledTaskDeliveryReconciler({store,readSnapshot:read,publish});
+ await reconcile();expect(store.listPendingScheduledDeliveries()).toHaveLength(1);
+ const clock=vi.spyOn(Date,'now').mockReturnValue(now+86400001);
+ try {
+  await reconcile();await reconcile();expect(read).toHaveBeenCalledTimes(1);expect(publish).not.toHaveBeenCalled();
+  expect(store.listPendingScheduledDeliveries()).toEqual([]);
+  const db=new DatabaseSync(path);expect(db.prepare('SELECT event_json FROM scheduled_task_delivery_receipts WHERE run_id=?').get(runId)).toMatchObject({event_json:null});db.close();
+ } finally {clock.mockRestore();}
+});
+it('recovers completed once receipts with a 24h inclusive boundary and only each action latest event',()=>{
+ const {store}=setup();const now=Date.now();const run=accepted(store,'once',now);
+ const event={taskId:'once',runId:run,completed:true,success:true};store.acknowledgeScheduledDelivery(run,now-86400000,event);
+ expect(store.getAction('once')?.status).toBe('completed');
+ expect(SCHEDULED_OUTPUT_SCHEMAS.getRecentScheduledDeliveries.parse(store.getRecentScheduledDeliveries(now))).toEqual([event]);
+ expect(store.getRecentScheduledDeliveries(now+1)).toEqual([]);
+});
+it('returns the latest 200 action receipts in delivery order, ignoring baselines and older runs',()=>{
+ const {store,path}=setup();const now=Date.now();
+ for(let i=0;i<201;i++){const id=`action-${i}`,run=accepted(store,id,now+i);store.acknowledgeScheduledDelivery(run,now+i,{taskId:id,runId:run,completed:true});}
+ const db=new DatabaseSync(path);
+ db.prepare("INSERT INTO timed_action_runs(run_id,action_id,executor_kind,status,started_at,runtime_task_id) VALUES ('extra','action-200','agent_task','success',?,'task_extra')").run(now+202);
+ db.close();store.acknowledgeScheduledDelivery('extra',now+202,{taskId:'action-200',runId:'extra',completed:true});
+ const events=store.getRecentScheduledDeliveries(now+203);
+ expect(events).toHaveLength(200);expect(events[0].taskId).toBe('action-1');expect(events.at(-1)?.runId).toBe('extra');
+ expect(new Set(events.map(event=>event.taskId)).size).toBe(200);
+});

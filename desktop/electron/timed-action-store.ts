@@ -369,8 +369,8 @@ export class TimedActionStore {
         this.db.prepare(`
           insert into timed_action_runs (
             run_id, action_id, executor_kind, status, started_at, finished_at,
-            runtime_task_id, error, decision_json
-          ) values (?, ?, ?, 'claimed', ?, null, null, null, ?)
+            runtime_task_id, error, decision_json, delivery_tracked
+          ) values (?, ?, ?, 'claimed', ?, null, null, null, ?, 1)
         `).run(runId, row.id, row.executor_kind, now, JSON.stringify({ context, originalAction: action }));
         claimed.push({ action, runId, context });
       }
@@ -631,15 +631,35 @@ export class TimedActionStore {
     return rows.map(row => ({...this.runRowToRecord(row), ...(row.event_json ? {delivery: JSON.parse(row.event_json) as ScheduledTaskDueEvent} : {})}));
   }
 
-  listPendingScheduledDeliveries(): Array<{action: TimedActionRecord; run: TimedActionRunRecord}> {
+  getRecentScheduledDeliveries(now = Date.now()): ScheduledTaskDueEvent[] {
+    const rows = typedRows<{event_json: string}>(this.db.prepare(`
+      SELECT event_json FROM (
+        SELECT d.event_json,d.delivered_at,d.run_id FROM scheduled_task_delivery_receipts d
+        JOIN timed_action_runs r ON r.run_id=d.run_id
+        WHERE d.event_json IS NOT NULL AND d.delivered_at>=? AND d.delivered_at<=?
+          AND NOT EXISTS(SELECT 1 FROM scheduled_task_delivery_receipts newer
+            JOIN timed_action_runs nr ON nr.run_id=newer.run_id
+            WHERE nr.action_id=r.action_id AND newer.event_json IS NOT NULL AND newer.delivered_at<=?
+              AND (newer.delivered_at>d.delivered_at OR newer.delivered_at=d.delivered_at AND newer.run_id>d.run_id))
+        ORDER BY d.delivered_at DESC,d.run_id DESC LIMIT 200
+      ) ORDER BY delivered_at,run_id
+    `).all(now-24*60*60_000,now,now));
+    return rows.map(row => JSON.parse(row.event_json) as ScheduledTaskDueEvent);
+  }
+
+  listPendingScheduledDeliveries(now = Date.now()): Array<{action: TimedActionRecord; run: TimedActionRunRecord}> {
+    // Persist expiry before filtering so missing snapshots cannot be retried forever.
+    this.db.prepare(`INSERT OR IGNORE INTO scheduled_task_delivery_receipts(run_id,delivered_at)
+      SELECT run_id,? FROM timed_action_runs WHERE executor_kind='agent_task' AND status='success'
+        AND runtime_task_id IS NOT NULL AND started_at<?`).run(now,now-24*60*60_000);
     const rows = typedRows<TimedActionRunRow>(this.db.prepare(`
       SELECT r.* FROM timed_action_runs r JOIN timed_actions a ON a.id=r.action_id
       LEFT JOIN scheduled_task_delivery_receipts d ON d.run_id=r.run_id
       WHERE r.executor_kind='agent_task' AND r.status='success' AND r.runtime_task_id IS NOT NULL
-        AND d.run_id IS NULL AND a.status!='cancelled'
+        AND d.run_id IS NULL AND r.started_at>=? AND a.status!='cancelled'
         AND json_extract(a.executor_json,'$.roomTarget') IS NULL
       ORDER BY r.started_at,r.run_id
-    `).all());
+    `).all(now-24*60*60_000));
     return rows.map(row => ({action: this.getAction(row.action_id)!, run: this.runRowToRecord(row)}));
   }
 
@@ -709,20 +729,25 @@ export class TimedActionStore {
 
   private ensureScheduledDeliveryReceipts(): void {
     this.transaction(() => {
-      if (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_task_delivery_receipts'").get()) return;
-      this.db.exec(`CREATE TABLE scheduled_task_delivery_receipts (
+      const columns = typedRows<{name: string}>(this.db.prepare('pragma table_info(timed_action_runs)').all());
+      if (!columns.some(column => column.name === 'delivery_tracked')) this.db.exec('ALTER TABLE timed_action_runs ADD COLUMN delivery_tracked INTEGER');
+      this.db.exec(`CREATE TABLE IF NOT EXISTS scheduled_task_delivery_receipts (
         run_id TEXT PRIMARY KEY REFERENCES timed_action_runs(run_id) ON DELETE CASCADE,
         delivered_at INTEGER NOT NULL,
         event_json TEXT
       )`);
       // Upgrade quietly baselines older history; recover only each schedule's latest recent dispatch.
-      this.db.prepare(`INSERT INTO scheduled_task_delivery_receipts(run_id,delivered_at)
-        SELECT r.run_id,0 FROM timed_action_runs r WHERE r.executor_kind='agent_task'
+      this.db.prepare(`INSERT OR IGNORE INTO scheduled_task_delivery_receipts(run_id,delivered_at)
+        SELECT r.run_id,0 FROM timed_action_runs r WHERE r.delivery_tracked IS NULL AND r.executor_kind='agent_task'
           AND r.status='success' AND r.runtime_task_id IS NOT NULL AND (
             r.started_at < ? OR EXISTS(SELECT 1 FROM timed_action_runs newer
               WHERE newer.action_id=r.action_id AND newer.executor_kind='agent_task' AND newer.status='success'
                 AND newer.runtime_task_id IS NOT NULL AND (newer.started_at>r.started_at
                   OR newer.started_at=r.started_at AND newer.run_id>r.run_id)))`).run(Date.now()-24*60*60_000);
+      // Old writers omit this nullable column; retained pending runs survive subsequent opens.
+      this.db.exec('UPDATE timed_action_runs SET delivery_tracked=1 WHERE delivery_tracked IS NULL');
+      this.db.prepare("INSERT OR IGNORE INTO automation_store_metadata(key,value) VALUES ('scheduled_delivery_baseline_at',?)").run(Date.now());
+      this.db.exec("INSERT OR REPLACE INTO automation_store_metadata(key,value) VALUES ('scheduled_delivery_schema',1)");
     });
   }
 

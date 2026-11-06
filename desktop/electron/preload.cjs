@@ -417,6 +417,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   downloadEmbeddingModel: (modelId) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId),
   setEmbeddingModel: (modelId) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId),
   syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
+  getRecentScheduledDeliveries: () => ipcRenderer.invoke('desktop:getRecentScheduledDeliveries'),
   getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks'),
   createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input),
   updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input),

@@ -1881,6 +1881,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   scheduledIpc.handle('desktop:getTimedActions', () => {
     return timedActionService.getActions();
   });
+  scheduledIpc.handle('desktop:getRecentScheduledDeliveries', () => timedActionService.getRecentScheduledDeliveries());
   scheduledIpc.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
   });

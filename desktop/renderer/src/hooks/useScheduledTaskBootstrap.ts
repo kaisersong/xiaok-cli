@@ -73,7 +73,8 @@ export function useScheduledTaskBootstrap(): void {
 
     // Register before the initial read, and serialize it with live events.
     if (desktop.getScheduledTasks) void enqueue(async () => {
-      const recoveredNotices: ScheduledTaskDueEvent[] = [];
+      const recoveredNotices = desktop.getRecentScheduledDeliveries ? await desktop.getRecentScheduledDeliveries() : [];
+      if (!Array.isArray(recoveredNotices)) throw Error('scheduled_deliveries_invalid');
       const main = await desktop.getScheduledTasks();
       if (!Array.isArray(main)) throw Error('scheduled_tasks_invalid');
       const rows = mergeScheduledTaskCache(main, readCache());
@@ -81,10 +82,6 @@ export function useScheduledTaskBootstrap(): void {
       for (const row of rows) {
         if (!active) return;
         linked.push(await link(row));
-        if (row.runtimeTaskId && desktop.getTimedActionRuns) {
-          const runs = await desktop.getTimedActionRuns(row.id);
-          for (const run of runs) if (run.delivery) recoveredNotices.push(run.delivery);
-        }
       }
       if (!active) return;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(linked));
