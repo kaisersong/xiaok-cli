@@ -1962,7 +1962,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return multiAgentService!.runRoot(input, context => descriptor.invoke(input, context));
     },
     authorizePreparation: multiAgentService ? (taskId, marker) => multiAgentService.assertHostPreparation(taskId, marker) : undefined,
-    assertTaskAdmission: snapshot => multiAgentService?.assertHostAdmission(snapshot),
+    assertTaskAdmission: (snapshot,kind) => multiAgentService?.assertHostAdmission(snapshot,kind),
     decideCancellation: (snapshot, reason) => multiAgentService?.decideHostCancellation(snapshot, reason) ?? Promise.resolve({ hostAbortAllowed: true }),
     getExecutionPolicy: snapshot => ({ deliveryRepair: multiAgentStore?.getRootBinding(snapshot.taskId) ? 'explicit' : 'automatic' }),
     onDeliveryReport: async report => {

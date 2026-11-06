@@ -142,7 +142,7 @@ export interface InProcessTaskRuntimeHostOptions {
   acquireExecutionToken?: (taskId: string) => { release(): void };
   getExecutionPolicy?: (snapshot: TaskSnapshot) => TaskExecutionPolicy;
   authorizePreparation?: (taskId: string, marker: TaskMultiAgentPreparation) => void;
-  assertTaskAdmission?: (snapshot: TaskSnapshot) => Promise<void> | void;
+  assertTaskAdmission?: (snapshot: TaskSnapshot, kind?: 'live_answer') => Promise<void> | void;
   decideCancellation?: (snapshot: TaskSnapshot, reason: string) => Promise<TaskCancellationDecision>;
   /** Fixed main-owned adapter; the exact durable report is the checking ACK. */
   onDeliveryReport?: (report: HostDeliveryReport) => Promise<HostDeliveryReport>;
@@ -807,8 +807,12 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   private async answerQuestionSourceOwned(input: { taskId: string; answer: UserAnswer }): Promise<void> {
-    if (this.options.assertTaskAdmission) await this.options.assertTaskAdmission(await this.requireSnapshot(input.taskId));
     const pending=this.liveQuestionAnswers.get(input.taskId);
+    if (this.options.assertTaskAdmission) {
+      const snapshot=await this.requireSnapshot(input.taskId);
+      if(pending)await this.options.assertTaskAdmission(snapshot,'live_answer');
+      else await this.options.assertTaskAdmission(snapshot);
+    }
     const currentQuestion=this.questions.getCurrent(input.taskId);
     if(currentQuestion?.kind==='freeform'&&!pending)throw Error('task_question_execution_not_live');
     let value:string|undefined;
@@ -2212,7 +2216,31 @@ function isValidContextSnapshot(snapshot: TaskSnapshot): boolean {
     && typeof snapshot.status === 'string';
 }
 
+// Core and Desktop have separate compile roots; the history test pins this protocol to Desktop's public predicate.
+function isTaskExecutionInterruption(message: unknown): boolean {
+  return message === 'app_shutdown' || message === 'multi_agent_prepare_interrupted';
+}
+
 function formatAssistantContext(snapshot: TaskSnapshot): string {
+  const progress = formatAssistantProgressContext(snapshot);
+  // Recognize only exact persisted interruption codes, not localized or substring matches.
+  const lastError = [...snapshot.events].reverse().find((event): event is Extract<DesktopTaskEvent, {type: 'error'}> => event.type === 'error');
+  if (snapshot.status !== 'failed' || !isTaskExecutionInterruption(lastError?.message)) return progress;
+  const resolved = new Set<string>();
+  for (let index = snapshot.events.length - 1; index >= 0; index--) {
+    const event = snapshot.events[index];
+    if (event.type === 'question_resolved') resolved.add(event.questionId);
+    if (event.type !== 'needs_user') continue;
+    const question = event.question;
+    // Never promote another task's question, an approval, or an older question.
+    if (question.taskId !== snapshot.taskId || question.kind !== 'freeform' || resolved.has(question.questionId)) return progress;
+    return ['上一轮执行已中断，以下问题尚未收到用户回答：', question.prompt,
+      ...(question.choices ?? []).map(choice => `- ${choice.label}`), '此前进展：', progress].join('\n');
+  }
+  return progress;
+}
+
+function formatAssistantProgressContext(snapshot: TaskSnapshot): string {
   const explicitSummary = snapshot.result?.summary?.trim();
   if (explicitSummary) {
     return explicitSummary;

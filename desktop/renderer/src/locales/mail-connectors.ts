@@ -1,5 +1,6 @@
 import type { MailProvider,MailErrorCode } from '../../../shared/mail-connectors-ipc-contract';
 export interface MailConnectorLabels {
+ manageProvider:(name:string)=>string;removeAccount:string;accountIdentityHint:string;
  authCodeTitle:string;authCodeHint:string;openWebmail:(name:string)=>string;authGuides:Record<'qq'|'netease163',string[]>;
  smtpHost:string;smtpPort:string;smtpHelp:string;
  title:string;description:string;search:string;all:string;connected:string;add:(name:string)=>string;accountCount:(count:number)=>string;

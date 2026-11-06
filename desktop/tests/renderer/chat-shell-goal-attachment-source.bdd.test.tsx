@@ -8,12 +8,13 @@ import type { ThreadRecord } from '../../renderer/src/api/types';
 import type { ChatView as ActualChatView } from '../../renderer/src/components/ChatView';
 
 const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), subscribeTask: vi.fn(), updateThreadTaskId: vi.fn(),
-  createTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
+  createTask: vi.fn(), createObservationTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
+const interruptedHandler = vi.hoisted(()=>({latest:undefined as undefined|((id:string)=>unknown)}));
 vi.mock('../../renderer/src/api', () => ({ api: { ...f, getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })), updateThreadTitle: vi.fn(async () => {}), listSkills: vi.fn(async () => []) } }));
 vi.mock('../../renderer/src/layouts/AppLayout', () => ({ useSidebarCollapse: () => ({ collapsed: false, setCollapsed: f.setCollapsed }), AppLayout: () => null }));
 // Leaf presentation only: real ChatShell owns every state transition, real
 // GoalBar drives semantic handlers, and the production attachment helper runs.
-vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: ComponentProps<typeof ActualChatView>) => <>
+vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: ComponentProps<typeof ActualChatView>) => { interruptedHandler.latest=p.onInterruptedChoice;return <>
   <form onSubmit={event => { event.preventDefault(); void p.onSubmit(p.prompt); }}>
     <input aria-label="chat draft" value={p.prompt} onChange={event => p.onPromptChange(event.target.value)} />
     <button type="submit">ordinary submit</button>
@@ -22,19 +23,23 @@ vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: Compone
   <output data-testid="display-status">{p.status}</output>
   <output data-testid="stream">{p.streamingText}</output>
   <output data-testid="question">{p.currentQuestion?.prompt}</output>
+  <output data-testid="interrupted-task">{p.interruptedTask?JSON.stringify(p.interruptedTask):''}</output>
   <output data-testid="current-result">{JSON.stringify(p.result)}</output>
   <output data-testid="history">{JSON.stringify(p.messages)}</output>
   <output data-testid="files">{JSON.stringify(p.generatedFiles)}</output>
   <output data-testid="canvas-visible">{String(p.canvasOpen)}</output>
   <button type="button" onClick={p.onToggleCanvas}>toggle canvas</button>
   <button type="button" onClick={() => p.onQueue?.(p.prompt, [])}>queue current draft</button>
+  {p.interruptedTask?.choices?.map(choice=><button type="button" key={'interrupted-'+choice.id} onClick={()=>p.onInterruptedChoice?.(choice.id)}>{choice.label}</button>)}
   {p.currentQuestion?.choices?.map(choice => <button type="button" key={choice.id} onClick={() => p.onAnswer(choice.id)}>{choice.label}</button>)}
   {p.status === 'running' && <button type="button" onClick={p.onCancel}>stop current task</button>}
-</> }));
+</> } }));
 vi.mock('../../renderer/src/components/TaskPanel', () => ({ TaskPanel: (p: { goalContent?: ReactNode; planSteps: unknown }) =>
   <><output data-testid="plan">{JSON.stringify(p.planSteps)}</output>{p.goalContent}</> }));
 vi.mock('../../renderer/src/components/CanvasPanel', () => ({ CanvasPanel: (p: { initialPreviewContent?: string; events?: unknown }) =>
   <><output data-testid="canvas-preview">{p.initialPreviewContent}</output><output data-testid="canvas-events">{JSON.stringify(p.events)}</output></> }));
+
+vi.mock('../../renderer/src/components/ObservationControls',()=>({ObservationControls:(p:{draftId:string|null;onDraft:(id:string|null)=>void})=><><button type="button" onClick={()=>p.onDraft('observation-existing')}>stage observation</button><output data-testid="observation-draft">{p.draftId}</output></>}));
 
 import { ChatShell } from '../../renderer/src/components/ChatShell';
 import { LocaleProvider, useLocale } from '../../renderer/src/contexts/LocaleContext';
@@ -130,7 +135,7 @@ function Navigate() {
 }
 async function mount(strict = false, waitForA = true) {
   const content = <MemoryRouter initialEntries={[{ pathname: `/t/${threadId}`, state: { createGoal: currentGoal === null, draftPrompt: 'saved draft' } }]}>
-    <LocaleProvider><Navigate /><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider>
+    <LocaleProvider><Navigate /><Routes><Route path="/t/:taskId" element={<ChatShell />} /><Route path="/" element={<p>task list home</p>}/></Routes></LocaleProvider>
   </MemoryRouter>;
   let view!: ReturnType<typeof render>;
   await act(async () => { view = render(strict ? <StrictMode>{content}</StrictMode> : content); });
@@ -155,6 +160,8 @@ beforeEach(() => {
   f.updateThreadTaskId.mockImplementation(async (_thread: string, id: string) => { order.push(`update:${id}`); });
   f.readFileContent.mockResolvedValue({ content: 'file content' });
   f.createTask.mockResolvedValue({ taskId: 'ordinary-B' });
+  f.createObservationTask.mockResolvedValue({taskId:'observation-B'});
+  interruptedHandler.latest=undefined;
   f.subscribeTask.mockImplementation((taskId: string, handler: (event: DesktopTaskEvent) => void) => {
     order.push(`subscribe:${taskId}`);
     const item: Observer = { taskId, handler, active: true, release: vi.fn() };
@@ -852,4 +859,97 @@ describe('pending publication uses the actual GoalBar and ChatShell without task
     expect(screen.queryByText('late old publication')).not.toBeInTheDocument();
     expect(resume).not.toHaveBeenCalled(); expect(ack).not.toHaveBeenCalled();
   });
+});
+
+
+describe('conversation failure recovery keeps the user in control',()=>{
+ it('keeps the draft, question and conversation visible when a choice reply fails',async()=>{
+  await mount();await emit(observer('A'),{type:'needs_user',question:{taskId:'A',questionId:'choice-A',kind:'confirm_understanding',prompt:'Choose next step',choices:[{id:'yes',label:'confirm step'}]}});
+  f.answerQuestion.mockRejectedValueOnce(Error('task_answer_failed'));
+  fireEvent.click(screen.getByRole('button',{name:'confirm step'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('回复未能提交，请重试。');
+  expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');
+  expect(screen.getByTestId('question')).toHaveTextContent('Choose next step');
+  expect(screen.getByTestId('display-status')).toHaveTextContent('waiting_user');
+  expect(screen.queryByText(/Failed to load thread/)).toBeNull();expect(f.createTask).not.toHaveBeenCalled();
+  f.answerQuestion.mockResolvedValueOnce(undefined);fireEvent.click(screen.getByRole('button',{name:'confirm step'}));
+  await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+  expect(screen.getByTestId('question')).toBeEmptyDOMElement();
+ });
+ it('retries a failed thread read without reloading the application or creating another task',async()=>{
+  f.getThread.mockRejectedValueOnce(Error('storage unavailable'));await mount(false,false);
+  expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法打开此对话');
+  fireEvent.click(screen.getByRole('button',{name:'重新加载对话'}));
+  await screen.findByLabelText('chat draft');expect(f.getThread).toHaveBeenCalledTimes(2);expect(f.createTask).not.toHaveBeenCalled();expect(activeIds()).toContain('A');
+ });
+ it('provides a safe return to the task list even when opened without browser history',async()=>{
+  f.getThread.mockRejectedValueOnce(Error('storage unavailable'));await mount(false,false);await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button',{name:'返回任务列表'}));await screen.findByText('task list home');expect(f.createTask).not.toHaveBeenCalled();
+ });
+ it('preserves an ordinary freeform reply after rejection without replacing the conversation',async()=>{
+  await mount();await emit(observer('A'),question('A'));f.answerQuestion.mockRejectedValueOnce(Error('task_answer_failed'));
+  fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await screen.findByRole('alert');
+  expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');expect(screen.getByTestId('question')).toHaveTextContent('A question');
+ });
+ it('still clears a rejected credential answer while keeping the question and composer available',async()=>{
+  await mount();await emit(observer('A'),question('A'));f.answerQuestion.mockRejectedValueOnce(Error('credential_secure_input_required'));
+  fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await screen.findByRole('alert');
+  expect(screen.getByLabelText('chat draft')).toHaveValue('');expect(screen.getByTestId('question')).toHaveTextContent('A question');
+ });
+});
+
+
+it('restores the unresolved question when reopening the latest waiting task',async()=>{
+ f.recoverTask.mockImplementation(async id=>({snapshot:snapshot(id,'waiting_user',[{type:'needs_user',question:{taskId:id,questionId:'restore-choice',kind:'freeform',prompt:'Restored QA question',choices:[{id:'qa',label:'restored QA choice'}]}}])}));
+ await mount();expect(screen.getByTestId('question')).toHaveTextContent('Restored QA question');
+ fireEvent.click(screen.getByRole('button',{name:'restored QA choice'}));await waitFor(()=>expect(f.answerQuestion).toHaveBeenCalledExactlyOnceWith({taskId:'A',answer:{questionId:'restore-choice',type:'choice',choiceId:'qa'}}));
+});
+it('coalesces repeated clicks on the same live question while its reply is pending',async()=>{
+ await mount();await emit(observer('A'),{type:'needs_user',question:{taskId:'A',questionId:'pending-choice',kind:'freeform',prompt:'QA question',choices:[{id:'qa',label:'pending QA choice'}]}});
+ const reply=deferred<void>();f.answerQuestion.mockReturnValue(reply.promise);const button=screen.getByRole('button',{name:'pending QA choice'});fireEvent.click(button);fireEvent.click(button);expect(f.answerQuestion).toHaveBeenCalledTimes(1);
+ await act(async()=>reply.resolve());expect(screen.queryByRole('alert')).toBeNull();
+});
+
+
+describe('application-close interruption is separate from a live question',()=>{
+ const stoppedEvents:DesktopTaskEvent[]=[{type:'needs_user',question:{taskId:'A',questionId:'old-question',kind:'freeform',prompt:'Synthetic interrupted question',choices:[{id:'one',label:'Synthetic reply'}]}},{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}];
+ async function mountStopped(){f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,'failed',stoppedEvents),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('failed'));}
+ it('explains historical shutdown and restores draft-only choices without answering or starting work',async()=>{
+  await mountStopped();expect(screen.getByTestId('history')).toHaveTextContent('应用关闭中断了上轮执行，记录已保留。');expect(screen.getByTestId('history')).not.toHaveTextContent('app_shutdown');expect(JSON.parse(screen.getByTestId('interrupted-task').textContent!)).toEqual({taskId:'A',choices:[{id:'one',label:'Synthetic reply'}]});expect(screen.getByTestId('question')).toBeEmptyDOMElement();expect(f.createTask).not.toHaveBeenCalled();expect(f.answerQuestion).not.toHaveBeenCalled();
+ });
+ it('sends an explicit reply through a new task with history references instead of answering an expired question',async()=>{
+  await mountStopped();fireEvent.change(screen.getByLabelText('chat draft'),{target:{value:'Synthetic reply'}});fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('ordinary-B'));expect(f.createTask).toHaveBeenCalledExactlyOnceWith({prompt:'Synthetic reply',materials:[],context:{threadId,taskIds:['A']}});expect(f.answerQuestion).not.toHaveBeenCalled();expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();expect(screen.getByLabelText('chat draft')).toHaveValue('');
+ });
+ it('retains interrupted continuation and draft when new-task submission fails',async()=>{
+  await mountStopped();f.createTask.mockRejectedValueOnce(Error('runtime unavailable'));fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('idle'));expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Synthetic reply');expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');expect(f.answerQuestion).not.toHaveBeenCalled();
+ });
+ it('drops interrupted options after switching conversations',async()=>{
+  await mountStopped();fireEvent.click(screen.getByRole('button',{name:'other thread'}));await waitFor(()=>expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement());expect(f.createTask).not.toHaveBeenCalled();
+ });
+ it.each(['running','waiting_user','completed','failed','cancelled'] as const)('does not restore an older interruption after a later %s turn',async state=>{
+  f.getThread.mockResolvedValue({...thread(),currentTaskId:'C',taskIds:['A','C']});f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,id==='A'?'failed':state,id==='A'?stoppedEvents:[]),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('C'));expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();
+ });
+});
+
+
+it('recovers draft-only choices after observing a live app shutdown terminal',async()=>{
+ await mount();const q:DesktopTaskEvent={type:'needs_user',question:{taskId:'A',questionId:'live-stop',kind:'freeform',prompt:'Synthetic stop',choices:[{id:'one',label:'Live stopped choice'}]}};await emit(observer('A'),q);
+ f.recoverTask.mockResolvedValueOnce({snapshot:{...snapshot('A','failed',[q,{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}]),context:{threadId}}});await emit(observer('A'),{type:'error',message:'app_shutdown'});await emit(observer('A'),{type:'task_terminal',status:'failed'});await waitFor(()=>expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Live stopped choice'));expect(f.answerQuestion).not.toHaveBeenCalled();expect(f.createTask).not.toHaveBeenCalled();
+});
+it.each(['route','new source']as const)('ignores a late shutdown snapshot after changing %s',async target=>{
+ await mount();const pending=deferred<{snapshot:TaskSnapshot}>();f.recoverTask.mockReturnValueOnce(pending.promise);await emit(observer('A'),{type:'error',message:'app_shutdown'});await emit(observer('A'),{type:'task_terminal',status:'failed'});if(target==='route')fireEvent.click(screen.getByRole('button',{name:'other thread'}));else fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await act(async()=>{});await act(async()=>pending.resolve({snapshot:{...snapshot('A','failed',[question('A'),{type:'error',message:'app_shutdown'}]),context:{threadId}}}));expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();expect(f.answerQuestion).not.toHaveBeenCalled();
+});
+
+it('localizes prior-boot interruption and offers only draft continuation',async()=>{f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,'failed',[{...question(id),question:{...question(id).question,choices:[{id:'one',label:'Recovered choice'}]}},{type:'error',message:'multi_agent_prepare_interrupted'},{type:'task_terminal',status:'failed'}]),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Recovered choice'));expect(screen.getByTestId('history')).toHaveTextContent('上轮执行已中断，记录已保留。');expect(screen.getByTestId('history')).not.toHaveTextContent('multi_agent_prepare_interrupted');expect(f.createTask).not.toHaveBeenCalled();expect(f.answerQuestion).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'English locale'}));await waitFor(()=>expect(screen.getByTestId('history')).toHaveTextContent('The previous turn was interrupted. Its history was saved.'));});
+
+
+describe('interrupted decisions submit with one click',()=>{
+ async function stopped(){f.recoverTask.mockImplementation(async id=>({snapshot:{...snapshot(id,'failed',[{type:'needs_user',question:{taskId:id,questionId:'one-click',kind:'freeform',prompt:'Synthetic decision',choices:[{id:'one',label:'Synthetic reply'},{id:'two',label:'Other reply'}]}},{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}]),context:{threadId}}}));await mount(false,false);await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('failed'));}
+ it.each(['saved draft','Synthetic reply'])('submits the chosen label immediately while handling the existing draft %s',async draft=>{await stopped();fireEvent.change(screen.getByLabelText('chat draft'),{target:{value:draft}});fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(f.createTask).toHaveBeenCalledExactlyOnceWith({prompt:'Synthetic reply',materials:[],context:{threadId,taskIds:['A']}}));await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('ordinary-B'));expect(f.answerQuestion).not.toHaveBeenCalled();expect(screen.getByLabelText('chat draft')).toHaveValue(draft==='Synthetic reply'?'':draft);expect(screen.getByTestId('interrupted-task')).toBeEmptyDOMElement();});
+ it('deduplicates repeated and alternate choices during pending admission',async()=>{await stopped();const pending=deferred<{taskId:string}>();f.createTask.mockReturnValueOnce(pending.promise);const one=screen.getByRole('button',{name:'Synthetic reply'}),two=screen.getByRole('button',{name:'Other reply'});fireEvent.click(one);fireEvent.click(one);fireEvent.click(two);expect(f.createTask).toHaveBeenCalledTimes(1);await act(async()=>pending.resolve({taskId:'ordinary-B'}));});
+ it('keeps choices and the draft after failure and permits an explicit one-click retry',async()=>{await stopped();f.createTask.mockRejectedValueOnce(Error('network failed'));fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('idle'));expect(screen.getByLabelText('chat draft')).toHaveValue('saved draft');expect(screen.getByTestId('interrupted-task')).toHaveTextContent('Synthetic reply');fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(f.createTask).toHaveBeenCalledTimes(2));expect(f.answerQuestion).not.toHaveBeenCalled();});
+ it('rejects an unknown choice and an old callback after changing thread',async()=>{await stopped();const old=interruptedHandler.latest;expect(old).toBeTypeOf('function');await act(async()=>old?.('missing'));expect(f.createTask).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'other thread'}));await act(async()=>{});await act(async()=>old?.('one'));expect(f.createTask).not.toHaveBeenCalled();});
+ it('rejects a late old choice after a newer source is promoted',async()=>{await stopped();const old=interruptedHandler.latest;fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(screen.getByTestId('display-source')).toHaveTextContent('ordinary-B'));await act(async()=>old?.('one'));expect(f.createTask).toHaveBeenCalledTimes(1);});
+ it('does not consume or submit an unrelated observation draft',async()=>{await stopped();fireEvent.click(screen.getByRole('button',{name:'stage observation'}));fireEvent.click(screen.getByRole('button',{name:'Synthetic reply'}));await waitFor(()=>expect(f.createTask).toHaveBeenCalledExactlyOnceWith({prompt:'Synthetic reply',materials:[],context:{threadId,taskIds:['A']}}));expect(f.createObservationTask).not.toHaveBeenCalled();expect(screen.getByTestId('observation-draft')).toHaveTextContent('observation-existing');});
+ it('retains the ordinary composer observation submission path',async()=>{await stopped();fireEvent.click(screen.getByRole('button',{name:'stage observation'}));fireEvent.click(screen.getByRole('button',{name:'ordinary submit'}));await waitFor(()=>expect(f.createObservationTask).toHaveBeenCalledExactlyOnceWith({draftId:'observation-existing',prompt:'saved draft',threadId}));expect(f.createTask).not.toHaveBeenCalled();});
 });
