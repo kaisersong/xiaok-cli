@@ -1,3 +1,5 @@
+import { formatModelRecoveryNotice } from './chat-model-recovery.js';
+import { sanitizeModelFailure } from '../ai/runtime/model-failure.js';
 import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
 import {inspectProfileAccountHome,ProfileAccountHomeError} from '../runtime/verification/profile-account-home.js';
 import {getUiCopy} from '../ui/locale.js';
@@ -813,8 +815,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         watchdog.observeRuntimeEvent(event);
         if (event.type === 'execution_health' && event.state === 'cleanup_pending' && !opts.print && !opts.json) writeOrchestrationBlock('\n执行长时间无进展或已取消，正在等待工具实际退出并清理资源。\n');
         if (event.type === 'model_recovery') {
-          log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs });
-          if (!opts.print && !opts.json) writeOrchestrationBlock(`\n模型连接中断，${Math.ceil(event.delayMs / 1000)} 秒后自动续接（第 ${event.attempt} 次，恢复窗口剩余 ${Math.ceil(event.remainingMs / 60000)} 分钟）。Esc 可中断。\n`);
+          log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs, failure: sanitizeModelFailure(event.failure) });
+          if (!opts.print && !opts.json) writeOrchestrationBlock(`\n${formatModelRecoveryNotice(event)}\n`);
         }
         onRuntimeActivity?.(event);
       });
