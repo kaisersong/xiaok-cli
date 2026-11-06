@@ -49,3 +49,4 @@ it('does not resurrect a disconnected account from a late reconnect and fences r
 it('keeps user and assistant previews available when sending is off',async()=>{
  const a=await service.connect({...input,allowSend:false},'user');search.mockResolvedValue({messages:[],hasMore:false,coverage:'complete'});for(const source of ['user','agent','scheduler'] as const)await expect(service.search({accountId:a.id},source)).resolves.toMatchObject({coverage:'complete'});
 });
+it('never stores a secure-input password if its task is cancelled during mailbox verification',async()=>{let release!:()=>void;test.mockImplementationOnce(()=>new Promise<void>(r=>release=r));const controller=new AbortController();const pending=service.connect(input,'user',controller.signal);controller.abort();release();await expect(pending).rejects.toThrow();expect(accounts.size).toBe(0);});

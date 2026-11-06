@@ -1413,7 +1413,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       const source=displaySourceRef.current;if(!source||!acceptsSource(source))return false;
       admissionPending.current=renderScope;
       try{await api.answerQuestion({taskId:thread.currentTaskId,answer:{questionId:currentQuestion.questionId,type:'text',text}});if(!acceptsSource(source))return false;setCurrentQuestion(null);setStatus('running');setPrompt('');return true;}
-      catch{setLoadError(t.chatShell.taskCreateFailed);return false;}
+      catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setLoadError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.taskCreateFailed);return false;}
       finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
     }
 
@@ -1527,7 +1527,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (!acceptsSource(source) || source.terminalSeen) return;
     setCurrentQuestion(null);
     setStatus('running');
-    } catch { if (acceptsSource(source)) setLoadError(t.chatShell.taskCreateFailed); }
+    } catch(error) { if (acceptsSource(source)) setLoadError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.taskCreateFailed); }
   };
 
   const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {

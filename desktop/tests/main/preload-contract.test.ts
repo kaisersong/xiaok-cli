@@ -1,3 +1,4 @@
+import {registerCredentialInputIpc} from '../../electron/credential-input-ipc.js';
 import { registerAssistantInboxIpc } from '../../electron/assistant-inbox-ipc.js';
 import { registerMailConnectorIpc } from '../../electron/mail-connector-typed-ipc.js';
 import { registerEnterpriseCliIpc } from '../../electron/enterprise-cli-typed-ipc.js';
@@ -250,6 +251,11 @@ describe('preload API contract', () => {
       'kswarmRestart',
       'kswarmResumeWorkflowRun',
       'kswarmStartProjectPlanning',
+      'getPrivateMemorySettings',
+      'savePrivateMemorySettings',
+      'listCredentialInputs',
+      'submitCredentialInput',
+      'cancelCredentialInput',
       'getAssistantState',
   'ensureAssistantToday',
   'refreshAssistantSources',
@@ -257,6 +263,7 @@ describe('preload API contract', () => {
   'startAssistantItem',
   'approveAssistantSend',
   'refuseAssistantSend',
+  'onCredentialInputsChanged',
   'onAssistantInboxChanged',
   'getAssistantOverview',
       'activateAssistant',
@@ -1143,6 +1150,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerScheduledTimedActionIpc({ handle: channel => { channels.add(channel); } });
   registerEnterpriseCliIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerMailConnectorIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerCredentialInputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerAssistantInboxIpc({ handle: channel => { channels.add(channel); } }, {} as never, {} as never, () => false);
   registerYzjCliAuthIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConnectorsIpc({ handle: channel => { channels.add(channel); } });

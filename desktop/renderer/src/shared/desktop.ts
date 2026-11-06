@@ -71,7 +71,7 @@ export interface AppUpdaterApi {
 
 export interface DesktopMemoryApi {
   getConfig(): Promise<Record<string, unknown>>;
-  setConfig(config: Record<string, unknown>): Promise<void>;
+  setConfig(config: Record<string, unknown>): Promise<Record<string,unknown>>;
   getStatus(): Promise<{ configured: boolean; healthy: boolean }>;
   getSnapshot(): Promise<{ memory_block: string; hits: unknown[] }>;
   getImpression(): Promise<{ impression: string; updated_at: unknown }>;
@@ -135,13 +135,12 @@ export function getDesktopApi(): ExtendedDesktopApi | null {
 
   const memory = {
     async getConfig() {
-      try {
-        const raw = localStorage.getItem('xiaok:memory-config')
-        return raw ? JSON.parse(raw) : { enabled: true, provider: 'notebook' }
-      } catch { return { enabled: true, provider: 'notebook' } }
+      const legacy=localStorage.getItem('xiaok:memory-config');let parsed:Record<string,unknown>|undefined;
+      if(legacy){try{parsed=JSON.parse(legacy);}catch{throw Error('credential_config_corrupt');}}
+      const saved=await raw.getPrivateMemorySettings(parsed);if(legacy)localStorage.removeItem('xiaok:memory-config');return saved;
     },
-    async setConfig(config: Record<string, unknown>) {
-      try { localStorage.setItem('xiaok:memory-config', JSON.stringify(config)) } catch { /* noop */ }
+    async setConfig(config:Record<string,unknown>) {
+      const saved=await raw.savePrivateMemorySettings(config);localStorage.removeItem('xiaok:memory-config');return saved;
     },
     async getStatus() {
       return { configured: true, healthy: true }

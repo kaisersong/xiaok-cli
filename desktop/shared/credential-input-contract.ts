@@ -1,0 +1,10 @@
+import {z} from 'zod';
+export const CREDENTIAL_TARGET_SCHEMA=z.object({id:z.string().min(1).max(256),kind:z.enum(['model','connector','mail']),label:z.string().min(1).max(200),destination:z.string().max(1000),account:z.string().max(320).optional()}).strict();
+export type CredentialTarget=z.infer<typeof CREDENTIAL_TARGET_SCHEMA>;
+export const CREDENTIAL_REQUEST_SCHEMA=z.object({id:z.string().uuid(),revision:z.number().int().positive(),taskId:z.string().min(1).max(256),target:CREDENTIAL_TARGET_SCHEMA,status:z.enum(['pending','submitting']),expiresAt:z.number().finite()}).strict();
+export type CredentialRequest=z.infer<typeof CREDENTIAL_REQUEST_SCHEMA>;
+export const CREDENTIAL_SUBMIT_SCHEMA=z.object({id:z.string().uuid(),expectedRevision:z.number().int().positive(),value:z.string().min(1).max(4096)}).strict();
+export const CREDENTIAL_CANCEL_SCHEMA=CREDENTIAL_SUBMIT_SCHEMA.omit({value:true});
+export type CredentialSubmit=z.infer<typeof CREDENTIAL_SUBMIT_SCHEMA>;
+export const CREDENTIAL_RESULT_SCHEMA=z.object({status:z.enum(['saved','cancelled','expired','failed']),targetId:z.string(),credentialRef:z.string().startsWith('credential:').optional(),errorCode:z.string().regex(/^credential_[a-z_]+$/).optional()}).strict();
+export type CredentialResult=z.infer<typeof CREDENTIAL_RESULT_SCHEMA>;

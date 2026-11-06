@@ -28,7 +28,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     globalSetup: ['../tests/support/profile-account.global.mjs'],
-    setupFiles: ['./tests/profile-account.setup.mjs', './tests/setup.ts', './tests/setup-host-env.ts'],
+    setupFiles: ['./tests/profile-account.setup.mjs', './tests/setup.ts', './tests/setup-host-env.ts', './tests/mock-system-credentials.ts'],
     sequence: { setupFiles: 'list' },
     server: {
       deps: {

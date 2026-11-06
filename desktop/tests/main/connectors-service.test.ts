@@ -111,14 +111,15 @@ describe('ConnectorsService', () => {
     expect(after?.name).toBe('web_search');
   });
 
-  it('getConfig returns full config with API keys after setConfig', async () => {
+  it('getConfig returns write-only key masks after setConfig', async () => {
     await service.setConfig({
       search: { provider: 'tavily', tavilyApiKey: 'tvly-key-123' },
       fetch: { provider: 'jina', jinaApiKey: 'jina-key-456' },
     }, {requestSource:'user'});
     const snapshot = await service.getConfig({requestSource:'user'});
-    expect(snapshot.config.search.tavilyApiKey).toBe('tvly-key-123');
-    expect(snapshot.config.fetch.jinaApiKey).toBe('jina-key-456');
+    expect(snapshot.config.search.tavilyApiKey).toBe('••••••••');
+    expect(JSON.stringify(snapshot)).not.toContain('tvly-key-123');
+    expect(snapshot.config.fetch.jinaApiKey).toBe('••••••••');
     expect(snapshot.loadStatus).toBe('ok');
   });
 
@@ -324,3 +325,5 @@ describe('ConnectorsService', () => {
     expect(ddgCalls).toBe(0);
   });
 });
+
+it('keeps masked connector values and clears only an explicitly empty key',async()=>{const root=join(tmpdir(),`connector-write-only-${Date.now()}`);mkdirSync(root,{recursive:true});const store=new ConnectorsStore({dataRoot:root});const registry=new ToolRegistry({autoMode:true});const service=new ConnectorsService({store,toolRegistry:registry});try{const a=await service.setConfig({search:{provider:'tavily',tavilyApiKey:'canary-live'},fetch:{provider:'basic'}},{requestSource:'user'});expect(a.config.search.tavilyApiKey).toBe('••••••••');await service.setConfig(a.config,{requestSource:'user'});expect(store.load().config.search.tavilyApiKey).toBe('canary-live');await service.setConfig({...a.config,search:{...a.config.search,tavilyApiKey:''}},{requestSource:'user'});expect(store.load().config.search.tavilyApiKey).toBeFalsy();}finally{registry.dispose();rmSync(root,{recursive:true,force:true});}});

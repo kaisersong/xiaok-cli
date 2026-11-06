@@ -1077,17 +1077,8 @@ export const api = {
   // ---------------------
   // Memory API (localStorage)
   // ---------------------
-  async getMemoryConfig() {
-    try {
-      const raw = localStorage.getItem('xiaok:memory-config');
-      return raw ? JSON.parse(raw) : { enabled: false };
-    } catch { return { enabled: false }; }
-  },
-
-  async saveMemoryConfig(config: { enabled: boolean }) {
-    try { localStorage.setItem('xiaok:memory-config', JSON.stringify(config)) } catch { /* noop */ }
-    return config;
-  },
+  async getMemoryConfig() {return getDesktopApi()!.memory.getConfig();},
+  async saveMemoryConfig(config:{enabled:boolean}) {return getDesktopApi()!.memory.setConfig(config);},
 
   // ---------------------
   // Connectors API
