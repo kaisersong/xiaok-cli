@@ -1,3 +1,4 @@
+import {pendingTaskQuestion} from '../lib/pending-task-question';
 import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
 import { ObservationControls } from './ObservationControls';
@@ -813,8 +814,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
           setStatus(snapshot.status);
           if (snapshot.status === 'waiting_user') {
-            const last = [...snapshot.events].reverse().find(event => event.type === 'needs_user');
-            if (last?.type === 'needs_user') setCurrentQuestion(last.question);
+            setCurrentQuestion(pendingTaskQuestion(snapshot));
           }
         } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
           source.terminalSeen = true;
@@ -1311,6 +1311,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           setResult(lastResult);
         }
         setStatus(lastStatus);
+        setCurrentQuestion(pendingTaskQuestion(lastSnapshot));
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
             executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
@@ -1523,7 +1524,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
-    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
+    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source) || admissionPending.current===renderScope) return;
+    admissionPending.current=renderScope;
     setActionError(null);
     try {
     await api.answerQuestion({
@@ -1534,6 +1536,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setCurrentQuestion(null);
     setStatus('running');
     } catch(error) { if (acceptsSource(source)) setActionError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed); }
+    finally {if(admissionPending.current===renderScope)admissionPending.current=null;}
   };
 
   const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {

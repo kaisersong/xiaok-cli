@@ -890,3 +890,15 @@ describe('conversation failure recovery keeps the user in control',()=>{
   expect(screen.getByLabelText('chat draft')).toHaveValue('');expect(screen.getByTestId('question')).toHaveTextContent('A question');
  });
 });
+
+
+it('restores the unresolved question when reopening the latest waiting task',async()=>{
+ f.recoverTask.mockImplementation(async id=>({snapshot:snapshot(id,'waiting_user',[{type:'needs_user',question:{taskId:id,questionId:'restore-choice',kind:'freeform',prompt:'Restored QA question',choices:[{id:'qa',label:'restored QA choice'}]}}])}));
+ await mount();expect(screen.getByTestId('question')).toHaveTextContent('Restored QA question');
+ fireEvent.click(screen.getByRole('button',{name:'restored QA choice'}));await waitFor(()=>expect(f.answerQuestion).toHaveBeenCalledExactlyOnceWith({taskId:'A',answer:{questionId:'restore-choice',type:'choice',choiceId:'qa'}}));
+});
+it('coalesces repeated clicks on the same live question while its reply is pending',async()=>{
+ await mount();await emit(observer('A'),{type:'needs_user',question:{taskId:'A',questionId:'pending-choice',kind:'freeform',prompt:'QA question',choices:[{id:'qa',label:'pending QA choice'}]}});
+ const reply=deferred<void>();f.answerQuestion.mockReturnValue(reply.promise);const button=screen.getByRole('button',{name:'pending QA choice'});fireEvent.click(button);fireEvent.click(button);expect(f.answerQuestion).toHaveBeenCalledTimes(1);
+ await act(async()=>reply.resolve());expect(screen.queryByRole('alert')).toBeNull();
+});
