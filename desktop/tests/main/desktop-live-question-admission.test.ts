@@ -1,3 +1,4 @@
+import {captureTask7Event} from '../../electron/task7-typed-ipc.js';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -32,7 +33,7 @@ it('accepts input for the actual active root while keeping ordinary start admiss
  const f=await setup();expect(f.store.getRootBinding(f.snapshot.taskId)?.phase).toBe('active');
  expect(()=>f.service.assertHostAdmission(f.snapshot)).toThrow('multi_agent_prepare_interrupted');
  await expect(f.host.answerQuestion(f.input)).resolves.toBeUndefined();expect(await f.answer).toBe('QA selected');
- expect((await f.host.inspectTask(f.snapshot.taskId))?.events.filter(e=>e.type==='question_resolved')).toHaveLength(1);
+ const resolved=(await f.host.inspectTask(f.snapshot.taskId))!.events.filter(e=>e.type==='question_resolved');expect(resolved).toHaveLength(1);expect(captureTask7Event(resolved[0])).toEqual(resolved[0]);
 });
 it('still rejects revoked authorization without consuming the pending answer',async()=>{
  const f=await setup();const current=f.service.getExecutionAuthorization();const spy=vi.spyOn(f.service,'getExecutionAuthorization').mockReturnValue({...current,executionAllowed:false});
