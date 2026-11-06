@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**发布目标：1.5.10（2026-10-08）。** CLI 与 Desktop 版本统一为 **1.5.10**。Desktop 启动目录变化后，同一配置下已有授权的历史会话可在原工作空间继续执行，保留原绑定和历史记录；原空间授权被撤销、缺失或记录不匹配时仍拒绝。安装包可用性在 release 构建后验收，以 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 为准。详见[版本日志](#版本日志)。
+**最新正式版：1.6.2（2026-11-05）。** Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2)，CLI 可通过 `npm install -g xiaokcode@1.6.2` 安装。本版改善中文分词初始化与记忆库关闭流程，并修复会话收尾崩溃。主干后续改动与正式版分别说明，详见[版本日志](#版本日志)。
 
 ---
 
@@ -21,7 +21,7 @@ xiaok "分别检查 agent coordinator 和 registry 的生命周期，再交叉�
 
 当实际可用工具与任务适合独立分工时，Xiaok 可以自动分派有界任务，无需先声明 Agent 或创建项目。简单问题和紧密依赖的工作由主 Agent 直接完成。
 
-CLI 会明确展示 **SubAgent**、星座代号、分工、当前活动，以及结束时的工具调用量和耗时。代号从**双鱼座、天秤座**开始，再依次使用白羊座至其余星座；下一轮加 `-2`。同一实例续轮保留代号。所有代号统一强调色；斜体效果取决于终端字体支持。
+CLI 展示 **SubAgent** 的分工、当前活动和完成摘要，帮助你了解并行任务的进展与结果。
 
 可以直接补充偏好：“你自己完成”“分派前先问我”“这两块可独立并行审查”。重要取舍尚未确定时需要实际答复，取消或空回答不算批准。
 
@@ -46,7 +46,7 @@ Desktop 中可从对话开始，添加材料并在预览 / Canvas 中查看结�
 **当前源码重点：**
 
 - **SubAgent 协作**：为有价值的独立分工自动启动，展示具体任务，支持消息、同实例续轮、中断、关闭及清理状态。
-- **简化系统提示词**：合并重复执行指令，消除授权与输出格式冲突。CLI 通用层从 20,687 缩到 5,993 字符；Desktop 基础层从 8,297 缩到 3,239 字符。这是固定文本测量，不代表 token、延迟或模型质量的同比改善。
+- **模型选择**：支持 Kimi K3.1 Pro 与 Highspeed Coding；具体能力和上下文限制取决于所选模型。
 - **Goal Mode**：持久目标、状态、暂停/恢复、预算、证据与受控续跑。
 - **Room-first 协作**：先与智能体讨论，再通过用户确认，从选中的来源消息创建项目。
 - **产物与知识工作流**：预览、编辑、文档入库、本地检索、录音转写和可复用技能。
@@ -235,7 +235,7 @@ xiaok doctor --check-keys
 
 #### Kimi K3
 
-内置精确 profile 使用 `k3` 和 `k3-256k`。当前默认配置是 262,144 token 上下文与 `high` reasoning effort；可选上下文与思考档位取决于具体模型/profile。
+内置 profile 包括 `k3`、`k3-256k`、`k3.1-pro` 和 `k3.1-pro-highspeed`。当前默认配置是 262,144 token 上下文与 `high` reasoning effort；可选上下文与思考档位取决于具体模型/profile。
 
 CLI 与 Desktop 仅在任务内的 provider 对话内存中保留 K3 `reasoning_content`；原始推理不进入持久会话/任务历史、用户事件、普通日志或工具上下文。已有 assistant turn 的持久化历史不能直接 resume/continue/fork，会返回 `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`；此 profile 应开启新会话。
 
@@ -249,18 +249,18 @@ Desktop 是基于 Electron 与 React 的主要图形工作台。主进程 servic
 
 ### 下载
 
-可下载的安装包以 [GitHub Releases 当前正式版](https://github.com/kaisersong/xiaok-cli/releases/latest) 为准。`desktop-v1.5.10` 在签名、公证和发布 CI 验收完成后提供：
+可下载的安装包以 [GitHub Releases 当前正式版](https://github.com/kaisersong/xiaok-cli/releases/latest) 为准。`desktop-v1.6.2` 已发布以下文件：
 
-- `xiaok-1.5.10-arm64.dmg` — macOS Apple Silicon 安装包。
-- `xiaok-1.5.10-arm64-mac.zip` — macOS Apple Silicon 压缩包。
-- `xiaok-setup-1.5.10.exe` — Windows x64 安装程序。
+- `xiaok-1.6.2-arm64.dmg` — macOS Apple Silicon 安装包。
+- `xiaok-1.6.2-arm64-mac.zip` — macOS Apple Silicon 压缩包。
+- `xiaok-setup-1.6.2.exe` — Windows x64 安装程序。
 
 自动更新使用 `latest-mac.yml` 与 `latest.yml`。本文标记为近期源码的改动，需要源码构建或后续正式发布后使用。
 
 ### 功能特性
 
 - **对话与 Goal Mode**：任务历史、提示词导航、持久目标、暂停/恢复和可见进度。
-- **SubAgent 面板**：当前源码中的受管协作，提供稳定星座代号、分工、活动、消息与结果。
+- **SubAgent 面板**：当前源码中的受管协作，展示分工、活动、消息与结果。
 - **预览 / Canvas**：HTML、Markdown、PDF、报告和幻灯片预览，产物编辑、修订与任务来源；部分高级界面仍受功能开关控制。
 - **项目与 Room**：从对话经用户确认创建项目，提供看板、工作流 Graph、审核门禁与恢复。
 - **自动化**：定时 AI 任务、提醒、用户 Loop、诊断、运行历史和输出预览。
@@ -332,7 +332,6 @@ xiaok yzjchannel serve             # 可选云之家网关
 - **Esc** 请求中断当前执行轮次，同时保留草稿与排队输入。
 - **Ctrl+O** 在空闲时用 `$PAGER`（默认 `less -R`）查看完整 transcript；私有 ANSI 临时文件退出后删除，不支持的环境回退到 scrollback。
 - 支持的终端通过 kitty 或 iTerm2 协议显示提交的图片；tmux 等不支持的环境显示占位提示。
-- SubAgent 代号使用统一强调色；中文斜体取决于终端字体回退，ANSI 样式本身不保证字形倾斜。
 
 ### 云之家 IM 命令
 
@@ -573,6 +572,23 @@ npm run test --prefix desktop -- --run \
 
 ## 版本日志
 
+### 主干更新（尚未包含在 1.6.2）
+
+- 原生文件搜索收紧路径范围隔离，避免搜索越出允许范围（[#135](https://github.com/kaisersong/xiaok-cli/pull/135)）。使用此改动需源码构建或等待后续正式版。
+
+### v1.6.2 — 启动与会话可靠性，2026-11-05
+
+- 中文分词词典每个进程仅加载一次，初始化移到后台线程，减少首屏等待。
+- 记忆库关闭前等待正在进行的写入，修复会话收尾时 transcript 目录被删除导致的崩溃。
+- 账号声明目录已不存在时正常完成释放；改进 Windows 打包冒烟中的模型列表与中文分词检查。
+- 已知限制：macOS CLI 提示符偶发不显示仍在跟踪；中文路径下首次冷启动仍有已知回退。详见[正式发布说明](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2)。
+
+### 1.5.10 之后的功能更新
+
+- 支持 Kimi K3.1 Pro 与 Highspeed Coding 模型。
+- Desktop 聊天结果聚焦最终交付物，便于打开产物。
+- 改善终端重排、提问历史间距及账号记录清理。
+
 ### v1.5.10 — 历史工作空间恢复，2026-10-08
 
 - 启动目录变化后，同一配置下的历史会话继续使用原来已授权的工作空间。
@@ -642,7 +658,7 @@ npm run test --prefix desktop -- --run \
 
 CLI 与 Desktop 的 package metadata 均为 **1.5.2**。本次准备发布以下改动：
 
-- CLI/Desktop 子任务启动、通信、等待与生命周期控制，使用稳定的星座代号展示。
+- CLI/Desktop 子任务启动、通信、等待与生命周期控制，展示各任务的进展与结果。
 - 任务 / SubAgent / 画布复用一个浮窗，修复滚动、输出可读性，并增加首页协作提示词。
 - 前后台独立执行槽位，明确展示排队、等待授权与执行状态。
 - 符合条件的汇总断流可进行一次有界、禁用工具的续接，保留子任务结果，不重放工具；已失败的历史任务不会自动重跑。
