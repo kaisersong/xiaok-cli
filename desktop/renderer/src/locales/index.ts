@@ -3217,6 +3217,8 @@ export interface LocaleStrings {
     cuUnavailable: string;
     historyUnavailable: (taskIds: string) => string;
     historyRecovered: (taskId: string) => string;
+    historyLoadEarlier: (remaining: number) => string;
+    historyLoading: string;
     taskCreateFailed: string;
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
