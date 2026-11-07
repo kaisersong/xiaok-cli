@@ -1,3 +1,4 @@
+import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
 import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
 import { useChannelReadonly } from '../hooks/useChannelReadonly';
 import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
@@ -101,7 +102,7 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'connectors' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
 type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
@@ -233,6 +234,7 @@ function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
     { key: 'voice', icon: Mic, label: t.desktopSettings.voice },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
     { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
+    { key: 'connectors', icon: Plug, label: t.nav.connectors },
     { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
     { key: 'mcp', icon: Plug, label: t.desktopSettings.navMcp },
     { key: 'tools', icon: Wrench, label: t.desktopSettings.navTools },
@@ -299,6 +301,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
+          {activeTab === 'connectors' && <AppConnectorsSettings />}
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'mobile' && <MobilePane />}

@@ -10,6 +10,13 @@ const mocks = vi.hoisted(() => ({
   saveConnectorsConfig: vi.fn(),
   listConnectorRuntimes: vi.fn(),
   testConnectorProvider: vi.fn(),
+  controlYzjCliAuth: vi.fn(),
+  getYzjCliAuthState: vi.fn(),
+}));
+
+vi.mock('../../renderer/src/shared/desktop', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../renderer/src/shared/desktop')>(),
+  getDesktopApi: () => mocks,
 }));
 
 vi.mock('../../renderer/src/api/bridge', () => ({
@@ -45,6 +52,8 @@ describe('DesktopSettings tools pane', () => {
     mocks.saveConnectorsConfig.mockReset();
     mocks.listConnectorRuntimes.mockReset();
     mocks.testConnectorProvider.mockReset();
+    mocks.controlYzjCliAuth.mockReset().mockResolvedValue({ phase: 'signedOut', revision: 1 });
+    mocks.getYzjCliAuthState.mockReset();
   });
 
   afterEach(() => {
@@ -81,6 +90,30 @@ describe('DesktopSettings tools pane', () => {
       </MemoryRouter>,
     );
   }
+
+  it('keeps account connections in their own tab and preserves a pending login across navigation', async () => {
+    mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());
+    renderSettings();
+    fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await screen.findByText('搜索 Provider');
+    expect(screen.queryByRole('button', { name: '浏览器扫码登录' })).toBeNull();
+    expect(mocks.controlYzjCliAuth).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '连接器' }));
+    await screen.findByText('尚未登录');
+    expect(screen.getByRole('region', { name: '云之家' })).toBeInTheDocument();
+    expect(mocks.controlYzjCliAuth).toHaveBeenCalledExactlyOnceWith('check');
+    mocks.controlYzjCliAuth.mockResolvedValue({ phase: 'waiting', revision: 2 });
+    fireEvent.click(screen.getByRole('button', { name: '浏览器扫码登录' }));
+    await screen.findByText(/等待.*扫码/);
+
+    fireEvent.click(screen.getByRole('button', { name: '工具管理' }));
+    await screen.findByText('搜索 Provider');
+    expect(mocks.controlYzjCliAuth).not.toHaveBeenCalledWith('cancel');
+    fireEvent.click(screen.getByRole('button', { name: '连接器' }));
+    await screen.findByText(/等待.*扫码/);
+    expect(mocks.controlYzjCliAuth.mock.calls.map(([action]) => action)).toEqual(['check', 'login', 'check']);
+  });
 
   it('renders tools tab with current providers and runtime badges', async () => {
     mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());

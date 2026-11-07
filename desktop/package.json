@@ -32,6 +32,7 @@
     "@modelcontextprotocol/client": "2.3.0",
     "@modelcontextprotocol/ext-tasks": "0.2.2",
     "@tanstack/react-query": "^5.100.10",
+    "@yunzhijia/cli": "0.1.8",
     "ajv": "8.20.0",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
@@ -89,6 +90,7 @@
     "vitest": "^3.2.4"
   },
   "allowScripts": {
+    "@yunzhijia/cli@0.1.8": true,
     "better-sqlite3@13.0.3": true,
     "electron@39.8.10": true,
     "electron-winstaller@5.4.0": true,

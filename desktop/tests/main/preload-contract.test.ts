@@ -1,3 +1,4 @@
+import { registerYzjCliAuthIpc } from '../../electron/yzj-cli-auth-typed-ipc.js';
 import { registerGoalPublicationIpc } from '../../electron/goal-publication-typed-ipc.js';
 import { registerComputerUseControlIpc } from '../../electron/computer-use-control-typed-ipc.js';
 import { registerGoalTaskMutationsIpc } from '../../electron/goal-task-mutation-typed-ipc.js';
@@ -322,6 +323,8 @@ describe('preload API contract', () => {
       'getEmbeddingModels',
       'downloadEmbeddingModel',
       'setEmbeddingModel',
+      'getYzjCliAuthState',
+      'controlYzjCliAuth',
       'getConnectorsConfig',
       'getHarnessOptimizationConfig',
       'saveHarnessOptimizationConfig',
@@ -1115,6 +1118,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerPrinciplesIpc({ handle: channel => { channels.add(channel); } });
   registerKnowledgeIpc({ handle: channel => { channels.add(channel); } });
   registerScheduledTimedActionIpc({ handle: channel => { channels.add(channel); } });
+  registerYzjCliAuthIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConnectorsIpc({ handle: channel => { channels.add(channel); } });
   registerRecorderWindowIpc({ handle: channel => { channels.add(channel); } }, new Map(), { isMainWindowSender: () => false, isRecorderWindowSender: () => false });
   registerUpdaterIpc({ handle: channel => { channels.add(channel); } }, new Map(), () => false);

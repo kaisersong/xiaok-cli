@@ -452,6 +452,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState'),
+  controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action),
   getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig'),
   getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig'),
   saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input),

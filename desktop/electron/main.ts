@@ -1,5 +1,8 @@
+import { YzjCliAuthService } from './yzj-cli-auth-service.js';
+import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
+import { configureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
 import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
@@ -685,6 +688,7 @@ function createInitialWindow(): Promise<BrowserWindow> {
 
 async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
+  configureBundledYzjCli();
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
   const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
@@ -709,6 +713,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
+  const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
+  registerLifetimeDisposerStep('yzj-cli-auth', () => yzjCliAuth.dispose());
+  registerYzjCliAuthIpc(shutdownAwareIpc, yzjCliAuth, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
