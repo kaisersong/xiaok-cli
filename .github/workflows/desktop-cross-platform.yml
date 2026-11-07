@@ -13,6 +13,19 @@ on:
     branches: [master]
     paths:
       - 'desktop/**'
+      - 'src/runtime/bundled-yzj-cli.ts'
+      - 'src/runtime/enterprise-cli-*.ts'
+      - 'data/skills/dingtalk-cli/**'
+      - 'data/skills/feishu-cli/**'
+      - 'data/skills/wecom-cli/**'
+      - 'src/commands/yzj-cli.ts'
+      - 'src/ai/skills/defaults.ts'
+      - 'data/yzj-cli/**'
+      - 'data/skills/yzj-cli/**'
+      - 'tests/runtime/*yzj-cli*.test.ts'
+      - 'tests/commands/yzj-cli.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
       - 'src/ai/runtime/**'
       - 'src/runtime/task-host/**'
       - 'src/ai/adapters/**'
@@ -29,6 +42,19 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'src/runtime/bundled-yzj-cli.ts'
+      - 'src/runtime/enterprise-cli-*.ts'
+      - 'data/skills/dingtalk-cli/**'
+      - 'data/skills/feishu-cli/**'
+      - 'data/skills/wecom-cli/**'
+      - 'src/commands/yzj-cli.ts'
+      - 'src/ai/skills/defaults.ts'
+      - 'data/yzj-cli/**'
+      - 'data/skills/yzj-cli/**'
+      - 'tests/runtime/*yzj-cli*.test.ts'
+      - 'tests/commands/yzj-cli.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
       - 'src/ai/runtime/**'
       - 'src/runtime/task-host/**'
       - 'src/ai/adapters/**'
@@ -134,6 +160,16 @@ jobs:
           tests/main/skill-runtime-path-escape.test.ts
           tests/renderer/changed-files-tree-relativize.test.ts
           tests/main/cross-platform-path-guard.test.ts
+          tests/main/bundled-yzj-cli-package.test.ts
+          tests/main/bundled-yzj-cli-runtime.test.ts
+          tests/main/bundled-yzj-cli-command.test.ts
+          tests/main/enterprise-cli-runtime.test.ts
+          tests/main/enterprise-cli-service.test.ts
+          tests/main/enterprise-cli-ipc.test.ts
+          tests/renderer/enterprise-cli-connectors.test.tsx
+          tests/main/yzj-cli-auth-service.test.ts
+          tests/main/yzj-cli-auth-ipc.test.ts
+          tests/renderer/yzj-cli-auth-card.test.tsx
           tests/renderer/project-artifact-actions.test.tsx
           tests/main/read-file-content-binary.test.ts
           tests/main/file-ipc-schema.test.ts
@@ -156,6 +192,9 @@ jobs:
           tests/renderer/chat-shell-draft-prompt.test.tsx
           tests/main/conversation-activity-ipc.test.ts
           tests/main/artifact-export-package.test.ts
+          tests/main/scheduled-task-delivery.test.ts
+          tests/renderer/scheduled-task-delivery.test.tsx
+          tests/main/scheduled-preload.test.ts
 
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'

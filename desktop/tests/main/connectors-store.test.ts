@@ -27,7 +27,7 @@ describe('ConnectorsStore', () => {
     });
   });
 
-  it('round-trips config with API keys in plaintext', async () => {
+  it('round-trips API keys through OS references without plaintext JSON', async () => {
     await store.save({
       search: { provider: 'tavily', tavilyApiKey: 'tvly-secret' },
       fetch: { provider: 'jina', jinaApiKey: 'jina-key' },
@@ -36,9 +36,11 @@ describe('ConnectorsStore', () => {
     const persistedJson = JSON.parse(readFileSync(join(dataRoot, 'connectors.json'), 'utf-8'));
     expect(persistedJson.schemaVersion).toBe(1);
     expect(persistedJson.search.provider).toBe('tavily');
-    expect(persistedJson.search.tavilyApiKey).toBe('tvly-secret');
+    expect(persistedJson.search.tavilyApiKey).toBeUndefined();
+    expect(JSON.stringify(persistedJson)).not.toContain('tvly-secret');
     expect(persistedJson.fetch.provider).toBe('jina');
-    expect(persistedJson.fetch.jinaApiKey).toBe('jina-key');
+    expect(persistedJson.fetch.jinaApiKey).toBeUndefined();
+    expect(JSON.stringify(persistedJson)).not.toContain('jina-key');
 
     const reloaded = store.load();
     expect(reloaded.status).toBe('ok');
@@ -71,20 +73,13 @@ describe('ConnectorsStore', () => {
     writeFileSync(file, legacy);
     const loaded = store.load();
     expect(loaded.config.search.tavilyApiKey).toBe('tvly-example');
-    expect(readFileSync(file, 'utf8')).toBe(legacy);
+    expect(readFileSync(file, 'utf8')).not.toContain('tvly-example');
     await store.save({ search: { provider: 'tavily', tavilyApiKey: '  "tavily: tvly-example"  ' }, fetch: { provider: 'basic' } }, {requestSource:'user'});
-    expect(JSON.parse(readFileSync(file, 'utf8')).search.tavilyApiKey).toBe('tvly-example');
+    expect(JSON.parse(readFileSync(file, 'utf8')).search.tavilyApiKey).toBeUndefined();
     expect(new ConnectorsStore({ dataRoot }).load().config.search.tavilyApiKey).toBe('tvly-example');
   });
 
-  it('falls back to defaults and backs up on parse_failed', () => {
-    const file = join(dataRoot, 'connectors.json');
-    writeFileSync(file, '{ not valid json', 'utf-8');
-    const result = store.load();
-    expect(result.status).toBe('parse_failed');
-    expect(result.config.search.provider).toBe('duckduckgo');
-    expect(existsSync(`${file}.bak`)).toBe(true);
-  });
+  it('preserves corrupt credential files and reports an explicit error',()=>{const file=join(dataRoot,'connectors.json');writeFileSync(file,'{ not valid json');expect(()=>store.load()).toThrow('credential_config_corrupt');expect(readFileSync(file,'utf8')).toBe('{ not valid json');expect(existsSync(file+'.bak')).toBe(false);});
 
   it('rejects unknown schema version and treats it as parse_failed', () => {
     const file = join(dataRoot, 'connectors.json');

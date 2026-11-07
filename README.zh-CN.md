@@ -144,10 +144,34 @@ npm 包名是 `xiaokcode`，命令是 `xiaok`。使用 `xiaok update` 更新。
 > **npm ≥ 11.16 用户**：npm 默认拦截依赖包的 install/postinstall 脚本。若安装时出现 `install scripts not yet covered by allowScripts` 警告，请改用：
 >
 > ```bash
-> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
 > ```
 >
 > `onnxruntime-node` 的脚本用于放置本地 embedding 推理所需的原生二进制，`nodejieba` 用于中文分词。脚本被拦截时 CLI 仍可正常启动，但这两项能力会静默降级（embedding 关闭、中文按整段索引）。上述命令同时允许 CLI 安装检查、`node-pty` 与 SQLite 的安装脚本，仅对本次全局安装生效。若需持久配置，请把需要的包名合并到已有名单，不要覆盖其他条目。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
+
+#### 内置云之家 CLI
+
+CLI 和 Desktop 默认包含官方 `@yunzhijia/cli`，无需另外全局安装。聊天中可直接请求查询云之家消息、日程、通讯录等；内置技能会读取当前 CLI 的操作指南，操作仍遵守现有权限审批。
+
+```bash
+xiaok yzj-cli --version
+xiaok yzj-cli auth login
+xiaok yzj-cli calendar event list --start 2026-11-05 --end 2026-11-05
+xiaok yzj-cli im group recent --limit 20
+xiaok yzj-cli update
+```
+
+首次登录需用户完成个人授权；无浏览器时使用 `auth login --device`。这与 `xiaok auth` 和 `xiaok yzjchannel` 的连接认证独立。
+
+Desktop 可在「设置 → 连接器 → 云之家」点击「浏览器扫码登录」，默认浏览器会打开扫码授权页。界面显示等待、取消与重试，授权后自动核验身份；等待由主进程管理，不受普通 shell 超时影响。
+
+连接器还支持钉钉、飞书和企业微信。三个官方 CLI 均不默认内置，点击各自的「下载安装」后才下载到 xiaok 用户工具目录，再由浏览器扫码连接。飞书首次使用需配置应用；企微官方 CLI 使用机器人身份。安装成功后，后续任务可通过 `dws`、`lark-cli`、`wecom-cli` 调用。
+
+内置更新入口使用 xiaok 自带的 Node/Electron 运行时，查询官方发行版本并调用官方安装器，无需系统 npm。`--profile` / `--endpoint` 选择业务身份和 API 地址，不改变软件更新源。
+
+首次启动将可执行文件复制到 `~/.xiaok/tools/yzj-cli/<平台>-<架构>/`（遵循 `XIAOK_CONFIG_DIR`），并仅加入 xiaok 进程及其子进程的 PATH，因此助手可直接执行 `yzj-cli`。`update` 更新该用户副本，重启或升级 xiaok 会保留它；后续 CLI 更新仍使用 `xiaok yzj-cli update`。应用安装目录保持只读。
+
+官方 npm 安装脚本从云之家 CDN 下载二进制并校验随包校验值，也会安装其官方 agent skills。若脚本被禁用或下载失败，xiaok 仍可启动，但需在允许脚本后运行 `npm rebuild @yunzhijia/cli`（全局安装用 `npm rebuild -g @yunzhijia/cli`）。Desktop 安装包必须在打包前准备好二进制，运行时不会下载；损坏或缺失时重新安装完整安装包。
 
 #### Linux sudo / node-pty 排障
 

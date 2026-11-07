@@ -61,6 +61,9 @@ function stripDeepseekConfigKey(config: ConnectorsConfig): ConnectorsConfig {
   };
 }
 
+export const CONNECTOR_KEY_MASK='••••••••';
+function maskConnectorKeys(config:ConnectorsConfig):ConnectorsConfig {const safe=structuredClone(config);for(const part of ['search','fetch'] as const)for(const key of Object.keys(safe[part]))if(/ApiKey$/.test(key)&&(safe[part] as unknown as Record<string,unknown>)[key])(safe[part] as unknown as Record<string,unknown>)[key]=CONNECTOR_KEY_MASK;return safe;}
+
 export class ConnectorsService {
   private readonly store: ConnectorsStore;
   private readonly toolRegistry: ToolRegistry;
@@ -140,6 +143,8 @@ export class ConnectorsService {
     return this.snapshot('connectors_operation_unknown');
   }
 
+  async refreshStoredCredentials():Promise<void>{const loaded=this.store.load();this.loadStatus=loaded.status;await this.refreshCredentials(loaded.config);}
+
   async listProviders(): Promise<ProviderRuntime[]> {
     return this.withCredentials(() => Promise.resolve(this.registry.listProviderRuntimes()));
   }
@@ -152,7 +157,7 @@ export class ConnectorsService {
 
   private snapshot(errorCode = 'connectors_projection_unavailable'): ConnectorsConfigSnapshot {
     return captureConnectorsSnapshot({
-      config: stripDeepseekConfigKey(this.registry.getConfig()),
+      config: maskConnectorKeys(stripDeepseekConfigKey(this.registry.getConfig())),
       loadStatus: this.loadStatus,
       providers: this.registry.listProviderRuntimes(),
     }, errorCode);

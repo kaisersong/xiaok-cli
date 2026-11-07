@@ -84,6 +84,6 @@ describe('AssistantDetailPanel', () => {
       </LocaleProvider>,
     );
 
-    expect(screen.queryByRole('dialog', { name: '每日助理详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '小K助理详情' })).not.toBeInTheDocument();
   });
 });

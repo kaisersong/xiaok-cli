@@ -12,6 +12,7 @@ import {
   Radio,
   Wifi,
   Wrench,
+  Plug,
   Palette,
   RefreshCw,
 } from 'lucide-react'
@@ -29,11 +30,12 @@ import { InviteCodeContent } from './settings/InviteSettings'
 import { HelpContent, ReportFeedbackContent } from './settings/HelpSettings'
 import { CreditsContent } from './settings/CreditsSettings'
 import { UpdateSettingsContent } from './settings/UpdateSettings'
+import { AppConnectorsSettings } from './settings/AppConnectorsSettings'
 import { ToolsSettings } from './settings/ToolsSettings'
 import { TimeZoneSettings } from './settings/TimeZoneSettings'
 import { isDesktop, isLocalMode } from '../shared/desktop'
 
-export type SettingsTab = 'account' | 'appearance' | 'settings' | 'tools' | 'skills' | 'credits' | 'models' | 'agents' | 'channels' | 'connection' | 'updates'
+export type SettingsTab = 'account' | 'appearance' | 'settings' | 'tools' | 'connectors' | 'skills' | 'credits' | 'models' | 'agents' | 'channels' | 'connection' | 'updates'
 
 type NavItem = { key: SettingsTab; icon: LucideIcon }
 
@@ -51,6 +53,7 @@ const BASE_NAV_ITEMS: NavItem[] = [
 
 const DESKTOP_NAV_ITEMS: NavItem[] = [
   ...BASE_NAV_ITEMS,
+  { key: 'connectors', icon: Plug },
   { key: 'updates',    icon: RefreshCw },
   { key: 'connection', icon: Wifi },
 ]
@@ -184,6 +187,7 @@ export function SettingsModal({ me, accessToken, initialTab = 'account', onClose
                 </div>
               </div>
             )}
+            {activeKey === 'connectors' && isDesktop() && <AppConnectorsSettings />}
             {activeKey === 'tools' && (
               <ToolsSettings accessToken={accessToken} />
             )}

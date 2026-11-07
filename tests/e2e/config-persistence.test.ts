@@ -61,7 +61,9 @@ describe('config persistence end-to-end', () => {
     // Step 2: Verify config on disk
     const rawOnDisk = JSON.parse(readFileSync(join(testDir, 'config.json'), 'utf-8'));
     expect(rawOnDisk.defaultProvider).toBe('deepseek');
-    expect(rawOnDisk.providers.deepseek.apiKey).toBe('sk-deepseek-test');
+    expect(rawOnDisk.providers.deepseek.apiKey).toBeUndefined();
+    expect(JSON.stringify(rawOnDisk)).not.toContain('sk-deepseek-test');
+    expect((await loadConfig()).providers.deepseek.apiKey).toBe('sk-deepseek-test');
     expect(rawOnDisk.models['deepseek-default']).toBeDefined();
 
     // Step 3: Reload config via loadConfig (simulates a new process)

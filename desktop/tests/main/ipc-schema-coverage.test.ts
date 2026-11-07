@@ -1,3 +1,5 @@
+import { registerEnterpriseCliIpc } from '../../electron/enterprise-cli-typed-ipc.js';
+import { registerYzjCliAuthIpc } from '../../electron/yzj-cli-auth-typed-ipc.js';
 import { registerHarnessOptimizationIpc } from '../../electron/harness-optimization-ipc.js';
 import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
 import { registerSkillMutationIpc } from '../../electron/skill-mutation-typed-ipc.js';
@@ -24,6 +26,8 @@ import { join } from 'node:path';
 const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'main.ts'), 'utf8');
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 const currentViewChannels:string[]=[];
+registerEnterpriseCliIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
+registerYzjCliAuthIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
 registerHarnessOptimizationIpc({handle:channel=>{currentViewChannels.push(channel);}}, {} as never, () => null);
 registerMobileSignInIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerAutomationConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});

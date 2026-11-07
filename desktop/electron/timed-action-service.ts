@@ -372,6 +372,8 @@ export class TimedActionService {
     return this.store.listActions({ includeInactive: true });
   }
 
+  getRecentScheduledDeliveries() { return this.store.getRecentScheduledDeliveries(); }
+
   getRuns(actionId: string) {
     return this.store.listRuns(actionId);
   }

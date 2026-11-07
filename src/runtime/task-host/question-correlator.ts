@@ -31,6 +31,11 @@ export class NeedsUserQuestionCorrelator {
     };
   }
 
+  clear(taskId: string, questionId: string): void {
+    if(this.currentByTaskId.get(taskId)?.questionId===questionId)this.currentByTaskId.delete(taskId);
+    if(this.questionsById.get(questionId)?.taskId===taskId)this.questionsById.delete(questionId);
+  }
+
   getCurrent(taskId: string): NeedsUserQuestion | undefined {
     return this.currentByTaskId.get(taskId);
   }
