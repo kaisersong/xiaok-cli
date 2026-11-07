@@ -34,7 +34,15 @@ describe.skipIf(process.platform==='win32')('profile account physical paths',()=
  it('rejects system target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const target=dir('shared/home'),alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=alias;reject(alias);});
  it('rejects user target ancestors owned by another non-root user',()=>{dir('shared',uid+1,0o755);const alias=link('dotfiles',dir('shared/home'));process.env.HOME=alias;reject(alias);});
  it('reports unreadable link targets from statSync',()=>{const target=dir('physical'),alias=link('dotfiles',target);process.env.HOME=alias;fake.errors.set('stat:'+target,'EACCES');reject(alias,'unreadable');});
- it('escapes NUL in invalid config path diagnostics',()=>{process.env.XIAOK_CONFIG_DIR=join(root,'bad\0path');expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});});
+ it('escapes NUL in invalid config path diagnostics',()=>{
+  // Native process.env truncates NUL values in forks. Preserve the malformed
+  // diagnostic input in a private object, then restore the exact native env.
+  const descriptor=Object.getOwnPropertyDescriptor(process,'env')!;
+  try{
+   Object.defineProperty(process,'env',{...descriptor,value:{...process.env,XIAOK_CONFIG_DIR:join(root,'bad\0path')}});
+   expect(inspectProfileAccountHome()).toEqual({ok:false,path:join(root,'bad\\0path'),reason:'invalid_path'});
+  }finally{Object.defineProperty(process,'env',descriptor);}
+ });
  it('rejects sticky system targets owned by a non-root user',()=>{const target=dir('shared',uid,0o1777);dir('shared/home');const alias=link('var',target,0);stat(root,0,0o755);process.env.HOME=join(alias,'home');reject(alias);});
  it('reports unreadable path components',()=>{const home=dir('home');process.env.HOME=home;fake.errors.set(home,'EACCES');reject(home,'unreadable');});
  it('rejects writable system link parents',()=>{const target=dir('physical'),alias=link('var',target,0);stat(root,0,0o777);process.env.HOME=alias;reject(alias);});
