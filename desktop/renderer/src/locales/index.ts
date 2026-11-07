@@ -51,6 +51,7 @@ export interface LocaleStrings {
     phases: Record<string, string>; eventKinds: Record<string, string>;
     activityAnnouncement: (running: number, completed: number) => string; failureAnnouncement: (name: string) => string;
   };
+  scheduledTaskToast: {completed: string; failed: string; open: string; close: string};
   // sidebar
   newChat: string;
   chats: string;

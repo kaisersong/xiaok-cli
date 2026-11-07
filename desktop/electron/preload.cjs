@@ -431,6 +431,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   downloadEmbeddingModel: (modelId) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId),
   setEmbeddingModel: (modelId) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId),
   syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
+  getRecentScheduledDeliveries: () => ipcRenderer.invoke('desktop:getRecentScheduledDeliveries'),
   getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks'),
   createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input),
   updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input),
@@ -446,6 +447,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples'),
   savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle),
   deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id),
+  // Payload preserves dispatch and persisted execution completion facts, including runId.
   onScheduledTaskDue(handler) {
     const channel = 'desktop:scheduledTaskDue';
     const listener = (_event, payload) => {

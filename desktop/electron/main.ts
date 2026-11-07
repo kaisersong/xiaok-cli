@@ -44,6 +44,8 @@ import {registerLoopPublicationIpc,createLoopPublicationIpcAuthorizer} from './l
 import {createLoopPublicationShutdownOwner} from './loop-publication-shutdown.js';
 import {createShutdownAwareTimedActionService} from './timed-action-service-lifetime.js';
 import { scheduledRunPresentation } from './scheduled-run-presentation.js';
+import {createScheduledTaskDeliveryReconciler} from './scheduled-task-delivery.js';
+import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
@@ -1803,7 +1805,36 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
     captureAdmission(){const original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen)throw Error('loop_timed_shutdown');};},
   });
+  const publishScheduledTaskEvent = (event: ScheduledTaskDueEvent): boolean => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed() || window.webContents.isLoadingMainFrame()) return false;
+    try { window.webContents.send('desktop:scheduledTaskDue', event); }
+    catch (error) { debugMain('scheduled:send-failed', String(error)); return false; }
+    if (event.completed || !event.success) {
+      const title = event.title || event.taskId;
+      void Promise.resolve(createElectronDesktopNotificationPort().show({
+        title: event.completed && event.success ? `定时任务已完成：${title}` : `定时任务失败：${title}`,
+        body: event.success ? '结果已生成，点击查看。' : (event.error || '点击查看运行详情。'),
+        silent: false,
+        onClick: () => {
+          const current = mainWindow;
+          if (!current || current.isDestroyed()) return;
+          if (current.isMinimized()) current.restore();
+          current.show(); current.focus();
+          current.webContents.send('desktop:scheduledTaskFocus', {taskId: event.taskId, runtimeTaskId: event.runtimeTaskId});
+        },
+      })).catch(error => debugMain('scheduled:notification-failed', String(error)));
+    }
+    return true;
+  };
+  const reconcileScheduledTasks = createScheduledTaskDeliveryReconciler({
+    store: timedActionStore,
+    readSnapshot: taskId => services.readScheduledTaskSnapshot(taskId),
+    publish: publishScheduledTaskEvent,
+    onError: error => debugMain('scheduled:completion-reconcile-failed', String(error)),
+  });
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
+    reconcileScheduledTasks,
     loopCompletion:loopTimedCompletion,
     acquireWriter: acquireAutomationWriter,
     executors: createDesktopTimedActionExecutors({
@@ -1823,49 +1854,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       action,
       timedActionRunId,
     }),
-    onRunComplete: (event) => {
-      if (event.action.executor.kind !== 'agent_task' || event.status === 'publication_pending') return;
-      const window = mainWindow;
-      if (!window || window.isDestroyed()) return;
-      const success = event.status === 'success';
-      const title = event.action.title || event.action.id;
-      window.webContents.send('desktop:scheduledTaskDue', {
-        taskId: event.action.id,
-        runtimeTaskId: event.runtimeTaskId,
-        ...scheduledRunPresentation({ status: event.status, runtimeTaskId: event.runtimeTaskId }),
-        success,
-        title,
-        lastRunAt: event.action.lastDueAt ?? event.finishedAt,
-        nextRunAt: event.action.nextDueAt,
-        error: event.error,
+    onRunComplete: event => {
+      if (event.action.executor.kind !== 'agent_task' || event.action.executor.roomTarget || event.status === 'publication_pending') return;
+      publishScheduledTaskEvent({
+        taskId: event.action.id, runId: event.runId, runtimeTaskId: event.runtimeTaskId,
+        ...scheduledRunPresentation({status: event.status, runtimeTaskId: event.runtimeTaskId}),
+        success: event.status === 'success', title: event.action.title || event.action.id,
+        lastRunAt: event.action.lastDueAt ?? event.finishedAt, nextRunAt: event.action.nextDueAt, error: event.error,
       });
-      try {
-        const notificationPort = createElectronDesktopNotificationPort();
-        const notificationTitle = success
-          ? `定时任务已派发：${title}`
-          : `定时任务失败：${title}`;
-        const notificationBody = success
-          ? '任务已派发，实际完成后会更新运行结果。'
-          : (event.error ? `失败原因：${event.error}` : '点击查看失败详情。');
-        void notificationPort.show({
-          title: notificationTitle,
-          body: notificationBody,
-          silent: false,
-          onClick: () => {
-            try {
-              const window = mainWindow;
-              if (!window || window.isDestroyed()) return;
-              if (window.isMinimized()) window.restore();
-              window.show();
-              window.focus();
-              window.webContents.send('desktop:scheduledTaskFocus', {
-                taskId: event.action.id,
-                runtimeTaskId: event.runtimeTaskId,
-              });
-            } catch { /* focus is best-effort */ }
-          },
-        });
-      } catch { /* notification is best-effort */ }
     },
   });
   desktopIngressOwners.push({
@@ -1943,6 +1939,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   scheduledIpc.handle('desktop:getTimedActions', () => {
     return timedActionService.getActions();
   });
+  scheduledIpc.handle('desktop:getRecentScheduledDeliveries', () => timedActionService.getRecentScheduledDeliveries());
   scheduledIpc.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
   });

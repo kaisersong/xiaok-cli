@@ -75,6 +75,7 @@ export const zh: LocaleStrings = {
     eventKinds: { status: '状态', cleanup: '清理', output: '输出', result: '结果', message_sent: '消息', message_consumed: '已进入上下文', usage: '用量', artifact: '产物', tool_finished: '工具调用' },
     activityAnnouncement: (running, completed) => `${running} 个 SubAgent 运行中，${completed} 个已完成`, failureAnnouncement: name => `${name} 执行失败`,
   },
+  scheduledTaskToast: {completed: '定时任务已完成', failed: '定时任务失败', open: '点击查看', close: '关闭'},
   newChat: "新建会话",
   chats: "会话",
   searchChats: "搜索会话",

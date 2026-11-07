@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {useLocale} from '../contexts/LocaleContext';
 
 interface ToastItem {
   id: number;
@@ -10,6 +11,7 @@ interface ToastItem {
 }
 
 export function ScheduledTaskToast() {
+  const {t} = useLocale();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const navigate = useNavigate();
 
@@ -78,7 +80,7 @@ export function ScheduledTaskToast() {
           />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-[var(--c-text-primary)]">
-              {toast.success ? '定时任务已完成' : '定时任务失败'}
+              {toast.success ? t.scheduledTaskToast.completed : t.scheduledTaskToast.failed}
             </div>
             <div className="mt-0.5 truncate text-xs text-[var(--c-text-secondary)]">
               {toast.title || toast.taskId}
@@ -89,14 +91,14 @@ export function ScheduledTaskToast() {
               </div>
             )}
             <div className="mt-1 text-[11px] text-[var(--c-text-tertiary)]">
-              点击查看
+              {t.scheduledTaskToast.open}
             </div>
           </div>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); dismiss(toast.id); }}
             className="shrink-0 text-[var(--c-text-tertiary)] hover:text-[var(--c-text-primary)]"
-            aria-label="关闭"
+            aria-label={t.scheduledTaskToast.close}
           >
             ×
           </button>
