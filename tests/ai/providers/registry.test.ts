@@ -571,7 +571,7 @@ describe('official context windows per provider', () => {
     kimi: {
       'kimi-k2.6': 262_144,
       'kimi-k2.5': 262_144,
-      'kimi-for-coding': 262_144,
+      'kimi-for-coding': 1_048_576,
     },
   };
 

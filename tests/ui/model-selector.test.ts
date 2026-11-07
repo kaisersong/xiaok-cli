@@ -100,7 +100,7 @@ describe('buildModelOptions', () => {
     } finally { harness.restore(); }
   });
 
-  it('does not offer effort for a model without declared effort constraints', async () => {
+  it('offers native K2.8 effort when the existing coding alias is selected', async () => {
     const harness = createTtyHarness(80, 24);
     const renderer = new ReplRenderer(process.stdout);
     const scrollRegion = new ScrollRegionManager(process.stdout);
@@ -112,7 +112,7 @@ describe('buildModelOptions', () => {
       harness.send('\x1b[C');
       harness.send('\r');
       await expect(pending).resolves.toEqual({
-        modelId: 'kimi-coding', provider: 'kimi', model: 'kimi-for-coding', label: 'Kimi Default',
+        modelId: 'kimi-coding', provider: 'kimi', model: 'kimi-for-coding', label: 'Kimi Default', reasoningEffort: 'max',
       });
     } finally {
       harness.restore();

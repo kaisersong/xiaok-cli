@@ -16,3 +16,8 @@ export function isKimiCodingModel(model: string | undefined): model is KimiCodin
 export function isStrictKimiK3ProfileId(profileId: unknown): profileId is StrictKimiK3ProfileId {
   return Object.values(KIMI_CODING_PROFILES).some((id) => id === profileId);
 }
+
+/** Runtime metadata support does not opt legacy models into strict history gates. */
+export function isKimiCodingRuntimeModel(model: string | undefined): boolean {
+  return isKimiCodingModel(model) || model === 'kimi-for-coding';
+}
