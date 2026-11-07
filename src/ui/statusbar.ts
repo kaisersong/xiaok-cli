@@ -1,13 +1,12 @@
 import { dim, boldCyan, dimCyan } from "./render.js";
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { homedir } from 'node:os';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { computeCost, getContextTokens } from '../ai/runtime/usage.js';
+import { getInstalledVersion } from '../utils/version-info.js';
+import { DEFAULT_STATUSLINE_FIELDS, loadStatuslineConfiguration, normalizeStatuslineFields, type StatusBarField } from './statusline-preferences.js';
 
-export type StatusBarField = "model" | "mode" | "tokens" | "session";
-
-const DEFAULT_FIELDS: StatusBarField[] = ["model", "mode", "tokens", "session"];
-const VALID_FIELDS = new Set<StatusBarField>(DEFAULT_FIELDS);
+export type { StatusBarField } from './statusline-preferences.js';
 
 export interface UsageStats {
   inputTokens: number;
@@ -43,7 +42,8 @@ export class StatusBar {
   private mode = "default";
   private usage: UsageStats = { inputTokens: 0, outputTokens: 0 };
   private contextLimit: number = 200_000; // Default to 200K, updated based on model
-  private fields: StatusBarField[] = DEFAULT_FIELDS;
+  private fields: StatusBarField[] = [...DEFAULT_STATUSLINE_FIELDS];
+  private legacyFields = false;
   private enabled: boolean;
   private cwd = "";
   private branch = "";
@@ -57,7 +57,9 @@ export class StatusBar {
     this.model = model;
     this.sessionId = sessionId;
     this.cwd = cwd;
-    this.fields = loadConfiguredFields(cwd) ?? DEFAULT_FIELDS;
+    const configuration = loadStatuslineConfiguration(cwd);
+    this.fields = configuration.fields;
+    this.legacyFields = configuration.legacy;
     if (mode) this.mode = mode;
     if (options?.contextLimit) this.contextLimit = options.contextLimit;
     // 根据模型名称自动推断 context limit
@@ -85,7 +87,33 @@ export class StatusBar {
   }
 
   setFields(fields: StatusBarField[]): void {
-    this.fields = fields;
+    this.fields = normalizeStatuslineFields(fields);
+    this.legacyFields = false;
+  }
+
+  getFields(): StatusBarField[] { return [...this.fields]; }
+
+  getEditableFields(): StatusBarField[] {
+    const groups = this.fields.map(field => this.legacyFields && this.contextLimit > 0 && field === 'tokens' && !this.fields.includes('cost')
+      ? ['tokens', 'cost'] : [field]);
+    if (this.legacyFields && !this.fields.includes('branch')) {
+      if (!this.fields.includes('mode')) groups.push(['branch']);
+      else if (this.fields.includes('session')) {
+        let visible = 0;
+        let index = 0;
+        for (; index < groups.length; index++) {
+          if (this.getStatusText([this.fields[index]!], false)) visible++;
+          if (visible === 2) { index++; break; }
+        }
+        groups.splice(index, 0, ['branch']);
+      }
+    }
+    return normalizeStatuslineFields(groups.flat());
+  }
+
+  getStatusLineForFields(fields: StatusBarField[]): string {
+    const text = this.getStatusText(normalizeStatuslineFields(fields), false);
+    return text ? dim(text) : '';
   }
 
   beginActivity(label: string, startedAt = Date.now()): void {
@@ -175,13 +203,13 @@ export class StatusBar {
     // streamed transcript rows in real tmux sessions.
   }
 
-  private getStatusText(): string {
+  private getStatusText(fields = this.fields, legacyFields = this.legacyFields): string {
     const parts: string[] = [];
     const normalizedCwd = this.cwd.replace(/[\\/]+$/, '');
     const projectName = normalizedCwd.split(/[\\/]/).filter(Boolean).pop() || 'xiaok';
 
-    for (const field of this.fields) {
-      if (field === "session" && projectName) {
+    for (const field of fields) {
+      if ((field === "session" || field === 'project') && projectName) {
         parts.push(projectName);
       }
       if (field === "model" && this.model) {
@@ -193,22 +221,28 @@ export class StatusBar {
       if (field === "tokens" && this.contextLimit > 0) {
         const total = getContextTokens(this.usage);
         const pct = Math.round((total / this.contextLimit) * 100);
-        const tokenParts = [`${pct}%`];
+        const cost = legacyFields && !fields.includes('cost') ? computeCost(this.usage, this.model) : 0;
+        parts.push(cost > 0 ? `${pct}% · ${formatCost(cost)}` : `${pct}%`);
+      }
+      if (field === 'cost') {
         const cost = computeCost(this.usage, this.model);
-        if (cost > 0) {
-          tokenParts.push(formatCost(cost));
-        }
-        parts.push(tokenParts.join(' · '));
+        if (cost > 0) parts.push(formatCost(cost));
+      }
+      if (field === 'branch' && this.branch) parts.push(this.branch);
+      if (field === 'session-id' && this.sessionId) parts.push(this.sessionId);
+      if (field === 'version') parts.push(`v${getInstalledVersion()}`);
+      if (field === 'cwd' && this.cwd) {
+        const fromHome = relative(homedir(), this.cwd);
+        const withinHome = !isAbsolute(fromHome) && fromHome !== '..' && !fromHome.startsWith(`..${sep}`);
+        parts.push(withinHome ? join('~', fromHome) : this.cwd);
       }
     }
 
-    if (!this.fields.includes("mode") && this.branch) {
-      parts.push(this.branch);
-    } else if (this.fields.includes("mode") && this.fields.includes("session") && this.branch) {
-      parts.splice(Math.min(parts.length, 2), 0, this.branch);
+    if (legacyFields && this.branch && !fields.includes('branch')) {
+      if (!fields.includes('mode')) parts.push(this.branch);
+      else if (fields.includes('session')) parts.splice(Math.min(parts.length, 2), 0, this.branch);
     }
-
-    return parts.join(' · ');
+    return stripVTControlCharacters(parts.join(' · ')).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
   }
 
   /** Print the status bar as simple text (no ANSI positioning). */
@@ -263,35 +297,4 @@ function inferContextLimitFromModel(modelName: string): number {
   }
 
   return 200_000; // Default fallback
-}
-
-function loadConfiguredFields(cwd: string): StatusBarField[] | undefined {
-  const configDir = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
-  const settingsPaths = [
-    join(configDir, 'settings.json'),
-    join(cwd, '.xiaok', 'settings.json'),
-  ];
-
-  let configured: StatusBarField[] | undefined;
-  for (const path of settingsPaths) {
-    if (!existsSync(path)) {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
-        ui?: { statusBar?: { fields?: string[] } };
-      };
-      const fields = parsed.ui?.statusBar?.fields;
-      if (!Array.isArray(fields)) {
-        continue;
-      }
-      const validFields = fields.filter((field): field is StatusBarField => VALID_FIELDS.has(field as StatusBarField));
-      if (validFields.length > 0) {
-        configured = validFields;
-      }
-    } catch {}
-  }
-
-  return configured;
 }

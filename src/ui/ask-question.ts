@@ -41,6 +41,7 @@ export interface AskQuestionParams {
   renderFrame?: (lines: string[]) => boolean | void;
   clearFrame?: () => void;
   readText?: (question: string, signal?: AbortSignal) => Promise<string | null>;
+  writeTranscript?: (text: string) => void;
   signal?: AbortSignal;
 }
 
@@ -200,6 +201,7 @@ function countRenderedTerminalRows(lines: string[], cols: number): number {
 export async function askQuestion(params: AskQuestionParams): Promise<AskQuestionResult> {
   params.signal?.throwIfAborted();
   const { allOptions, otherIdx } = withFallbackOther(params.options);
+  let directPromptStarted = false;
 
   const selection = await new Promise<{selected: number[]; wantsOther: boolean} | null>((resolve, reject) => {
     const stdout = process.stdout;
@@ -209,7 +211,6 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
     const checked = new Set<number>();
     let renderedRowCount = 0;
     let externallyRendered = false;
-    let directPromptStarted = false;
     let settled = false;
 
     function clearFrame() {
@@ -376,18 +377,20 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
 
   const {selected, wantsOther} = selection;
   const labels = selected.map(i => allOptions[i]!.label);
-  const stdout = process.stdout;
-  stdout.write(`${boldCyan('❯')} ${bold(params.question)}\n`);
+  const writeTranscript = params.writeTranscript ?? ((text: string) => { process.stdout.write(text); });
+  // A direct menu already reserved its leading gap before the first draw.
+  // Footer overlays do not write into history, so reserve the gap on commit.
+  const questionText = `${directPromptStarted ? '' : '\n'}${boldCyan('❯')} ${bold(params.question)}\n`;
   if (wantsOther) {
+    writeTranscript(questionText);
     const text = await (params.readText
       ? params.readText(params.question, params.signal)
       : new InputReader().read('Enter your answer: ', {signal:params.signal}));
     params.signal?.throwIfAborted();
     if (text === null) return {selected:[],labels:[]};
-    stdout.write('\n');
+    writeTranscript('\n');
     return {selected,labels,otherText:text};
   }
-  for (const label of labels) stdout.write(`  ${dim('·')} ${cyan(label)}\n`);
-  stdout.write('\n');
+  writeTranscript(questionText + labels.map(label => `  ${dim('·')} ${cyan(label)}\n`).join('') + '\n');
   return {selected,labels};
 }
