@@ -39,7 +39,7 @@ vi.mock('node:worker_threads', async importOriginal => {
   const sourceUrl = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url);
   const source = join(realpathSync(dirname(fileURLToPath(sourceUrl))),basename(fileURLToPath(sourceUrl)));
   const protectionSource=new URL('../../../src/runtime/task-host/protection-read-worker.ts',import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  class CompiledEntryWorker extends actual.Worker {
     private readonly originalEntry: {entry:string,protection:boolean,start:number,exit?:number,exitCode?:number,terminateCalls:number};
     override terminate():Promise<number>{this.originalEntry.terminateCalls++;return super.terminate();}
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
@@ -54,7 +54,16 @@ vi.mock('node:worker_threads', async importOriginal => {
       this.originalEntry=originalEntry;this.once('exit',(code)=>{originalEntry.exit=Date.now();originalEntry.exitCode=code;});
       if (mapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
-  } };
+  }
+  // The SDK captures own native getter descriptors. Preserve that class shape
+  // on this entry-remapping subclass without constructing a Worker or adding a
+  // replacement getter implementation.
+  for (const key of ['stdout', 'stderr', 'stdin', 'threadId'] as const) {
+    const getter = Object.getOwnPropertyDescriptor(actual.Worker.prototype, key);
+    if (!getter?.get) throw Error('test original Worker getter missing: ' + key);
+    Object.defineProperty(CompiledEntryWorker.prototype, key, getter);
+  }
+  return { ...actual, Worker: CompiledEntryWorker };
 });
 beforeAll(async()=>{Object.assign(nativeWorker,await compileVerifierEntry('delivery-verifier-worker.ts'));const protection=await compileProtectionWorkerEntry();nativeWorker.protectionOutput=protection.output;nativeWorker.protectionRoot=protection.root;});
 afterAll(() => {
@@ -62,6 +71,18 @@ afterAll(() => {
   finally { for(const root of [nativeWorker.root,nativeWorker.protectionRoot])if(root)rmSync(root,{recursive:true,force:true,maxRetries:3}); }
 });
 
+
+it('the compiled-entry Worker fixture exposes original own getters without starting a native worker', async () => {
+  const actual = await vi.importActual<typeof import('node:worker_threads')>('node:worker_threads');
+  const observed = await import('node:worker_threads');
+  const before = { starts: nativeWorker.starts, entries: nativeWorker.originalEntries.length };
+  for (const key of ['stdout', 'stderr', 'stdin', 'threadId'] as const) {
+    const expected = Object.getOwnPropertyDescriptor(actual.Worker.prototype, key);
+    expect(expected?.get).toBeTypeOf('function');
+    expect(Object.getOwnPropertyDescriptor(observed.Worker.prototype, key)).toEqual(expected);
+  }
+  expect({ starts: nativeWorker.starts, entries: nativeWorker.originalEntries.length }).toEqual(before);
+});
 
 function sqlLiteral(value: string): string { return `'${value.replaceAll("'", "''")}'`; }
 function installNativeSqlFault(store: DesktopMultiAgentStore, table: 'operations' | 'root_turns', groupId: string, predicate: string, error: string) {

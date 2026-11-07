@@ -1,7 +1,7 @@
 import {openPrivateVerificationDatabase as openArtifactTestDatabase} from '../../../src/runtime/verification/private-database.js';
 import {it,expect,vi} from 'vitest';import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {spawnSync} from 'node:child_process';
 import {extractSingleArtifact} from '../../../src/runtime/isolated-execution/artifact-export.js';
-function tar(files:(root:string)=>void,names:string[],format='ustar'){const root=mkdtempSync(join(tmpdir(),'artifact-tar-'));try{files(root);const archive=join(root,'archive.tar');const command=spawnSync('/usr/bin/tar',['--format='+format,'-cf',archive,'-C',root,...names],{encoding:'utf8'});if(command.status!==0)throw Error(command.stderr);return readFileSync(archive);}finally{rmSync(root,{recursive:true,force:true});}}
+function tar(files:(root:string)=>void,names:string[],format='ustar'){const root=mkdtempSync(join(tmpdir(),'artifact-tar-'));try{files(root);const archive=join(root,'archive.tar');const command=spawnSync('/usr/bin/tar',[...(process.platform==='darwin'?['--no-xattrs']:[]),'--format='+format,'-cf',archive,'-C',root,...names],{encoding:'utf8',env:{...process.env,COPYFILE_DISABLE:'1'}});console.info(JSON.stringify({kind:'owned-artifact-tar-fixture',pid:command.pid??null,status:command.status,signal:command.signal}));if(command.status!==0)throw Error(command.stderr);return readFileSync(archive);}finally{rmSync(root,{recursive:true,force:true});}}
 it('extracts exact regular bytes from actual tar, rejecting links, additional members and truncated trailers',()=>{
  const data=tar(root=>writeFileSync(join(root,'report.txt'),'artifact bytes'),['report.txt']);expect(extractSingleArtifact(data,'nested/report.txt')).toEqual(Buffer.from('artifact bytes'));
  const link=tar(root=>{writeFileSync(join(root,'secret.txt'),'secret');symlinkSync('secret.txt',join(root,'report.txt'));},['report.txt']);expect(()=>extractSingleArtifact(link,'report.txt')).toThrow(/regular/);
@@ -13,6 +13,7 @@ it('extracts exact regular bytes from actual tar, rejecting links, additional me
 
 it('accepts actual bounded PAX Unicode names while preserving the exact requested file binding',()=>{
  const name='report-中文.txt',data=tar(root=>writeFileSync(join(root,name),'Unicode artifact'),[name],'pax');
+ expect(data.includes(Buffer.from('path='+name+'\n'))).toBe(true);
  expect(extractSingleArtifact(data,'nested/'+name).toString()).toBe('Unicode artifact');
  expect(()=>extractSingleArtifact(data,'other.txt')).toThrow(/path/);
 });

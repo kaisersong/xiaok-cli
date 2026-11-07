@@ -90,7 +90,14 @@ describe('native readonly search scope production boundary', () => {
   it('bounds scoped grep bytes and keeps cancellation responsive to a pathological regex', async () => {
     writeFileSync(join(allowed, 'large.txt'), Buffer.alloc(4 * 1024 * 1024 + 1, 65));
     const tooLarge = await registry.executeTool('grep', { path: join(allowed, 'large.txt'), pattern: 'A' });
-    expect(tooLarge).toMatch(/grep_scan_limit/);
+    expect(tooLarge).toContain('搜索已截断');
+    expect(tooLarge).toContain('匹配结果超过上限');
+    expect(tooLarge.length).toBeLessThan(4 * 1024 * 1024);
+    // The ordinary scoped Worker has an existing8MiB per-file ceiling; no Native installation is forged here.
+    writeFileSync(join(allowed, 'large.txt'), Buffer.alloc(8 * 1024 * 1024 + 1, 65));
+    const skipped = await registry.executeTool('grep', { path: join(allowed, 'large.txt'), pattern: 'A' });
+    expect(skipped).toContain('跳过了超过 8MB 的文件');
+    expect(skipped).not.toContain('AAAA');
     rmSync(join(allowed, 'large.txt'));
     writeFileSync(join(allowed, 'regex.txt'), 'a'.repeat(50000) + '!');
     const controller = new AbortController();

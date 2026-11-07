@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -58,10 +58,20 @@ describe('Windows CUA startup boundary', () => {
     }
 
     const originalCuaManager = readFileSync(builtCuaManagerPath);
-    rmSync(builtCuaManagerPath, { force: true });
-
+    const originalManagerMtime = statSync(builtCuaManagerPath, { bigint: true }).mtimeNs;
+    const cacheRoot = join(process.cwd(), '.test-cache');
+    mkdirSync(cacheRoot, { recursive: true });
+    const packageRoot = mkdtempSync(join(cacheRoot, 'cua-win-boundary-'));
+    tempDirs.push(packageRoot);
+    cpSync(join(process.cwd(), '.test-dist', 'src'), join(packageRoot, 'src'), {
+      recursive: true,
+      filter: path => !['cua-connection-manager.js', 'cua-connection-manager.js.map'].some(name => path.endsWith(name)),
+    });
+    writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ type: 'module' }));
+    expect(existsSync(join(packageRoot, 'src', 'platform', 'mcp', 'cua-connection-manager.js'))).toBe(false);
+    let context: Awaited<ReturnType<typeof import('../../../src/platform/runtime/context.js')['createPlatformRuntimeContext']>> | undefined;
     try {
-      const runtimeModuleUrl = `${pathToFileURL(builtContextPath).href}?windows-cua-boundary=${Date.now()}-${Math.random()}`;
+      const runtimeModuleUrl = pathToFileURL(join(packageRoot, 'src', 'platform', 'runtime', 'context.js')).href;
       const runtimeModule = await import(runtimeModuleUrl) as typeof import('../../../src/platform/runtime/context.js');
 
       const cwd = join(tmpdir(), `xiaok-win-cua-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -82,7 +92,7 @@ describe('Windows CUA startup boundary', () => {
         ],
       });
 
-      const context = await runtimeModule.createPlatformRuntimeContext({
+      context = await runtimeModule.createPlatformRuntimeContext({
         cwd,
         builtinCommands: ['chat'],
         reminderMode: 'local',
@@ -94,9 +104,10 @@ describe('Windows CUA startup boundary', () => {
       expect(context.health.summary()).toContain(`mcp:${serverName} degraded`);
       expect(context.health.summary()).toContain(serverName === 'cua-driver' ? 'macOS-only' : 'COMPUTER_USE_PLUGIN_IDENTITY_MISMATCH');
 
-      await context.dispose();
     } finally {
-      writeFileSync(builtCuaManagerPath, originalCuaManager);
+      await context?.dispose();
+      expect(readFileSync(builtCuaManagerPath)).toEqual(originalCuaManager);
+      expect(statSync(builtCuaManagerPath, { bigint: true }).mtimeNs).toBe(originalManagerMtime);
     }
   });
 });
