@@ -8,6 +8,18 @@ import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 const DASHBOARD_TOOL_NAME = ['render', 'ui'].join('_');
 
 describe('A2UI dashboard tool', () => {
+  it('advertises business requests without expanding the tool permission or schema', () => {
+    const tool = buildToolList().find(candidate => candidate.definition.name === DASHBOARD_TOOL_NAME)!;
+    expect(tool.definition.description).toContain('把销售数据做成图表');
+    expect(tool.definition.description).toMatch(/不.*(?:点名|说出).*工具名/);
+    expect(tool.definition.description).toContain('不编造数据');
+    expect(tool.definition.description).toContain('内置');
+    expect(tool.permission).toBe('write');
+    const table = (tool.definition.inputSchema.properties as Record<string, any>).sections.items.oneOf.find((section: any) => section.properties.kind.enum[0] === 'table');
+    expect(table.additionalProperties).toBe(false);
+    for (const key of ['filters', 'actions', 'export']) expect(table.properties).not.toHaveProperty(key);
+  });
+
   const tempDirs: string[] = [];
 
   function createTempDir(prefix: string): string {

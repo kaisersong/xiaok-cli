@@ -107,6 +107,7 @@ export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
     definition: {
       name: 'render_ui',
       description: [
+        '适用于“把销售数据做成图表”“做个指标看板”“明细可以筛选”等自然语言目标；不要求用户点名工具名。仅使用已提供或经授权读取的数据，不编造数据或自动填充样例；用户明确的纯文本、正式报告和技能交付要求优先。表格筛选和 CSV 导出是内置本地功能，不添加 schema 未支持的 filters/actions/export 字段，不声称用户已下载文件；仍遵守当前工具权限与审批。',
         `生成 A2UI 1.0 分析卡片 artifact（支持图表、表格本地筛选和 CSV 导出）。sections 必须使用 kind 字段，支持 ${RENDER_UI_SECTION_KINDS.join('/')}；text 正文使用 content 字段。禁止表单、脚本、链接、事件和自定义样式。`,
         '返回短 JSON ack；完整 UI payload 会写入 output_path 指向的 .a2ui.json 文件。',
       ].join('\n'),
