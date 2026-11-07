@@ -1420,6 +1420,11 @@ export const en: LocaleStrings = {
     memoryPaneTitle: "Memory",
     memoryContentTab: "Memory content",
     memoryConfigurationTab: "Memory configuration",
+    conversationModelsTab: "Conversation models",
+    decisionModelsTab: "Decision models",
+    decisionModelsDesc: "Configure specialized models such as System One and K-IM for semantic decisions and message triage. These settings are independent of your default conversation model.",
+    memoryDecisionModelsMoved: "Decision models such as System One and K-IM are now grouped in model settings. Your existing configuration remains active.",
+    openDecisionModelSettings: "Open decision model settings",
     memoryEmbeddingCurrent: "Current configuration",
     memoryModelConfigFailed: "Could not load or save the model configuration. Please retry.",
 
