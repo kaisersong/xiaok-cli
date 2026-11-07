@@ -9,7 +9,7 @@ export type RemoteDebuggingConfigResult =
     }
   | {
       enabled: false;
-      reason: 'explicit_remote_debugging_port';
+      reason: 'explicit_remote_debugging_port' | 'packaged_default_disabled';
     };
 
 export interface RemoteDebuggingCommandLine {
@@ -24,7 +24,8 @@ function argvHasSwitch(argv: readonly string[], switchName: string): boolean {
 
 export function configureDefaultRemoteDebugging(
   commandLine: RemoteDebuggingCommandLine,
-  argv: readonly string[] = [],
+  argv: readonly string[],
+  options: { isPackaged: boolean; env?: NodeJS.ProcessEnv },
 ): RemoteDebuggingConfigResult {
   const hasExplicitPort =
     Boolean(commandLine.hasSwitch?.('remote-debugging-port')) ||
@@ -32,6 +33,10 @@ export function configureDefaultRemoteDebugging(
 
   if (hasExplicitPort) {
     return { enabled: false, reason: 'explicit_remote_debugging_port' };
+  }
+
+  if (options.isPackaged && options.env?.XIAOK_DESKTOP_REMOTE_DEBUGGING !== '1') {
+    return { enabled: false, reason: 'packaged_default_disabled' };
   }
 
   commandLine.appendSwitch('remote-debugging-port', DEFAULT_DESKTOP_REMOTE_DEBUGGING_PORT);
