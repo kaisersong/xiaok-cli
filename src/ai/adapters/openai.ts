@@ -27,6 +27,7 @@ import {
   type KimiUsageDiagnostic,
   type KimiUsageDiagnosticSink,
   type OpenAIAdapterInit,
+  type AdapterBindingIdentity,
   type ReasoningDialectState,
 } from '../providers/model-harness-profile.js';
 import {
@@ -121,6 +122,23 @@ interface BufferedToolCall {
   id: string;
   name: string;
   argsBuffer: string;
+  googleThoughtSignature?: import('../runtime/blocks.js').GoogleThoughtSignature;
+}
+
+/** Only the official Google transport may receive its opaque continuation state. */
+function supportsGoogleThoughtSignatures(identity: AdapterBindingIdentity): boolean {
+  if (identity.providerId !== 'gemini' || identity.providerType !== 'first_party'
+    || identity.protocol !== 'openai_legacy' || !/^gemini-3[.-]/.test(identity.wireModel)) return false;
+  try {
+    const endpoint = new URL(identity.canonicalBaseUrl ?? '');
+    return endpoint.origin === 'https://generativelanguage.googleapis.com'
+      && endpoint.pathname.replace(/\/$/, '') === '/v1beta/openai'
+      && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash;
+  } catch { return false; }
+}
+
+function isGoogleSignature(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_OPENAI_STREAM_TEXT_CHARS;
 }
 
 function openAIStreamLimitError(
@@ -157,7 +175,9 @@ function drainBufferedToolCalls(
       }
       input = { _raw: buffer.argsBuffer };
     }
-    calls.push({ type: 'tool_use', id: buffer.id, name: buffer.name, input });
+    calls.push({ type: 'tool_use', id: buffer.id, name: buffer.name, input,
+      ...(buffer.googleThoughtSignature ? { googleThoughtSignature: buffer.googleThoughtSignature } : {}),
+    });
   }
   toolBuffers.clear();
   return calls;
@@ -843,6 +863,11 @@ export class OpenAIAdapter implements ModelAdapter {
               name: block.name,
               arguments: JSON.stringify(block.input),
             },
+            ...(supportsGoogleThoughtSignatures(this.harnessContext.identity)
+              && block.googleThoughtSignature?.model === this.harnessContext.identity.wireModel
+              && isGoogleSignature(block.googleThoughtSignature.signature)
+              ? { extra_content: { google: { thought_signature: block.googleThoughtSignature.signature } } }
+              : {}),
           }));
         }
 
@@ -1153,7 +1178,14 @@ export class OpenAIAdapter implements ModelAdapter {
 
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
-            const current = toolBuffers.get(tc.index) ?? { id: '', name: '', argsBuffer: '' };
+            const current: BufferedToolCall = toolBuffers.get(tc.index) ?? { id: '', name: '', argsBuffer: '' };
+            if (supportsGoogleThoughtSignatures(this.harnessContext.identity)) {
+              const signature = (tc as unknown as { extra_content?: { google?: { thought_signature?: unknown } } })
+                .extra_content?.google?.thought_signature;
+              if (isGoogleSignature(signature)) current.googleThoughtSignature = {
+                model: this.harnessContext.identity.wireModel, signature,
+              };
+            }
             if (tc.id) current.id = tc.id;
             if (tc.function?.name) current.name = tc.function.name;
             if (tc.function?.arguments) {

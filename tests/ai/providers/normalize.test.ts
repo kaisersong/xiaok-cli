@@ -33,7 +33,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('preserves provider default metadata for a legacy non-Kimi explicit model', () => {
+  it('uses legacy model metadata rather than a newly recommended default', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'openai',
@@ -51,10 +51,10 @@ describe('normalizeConfig', () => {
     expect(entry).toMatchObject({
       provider: 'openai',
       model: 'o3',
-      label: 'GPT-4o',
-      capabilities: ['tools'],
+      label: 'o3',
+      capabilities: ['tools', 'thinking'],
     });
-    expect(entry).not.toHaveProperty('runtimeOptions');
+    expect(entry.runtimeOptions).toEqual({ contextLimit: 200_000 });
   });
 
   it('inherits deepseek legacy wire capabilities during v1 upgrade instead of the new default', () => {
@@ -114,7 +114,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('pins a schema-v1 Kimi config without a model to the still-served K2.7 generation', () => {
+  it('keeps the official alias for a schema-v1 Kimi config without a model', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'custom',
@@ -131,14 +131,13 @@ describe('normalizeConfig', () => {
     expect(normalized.schemaVersion).toBe(2);
     expect(normalized.defaultModelId).toBe('kimi-default');
     // 原本 pin 的是裸 `kimi-k2.7`，但官方任何 endpoint 都没有这个 ID。
-    // `kimi-for-coding` 就是官方的 Kimi K2.7 Code，既有效又不跨代升级用户。
+    // 官方稳定别名现由 K2.8 Preview 服务。
     expect(normalized.models['kimi-default']).toMatchObject({
       provider: 'kimi',
       model: 'kimi-for-coding',
     });
-    // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
-    // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
-    expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
+    // 获取 K2.8 的目录元数据，保持既有 alias。
+    expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'high' });
     const normalizedModel = normalized.models['kimi-default'];
     expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
@@ -163,9 +162,8 @@ describe('normalizeConfig', () => {
       provider: 'kimi',
       model: 'kimi-for-coding',
     });
-    // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
-    // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
-    expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
+    // 获取 K2.8 的目录元数据，保持既有 alias。
+    expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'high' });
     const normalizedModel = normalized.models['kimi-default'];
     expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });

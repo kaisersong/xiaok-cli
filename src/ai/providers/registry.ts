@@ -1,4 +1,8 @@
+import { findLegacyProviderModel } from './legacy-models.js';
 import type { FirstPartyProviderId, ProviderModelVariant, ProviderProfile } from './types.js';
+
+/** Explicitly maintained; the clock must never silently change user model access. */
+export const MODEL_CATALOG_YEAR = 2026;
 
 function createKimiK3Variant(
   modelId: string,
@@ -6,6 +10,7 @@ function createKimiK3Variant(
   label = 'Kimi K3',
 ): ProviderModelVariant {
   return {
+    releaseYear: 2026,
     modelId,
     model,
     label,
@@ -30,21 +35,9 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['OPENAI'],
     // contextLimit 逐个查证于 https://developers.openai.com/api/docs/models/<model>
     // 官方语义是「总窗口，含输入 + 输出 + reasoning tokens」。
-    defaultModel: {
-      modelId: 'openai-default',
-      model: 'gpt-4o',
-      label: 'GPT-4o',
-      capabilities: ['tools'],
-      runtimeOptions: { contextLimit: 128_000 },
-    },
+    defaultModel: { releaseYear: 2026, modelId: 'openai-default', model: 'gpt-5.5', label: 'GPT-5.5', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_050_000, reasoningEffort: 'medium' }, runtimeConstraints: { reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'] } },
     availableModels: [
-      { modelId: 'openai-gpt-5.5', model: 'gpt-5.5', label: 'GPT-5.5', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_050_000, reasoningEffort: 'medium' }, runtimeConstraints: { reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'] } },
-      { modelId: 'openai-gpt-5', model: 'gpt-5', label: 'GPT-5', capabilities: ['tools'], runtimeOptions: { contextLimit: 400_000, reasoningEffort: 'medium' }, runtimeConstraints: { reasoningEfforts: ['minimal', 'low', 'medium', 'high'] } },
-      // 与 defaultModel 共享 wireModel，元数据必须逐字一致
-      { modelId: 'openai-gpt-4o', model: 'gpt-4o', label: 'GPT-4o', capabilities: ['tools'], runtimeOptions: { contextLimit: 128_000 } },
-      { modelId: 'openai-gpt-4.1', model: 'gpt-4.1', label: 'GPT-4.1', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_047_576 } },
-      { modelId: 'openai-o4-mini', model: 'o4-mini', label: 'o4-mini', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 200_000 } },
-      { modelId: 'openai-o3', model: 'o3', label: 'o3', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 200_000 } },
+      { releaseYear: 2026, modelId: 'openai-gpt-5.5', model: 'gpt-5.5', label: 'GPT-5.5', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_050_000, reasoningEffort: 'medium' }, runtimeConstraints: { reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'] } },
     ],
   },
   anthropic: {
@@ -54,16 +47,16 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     baseUrl: 'https://api.anthropic.com',
     envPrefixes: ['ANTHROPIC', 'CLAUDE'],
     defaultModel: {
+      releaseYear: 2026,
       modelId: 'anthropic-default',
       model: 'claude-opus-4-7',
       label: 'Claude Opus 4.7',
       capabilities: ['tools'],
     },
     availableModels: [
-      { modelId: 'anthropic-claude-opus-4-7', model: 'claude-opus-4-7', label: 'Claude Opus 4.7', capabilities: ['tools'] },
-      { modelId: 'anthropic-claude-opus-4-6', model: 'claude-opus-4-6', label: 'Claude Opus 4.6', capabilities: ['tools'] },
-      { modelId: 'anthropic-claude-sonnet-4-6', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', capabilities: ['tools'] },
-      { modelId: 'anthropic-claude-haiku-4-5', model: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', capabilities: ['tools'] },
+      { releaseYear: 2026, modelId: 'anthropic-claude-opus-4-7', model: 'claude-opus-4-7', label: 'Claude Opus 4.7', capabilities: ['tools'] },
+      { releaseYear: 2026, modelId: 'anthropic-claude-opus-4-6', model: 'claude-opus-4-6', label: 'Claude Opus 4.6', capabilities: ['tools'] },
+      { releaseYear: 2026, modelId: 'anthropic-claude-sonnet-4-6', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', capabilities: ['tools'] },
     ],
   },
   kimi: {
@@ -81,11 +74,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       { ...createKimiK3Variant('kimi-k3.1-pro-highspeed', 'k3.1-pro-highspeed', 'Kimi K3.1 Pro Highspeed'), capabilities: ['tools', 'thinking', 'image_in'] },
       createKimiK3Variant('kimi-k3'),
       createKimiK3Variant('kimi-k3-256k', 'k3-256k', 'Kimi K3 256K'),
-      { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
+      // K2.8 Preview upgrades the existing wire in place (official model docs, 2026-11-03).
+      // https://www.kimi.com/code/docs/en/kimi-code/models.html
+      { releaseYear: 2026, modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi K2.8 Preview', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { maxContextLimit: 1_048_576, reasoningEfforts: ['low', 'high', 'max'] } },
       // k2.6 / k2.5 只在开放平台 endpoint 上有效；k2.5 官方公告 8/31 下线。
       // 262,144 来自官方定价页给出的精确整数（非按 "256k" 推断）。
-      { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
-      { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
+      { releaseYear: 2026, modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
+      { releaseYear: 2026, modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } },
     ],
   },
   deepseek: {
@@ -101,6 +96,7 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     // 与下方 availableModels 的 deepseek-flash 条目共享 wireModel，元数据必须
     // 逐字一致，否则 resolveProviderModelVariant 会抛 MODEL_VARIANT_AMBIGUOUS。
     defaultModel: {
+      releaseYear: 2026,
       modelId: 'deepseek-default',
       model: 'deepseek-flash',
       label: 'DeepSeek V4.1 Flash (1017)',
@@ -108,15 +104,15 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
-      { modelId: 'deepseek-flash', model: 'deepseek-flash', label: 'DeepSeek V4.1 Flash (1017)', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { releaseYear: 2026, modelId: 'deepseek-flash', model: 'deepseek-flash', label: 'DeepSeek V4.1 Flash (1017)', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
       // 官方 pricing 脚注(1)：legacy 名字 deepseek-v4-flash 与
       // deepseek-v4-flash-vision-exp 的对应模型已退役，请求仍受理，但由
       // DeepSeek-V4.1-Flash-1017 服务并按 Flash 价格计费。Vision 旧名仅保留
       // 查询兼容，不再展示为可选型号。expires-on-0910 为 2026-09-10 版本的临时
       // preview ID（现在同样由 1017 服务）。
-      { modelId: 'deepseek-v4.1-flash-expires-on-0910', model: 'deepseek-v4.1-flash-expires-on-0910', label: 'DeepSeek V4.1 Flash Preview (0910)', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
-      { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
-      { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { releaseYear: 2026, modelId: 'deepseek-v4.1-flash-expires-on-0910', model: 'deepseek-v4.1-flash-expires-on-0910', label: 'DeepSeek V4.1 Flash Preview (0910)', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { releaseYear: 2026, modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { releaseYear: 2026, modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
     ],
   },
   glm: {
@@ -127,6 +123,7 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['GLM'],
     // contextLimit 逐个查证于 https://docs.bigmodel.cn/cn/guide/start/model-overview
     defaultModel: {
+      releaseYear: 2026,
       modelId: 'glm-default',
       model: 'GLM-5.2',
       label: 'GLM 5.2',
@@ -137,20 +134,18 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       // GLM-5.3-Flash（https://docs.z.ai/guides/vlm/glm-5.3-flash，2026-08-26 查证）：
       // 官方 wire model 为全小写 `glm-5.3-flash`；1M 上下文，原生多模态，
       // 支持工具调用且思考始终开启。reasoning_effort 支持 low/high/max，厂商推荐 max，xiaok 默认中档 high。
-      { modelId: 'glm-5.3-flash', model: 'glm-5.3-flash', label: 'GLM 5.3 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
+      { releaseYear: 2026, modelId: 'glm-5.3-flash', model: 'glm-5.3-flash', label: 'GLM 5.3 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
       // GLM-5.3（https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3，2026-08-16 查证）：
       // 与 GLM-5.2 同底座，纯 post-training 提升。1M 上下文窗口，128K 最大输出。
       // 思考功能始终启用，不支持 thinking.type: disabled；reasoning_effort 仅
       // low/high/max 三档，厂商默认 max；xiaok 默认中档 high（与 5.2 及以下版本不同，那些没有思考控制）。
-      { modelId: 'glm-5.3', model: 'GLM-5.3', label: 'GLM 5.3', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
+      { releaseYear: 2026, modelId: 'glm-5.3', model: 'GLM-5.3', label: 'GLM 5.3', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
       // 与 defaultModel 共享 wireModel，元数据必须逐字一致，否则
       // resolveProviderModelVariant 会抛 MODEL_VARIANT_AMBIGUOUS。
-      { modelId: 'glm-5.2', model: 'GLM-5.2', label: 'GLM 5.2', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_000_000 } },
-      { modelId: 'glm-5.1', model: 'GLM-5.1', label: 'GLM 5.1', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
-      { modelId: 'glm-5', model: 'GLM-5', label: 'GLM 5', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
-      { modelId: 'glm-5-turbo', model: 'GLM-5-Turbo', label: 'GLM 5 Turbo', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
-      { modelId: 'glm-4.7', model: 'GLM-4.7', label: 'GLM 4.7', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
-      { modelId: 'glm-4.5', model: 'glm-4.5', label: 'GLM 4.5', capabilities: ['tools'], runtimeOptions: { contextLimit: 128_000 } },
+      { releaseYear: 2026, modelId: 'glm-5.2', model: 'GLM-5.2', label: 'GLM 5.2', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { releaseYear: 2026, modelId: 'glm-5.1', model: 'GLM-5.1', label: 'GLM 5.1', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
+      { releaseYear: 2026, modelId: 'glm-5', model: 'GLM-5', label: 'GLM 5', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
+      { releaseYear: 2026, modelId: 'glm-5-turbo', model: 'GLM-5-Turbo', label: 'GLM 5 Turbo', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } },
     ],
   },
   minimax: {
@@ -163,6 +158,7 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     // 支持 tool use 与 interleaved thinking）。contextLimit 为官方固定值 1,000,000
     // （https://platform.minimax.io/docs/guides/text-generation，无分档条件）。
     defaultModel: {
+      releaseYear: 2026,
       modelId: 'minimax-default',
       model: 'MiniMax-M3',
       label: 'MiniMax M3',
@@ -170,28 +166,24 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
-      { modelId: 'minimax-m3', model: 'MiniMax-M3', label: 'MiniMax M3', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
+      { releaseYear: 2026, modelId: 'minimax-m3', model: 'MiniMax-M3', label: 'MiniMax M3', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
     ],
   },
   gemini: {
     id: 'gemini',
     label: 'Gemini',
-    protocol: 'openai_responses',
+    protocol: 'openai_legacy',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     envPrefixes: ['GEMINI'],
-    // contextLimit 来自 https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro
-    // 与 .../gemini-2.5-flash（两者同为 1,048,576，无 tier 门槛）。
+    // 2026-02-19 release; official model page publishes the exact input limit.
+    // https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
     defaultModel: {
-      modelId: 'gemini-default',
-      model: 'gemini-2.5-pro',
-      label: 'Gemini 2.5 Pro',
-      capabilities: ['tools', 'thinking', 'image_in'],
-      runtimeOptions: { contextLimit: 1_048_576 },
+      releaseYear: 2026,
+      modelId: 'gemini-default', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview',
+      capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576 },
     },
     availableModels: [
-      // 与 defaultModel 共享 wireModel，元数据必须逐字一致
-      { modelId: 'gemini-2.5-pro', model: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576 } },
-      { modelId: 'gemini-2.5-flash', model: 'gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576 } },
+      { releaseYear: 2026, modelId: 'gemini-3.1-pro-preview', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576 } },
     ],
   },
 };
@@ -246,7 +238,7 @@ export function resolveProviderModelVariant(
       left.modelId.localeCompare(right.modelId)
       || left.label.localeCompare(right.label)
     ));
-  if (matches.length <= 1) return matches[0] ?? resolveRetiredModelAlias(profile, wireModel);
+  if (matches.length <= 1) return matches[0] ?? findLegacyProviderModel(profile.id, wireModel) ?? resolveRetiredModelAlias(profile, wireModel);
 
   const metadataKeys = new Set(matches.map(variantMetadataKey));
   if (metadataKeys.size > 1) {
@@ -293,7 +285,7 @@ export function findCatalogModel(
   if (exact) return exact;
 
   const byWire = variants.filter((variant) => variant.model === wireModel);
-  if (byWire.length === 0) return resolveRetiredModelAlias(profile, wireModel);
+  if (byWire.length === 0) return findLegacyProviderModel(profile.id, wireModel) ?? resolveRetiredModelAlias(profile, wireModel);
   // 元数据不一致时无法确定该采用哪一条，退化为未命中。
   if (new Set(byWire.map(variantMetadataKey)).size > 1) return undefined;
   // variantMetadataKey 不含 label / modelId，因此这些条目对元数据而言等价。
