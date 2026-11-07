@@ -1,10 +1,11 @@
 import {hasOriginalMainSdkBridgeInstallation} from '../../runtime/verification/original-main-sdk-bridge.js';
-import { getSearchScope } from './search-scope-context.js';
-import { permitsSearchPath, type SearchScope } from './search-scope.mjs';
+import {getSearchScope} from './search-scope-context.js';
+import {permitsSearchPath,type SearchScope} from './search-scope.mjs';
+import {statSync} from 'node:fs';
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
-import { runBoundedGlob } from './bounded-glob.js';
-import { readFileSync, statSync } from 'fs';
+import { runBoundedGlob, runBoundedGrep, formatSearchPath, type GrepTruncation } from './bounded-glob.js';
+import {getSandboxSearchGuard,type SearchPathGuard} from '../../platform/sandbox/search-scope.js';
 import { resolve } from 'path';
 import type { Tool } from '../../types.js';
 import { appendPaginationNotice, paginateItems, truncateText } from './truncation.js';
@@ -26,9 +27,6 @@ function canRunCommand(command: string): boolean {
   return result.status === 0 && !result.error;
 }
 
-/** The Native backend uses the existing bounded JS-regex worker. Reject
- * syntax whose Rust/PCRE meaning is not established instead of claiming an
- * empty result. Literal Unicode remains supported; regex text is ASCII-only. */
 function supportsNativeGrepPattern(pattern:unknown):boolean {
  if(typeof pattern!=='string'||pattern.length>2048||pattern.includes('\\')||pattern.includes('(?')||pattern.includes('{')||pattern.includes('}'))return false;
  let meta=false,inClass=false;
@@ -43,36 +41,6 @@ function supportsNativeGrepPattern(pattern:unknown):boolean {
  if(meta)for(let i=0;i<pattern.length;i++)if(pattern.charCodeAt(i)>127)return false;
  return !inClass&&!pattern.includes('[]')&&!pattern.includes('[^]');
 }
-function buildRegex(pattern: string): RegExp {
-  try {
-    return new RegExp(pattern);
-  } catch (error) {
-    throw new Error(`无效正则: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal, searchScope?: SearchScope): Promise<string[]> {
-  signal?.throwIfAborted();
-  const resolvedPath = resolve(searchPath);
-  const stats = statSync(resolvedPath);
-  if (stats.isFile()) {
-    return [resolvedPath];
-  }
-
-  const patterns = fileGlob
-    ? [fileGlob]
-    : type
-      ? (TYPE_GLOBS[type] ?? [`**/*.${type}`])
-      : ['**/*'];
-
-  return (await runBoundedGlob({ patterns,
-    cwd: resolvedPath,
-    searchScope,
-    dot: true,
-    skipInaccessible: true,
-    ignore: ['**/.git/**', '**/node_modules/**'],
-  }, signal)).map(entry => entry.path);
-}
 
 export async function runFallbackGrepSearch(input: {
   pattern: string;
@@ -82,8 +50,9 @@ export async function runFallbackGrepSearch(input: {
   output_mode?: string;
   type?: string;
   signal?: AbortSignal;
-  searchScope?: SearchScope;
-}): Promise<string[]> {
+  guard?:SearchPathGuard;
+  searchScope?:SearchScope;
+}): Promise<string[] & {truncated?: GrepTruncation[]}> {
   const {
     pattern,
     path: searchPath = process.cwd(),
@@ -92,65 +61,38 @@ export async function runFallbackGrepSearch(input: {
     output_mode = 'lines',
     type,
   } = input;
-  if (input.searchScope || hasOriginalMainSdkBridgeInstallation()) {
-    const resolved = resolve(searchPath);
-    if (!permitsSearchPath(resolved, input.searchScope)) throw new Error('search_scope_denied');
-    const patterns = fileGlob ? [fileGlob] : type ? (TYPE_GLOBS[type] ?? ['**/*.' + type]) : ['**/*'];
-    const entries = await runBoundedGlob({
-      cwd: resolved, patterns, dot: true, skipInaccessible: true, ignore: ['**/.git/**', '**/node_modules/**'],
-      searchScope: input.searchScope,
-      grep: { pattern, context, outputMode: output_mode, directFile: statSync(resolved).isFile() },
-    }, input.signal);
-    return entries.map(entry => entry.text ?? '');
-  }
-  const matcher = buildRegex(pattern);
-  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal, input.searchScope);
-  const results: string[] = [];
-
-  for (const file of files) {
-    input.signal?.throwIfAborted();
-    if (!permitsSearchPath(file, input.searchScope)) continue;
-    let lines: string[];
-    try {
-      lines = readFileSync(file, 'utf-8').split(/\r?\n/);
-    } catch {
-      continue;
-    }
-
-    const matchedIndexes = lines
-      .map((line, index) => (matcher.test(line) ? index : -1))
-      .filter((index) => index >= 0);
-
-    if (matchedIndexes.length === 0) {
-      continue;
-    }
-
-    if (output_mode === 'files') {
-      results.push(file);
-      continue;
-    }
-
-    if (output_mode === 'count') {
-      results.push(`${file}:${matchedIndexes.length}`);
-      continue;
-    }
-
-    const includedIndexes = new Set<number>();
-    for (const matchIndex of matchedIndexes) {
-      const start = Math.max(0, matchIndex - context);
-      const end = Math.min(lines.length - 1, matchIndex + context);
-      for (let index = start; index <= end; index += 1) {
-        includedIndexes.add(index);
-      }
-    }
-
-    const orderedIndexes = [...includedIndexes].sort((a, b) => a - b);
-    for (const lineIndex of orderedIndexes) {
-      results.push(`${file}:${lineIndex + 1}:${lines[lineIndex]}`);
-    }
+  const patterns=fileGlob?[fileGlob]:type?(TYPE_GLOBS[type]??[`**/*.${type}`]):['**/*'];
+  if(hasOriginalMainSdkBridgeInstallation()){
+    if(!supportsNativeGrepPattern(pattern))throw Error('grep_native_regex_profile_unavailable');
+    const root=resolve(searchPath);
+    if(input.guard&&!input.guard(root))throw Error('sandbox denied search path');
+    if(!permitsSearchPath(root,input.searchScope))throw Error('search_scope_denied');
+    const entries=await runBoundedGlob({cwd:root,patterns,dot:true,skipInaccessible:true,ignore:['**/.git/**','**/node_modules/**'],
+      searchScope:input.searchScope,grep:{pattern,context,outputMode:output_mode,directFile:statSync(root).isFile()}},input.signal,input.guard);
+    return entries.map(entry=>{
+      const text=entry.text;if(typeof text!=='string'||!(text===entry.path||text.startsWith(entry.path+':')))throw Error('glob_worker_failed');
+      // The authority path is entry.path, never a path parsed from output text.
+      return formatSearchPath(entry.path)+text.slice(entry.path.length);
+    });
   }
 
-  return results;
+  const entries=await runBoundedGrep({cwd:resolve(searchPath),patterns,dot:true,skipInaccessible:true,
+    ignore:['**/.git/**','**/node_modules/**'],searchScope:input.searchScope,grep:{pattern,context,outputMode:output_mode}},input.signal,input.guard);
+  const lines=entries.map(entry=>{
+    const file=formatSearchPath(entry.path);
+    return output_mode==='files'?file:output_mode==='count'?`${file}:${entry.count}`:`${file}:${entry.lineNo}:${entry.text}`;
+  });
+  return Object.assign(lines,{truncated:entries.truncated??[]});
+}
+
+const TRUNCATION_NOTICE: Record<GrepTruncation,string>={
+  result_limit:'匹配结果超过上限，只返回了前面的部分',
+  file_too_large:'跳过了超过 8MB 的文件',
+  read_budget:'累计读取超过 16MB，后面的文件没有搜索',
+};
+/** Visible note so a cut-short search is never mistaken for a complete one. */
+export function grepTruncationNotice(truncated: readonly GrepTruncation[]|undefined):string{
+  return truncated?.length?`\n（搜索已截断：${truncated.map(reason=>TRUNCATION_NOTICE[reason]).join('；')}）`:'';
 }
 
 export const grepTool: Tool = {
@@ -197,12 +139,36 @@ export const grepTool: Tool = {
       max_chars?: number;
     };
 
-    // 优先使用 rg（ripgrep），回退到 grep，再回退到纯 Node 搜索。
-    const searchScope = getSearchScope(toolContext);
-    const nativeInstalled=hasOriginalMainSdkBridgeInstallation();
-    if(nativeInstalled&&!supportsNativeGrepPattern(pattern))return 'Error: grep_native_regex_profile_unavailable';
-    const hasRg = !nativeInstalled && !searchScope && canRunCommand('rg');
-    const hasGrep = !nativeInstalled && !searchScope && !hasRg && canRunCommand('grep');
+    const guard=getSandboxSearchGuard(toolContext);
+    const searchScope=getSearchScope(toolContext);
+    const installed=hasOriginalMainSdkBridgeInstallation();
+    if(installed){
+      // Preserve the Source SDK's original rejection/first value; a Native
+      // failure is never converted into a successful ordinary Worker result.
+      if(!supportsNativeGrepPattern(pattern))return 'Error: grep_native_regex_profile_unavailable';
+      const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard,searchScope});
+      if(!lines.length)return '（无匹配结果）';
+      const page=paginateItems(lines,offset,head_limit);
+      return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset);
+    }
+    if(guard||searchScope){
+      try{
+        // Never probe external programs or hand them a recursively searched root
+        // when the host has installed a per-invocation sandbox policy.
+        const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard,searchScope});
+        const notice=grepTruncationNotice(lines.truncated);
+        if(!lines.length)return notice?notice.trimStart():'（无匹配结果）';
+        const page=paginateItems(lines,offset,head_limit);
+        return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset)+notice;
+      }catch(error){
+        toolContext?.signal?.throwIfAborted();
+        const code=error instanceof Error?error.message:'';
+        return `Error: ${/^(?:glob_[a-z_]+|grep_[a-z_]+|search_scope_[a-z_]+|native_readonly_sandbox_changed)$/.test(code)||code==='sandbox denied search path'?code:'grep_search_failed'}`;
+      }
+    }
+    // 非 sandbox 调用保留 rg → grep → worker Node fallback。
+    const hasRg = canRunCommand('rg');
+    const hasGrep = !hasRg && canRunCommand('grep');
     const cmd = hasRg ? 'rg' : 'grep';
     const args = hasRg
       ? [
@@ -229,20 +195,25 @@ export const grepTool: Tool = {
       ]
         : [];
 
+    let notice = '';
     const output = hasRg || hasGrep
       ? (spawnSync(cmd, args, { encoding: 'utf-8', maxBuffer: 1024 * 1024 }).stdout ?? '').trim()
-      : (await runFallbackGrepSearch({
-        pattern,
-        path: searchPath,
-        glob: fileGlob,
-        context,
-        output_mode,
-        type,
-        signal: toolContext?.signal,
-        searchScope,
-      })).join('\n').trim();
-    if (!output) return '（无匹配结果）';
+      : await (async () => {
+        const lines = await runFallbackGrepSearch({
+          pattern,
+          path: searchPath,
+          glob: fileGlob,
+          context,
+          output_mode,
+          type,
+          signal: toolContext?.signal,
+        });
+        notice = grepTruncationNotice(lines.truncated);
+        return lines.join('\n').trim();
+      })();
+    // A cut-short search with nothing found must not also claim there are no matches.
+    if (!output) return notice ? notice.trimStart() : '（无匹配结果）';
     const page = paginateItems(output.split(/\r?\n/), offset, head_limit);
-    return appendPaginationNotice(truncateText(page.items.join('\n'), max_chars).text, page.nextOffset);
+    return appendPaginationNotice(truncateText(page.items.join('\n'), max_chars).text, page.nextOffset) + notice;
   },
 };

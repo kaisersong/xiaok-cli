@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { EmbeddingClient } from './embedding.js';
-import { segmentQuery } from './segment.js';
+import { segmentQueryAsync } from './segment.js';
 
 export interface SearchOptions {
   bm25Weight?: number;
@@ -52,7 +52,8 @@ export async function hybridSearch(
     layers = [0, 1, 2, 3],
   } = options;
 
-  const segmentedQuery = segmentQuery(query);
+  // Off-thread dictionary load: building the first prompt must not block the event loop.
+  const segmentedQuery = await segmentQueryAsync(query);
 
   if (segmentedQuery.trim() === '') {
     // Empty query: return recent L1 entries as a recency fallback

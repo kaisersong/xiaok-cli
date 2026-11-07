@@ -20,7 +20,7 @@ const compactionErrorCodes = new Set([
   'memory_store_closed', 'memory_model_unavailable',
   'memory_compaction_busy', 'memory_compaction_forbidden',
 ]);
-import { segmentChinese } from './segment.js';
+import { segmentChinese, segmentChineseAsync } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
 import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
 
@@ -91,6 +91,14 @@ export function createLLMFromAdapter(adapter: ModelAdapter): (prompt: string) =>
   };
 }
 
+/**
+ * Upper bound for close() waiting on pending writes (#150, CTO ruling: exit waits are bounded).
+ * Above the segmentation worker's ready deadline (10s) plus a normal synchronous fallback load,
+ * so a write accepted just before close still lands in a normal environment; past it the
+ * database closes anyway and the remaining writes fail with a logged warning.
+ */
+export const MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS = 15_000;
+
 export class LayeredMemoryStore implements MemoryStore {
   private db: Database.Database;
   private dbPath: string;
@@ -105,6 +113,10 @@ export class LayeredMemoryStore implements MemoryStore {
   private compactTimer?: ReturnType<typeof setInterval>;
   private compacting = false;
   private closed = false;
+  /** Set when close() had to wait for pending writes; repeated close() calls return the same wait. */
+  private closing: Promise<void> | undefined;
+  // Writes waiting on off-thread segmentation; close() lets them finish before closing the database.
+  private readonly pendingWrites = new Set<Promise<unknown>>();
 
   constructor(config: LayeredMemoryConfig) {
     this.dbPath = config.dbPath;
@@ -138,9 +150,35 @@ export class LayeredMemoryStore implements MemoryStore {
     if (this.compactionConfig.autoCompact && !this.compactTimer && !this.closed) this.startAutoCompact();
   }
 
-  async save(record: MemoryRecord): Promise<void> {
+  private trackWrite<T>(start: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error('memory_store_closed'));
+    const write = start();
+    this.pendingWrites.add(write);
+    const done = () => { this.pendingWrites.delete(write); };
+    write.then(done, done);
+    return write;
+  }
+
+  save(record: MemoryRecord): Promise<void> {
+    return this.trackWrite(() => this.saveSegmented(record));
+  }
+
+  /**
+   * Synchronous save (master semantics: the rows exist when this returns). For callers
+   * that must read the record back in the same tick, such as the desktop legacy JSON
+   * migration (第 2 轮 DS B1). Segments on the main thread; only used off the first screen.
+   */
+  saveSync(record: MemoryRecord): void {
+    if (this.closed) throw new Error('memory_store_closed');
+    this.insertRecord(record, segmentChinese(record.title + ' ' + record.summary));
+  }
+
+  private async saveSegmented(record: MemoryRecord): Promise<void> {
+    this.insertRecord(record, await segmentChineseAsync(record.title + ' ' + record.summary));
+  }
+
+  private insertRecord(record: MemoryRecord, segmented: string): void {
     const id = record.id || crypto.randomUUID();
-    const segmented = segmentChinese(record.title + ' ' + record.summary);
     const scope = record.scope || 'global';
     const cwd = record.cwd || null;
     const memType = record.type || null;
@@ -155,9 +193,13 @@ export class LayeredMemoryStore implements MemoryStore {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, JSON.stringify([id]), record.title, JSON.stringify(record.tags || []), scope, memType, cwd, JSON.stringify(record.provenance ?? {}));
 
-    this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
+    // The vector row is written after the embedding resolves; track it like the other
+    // pending writes so close() waits for it before closing the database (#150 M3).
+    const vectorWrite = this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
       logger.warn('embedAndStore failed', { id, error: err instanceof Error ? err.message : String(err) });
     });
+    this.pendingWrites.add(vectorWrite);
+    void vectorWrite.finally(() => { this.pendingWrites.delete(vectorWrite); });
   }
 
   async listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]> {
@@ -202,9 +244,13 @@ export class LayeredMemoryStore implements MemoryStore {
     };
   }
 
-  async writeRawMessage(sessionId: string, role: string, content: string): Promise<void> {
+  writeRawMessage(sessionId: string, role: string, content: string): Promise<void> {
+    return this.trackWrite(() => this.writeRawMessageSegmented(sessionId, role, content));
+  }
+
+  private async writeRawMessageSegmented(sessionId: string, role: string, content: string): Promise<void> {
     const id = crypto.randomUUID();
-    const segmented = segmentChinese(content);
+    const segmented = await segmentChineseAsync(content);
     this.db.prepare(
       `INSERT INTO memory_l0_raw (id, session_id, role, content, segmented_content) VALUES (?, ?, ?, ?, ?)`
     ).run(id, sessionId, role, content, segmented);
@@ -401,16 +447,52 @@ export class LayeredMemoryStore implements MemoryStore {
     return (del0 + del1) > 0;
   }
 
-  close(): void {
-    if (this.closed) return;
+  /**
+   * Close the store. Returns a promise only when writes accepted before close are
+   * still waiting for off-thread segmentation; callers on an exit path must await
+   * it (chat finalization does) so those writes land before the process exits.
+   */
+  close(): void | Promise<void> {
+    if (this.closed) return this.closing;
     this.closed = true;
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
     }
-    this.embeddingClient.close().catch((err) => {
-      logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
+    const closeEmbedding = () => {
+      this.embeddingClient.close().catch((err) => {
+        logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
+      });
+    };
+    if (this.pendingWrites.size === 0) {
+      closeEmbedding();
+      this.db.close();
+      return;
+    }
+    // A write accepted before close is still waiting for segmentation or for its vector:
+    // let it land before the embedding engine and the database close (第 2 轮 DS M3).
+    // Bounded (CTO ruling on #150, Minor 6): exit paths await this, so it must not wait forever.
+    this.closing = this.waitForPendingWrites().then(() => { closeEmbedding(); this.db.close(); });
+    return this.closing;
+  }
+
+  /** Wait until no write is pending (writes may add their vector write while landing), up to the close deadline. */
+  private async waitForPendingWrites(): Promise<void> {
+    const startedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<'deadline'>((resolve) => {
+      timer = setTimeout(() => resolve('deadline'), MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS);
     });
-    this.db.close();
+    try {
+      while (this.pendingWrites.size > 0) {
+        const outcome = await Promise.race([Promise.allSettled([...this.pendingWrites]), deadline]);
+        if (outcome === 'deadline') {
+          logger.warn('memory close deadline reached; closing with writes still pending', {
+            pending: this.pendingWrites.size, waitedMs: Date.now() - startedAt, deadlineMs: MEMORY_CLOSE_PENDING_WRITES_DEADLINE_MS,
+          });
+          return;
+        }
+      }
+    } finally { clearTimeout(timer); }
   }
 
   private searchResultToRecord(r: { id: string; layer: number; content: string; metadata: Record<string, unknown> }): MemoryRecord {

@@ -8,6 +8,7 @@ import {
   type LayeredMemoryConfig,
 } from '../../../src/ai/memory/layered-store.js';
 import type { ModelAdapter } from '../../../src/types.js';
+import { assertStoreDatabaseClosed, closeStoreAndRemove } from './helpers/close-store.js';
 
 describe('LayeredMemoryStore', () => {
   let store: LayeredMemoryStore;
@@ -27,9 +28,8 @@ describe('LayeredMemoryStore', () => {
     store = new LayeredMemoryStore(config);
   });
 
-  afterEach(() => {
-    store.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await closeStoreAndRemove(store, tmpDir);
   });
 
   it('should save and search', async () => {
@@ -94,6 +94,54 @@ describe('LayeredMemoryStore', () => {
         evidenceRefs: [{ kind: 'task', id: 'task-1' }],
       },
       updatedAt: expect.any(Number),
+    });
+  });
+
+  // #150 CI（Windows EBUSY/EPERM）：save 之后的向量写还在途时，close() 返回 promise，
+  // memory.db 句柄要等它 resolve 才关。调用方不 await 就删目录，在 Windows 上必然失败；
+  // 这里直接断言句柄状态，所以 Linux/macOS 上同样能抓到。
+  describe('close() with a vector write still in flight (#150)', () => {
+    type Internals = { db: { open: boolean }; embeddingClient: { embed(text: string): Promise<Float32Array> } };
+    let release!: () => void;
+    const record = {
+      id: 'close-inflight', scope: 'global' as const, title: '关闭前', summary: '关闭前写入的记忆',
+      tags: [], updatedAt: 1, type: 'user' as const,
+    };
+    beforeEach(() => {
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      (store as unknown as Internals).embeddingClient.embed = async () => { await gate; return new Float32Array(768).fill(0.25); };
+    });
+
+    it('keeps memory.db open until the pending write lands and closes it once close() resolves', async () => {
+      await store.save(record);
+      const db = (store as unknown as Internals).db;
+      const closing = store.close();
+      expect(closing).toBeInstanceOf(Promise);
+      expect(db.open).toBe(true);
+      release();
+      await closing;
+      expect(db.open).toBe(false);
+    });
+
+    it('a caller that removes files right after close() without awaiting it is caught on every platform', async () => {
+      await store.save(record);
+      void store.close();
+      expect(() => assertStoreDatabaseClosed(store)).toThrow(/still open after close/);
+      release();
+    });
+
+    it('closeStoreAndRemove waits for the pending write, then removes the directory with the database closed', async () => {
+      await store.save(record);
+      const dir = tmpDir;
+      let finished = false;
+      const done = closeStoreAndRemove(store, dir).then(() => { finished = true; });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(finished).toBe(false);
+      expect(fs.existsSync(dir)).toBe(true);
+      release();
+      await done;
+      expect((store as unknown as Internals).db.open).toBe(false);
+      expect(fs.existsSync(dir)).toBe(false);
     });
   });
 

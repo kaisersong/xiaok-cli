@@ -7,7 +7,8 @@ import {hasOriginalMainSdkBridgeInstallation} from '../verification/original-mai
 import {withOriginalSnapshotPrepResource} from './task-runtime-host.js';
 import {assertSourceSyncCustodyCurrent} from './source-sync-custody.js';
 import type {StoredSessionSnapshot} from '../../ai/runtime/session-store/stored-snapshot-types.js';
-import {desktopObservationSessionId,assertInitializedSnapshot,readDesktopTaskProtection} from './protected-observation-reader.js';
+import {desktopObservationSessionId,desktopObservationSessionsRoot,assertInitializedSnapshot,readDesktopTaskProtection} from './protected-observation-reader.js';
+import {SESSION_ALIAS_HOLDER_DIRECTORY} from '../../ai/runtime/session-store/aliases.js';
 import { assertCompoundHostStorage, type CompoundHostStorage } from '../sol-pi/compound-host-storage.js';
 import { getCompoundExecutionDomainBinding, type openCompoundExecutionDomain } from '../sol-pi/compound-execution-domain.js';
 import { getConfigDir } from '../../utils/config.js';
@@ -69,7 +70,7 @@ export class DesktopTaskObservationStore {
   }
   constructor(root: string, canonicalRoot?: string) {
     this.#root=root;
-    this.#sessions = new FileSessionStore(join(root, 'protected-observation-sessions'));
+    this.#sessions = new FileSessionStore(desktopObservationSessionsRoot(root));
     if (canonicalRoot !== undefined) this.#canonicalRoot = canonicalRoot;
     observationWorkerApply(observationWorkerSet,observationWorkerBirths,[this,{
      source:(taskId:string)=>{
@@ -99,7 +100,20 @@ export class DesktopTaskObservationStore {
       let received = false, failed = false;
       let worker: Worker;
       try {
-        if(!request)desktopObservationSessionId(taskId);
+        if(!request){
+          desktopObservationSessionId(taskId);
+          const root = resolve(this.#root), canonicalRoot = resolve(this.#canonicalRoot);
+          // Only fresh, explicit absence is ordinary. Any existing path or
+          // uncertain metadata retains the original Worker and physical IO owner.
+          const directories = [canonicalRoot, join(root, SESSION_ALIAS_HOLDER_DIRECTORY), desktopObservationSessionsRoot(root)];
+          if (directories.every(directory => {
+            try { lstatSync(directory); return false; }
+            catch (error) { return (error as NodeJS.ErrnoException)?.code === 'ENOENT'; }
+          })) {
+            yes({ closure: mergeProtectedObservationClosures(undefined, undefined) });
+            return;
+          }
+        }
         const entry = new URL(import.meta.url.endsWith('.ts') ? './protection-read-worker.ts' : './protection-read-worker.js', import.meta.url);
         worker = owned?owned.handle:new Worker(entry, { workerData: { root: resolve(this.#root), canonicalRoot: resolve(this.#canonicalRoot), taskId }, stdout: true, stderr: true });
       } catch { no(unavailable()); return; }
@@ -141,7 +155,7 @@ export class DesktopTaskObservationStore {
   }
   async read(taskId: string): Promise<ProtectedObservationClosure | undefined> { return (await this.readProtection(taskId)).closure; }
   readProtectionSync(taskId: string): {closure?: ProtectedObservationClosure; executionProtected?: true} {
-    const sessionId = desktopObservationSessionId(taskId), file = join(this.#root, 'protected-observation-sessions', `${sessionId}.json`);
+    const sessionId = desktopObservationSessionId(taskId), file = join(desktopObservationSessionsRoot(this.#root), `${sessionId}.json`);
     try {
       const alias = this.#alias(taskId);
       if (alias) {

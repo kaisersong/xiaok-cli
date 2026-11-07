@@ -6,6 +6,8 @@ import {FileSessionStore} from '../../../src/ai/runtime/session-store/file-store
 import {AgentSessionState} from '../../../src/ai/runtime/session.js';
 import {computeSessionHistoryDigest} from '../../../src/ai/runtime/session-store/store.js';
 import {createSessionExecutionAuthority,createSessionExecutionContext} from '../../../src/ai/runtime/session-store/execution-authority.js';
+import {SESSION_ALIAS_HOLDER_DIRECTORY} from '../../../src/ai/runtime/session-store/aliases.js';
+import {createHash} from 'node:crypto';
 const cleanup:Array<()=>void>=[];afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
 async function fixture(){
  const root=realpathSync(mkdtempSync(join(tmpdir(),'session-aliases-'))),holderRoot=join(root,'desktop');mkdirSync(holderRoot);
@@ -19,6 +21,12 @@ async function fixture(){
  const binding={aliasId:'alias-one',holderRoot,holderId:'desktop-task',targetSessionId:'canonical-session',domainInitializationId:'domain-one',domainGeneration:1};
  return{root,holderRoot,canonical,store,lease,binding};
 }
+it('preserves the canonical holder directory and marker layout shared by protection reads',async()=>{
+ expect(SESSION_ALIAS_HOLDER_DIRECTORY).toBe('.canonical-session-aliases');
+ const f=await fixture();const registered=await f.store.registerSessionAlias({...f.binding,requestSource:'user',lease:f.lease});
+ expect(registered.markerPath).toBe(join(f.holderRoot,'.canonical-session-aliases',createHash('sha256').update(f.binding.holderId).digest('hex')+'.json'));
+ expect(existsSync(registered.markerPath)).toBe(true);
+});
 it('durably records a real initialized session without a closure, across store instances',async()=>{
  const f=await fixture();await f.store.registerSessionAlias({...f.binding,requestSource:'user',lease:f.lease});
  const other=new FileSessionStore(f.canonical);

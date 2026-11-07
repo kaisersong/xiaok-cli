@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createMemoryStoreAsync } from '../../../src/ai/memory/store.js';
+import { closeStoreAndRemove } from './helpers/close-store.js';
 
 describe('createMemoryStoreAsync - default store', () => {
   it('should create LayeredMemoryStore by default (no config)', async () => {
@@ -22,8 +23,7 @@ describe('createMemoryStoreAsync - default store', () => {
     expect(typeof store.delete).toBe('function');
     expect(typeof store.clearAll).toBe('function');
 
-    store.close?.();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await closeStoreAndRemove(store, tmpDir);
   });
 
   it('should use XIAOK_CONFIG_DIR for the default layered database when HOME is missing', async () => {
@@ -41,7 +41,7 @@ describe('createMemoryStoreAsync - default store', () => {
       expect(typeof store.getStats).toBe('function');
       expect(fs.existsSync(path.join(tmpDir, 'memory.db'))).toBe(true);
     } finally {
-      store?.close?.();
+      await closeStoreAndRemove(store, undefined);
       if (originalHome === undefined) {
         delete process.env.HOME;
       } else {
@@ -75,8 +75,7 @@ describe('createMemoryStoreAsync - default store', () => {
     const results = await store.search!('Vite');
     expect(results.length).toBeGreaterThan(0);
 
-    store.close?.();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await closeStoreAndRemove(store, tmpDir);
   });
 
   it('should reject compaction without a configured LLM', async () => {
@@ -86,7 +85,6 @@ describe('createMemoryStoreAsync - default store', () => {
 
     await expect(store.compact!({ requestSource: 'user' })).rejects.toThrow('memory_model_unavailable');
 
-    store.close?.();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await closeStoreAndRemove(store, tmpDir);
   });
 });

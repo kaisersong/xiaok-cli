@@ -37,7 +37,7 @@ class BridgeClientFixture {
 }
 async function routes(success=false,threadId='thread'){
  const dir=mkdtempSync(join(root,'routes-')),store=new FileTaskSnapshotStore(join(dir,'tasks'));
- const bridge=new CodexTaskBridge({dataRoot:dir,profileId:'profile-a',cwd:dir,materialRegistry:new MaterialRegistry({workspaceRoot:join(dir,'workspace'),maxBytes:1024*1024}),snapshotStore:store,createClient:options=>new BridgeClientFixture(options) as never,admitThread:async()=>()=>{if(!success)throw Error('fixture_revoked');}});
+ const bridge=new CodexTaskBridge({dataRoot:dir,profileId:'profile-a',cwd:dir,materialRegistry:new MaterialRegistry({workspaceRoot:join(dir,'workspace'),maxBytes:1024*1024}),snapshotStore:store,createClient:options=>new BridgeClientFixture(options) as never,admitThread:async()=>()=>{},beforeStartTask:async()=>{if(!success)throw Error('fixture_revoked');}});
  try{bridge.select(true);const pending=bridge.create({prompt:'original',materials:[],context:{threadId}},{requestSource:'user',actorId:'profile-a'});if(success){const task=await pending;await vi.waitFor(async()=>expect((await store.recoverTask(task.taskId))?.status).toBe('completed'));}else await expect(pending).rejects.toThrow('fixture_revoked');}finally{await bridge.dispose();await store.closeAndDrain();}
  return join(dir,'codex-task-routes.sqlite');
 }
@@ -65,7 +65,7 @@ it.each(['unknown-setting','null-thread','blob-route','missing-native'] as const
  const {readCapturedSQLiteCodexSources}=await import('../../../src/runtime/verification/captured-sqlite-codex.js');const path=await routes();change(path,db=>{
   if(mode==='unknown-setting')db.prepare('INSERT INTO settings VALUES (?,?)').run('unknown','true');
   if(mode==='null-thread')db.prepare('INSERT INTO threads VALUES (?,?)').run('thread',null);
-  if(mode==='blob-route')db.prepare('UPDATE routes SET thread_id=?').run(Buffer.from('thread'));
+  if(mode==='blob-route')expect(db.prepare('UPDATE routes SET thread_id=?').run(Buffer.from('thread')).changes).toBe(1);
   if(mode==='missing-native')db.prepare('INSERT INTO threads VALUES (?,?)').run('thread','missing');
  });await held([{path,format:'codex-routes-sqlite-v1'},{path:join(dirname(path),'codex-native.sqlite'),format:'codex-native-sqlite-v1'}],(owner,token)=>expect(()=>readCapturedSQLiteCodexSources(owner,token)).toThrow());
 });

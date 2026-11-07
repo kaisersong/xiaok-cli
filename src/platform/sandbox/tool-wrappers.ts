@@ -1,7 +1,10 @@
-import { realpathSync } from 'node:fs';
-import { withSearchScope } from '../../ai/tools/search-scope-context.js';
+import {realpathSync} from 'node:fs';
+import {withSearchScope} from '../../ai/tools/search-scope-context.js';
+import {hasOriginalMainSdkBridgeInstallation} from '../../runtime/verification/original-main-sdk-bridge.js';
 import {types} from 'node:util';
+import {resolve} from 'node:path';
 import {isReadonlySandboxEnforcer} from './enforcer.js';
+import {withSandboxSearchScope} from './search-scope.js';
 import {inheritBuiltinToolIdentity} from '../../ai/tools/native-tool-identity.js';
 import type { Tool, ToolExecutionContext } from '../../types.js';
 import type { createSandboxEnforcer } from './enforcer.js';
@@ -40,9 +43,11 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
  const options=normalizeOptions(optionsOrCallback);
  return tools.map(tool=>{
   const name=tool.definition.name;if(!['bash','read','write','edit','grep','glob'].includes(name))return tool;
+  const search=name==='grep'||name==='glob';
   const prepare=async(input:Readonly<Record<string,unknown>>,context:ToolExecutionContext|undefined,allowPrompt:boolean):Promise<string|undefined>=>{
    context?.signal?.throwIfAborted();
-   const path=name==='bash'?input.workdir:['grep','glob'].includes(name)?(input.path??process.cwd()):input.file_path;
+   if(search && input.path!==undefined && typeof input.path!=='string')return 'Error: sandbox denied invalid search path';
+   const path=search?resolve((input.path as string|undefined)||process.cwd()):name==='bash'?input.workdir:input.file_path;
    if(typeof path==='string'){
     const decision=enforcer.enforceFile(path);
     if(!decision.allowed){
@@ -57,16 +62,20 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    return undefined;
   };
   const wrapped:Tool={...tool,execute:async(input,context)=>{
-   const denial=await prepare(input,context,!context?.compoundPhase);
+   // Resolve once before a possible approval await; never mutate shared input.
+   const effective=search?{...input,path:typeof input.path==='string'?resolve(input.path||process.cwd()):input.path===undefined?process.cwd():input.path}:input;
+   const denial=await prepare(effective,context,!context?.compoundPhase);
    if(denial)return denial;
    context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();
-   if (name === 'grep' || name === 'glob') {
-    const scope=enforcer.getSearchScope();
-    if(scope.allowedPaths.length===0 && scope.deniedPaths.length===0)return tool.execute(input,context);
-    const path = realpathSync(typeof input.path === 'string' ? input.path : process.cwd());
-    return tool.execute({...input, path}, withSearchScope(context, scope));
+   if(search){
+    if(hasOriginalMainSdkBridgeInstallation()){
+     const path=realpathSync(effective.path as string);
+     if(!enforcer.enforceFile(path).allowed)return 'Error: sandbox denied search path';
+     return tool.execute({...effective,path},withSandboxSearchScope(withSearchScope(context,enforcer.getSearchScope()),enforcer));
+    }
+    return tool.execute(effective,withSandboxSearchScope(context,enforcer));
    }
-   return tool.execute(input,context);
+   return tool.execute(effective,context);
   }};
   inheritBuiltinToolIdentity(tool,wrapped,()=>{
    if(!isReadonlySandboxEnforcer(enforcer)||types.isProxy(options)||![Object.prototype,null].includes(Object.getPrototypeOf(options)))return false;

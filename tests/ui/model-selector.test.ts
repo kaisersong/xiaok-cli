@@ -290,8 +290,8 @@ describe('buildModelOptions', () => {
     });
   });
 
-  it('lists DeepSeek V4 Flash Vision Exp when the first-party provider is configured', () => {
-    const options = buildModelOptions({
+  it('lists current DeepSeek Flash while preserving explicitly configured legacy Vision without offering it as a catalog choice', () => {
+    const config = {
       ...configFixture,
       providers: {
         ...configFixture.providers,
@@ -302,15 +302,23 @@ describe('buildModelOptions', () => {
           baseUrl: 'https://api.deepseek.com/v1',
         },
       },
-    });
+    };
+    const options = buildModelOptions(config);
 
     expect(options).toContainEqual({
-      id: 'deepseek-v4-flash-vision-exp',
+      id: 'deepseek-flash',
       provider: 'deepseek',
-      model: 'deepseek-v4-flash-vision-exp',
-      label: 'DeepSeek V4 Flash Vision Exp',
+      model: 'deepseek-flash',
+      label: 'DeepSeek V4.1 Flash (1017)',
       desc: 'DeepSeek',
     });
+    expect(options.some(option => option.model === 'deepseek-v4-flash-vision-exp')).toBe(false);
+    const configured = buildModelOptions({ ...config, models: {
+      ...config.models,
+      'saved-vision': { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', label: 'Saved Vision' },
+    } });
+    expect(configured).toContainEqual({ id: 'saved-vision', provider: 'deepseek',
+      model: 'deepseek-v4-flash-vision-exp', label: 'Saved Vision', desc: 'DeepSeek' });
   });
 
   it('renders the model selector as a multi-line overlay above the footer when a repl renderer is active', async () => {

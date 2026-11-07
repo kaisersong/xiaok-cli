@@ -7,6 +7,7 @@ import {isAbsolute,join,resolve} from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {writeFileAtomicallySync,syncDirectoryTreeStrict} from '../../../utils/atomic-file.js';
 export const SESSION_ALIAS_RESERVED_BYTES=1024*1024;
+export const SESSION_ALIAS_HOLDER_DIRECTORY = '.canonical-session-aliases';
 const INDEX_LIMIT=128*1024,MARKER_LIMIT=2048,ROWS_LIMIT=256;
 export interface SessionAliasBinding {aliasId:string;holderRoot:string;holderId:string;targetSessionId:string;domainInitializationId:string;domainGeneration:number}
 export interface SessionAliasRow extends SessionAliasBinding {state:'active'|'release_pending'|'released'}
@@ -55,7 +56,7 @@ export function reserveSessionAliasBytes(root:string,requested=false):number {
 }
 function assertAliasFileBudget(root:string,rows:SessionAliasRow[]){
  const known=new Map<string,Set<string>>();
- for(const row of rows){const directory=join(row.holderRoot,'.canonical-session-aliases');let names=known.get(directory);if(!names)known.set(directory,names=new Set());names.add(createHash('sha256').update(row.holderId).digest('hex')+'.json');}
+ for(const row of rows){const directory=join(row.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);let names=known.get(directory);if(!names)known.set(directory,names=new Set());names.add(createHash('sha256').update(row.holderId).digest('hex')+'.json');}
  let bytes=0,files=0;
  for(const [directory,names] of known){
   if(!existsSync(directory))continue;const stat=lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink())fail('holder_changed');
@@ -79,14 +80,14 @@ function write(root:string,rows:SessionAliasRow[]){
  writeFileAtomicallySync(index(root),bytes,{requireDirectorySync:true});
 }
 function marker(root:string,binding:SessionAliasBinding){return {version:1,canonicalRoot:resolve(root),binding};}
-function markerPath(binding:SessionAliasBinding){return join(binding.holderRoot,'.canonical-session-aliases',createHash('sha256').update(binding.holderId).digest('hex')+'.json');}
+function markerPath(binding:SessionAliasBinding){return join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY,createHash('sha256').update(binding.holderId).digest('hex')+'.json');}
 function verifyHolder(binding:SessionAliasBinding,context?:object){const stat=sessionReadSdk(context,'stat',lstatSync,[binding.holderRoot]);if(!sessionReadStatKind(stat,'directory')||sessionReadStatKind(stat,'symlink')||sessionReadSdk(context,'string',realpathSync,[binding.holderRoot])!==binding.holderRoot)fail('holder_changed');
- const directory=join(binding.holderRoot,'.canonical-session-aliases');if(sessionReadSdk(context,'boolean',existsSync,[directory])){const dir=sessionReadSdk(context,'stat',lstatSync,[directory]);if(!sessionReadStatKind(dir,'directory')||sessionReadStatKind(dir,'symlink'))fail('holder_changed');}}
+ const directory=join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);if(sessionReadSdk(context,'boolean',existsSync,[directory])){const dir=sessionReadSdk(context,'stat',lstatSync,[directory]);if(!sessionReadStatKind(dir,'directory')||sessionReadStatKind(dir,'symlink'))fail('holder_changed');}}
 /** Caller holds the shared FileSessionStore root mutation lock and actual target
  * execution lease. This low-level identity transaction does not issue grants. */
 function assertAliasWriterOpen(root:string,binding:SessionAliasBinding){
  createKnownDirectoryWriterFence(root,'session-root').assertOpen();
- createKnownDirectoryWriterFence(join(binding.holderRoot,'.canonical-session-aliases'),'session-alias-holder').assertOpen();
+ createKnownDirectoryWriterFence(join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY),'session-alias-holder').assertOpen();
 }
 export function registerSessionAliasLocked(root:string,input:SessionAliasBinding){
  const binding=captureSessionAlias(input);assertAliasWriterOpen(root,binding);const rows=readSessionAliases(root),existing=rows.find(row=>row.aliasId===binding.aliasId);
@@ -95,7 +96,7 @@ export function registerSessionAliasLocked(root:string,input:SessionAliasBinding
  verifyHolder(binding);const path=markerPath(binding),bytes=JSON.stringify(marker(root,binding));if(Buffer.byteLength(bytes)>MARKER_LIMIT)fail('marker_limit');
  if(existsSync(path)&&!isDeepStrictEqual(read(path,MARKER_LIMIT),marker(root,binding)))fail('marker_conflict');
  assertOrdinarySourceWriterRoute();
- const directory=join(binding.holderRoot,'.canonical-session-aliases');
+ const directory=join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);
  mkdirSync(directory,{recursive:true,mode:0o700});
  observeOrdinaryDirectoryWriter(directory,'session-alias-holder');
  assertOrdinarySourceWriterRoute();
@@ -106,7 +107,7 @@ export function releaseSessionAliasLocked(root:string,input:SessionAliasBinding)
  const binding=captureSessionAlias(input);assertAliasWriterOpen(root,binding);const rows=readSessionAliases(root),existing=rows.find(row=>row.aliasId===binding.aliasId);
  if(!existing||!isDeepStrictEqual(captureSessionAlias(existing),binding))fail('conflict');
  verifyHolder(binding);
- const existingDirectory=join(binding.holderRoot,'.canonical-session-aliases');
+ const existingDirectory=join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);
  if(existsSync(existingDirectory))observeOrdinaryDirectoryWriter(existingDirectory,'session-alias-holder');
  assertOrdinarySourceWriterRoute();
  if(existing.state==='released'){write(root,rows);return;}
@@ -118,7 +119,7 @@ export function releaseSessionAliasLocked(root:string,input:SessionAliasBinding)
   existing.state='release_pending';write(root,rows);
  }
  if(existsSync(path)){if(!isDeepStrictEqual(read(path,MARKER_LIMIT),marker(root,binding)))fail('marker_conflict');unlinkSync(path);}
- const markerDirectory=join(binding.holderRoot,'.canonical-session-aliases');
+ const markerDirectory=join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);
  syncDirectoryTreeStrict(existsSync(markerDirectory)?markerDirectory:binding.holderRoot);
  existing.state='released';write(root,rows);
 }
@@ -133,7 +134,7 @@ export function readSessionAliasBinding(root:string,input:{holderRoot:string;hol
  if(!row){
   // Ordinary task IDs and relative host roots retain their old contract. A
   // missing alias does not impose the stricter registration schema on them.
-  const path=join(input.holderRoot,'.canonical-session-aliases',createHash('sha256').update(input.holderId).digest('hex')+'.json');
+  const path=join(input.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY,createHash('sha256').update(input.holderId).digest('hex')+'.json');
   if(sessionReadSdk(context,'boolean',existsSync,[path]))fail('unregistered_marker');return null;
  }
  if(row.state!=='active')fail('route_unavailable');

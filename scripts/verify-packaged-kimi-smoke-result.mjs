@@ -72,6 +72,25 @@ if (result.authorizationDenyNetworkRequests !== 0 || result.rollbackDenyNetworkR
   fail('deny smoke observed a network request');
 }
 
+// #150 M6: the packaged app must have segmented Chinese through the product's worker
+// path with nodejieba loaded from the packaged app. Literal expectation on purpose
+// (same as terminal-ui's "Verify nodejieba binding loads"), independent of the app.
+{
+  const seg = result.segmentation;
+  const expected = '南京市 长江大桥';
+  if (!seg || typeof seg !== 'object') fail('segmentation result is missing (packaged app did not run the Chinese segmentation step)');
+  if (seg.status !== 'pass') fail(`segmentation status is ${JSON.stringify(seg.status)}, expected pass`);
+  if (seg.output !== expected) fail(`segmentation output=${JSON.stringify(seg.output)}, expected ${JSON.stringify(expected)}`);
+  if (typeof seg.workerEntry !== 'string' || !/app\.asar(\.unpacked)?[\\/]/.test(seg.workerEntry)) {
+    fail(`segmentation workerEntry is not inside app.asar / app.asar.unpacked: ${JSON.stringify(seg.workerEntry)}`);
+  }
+  if (typeof seg.dictionaryDir !== 'string' || !/app\.asar(\.unpacked)?[\\/]/.test(seg.dictionaryDir)) {
+    fail(`segmentation dictionaryDir is not inside app.asar / app.asar.unpacked: ${JSON.stringify(seg.dictionaryDir)}`);
+  }
+  if (!Number.isFinite(seg.elapsedMs) || seg.elapsedMs < 0) fail(`segmentation elapsedMs is invalid: ${JSON.stringify(seg.elapsedMs)}`);
+  console.log(`[packaged-kimi-smoke] segmentation pass: ${JSON.stringify(seg.output)} in ${seg.elapsedMs}ms, nodejieba=${seg.workerEntry}, binding=${seg.nativeBinding}, dict=${seg.dictionaryDir}`);
+}
+
 {
   const canary = 'PACKAGED_SMOKE_RUNTIME_ONLY';
   const hits = [];

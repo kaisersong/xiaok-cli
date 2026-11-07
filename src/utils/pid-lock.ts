@@ -26,11 +26,11 @@ export class PidLock {
     mkdirSync(dirname(this.pidFile), { recursive: true });
     writeFileSync(this.pidFile, String(process.pid), 'utf-8');
 
-    // Clean up on exit
-    const cleanup = () => this.release();
-    process.on('exit', cleanup);
-    process.on('SIGINT', () => { cleanup(); process.exit(130); });
-    process.on('SIGTERM', () => { cleanup(); process.exit(143); });
+    // Release on exit only. Signals belong to the owning service (yzj serve), which shuts down
+    // gracefully and then exits; exiting here on SIGINT/SIGTERM would skip that shutdown (#150).
+    // A signal before the owner installs its handlers terminates by Node's default; the pidfile
+    // left behind names a dead pid and the next acquire() removes it as stale.
+    process.on('exit', () => this.release());
 
     return { acquired: true };
   }

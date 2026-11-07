@@ -1433,6 +1433,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
   it('A20 Given many fully settled groups, When runtime objects become dormant, Then only bounded metadata remains and returning to a group rebuilds its core without changing historical results', async () => {
     const nativeEntryStart=nativeWorker.originalEntries.length;
     const fixture = await setup(vi.fn(), async () => {});
+    mkdirSync(join(fixture.root, 'tasks', 'protected-observation-sessions'), { recursive: true });
     const first = await fixture.start(); await fixture.host.drain();
     const firstGroup = fixture.store.activeGroup('t1')!;
     for (let index = 0; index < 10; index++) {

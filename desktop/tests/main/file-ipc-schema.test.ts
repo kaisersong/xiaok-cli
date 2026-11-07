@@ -18,7 +18,7 @@ describe('real file IPC schema rollout', () => {
         // The IPC registrar opens SQLite; Windows cannot unlink its live handle.
         const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');
         const store = getDesktopMemoryStore(join(root, 'data'));
-        if ('close' in store && typeof store.close === 'function') store.close();
+        if ('close' in store && typeof store.close === 'function') await store.close();
         rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     });
     it('registers all eight same-domain channels in the existing registry', () => { for (const name of ['openFileInSystemApp', 'readFileContent', 'saveFile', 'artifactBackup', 'artifactRevert', 'artifactCleanup', 'artifactWatch', 'artifactUnwatch'])

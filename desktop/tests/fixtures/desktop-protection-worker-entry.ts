@@ -54,6 +54,16 @@ function sourceTreeHash(): string {
   return digest.digest('hex');
 }
 
+/** Time budget for any Vitest hook or test that awaits a fresh
+ * compileProtectionWorkerEntry(). The compile is a cold, fully type-checked
+ * `tsc` run over ~1.2k files plus an esbuild bundle: ~10s on an idle 8-core
+ * machine, ~20s on one core, and 19-20s on the 3-4 core GitHub macOS/Windows
+ * runners while the other cross-platform test files run in parallel. A 20s
+ * budget therefore timed out whenever two such compiles overlapped on a
+ * loaded runner (master 615c6deb). The budget only exists to catch a hang, so
+ * it is sized for CPU-starved runners rather than for a fast local machine. */
+export const PROTECTION_WORKER_COMPILE_TIMEOUT_MS = 120_000;
+
 /** Fresh actual production JS, including every sibling dynamically imported by
  * the fixed Worker. No payload, result, exit or read implementation is replaced. */
 export async function compileProtectionWorkerEntry() {

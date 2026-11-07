@@ -18,7 +18,7 @@ export function registerMemoryCommands(program: Command): void {
       const store = await createMemoryStoreAsync(config.memory as Record<string, unknown> | undefined);
       if (!store.getStats) {
         console.log('当前记忆后端不支持 stats');
-        store.close?.();
+        await store.close?.();
         return;
       }
       const stats = store.getStats();
@@ -28,7 +28,7 @@ export function registerMemoryCommands(program: Command): void {
       console.log(`  L2 场景模式:   ${stats.l2}`);
       console.log(`  L3 人格特征:   ${stats.l3}`);
       console.log(`  数据库大小:    ${(stats.dbSizeBytes / 1024).toFixed(1)} KB`);
-      store.close?.();
+      await store.close?.();
     });
 
   mem
@@ -50,7 +50,7 @@ export function registerMemoryCommands(program: Command): void {
         }
         console.log(`\n共 ${items.length} 条`);
       }
-      store.close?.();
+      await store.close?.();
     });
 
   mem
@@ -78,7 +78,7 @@ export function registerMemoryCommands(program: Command): void {
         }
         console.log(`\n共 ${results.length} 条结果`);
       }
-      store.close?.();
+      await store.close?.();
     });
 
   mem
@@ -109,7 +109,7 @@ export function registerMemoryCommands(program: Command): void {
           console.log(`  L0: ${stats.l0} | L1: ${stats.l1} | L2: ${stats.l2} | L3: ${stats.l3}`);
         }
       } finally {
-        store.close?.();
+        await store.close?.();
       }
     });
 
@@ -134,11 +134,11 @@ export function registerMemoryCommands(program: Command): void {
       const store = await createMemoryStoreAsync(config.memory as Record<string, unknown> | undefined);
       if (!store.clearAll) {
         console.log('当前记忆后端不支持 clear');
-        store.close?.();
+        await store.close?.();
         return;
       }
       store.clearAll();
       console.log('所有记忆已清除。');
-      store.close?.();
+      await store.close?.();
     });
 }
