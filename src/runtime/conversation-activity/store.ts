@@ -144,7 +144,10 @@ export class ConversationActivityStore {
     try {
       // A separate rollback-journal database supplies an OS-managed exclusive lock.
       // It is held for this owner's lifetime and released by process exit, never mtime.
-      this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
+      // Fresh concurrent connections may briefly hold initialization read locks.
+      // Wait only while acquiring the same exclusive transaction; never retry RPCs.
+      this.owner.exec('PRAGMA busy_timeout=100; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
+      this.owner.exec('PRAGMA busy_timeout=0');
       this.secureSidecars();
     } catch (error) {
       // Preserve the existing public owner-held mapping and retain its real cause.
