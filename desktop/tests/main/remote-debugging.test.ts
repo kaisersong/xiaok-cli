@@ -118,3 +118,185 @@ describe('packaged upgrade smoke contract', () => {
     expect(script).toContain("assert.deepEqual(actualTree, newTree");
   });
 });
+
+// Kept in this explicitly selected cross-platform CI file (#168).
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
+import { prepareDesktopServicePorts, readDesktopServicePorts, desktopServiceUrl } from '../../electron/desktop-service-discovery.js';
+import { createCollaborationRoomBrokerClient } from '../../electron/collaboration-room-broker-client.js';
+import { vi } from 'vitest';
+
+describe('Desktop service port discovery (#168)', () => {
+  it('keeps free default ports and publishes them', async (context) => {
+    const probes = [createServer(), createServer()];
+    try {
+      for (const [i, server] of probes.entries()) await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen([4318, 4400][i], '127.0.0.1', resolve); });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+      context.skip();
+    } finally { await Promise.all(probes.map(server => new Promise<void>(resolve => server.close(() => resolve())))); }
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-ports-'));
+    try {
+      const file = join(root, 'services.json');
+      const ports = await prepareDesktopServicePorts(file, {});
+      expect(ports).toMatchObject({ broker: 4318, kswarm: 4400 });
+      expect(readDesktopServicePorts(file)).toEqual(ports);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('moves occupied defaults and the real broker client reads the published port', async (context) => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-ports-'));
+    const servers = [createServer(), createServer()];
+    try {
+      try {
+        for (const [i, server] of servers.entries()) await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen([4318, 4400][i], '127.0.0.1', resolve); });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+        context.skip();
+      }
+      const occupied = servers.map(server => (server.address() as { port: number }).port);
+      const file = join(root, 'services.json');
+      const ports = await prepareDesktopServicePorts(file, {});
+      expect(occupied).not.toContain(ports.broker);
+      expect(occupied).not.toContain(ports.kswarm);
+      expect(ports.broker).not.toBe(ports.kswarm);
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(ports);
+      const fetchImpl = vi.fn(async () => new Response('{}'));
+      await createCollaborationRoomBrokerClient({ token: 'fixture', discoveryFile: file, fetchImpl }).listRooms();
+      expect((fetchImpl.mock.calls as unknown[][])[0]?.[0]).toBe(`${desktopServiceUrl('broker', file)}/rooms`);
+    } finally {
+      await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('reports discovery write failure and releases its port probes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-ports-'));
+    try {
+      const blocker = join(root, 'blocker'); writeFileSync(blocker, 'file');
+      await expect(prepareDesktopServicePorts(join(blocker, 'services.json'), {})).rejects.toThrow('Desktop service port setup failed');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('rejects invalid configuration and unreadable discovery instead of connecting elsewhere', async () => {
+    await expect(prepareDesktopServicePorts(join(tmpdir(), 'unused-ports.json'), { KSWARM_PORT: 'invalid' })).rejects.toThrow('KSWARM_PORT');
+    expect(() => readDesktopServicePorts(join(tmpdir(), 'missing-xiaok-discovery.json'))).toThrow();
+  });
+});
+
+import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+import { activeOwnerServicePorts } from '../../electron/active-owner-service-ports.js';
+import { activityOwnerAddress, createActivityOwnerCredentials, ACTIVITY_OWNER_GENERATION, ACTIVITY_OWNER_PROTOCOL } from '../../../src/runtime/conversation-activity/owner-protocol.js';
+import { activityOwnerConfigDigest, type ActivityOwnerConfig } from '../../../src/runtime/conversation-activity/owner-runtime.js';
+import { ACTIVITY_STORAGE_NAMES } from '../../../src/runtime/conversation-activity/storage-permissions.js';
+
+it('reuses only authenticated owner endpoints with a matching persisted digest', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xiaok-port-owner-'));
+  const address = activityOwnerAddress(root);
+  const credentials = createActivityOwnerCredentials(address);
+  const config: ActivityOwnerConfig = {
+    schemaVersion: 1, dataRoot: address.dataRoot, profileId: createHash('sha256').update(resolve(root)).digest('hex'), actorId: 'fixture',
+    identity: { kind: 'desktop', path: join(root, 'groups.sqlite') },
+    kswarm: { url: 'http://127.0.0.1:45001', brokerUrl: 'http://127.0.0.1:45002', mutationToken: 'fixture', roomToken: 'fixture' },
+    managedSources: [
+      { name: 'kswarm', executable: process.execPath, entryPath: join(root, 'ks.js'), healthUrl: 'http://127.0.0.1:45001/health' },
+      { name: 'broker', executable: process.execPath, entryPath: join(root, 'broker.js'), healthUrl: 'http://127.0.0.1:45002/health' },
+    ],
+  };
+  writeFileSync(join(root, ACTIVITY_STORAGE_NAMES.config), JSON.stringify(config));
+  let mismatch = false;
+  const server = createServer(socket => {
+    let buffer = '';
+    socket.setEncoding('utf8');
+    socket.on('data', chunk => {
+      buffer += chunk;
+      for (;;) {
+        const end = buffer.indexOf('\n'); if (end < 0) break;
+        const message = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+        if (message.type === 'hello') {
+          if (message.token !== credentials.producer) { socket.destroy(); return; }
+          socket.write(JSON.stringify({ type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: address.rootHash, ownerEpoch: 'fixture' }) + '\n');
+        } else socket.write(JSON.stringify({ type: 'result', id: message.id, result: { profileId: config.profileId, generation: ACTIVITY_OWNER_GENERATION,
+          configDigest: mismatch ? 'invalid' : activityOwnerConfigDigest(config) } }) + '\n');
+      }
+    });
+  });
+  try {
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(address.socketPath, resolve); });
+    expect(await activeOwnerServicePorts(root)).toEqual({ kswarm: 45001, broker: 45002 });
+    mismatch = true;
+    await expect(activeOwnerServicePorts(root)).rejects.toThrow('activity_owner_discovery_mismatch');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+import { startDesktopKSwarmService } from '../../electron/kswarm-service-lifetime.js';
+import { DesktopShutdownGate } from '../../electron/shutdown-aware-ipc-main.js';
+import { createDesktopServiceReadiness } from '../../electron/desktop-service-readiness.js';
+import { KSwarmStreamBridge, startKSwarmStreamWhenReady } from '../../electron/kswarm-stream-bridge.js';
+
+it('refuses duplicate services when another owner appears after endpoint preparation', async () => {
+  const start = vi.fn(), release = vi.fn();
+  const service = { activityOwnerConfig: async () => ({}), start, releaseActivityOwnerDelegation: release };
+  await expect(startDesktopKSwarmService(new DesktopShutdownGate(), service as never,
+    async () => { throw new Error('activity_owner_config_mismatch'); }, vi.fn())).rejects.toThrow('activity_owner_config_mismatch');
+  expect(start).not.toHaveBeenCalled();
+  expect(release).not.toHaveBeenCalled();
+});
+
+it('blocks consumers after bootstrap failure and starts streaming only on recovery', async () => {
+  let current = { running: false, lastError: 'startup failed' as string | null };
+  const ready = createDesktopServiceReadiness(async () => {}, () => current);
+  const consumer = vi.fn();
+  await expect(ready().then(consumer)).rejects.toThrow('startup failed');
+  expect(consumer).not.toHaveBeenCalled();
+  let report!: (status: typeof current) => void;
+  const sockets: string[] = [];
+  class FakeSocket {
+    static OPEN = 1;
+    readyState = 1;
+    constructor(url: string) { sockets.push(url); }
+    close() {}
+  }
+  vi.stubGlobal('WebSocket', FakeSocket);
+  let actualUrl = 'ws://127.0.0.1:4400/ws';
+  const bridge = new KSwarmStreamBridge(() => actualUrl);
+  const stop = startKSwarmStreamWhenReady({ getStatus: () => current, onStatusChange: cb => { report = cb; return () => {}; } }, bridge);
+  try {
+    expect(sockets).toEqual([]);
+    actualUrl = 'ws://127.0.0.1:45003/ws';
+    current = { running: true, lastError: null }; report(current); report(current);
+    await ready().then(consumer);
+    expect(consumer).toHaveBeenCalledTimes(1);
+    expect(sockets).toEqual([actualUrl]);
+  } finally { stop(); bridge.dispose(); vi.unstubAllGlobals(); }
+});
+
+import ts from 'typescript';
+
+it('clears the actual Main runtime bridge startup flag after readiness rejection so recovery retries', async () => {
+  const source = readFileSync(join(repoRoot, 'desktop/electron/main.ts'), 'utf8');
+  const ast = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true);
+  let declaration: ts.VariableDeclaration | undefined;
+  const find = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'startRuntimeBridge') declaration = node;
+    ts.forEachChild(node, find);
+  };
+  find(ast);
+  expect(declaration?.initializer).toBeDefined();
+  const compiled = ts.transpileModule(`const startRuntimeBridge = ${declaration!.initializer!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const ready = vi.fn().mockRejectedValueOnce(new Error('fixture startup failure')).mockImplementation(() => new Promise(() => {}));
+  const warning = vi.fn();
+  const actual = new Function('brokerReady', 'console', 'desktopShutdownGate', `
+    let runtimeBridgeStopping, runtimeBridgeStarted = false, runtimeBridgeStartEpoch = 0, runtimeBridgeFallbackTimer = null;
+    ${compiled}
+    return { start: startRuntimeBridge, started: () => runtimeBridgeStarted };
+  `)(ready, { warn: warning }, { isOpen: true });
+  actual.start();
+  await vi.waitFor(() => expect(warning).toHaveBeenCalledTimes(1));
+  expect(actual.started()).toBe(false);
+  actual.start();
+  expect(ready).toHaveBeenCalledTimes(2);
+  expect(actual.started()).toBe(true);
+});

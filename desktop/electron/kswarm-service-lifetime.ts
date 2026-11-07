@@ -55,6 +55,7 @@ export function startDesktopKSwarmService(
       } catch (error) {
         // Shutdown is never converted to fallback or a new background start.
         fresh();
+        if (error instanceof Error && /activity_owner_(?:config|profile|discovery)_mismatch/.test(error.message)) throw error;
         if (!onOwnerUnavailable) throw error;
         service.releaseActivityOwnerDelegation?.();
         onOwnerUnavailable(error);

@@ -26,6 +26,7 @@ export interface KSwarmHealthFinding {
 }
 
 export interface KSwarmHealthDiagnosticInput {
+  servicePort?: number;
   expectedEntryPath: string | null;
   expectedSourceHash?: string | null;
   spawnEntryExists: boolean;
@@ -54,6 +55,7 @@ export interface KSwarmHealthDiagnosticInput {
 
 
 export function classifyKSwarmHealth(input: KSwarmHealthDiagnosticInput): KSwarmHealthFinding[] {
+  const servicePort = input.servicePort ?? 4400;
   if (!input.spawnEntryExists) {
     return [finding('spawn_path_missing', 'high',
       'KSwarm startup entry is missing.',
@@ -72,7 +74,7 @@ export function classifyKSwarmHealth(input: KSwarmHealthDiagnosticInput): KSwarm
 
   if (input.port && input.port.listening === false && input.managerRunning !== true) {
     return [finding('service_not_running', 'medium',
-      'KSwarm service is not running on port 4400.',
+      `KSwarm service is not running on port ${servicePort}.`,
       'start_kswarm',
       'Restart Xiaok or run the KSwarm service health check again.',
       baseMetadata(input))];
@@ -84,14 +86,14 @@ export function classifyKSwarmHealth(input: KSwarmHealthDiagnosticInput): KSwarm
       return [finding('health_parse_error', 'high',
         `KSwarm health endpoint returned invalid JSON${health?.error ? `: ${health.error}` : ''}.`,
         'stop_conflicting_kswarm',
-        'Stop the conflicting service on port 4400 or inspect KSwarm health logs.',
+        `Stop the conflicting service on port ${servicePort} or inspect KSwarm health logs.`,
         baseMetadata(input))];
     }
     if (input.port?.listening && !health?.status) {
       return [finding('port_occupied_by_unknown_process', 'high',
-        `Port 4400 is occupied by a non-KSwarm process${input.port.command ? `: ${input.port.command}` : ''}.`,
-        'free_port_4400',
-        'Stop the process occupying port 4400, then restart KSwarm.',
+        `Port ${servicePort} is occupied by a non-KSwarm process${input.port.command ? `: ${input.port.command}` : ''}.`,
+        `free_port_${servicePort}`,
+        `Stop the process occupying port ${servicePort}, then restart KSwarm.`,
         baseMetadata(input))];
     }
     if (health?.status) {
@@ -115,7 +117,7 @@ export function classifyKSwarmHealth(input: KSwarmHealthDiagnosticInput): KSwarm
     findings.push(finding('health_identity_mismatch', 'high',
       'KSwarm health identity does not match the current Xiaok desktop service.',
       'stop_conflicting_kswarm',
-      'Stop the conflicting KSwarm service on port 4400, then let Xiaok start the bundled service.',
+      `Stop the conflicting KSwarm service on port ${servicePort}, then let Xiaok start the bundled service.`,
       {
         ...baseMetadata(input),
         actualEntryPath,

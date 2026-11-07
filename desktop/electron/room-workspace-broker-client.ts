@@ -1,16 +1,19 @@
+import { desktopServiceUrl } from './desktop-service-discovery.js';
 import { randomUUID } from 'node:crypto';
 import type { RoomWorkspaceBrokerPort } from './room-workspace-service.js';
 
 /** Private authenticated main transport, never exposed as a generic IPC API. */
 export function createRoomWorkspaceBrokerClient(options: {
+  ready?: () => Promise<void>;
   token: string; isMutationOwner: () => boolean; fetchImpl?: typeof fetch; baseUrl?: string;
 }) {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const baseUrl = options.baseUrl ?? 'http://127.0.0.1:4318';
+  const baseUrl = () => options.baseUrl ?? desktopServiceUrl('broker');
   const startupId = randomUUID();
   let registration: Promise<{ hostId: string; hostIncarnation: number }> | undefined;
   async function send(roomId: string, action?: string, input?: Record<string, unknown>, incarnation?: number, revision?: number) {
-    const url = `${baseUrl}/rooms/${encodeURIComponent(roomId)}/workspace${action ? `/${action}` : ''}${revision === undefined ? '' : `?instructionsRevision=${revision}`}`;
+    await options.ready?.();
+    const url = `${baseUrl()}/rooms/${encodeURIComponent(roomId)}/workspace${action ? `/${action}` : ''}${revision === undefined ? '' : `?instructionsRevision=${revision}`}`;
     const response = await fetchImpl(url, {
       method: action ? 'POST' : 'GET',
       signal: AbortSignal.timeout(15_000),
@@ -40,7 +43,8 @@ export function createRoomWorkspaceBrokerClient(options: {
       const host = await getHost(roomId); return send(roomId, undefined, undefined, host.hostIncarnation, revision);
     },
     async probe() {
-      const response = await fetchImpl(`${baseUrl}/rooms/workspace-protocol`, { headers: { 'x-intent-broker-room-token': options.token }, signal: AbortSignal.timeout(15_000) });
+      await options.ready?.();
+      const response = await fetchImpl(`${baseUrl()}/rooms/workspace-protocol`, { headers: { 'x-intent-broker-room-token': options.token }, signal: AbortSignal.timeout(15_000) });
       return response.json();
     },
   };

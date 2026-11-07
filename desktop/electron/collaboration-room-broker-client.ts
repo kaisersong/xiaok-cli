@@ -1,15 +1,18 @@
-const BROKER_BASE_URLS = ['http://127.0.0.1:4318', 'http://localhost:4318'];
+import { desktopServiceUrl } from './desktop-service-discovery.js';
 const ROOM_TOKEN_HEADER = 'x-intent-broker-room-token';
 
 export function createCollaborationRoomBrokerClient(options: {
   token: string;
+  discoveryFile?: string;
+  ready?: () => Promise<void>;
   fetchImpl?: typeof fetch;
 }) {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   async function request(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+    await options.ready?.();
     let lastError: unknown = null;
-    for (const baseUrl of BROKER_BASE_URLS) {
+    for (const baseUrl of [desktopServiceUrl('broker', options.discoveryFile)]) {
       try {
         const response = await fetchImpl(`${baseUrl}${path}`, {
           ...init,
