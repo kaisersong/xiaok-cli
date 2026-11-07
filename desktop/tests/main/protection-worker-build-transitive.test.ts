@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
-import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
+import { compileProtectionWorkerEntry, PROTECTION_WORKER_COMPILE_TIMEOUT_MS } from '../fixtures/desktop-protection-worker-entry.js';
 let compiled: Awaited<ReturnType<typeof compileProtectionWorkerEntry>>;
 const scratch=mkdtempSync(join(tmpdir(),'protection-build-test-'));
-beforeAll(async()=>{compiled=await compileProtectionWorkerEntry();},10000);
+beforeAll(async()=>{compiled=await compileProtectionWorkerEntry();},PROTECTION_WORKER_COMPILE_TIMEOUT_MS);
 afterAll(()=>{if(compiled)rmSync(compiled.root,{recursive:true,force:true});rmSync(scratch,{recursive:true,force:true});});
 const sha=(file:string)=>createHash('sha256').update(readFileSync(file)).digest('hex');
 describe('fresh actual protection worker compilation',()=>{
