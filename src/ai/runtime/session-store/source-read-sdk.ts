@@ -4,7 +4,10 @@ const apply=Reflect.apply,descriptor=Object.getOwnPropertyDescriptor,own=Object.
 /** A context is custody of the original Task Store's SDK results, never a
  * filesystem grant. Invalid supplied contexts cannot fall back to legacy IO. */
 export function sessionReadSdk(context:object|undefined,kind:SourceSyncSdkKind,method:Function,args:unknown[],receiver?:unknown):any {
- return context===undefined?apply(method,receiver,args):invokeSourceSyncSdk(context,kind,method,args,receiver);
+ if(context===undefined)return apply(method,receiver,args);
+ // File identities can exceed the exact Number range on Windows.
+ const originalArgs=kind==='stat'||kind==='fd-stat'?[args[0],{bigint:true}]:args;
+ return invokeSourceSyncSdk(context,kind,method,originalArgs,receiver);
 }
 export function sessionReadStatKind(stat:any,kind:'file'|'directory'|'symlink'):boolean {
  const mode=stat.mode,mask=typeof mode==='bigint'?mode&0o170000n:mode&0o170000;

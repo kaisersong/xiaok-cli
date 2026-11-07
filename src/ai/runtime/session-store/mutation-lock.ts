@@ -8,7 +8,11 @@ import {types} from 'node:util';
 const apply=Reflect.apply,get=Reflect.get,parse=JSON.parse,stringify=JSON.stringify,keys=Object.keys,own=Object.hasOwn,descriptor=Object.getOwnPropertyDescriptor,define=Object.defineProperty,isProxy=types.isProxy;
 const originalLstat=lstatSync,originalRead=readFileSync,originalExists=existsSync,originalUnlink=unlinkSync,originalOpen=openSync,originalClose=closeSync,originalWrite=writeFileSync,originalSync=fsyncSync,originalLink=linkSync,originalFstat=fstatSync,originalUuid=randomUUID,originalHostname=hostname;
 const integer=Number.isSafeInteger,exec=RegExp.prototype.exec;
-function call<T>(context:object|undefined,kind:SourceSyncSdkKind,method:Function,args:unknown[],receiver?:unknown):T{return context===undefined?apply(method,receiver,args):invokeSourceSyncSdk(context,kind,method,args,receiver) as T;}
+function call<T>(context:object|undefined,kind:SourceSyncSdkKind,method:Function,args:unknown[],receiver?:unknown):T{
+ if(context===undefined)return apply(method,receiver,args);
+ const originalArgs=kind==='stat'||kind==='fd-stat'?[args[0],{bigint:true}]:args;
+ return invokeSourceSyncSdk(context,kind,method,originalArgs,receiver) as T;
+}
 function code(error:unknown,value:string):boolean{if(!error||typeof error!=='object'||isProxy(error))return false;const row=descriptor(error,'code');return !!row&&own(row,'value')&&row.value===value;}
 function statKind(stat:any,kind:'file'|'symlink',context?:object){if(context===undefined)return kind==='file'?stat.isFile():stat.isSymbolicLink();const mode=stat.mode;return(typeof mode==='bigint'?mode&0o170000n:mode&0o170000)===(typeof mode==='bigint'?(kind==='file'?0o100000n:0o120000n):(kind==='file'?0o100000:0o120000));}
 const requireOptional = createRequire(import.meta.url);

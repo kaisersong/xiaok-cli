@@ -17,8 +17,8 @@ function fixture(sourceInput = false) {
     import {createHook} from 'node:async_hooks';
     import {spawnSync} from 'node:child_process';
     import {join} from 'node:path';
-    const {FileTaskSnapshotStore}=await import(${JSON.stringify(pathToFileURL(resolve('src/runtime/task-host/snapshot-store.ts')).href)});
-    const {desktopObservationSessionId}=await import(${JSON.stringify(pathToFileURL(resolve('src/runtime/task-host/protected-observation-store.ts')).href)});
+    const {FileTaskSnapshotStore}=await import(${JSON.stringify(pathToFileURL(resolve(import.meta.url.endsWith('.js') ? '.test-dist/src/runtime/task-host/snapshot-store.js' : 'src/runtime/task-host/snapshot-store.ts')).href)});
+    const {desktopObservationSessionId}=await import(${JSON.stringify(pathToFileURL(resolve(import.meta.url.endsWith('.js') ? '.test-dist/src/runtime/task-host/protected-observation-store.js' : 'src/runtime/task-host/protected-observation-store.ts')).href)});
     const root=${JSON.stringify(root)}, taskId='actual-protected-task';
     const closure={version:1,requiresReauthorization:true,observations:[{authorityId:'11111111-1111-1111-1111-111111111111',profileId:'actual-profile',sourceSessionId:'original-session',ownerAgentId:'original-agent',scopeId:'original-scope',permissionGeneration:1,observationId:'original-observation',contentHash:'a'.repeat(64),revision:1,policyId:'original-policy',policyRevision:1}]};
     const snapshot={taskId,sessionId:'original-session',status:'running',prompt:'original',materials:[],events:[],createdAt:1,updatedAt:1,protectedObservationClosure:closure};

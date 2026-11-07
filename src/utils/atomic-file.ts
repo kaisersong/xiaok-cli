@@ -61,7 +61,7 @@ function sourceOperations(context:object):AtomicFileOperations {
       const kind=args[1]==='r'?'fd-open-read':'fd-open';
       const fd=invokeSourceSyncSdk(context,kind,defaultOperations.openSync,args) as number;
       // Record the acquired descriptor's inode before writes or cleanup.
-      try{invokeSourceSyncSdk(context,'fd-stat',nativeFstat,[fd]);}catch(error){try{invokeSourceSyncSdk(context,'fd-close',defaultOperations.closeSync,[fd]);}catch(cleanupError){throw new NativeAggregateError([error,cleanupError],'source_atomic_open_and_close_failed',{cause:error});}throw error;}return fd;
+      try{invokeSourceSyncSdk(context,'fd-stat',nativeFstat,[fd,{bigint:true}]);}catch(error){try{invokeSourceSyncSdk(context,'fd-close',defaultOperations.closeSync,[fd]);}catch(cleanupError){throw new NativeAggregateError([error,cleanupError],'source_atomic_open_and_close_failed',{cause:error});}throw error;}return fd;
     },
     writeFileSync:(...args:Parameters<typeof writeFileSync>)=>invokeSourceSyncSdk(context,'void',defaultOperations.writeFileSync,args),
     fsyncSync:(...args:Parameters<typeof fsyncSync>)=>invokeSourceSyncSdk(context,'void',defaultOperations.fsyncSync,args),

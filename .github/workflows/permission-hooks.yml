@@ -107,6 +107,8 @@ jobs:
         run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty
       - run: npm run build:release
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Exercise real hooks, registry and permission UI
         run: >
           npm run test:sandbox:run --

@@ -34,6 +34,10 @@ export default {
     // afterEach 清理临时目录在 Windows 上会因文件句柄重试而超过默认 10s。
     hookTimeout: 30_000,
     fileParallelism: false,
-    pool: 'threads',
+    // Match source tests: fixtures use process.chdir/umask, unavailable in threads.
+    pool: 'forks',
+    // Same owner-approved B1 runner budget as vitest.config.ts (8f12a36a).
+    // Product deadlines, clocks, populations and assertions remain unchanged.
+    testTimeout: 12000,
   },
 };

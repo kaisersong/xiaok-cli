@@ -51,6 +51,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Test Kimi diagnostics, retries, cancellation and completed tools
         run: >
           npm run test:sandbox:run --

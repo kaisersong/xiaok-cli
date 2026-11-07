@@ -373,7 +373,7 @@ export class FileTaskSnapshotStore {
         // The exact fd's original inode was recorded before it was closed.
         // Never remove a replacement at its former temp name.
         let current:any;const previous=state.tempProbe;state.tempProbe=temp.path;
-        try{current=this.#sourceSyncSdk(key,'stat',sdkLstat,[temp.path]);}catch(error){if(isNodeErrorCode(error,'ENOENT')&&!state.pending.size){state.temps.delete(temp);this.#unconfirmedSyncHandles.delete(temp);this.#ownedSyncRaws.delete(reservation);return undefined;}throw error;}finally{state.tempProbe=previous;}
+        try{current=this.#sourceSyncSdk(key,'stat',sdkLstat,[temp.path,{bigint:true}]);}catch(error){if(isNodeErrorCode(error,'ENOENT')&&!state.pending.size){state.temps.delete(temp);this.#unconfirmedSyncHandles.delete(temp);this.#ownedSyncRaws.delete(reservation);return undefined;}throw error;}finally{state.tempProbe=previous;}
         if(current.dev!==temp.identity.dev||current.ino!==temp.identity.ino)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');
       }
       if(kind==='stale-unlink'||kind==='lock-release'){
@@ -386,9 +386,9 @@ export class FileTaskSnapshotStore {
         // The second stat also detects replacement during the original read.
         const previous=state.finalReadPath;state.finalReadPath=args[0] as string;
         try{
-          const before=this.#sourceSyncSdk(key,'stat',sdkLstat,[args[0]]) as any;
+          const before=this.#sourceSyncSdk(key,'stat',sdkLstat,[args[0],{bigint:true}]) as any;
           const bytes=this.#sourceSyncSdk(key,'string',sdkReadFileSync,[args[0],'utf8']);
-          const after=this.#sourceSyncSdk(key,'stat',sdkLstat,[args[0]]) as any;
+          const after=this.#sourceSyncSdk(key,'stat',sdkLstat,[args[0],{bigint:true}]) as any;
           if(before.dev!==args[1]||before.ino!==args[2]||after.dev!==args[1]||after.ino!==args[2]||bytes!==args[3])throw new SdkError('session_save_locked');
         }finally{state.finalReadPath=previous;}
       }
@@ -397,7 +397,7 @@ export class FileTaskSnapshotStore {
         // After the last Source callback, inspect the actual source pathname.
         // Cleanup uses the same inode rule and cannot unlink a replacement.
         const previous=state.tempProbe;state.tempProbe=renamedTemp!.path;
-        try{const current=this.#sourceSyncSdk(key,'stat',sdkLstat,[renamedTemp!.path]) as any;if(current.dev!==renamedTemp!.identity!.dev||current.ino!==renamedTemp!.identity!.ino)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');}
+        try{const current=this.#sourceSyncSdk(key,'stat',sdkLstat,[renamedTemp!.path,{bigint:true}]) as any;if(current.dev!==renamedTemp!.identity!.dev||current.ino!==renamedTemp!.identity!.ino)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');}
         finally{state.tempProbe=previous;}
       }
       if(kind==='fd-close')held!.closing=true;
@@ -464,7 +464,7 @@ export class FileTaskSnapshotStore {
     }
   }
   #sourceStat(path:string,context?:SourceStoreContext,bigint=false):any{
-    return context?this.#sourceSyncSdk(context,'stat',sdkLstat,[path,{bigint}]):bigint?lstatSync(path,{bigint:true}):lstatSync(path);
+    return context?this.#sourceSyncSdk(context,'stat',sdkLstat,[path,{bigint:true}]):bigint?lstatSync(path,{bigint:true}):lstatSync(path);
   }
   #statKind(stat:any,kind:'directory'|'file'|'symlink',context?:SourceStoreContext):boolean{
     if(!context)return kind==='directory'?stat.isDirectory():kind==='file'?stat.isFile():stat.isSymbolicLink();
@@ -893,7 +893,7 @@ export class FileTaskSnapshotStore {
       let checkpoint;
       try{checkpoint=this.#sourceStat(this.#snapshotPath(taskId),this.#ordinaryContext());}catch(error){if(!isNodeErrorCode(error,'ENOENT'))throw error;}
       if(checkpoint){
-        if(!this.#statKind(checkpoint,'file',this.#ordinaryContext())||this.#statKind(checkpoint,'symlink',this.#ordinaryContext())||checkpoint.nlink!==1)throw Error('task_original_input_invalid');
+        if(!this.#statKind(checkpoint,'file',this.#ordinaryContext())||this.#statKind(checkpoint,'symlink',this.#ordinaryContext())||checkpoint.nlink!==(typeof checkpoint.nlink==='bigint'?1n:1))throw Error('task_original_input_invalid');
         const initialProtection=await this.#readProtection(taskId,readOptions);
         const pendingWrite=this.#taskWriteQueues.get(taskId);if(pendingWrite)await waitSnapshotRead(()=>pendingWrite,readOptions);
         const loaded=await this.#loadSnapshotState(taskId,readOptions);

@@ -45,6 +45,8 @@ jobs:
         run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty
       - run: npm run build:release
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Verify renderer, highlights, row accounting and history formatting
         run: >
           npm run test:sandbox:run --

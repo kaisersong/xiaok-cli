@@ -41,7 +41,12 @@ jobs:
             desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Real host recovery ordering and durable receipts
         run: >
           npm run test:sandbox:run --
@@ -88,6 +93,9 @@ jobs:
             desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
       - name: Prepare pinned workflow issuer and broker
         shell: bash
         run: |
