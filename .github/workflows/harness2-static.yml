@@ -18,6 +18,7 @@ on:
       - 'src/ai/memory/compaction.ts'
       - 'src/ai/memory/layered-store.ts'
       - 'desktop/electron/desktop-services.ts'
+      - 'desktop/tests/main/desktop-services.test.ts'
       - 'desktop/electron/desktop-system-prompt.ts'
       - 'desktop/electron/loop-evaluator.ts'
       - 'desktop/electron/completion-evidence-store.ts'
@@ -42,6 +43,7 @@ on:
       - 'src/ai/memory/compaction.ts'
       - 'src/ai/memory/layered-store.ts'
       - 'desktop/electron/desktop-services.ts'
+      - 'desktop/tests/main/desktop-services.test.ts'
       - 'desktop/electron/desktop-system-prompt.ts'
       - 'desktop/electron/loop-evaluator.ts'
       - 'desktop/electron/completion-evidence-store.ts'
@@ -127,6 +129,7 @@ jobs:
           tests/main/harness-optimization-crash.test.ts
           tests/main/harness-optimization-ipc.test.ts
           tests/main/harness-optimization-services.test.ts
+          tests/main/desktop-services.test.ts
           tests/main/preload-contract.test.ts
           tests/main/preload-sandbox.test.ts
           tests/renderer/harness-optimization-settings.test.tsx

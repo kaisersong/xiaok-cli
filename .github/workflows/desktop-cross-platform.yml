@@ -163,7 +163,6 @@ jobs:
           tests/main/room-scheduled-context.test.ts
           tests/renderer/scheduled-sidebar-selection.test.tsx
           tests/renderer/chat-approval-scroll.test.tsx
-          tests/main/desktop-services.test.ts
           tests/main/desktop-services-pure-node-import.test.ts
           tests/main/desktop-services-scheduled-task-authority.test.ts
           tests/renderer/model-recommendations.test.ts
