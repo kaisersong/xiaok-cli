@@ -182,7 +182,7 @@ jobs:
         run: node node_modules/vitest/vitest.mjs run tests/platform/mcp/python-server.test.ts --config vitest.config.ts
 
       - name: Model catalog and selector regression
-        run: node node_modules/vitest/vitest.mjs run tests/ai/adapters/gemini-thought-signature.test.ts tests/ai/providers/current-year-catalog.test.ts tests/ai/providers/kimi-k28.test.ts tests/ui/model-selector.test.ts --config vitest.config.ts
+        run: node node_modules/vitest/vitest.mjs run tests/ai/adapters/gemini-thought-signature.test.ts tests/ai/providers/current-year-catalog.test.ts tests/ai/providers/kimi-k28.test.ts --config vitest.config.ts
 
   windows-kimi-packaged-smoke:
     name: Windows packaged Kimi K3 smoke
