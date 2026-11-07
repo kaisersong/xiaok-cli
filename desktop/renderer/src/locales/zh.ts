@@ -1374,6 +1374,11 @@ export const zh: LocaleStrings = {
     memoryPaneTitle: "记忆管理",
     memoryContentTab: "记忆内容",
     memoryConfigurationTab: "记忆配置",
+    conversationModelsTab: "对话模型",
+    decisionModelsTab: "决策模型",
+    decisionModelsDesc: "配置 System One、K-IM 等专用判断模型，用于语义判断和消息分诊。它们独立于默认对话模型。",
+    memoryDecisionModelsMoved: "System One、K-IM 等决策模型已统一放在模型设置中。已有配置继续生效。",
+    openDecisionModelSettings: "前往决策模型设置",
     memoryEmbeddingCurrent: "当前配置",
     memoryModelConfigFailed: "模型配置读取或保存失败，请重试。",
 
