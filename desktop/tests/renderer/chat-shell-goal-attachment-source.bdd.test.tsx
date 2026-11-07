@@ -20,6 +20,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: Compone
   </form>
   <output data-testid="display-source">{p.thread.currentTaskId}</output>
   <output data-testid="display-status">{p.status}</output>
+  <output data-testid="ui-previews">{JSON.stringify(p.uiPreviews)}</output>
   <output data-testid="stream">{p.streamingText}</output>
   <output data-testid="question">{p.currentQuestion?.prompt}</output>
   <output data-testid="current-result">{JSON.stringify(p.result)}</output>
@@ -852,4 +853,27 @@ describe('pending publication uses the actual GoalBar and ChatShell without task
     expect(screen.queryByText('late old publication')).not.toBeInTheDocument();
     expect(resume).not.toHaveBeenCalled(); expect(ack).not.toHaveBeenCalled();
   });
+});
+
+
+describe('Desktop transient generative UI source',()=>{
+ it('shows a live preview, excludes history/canvas, clears at terminal and rejects late events',async()=>{
+  await mount();const source=observer('A');
+  const preview={type:'ui_preview' as const,turnId:'turn',toolUseId:'call',preview:{title:'Live analysis',content:'[]'}};
+  await emit(source,preview);
+  expect(screen.getByTestId('ui-previews').textContent).toContain('Live analysis');
+  expect(screen.getByTestId('history').textContent).not.toContain('Live analysis');
+  expect(screen.queryByTestId('canvas-events')?.textContent ?? '').not.toContain('ui_preview');
+  await emit(source,{type:'task_terminal',status:'completed'});
+  expect(screen.getByTestId('ui-previews').textContent).toBe('[]');
+  await emit(source,preview);expect(screen.getByTestId('ui-previews').textContent).toBe('[]');
+ });
+ it('clears previews on recovery and cancel, and does not replay them',async()=>{
+  await mount();const source=observer('A');
+  const preview={type:'ui_preview' as const,turnId:'turn',toolUseId:'call',preview:{title:'Live analysis',content:'[]'}};
+  await emit(source,preview);await emit(source,{type:'execution_health',state:'recovering'});
+  expect(screen.getByTestId('ui-previews').textContent).toBe('[]');
+  await emit(source,preview);await emit(source,{type:'task_cancelled',taskId:'A',reason:'user_aborted'});
+  expect(screen.getByTestId('ui-previews').textContent).toBe('[]');
+ });
 });

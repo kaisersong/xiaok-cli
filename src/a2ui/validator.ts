@@ -1,14 +1,7 @@
-import {
-  A2UI_LIMITS,
-  RENDER_UI_SECTION_KINDS,
-  SAFE_A2UI_CATALOG_ID,
-  type A2UIComponent,
-  type A2UIMessage,
-  type RenderUIInput,
-  type RenderUISection,
-  type RenderUISectionKind,
-  type ValidationResult,
-} from './protocol.js';
+import { assertJsonBudget } from './json-budget.js';
+import { A2UI_LIMITS, SAFE_A2UI_CATALOG_ID, type A2UIComponent, type ValidationResult } from './protocol.js';
+import { FORBIDDEN_KEYS, byteLength, containsDangerousPrototypeKey, fail, isRecord, validateChart } from './validation-helpers.js';
+export { assertRenderUiInput, normalizeRenderUiInput, validateRenderUiInput } from './input-validator.js';
 
 const ALLOWED_COMPONENTS = new Set([
   'Text',
@@ -19,9 +12,11 @@ const ALLOWED_COMPONENTS = new Set([
   'List',
   'Table',
   'MetricCard',
+  'Chart',
 ]);
 
 const ALLOWED_PROPS: Record<string, Set<string>> = {
+  Chart: new Set(['id', 'component', 'title', 'chartType', 'points']),
   Text: new Set(['id', 'component', 'text', 'variant']),
   Row: new Set(['id', 'component', 'children', 'distribution', 'alignment']),
   Column: new Set(['id', 'component', 'children', 'distribution', 'alignment']),
@@ -32,169 +27,11 @@ const ALLOWED_PROPS: Record<string, Set<string>> = {
   MetricCard: new Set(['id', 'component', 'label', 'value', 'change']),
 };
 
-const FORBIDDEN_KEYS = new Set([
-  '__proto__',
-  'constructor',
-  'prototype',
-  'action',
-  'actions',
-  'onClick',
-  'onclick',
-  'event',
-  'events',
-  'style',
-  'className',
-  'color',
-  'href',
-  'src',
-  'url',
-]);
-
 const TEXT_VARIANTS = new Set(['h1', 'h2', 'h3', 'body']);
 const DISTRIBUTIONS = new Set(['start', 'center', 'end', 'between']);
 const ALIGNMENTS = new Set(['start', 'center', 'end', 'stretch']);
-const RENDER_UI_SECTION_KIND_SET = new Set<RenderUISectionKind>(RENDER_UI_SECTION_KINDS);
-const RENDER_UI_SECTION_KIND_LABEL = RENDER_UI_SECTION_KINDS.join('/');
-
-export function validateRenderUiInput(input: unknown): ValidationResult {
-  if (!isRecord(input)) return fail('input 必须是对象');
-  if (typeof input.title !== 'string' || input.title.trim().length === 0) return fail('title 必填');
-  if (input.title.length > A2UI_LIMITS.maxStringLen) return fail('title 过长');
-  if (!Array.isArray(input.sections)) return fail('sections 必须是数组');
-  if (input.sections.length > A2UI_LIMITS.maxSections) return fail('sections 超限');
-
-  for (let index = 0; index < input.sections.length; index++) {
-    const result = validateSection(input.sections[index], index);
-    if (!result.ok) return result;
-  }
-
-  const data = isRecord(input.data) ? input.data : {};
-  const dataBytes = byteLength(JSON.stringify(data));
-  if (dataBytes > A2UI_LIMITS.maxDataModelBytes) return fail('数据量超限');
-  if (containsForbiddenKey(data)) return fail('包含危险 key');
-  return { ok: true };
-}
-
-function validateSection(section: unknown, index: number): ValidationResult {
-  if (!isRecord(section)) return fail(`sections[${index}] 必须是对象`);
-  const kindResult = readSectionKind(section, index);
-  if (!kindResult.ok) return kindResult;
-  switch (kindResult.kind) {
-    case 'heading': {
-      if (typeof section.text !== 'string' || section.text.length > A2UI_LIMITS.maxStringLen) return fail('文本过长');
-      if (section.level != null && section.level !== 1 && section.level !== 2 && section.level !== 3) return fail('heading level 无效');
-      return { ok: true };
-    }
-    case 'text': {
-      const content = typeof section.content === 'string' ? section.content : section.text;
-      if (typeof content !== 'string' || content.length > A2UI_LIMITS.maxStringLen) return fail('内容过长');
-      return { ok: true };
-    }
-    case 'metric': {
-      if (typeof section.label !== 'string' || section.label.length > A2UI_LIMITS.maxStringLen) return fail('metric label 无效');
-      const value = String(section.value ?? '');
-      if (!value || value.length > A2UI_LIMITS.maxMetricValueLen) return fail('metric value 无效');
-      if (section.change != null && (typeof section.change !== 'string' || section.change.length > A2UI_LIMITS.maxMetricValueLen)) return fail('metric change 无效');
-      return { ok: true };
-    }
-    case 'table': {
-      if (!Array.isArray(section.columns)) return fail('表格 columns 必须是数组');
-      if (section.columns.length > A2UI_LIMITS.maxTableCols) return fail('表格列数超限');
-      if (!section.columns.every((value) => typeof value === 'string' && value.length <= A2UI_LIMITS.maxTableCellLen)) return fail('表头内容过长');
-      if (!Array.isArray(section.rows)) return fail('表格 rows 必须是数组');
-      if (section.rows.length > A2UI_LIMITS.maxTableRows) return fail('表格行数超限');
-      for (const row of section.rows) {
-        if (!Array.isArray(row)) return fail('表格 row 必须是数组');
-        if (row.length > A2UI_LIMITS.maxTableCols) return fail('表格列数超限');
-        for (const cell of row) {
-          if (String(cell ?? '').length > A2UI_LIMITS.maxTableCellLen) return fail('单元格内容过长');
-        }
-      }
-      return { ok: true };
-    }
-    case 'list': {
-      if (!Array.isArray(section.items)) return fail('list items 必须是数组');
-      if (!section.items.every((item) => typeof item === 'string' && item.length <= A2UI_LIMITS.maxStringLen)) return fail('列表项过长');
-      return { ok: true };
-    }
-    case 'divider':
-      return { ok: true };
-  }
-}
-
-export function assertRenderUiInput(input: unknown): RenderUIInput {
-  const validation = validateRenderUiInput(input);
-  if (!validation.ok) throw new Error(validation.reason);
-  return normalizeRenderUiInput(input);
-}
-
-export function normalizeRenderUiInput(input: unknown): RenderUIInput {
-  const validation = validateRenderUiInput(input);
-  if (!validation.ok) throw new Error(validation.reason);
-  const record = input as Record<string, unknown>;
-  return {
-    title: record.title as string,
-    sections: (record.sections as unknown[]).map(normalizeRenderUiSection),
-    ...(isRecord(record.data) ? { data: record.data } : {}),
-    ...(typeof record.output_path === 'string' ? { output_path: record.output_path } : {}),
-    ...(typeof record.task_id === 'string' ? { task_id: record.task_id } : {}),
-  };
-}
-
-function normalizeRenderUiSection(section: unknown): RenderUISection {
-  const record = section as Record<string, unknown>;
-  const kindResult = readSectionKind(record, 0);
-  if (!kindResult.ok) throw new Error(kindResult.reason);
-  const kind = kindResult.kind;
-  switch (kind) {
-    case 'heading':
-      return {
-        kind,
-        text: record.text as string,
-        ...(record.level === 1 || record.level === 2 || record.level === 3 ? { level: record.level } : {}),
-      };
-    case 'text':
-      return {
-        kind,
-        content: (typeof record.content === 'string' ? record.content : record.text) as string,
-      };
-    case 'metric':
-      return {
-        kind,
-        label: record.label as string,
-        value: record.value as string | number,
-        ...(typeof record.change === 'string' ? { change: record.change } : {}),
-      };
-    case 'table':
-      return {
-        kind,
-        columns: record.columns as string[],
-        rows: record.rows as unknown[][],
-      };
-    case 'list':
-      return {
-        kind,
-        items: record.items as string[],
-      };
-    case 'divider':
-      return { kind };
-  }
-}
-
-function readSectionKind(section: Record<string, unknown>, index: number): { ok: true; kind: RenderUISectionKind } | { ok: false; reason: string } {
-  const kind = typeof section.kind === 'string' ? section.kind : undefined;
-  const type = typeof section.type === 'string' ? section.type : undefined;
-  if (kind && type && kind !== type) {
-    return { ok: false, reason: `sections[${index}] kind/type 不一致: kind=${kind}, type=${type}` };
-  }
-  const value = kind ?? type;
-  if (!value || !RENDER_UI_SECTION_KIND_SET.has(value as RenderUISectionKind)) {
-    return { ok: false, reason: `sections[${index}] 未知 section kind: ${String(value ?? '(missing)')}; 支持: ${RENDER_UI_SECTION_KIND_LABEL}` };
-  }
-  return { ok: true, kind: value as RenderUISectionKind };
-}
-
-export function validateA2uiMessages(messages: unknown): ValidationResult {
+export function validateLegacyA2uiMessages(messages: unknown): ValidationResult {
+  try { assertJsonBudget(messages); } catch { return fail('UI 数据超限或包含危险 key'); }
   if (!Array.isArray(messages)) return fail('A2UI payload 必须是数组');
   if (messages.length === 0) return fail('A2UI payload 为空');
   if (messages.length > A2UI_LIMITS.maxMessages) return fail('消息数量超限');
@@ -208,6 +45,8 @@ export function validateA2uiMessages(messages: unknown): ValidationResult {
 
   for (const raw of messages) {
     if (!isRecord(raw)) return fail('message 必须是对象');
+    if (raw.version !== 1) return fail('未知协议版本');
+    if (Object.keys(raw).some(key => !['version','createSurface','updateComponents','updateDataModel','destroySurface'].includes(key))) return fail('未知 message 字段');
     const operations = ['createSurface', 'updateComponents', 'updateDataModel', 'destroySurface']
       .filter((key) => Object.prototype.hasOwnProperty.call(raw, key));
     if (operations.length !== 1) return fail('message 必须且只能包含一个操作');
@@ -236,6 +75,7 @@ export function validateA2uiMessages(messages: unknown): ValidationResult {
     if (operation === 'updateComponents') {
       const update = raw.updateComponents;
       if (!isRecord(update)) return fail('updateComponents 无效');
+      if (!surfaceId || Object.keys(update).some(key => !['surfaceId','components'].includes(key))) return fail('updateComponents 字段或顺序无效');
       if (!surfaceMatches(surfaceId, update.surfaceId)) return fail('surfaceId 不一致');
       if (!Array.isArray(update.components)) return fail('components 必须是数组');
       if (update.components.length > A2UI_LIMITS.maxComponents) return fail('组件数量超限');
@@ -246,7 +86,7 @@ export function validateA2uiMessages(messages: unknown): ValidationResult {
     }
 
     const updateData = raw.updateDataModel;
-    if (!isRecord(updateData)) return fail('updateDataModel 无效');
+    if (!isRecord(updateData) || !surfaceId) return fail('updateDataModel 无效');
     for (const key of Object.keys(updateData)) {
       if (!new Set(['surfaceId', 'path', 'value']).has(key)) {
         if (FORBIDDEN_KEYS.has(key)) return fail(`禁止的 prop: updateDataModel.${key}`);
@@ -273,11 +113,11 @@ export function validateA2uiMessages(messages: unknown): ValidationResult {
   return { ok: true };
 }
 
-function validateComponents(components: A2UIComponent[]): ValidationResult {
+export function validateComponents(components: A2UIComponent[]): ValidationResult {
   const seen = new Set<string>();
   for (const component of components) {
     if (!isRecord(component)) return fail('component 必须是对象');
-    if (typeof component.id !== 'string' || !component.id) return fail('component id 无效');
+    if (typeof component.id !== 'string' || !component.id || ['__proto__','prototype','constructor'].includes(component.id)) return fail('component id 无效');
     if (seen.has(component.id)) return fail('component id 重复');
     seen.add(component.id);
     if (typeof component.component !== 'string' || !ALLOWED_COMPONENTS.has(component.component)) return fail(`未知组件: ${String(component.component)}`);
@@ -299,23 +139,26 @@ function validateComponentValueTypes(component: A2UIComponent): ValidationResult
       return fail('children 必须是 string id 数组');
     }
   }
+  if (component.component === 'Chart') return validateChart(component);
   if (component.component === 'Text') {
     if (typeof component.text !== 'string') return fail('Text.text 必须是字符串');
     if (component.text.length > A2UI_LIMITS.maxStringLen) return fail('文本过长');
     if (component.variant != null && !TEXT_VARIANTS.has(component.variant)) return fail('Text.variant 无效');
   }
   if (component.component === 'MetricCard') {
-    if (typeof component.label !== 'string') return fail('MetricCard.label 必须是字符串');
+    if (typeof component.label !== 'string' || component.label.length > A2UI_LIMITS.maxStringLen) return fail('MetricCard.label 必须是字符串');
     if (!isStringNumberOrPath(component.value)) return fail('MetricCard.value 无效');
-    if (component.change != null && typeof component.change !== 'string') return fail('MetricCard.change 必须是字符串');
+    if (typeof component.value === 'string' && component.value.length > A2UI_LIMITS.maxMetricValueLen) return fail('metric value 过长');
+    if (typeof component.value === 'number' && !Number.isFinite(component.value)) return fail('metric value 无效');
+    if (component.change != null && (typeof component.change !== 'string' || component.change.length > A2UI_LIMITS.maxMetricValueLen)) return fail('MetricCard.change 必须是字符串');
   }
   if (component.component === 'Table') {
-    if (!Array.isArray(component.columns) || !component.columns.every((value) => typeof value === 'string')) return fail('Table.columns 无效');
+    if (!Array.isArray(component.columns) || !component.columns.every((value) => typeof value === 'string' && value.length <= A2UI_LIMITS.maxTableCellLen)) return fail('Table.columns 无效');
     if (component.columns.length > A2UI_LIMITS.maxTableCols) return fail('表格列数超限');
     if (!isRowsOrPath(component.rows)) return fail('Table.rows 无效');
   }
   if (component.component === 'List') {
-    if (!Array.isArray(component.items) || !component.items.every((value) => typeof value === 'string')) return fail('List.items 无效');
+    if (!Array.isArray(component.items) || component.items.length > 200 || !component.items.every((value) => typeof value === 'string' && value.length <= A2UI_LIMITS.maxStringLen)) return fail('List.items 无效');
   }
   if (component.distribution != null && !DISTRIBUTIONS.has(component.distribution)) return fail('distribution 无效');
   if (component.alignment != null && !ALIGNMENTS.has(component.alignment)) return fail('alignment 无效');
@@ -332,6 +175,11 @@ function validateTree(rootId: string, components: A2UIComponent[]): ValidationRe
     }
   }
 
+  const parents = new Set<string>();
+  for (const component of components) for (const child of component.children ?? []) {
+    if (parents.has(child)) return fail('组件重复引用');
+    parents.add(child);
+  }
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const visit = (id: string, depth: number): ValidationResult => {
@@ -379,6 +227,15 @@ function validateDynamicPaths(components: A2UIComponent[], dataModel: unknown): 
   for (const path of modelPaths) {
     if (!allowedPaths.has(path)) return fail('data model 包含未引用路径');
   }
+  for (const component of components) {
+    const value = component.component === 'MetricCard' ? component.value : component.component === 'Table' ? component.rows : null;
+    if (isPathRef(value)) {
+      let resolved: unknown = dataModel;
+      for (const part of value.path.split('.')) resolved = isRecord(resolved) && Object.hasOwn(resolved, part) ? resolved[part] : undefined;
+      const check = validateComponentValueTypes({ ...component, ...(component.component === 'Table' ? { rows: resolved as unknown[][] } : { value: resolved as string }) });
+      if (!check.ok) return check;
+    }
+  }
   for (const path of allowedPaths) {
     if (!hasPath(dataModel, path)) return fail(`data model 缺少路径: ${path}`);
   }
@@ -390,6 +247,7 @@ function validateRows(rows: unknown[][]): ValidationResult {
   for (const row of rows) {
     if (row.length > A2UI_LIMITS.maxTableCols) return fail('表格列数超限');
     for (const cell of row) {
+      if (cell !== null && !['string','number','boolean'].includes(typeof cell)) return fail('表格单元格必须为标量');
       if (String(cell ?? '').length > A2UI_LIMITS.maxTableCellLen) return fail('单元格内容过长');
     }
   }
@@ -430,39 +288,7 @@ function hasPath(value: unknown, path: string): boolean {
   return true;
 }
 
-function containsForbiddenKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some((item) => containsForbiddenKey(item));
-  if (!isRecord(value)) return false;
-  for (const key of Object.keys(value)) {
-    if (FORBIDDEN_KEYS.has(key)) return true;
-    if (containsForbiddenKey(value[key])) return true;
-  }
-  return false;
-}
-
-function containsDangerousPrototypeKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some((item) => containsDangerousPrototypeKey(item));
-  if (!isRecord(value)) return false;
-  for (const key of Object.keys(value)) {
-    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return true;
-    if (containsDangerousPrototypeKey(value[key])) return true;
-  }
-  return false;
-}
-
 function surfaceMatches(expected: string, candidate: unknown): boolean {
   if (!expected) return typeof candidate === 'string' && candidate.length > 0;
   return candidate === expected;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
-}
-
-function fail(reason: string): ValidationResult {
-  return { ok: false, reason };
 }

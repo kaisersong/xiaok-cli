@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { A2UI_MIME_TYPE, validateA2uiMessages } from '../../../src/a2ui/index.js';
+import { A2UI_MIME_TYPE, validateA2uiMessages, parseUiJson } from '../../../src/a2ui/index.js';
 import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 
 const DASHBOARD_TOOL_NAME = ['render', 'ui'].join('_');
@@ -150,4 +150,20 @@ describe('A2UI dashboard tool', () => {
     expect(validateA2uiMessages(payload)).toEqual({ ok: true });
     expect(JSON.stringify(payload)).toContain('Hello from a natural discriminator.');
   });
+  it('writes a near-budget artifact using the exact bounded format accepted on readback', async () => {
+    const tempDir = createTempDir('xiaok-dashboard-byte-boundary-');
+    const outputPath = join(tempDir, 'boundary.a2ui.json');
+    const registry = new ToolRegistry({ autoMode: true }, buildToolList(undefined, { cwd: tempDir, allowOutsideCwd: false }));
+    try {
+      const result = JSON.parse(await registry.executeTool(DASHBOARD_TOOL_NAME, {
+        title: 'Byte boundary', output_path: outputPath,
+        sections: Array.from({ length: 20 }, () => ({ kind: 'text', content: '\u0000'.repeat(8306) })),
+      }));
+      const persisted = readFileSync(outputPath, 'utf8');
+      expect(Buffer.byteLength(persisted)).toBeLessThanOrEqual(1_000_000);
+      expect(result.artifacts[0].size).toBe(Buffer.byteLength(persisted));
+      expect(validateA2uiMessages(parseUiJson(persisted))).toEqual({ ok: true });
+    } finally { registry.dispose(); }
+  });
+
 });

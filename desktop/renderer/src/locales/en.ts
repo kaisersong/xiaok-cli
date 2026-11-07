@@ -3540,6 +3540,9 @@ export const en: LocaleStrings = {
   // a2ui
   a2uiLoadFailed: "Unable to load interactive UI",
   a2uiLoading: "Parsing interactive UI...",
+  a2uiTableFilter: 'Filter table',
+  a2uiExportCsv: 'Export CSV',
+  a2uiNoRows: 'No matching rows',
   a2uiRenderError: "Unable to render interactive UI",
 
   // sub-agent

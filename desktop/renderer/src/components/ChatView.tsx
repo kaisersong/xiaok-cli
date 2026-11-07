@@ -1,3 +1,4 @@
+import { A2uiArtifactRenderer } from './a2ui/A2uiArtifactRenderer';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
@@ -262,6 +263,7 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
+  uiPreviews?: Array<{toolUseId:string;title:string;content:string}>;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -289,7 +291,7 @@ interface ChatViewProps {
   onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
 }
 
-export function ChatView({
+export function ChatView({ uiPreviews = [],
   thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
@@ -576,6 +578,9 @@ export function ChatView({
               );
             })}
 
+            {status === 'running' && uiPreviews.map(preview => <section key={preview.toolUseId} aria-label={preview.title}>
+              <A2uiArtifactRenderer artifactContent={preview.content} artifactRef={{artifactId:preview.toolUseId,type:'artifact',mime_type:A2UI_MIME_TYPE}} />
+            </section>)}
             {/* Streaming assistant text */}
             {streamingText && (
               <div className="max-w-[663px] break-words text-sm text-[var(--c-text-primary)] leading-relaxed">

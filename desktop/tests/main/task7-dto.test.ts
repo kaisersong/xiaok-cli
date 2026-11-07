@@ -6,6 +6,7 @@ const understanding = { goal: 'g', deliverable: 'd', taskType: 'unknown', audien
   missingInfo: ['i'], assumptions: ['a'], riskLevel: 'low', suggestedPlan: [{ id: 's', label: 's', status: 'completed' }], nextAction: 'n' };
 const result = { summary: 's', artifacts: [{ artifactId: 'a', sourceTaskId: 'task', kind: 'text', title: 't', createdAt: '2026-10-12', previewAvailable: true, filePath: 'C:\\result.txt', mimeType: 'text/plain', sizeBytes: 1, sourceMaterialIds: ['m'], creator: 'agent' }], structuredOutput: { nested: [1, true, null] }, assumptions: ['a'], nextSteps: ['n'], degraded: false };
 const events = [
+  { type: 'ui_preview', turnId: 'turn', toolUseId: 'call', preview: { title: 'UI', content: '[]' } },
   { type: 'execution_health', state: 'cleanup_pending' }, { type: 'task_started', taskId: 'task' }, { type: 'task_execution_started', taskId: 'task' }, { type: 'task_terminal', status: 'completed' },
   { type: 'understanding_updated', understanding }, { type: 'plan_updated', plan: understanding.suggestedPlan }, { type: 'progress', eventId: 'e', message: 'm', stage: 's' },
   { type: 'assistant_delta', eventId: 'e', delta: 'd' }, { type: 'needs_user', question: { questionId: 'q', taskId: 'task', kind: 'freeform', prompt: 'p', choices: [{ id: 'yes', label: 'yes' }], expectedAttachments: ['unknown'], staleAfterEventId: 'e' } },

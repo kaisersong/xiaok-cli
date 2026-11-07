@@ -17,7 +17,11 @@ else if (extensions.includes(extname(p)))
     walk(resolve(root, p)); return files; }
 function layer(path, policy) { if (policy.preload.includes(path))
     return 'preload'; if (path.startsWith('desktop/renderer/src/'))
-    return 'renderer'; if (path.startsWith('desktop/electron/') || path.startsWith('src/'))
+    return 'renderer';
+    // A2UI is a platform-neutral wire codec shared by Main, CLI and renderer.
+    // reachesHost still rejects any future transitive filesystem/service imports.
+    if (path.startsWith('src/a2ui/')) return 'shared';
+    if (path.startsWith('desktop/electron/') || path.startsWith('src/'))
     return 'main'; return 'shared'; }
 function imports(source, path) {
     const sf = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ['.tsx', '.jsx'].includes(extname(path)) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

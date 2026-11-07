@@ -117,6 +117,7 @@ interface StreamAttemptState {
 }
 
 interface BufferedToolCall {
+  previewClosed?: boolean;
   id: string;
   name: string;
   argsBuffer: string;
@@ -1167,6 +1168,13 @@ export class OpenAIAdapter implements ModelAdapter {
               current.argsBuffer += tc.function.arguments;
             }
             toolBuffers.set(tc.index, current);
+            if (current.name === 'render_ui' && tools.some(tool=>tool.name==='render_ui') && current.id && !current.previewClosed && current.argsBuffer.length > 1_000_000 && (!strictKimiK3 || officialReasoningSeen)) {
+              current.previewClosed = true; yield {type:'ui_preview',id:current.id,input:'',invalid:true};
+            }
+            if (current.name === 'render_ui' && tools.some(tool=>tool.name==='render_ui') && current.id && !current.previewClosed && current.argsBuffer.length <= 1_000_000
+              && tc.function?.arguments?.includes('}') && (!strictKimiK3 || officialReasoningSeen)) {
+              yield { type: 'ui_preview', id: current.id, input: current.argsBuffer };
+            }
             if (tc.function?.arguments && (!strictKimiK3 || officialReasoningSeen)
               && Date.now() - lastToolProgressAt >= 1000) {
               lastToolProgressAt = Date.now();

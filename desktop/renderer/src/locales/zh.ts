@@ -3520,6 +3520,9 @@ export const zh: LocaleStrings = {
   // a2ui
   a2uiLoadFailed: "无法加载该交互式 UI",
   a2uiLoading: "正在解析交互式 UI...",
+  a2uiTableFilter: '筛选表格',
+  a2uiExportCsv: '导出 CSV',
+  a2uiNoRows: '没有匹配的记录',
   a2uiRenderError: "无法渲染该交互式 UI",
 
   // sub-agent

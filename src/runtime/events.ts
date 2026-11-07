@@ -1,4 +1,5 @@
 export type RuntimeEvent =
+  | { type: 'ui_preview'; sessionId: string; turnId: string; toolUseId: string; preview: {title:string;content:string} | null }
   | { type: 'execution_progress'; sessionId: string; turnId: string }
   | { type: 'execution_health'; invocationId?: string; sessionId: string; turnId: string; state: import('./execution-health.js').ExecutionHealthState }
   | { type: 'turn_started'; sessionId: string; turnId: string }
