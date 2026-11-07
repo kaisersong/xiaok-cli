@@ -12,11 +12,15 @@ export type ImageBlock = {
   cache_control?: CacheControl;
 };
 
+/** Opaque provider continuation data, never tool input or visible context. */
+export type GoogleThoughtSignature = { model: string; signature: string };
+
 export type ToolUseBlock = {
   type: 'tool_use';
   id: string;
   name: string;
   input: Record<string, unknown>;
+  googleThoughtSignature?: GoogleThoughtSignature;
   cache_control?: CacheControl;
 };
 

@@ -67,15 +67,8 @@ function buildFirstPartyConfig(
   }
 
   const wireModel = modelOverride?.model ?? profile.defaultModel.model;
-  // Kimi 之外，DeepSeek 的 legacy 迁移同样按实际 wire 查 catalog 变体继承能力：
-  // 默认模型换新后 profile.defaultModel 与钉死的 legacy wire 不同名，直接取默认
-  // 会把新默认的 image_in 泄露给纯文本 wire（评审 BLOCK #3）。Kimi 的
-  // endpoint/runtime 限制保持原样，不受影响。
-  const catalogVariant = providerId === 'kimi'
-    ? getProviderModelVariant(providerId, wireModel)
-    : providerId === 'deepseek'
-      ? getProviderModelVariant(providerId, wireModel)
-      : undefined;
+  // Legacy wires keep their own metadata when the recommended default changes.
+  const catalogVariant = getProviderModelVariant(providerId, wireModel);
   const capabilities = modelOverride?.capabilities
     ?? catalogVariant?.capabilities
     ?? profile.defaultModel.capabilities;
@@ -147,7 +140,7 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
       ...buildFirstPartyConfig('openai', {
         apiKey: config.models.openai?.apiKey,
       }, {
-        model: config.models.openai?.model,
+        model: config.models.openai?.model ?? 'gpt-4o',
       }),
       defaultMode: config.defaultMode,
       devApp: config.devApp,
@@ -159,11 +152,13 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
   const detectedProvider = detectKnownProvider(customBaseUrl);
   if (detectedProvider) {
     const legacyModel = config.models.custom?.model
-      // 保留官方稳定别名；kimi-for-coding 由厂商原位升级至 K2.8 Preview。
-      ?? (detectedProvider === 'kimi' ? 'kimi-for-coding' : undefined);
+      // Preserve historical aliases/defaults when the recommended catalog changes.
+      ?? (detectedProvider === 'kimi' ? 'kimi-for-coding'
+        : detectedProvider === 'gemini' ? 'gemini-2.5-pro' : undefined);
     const known = buildFirstPartyConfig(detectedProvider, {
       apiKey: config.models.custom?.apiKey,
       baseUrl: customBaseUrl,
+      ...(detectedProvider === 'gemini' ? { protocol: 'openai_responses' as const } : {}),
     }, {
       model: legacyModel,
     });

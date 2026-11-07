@@ -6738,7 +6738,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         reply += chunk.delta;
         await ctx.emitRuntimeEvent({ type: 'assistant_delta', sessionId: ctx.sessionId, turnId: ctx.turnId, intentId: ctx.intentId, stepId: ctx.stepId, delta: chunk.delta });
       } else if (chunk.type === 'tool_use') {
-        assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
+        assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input,
+          ...(chunk.googleThoughtSignature ? { googleThoughtSignature: { ...chunk.googleThoughtSignature } } : {}),
+        });
       } else if (chunk.type === 'thinking') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
         if (
