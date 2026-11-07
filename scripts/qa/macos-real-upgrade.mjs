@@ -13,7 +13,7 @@ import { performance } from 'node:perf_hooks';
 const REPO = 'kaisersong/xiaok-cli';
 const APP_ID = 'com.xiaok.desktop';
 const TEAM = 'Y9YR86UG94';
-const DEFAULT_CDP_PORT = 9222; // Production default in both signed 1.5.14 and the new app.
+const DEFAULT_CDP_PORT = 9222; // QA explicitly opts the old app in; packaged apps no longer default to CDP.
 const OLD = Object.freeze({ tag: 'desktop-v1.5.14', version: '1.5.14', release: 418149835,
   sha: 'dc221f9bac84d939b8fb543d4795396693fdc9b8', bytes: 228655718,
   zipSHA256: 'b7a3b6d6e23b5423d581f8b93ad05b82b34fc0fab429c14ea4c9736d358ebf37' });
@@ -319,9 +319,9 @@ async function main() {
   const server = createServer();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen({ port, host: '127.0.0.1', exclusive: true }, resolve); });
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  event('production-default-cdp-preflight', { address: '127.0.0.1', port, noPriorListener: true, bindReleased: true, explicitAppCDPFlags: false });
+  event('explicit-old-cdp-preflight', { address: '127.0.0.1', port, noPriorListener: true, bindReleased: true, explicitAppCDPFlags: true });
   const out = openSync(join(evidence, 'app.stdout'), 'wx', 0o600), err = openSync(join(evidence, 'app.stderr'), 'wx', 0o600);
-  try { oldChild = spawn(appExecutable, [], { env: cleanEnv(), detached: true, stdio: ['ignore', out, err] }); }
+  try { oldChild = spawn(appExecutable, ['--remote-debugging-port=9222', '--remote-debugging-address=127.0.0.1'], { env: cleanEnv(), detached: true, stdio: ['ignore', out, err] }); }
   finally { closeSync(out); closeSync(err); }
   oldChild.qaClosed = false; oldChild.once('close', () => { oldChild.qaClosed = true; }); oldChild.once('error', e => { monitorError = e; }); oldChild.once('exit', (code, signal) => event('direct-old-app-exit', { pid: oldChild.pid, code, signal, waitedReapedByNode: true }));
   monitorPromise = monitor();
@@ -346,24 +346,43 @@ async function main() {
   const restarted = await waitFor(async () => { await sample(); const rows = latestProcesses.filter(p => p.uid === qaUid && p.executable === appExecutable && p.pid !== oldIdentity.pid); assert(rows.length <= 1, 'multiple_relaunched_apps'); return rows[0]; }, 180_000, 'nsworkspace_did_not_relaunch_same_path');
   assert(restarted.ppid !== process.pid && restarted.birth !== oldIdentity.birth, 'not_os_owned_new_launch'); event('os-owned-relaunch-observed', { ...restarted, directlySpawnedByRunner: false, reapClaim: false });
   assert([...owned.values()].some(p => p.shipIt), 'shipit_identity_not_observed');
-  const newCDP = await waitFor(() => cdp(port, restarted.pid), 120_000, 'relaunched_app_production_default_cdp_unavailable');
-  let current;
-  try {
-    const observed = await waitFor(async () => {
-      const state = await newCDP.evaluate('window.xiaokDesktop ? window.xiaokDesktop.getUpdateStatus() : null');
-      if (state === null) return false;
-      assert(state.currentVersion === NEW.tag.slice(9) && !state.error, 'new_actual_version_or_error');
-      const page = await newCDP.evaluate('({ready:document.readyState,visible:document.body.getBoundingClientRect().width>0&&document.body.getBoundingClientRect().height>0})');
-      return page.ready === 'complete' && page.visible ? { state, page } : false;
-    }, 30_000, 'new_first_window_not_ready');
-    current = observed.state; save('new-actual-preload-state.json', { ...observed, restarted });
+  // #166: the OS relaunched packaged app must not expose default CDP.
+  // Signature/tree below establish the installed version; this only observes a native window.
+  const nativeWindows = await waitFor(async () => {
+    const probe = await command('/usr/bin/swift', ['-e', `
+import CoreGraphics
+import Foundation
+let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+let visible = windows.filter { window in
+  guard let pid = window[kCGWindowOwnerPID as String] as? Int,
+        let layer = window[kCGWindowLayer as String] as? Int,
+        let bounds = window[kCGWindowBounds as String] as? [String: Any],
+        let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double else { return false }
+  return pid == ${restarted.pid} && layer == 0 && width > 0 && height > 0
+}
+let data = try JSONSerialization.data(withJSONObject: visible)
+print(String(decoding: data, as: UTF8.self))
+`], { timeout: 60_000 });
+    const windows = JSON.parse(probe.out);
+    return windows.length > 0 ? windows : false;
+  }, 120_000, 'new_native_window_not_visible');
+  save('new-native-window.json', { restarted, windows: nativeWindows, rendererReadinessClaim: false });
+  // Sample after a visible window, then again during a live observation period.
+  const noCDP = [];
+  for (let i = 0; i < 5; i++) {
+    const live = (await processes()).find(p => p.pid === restarted.pid);
+    assert(live && live.birth === restarted.birth && live.executable === appExecutable, 'relaunched_app_not_alive');
+    const listener = await command('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], { allowFailure: true, timeout: 5000 });
+    assert(listener.code === 1 && listener.signal === null && !listener.spawnError && !listener.timedOut && listener.out === '' && listener.err === '', 'packaged_default_cdp_must_not_listen');
+    noCDP.push({ pid: restarted.pid, port, listening: false, elapsedMs: performance.now() - START });
+    if (i < 4) await delay(1000);
   }
-  finally { newCDP.close(); }
+  save('new-no-default-cdp.json', noCDP);
   const mainLog = readFileSync(join(evidence, 'app.stdout'), 'utf8'); assert(mainLog.includes('updater:install-wrapper-entered') && mainLog.includes('updater:before-quit'), 'real_handoff_markers_missing');
   await signature(app, NEW.tag.slice(9), 'actually-upgraded'); const actualTree = await tree(app); save('actual-upgraded-bundle-tree.json', actualTree); assert.deepEqual(actualTree, newTree, 'upgraded_bundle_differs_from_published_zip');
   const afterOld = await releaseFacts(OLD), afterNew = await releaseFacts(NEW); save('release-after.json', { old: afterOld, new: afterNew });
   assert.deepEqual(afterOld.metadata, beforeOld.metadata, 'old_release_drift'); assert.deepEqual(afterNew.metadata, beforeNew.metadata, 'new_release_drift');
-  resultFacts = { downloaded, current, oldIdentity, restarted, actualSamePathReplacement: true, treeMatchesPublishedNewZIP: true, productionFeedUnchanged: true, oneInstallRequest: true };
+  resultFacts = { downloaded, nativeWindows, noCDP, oldIdentity, restarted, actualSamePathReplacement: true, treeMatchesPublishedNewZIP: true, productionFeedUnchanged: true, oneInstallRequest: true };
 }
 try { await main(); if (monitorError) throw monitorError; } catch (e) { primary = { message: e.message, stack: e.stack }; }
 finally {
