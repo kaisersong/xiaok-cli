@@ -185,6 +185,9 @@ jobs:
           tests/main/kimi-reasoning-admission.test.ts
           tests/main/desktop-provider-stream-lifecycle.test.ts
           tests/main/desktop-startup-task-recovery.test.ts
+          tests/main/desktop-tool-execution-policy.test.ts
+          tests/main/desktop-multi-agent-catalog-bridge.bdd.test.ts
+          tests/main/desktop-multi-agent-capabilities.bdd.test.ts
           tests/main/desktop-protection-ordinary-read.test.ts
           tests/main/desktop-protection-worker-compiled-entry.test.ts
           tests/main/project-stream-reconnect-regression.test.ts
