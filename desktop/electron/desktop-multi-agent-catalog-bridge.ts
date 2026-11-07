@@ -112,6 +112,7 @@ export class DesktopToolCatalogBridge {
       }
       const descriptor = this.catalog.publish({ requestSource: 'scheduler', ownerId: owner.ownerId, slotId: previous?.descriptor.slotId,
         entry: { definition: tool.definition, aliases: [], permission: tool.permission, verifiedReadOnly: owner.verifiedReadOnly === true,
+          executionPolicy: tool.executionPolicy,
           scope: { workspaceId: this.options.workspaceId, materialIds: [], permissions: [tool.permission] },
           bindInvocation: authority => this.bind(tool, owner, authority),
         } }, metadata);
