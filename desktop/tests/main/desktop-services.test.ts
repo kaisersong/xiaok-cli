@@ -1,3 +1,4 @@
+import { mockKSwarmService } from '../support/desktop-services-fixtures.js';
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
 import * as atomicUserFile from '../../../src/utils/atomic-file.js';
 import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
@@ -56,22 +57,6 @@ afterAll(() => {
   finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
 });
 
-function mockKSwarmService(): KSwarmService {
-  return {
-    start: async () => {},
-    stop: async () => {},
-    restart: async () => {},
-    getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
-    onStatusChange: () => () => {},
-    getDesktopMutationToken: () => 'desktop-token',
-    // This legacy stub has no service/factory authority. Unsupported newer APIs fail closed.
-    getServiceStatus: async () => { throw Error('fixture_unsupported_service_capability'); },
-    getHealthDiagnosticInput: async () => { throw Error('fixture_unsupported_service_capability'); },
-    restartRelatedService: async () => { throw Error('fixture_unsupported_service_capability'); },
-    getIntentBrokerRoomToken: () => { throw Error('fixture_unsupported_service_capability'); },
-    request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
-  };
-}
 
 describe('CUA mutation sources and reconnect intent', () => {
   it('dispatches macOS legacy indices as native tokens through the actual Desktop service', async () => {
@@ -3109,21 +3094,6 @@ describe('desktop services', () => {
     }
   });
 
-  it.each(['k3.1-pro', 'k3.1-pro-highspeed', 'kimi-for-coding'])('persists %s catalog capabilities and native runtime choices', async modelName => {
-    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    await services.saveModelConfig({ providerId: 'kimi', modelName }, undefined, 'user');
-    const before = await services.getModelConfig();
-    const model = before.models.find(entry => entry.model === modelName)!;
-    expect(model).toBeDefined();
-    expect(model.runtimeOptions).toEqual({ contextLimit: modelName === 'kimi-for-coding' ? 1_048_576 : 262_144, reasoningEffort: 'high' });
-    expect(model.runtimeConstraints).toEqual({ maxContextLimit: 1_048_576, reasoningEfforts: ['low', 'high', 'max'] });
-    const updated = await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' } }, 'user');
-    expect(updated.models.find(entry => entry.id === model.id)?.runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'max' });
-    await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'none' } }, 'user')).rejects.toThrow(/reasoningEffort/);
-    const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf8'));
-    expect(persisted.models[model.id].capabilities).toEqual(['tools', 'thinking', 'image_in']);
-    expect((await services.getModelConfig()).models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('max');
-  });
 
   it('updates the declared GLM effort while preserving its context limit', async () => {
     const services = createDesktopServices({

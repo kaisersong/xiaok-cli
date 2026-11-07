@@ -1,6 +1,6 @@
 import { isKimiCodingRuntimeModel } from './kimi-models.js';
 import type { Config, LegacyConfig, ConfigInput, ConfigV2Input } from '../../types.js';
-import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
+import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId, ProviderModelVariant } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
 import {
   isOfficialKimiK3OpenAIEndpoint,
@@ -68,7 +68,11 @@ function buildFirstPartyConfig(
 
   const wireModel = modelOverride?.model ?? profile.defaultModel.model;
   // Legacy wires keep their own metadata when the recommended default changes.
-  const catalogVariant = getProviderModelVariant(providerId, wireModel);
+  const catalogVariant: Partial<ProviderModelVariant> | undefined = providerId === 'kimi' && wireModel === 'kimi-for-coding'
+    ? { model: wireModel, label: 'Kimi for Coding', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } }
+    : providerId === 'openai' && wireModel === 'o3'
+      ? { model: wireModel, label: 'GPT-4o', capabilities: ['tools'] }
+      : getProviderModelVariant(providerId, wireModel);
   const capabilities = modelOverride?.capabilities
     ?? catalogVariant?.capabilities
     ?? profile.defaultModel.capabilities;

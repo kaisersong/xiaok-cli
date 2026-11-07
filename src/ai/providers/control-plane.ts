@@ -80,14 +80,20 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
   const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
     ? modelEntry.runtimeOptions
     : undefined;
+  // Existing alias bindings did not opt into the K2.8 defaults. New selections
+  // persist catalog runtimeOptions explicitly; never infer that opt-in from wire alone.
+  const legacyCodingAlias = providerId === 'kimi' && wireModel === 'kimi-for-coding'
+    && modelEntry.runtimeOptions?.reasoningEffort === undefined;
   const { runtimeOptions } = resolveModelRuntimeOptions({
     protocol: providerConfig.protocol,
     baseUrl: transport.baseUrl,
     wireModel,
-    catalogOptions: catalogRuntimeModel?.runtimeOptions,
+    catalogOptions: legacyCodingAlias && catalogRuntimeModel
+      ? { contextLimit: 262_144 }
+      : catalogRuntimeModel?.runtimeOptions,
     catalogConstraints: catalogRuntimeModel?.runtimeConstraints,
     configuredOptions: configuredRuntimeOptions,
-    reasoningEfforts: getSupportedModelReasoningEfforts({ providerId, providerType: providerConfig.type, protocol: providerConfig.protocol, wireModel, baseUrl: transport.baseUrl }),
+    reasoningEfforts: legacyCodingAlias ? [] : getSupportedModelReasoningEfforts({ providerId, providerType: providerConfig.type, protocol: providerConfig.protocol, wireModel, baseUrl: transport.baseUrl }),
   });
 
   return {
@@ -108,7 +114,7 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
     // 的 custom provider 拿到的是官方 profile，但运行在自己 baseUrl 上的模型
     // 不能继承官方能力（评审 P2 #4）——custom 无显式声明时按保守空集。
     capabilities: modelEntry.capabilities
-      ?? catalogModel?.capabilities
+      ?? (legacyCodingAlias && catalogModel ? ['tools', 'thinking'] : catalogModel?.capabilities)
       ?? (providerConfig.type === 'first_party'
         ? providerProfile?.defaultModel.capabilities ?? []
         : []),

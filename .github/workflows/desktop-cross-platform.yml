@@ -170,6 +170,7 @@ jobs:
           tests/main/desktop-services-pure-node-import.test.ts
           tests/main/desktop-services-scheduled-task-authority.test.ts
           tests/renderer/model-recommendations.test.ts
+          tests/main/desktop-services-model-catalog.test.ts
 
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'

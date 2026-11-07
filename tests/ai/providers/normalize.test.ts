@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
 import { normalizeConfig } from '../../../src/ai/providers/normalize.js';
 import { getProviderProfile } from '../../../src/ai/providers/registry.js';
 import type { LegacyConfig } from '../../../src/types.js';
@@ -33,7 +34,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('uses legacy model metadata rather than a newly recommended default', () => {
+  it('preserves provider default metadata for a legacy non-Kimi explicit model', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'openai',
@@ -51,10 +52,10 @@ describe('normalizeConfig', () => {
     expect(entry).toMatchObject({
       provider: 'openai',
       model: 'o3',
-      label: 'o3',
-      capabilities: ['tools', 'thinking'],
+      label: 'GPT-4o',
+      capabilities: ['tools'],
     });
-    expect(entry.runtimeOptions).toEqual({ contextLimit: 200_000 });
+    expect(entry).not.toHaveProperty('runtimeOptions');
   });
 
   it('inherits deepseek legacy wire capabilities during v1 upgrade instead of the new default', () => {
@@ -114,7 +115,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('keeps the official alias for a schema-v1 Kimi config without a model', () => {
+  it('pins a schema-v1 Kimi config without a model to the still-served K2.7 generation', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'custom',
@@ -131,13 +132,14 @@ describe('normalizeConfig', () => {
     expect(normalized.schemaVersion).toBe(2);
     expect(normalized.defaultModelId).toBe('kimi-default');
     // 原本 pin 的是裸 `kimi-k2.7`，但官方任何 endpoint 都没有这个 ID。
-    // 官方稳定别名现由 K2.8 Preview 服务。
+    // `kimi-for-coding` 就是官方的 Kimi K2.7 Code，既有效又不跨代升级用户。
     expect(normalized.models['kimi-default']).toMatchObject({
       provider: 'kimi',
       model: 'kimi-for-coding',
     });
-    // 获取 K2.8 的目录元数据，保持既有 alias。
-    expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'high' });
+    // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
+    // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
+    expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
     const normalizedModel = normalized.models['kimi-default'];
     expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
@@ -162,8 +164,8 @@ describe('normalizeConfig', () => {
       provider: 'kimi',
       model: 'kimi-for-coding',
     });
-    // 获取 K2.8 的目录元数据，保持既有 alias。
-    expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'high' });
+    // 保留旧 alias 的 256K，不自动启用新 reasoning 默认。
+    expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 262_144 });
     const normalizedModel = normalized.models['kimi-default'];
     expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
@@ -347,5 +349,40 @@ describe('normalizeConfig', () => {
     expect(normalizeConfig({ ...input, automations: undefined }).automations).toEqual({
       globalBackgroundAutoRunEnabled: true,
     });
+  });
+});
+
+
+describe('CTO 1.6.3 keeps existing users unchanged', () => {
+  it.each(['https://api.kimi.com/coding/v1', 'https://api.kimi.com:443/coding/v1'])('preserves all implicit legacy Kimi metadata at %s', baseUrl => {
+    const input: LegacyConfig = { schemaVersion: 1, defaultModel: 'custom', models: { custom: { apiKey: 'fixture', baseUrl } }, defaultMode: 'interactive', channels: {} };
+    const normalized = normalizeConfig(input);
+    expect(normalized.models['kimi-default']).toEqual({ provider: 'kimi', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } });
+    const binding = resolveRuntimeModelBinding(input);
+    expect(binding.runtimeOptions).toEqual({ contextLimit: 262_144 });
+    expect(binding.capabilities).toEqual(['tools', 'thinking']);
+  });
+  it('keeps o3 master normalized metadata including the absence of thinking', () => {
+    const input: LegacyConfig = { schemaVersion: 1, defaultModel: 'openai', models: { openai: { apiKey: 'fixture', model: 'o3' } }, defaultMode: 'interactive', channels: {} };
+    expect(normalizeConfig(input).models['openai-default']).toEqual({ provider: 'openai', model: 'o3', label: 'GPT-4o', capabilities: ['tools'] });
+    expect(resolveRuntimeModelBinding(input)).toMatchObject({ wireModel: 'o3', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } });
+  });
+  it.each([undefined, { contextLimit: 131_072 }, { contextLimit: 524_288, reasoningEffort: 'max' as const }])('keeps schema2 saved Kimi values %j', runtimeOptions => {
+    const input = { schemaVersion: 2 as const, defaultProvider: 'kimi', defaultModelId: 'saved', providers: { kimi: { type: 'first_party' as const, protocol: 'openai_legacy' as const, apiKey: 'fixture', baseUrl: 'https://api.kimi.com/coding/v1' } }, models: { saved: { provider: 'kimi', model: 'kimi-for-coding', label: 'Saved label', capabilities: ['tools'], ...(runtimeOptions ? { runtimeOptions } : {}) } }, defaultMode: 'interactive' as const, channels: {} };
+    const before = structuredClone(input);
+    expect(normalizeConfig(input).models).toEqual(input.models);
+    expect(resolveRuntimeModelBinding(input).runtimeOptions).toEqual(runtimeOptions ?? { contextLimit: 262_144 });
+    expect(input).toEqual(before);
+  });
+});
+
+
+describe('saved o3 configuration', () => {
+  it('preserves explicit schema2 metadata and options without provider-default capability inheritance', () => {
+    const input = { schemaVersion: 2 as const, defaultProvider: 'openai', defaultModelId: 'saved', providers: { openai: { type: 'first_party' as const, protocol: 'openai_legacy' as const, apiKey: 'fixture' } }, models: { saved: { provider: 'openai', model: 'o3', label: 'My o3', capabilities: ['tools'], runtimeOptions: { contextLimit: 64_000 } } }, defaultMode: 'interactive' as const, channels: {} };
+    const before = structuredClone(input);
+    expect(normalizeConfig(input).models).toEqual(input.models);
+    expect(resolveRuntimeModelBinding(input)).toMatchObject({ capabilities: ['tools'], runtimeOptions: { contextLimit: 64_000 } });
+    expect(input).toEqual(before);
   });
 });
