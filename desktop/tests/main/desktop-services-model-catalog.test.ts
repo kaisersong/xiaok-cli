@@ -9,6 +9,7 @@ import { mockKSwarmService } from '../support/desktop-services-fixtures.js';
 describe('desktop services model catalog', () => {
   let rootDir: string;
   let previousConfigDir: string | undefined;
+  let services: ReturnType<typeof createDesktopServices> | undefined;
 
   beforeEach(() => {
     // mkdtemp atomically creates an exclusive directory; never reuse a prior run.
@@ -17,12 +18,19 @@ describe('desktop services model catalog', () => {
     process.env.XIAOK_CONFIG_DIR = join(rootDir, 'config');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Close every handle the services API can close before deleting the temp dir.
+    if (services) {
+      const current = services;
+      services = undefined;
+      await current.closeTaskSourceWritersForMigration();
+      await current.disposeMultiAgent();
+    }
     try {
       try {
         rmSync(rootDir, { recursive: true, force: true, maxRetries: 3 });
       } catch (error) {
-        // createDesktopServices exposes no close for the artifact-workspace sqlite handle, and
+        // The services API has no close for the artifact-workspace sqlite handle (#198), and
         // Windows refuses to unlink an open file (EBUSY). The dir is a unique mkdtemp dir, so a
         // leftover on win32 cannot leak into another test. Other platforms must still clean up.
         if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
@@ -34,7 +42,7 @@ describe('desktop services model catalog', () => {
   });
 
   it.each(['k3.1-pro', 'k3.1-pro-highspeed', 'kimi-for-coding'])('persists %s catalog capabilities and native runtime choices', async modelName => {
-    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
     await services.saveModelConfig({ providerId: 'kimi', modelName }, undefined, 'user');
     const before = await services.getModelConfig();
     const model = before.models.find(entry => entry.model === modelName)!;
