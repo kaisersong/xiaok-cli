@@ -9,7 +9,7 @@ import { SCHEDULED_INPUT_SCHEMAS, SCHEDULED_OUTPUT_SCHEMAS, type ScheduledIpcMet
 const methods = Object.keys(SCHEDULED_INPUT_SCHEMAS) as ScheduledIpcMethod[];
 const isPromise = types.isPromise, nativeThen = Promise.prototype.then, apply = Reflect.apply;
 const effects: RiskTag[] = ['fs-read', 'fs-write', 'fs-delete', 'fs-write-userData', 'internal-mutation', 'network', 'exec', 'external-process'];
-const readers = new Set<ScheduledIpcMethod>(['syncScheduledTasks','getScheduledTasks','loops:getScheduleBindings','getTimedActions','getTimedActionRuns','listReminders','getReminderStatus']);
+const readers = new Set<ScheduledIpcMethod>(['syncScheduledTasks','getScheduledTasks','getRecentScheduledDeliveries','loops:getScheduleBindings','getTimedActions','getTimedActionRuns','listReminders','getReminderStatus']);
 export function captureScheduledOutput(method: ScheduledIpcMethod, raw: unknown): unknown {
   const error = readers.has(method) ? 'scheduled_projection_unavailable' : 'scheduled_operation_unknown';
   const snapshot = captureIpcData(raw, error);
