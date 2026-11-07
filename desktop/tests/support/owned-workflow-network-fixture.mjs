@@ -29,6 +29,8 @@ const root=realpathSync(mkdtempSync(join(tmpdir(),'workflow-real-get-')));
 const data=join(root,'data');mkdirSync(data);mkdirSync(join(root,'config'));
 let child,childClosed,deadline,broker,brokerHTTP,recipient,recipientFailure,poTarget,original,serverStartedAt,serverStartedMonotonic,protectionTriggered=false;
 const receivedHandoffs=[];
+// A failed Source drain may still own files beneath this fixture root.
+let retainRootOnClose=false;
 let handoffArrived;
 const net=createServer();await new Promise((resolve,reject)=>{net.once('error',reject);net.listen(0,'127.0.0.1',resolve);});
 const port=net.address().port;await new Promise(resolve=>net.close(resolve));
@@ -68,7 +70,7 @@ async function closePoOwners(primary){
  // Never turn a cleared notifier map into proof that its callbacks completed.
  if(joined&&!errors.length)for(const close of [()=>broker?.close(),()=>brokerHTTP?.close(),()=>hub.closePersistence()])try{await close();}catch(error){errors.push(error);}
  if(recipientFailure&&(!failed||recipientFailure!==primary)&&!errors.includes(recipientFailure))errors.push(recipientFailure);
- if(!errors.length)try{rmSync(root,{recursive:true,force:true});}catch(error){errors.push(error);}
+ if(!errors.length&&!retainRootOnClose)try{rmSync(root,{recursive:true,force:true});}catch(error){errors.push(error);}
  if(errors.length)throw new AggregateError([...(failed?[primary]:[]),...errors],'owned_workflow_protocol_cleanup_failed',{...(failed?{cause:primary}:{})});
  if(failed)throw primary;
 }
@@ -194,8 +196,8 @@ try{
   assert.deepEqual(fresh.workflowRun.nodes.find(node=>node.id===issued.dispatches[0].nodeId).input.permissions,validated.permissions);
  }
  let disposed=false;
- const close=async()=>{if(disposed)return;disposed=true;if(poTarget||liveWorkflowDispatch)return closePoOwners();try{hub.closePersistence();}catch{}
-  await stopOwnedServer();await brokerHTTP?.close();broker?.close();rmSync(root,{recursive:true,force:true});};
+ const close=async(closeOptions={})=>{retainRootOnClose ||= closeOptions.retainRoot===true;if(disposed)return;disposed=true;if(poTarget||liveWorkflowDispatch)return closePoOwners();try{hub.closePersistence();}catch{}
+  await stopOwnedServer();await brokerHTTP?.close();broker?.close();if(!retainRootOnClose)rmSync(root,{recursive:true,force:true});};
  return {root,base,brokerBase,workspace,project,original,issued,getReceivedHandoffs:()=>structuredClone(receivedHandoffs),getOwnedServerState:()=>({pid:child?.pid,protectionTriggered,elapsedMs:performance.now()-serverStartedMonotonic,exitCode:child?.exitCode,signalCode:child?.signalCode}),forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
 }catch(error){
  if(options.issuer==='po_generated'||options.issuer==='po_generated_project'||liveWorkflowDispatch)return closePoOwners(error);
