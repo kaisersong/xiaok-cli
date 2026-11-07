@@ -16,6 +16,34 @@ async function fixture() {
   return { root, source: { name: 'kswarm' as const, executable: process.execPath, entryPath, cwd: root, env: {}, healthUrl: `http://127.0.0.1:${address.port}/health`, expectedHealth: { ok: true, 'service.entryPath': entryPath, 'service.entryHash': createHash('sha256').update(readFileSync(entryPath)).digest('hex') } } };
 }
 describe('native source supervisor process ownership', () => {
+  it('preserves a healthy external Broker and ensures a new owned instance after it disappears', async () => {
+    const f = await fixture();
+    const observerRoot = mkdtempSync(join(tmpdir(), 'activity-external-broker-'));
+    const source = { ...f.source, name: 'broker' as const };
+    const original = new ActivitySourceSupervisor(f.root, 'original');
+    const observer = new ActivitySourceSupervisor(observerRoot, 'observer');
+    const pids: number[] = [];
+    try {
+      const first = await original.ensure(source); pids.push(first.pid);
+      expect(await observer.ensure(source)).toMatchObject({ external: true, pid: 0 });
+      await expect(observer.stopOwned('broker', 'observer')).rejects.toThrow('activity_source_stop_unconfirmed');
+      expect((await fetch(source.healthUrl)).ok).toBe(true);
+      await original.stopOwned('broker', 'original');
+      const restored = await observer.ensure(source); pids.push(restored.pid);
+      expect(restored).toMatchObject({ external: false, ownerEpoch: 'observer' });
+      expect(restored.pid).not.toBe(first.pid);
+      expect(await observer.protectedPid(restored.pid)).toBe(true);
+      await observer.stopOwned('broker', 'observer');
+      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      for (const pid of pids) {
+        try { process.kill(pid, 'SIGTERM'); } catch {}
+        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+      }
+      rmSync(f.root, { recursive: true, force: true });
+      rmSync(observerRoot, { recursive: true, force: true });
+    }
+  }, 15_000);
   it('single-flights launch, persists birth and entry identity, transfers only verified ownership and rejects an old stop lease', async () => {
     const f = await fixture(); let pid: number | undefined;
     try {
