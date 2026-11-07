@@ -130,7 +130,11 @@ jobs:
 
       - name: Compile the real main graph for the memory close regression
         working-directory: desktop
-        run: node node_modules/typescript/bin/tsc -p tsconfig.electron.json
+        shell: bash
+        run: |
+          node node_modules/typescript/bin/tsc -p tsconfig.electron.json
+          node ../scripts/copy-harness-runtime.mjs
+          node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
