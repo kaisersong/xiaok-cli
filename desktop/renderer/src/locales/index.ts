@@ -2954,6 +2954,7 @@ export interface LocaleStrings {
   mcpInstallsReadonlyUnknown: string;
   mcpInstallsReadonlyUnavailable: string;
   desktopReadonlyRetry: string;
+  desktopReadonlyRefresh: string;
   skillsReadonlyUnknown: string;
   skillsReadonlyMetricUnknown: string;
   automationsReadFailed: string;
