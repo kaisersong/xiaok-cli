@@ -106,6 +106,16 @@ jobs:
           node node_modules/vitest/vitest.mjs run --maxWorkers=1 --minWorkers=1
           tests/main/kswarm-owned-preparation-service.test.ts
           tests/main/kswarm-uninstalled-candidate.test.ts
+      - name: Prepare locked Electron headers for genuine Main (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          electron_version="$(node -p "require('./desktop/node_modules/electron/package.json').version")"
+          headers_root="$(mktemp -d "$RUNNER_TEMP/xiaok-candidate-electron-headers.XXXXXX")"
+          NODE_VERSION="v$electron_version" NODE_ARCH="$(node -p process.arch)" HEADERS_DIR="$headers_root" DIST_URL=https://electronjs.org/headers FALLBACK_DIST_URL=https://electronjs.org/headers bash .github/actions/node-headers/fetch-node-headers.sh
+          test -s "$headers_root/include/node/node_api.h"
+          test -s "$headers_root/include/node/v8.h"
+          echo "XIAOK_MAIN_BOOTSTRAP_TEST_HEADERS=$headers_root/include/node" >> "$GITHUB_ENV"
       - name: Genuine Main candidate identity and lifecycle (macOS)
         if: runner.os == 'macOS'
         run: node --test tests/native/accepted-root-candidate-identity.test.mjs
