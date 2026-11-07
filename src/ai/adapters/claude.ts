@@ -276,7 +276,13 @@ export class ClaudeAdapter implements ModelAdapter {
           yield { type: 'text', delta: delta.text };
         } else if (delta.type === 'input_json_delta') {
           const buf = toolBuffers.get(event.index);
-          if (buf) buf.jsonBuffer += delta.partial_json;
+          if (buf) {
+            buf.jsonBuffer += delta.partial_json;
+            if (buf.name === 'render_ui' && tools.some(tool=>tool.name==='render_ui')) {
+              if (buf.jsonBuffer.length > 1_000_000) throw Error('UI payload limit');
+              if (delta.partial_json.includes('}')) yield { type: 'ui_preview', id: buf.id, input: buf.jsonBuffer };
+            }
+          }
         }
       } else if (event.type === 'content_block_stop') {
         const buf = toolBuffers.get(event.index);

@@ -37,6 +37,8 @@ export type StreamChunk =
       signature?: import('./ai/runtime/blocks.js').ReasoningSource;
       reasoningProvenance?: import('./ai/runtime/blocks.js').ReasoningBlockProvenance;
     }
+  /** Transient render_ui arguments; only the main preview parser may consume this snapshot. */
+  | { type: 'ui_preview'; id: string; input: string; invalid?: boolean }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   /** Transport activity only; buffered tool arguments are not executable yet. */
   | { type: 'tool_input_progress' }

@@ -51,6 +51,7 @@
   },
   "devDependencies": {
     "@dagrejs/dagre": "^3.0.0",
+    "@json-render/react": "0.22.0",
     "@pierre/diffs": "^1.1.20",
     "@pierre/trees": "^1.0.0-beta.3",
     "@playwright/test": "^1.59.1",
@@ -86,7 +87,8 @@
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "zod4": "npm:zod@4.6.7"
   },
   "allowScripts": {
     "better-sqlite3@13.0.3": true,

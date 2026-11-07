@@ -3421,6 +3421,9 @@ export interface LocaleStrings {
   // a2ui
   a2uiLoadFailed: string;
   a2uiLoading: string;
+  a2uiTableFilter: string;
+  a2uiExportCsv: string;
+  a2uiNoRows: string;
   a2uiRenderError: string;
 
   // sub-agent

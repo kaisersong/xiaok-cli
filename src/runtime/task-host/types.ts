@@ -129,6 +129,7 @@ export interface TaskEventRecord {
 }
 
 export type DesktopTaskEvent =
+  | { type: 'ui_preview'; turnId: string; toolUseId: string; preview: {title:string;content:string} | null }
   | { type: 'execution_health'; state: import('../execution-health.js').ExecutionHealthState }
   | { type: 'task_started'; taskId: string }
   | { type: 'task_execution_started'; taskId: string }

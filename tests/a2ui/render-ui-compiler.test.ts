@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { A2UI_MIME_TYPE, SAFE_A2UI_CATALOG_ID, compileRenderUiToA2ui, type A2UIMessage } from '../../src/a2ui/index.js';
+import { A2UI_MIME_TYPE, A2UI_V1_CATALOG_ID, compileRenderUiToA2ui, type A2UIV1Message } from '../../src/a2ui/index.js';
 
 describe('A2UI dashboard compiler', () => {
   it('compiles read-only DSL into a safe catalog surface with least-data model', () => {
@@ -27,15 +27,14 @@ describe('A2UI dashboard compiler', () => {
     expect(compiled.componentCount).toBe(7);
 
     expect(compiled.messages[0]).toEqual({
-      version: 1,
+      version: '1.0',
       createSurface: {
         surfaceId: 'a2ui-task_123-tool_456',
-        catalogId: SAFE_A2UI_CATALOG_ID,
-        root: 'root',
+        catalogId: A2UI_V1_CATALOG_ID,
       },
     });
 
-    const updateComponents = (compiled.messages[1] as Extract<A2UIMessage, { updateComponents: unknown }> | undefined)?.updateComponents;
+    const updateComponents = (compiled.messages[1] as Extract<A2UIV1Message, { updateComponents: unknown }> | undefined)?.updateComponents;
     expect(updateComponents?.components.map((component) => component.component)).toEqual([
       'Column',
       'Text',
@@ -47,15 +46,15 @@ describe('A2UI dashboard compiler', () => {
     ]);
     expect(updateComponents?.components.find((component) => component.component === 'MetricCard')).toMatchObject({
       label: 'Revenue',
-      value: { path: 'metrics.c2.value' },
+      value: { '@path': '/metrics/c2/value' },
       change: '+8%',
     });
     expect(updateComponents?.components.find((component) => component.component === 'Table')).toMatchObject({
       columns: ['Region', 'Revenue'],
-      rows: { path: 'tables.c3.rows' },
+      rows: { '@path': '/tables/c3/rows' },
     });
 
-    const dataModel = (compiled.messages[2] as Extract<A2UIMessage, { updateDataModel: unknown }> | undefined)?.updateDataModel?.value as Record<string, unknown>;
+    const dataModel = (compiled.messages[2] as Extract<A2UIV1Message, { updateDataModel: unknown }> | undefined)?.updateDataModel?.value as Record<string, unknown>;
     expect(JSON.stringify(dataModel)).not.toContain('must not be copied');
     expect(dataModel).toEqual({
       metrics: {

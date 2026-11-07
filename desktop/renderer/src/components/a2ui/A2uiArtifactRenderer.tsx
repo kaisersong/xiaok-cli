@@ -1,6 +1,6 @@
 import React, { Component, useMemo, type ErrorInfo, type ReactNode } from 'react';
 import type { ArtifactRef } from '../../storage';
-import { validateA2uiMessages, type A2UIMessage } from '../../../../../src/a2ui/index.js';
+import { validateA2uiMessages, parseUiJson } from '../../../../shared/a2ui';
 import { A2uiSurfaceRenderer } from './A2uiSurfaceRenderer';
 import { useLocale } from '../../contexts/LocaleContext';
 
@@ -36,10 +36,10 @@ export function A2uiArtifactRenderer({ artifactContent, artifactRef }: Props) {
   const { t } = useLocale();
   const parsed = useMemo(() => {
     try {
-      const messages = JSON.parse(artifactContent);
+      const messages = parseUiJson(artifactContent);
       const validation = validateA2uiMessages(messages);
       if (!validation.ok) return { ok: false as const };
-      return { ok: true as const, messages: messages as A2UIMessage[] };
+      return { ok: true as const, messages };
     } catch {
       return { ok: false as const };
     }
@@ -47,7 +47,7 @@ export function A2uiArtifactRenderer({ artifactContent, artifactRef }: Props) {
 
   if (!parsed.ok) return <A2uiRenderError message={t.a2uiRenderError} />;
 
-  const resetKey = `${artifactRef.key ?? artifactRef.artifactId}:${artifactContent.length}`;
+  const resetKey = artifactContent;
   return (
     <A2uiErrorBoundary resetKey={resetKey} errorMessage={t.a2uiRenderError}>
       <A2uiSurfaceRenderer messages={parsed.messages} />

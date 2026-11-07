@@ -1,3 +1,4 @@
+import { parseUiJson, validateA2uiMessages } from '../../a2ui/index.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {getCompoundFinalPublicationBinding,type CompoundFinalPublicationTicket} from '../sol-pi/compound-publication-producer.js';
 import {computeSessionHistoryDigest} from '../../ai/runtime/session-store/store.js';
@@ -149,6 +150,7 @@ export interface InProcessTaskRuntimeHostOptions {
 }
 
 interface LiveSubscription {
+  livePreviews?: boolean;
   push(event: TaskEventRecord): void;
   close(): void;
 }
@@ -730,10 +732,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   async *subscribeTask(taskId: string, options?: { sinceIndex?: number; signal?: AbortSignal }): AsyncIterable<DesktopTaskEvent> {
-    for await (const record of this.subscribeTaskRecords(taskId, options)) yield record.event;
+    for await (const record of this.subscribeTaskRecords(taskId, { ...options, livePreviews: true })) yield record.event;
   }
 
-  async *subscribeTaskRecords(taskId: string, options: { sinceIndex?: number; signal?: AbortSignal } = {}): AsyncIterable<TaskEventRecord> {
+  async *subscribeTaskRecords(taskId: string, options: { sinceIndex?: number; signal?: AbortSignal; livePreviews?: boolean } = {}): AsyncIterable<TaskEventRecord> {
     const start = options.sinceIndex ?? 0;
     if (!Number.isSafeInteger(start) || start < 0) throw new Error('invalid_task_event_cursor');
     options.signal?.throwIfAborted();
@@ -743,8 +745,25 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     let fault: Error | undefined;
     let snapshot!: TaskSnapshot;
     const subscription: LiveSubscription = {
+      livePreviews: options.livePreviews,
       push(record) {
         if (closed) return;
+        if (record.event.type === 'ui_preview') {
+          const incoming=record.event;
+          for (let i=queue.length-1;i>=0;i--) {
+            const queued=queue[i]!.event;
+            if (queued.type==='ui_preview' && (incoming.toolUseId==='all' || queued.toolUseId===incoming.toolUseId)) queue.splice(i,1);
+          }
+          let bytes=new TextEncoder().encode(incoming.preview?.content ?? '').length;
+          for (let i=queue.length-1;i>=0;i--) {
+            const queued=queue[i]!.event;
+            if (queued.type!=='ui_preview') continue;
+            const size=new TextEncoder().encode(queued.preview?.content ?? '').length;
+            if (bytes+size>2_000_000) queue.splice(i,1); else bytes+=size;
+          }
+          // Preview backpressure must never fault the durable task event stream.
+          if (queue.length>=1000) return;
+        }
         if (queue.length >= 1024) {
           fault = new Error('task_event_subscriber_backpressure');
           closed = true;
@@ -773,6 +792,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         options.signal?.throwIfAborted();
         if (!queue.length) { await new Promise<void>(resolve => { wake = resolve; }); continue; }
         const record = queue.shift()!;
+        if (record.event.type === 'ui_preview') { yield record; continue; }
         if (record.eventIndex < nextIndex) continue;
         if (record.eventIndex !== nextIndex) throw new Error('task_event_cursor_gap');
         nextIndex++;
@@ -1637,6 +1657,19 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
   private async appendRuntimeEvent(taskId: string, event: RuntimeEvent): Promise<void> {
     this.throwRuntimeEventError(taskId);
+    if (event.type === 'ui_preview') {
+      let preview = event.preview;
+      try {
+        if (typeof event.toolUseId !== 'string' || event.toolUseId.length > 256) return;
+        if (preview && (typeof preview.title !== 'string' || preview.title.length > 10000 || !validateA2uiMessages(parseUiJson(preview.content)).ok)) preview=null;
+      } catch { preview=null; }
+      await this.enqueueMutation(taskId, async () => {
+        const snapshot = await this.requireSnapshot(taskId);
+        if (TERMINAL_STATUSES.has(snapshot.status) || !this.activeExecutions.has(taskId)) return;
+        this.pushLiveEvent(taskId,{type:'ui_preview',turnId:event.turnId,toolUseId:event.toolUseId,preview},snapshot.events.length,snapshot.sessionId);
+      });
+      return;
+    }
     const health = this.activeExecutions.get(taskId)?.health;
     if (event.type === 'tool_finished') {health?.resume(`managed:${event.invocationId}`);health?.resume(`tool:${event.invocationId}`);}
     if (event.type === 'approval_required') health?.wait(event.approvalId);
@@ -2142,6 +2175,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
   private pushLiveEvent(taskId: string, event: DesktopTaskEvent, eventIndex: number, sourceDataEpoch: string): void {
     for (const subscriber of this.subscribers.get(taskId) ?? []) {
+      if (event.type === 'ui_preview' && !subscriber.livePreviews) continue;
       subscriber.push({ taskId, eventIndex, sourceDataEpoch, event });
     }
   }

@@ -1,3 +1,4 @@
+import { RenderUiPreviewStream } from '../../src/a2ui/preview-stream.js';
 import { isKimiCodingModel, isStrictKimiK3ProfileId } from '../../src/ai/providers/kimi-models.js';
 import { buildKSwarmReviewPrompt } from './kswarm-task-review-prompt.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
@@ -6680,6 +6681,13 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     lastRequestInputTokens = 0;
     let providerInvocationId = `inv_${randomUUID()}`;
     let connectionRecovering = false;
+    const uiPreviews = new RenderUiPreviewStream();
+    let sawUiPreview = false;
+    const clearUiPreviews = async () => {
+      if (!sawUiPreview) return;
+      sawUiPreview = false; uiPreviews.reset();
+      await ctx.emitRuntimeEvent({type:'ui_preview',sessionId:ctx.sessionId,turnId:ctx.turnId,toolUseId:'all',preview:null});
+    };
     const modelPhysicalRun = admitDesktopModelPhysicalRead(ctx.modelPhysicalScope!);
     try {
     for await (const chunk of (ctx.projectModel ? ctx.projectModel.stream : streamDesktopTaskRecovery)({
@@ -6697,6 +6705,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       onRecovery: async (notice?: { summaryOnly: boolean }) => {
         summaryRecoveryMode = notice?.summaryOnly ?? true;
         connectionRecovering = true;
+        await clearUiPreviews();
         assistantBlocks.length = 0;
         await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'});
       },
@@ -6721,7 +6730,18 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       await ctx.emitRuntimeEvent({type:'execution_progress',sessionId:ctx.sessionId,turnId:ctx.turnId});
       ctx.onActivity?.({ phase: chunk.type === 'thinking' ? 'thinking' : chunk.type === 'tool_use' ? 'tool' : 'model',
         ...(chunk.type === 'tool_use' ? { toolName: chunk.name } : {}) });
-      if (chunk.type === 'text') {
+      if (chunk.type === 'ui_preview' && ctx.allToolDefs.some(tool=>tool.name==='render_ui')) {
+        const previewKey = `${providerInvocationId}:${chunk.id}`;
+        if (chunk.invalid) uiPreviews.finish(previewKey);
+        const preview = uiPreviews.update(`${providerInvocationId}:${chunk.id}`,chunk.input);
+        if (!preview && uiPreviews.isClosed(previewKey)) {
+          await ctx.emitRuntimeEvent({type:'ui_preview',sessionId:ctx.sessionId,turnId:ctx.turnId,toolUseId:previewKey,preview:null});
+        }
+        if (preview) {
+          sawUiPreview = true;
+          await ctx.emitRuntimeEvent({type:'ui_preview',sessionId:ctx.sessionId,turnId:ctx.turnId,toolUseId:preview.toolUseId,preview:{title:preview.title,content:preview.content}});
+        }
+      } else if (chunk.type === 'text') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
         if (lastBlock?.type === 'text') {
           lastBlock.text += chunk.delta;
@@ -6751,7 +6771,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         }
       }
     }
-    } finally { modelPhysicalRun.finish(); }
+    } finally {
+      modelPhysicalRun.finish();
+      try { await clearUiPreviews(); } catch { /* Transient UI cleanup cannot replace the model outcome. */ }
+    }
     assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline);
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
     const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');

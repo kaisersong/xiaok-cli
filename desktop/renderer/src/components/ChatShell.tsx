@@ -67,6 +67,7 @@ interface DisplaySource {
   intentOwner: GoalAttempt | null;
   executionScope?: TaskSnapshot['executionScope'];
   eventCount: number;
+  uiPreviewClosed?: boolean;
   terminalSeen: boolean;
   streamEnded: boolean;
   resultSummaryInHistory?: string;
@@ -285,6 +286,7 @@ export function ChatShell() {
     thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
+  const [uiPreviews, setUiPreviews] = useState<Array<{ toolUseId: string; title: string; content: string }>>([]);
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
@@ -387,7 +389,20 @@ export function ChatShell() {
     source.eventCount += 1;
     const sourceTaskId = source.sourceTaskId;
     const live = !source.terminalSeen;
+    if (event.type === 'ui_preview') {
+      if (!live || source.uiPreviewClosed) return;
+      setUiPreviews(previous => event.preview
+        ? [...previous.filter(item => item.toolUseId !== event.toolUseId), { toolUseId: event.toolUseId, ...event.preview }]
+        : event.toolUseId === 'all' ? [] : previous.filter(item => item.toolUseId !== event.toolUseId));
+      return;
+    }
+    if (event.type === 'result' || event.type === 'task_cancelled' || event.type === 'error') {
+      source.uiPreviewClosed = true;
+      setUiPreviews([]);
+    }
+    if (event.type === 'execution_health' && event.state === 'recovering') setUiPreviews([]);
     if (event.type === 'task_terminal') {
+      setUiPreviews([]);
       source.terminalSeen = true;
       source.streamEnded = true;
       setCurrentQuestion(null);
@@ -453,6 +468,7 @@ export function ChatShell() {
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
+        setUiPreviews([]);
         if (partialText.trim()) {
           setMessages(prev => [...prev, {
             id: `msg-${Date.now()}-assistant-cancelled`,
@@ -496,6 +512,7 @@ export function ChatShell() {
           streamRef.current = '';
           cancelStreamingFlush();
           setStreamingText('');
+          setUiPreviews([]);
           if (finalContent) {
             source.resultSummaryInHistory = finalContent;
             setMessages(prev => [...prev, {
@@ -515,6 +532,7 @@ export function ChatShell() {
           streamRef.current = '';
           cancelStreamingFlush();
           setStreamingText('');
+          setUiPreviews([]);
           setResult(resultWithArtifacts);
           if (finalText.trim()) {
             source.resultSummaryInHistory = finalText;
@@ -667,6 +685,7 @@ export function ChatShell() {
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
+        setUiPreviews([]);
         setMessages(prev => {
           let lastUserMessageIndex = -1;
           for (let index = prev.length - 1; index >= 0; index -= 1) {
@@ -736,6 +755,7 @@ export function ChatShell() {
       streamRef.current = '';
       cancelStreamingFlush();
       setStreamingText('');
+      setUiPreviews([]);
       resultRef.current = null;
       setResult(null);
       setCurrentQuestion(null);
@@ -1163,6 +1183,7 @@ export function ChatShell() {
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
+    setUiPreviews([]);
     setResult(null);
     setMessages([]);
     setPlanSteps([]);
@@ -1413,6 +1434,7 @@ export function ChatShell() {
     setStatus('running');
     cancelStreamingFlush();
     setStreamingText('');
+    setUiPreviews([]);
     streamRef.current = '';
     currentTaskEventsRef.current = [];
     setResult(null);
@@ -1552,6 +1574,7 @@ export function ChatShell() {
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
+    setUiPreviews([]);
   };
 
   const handleCancel = async () => {
@@ -1875,6 +1898,7 @@ export function ChatShell() {
         thread={thread}
         messages={messages}
         streamingText={streamingText}
+        uiPreviews={uiPreviews}
         status={status}
         currentQuestion={currentQuestion}
         result={result}
