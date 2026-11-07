@@ -410,7 +410,7 @@ export function createRoomWorkspaceRuntime(options: {
         try{process.kill(group?-Number(pid):Number(pid),0);return false;}
         catch(error){return (error as NodeJS.ErrnoException).code==='ESRCH';}
       };
-      for(let record of store.listRecords<Record<string,unknown>>('external-discussion-operation')){
+      for(let record of store.listRecoveryRecords<Record<string,unknown>>('external-discussion-operation')){
         if(['completed','abandoned'].includes(String(record.phase)))continue;
         const key=String(record.operationId);
         const persist=(patch:Record<string,unknown>)=>{record={...record,...patch};store.saveRecord('external-discussion-operation',key,record);};

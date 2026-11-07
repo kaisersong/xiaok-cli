@@ -184,6 +184,22 @@ export async function listWorkspaceDirectory(binding: WorkspaceRoot, relativePat
 interface LocalSubmission { submissionId: string; subjectKey: string; payloadDigest: string; manifest: Record<string, unknown> }
 interface CommitTicket { ticketId: string; submissionId: string; payloadDigest: string; commitSequence: number }
 
+// Keep the predicates identical in the partial index and recovery query. Unknown
+// JSON shapes remain candidates; the existing recovery guards make the decision.
+// JSON.parse accepts deeper documents than SQLite, so never exclude (or fail an
+// upgrade on) historical JSON that SQLite cannot inspect.
+const recoveryPredicates = {
+  'physical-claim': "json_extract(data,'$.released') IS NOT 1",
+  'pending-confirmation': "json_extract(data,'$.committed') IS NOT 1",
+  'admission-request': "json_extract(data,'$.state') IN ('requesting','no-executor')",
+  'external-discussion-operation': "json_extract(data,'$.phase') IS NULL OR json_extract(data,'$.phase') NOT IN ('completed','abandoned')",
+} as const;
+type RecoveryRecordKind = keyof typeof recoveryPredicates;
+function recoveryWhere(kind: RecoveryRecordKind): string {
+  if (typeof kind !== 'string' || !Object.hasOwn(recoveryPredicates, kind)) throw new Error('workspace_recovery_kind_invalid');
+  return `kind='${kind}' AND CASE WHEN json_valid(data) THEN (${recoveryPredicates[kind]}) ELSE 1 END`;
+}
+
 /** Local physical facts only; broker remains sole authorization/active pointer owner. */
 export class RoomWorkspaceLocalStore {
   private readonly db: DatabaseSync;
@@ -196,6 +212,17 @@ export class RoomWorkspaceLocalStore {
       CREATE TABLE IF NOT EXISTS room_workspace_submissions (subject_key TEXT NOT NULL, submission_id TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, ticket_id TEXT UNIQUE, PRIMARY KEY(subject_key,submission_id));
       CREATE TABLE IF NOT EXISTS room_workspace_artifacts (version_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, ticket_id TEXT NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_workspace_outbox (event_id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, event_kind TEXT NOT NULL, data TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, UNIQUE(ticket_id,event_kind));`);
+    try {
+      this.transaction(() => {
+        for (const kind of Object.keys(recoveryPredicates) as RecoveryRecordKind[]) {
+          const name = kind.replaceAll('-', '_');
+          this.db.exec(`CREATE INDEX IF NOT EXISTS room_workspace_recovery_${name} ON room_workspace_local_journal(kind,key) WHERE ${recoveryWhere(kind)}`);
+        }
+      });
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
   close() { this.db.close(); }
   localCommandsAllowed(scope: {bindingId:string;roomId:string;generation:number}):boolean {
@@ -208,6 +235,10 @@ export class RoomWorkspaceLocalStore {
   }
   saveRecord(kind: string, key: string, data: unknown) { this.db.prepare('INSERT INTO room_workspace_local_journal VALUES (?,?,?) ON CONFLICT(kind,key) DO UPDATE SET data=excluded.data').run(kind, key, canonicalWorkspaceJson(data)); }
   listRecords<T>(kind: string): T[] { return this.db.prepare('SELECT data FROM room_workspace_local_journal WHERE kind=?').all(kind).map(row => JSON.parse(row.data as string) as T); }
+  /** Read only recovery candidates; terminal history stays directly readable. */
+  listRecoveryRecords<T>(kind: RecoveryRecordKind): T[] {
+    return this.db.prepare(`SELECT data FROM room_workspace_local_journal WHERE ${recoveryWhere(kind)}`).all().map(row => JSON.parse(row.data as string) as T);
+  }
   private transaction<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); this.db.exec('COMMIT'); return result; } catch (error) { this.db.exec('ROLLBACK'); throw error; }

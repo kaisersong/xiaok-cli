@@ -115,7 +115,7 @@ export function createRoomWorkspaceRecovery(options: {
   async function run(roomId: string): Promise<RecoveryReport> {
     const report = { released: 0, committed: 0, pending: 0 };
     if (!allowed()) return report;
-    for(const admission of store.listRecords<AdmissionRecord>('admission-request').filter(item=>item.roomId===roomId&&['requesting','no-executor'].includes(item.state))){
+    for(const admission of store.listRecoveryRecords<AdmissionRecord>('admission-request').filter(item=>item.roomId===roomId&&['requesting','no-executor'].includes(item.state))){
       if(!allowed())break;
       const exited=positiveExit(admission.ownerPid);
       if(!exited&&!(admission.ownerPid===process.pid&&admission.state==='no-executor')){report.pending++;continue;}
@@ -131,7 +131,7 @@ export function createRoomWorkspaceRecovery(options: {
         store.saveRecord('admission-request',admission.requestKey,{...admission,state:'recovered',claimId:claim.claimId});
       }catch{report.pending++;}
     }
-    for (const record of store.listRecords<PhysicalRecord>('physical-claim').filter(item => item.claim?.roomId === roomId && !item.released)) {
+    for (const record of store.listRecoveryRecords<PhysicalRecord>('physical-claim').filter(item => item.claim?.roomId === roomId && !item.released)) {
       if (!allowed()) break;
       try { if (await release(record)) report.released++; else report.pending++; }
       catch { report.pending++; }
@@ -141,7 +141,7 @@ export function createRoomWorkspaceRecovery(options: {
       try { if (await recoverSubmission(pending)) report.committed++; else report.pending++; }
       catch { report.pending++; }
     }
-    for (const pending of store.listRecords<PendingConfirmation>('pending-confirmation').filter(item => item.roomId === roomId && !item.committed)) {
+    for (const pending of store.listRecoveryRecords<PendingConfirmation>('pending-confirmation').filter(item => item.roomId === roomId && !item.committed)) {
       if (!allowed()) break;
       try { if (await recoverConfirmation(pending)) report.committed++; else report.pending++; }
       catch { report.pending++; }
@@ -162,10 +162,10 @@ export function createRoomWorkspaceRecovery(options: {
   async function tick() {
     if (!allowed()) return;
     const rooms = new Set<string>();
-    for(const admission of store.listRecords<AdmissionRecord>('admission-request'))if(['requesting','no-executor'].includes(admission.state)&&typeof admission.roomId==='string')rooms.add(admission.roomId);
-    for (const record of store.listRecords<PhysicalRecord>('physical-claim')) if (!record.released && record.claim?.roomId) rooms.add(record.claim.roomId);
+    for(const admission of store.listRecoveryRecords<AdmissionRecord>('admission-request'))if(['requesting','no-executor'].includes(admission.state)&&typeof admission.roomId==='string')rooms.add(admission.roomId);
+    for (const record of store.listRecoveryRecords<PhysicalRecord>('physical-claim')) if (!record.released && record.claim?.roomId) rooms.add(record.claim.roomId);
     for (const pending of submissions()) if (typeof pending.manifest.roomId === 'string') rooms.add(pending.manifest.roomId);
-    for (const pending of store.listRecords<PendingConfirmation>('pending-confirmation')) if (!pending.committed && typeof pending.roomId === 'string') rooms.add(pending.roomId);
+    for (const pending of store.listRecoveryRecords<PendingConfirmation>('pending-confirmation')) if (!pending.committed && typeof pending.roomId === 'string') rooms.add(pending.roomId);
     for (const event of store.pendingOutbox()) { const manifest = event.manifest as Record<string, unknown> | undefined; if (typeof manifest?.roomId === 'string') rooms.add(manifest.roomId); }
     for (const roomId of rooms) { if (!allowed()) break; await recoverRoom(roomId); }
     // A future outbox event may not carry a manifest room. Delivery belongs
