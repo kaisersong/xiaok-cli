@@ -77,6 +77,8 @@
 
 ## CLI / Sandbox 验证说明
 
+- 核对 source 与 emitted 两份 Vitest 配置的执行预算、进程池和隔离设置。先查已有批准记录；B1 的 12000ms runner 预算见提交 `8f12a36a`，不能把 emitted 遗漏后的默认 5000ms 当成产品验收要求。对齐已批准预算不改变产品时钟、用例内显式 deadline、断言或用例数量。使用 `process.chdir` / `process.umask` 的原夹具需要 forks；不得通过跳过用例掩盖 threads 不支持的 API。两份配置的有意差异仍须保留，例如 setupFiles 顺序和原 exclude。
+
 - 在 Codex sandbox 中，raw `vitest` 跑 TypeScript source 可能因为 Vite / esbuild 启动 child process 出现 `spawn EPERM`。
 - CLI 侧优先使用 `npm test` 或 `npm run test:sandbox`，它会先把 `src/` 和 `tests/` 编译到 `.test-dist/`，再用 `vitest.sandbox.config.mjs` 跑 emitted JavaScript。
 - reminder / daemon suites 会打开真实 Unix socket；受限 sandbox 中可能出现 `listen EPERM`。需要 full pass signal 时，在 unrestricted 环境重跑。
