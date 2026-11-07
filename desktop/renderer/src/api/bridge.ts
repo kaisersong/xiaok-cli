@@ -645,6 +645,9 @@ export const api = {
     return r;
   },
 
+  async getKimDecisionConfig(){return window.xiaokDesktop.getKimDecisionConfig();},
+  async saveKimDecisionConfig(input:import('../../../shared/kim-decision-ipc-contract').KimConfigPatch){return window.xiaokDesktop.saveKimDecisionConfig(input);},
+  async testKimDecisionConnection(){return window.xiaokDesktop.testKimDecisionConnection();},
   async getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot> {
     log.debug('getSystemOneConfig');
     const r = await window.xiaokDesktop.getSystemOneConfig();

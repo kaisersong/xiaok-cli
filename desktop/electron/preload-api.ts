@@ -1,3 +1,5 @@
+import type {KimConfigPatch,KimConfigView} from '../shared/kim-decision-ipc-contract.js';
+import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
 import type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../shared/mail-connectors-ipc-contract.js';
 import type { EnterpriseCliState, EnterpriseCliAction, EnterpriseCliProvider } from '../shared/enterprise-cli-ipc-contract.js';
 import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
@@ -98,6 +100,9 @@ export const PRELOAD_API_KEYS = [
   'saveModelConfig',
   'updateModelRuntimeOptions',
   'getSystemOneConfig',
+  'getKimDecisionConfig',
+  'saveKimDecisionConfig',
+  'testKimDecisionConnection',
   'saveSystemOneConfig',
   'createManagedXiaokAgent',
   'testProviderConnection',
@@ -538,6 +543,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   saveModelConfig: 'desktop:saveModelConfig',
   updateModelRuntimeOptions: 'desktop:updateModelRuntimeOptions',
   getSystemOneConfig: 'desktop:getSystemOneConfig',
+  getKimDecisionConfig: 'desktop:getKimDecisionConfig',
+  saveKimDecisionConfig: 'desktop:saveKimDecisionConfig',
+  testKimDecisionConnection: 'desktop:testKimDecisionConnection',
   saveSystemOneConfig: 'desktop:saveSystemOneConfig',
   createManagedXiaokAgent: 'desktop:createManagedXiaokAgent',
   testProviderConnection: 'desktop:testProviderConnection',
@@ -1252,6 +1260,9 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
   getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot>;
+  getKimDecisionConfig(): Promise<KimConfigView>;
+  saveKimDecisionConfig(input:KimConfigPatch): Promise<KimConfigView>;
+  testKimDecisionConnection(): Promise<KimHealthView>;
   saveSystemOneConfig(input?: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot>;
   createManagedXiaokAgent(input: ModelProviderDTO.ManagedAgentInput): Promise<ModelProviderDTO.ManagedAgentResult>;
   testProviderConnection(input: { providerId: string; modelId?: string }): Promise<TestProviderConnectionResult>;
@@ -1662,6 +1673,9 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
     updateModelRuntimeOptions: (input) => ipcRenderer.invoke('desktop:updateModelRuntimeOptions', input) as ReturnType<DesktopApi['updateModelRuntimeOptions']>,
+    getKimDecisionConfig: () => ipcRenderer.invoke('desktop:getKimDecisionConfig') as ReturnType<DesktopApi['getKimDecisionConfig']>,
+    saveKimDecisionConfig: (input) => ipcRenderer.invoke('desktop:saveKimDecisionConfig',input) as ReturnType<DesktopApi['saveKimDecisionConfig']>,
+    testKimDecisionConnection: () => ipcRenderer.invoke('desktop:testKimDecisionConnection') as ReturnType<DesktopApi['testKimDecisionConnection']>,
     getSystemOneConfig: () => ipcRenderer.invoke('desktop:getSystemOneConfig') as ReturnType<DesktopApi['getSystemOneConfig']>,
     saveSystemOneConfig: (input) => ipcRenderer.invoke('desktop:saveSystemOneConfig', input) as ReturnType<DesktopApi['saveSystemOneConfig']>,
     createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input) as ReturnType<DesktopApi['createManagedXiaokAgent']>,

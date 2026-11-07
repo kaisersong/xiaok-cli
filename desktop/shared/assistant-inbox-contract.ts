@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import {KIM_JUDGMENT_SCHEMA} from './kim-decision-ipc-contract.js';
 export const ASSISTANT_CHAT_THREAD = 'a0c11111-1111-4111-8111-111111111111';
 export const isAssistantThread = (id: unknown): id is string => typeof id === 'string' && (id === ASSISTANT_CHAT_THREAD || /^a0c22222-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id));
 export type AssistantSource = 'mail'|'yzj_message'|'yzj_calendar'|'ai_news'|'internal';
 export type AssistantActor = 'user'|'agent'|'scheduler';
 export const SOURCE_SCHEMA=z.enum(['mail','yzj_message','yzj_calendar','ai_news','internal']);
 const short=z.string().max(1000),id=z.string().min(1).max(256),time=z.number().finite().nonnegative();
-export const ATTENTION_RECORD_SCHEMA=z.object({source:SOURCE_SCHEMA,accountKey:id,sourceId:id,title:z.string().min(1).max(200),summary:short,reason:short,nextStep:short,priority:z.enum(['now','later']),observedAt:time,deadline:time.optional(),url:z.string().url().max(2048).optional(),locator:z.record(z.string(),z.string().max(512)).optional()}).strict();
+export const ATTENTION_RECORD_SCHEMA=z.object({source:SOURCE_SCHEMA,accountKey:id,sourceId:id,title:z.string().min(1).max(200),summary:short,kimJudgment:KIM_JUDGMENT_SCHEMA.optional(),reason:short,nextStep:short,priority:z.enum(['now','later']),observedAt:time,deadline:time.optional(),url:z.string().url().max(2048).optional(),locator:z.record(z.string(),z.string().max(512)).optional()}).strict();
 export type AttentionRecord=z.infer<typeof ATTENTION_RECORD_SCHEMA>;
 export const ATTENTION_ITEM_SCHEMA=ATTENTION_RECORD_SCHEMA.extend({id:z.string().regex(/^[a-f0-9]{64}$/),revision:z.number().int().positive(),status:z.enum(['suggested','working','needs_input','ready','failed','resolved','hidden','unknown']),workStatus:z.enum(['working','needs_input','ready','failed']).optional(),snoozedUntil:time.optional(),attemptId:z.string().uuid().optional(),threadId:z.string().uuid().optional(),taskId:id.optional(),taskCreatedAt:time.optional(),reminderId:id.optional(),outcome:z.string().max(3000).optional(),updatedAt:time}).strict();
 export type AttentionItem=z.infer<typeof ATTENTION_ITEM_SCHEMA>;

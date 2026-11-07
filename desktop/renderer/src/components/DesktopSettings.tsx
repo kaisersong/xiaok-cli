@@ -1,3 +1,4 @@
+import {KimDecisionSection} from './KimDecisionSection';
 import {SecretInput} from './security/SecretInput';
 import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
 import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
@@ -4374,6 +4375,7 @@ function MemoryPane() {
       {memoryTab === 'configuration' && <div role="tabpanel" id="memory-panel-configuration" aria-labelledby="memory-tab-configuration" className="space-y-6">
         <MemoryCompactionModelSettings />
         <MemoryModelSettings />
+        <KimDecisionSection />
         <SystemOneSection />
       </div>}
     </Section>

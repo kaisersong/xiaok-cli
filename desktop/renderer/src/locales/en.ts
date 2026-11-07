@@ -1,3 +1,4 @@
+import {kimDecisionEn} from './kim-decision';
 import {secureCredentialsEn} from './secure-credentials';
 import { assistantInboxEn } from './assistant-inbox';
 import {loopPublicationEn} from './loop-publication';
@@ -7,6 +8,7 @@ import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
   secureCredentials:secureCredentialsEn,
+  kimDecision:kimDecisionEn,
   assistantInbox: assistantInboxEn,
   mailConnectors: {
     manageProvider:(name:string)=>`Manage ${name}`,removeAccount:'Remove account',accountIdentityHint:'Update authorization and sending permissions here. To use a different email address, add an account.',

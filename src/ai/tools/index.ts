@@ -34,6 +34,7 @@ import { installSkillTool } from './install-skill.js';
 import { uninstallSkillTool } from './uninstall-skill.js';
 import { validateSkillTool } from './validate-skill.js';
 import { createRenderUiTool } from './render-ui.js';
+import {createKimJudgeTool} from './kim-judge.js';
 import { sanitizeToolOutput } from '../../shared/stream-safety/redact.js';
 import {
   buildCapabilityToolDefinition,
@@ -73,6 +74,7 @@ export function buildToolList(
     uninstallSkillTool,
     validateSkillTool,
     createRenderUiTool(workspace),
+    createKimJudgeTool(),
     ...extraTools,
   ];
   // These positions are constructed above by first-party native factories, before
