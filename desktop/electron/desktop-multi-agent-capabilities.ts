@@ -34,6 +34,8 @@ export interface DesktopCapabilityEntry {
   definition: ToolDefinition;
   aliases: readonly string[];
   permission: PermissionClass;
+  /** Main-owned watchdog policy; never inferred from model input or permissions. */
+  executionPolicy?: Readonly<NonNullable<Tool['executionPolicy']>>;
   /** Main-reviewed implementation guarantee, never inferred from name/permission. */
   verifiedReadOnly?: boolean;
   scope: DesktopCapabilityScope;
@@ -88,6 +90,10 @@ export class DesktopCapabilityCatalog {
     const description = captureToolDescriptionMetadata(metadata);
     const revision = (this.slotRevisions.get(slotId) ?? 0) + 1;
     const descriptor: DesktopCapabilityDescriptor = Object.freeze({ ...input.entry,
+      executionPolicy: input.entry.executionPolicy ? Object.freeze({
+        idleTimeoutMs: input.entry.executionPolicy.idleTimeoutMs,
+        waitsForUser: input.entry.executionPolicy.waitsForUser,
+      }) : undefined,
       definition: structuredClone(input.entry.definition), aliases: Object.freeze([...input.entry.aliases]), scope,
       capabilityId: randomUUID(), ownerId: input.ownerId, slotId, revision, canonicalName: input.entry.definition.name,
     });
@@ -269,6 +275,7 @@ export class DesktopCapabilityCatalog {
       if (record.tools.has(name)) continue;
       const tool: Tool & { capabilityId: string } = {
         definition: { ...descriptor.definition, name }, permission: descriptor.permission, capabilityId: descriptor.capabilityId,
+        executionPolicy: descriptor.executionPolicy,
         execute: async (input, context) => {
           const authority = record.handle.authority;
           if (authority.signal.aborted) throw authority.signal.reason;
