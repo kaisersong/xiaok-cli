@@ -404,7 +404,10 @@ export function createCollaborationRoomService({
       messageId: string;
       kind: string;
       contextScope?: { kind: string; projectId?: string };
-      sourceRef?: { projectId?: string; projectionEventId?: string };
+      sourceRef?: {
+        projectId?: string; projectionEventId?: string; taskId?: string; eventType?: string; artifactId?: string;
+        artifact?: { filename?: string | null; mimeType?: string | null };
+      };
     }>;
     projects?: string[];
   }
@@ -434,19 +437,45 @@ export function createCollaborationRoomService({
           ),
         ];
 
+    type TaskArtifact = { filename?: string; mimeType?: string | null };
+    type ProjectTask = { id?: string; result?: { artifacts?: TaskArtifact[] | null } | null };
+    const projectTasks = new Map<string, ProjectTask[]>();
     const projects: Array<Record<string, unknown>> = [];
     for (const projectId of projectIds) {
       try {
         const response = await kswarmClient.request(`/projects/${projectId}`);
         if (!response || response.ok !== true) continue;
-        const body = (await response.json()) as { project?: Record<string, unknown> };
-        if (body?.project) projects.push(body.project);
+        const body = (await response.json()) as { project?: Record<string, unknown>; tasks?: ProjectTask[] };
+        if (body?.project) {
+          projects.push(body.project);
+          if (body.project.id === projectId && Array.isArray(body.tasks)) projectTasks.set(projectId, body.tasks);
+        }
       } catch {
         // degraded: project facts simply stay absent rather than being
         // reconstructed from room event payloads
       }
     }
 
+    const messages = (snapshot.messages ?? []).map(message => {
+      const ref = message.sourceRef;
+      const filename = ref?.artifact?.filename;
+      if (message.kind !== 'project_event' || ref?.eventType !== 'artifact.registered'
+        || !ref.projectId || !ref.taskId || !ref.artifactId || !filename) return message;
+      const task = projectTasks.get(ref.projectId)?.find(task => task?.id === ref.taskId);
+      const artifacts = task?.result?.artifacts;
+      if (!Array.isArray(artifacts)) return message;
+      const candidates = artifacts.filter(artifact => typeof artifact?.filename === 'string' && artifact.filename);
+      const exact = candidates.filter(artifact => artifact.filename === filename);
+      // Historical room events may predate a move into a run directory. Only
+      // resolve within the producing task; a basename alone is not global identity.
+      const matches = exact.length ? exact : candidates.filter(artifact =>
+        basename(artifact.filename!.replace(/\\/g, '/')) === basename(filename.replace(/\\/g, '/')));
+      if (matches.length !== 1) return message;
+      const current = matches[0];
+      return { ...message, sourceRef: { ...ref, artifact: { ...ref.artifact, filename: current.filename,
+        ...(current.mimeType ? { mimeType: current.mimeType } : {}),
+      } } };
+    });
     const agentNames = await resolveAgentNames(snapshot);
     return {
       ok: true,
@@ -455,7 +484,7 @@ export function createCollaborationRoomService({
         const item = member as { subject?: { logicalAgentId?: string } };
         return { ...item, displayName: agentNames.get(item.subject?.logicalAgentId ?? '') };
       }),
-      messages: snapshot.messages ?? [],
+      messages,
       projects,
       ...(getExecutionCapabilities ? { executionCapabilities: await getExecutionCapabilities().catch(() => []) } : {}),
     };
