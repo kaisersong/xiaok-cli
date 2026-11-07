@@ -27,11 +27,22 @@ jobs:
         with:
           path: xiaok-cli
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require the readonly private sibling checkout token
+        shell: bash
+        env:
+          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+        run: |
+          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
+            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           repository: kaisersong/mydocs
           ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
           path: mydocs
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -67,11 +78,23 @@ jobs:
           repository: kaisersong/kswarm
           ref: ${{ inputs.kswarm_ref || github.head_ref || github.ref_name }}
           path: kswarm
+          persist-credentials: false
+      - name: Require the readonly private sibling checkout token
+        shell: bash
+        env:
+          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+        run: |
+          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
+            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           repository: kaisersong/mydocs
           ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
           path: mydocs
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
