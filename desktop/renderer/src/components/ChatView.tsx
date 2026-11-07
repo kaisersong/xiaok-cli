@@ -1,7 +1,7 @@
 import { A2uiArtifactRenderer } from './a2ui/A2uiArtifactRenderer';
 import type {InterruptedTask} from '../lib/interrupted-task';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
-import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { type ReactNode, useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
 import { ChatInput } from './ChatInput';
@@ -272,6 +272,7 @@ interface ChatViewProps {
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
+  historyContent?: ReactNode;
   pendingApprovalCount?: number;
   thread: ThreadRecord;
   messages: ChatMessage[];
@@ -299,7 +300,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ uiPreviews = [],
-  emptyContent, conversationHeader, assistantContent, assistantHasMessages,
+  emptyContent, conversationHeader, assistantContent, assistantHasMessages, historyContent,
   thread, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
@@ -313,6 +314,23 @@ export function ChatView({ uiPreviews = [],
   const canContinueInterruption = Boolean(interruptedTask && interruptedTask.taskId === thread.taskIds.at(-1) && (status === 'failed' || status === 'idle') && !currentQuestion);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
+  const historyAnchorRef = useRef<{ id: string; top: number; firstId: string } | null>(null);
+  const captureHistoryAnchor = () => {
+    const first = messages.find(message => message.role === 'user');
+    const node = first && messageAnchorRefs.current.get(first.id);
+    if (node && scrollRef.current) {
+      historyAnchorRef.current = { id: first.id, top: node.getBoundingClientRect().top - scrollRef.current.getBoundingClientRect().top, firstId: messages[0].id };
+      isAtBottomRef.current = false;
+    }
+  };
+  useLayoutEffect(() => {
+    const anchor = historyAnchorRef.current;
+    if (!anchor || messages[0]?.id === anchor.firstId) return;
+    const node = messageAnchorRefs.current.get(anchor.id);
+    const scroller = scrollRef.current;
+    if (node && scroller) scroller.scrollTop += node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.top;
+    historyAnchorRef.current = null;
+  }, [messages]);
   const activeIndexFrameRef = useRef<number | null>(null);
   const isAtBottomRef = useRef(true);
   const lastScrollTimeRef = useRef(0);
@@ -473,6 +491,7 @@ export function ChatView({ uiPreviews = [],
         {showEntry ? emptyContent : <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
             {assistantContent}
+            {historyContent && <div onClickCapture={captureHistoryAnchor}>{historyContent}</div>}
             {messages.map((msg, index) => {
               const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
               const outputs = msg.role === 'result_card'
