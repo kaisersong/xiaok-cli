@@ -1,9 +1,26 @@
 // @vitest-environment node
-import {it,expect,vi} from 'vitest';
-import {mkdirSync,writeFileSync,readFileSync,existsSync} from 'node:fs';import {join,resolve,relative,isAbsolute} from 'node:path';
+import {it,expect,vi,afterAll} from 'vitest';
+import {mkdirSync,writeFileSync,readFileSync,existsSync,mkdtempSync,rmSync} from 'node:fs';import {join,resolve,relative,isAbsolute} from 'node:path';
 import {setTimeout as realDelay} from 'node:timers/promises';
+import {tmpdir} from 'node:os';
 import {openOwnedWorkflowServiceCase,finishOwnedWorkflowServiceCase} from '../support/owned-workflow-normal-case.js';
 vi.mock('electron',()=>({app:{isPackaged:false},BrowserWindow:undefined,webContents:undefined}));
+// Keep cold module evaluation in collection, outside both the case's 8s budget
+// and the original server's 5s protection. Real owners/effects remain in the case.
+const collectionRoot=mkdtempSync(join(tmpdir(),'workflow-deadline-collection-'));
+const collectionConfig=join(collectionRoot,'config');mkdirSync(collectionConfig,{mode:0o700});
+const previousCollectionConfig=process.env.XIAOK_CONFIG_DIR;
+afterAll(()=>{rmSync(collectionRoot,{recursive:true,force:true});});
+process.env.XIAOK_CONFIG_DIR=collectionConfig;
+try{
+ await import('../../electron/kswarm-service.ts');
+ await import('../../electron/desktop-services.ts');
+ await import('../../../src/ai/adapters/openai.ts');
+ await import('../../electron/desktop-execution-coordinator.ts');
+ await import('../support/owned-workflow-network-fixture.mjs');
+}finally{
+ if(previousCollectionConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previousCollectionConfig;
+}
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return {promise,resolve};}
 async function waitFor(test:()=>boolean){const started=performance.now();while(!test()){if(performance.now()-started>2000)throw Error('fixture_condition_timeout');await realDelay(10);}}
 for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-setup','late-prepared','retry-budget','worker-then-reviewer'] as const)it(`actual approved workflow budget: ${mode}`,async()=>{
