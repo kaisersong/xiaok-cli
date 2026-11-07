@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DesktopTaskObservationStore } from '../../../src/runtime/task-host/protected-observation-store.js';
 import { desktopObservationSessionId } from '../../../src/runtime/task-host/protected-observation-reader.js';
-import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
+import { compileProtectionWorkerEntry, PROTECTION_WORKER_COMPILE_TIMEOUT_MS } from '../fixtures/desktop-protection-worker-entry.js';
 
 const physical = vi.hoisted(() => ({ entry: '', starts: 0, exits: 0 }));
 vi.mock('node:fs', async original => ({ ...await original<typeof fs>(), lstatSync: vi.fn((await original<typeof fs>()).lstatSync) }));
@@ -26,7 +26,7 @@ vi.mock('node:worker_threads', async original => {
 describe('ordinary protection reads preserve the original reader and Worker contract', () => {
   let compiledRoot = '';
   const roots: string[] = [];
-  beforeAll(async () => { const compiled = await compileProtectionWorkerEntry(); compiledRoot = compiled.root; physical.entry = compiled.output; }, 20000);
+  beforeAll(async () => { const compiled = await compileProtectionWorkerEntry(); compiledRoot = compiled.root; physical.entry = compiled.output; }, PROTECTION_WORKER_COMPILE_TIMEOUT_MS);
   beforeEach(async () => {
     physical.starts = 0; physical.exits = 0;
     vi.mocked(fs.lstatSync).mockImplementation((await vi.importActual<typeof fs>('node:fs')).lstatSync);
