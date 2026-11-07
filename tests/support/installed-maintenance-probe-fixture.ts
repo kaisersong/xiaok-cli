@@ -180,13 +180,13 @@ function seedOS(database:Database,manifest:InstalledControllerLifetime['manifest
  const process=step(observer,['123'],'',json({uid:502,realUid:502,executable:join(leaf.release,'bin/qemu-system-aarch64'),startIdentity:observation.processStartIdentity}));
  const validate=step(plan.executable,['validate','--fill',plan.configPath],'','r1172-normalized'),lima=step(plan.executable,['validate','--fill',join(directory,'lima.yaml')],'','r1172-normalized');
  const ids=shell('set -eu\ncat /etc/machine-id\ncat /proc/sys/kernel/random/boot_id\ncat /etc/xiaok-controller-creation-nonce\n',observation.machineId+'\n'+observation.bootId+'\n'+observation.creationNonce+'\n');
- const info=shell(`${docker} info --format '{{json .}}'\n`,json({ID:observation.engineId,OSType:'linux',Architecture:'aarch64'}));
+ const info=shell(`${docker} info --format '{{json .}}'\n`,json({ID:observation.engineId,OSType:'linux',Architecture:'aarch64',Driver:'overlay2',DriverStatus:[]}));
  const binary=shell(ENGINE_BINARY_CENSUS_SCRIPT,binaries.map(x=>`${x.name} ${x.sha256} 0 0 755 1 ${x.size}`).join('\n')+'\n');
  const vm=[process,lima,ids,process],observe=[...vm,info];
  const archive=shell(`set -eu\nif [ ! -e '/home/xiaokvm/docker.tgz' ] && [ ! -L '/home/xiaokvm/docker.tgz' ]; then printf missing; else [ ! -L '/home/xiaokvm/docker.tgz' ] && [ -f '/home/xiaokvm/docker.tgz' ]; printf '%s  %s\\n' '${sources.engine.sha256}' '/home/xiaokvm/docker.tgz' | sha256sum -c - >/dev/null; printf complete; fi\n`,'complete');
  const unit=shell(`set -eu\nif [ ! -e /etc/systemd/system/xiaok-engine.service ]; then printf missing; else [ ! -L /etc/systemd/system/xiaok-engine.service ]; printf '%s  %s\\n' '${hash(plan.unit)}' '/etc/systemd/system/xiaok-engine.service' | sha256sum -c - >/dev/null; if systemctl is-active --quiet xiaok-engine.service; then printf complete; else printf missing; fi; fi\n`,'complete');
  const image=shell(`set -eu\nif ${docker} image inspect '${sources.workerImage.imageId}' >/dev/null 2>&1; then ${docker} image inspect '${sources.workerImage.imageId}' --format '{{.Id}}'; else printf missing; fi\n`,imageId+'\n');
- const normal=[validate,...vm,archive,...vm,archive,unit,binary,...vm,unit,binary,image,...vm,image,...observe,...vm];
+ const normal=[validate,...vm,archive,...vm,archive,unit,binary,...vm,unit,binary,info,image,...vm,info,image,...observe,...vm];
  const maintenance=[validate,process,lima,ids,info,shell(`set -eu\n[ ! -L /etc/systemd/system/xiaok-engine.service ]\nprintf '%s  %s\\n' '${hash(plan.unit)}' '/etc/systemd/system/xiaok-engine.service' | sha256sum -c - >/dev/null\nsystemctl is-active --quiet xiaok-engine.service\n`,''),binary,shell(`${docker} image inspect '${sources.workerImage.imageId}' --format '{{.Id}}'\n`,imageId+'\n'),process];
  return {normal,observe,maintenance,observation};
 }
@@ -282,7 +282,7 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
    if(options.sourceOnly&&inspections===0){
     // Only a declared OS info response changes; the real private inspector must
     // reject this actual value drift before the original unchanged census runs.
-    const drift=fixedPrograms.observe.map((command,index)=>index===4?{...command,output:json({ID:fixedPrograms.observation.engineId+'-drift',OSType:'linux',Architecture:'aarch64'})}:command);
+    const drift=fixedPrograms.observe.map((command,index)=>index===4?{...command,output:json({...JSON.parse(command.output),ID:fixedPrograms.observation.engineId+'-drift'})}:command);
     setProgram('inspect-negative-engine-id',drift);let rejected=false;
     try{await actualInspector(handle);}catch(error){if(!(error instanceof Error)||error.message!=='installed_engine_changed')throw error;rejected=true;}
     assertProgramDone();if(!rejected)throw Error('probe_fixture_engine_id_drift_not_rejected');counters.engineIdDriftRejections++;

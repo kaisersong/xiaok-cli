@@ -35,7 +35,7 @@ it('publishes the same close Promise before synchronously sealing any actual par
 });
 it('does not register a partially constructed Host when original options throw',async()=>{
  const{store,population,options}=fixture();let calls=0;const broken={...options,get runner():hostModule.TaskRunner{throw Error('original_constructor_input_failed');}};
- expect(()=>population.createHost(broken)).toThrow('original_constructor_input_failed');const host=population.createHost({...options,runner:async()=>{calls++;}});await host.createTask({prompt:'actual healthy member',materials:[]});await population.close();expect(calls).toBe(1);await expect(store.clearActiveTask('new')).rejects.toThrow('task_store_closed');
+ expect(()=>population.createHost(broken)).toThrow('original_constructor_input_failed');let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});const host=population.createHost({...options,runner:async()=>{calls++;entered();}});await host.createTask({prompt:'actual healthy member',materials:[]});await ready;await population.close();expect(calls).toBe(1);await expect(store.clearActiveTask('new')).rejects.toThrow('task_store_closed');
 });
 it('retires only the original member after its drain without closing the shared store',async()=>{
  const{store,population,options}=fixture();const original=population.createHost(options);await original.createTask({prompt:'original member',materials:[]});const close=vi.spyOn(store,'closeAndDrain');
