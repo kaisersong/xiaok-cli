@@ -14,6 +14,7 @@ on:
     paths:
       - 'desktop/**'
       - 'src/ai/runtime/**'
+      - 'src/runtime/task-host/**'
       - 'src/ai/adapters/**'
       - 'src/ai/providers/kimi-models.ts'
       - 'src/ai/memory/segment.ts'
@@ -29,6 +30,7 @@ on:
     paths:
       - 'desktop/**'
       - 'src/ai/runtime/**'
+      - 'src/runtime/task-host/**'
       - 'src/ai/adapters/**'
       - 'src/ai/providers/kimi-models.ts'
       - 'src/ai/memory/segment.ts'
@@ -147,11 +149,16 @@ jobs:
           tests/main/kimi-reasoning-admission.test.ts
           tests/main/desktop-provider-stream-lifecycle.test.ts
           tests/main/desktop-startup-task-recovery.test.ts
+          tests/main/desktop-protection-ordinary-read.test.ts
+          tests/main/desktop-protection-worker-compiled-entry.test.ts
           tests/main/project-stream-reconnect-regression.test.ts
           tests/renderer/chat-helpers-error-sanitization.test.ts
           tests/renderer/chat-shell-draft-prompt.test.tsx
           tests/main/conversation-activity-ipc.test.ts
           tests/main/artifact-export-package.test.ts
+          tests/main/scheduled-task-delivery.test.ts
+          tests/renderer/scheduled-task-delivery.test.tsx
+          tests/main/scheduled-preload.test.ts
 
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'

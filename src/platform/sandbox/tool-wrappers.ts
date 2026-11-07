@@ -1,5 +1,7 @@
 import {types} from 'node:util';
+import {resolve} from 'node:path';
 import {isReadonlySandboxEnforcer} from './enforcer.js';
+import {withSandboxSearchScope} from './search-scope.js';
 import {inheritBuiltinToolIdentity} from '../../ai/tools/native-tool-identity.js';
 import type { Tool, ToolExecutionContext } from '../../types.js';
 import type { createSandboxEnforcer } from './enforcer.js';
@@ -31,10 +33,12 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
  if(!enforcer)return tools;
  const options=normalizeOptions(optionsOrCallback);
  return tools.map(tool=>{
-  const name=tool.definition.name;if(!['bash','read','write','edit'].includes(name))return tool;
+  const name=tool.definition.name;if(!['bash','read','write','edit','grep','glob'].includes(name))return tool;
+  const search=name==='grep'||name==='glob';
   const prepare=async(input:Readonly<Record<string,unknown>>,context:ToolExecutionContext|undefined,allowPrompt:boolean):Promise<string|undefined>=>{
    context?.signal?.throwIfAborted();
-   const path=name==='bash'?input.workdir:input.file_path;
+   if(search && input.path!==undefined && typeof input.path!=='string')return 'Error: sandbox denied invalid search path';
+   const path=search?resolve((input.path as string|undefined)||process.cwd()):name==='bash'?input.workdir:input.file_path;
    if(typeof path==='string'){
     const decision=enforcer.enforceFile(path);
     if(!decision.allowed){
@@ -49,10 +53,12 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    return undefined;
   };
   const wrapped:Tool={...tool,execute:async(input,context)=>{
-   const denial=await prepare(input,context,!context?.compoundPhase);
+   // Resolve once before a possible approval await; never mutate shared input.
+   const effective=search?{...input,path:typeof input.path==='string'?resolve(input.path||process.cwd()):input.path===undefined?process.cwd():input.path}:input;
+   const denial=await prepare(effective,context,!context?.compoundPhase);
    if(denial)return denial;
    context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();
-   return tool.execute(input,context);
+   return tool.execute(effective,search?withSandboxSearchScope(context,enforcer):context);
   }};
   inheritBuiltinToolIdentity(tool,wrapped,()=>{
    if(!isReadonlySandboxEnforcer(enforcer)||types.isProxy(options)||![Object.prototype,null].includes(Object.getPrototypeOf(options)))return false;

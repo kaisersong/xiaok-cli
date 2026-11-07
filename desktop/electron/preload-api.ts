@@ -1,3 +1,4 @@
+import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
@@ -294,6 +295,7 @@ export const PRELOAD_API_KEYS = [
   'onLoopConstraintAdded',
   'syncScheduledTasks',
   'getScheduledTasks',
+  'getRecentScheduledDeliveries',
   'createScheduledTask',
   'updateScheduledTask',
   'setScheduledTaskStatus',
@@ -657,6 +659,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   confirmLoopConstraint: 'desktop:loops:confirmConstraint',
   syncScheduledTasks: 'desktop:syncScheduledTasks',
   getScheduledTasks: 'desktop:getScheduledTasks',
+  getRecentScheduledDeliveries: 'desktop:getRecentScheduledDeliveries',
   createScheduledTask: 'desktop:createScheduledTask',
   updateScheduledTask: 'desktop:updateScheduledTask',
   setScheduledTaskStatus: 'desktop:setScheduledTaskStatus',
@@ -1375,6 +1378,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   confirmLoopConstraint(constraintId: string): Promise<LoopConstraintDto | undefined>;
   onLoopConstraintAdded(handler: (constraint: unknown) => void): () => void;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<ScheduledTaskDto[]>;
+  getRecentScheduledDeliveries(): Promise<ScheduledTaskDueEvent[]>;
   getScheduledTasks(): Promise<ScheduledTaskDto[]>;
   createScheduledTask(input: ScheduledCreateDto): Promise<ScheduledTaskDto>;
   updateScheduledTask(input: ScheduledUpdateDto): Promise<ScheduledUpdateResultDto>;
@@ -1385,7 +1389,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   approveTimedActionAuto(actionId: string): Promise<ScheduledActionDto | null>;
   revokeTimedActionAuto(actionId: string): Promise<ScheduledActionDto | null>;
   clearScheduledTaskRunHistory(actionId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
-  onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; dispatchStatus?: 'success' | 'failed' | 'skipped'; runtimeState?: 'accepted' | 'not_started'; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
+  onScheduledTaskDue(handler: (event: ScheduledTaskDueEvent) => void): () => void;
   listMemories(): Promise<MemoryIpcEntry[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<MemoryIpcEntry>;
   updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<MemoryIpcEntry>;
@@ -1920,6 +1924,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     setLoopConstraintActive: (constraintId, active) => ipcRenderer.invoke('desktop:loops:setConstraintActive', constraintId, active) as Promise<LoopConstraintDto | undefined>,
     confirmLoopConstraint: (constraintId) => ipcRenderer.invoke('desktop:loops:confirmConstraint', constraintId) as Promise<LoopConstraintDto | undefined>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<ScheduledTaskDto[]>,
+    getRecentScheduledDeliveries: () => ipcRenderer.invoke('desktop:getRecentScheduledDeliveries') as Promise<ScheduledTaskDueEvent[]>,
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<ScheduledTaskDto[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<ScheduledTaskDto>,
     updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input) as Promise<ScheduledUpdateResultDto>,

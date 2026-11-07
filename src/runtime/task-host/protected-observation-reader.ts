@@ -1,8 +1,12 @@
 import type {StoredSessionSnapshot} from '../../ai/runtime/session-store/stored-snapshot-types.js';
 import {createHash} from 'node:crypto';
+import {join} from 'node:path';
 import {computeSessionHistoryDigest,toDurableSessionSnapshot} from '../../ai/runtime/session-store/store.js';
 import {mergeProtectedObservationClosures,type ProtectedObservationClosure} from '../../ai/runtime/protected-observation-closure.js';
 
+export function desktopObservationSessionsRoot(root: string): string {
+  return join(root, 'protected-observation-sessions');
+}
 export function desktopObservationSessionId(taskId: string): string {
   if (!taskId || typeof taskId !== 'string') throw new Error('SOL_PI_DESKTOP_TASK_ID_INVALID');
   return `desktop-observation-${createHash('sha256').update(taskId).digest('hex')}`;
