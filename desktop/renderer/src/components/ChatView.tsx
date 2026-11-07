@@ -1,4 +1,5 @@
-import { A2uiArtifactRenderer } from './a2ui/A2uiArtifactRenderer';
+import { A2uiInlineCard } from './a2ui/A2uiInlineCard';
+import { inlineUiKey, isInlineUiArtifact, separateInlineUiOutputs } from '../lib/inline-ui';
 import type {InterruptedTask} from '../lib/interrupted-task';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
@@ -11,7 +12,6 @@ import { UserDecisionCard } from './UserDecisionCard';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
 import { ConversationIndexRail } from './ConversationIndexRail';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
@@ -21,7 +21,6 @@ import { fileBasename, filePathIdentity, normalizeClipboardFilePath } from '../l
 import { projectFinalDeliverables } from '../lib/final-deliverables';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
-import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -191,7 +190,7 @@ export interface ComputerUseActionData {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card' | 'ui_card';
   content: string;
   stage?: string;
   steps?: ToolStep[];
@@ -201,6 +200,7 @@ export interface ChatMessage {
   computerUseAction?: ComputerUseActionData;
   result?: TaskResult | null;
   generatedFiles?: GeneratedFile[];
+  uiCard?: { artifact?: ArtifactSummary; previewToolUseId?: string; sourceTaskId?: string };
 }
 
 export interface GeneratedFile {
@@ -229,6 +229,16 @@ function findAssistantTextInCurrentTurn(messages: ChatMessage[], endIndex: numbe
     if (message.role === 'user' || message.role === 'result_card') return '';
   }
   return '';
+}
+
+function findAssistantReferencesInCurrentTurn(messages: ChatMessage[], endIndex: number): string {
+  const segments: string[] = [];
+  for (let index = endIndex - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === 'user' || message.role === 'result_card') break;
+    if (message.role === 'assistant') segments.push(message.content);
+  }
+  return segments.reverse().join('\n\n');
 }
 
 function projectResultForDisplay(result: TaskResult | null, assistantText: string): TaskResult | null {
@@ -264,7 +274,7 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
-  uiPreviews?: Array<{toolUseId:string;title:string;content:string}>;
+  uiPreviews?: Array<{toolUseId:string;sourceTaskId?:string;title:string;content:string}>;
   emptyContent?: ReactNode;
   assistantContent?: ReactNode;
   assistantHasMessages?: boolean;
@@ -310,6 +320,26 @@ export function ChatView({ uiPreviews = [],
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
+  const bodyMessages = useMemo(() => {
+    const seen = new Set(messages.flatMap(message => message.uiCard?.artifact ? [inlineUiKey(message.uiCard.artifact)] : []));
+    return messages.flatMap(message => {
+      const fallback: ChatMessage[] = [];
+      if (message.role === 'result_card') for (const artifact of message.result?.artifacts ?? []) {
+        const key = inlineUiKey(artifact);
+        if (!isInlineUiArtifact(artifact) || seen.has(key)) continue;
+        seen.add(key);
+        fallback.push({ id: `inline-ui:${key}`, role: 'ui_card', content: '', uiCard: { artifact } });
+      }
+      return [...fallback, message];
+    });
+  }, [messages]);
+  const displayedUiKeys = new Set(bodyMessages.flatMap(message => message.uiCard?.artifact ? [inlineUiKey(message.uiCard.artifact)] : []));
+  const standaloneInlineArtifacts = (result?.artifacts ?? []).filter(artifact => {
+    const key = inlineUiKey(artifact);
+    if (!isInlineUiArtifact(artifact) || displayedUiKeys.has(key)) return false;
+    displayedUiKeys.add(key);
+    return true;
+  });
   const showEntry = Boolean(emptyContent) && !assistantHasMessages && messages.length === 0 && !streamingText && status === 'idle';
   const canContinueInterruption = Boolean(interruptedTask && interruptedTask.taskId === thread.taskIds.at(-1) && (status === 'failed' || status === 'idle') && !currentQuestion);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -363,7 +393,9 @@ export function ChatView({ uiPreviews = [],
     () => promptIndexEntries[0]?.id ?? null,
   );
   const currentTurnAssistantText = findAssistantTextInCurrentTurn(messages, messages.length) || streamingText;
-  const standaloneOutputs = projectFinalDeliverables(result, generatedFiles, currentTurnAssistantText, isA2uiArtifact);
+  const standaloneDeliverables = projectFinalDeliverables(result, generatedFiles,
+    `${findAssistantReferencesInCurrentTurn(bodyMessages, bodyMessages.length)}\n${streamingText}`, isInlineUiArtifact);
+  const standaloneOutputs = separateInlineUiOutputs(standaloneDeliverables.result, standaloneDeliverables.generatedFiles);
   const standaloneDisplayResult = projectResultForDisplay(standaloneOutputs.result, currentTurnAssistantText);
   const standaloneResultEligible = status === 'completed' || status === 'idle';
   const showStandaloneResult = !hasResultCardInCurrentTurn(messages)
@@ -492,13 +524,14 @@ export function ChatView({ uiPreviews = [],
           <div className="space-y-6">
             {assistantContent}
             {historyContent && <div onClickCapture={captureHistoryAnchor}>{historyContent}</div>}
-            {messages.map((msg, index) => {
-              const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
+            {bodyMessages.map((msg, index) => {
+              const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(bodyMessages, index) : '';
               const outputs = msg.role === 'result_card'
-                ? projectFinalDeliverables(msg.result ?? null, msg.generatedFiles ?? [], assistantText, isA2uiArtifact)
+                ? projectFinalDeliverables(msg.result ?? null, msg.generatedFiles ?? [], findAssistantReferencesInCurrentTurn(bodyMessages, index), isInlineUiArtifact)
                 : { result: null, generatedFiles: [] };
-              const displayResult = projectResultForDisplay(outputs.result, assistantText);
-              const resultGeneratedFiles = outputs.generatedFiles;
+              const visibleOutputs = separateInlineUiOutputs(outputs.result, outputs.generatedFiles);
+              const displayResult = projectResultForDisplay(visibleOutputs.result, assistantText);
+              const resultGeneratedFiles = visibleOutputs.generatedFiles;
               if (msg.role === 'result_card' && !hasResultCardContent(displayResult, resultGeneratedFiles)) return null;
               return (
                 <div
@@ -520,6 +553,9 @@ export function ChatView({ uiPreviews = [],
                       <SaveToKbButton text={msg.content} />
                     </div>
                   </>
+                ) : msg.role === 'ui_card' ? (
+                  <A2uiInlineCard artifact={msg.uiCard?.artifact} preview={status === 'running' ? uiPreviews.find(preview =>
+                    preview.toolUseId === msg.uiCard?.previewToolUseId && (preview.sourceTaskId ?? thread.currentTaskId) === msg.uiCard?.sourceTaskId) : undefined} />
                 ) : msg.role === 'progress' ? (
                   <div className="flex items-center gap-2 py-1 text-sm text-[var(--c-text-secondary)] select-text">
                     <div className="relative size-3 shrink-0" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -615,9 +651,6 @@ export function ChatView({ uiPreviews = [],
               );
             })}
 
-            {status === 'running' && uiPreviews.map(preview => <section key={preview.toolUseId} aria-label={preview.title}>
-              <A2uiArtifactRenderer artifactContent={preview.content} artifactRef={{artifactId:preview.toolUseId,type:'artifact',mime_type:A2UI_MIME_TYPE}} />
-            </section>)}
             {/* Streaming assistant text */}
             {streamingText && (
               <div className="max-w-[663px] break-words text-sm text-[var(--c-text-primary)] leading-relaxed">
@@ -625,6 +658,7 @@ export function ChatView({ uiPreviews = [],
               </div>
             )}
 
+            {standaloneResultEligible && standaloneInlineArtifacts.map(artifact => <A2uiInlineCard key={inlineUiKey(artifact)} artifact={artifact} />)}
             {/* Result card + generated files (only if not already shown as a message) */}
             {showStandaloneResult ? (
               <ResultCard
@@ -910,16 +944,6 @@ function ResultCard({
       {hasArtifacts && (
         <div className="mt-3 flex flex-col gap-2">
           {artifacts.map(a => {
-            if (isA2uiArtifact(a)) {
-              return (
-                <A2uiResultArtifactPreview
-                  key={a.artifactId}
-                  artifact={a}
-                  onArtifactClick={onArtifactClick}
-                  onArtifactOpenExternal={onArtifactOpenExternal}
-                />
-              );
-            }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
             const displayTitle = fileBasename(a.title) || a.title;
             const info = {
@@ -1014,105 +1038,6 @@ function ResultCard({
             );
           })}
         </div>
-      )}
-    </div>
-  );
-}
-
-function isA2uiArtifact(artifact: ArtifactSummary): boolean {
-  return artifact.kind === 'a2ui'
-    || isA2UIMimeType(artifact.mimeType)
-    || artifact.title.endsWith('.a2ui.json')
-    || Boolean(artifact.filePath?.endsWith('.a2ui.json'));
-}
-
-function A2uiResultArtifactPreview({
-  artifact,
-  onArtifactClick,
-  onArtifactOpenExternal,
-}: {
-  artifact: ArtifactSummary;
-  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
-  onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
-}) {
-  const [content, setContent] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const { t } = useLocale();
-
-  useEffect(() => {
-    let cancelled = false;
-    setContent(null);
-    setFailed(false);
-    if (!artifact.filePath) {
-      setFailed(true);
-      return () => {
-        cancelled = true;
-      };
-    }
-    api.readFileContent(artifact.filePath)
-      .then((result) => {
-        if (cancelled) return;
-        if (result.error) {
-          setFailed(true);
-          return;
-        }
-        setContent(result.content);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [artifact.artifactId, artifact.filePath]);
-
-  const info = {
-    artifactId: artifact.artifactId,
-    sourceTaskId: artifact.sourceTaskId,
-    title: artifact.title,
-    kind: artifact.kind,
-    filePath: artifact.filePath,
-    mimeType: artifact.mimeType,
-  };
-  return (
-    <div
-      className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3"
-      data-testid={`a2ui-artifact-${artifact.title}`}
-    >
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">{artifact.title}</div>
-          <div className="text-xs text-[var(--c-text-tertiary)]">Interactive UI · A2UI</div>
-        </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-            else onArtifactClick?.(info);
-          }}
-          className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-hover)]"
-          data-testid={`generated-file-${artifact.title}`}
-        >
-          {t.chatView.open}
-        </button>
-      </div>
-      {failed ? (
-        <div role="alert" className="text-sm text-[var(--c-text-secondary)]">{t.chatView.a2uiLoadFailed}</div>
-      ) : content === null ? (
-        <div className="text-sm text-[var(--c-text-tertiary)]">{t.chatView.a2uiLoading}</div>
-      ) : (
-        <A2uiArtifactBlock
-          content={content}
-          artifactRef={{
-            artifactId: artifact.artifactId,
-            type: 'artifact',
-            title: artifact.title,
-            filename: artifact.title,
-            key: artifact.filePath,
-            mime_type: artifact.mimeType || A2UI_MIME_TYPE,
-            size: artifact.sizeBytes,
-          }}
-        />
       )}
     </div>
   );

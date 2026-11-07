@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { DesktopGoalChangedEvent, DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared, GoalAttachmentRequest } from '../../electron/preload-api';
 import type { DesktopTaskEvent, TaskSnapshot } from '../../../src/runtime/task-host/types';
 import type { ThreadRecord } from '../../renderer/src/api/types';
+import { projectRuntimeEventToDesktopEvent } from '../../../src/runtime/task-host/event-projection';
 import type { ChatView as ActualChatView } from '../../renderer/src/components/ChatView';
 
 const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), subscribeTask: vi.fn(), updateThreadTaskId: vi.fn(),
@@ -956,6 +957,96 @@ describe('interrupted decisions submit with one click',()=>{
 });
 
 describe('Desktop transient generative UI source',()=>{
+ function cardEvent(id = 'sales'): DesktopTaskEvent {
+  return projectRuntimeEventToDesktopEvent({taskId:'A',event:{type:'post_tool_use',sessionId:'session',turnId:'turn',toolUseId:id,toolName:'render_ui',toolInput:{},toolResponse:JSON.stringify({ok:true,artifactPath:`/tmp/${id}.a2ui.json`,mimeType:'application/vnd.xiaok.a2ui+json',title:id})}})!;
+ }
+ const body = () => JSON.parse(screen.getByTestId('history').textContent || '[]').filter((m: any) => m.role === 'assistant' || m.role === 'ui_card');
+ it('places successful cards between narration segments and deduplicates repeated artifact facts',async()=>{
+  await mount();const source=observer('A');
+  await emit(source,{type:'assistant_delta',delta:'Before chart.'});
+  await emit(source,cardEvent());await emit(source,cardEvent());
+  expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card']);
+  expect(screen.getByTestId('stream')).toHaveTextContent('');
+  await emit(source,{type:'assistant_delta',delta:'After chart.'});
+  await emit(source,cardEvent());
+  expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card']);
+  await emit(source,{type:'result',result:{summary:'Before chart.After chart.',artifacts:[]}});
+  expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card','assistant']);
+  expect(body().filter((m:any)=>m.role==='assistant').map((m:any)=>m.content)).toEqual(['Before chart.','After chart.']);
+ });
+ it('replays the same artifact event at its original position without echoing narration',async()=>{
+  f.recoverTask.mockResolvedValue({snapshot:{...snapshot('A','completed'),events:[{type:'assistant_delta',delta:'Before chart.'},cardEvent(),{type:'assistant_delta',delta:'After chart.'},{type:'result',result:{summary:'Before chart.After chart.',artifacts:[]}}]}});
+  await mount(false,false);
+  await waitFor(()=>expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card','assistant']));
+  expect(body().filter((m:any)=>m.role==='assistant').map((m:any)=>m.content)).toEqual(['Before chart.','After chart.']);
+ });
+ it('anchors partial previews after preceding text and clears only transient cards on cancellation',async()=>{
+  await mount();const source=observer('A');
+  await emit(source,{type:'assistant_delta',delta:'Before chart.'});
+  await emit(source,{type:'ui_preview',turnId:'turn',toolUseId:'call',preview:{title:'Partial',content:'[]'}});
+  expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card']);
+  await emit(source,{type:'task_cancelled',taskId:'A',reason:'user_aborted',partialText:'Before chart.'});
+  expect(body().map((m:any)=>m.content)).toEqual(['Before chart.']);
+ });
+ it('does not repeat the already committed prefix when the task ends immediately after a card',async()=>{
+  f.recoverTask.mockResolvedValue({snapshot:{...snapshot('A','completed'),events:[{type:'assistant_delta',delta:'Before chart.'},cardEvent(),{type:'result',result:{summary:'Before chart.',artifacts:[]}}]}});
+  await mount(false,false);
+  await waitFor(()=>expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card']));
+ });
+ it('replaces cleared previews with a confirmed card before following text',async()=>{
+  await mount();const source=observer('A');
+  await emit(source,{type:'assistant_delta',delta:'Before chart.'});
+  await emit(source,{type:'ui_preview',turnId:'turn',toolUseId:'call',preview:{title:'Partial',content:'[]'}});
+  await emit(source,{type:'ui_preview',turnId:'turn',toolUseId:'all',preview:null});
+  await emit(source,cardEvent());
+  await emit(source,{type:'assistant_delta',delta:'After chart.'});
+  await emit(source,{type:'result',result:{summary:'Before chart.After chart.',artifacts:[]}});
+  expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card','assistant']);
+  expect(body()[1].uiCard.artifact.title).toBe('sales');
+  expect(body().some((m:any)=>m.uiCard?.previewToolUseId)).toBe(false);
+ });
+ it('keeps multiple cards in order and preserves a separately authored summary',async()=>{
+  await mount();const source=observer('A');
+  await emit(source,{type:'assistant_delta',delta:'Before chart.'});await emit(source,cardEvent('one'));
+  await emit(source,{type:'assistant_delta',delta:'Between cards.'});await emit(source,cardEvent('two'));
+  await emit(source,{type:'assistant_delta',delta:'After chart.'});
+  await emit(source,{type:'result',result:{summary:'Before chart. Independent summary.',artifacts:[]}});
+  expect(body().map((m:any)=>m.role)).toEqual(['assistant','ui_card','assistant','ui_card','assistant']);
+  expect(JSON.parse(screen.getByTestId('current-result').textContent || '{}').summary).toBe('Before chart. Independent summary.');
+ });
+ it('continues a running snapshot without replaying committed narration at completion',async()=>{
+  f.recoverTask.mockResolvedValue({snapshot:{...snapshot('A','running'),events:[{type:'assistant_delta',delta:'Before chart.'},cardEvent(),{type:'assistant_delta',delta:'After chart.'}]}});
+  await mount();const source=observer('A');
+  await emit(source,{type:'assistant_delta',delta:' More.'});
+  await emit(source,{type:'result',result:{summary:'Before chart.After chart. More.',artifacts:[]}});
+  expect(body().filter((m:any)=>m.role==='assistant').map((m:any)=>m.content)).toEqual(['Before chart.','After chart. More.']);
+ });
+ it('does not echo a committed prefix when a preview clears without a final artifact',async()=>{
+  await mount();const source=observer('A');await emit(source,{type:'assistant_delta',delta:'Before chart.'});
+  await emit(source,{type:'ui_preview',turnId:'turn',toolUseId:'call',preview:{title:'Partial',content:'[]'}});
+  await emit(source,{type:'ui_preview',turnId:'turn',toolUseId:'all',preview:null});
+  await emit(source,{type:'result',result:{summary:'Before chart.',artifacts:[]}});
+  expect(body().map((m:any)=>m.content)).toEqual(['Before chart.']);
+ });
+ it('does not split following Markdown at repeated preview update boundaries',async()=>{
+  await mount();const source=observer('A');await emit(source,{type:'assistant_delta',delta:'Before chart.'});
+  const preview={type:'ui_preview' as const,turnId:'turn',toolUseId:'call',preview:{title:'Partial',content:'[]'}};
+  await emit(source,preview);await emit(source,{type:'assistant_delta',delta:'**After'});await emit(source,preview);
+  await emit(source,{type:'assistant_delta',delta:' chart.**'});await emit(source,preview);
+  await emit(source,{type:'result',result:{summary:'Before chart.**After chart.**',artifacts:[]}});
+  expect(body().map((m:any)=>m.content)).toEqual(['Before chart.','**After chart.**']);
+ });
+ it('retains the pending tail when cancel returns before its event',async()=>{
+  await mount();const source=observer('A');await emit(source,{type:'assistant_delta',delta:'Before chart.'});await emit(source,cardEvent());
+  await emit(source,{type:'assistant_delta',delta:'After chart.'});
+  f.cancelTask.mockResolvedValueOnce(undefined);
+  fireEvent.click(screen.getByRole('button',{name:'stop current task'}));
+  await waitFor(()=>expect(screen.getByTestId('display-status')).toHaveTextContent('idle'));
+  await emit(source,{type:'ui_preview',turnId:'turn',toolUseId:'late',preview:{title:'Late preview',content:'[]'}});
+  expect(screen.getByTestId('ui-previews').textContent).toBe('[]');
+  await emit(source,{type:'task_cancelled',taskId:'A',reason:'user_aborted',partialText:'Before chart.After chart.'});
+  expect(body().filter((m:any)=>m.role==='assistant').map((m:any)=>m.content)).toEqual(['Before chart.','After chart.']);
+ });
  it('shows a live preview, excludes history/canvas, clears at terminal and rejects late events',async()=>{
   await mount();const source=observer('A');
   const preview={type:'ui_preview' as const,turnId:'turn',toolUseId:'call',preview:{title:'Live analysis',content:'[]'}};

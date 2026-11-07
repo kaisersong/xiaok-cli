@@ -20,7 +20,8 @@ import { ChatRightSurface } from './ChatRightSurface';
 import { MultiAgentPanel } from './MultiAgentPanel';
 import { useMultiAgentConnection } from '../hooks/useMultiAgentConnection';
 import type { ThreadRecord } from '../api/types';
-import { separateAssistantNarration, projectNarrationSummary } from '../lib/assistant-narration';
+import { separateAssistantNarration, projectNarrationSummary, pendingNarration } from '../lib/assistant-narration';
+import { inlineUiKey, isInlineUiArtifact } from '../lib/inline-ui';
 import { ChatTaskApprovals } from './ChatTaskApprovals';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult, TaskSnapshot } from '../../../shared/task-types';
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
@@ -75,6 +76,9 @@ interface DisplaySource {
   executionScope?: TaskSnapshot['executionScope'];
   eventCount: number;
   uiPreviewClosed?: boolean;
+  inlineUiArtifacts?: Set<string>;
+  inlineUiPreviewKeys?: Set<string>;
+  inlineUiNarrationCommitted?: boolean;
   terminalSeen: boolean;
   streamEnded: boolean;
   resultSummaryInHistory?: string;
@@ -224,7 +228,8 @@ function collectGeneratedFilesForTurn(events: DesktopTaskEvent[], texts: string[
   const seen = new Set<string>();
   const files: GeneratedFile[] = [];
   for (const file of collectGeneratedFilesFromEvents(events)) addGeneratedFile(files, seen, file.filePath);
-  for (const file of collectGeneratedFilesFromTexts(texts)) addGeneratedFile(files, seen, file.filePath);
+  const narration = events.flatMap(event => event.type === 'assistant_delta' ? [event.delta] : []).join('');
+  for (const file of collectGeneratedFilesFromTexts([...texts, narration])) addGeneratedFile(files, seen, file.filePath);
   return files;
 }
 
@@ -305,7 +310,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const olderHistoryRef = useRef<{ remaining: string[]; loading: boolean }>({ remaining: [], loading: false });
   const [olderHistory, setOlderHistory] = useState({ remaining: 0, loading: false, error: '' });
   const [streamingText, setStreamingText] = useState('');
-  const [uiPreviews, setUiPreviews] = useState<Array<{ toolUseId: string; title: string; content: string }>>([]);
+  const [uiPreviews, setUiPreviews] = useState<Array<{ toolUseId: string; sourceTaskId: string; title: string; content: string }>>([]);
+  const clearUiPreviews = useCallback(() => {
+    displaySourceRef.current?.inlineUiPreviewKeys?.clear();
+    setUiPreviews([]);
+    setMessages(previous => previous.filter(message => !message.uiCard?.previewToolUseId));
+  }, []);
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
   const [interruptedTask, setInterruptedTask] = useState<InterruptedTask | null>(null);
@@ -415,20 +425,44 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     source.eventCount += 1;
     const sourceTaskId = source.sourceTaskId;
     const live = !source.terminalSeen;
+    const commitInlinePrefix = () => {
+      const text = streamRef.current;
+      streamRef.current = '';
+      cancelStreamingFlush();
+      setStreamingText('');
+      if (!text.trim()) return;
+      source.inlineUiNarrationCommitted = true;
+      setMessages(previous => [...previous, { id: `inline-prefix:${sourceTaskId}:${source.eventCount}`, role: 'assistant', content: text }]);
+    };
     if (event.type === 'ui_preview') {
       if (!live || source.uiPreviewClosed) return;
+      if (event.preview) {
+        const id = `inline-preview:${JSON.stringify([sourceTaskId, event.toolUseId])}`;
+        source.inlineUiPreviewKeys ??= new Set();
+        if (!source.inlineUiPreviewKeys.has(id)) {
+          source.inlineUiPreviewKeys.add(id);
+          commitInlinePrefix();
+        }
+        setMessages(previous => previous.some(message => message.id === id) ? previous : [...previous,
+          { id, role: 'ui_card', content: '', uiCard: { previewToolUseId: event.toolUseId, sourceTaskId } }]);
+      } else {
+        if (event.toolUseId === 'all') source.inlineUiPreviewKeys?.clear();
+        else source.inlineUiPreviewKeys?.delete(`inline-preview:${JSON.stringify([sourceTaskId, event.toolUseId])}`);
+        setMessages(previous => previous.filter(message => !(message.uiCard?.previewToolUseId
+          && message.uiCard.sourceTaskId === sourceTaskId && (event.toolUseId === 'all' || message.uiCard.previewToolUseId === event.toolUseId))));
+      }
       setUiPreviews(previous => event.preview
-        ? [...previous.filter(item => item.toolUseId !== event.toolUseId), { toolUseId: event.toolUseId, ...event.preview }]
+        ? [...previous.filter(item => item.toolUseId !== event.toolUseId), { toolUseId: event.toolUseId, sourceTaskId, ...event.preview }]
         : event.toolUseId === 'all' ? [] : previous.filter(item => item.toolUseId !== event.toolUseId));
       return;
     }
     if (event.type === 'result' || event.type === 'task_cancelled' || event.type === 'error') {
       source.uiPreviewClosed = true;
-      setUiPreviews([]);
+      clearUiPreviews();
     }
-    if (event.type === 'execution_health' && event.state === 'recovering') setUiPreviews([]);
+    if (event.type === 'execution_health' && event.state === 'recovering') clearUiPreviews();
     if (event.type === 'task_terminal') {
-      setUiPreviews([]);
+      clearUiPreviews();
       source.terminalSeen = true;
       source.streamEnded = true;
       setCurrentQuestion(null);
@@ -497,11 +531,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
       case 'task_cancelled': {
         setMessages(settleChatProgress);
-        const partialText = streamRef.current || (event as { type: 'task_cancelled'; partialText?: string }).partialText || '';
+        const partialText = pendingNarration(streamRef.current, event.partialText ?? '', currentTaskEventsRef.current, Boolean(source.inlineUiNarrationCommitted));
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
-        setUiPreviews([]);
+        clearUiPreviews();
         if (partialText.trim()) {
           setMessages(prev => [...prev, {
             id: `msg-${Date.now()}-assistant-cancelled`,
@@ -515,6 +549,15 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
       case 'artifact_recorded': {
         const artifact = artifactSummaryFromEvent(event, sourceTaskId);
+        if (isInlineUiArtifact(artifact)) {
+          const key = inlineUiKey(artifact);
+          source.inlineUiArtifacts ??= new Set();
+          if (!source.inlineUiArtifacts.has(key)) {
+            source.inlineUiArtifacts.add(key);
+            commitInlinePrefix();
+            setMessages(previous => [...previous, { id: `inline-ui:${key}`, role: 'ui_card', content: '', uiCard: { artifact } }]);
+          }
+        }
         setResult(prev => {
           if (!prev) return prev;
           return {
@@ -533,7 +576,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         const recordedArtifacts = currentTaskEventsRef.current
           .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
           .map((recordedEvent) => artifactSummaryFromEvent(recordedEvent, sourceTaskId));
-        const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, recordedArtifacts), streamRef.current, currentTaskEventsRef.current);
+        const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, recordedArtifacts), streamRef.current, currentTaskEventsRef.current, source.inlineUiNarrationCommitted);
         const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
             && (e as { input: Record<string, unknown> }).input?.file_path)
@@ -545,7 +588,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           streamRef.current = '';
           cancelStreamingFlush();
           setStreamingText('');
-          setUiPreviews([]);
+          clearUiPreviews();
           if (finalContent) {
             source.resultSummaryInHistory = finalContent;
             setMessages(prev => [...prev, {
@@ -560,12 +603,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
         } else {
           // Desktop tasks: artifacts is [], but still set result for generatedFiles extraction
-          const finalText = streamRef.current || r.summary;
+          const finalText = streamRef.current || resultWithArtifacts.summary;
           // Clear streaming FIRST to prevent one-frame duplicate display
           streamRef.current = '';
           cancelStreamingFlush();
           setStreamingText('');
-          setUiPreviews([]);
+          clearUiPreviews();
           setResult(resultWithArtifacts);
           if (finalText.trim()) {
             source.resultSummaryInHistory = finalText;
@@ -721,7 +764,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
-        setUiPreviews([]);
+        clearUiPreviews();
         setMessages(prev => {
           let lastUserMessageIndex = -1;
           for (let index = prev.length - 1; index >= 0; index -= 1) {
@@ -751,7 +794,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         break;
       }
     }
-  }, [taskId, t, acceptsSource]);
+  }, [taskId, t, acceptsSource, clearUiPreviews]);
 
   const retainObserver = useCallback((source: DisplaySource, unsubscribe: () => void) => {
     let released = false;
@@ -792,7 +835,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       streamRef.current = '';
       cancelStreamingFlush();
       setStreamingText('');
-      setUiPreviews([]);
+      clearUiPreviews();
       resultRef.current = null;
       setResult(null);
       setCurrentQuestion(null);
@@ -853,6 +896,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             setCurrentQuestion(pendingTaskQuestion(snapshot));
           }
         } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
+          source.uiPreviewClosed = true;
+          clearUiPreviews();
           source.terminalSeen = true;
           setStatus(snapshot.status === 'cancelled' ? 'idle' : snapshot.status);
           setCurrentQuestion(null);
@@ -1006,6 +1051,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
       const replayArtifacts: ArtifactSummary[] = [];
+      const inlineKeys = new Set<string>();
+      let committedNarration = false;
       for (const ev of snapshot.events) {
         if(ev.type==='needs_user'||ev.type==='question_resolved'){
           if(accumulated){msgs.push({id:`${snapshot.taskId}:before-question:${msgs.length}`,role:'assistant',content:accumulated});accumulated='';}
@@ -1018,7 +1065,18 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           continue;
         }
         if (ev.type === 'artifact_recorded') {
-          replayArtifacts.push(artifactSummaryFromEvent(ev, snapshot.taskId));
+          const artifact = artifactSummaryFromEvent(ev, snapshot.taskId);
+          replayArtifacts.push(artifact);
+          const key = inlineUiKey(artifact);
+          if (isInlineUiArtifact(artifact) && !inlineKeys.has(key)) {
+            inlineKeys.add(key);
+            if (accumulated.trim()) {
+              committedNarration = true;
+              msgs.push({ id: `inline-prefix:${snapshot.taskId}:${msgs.length}`, role: 'assistant', content: accumulated });
+              accumulated = '';
+            }
+            msgs.push({ id: `inline-ui:${key}`, role: 'ui_card', content: '', uiCard: { artifact } });
+          }
           continue;
         }
         if (ev.type === 'progress_plan_reported') {
@@ -1087,7 +1145,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           accumulated += (ev as { delta: string }).delta;
           lastProgress = null;
         } else if (ev.type === 'task_cancelled') {
-          const partialText = accumulated || (ev as { partialText?: string }).partialText || '';
+          const partialText = pendingNarration(accumulated, ev.partialText ?? '', snapshot.events, committedNarration);
           if (partialText.trim()) {
             msgs.push({
               id: `msg-assistant-cancelled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1127,9 +1185,9 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         } else if (ev.type === 'result') {
           if (lastProgress?.stage !== 'completed' && lastProgress?.stage !== 'failed') lastProgress = null;
           const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.taskId);
-          const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, replayArtifacts), accumulated, snapshot.events);
-          const assistantContent = accumulated || r.summary;
-          if (accumulated || r.summary) {
+          const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, replayArtifacts), accumulated, snapshot.events, committedNarration);
+          const assistantContent = accumulated || resultWithArtifacts.summary;
+          if (assistantContent) {
             msgs.push({
               id: `msg-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
@@ -1263,7 +1321,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
-    setUiPreviews([]);
+    clearUiPreviews();
     setResult(null);
     setMessages([]);
     olderHistoryRef.current = { remaining: [], loading: false };
@@ -1345,7 +1403,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
               allEventsRef.current.push(...replayEvents);
               if (tid === allTaskIds[allTaskIds.length - 1]) {
                 lastSnapshot = snapshot;
-                currentTaskEventsRef.current = replayEvents;
+                currentTaskEventsRef.current = snapshot.events.filter(event => event.type !== 'ui_preview');
               }
 
               // Keep result separate only for a live latest task. Completed tasks are rendered as
@@ -1397,6 +1455,10 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
             executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
             terminalSeen: lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: false };
+          const artifacts = (lastSnapshot?.events ?? []).flatMap(event => event.type === 'artifact_recorded'
+            ? [artifactSummaryFromEvent(event, lastTaskIdForSub!)] : []).filter(isInlineUiArtifact);
+          loadedSource.inlineUiArtifacts = new Set(artifacts.map(inlineUiKey));
+          loadedSource.inlineUiNarrationCommitted = artifacts.length > 0 && allMessages.some(message => message.id.startsWith(`inline-prefix:${lastTaskIdForSub}:`));
         }
         if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
           // Guard: if effect was cleaned up during async gap (StrictMode), don't subscribe
@@ -1532,7 +1594,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setStatus('running');
     cancelStreamingFlush();
     setStreamingText('');
-    setUiPreviews([]);
+    clearUiPreviews();
     streamRef.current = '';
     currentTaskEventsRef.current = [];
     setResult(null);
@@ -1685,11 +1747,19 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   };
 
   const clearCancelledTaskPresentation = () => {
+    const source = displaySourceRef.current;
+    if (source) source.uiPreviewClosed = true;
+    const pending = streamRef.current;
+    if (source && acceptsSource(source) && pending.trim()
+      && (source.inlineUiNarrationCommitted || source.inlineUiArtifacts?.size || source.inlineUiPreviewKeys?.size)) {
+      source.inlineUiNarrationCommitted = true;
+      setMessages(previous => [...previous, { id: `inline-cancel:${source.sourceTaskId}:${source.eventCount}`, role: 'assistant', content: pending }]);
+    }
     setStatus('idle');
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
-    setUiPreviews([]);
+    clearUiPreviews();
   };
 
   const handleCancel = async () => {
