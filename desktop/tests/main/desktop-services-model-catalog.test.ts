@@ -19,7 +19,14 @@ describe('desktop services model catalog', () => {
 
   afterEach(() => {
     try {
-      rmSync(rootDir, { recursive: true, force: true });
+      try {
+        rmSync(rootDir, { recursive: true, force: true, maxRetries: 3 });
+      } catch (error) {
+        // createDesktopServices exposes no close for the artifact-workspace sqlite handle, and
+        // Windows refuses to unlink an open file (EBUSY). The dir is a unique mkdtemp dir, so a
+        // leftover on win32 cannot leak into another test. Other platforms must still clean up.
+        if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+      }
     } finally {
       if (previousConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR;
       else process.env.XIAOK_CONFIG_DIR = previousConfigDir;
