@@ -119,11 +119,20 @@ jobs:
         run: bash .github/scripts/retry.sh npm ci
 
       - name: Install desktop dependencies
-        # --ignore-scripts skips the better-sqlite3/electron native postinstall,
-        # which is unnecessary for these unit tests + renderer build and whose
-        # bash `$(...)` step is fragile under npm's cmd.exe script shell on Windows.
+        # Keep native rebuild lifecycle scripts disabled. Real Electron imports
+        # need the separate locked installer below, even in ordinary Node tests.
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
+      - name: Compile the real main graph for the memory close regression
+        working-directory: desktop
+        run: node node_modules/typescript/bin/tsc -p tsconfig.electron.json
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Run cross-platform path tests
         run: >
@@ -203,6 +212,10 @@ jobs:
       - name: Install desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
 
       - name: Build nodejieba native binding for packaged segmentation (#150 M6)
         # npm ci --ignore-scripts skips nodejieba's node-pre-gyp install, so the
