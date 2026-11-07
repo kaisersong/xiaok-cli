@@ -1,0 +1,36 @@
+import { z } from 'zod';
+export const MAIL_PROVIDER_SCHEMA=z.enum(['qq','netease163','gmail','outlook','imap']);
+export type MailProvider=z.infer<typeof MAIL_PROVIDER_SCHEMA>;
+export const MAIL_ERROR_CODES=['mail_user_only','mail_secure_storage_unavailable','mail_store_unavailable','mail_auth_failed','mail_network_error','mail_timeout','mail_invalid_input','mail_stale_account','mail_account_not_found','mail_account_changed','mail_assistant_access_denied','mail_message_changed','mail_message_not_found','mail_authorization_cancelled','mail_authorization_failed','mail_authorization_busy','mail_needs_reconnect','mail_read_limit','mail_send_denied','mail_send_unknown','mail_send_conflict','mail_send_reauthorize','mail_send_rejected','mail_send_limit'] as const;
+export const MAIL_ERROR_SCHEMA=z.enum(MAIL_ERROR_CODES);
+export type MailErrorCode=z.infer<typeof MAIL_ERROR_SCHEMA>;
+const id=z.string().regex(/^[a-f0-9]{32}$/), revision=z.number().int().nonnegative();
+const host=z.string().min(1).max(253).regex(/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?|\[[a-fA-F0-9:]+\])$/);
+const email=z.string().trim().email().max(254),secret=z.string().min(1).max(4096);
+export const MAIL_ACCOUNT_SCHEMA=z.object({id,provider:MAIL_PROVIDER_SCHEMA,email,host,port:z.number().int().min(1).max(65535),allowSend:z.boolean(),smtpHost:host.optional(),smtpPort:z.number().int().min(1).max(65535).optional(),revision:revision.min(1),lastVerifiedAt:z.number().finite().optional(),status:z.enum(['saved','connected','needs_reconnect','error']),errorCode:MAIL_ERROR_SCHEMA.optional()}).strict();
+export type MailAccountDto=z.infer<typeof MAIL_ACCOUNT_SCHEMA>;
+export const MAIL_CONNECT_SCHEMA=z.object({provider:z.enum(['qq','netease163','imap']),email,password:secret,host:host.optional(),port:z.number().int().min(1).max(65535).optional(),allowSend:z.boolean(),smtpHost:host.optional(),smtpPort:z.number().int().min(1).max(65535).optional(),expectedRevision:revision}).strict();
+export type MailConnectInput=z.infer<typeof MAIL_CONNECT_SCHEMA>;
+export const MAIL_ACCOUNT_REQUEST_SCHEMA=z.object({id,expectedRevision:revision.min(1)}).strict();
+export const MAIL_OAUTH_INPUT_SCHEMA=z.object({provider:z.enum(['gmail','outlook']),clientId:z.string().trim().min(3).max(512).regex(/^[A-Za-z0-9._-]+$/),clientSecret:secret.optional(),allowSend:z.boolean(),expectedRevision:revision,accountId:id.optional()}).strict();
+export type MailOAuthInput=z.infer<typeof MAIL_OAUTH_INPUT_SCHEMA>;
+export const MAIL_OAUTH_STATE_SCHEMA=z.object({phase:z.enum(['idle','waiting','exchanging','connected','failed','cancelled','timed_out']),operationId:z.string().uuid().optional(),errorCode:MAIL_ERROR_SCHEMA.optional()}).strict();
+export type MailOAuthState=z.infer<typeof MAIL_OAUTH_STATE_SCHEMA>;
+export const MAIL_SEARCH_SCHEMA=z.object({accountId:id,since:z.string().datetime({offset:true}).optional(),limit:z.number().int().min(1).max(50).optional(),cursor:z.string().max(2048).optional()}).strict();
+export type MailSearchInput=z.infer<typeof MAIL_SEARCH_SCHEMA>;
+export const MAIL_READ_SCHEMA=z.object({accountId:id,messageId:z.string().min(1).max(1024)}).strict();
+export type MailReadInput=z.infer<typeof MAIL_READ_SCHEMA>;
+export const MAIL_MESSAGE_SCHEMA=z.object({id:z.string().min(1).max(1024),subject:z.string().max(1000),from:z.string().max(1000),receivedAt:z.string().max(64),unread:z.boolean(),preview:z.string().max(2000).optional()}).strict();
+export type MailMessageDto=z.infer<typeof MAIL_MESSAGE_SCHEMA>;
+export const MAIL_SEARCH_RESULT_SCHEMA=z.object({messages:z.array(MAIL_MESSAGE_SCHEMA).max(50),hasMore:z.boolean(),cursor:z.string().max(2048).optional(),coverage:z.enum(['complete','partial'])}).strict();
+export type MailSearchResult=z.infer<typeof MAIL_SEARCH_RESULT_SCHEMA>;
+export const MAIL_READ_RESULT_SCHEMA=MAIL_MESSAGE_SCHEMA.extend({body:z.string().max(12000),truncated:z.boolean()}).strict();
+export type MailReadResult=z.infer<typeof MAIL_READ_RESULT_SCHEMA>;
+export type MailRequestSource='user'|'agent'|'scheduler';
+
+export const MAIL_ACCESS_SCHEMA=MAIL_ACCOUNT_REQUEST_SCHEMA.extend({allowSend:z.boolean(),smtpHost:host.optional(),smtpPort:z.number().int().min(1).max(65535).optional()}).strict();
+
+export const MAIL_SEND_SCHEMA=z.object({accountId:id,requestId:z.string().uuid(),to:z.array(email).min(1).max(20),subject:z.string().min(1).max(200).regex(/^[^\r\n]+$/),text:z.string().min(1).max(30000)}).strict();
+export type MailSendInput=z.infer<typeof MAIL_SEND_SCHEMA>;
+export const MAIL_SEND_RESULT_SCHEMA=z.object({requestId:z.string().uuid(),status:z.literal('accepted'),messageId:z.string().max(1000).optional(),accepted:z.array(email).max(20),rejected:z.array(email).max(20)}).strict();
+export type MailSendResult=z.infer<typeof MAIL_SEND_RESULT_SCHEMA>;

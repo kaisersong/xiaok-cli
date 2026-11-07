@@ -64,6 +64,8 @@ vi.mock('../../renderer/src/shared/desktop', () => ({
 
 import { CollaborationRoomView } from '../../renderer/src/components/collaboration/CollaborationRoomView';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
+import { createCollaborationRoomService } from '../../electron/collaboration-room-service';
+import { ROOM_SEMANTIC_OUTPUT_SCHEMAS } from '../../shared/collaboration-room-ipc-contract';
 
 afterEach(() => {
   cleanup();
@@ -454,6 +456,28 @@ describe('CollaborationRoomView states', () => {
       expect(mockProxyGetText).toHaveBeenCalledWith('/projects/project-1/artifacts/report.html');
     });
     expect(await screen.findByTitle('report.html')).toBeDefined();
+  });
+
+  it('opens a migrated Markdown artifact using the production composed room snapshot', async () => {
+    const service = createCollaborationRoomService({
+      brokerClient: { getRoomSnapshot: async () => ({ ...activeSnapshot, projects: ['project-1'], messages: [{
+        messageId: 'migrated-artifact', kind: 'project_event', sender: { kind: 'system', service: 'kswarm' },
+        sourceRef: { projectId: 'project-1', taskId: 'task-1', eventType: 'artifact.registered',
+          artifactId: 'task-1:report.md', artifact: { filename: 'report.md', mimeType: null } },
+      }] }) } as never,
+      kswarmClient: { request: async path => ({ ok: true, json: async () => path === '/agents' ? { agents: [] }
+        : { project: { id: 'project-1', name: 'Fixture' }, tasks: [{ id: 'task-1', result: {
+          artifacts: [{ filename: 'run-fixture/report.md', mimeType: 'text/markdown' }],
+        } }] } }) },
+    });
+    mockGetRoom.mockResolvedValue(ROOM_SEMANTIC_OUTPUT_SCHEMAS.getRoom.parse(await service.getRoom('room-1')));
+    mockProxyGetText.mockImplementation(async path => path === '/projects/project-1/artifacts/run-fixture/report.md'
+      ? '# Migrated artifact proof' : null);
+    renderView();
+    fireEvent.click(await screen.findByTestId('room-artifact-run-fixture/report.md'));
+    expect(await screen.findByRole('heading', { name: 'Migrated artifact proof' })).toBeVisible();
+    expect(mockProxyGetText).toHaveBeenCalledWith('/projects/project-1/artifacts/run-fixture/report.md');
+    expect(screen.queryByText(/fetch failed/)).toBeNull();
   });
 
   it('keeps historical artifact cards with nullable metadata and previews by filename', async () => {

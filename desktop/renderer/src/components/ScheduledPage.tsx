@@ -1,3 +1,4 @@
+import { getAssistantWatchPreset } from '../lib/assistant-watch-presets';
 import type {ScheduledTriggerDto,ScheduledUpdateDto} from '../../../shared/scheduled-timed-action-ipc-contract';
 import {scheduledErrorMessage,reportScheduledReadFailure,SCHEDULED_READ_FAILURE_EVENT} from '../lib/scheduled-timed-action-error';
 import { loopManagementErrorMessage, loopManagementFailureKind } from '../lib/loop-management-errors';
@@ -444,18 +445,20 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   useEffect(() => {
     if (searchParams.get('create') !== '1') return;
     if (modalMode !== null) return;
-    const presetName = searchParams.get('name') ?? '';
+    const watch = getAssistantWatchPreset(searchParams.get('assistantWatch'), t.assistant.watches);
+    const presetName = watch?.name ?? searchParams.get('name') ?? '';
     setFormName(presetName);
-    setFormDesc('');
-    setFormPrompt('');
-    setFormFrequency('daily');
-    setFormScheduleConfig({ hour: 9, minute: 0 });
+    setFormDesc(watch?.description ?? '');
+    setFormPrompt(watch?.prompt ?? '');
+    setFormFrequency(watch?.frequency ?? 'daily');
+    setFormScheduleConfig(watch?.scheduleConfig ?? { hour: 9, minute: 0 });
     setEditingTask(null);
     setModalMode('create');
     // Strip the create flag from URL so refresh doesn't re-open
     const next = new URLSearchParams(searchParams);
     next.delete('create');
     next.delete('name');
+    next.delete('assistantWatch');
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.toString()]);

@@ -27,3 +27,16 @@ test('actual Git changed discovery includes both sides of a rename',()=>{const r
 test('valid JSX remains parseable while forbidden host imports are rejected',()=>{const root=fixture();put(root,'desktop/renderer/src/app.jsx',"import fs from 'node:fs'; export const UI=()=> <div>ok</div>;");const r=checkArchitecture({root,policy});assert.equal(r.newDiagnostics.length,1);});
 test('a missing architecture source root fails instead of silently shrinking scope',()=>{const root=fixture();put(root,'src/active.ts','export const active=true;');rmSync(join(root,'desktop/renderer/src'),{recursive:true});assert.throws(()=>checkArchitecture({root,policy}),/missing architecture source root/i);});
 test('lint configuration bytes survive a real Git CRLF checkout',()=>{const root=fixture();const git=(...args)=>execFileSync('git',['-C',root,...args],{stdio:'pipe'});const config=readFileSync(new URL('../../.oxlintrc.json',import.meta.url));put(root,'.oxlintrc.json',config);put(root,'.gitattributes',readFileSync(new URL('../../.gitattributes',import.meta.url)));git('init');git('config','user.name','Fixture');git('config','user.email','fixture@example.invalid');git('add','.');git('commit','-m','config');const checkout=join(fixture(),'checkout');git('-c','core.autocrlf=true','clone','--quiet',root,checkout);assert.deepEqual(readFileSync(join(checkout,'.oxlintrc.json')),config);});
+
+test('A2UI pure protocol is shared while transitive filesystem/Main imports remain forbidden',()=>{
+  const root=fixture();
+  put(root,'src/a2ui/index.ts',"export const decode=()=>({ok:true});");
+  put(root,'desktop/shared/a2ui.ts',"export {decode} from '../../src/a2ui/index.js';");
+  put(root,'desktop/renderer/src/view.ts',"import {decode} from '../../shared/a2ui.js'; decode();");
+  assert.equal(checkArchitecture({root,policy}).newDiagnostics.length,0);
+  put(root,'src/a2ui/index.ts',"import fs from 'node:fs'; export const decode=()=>fs.readFileSync('x');");
+  assert.ok(checkArchitecture({root,policy}).newDiagnostics.some(d=>d.rule==='host-through-shared'));
+  put(root,'desktop/electron/owner.ts','export const owner=1;');
+  put(root,'src/a2ui/index.ts',"import {owner} from '../../desktop/electron/owner.js'; export const decode=()=>owner;");
+  assert.ok(checkArchitecture({root,policy}).newDiagnostics.some(d=>d.rule==='host-through-shared'));
+});

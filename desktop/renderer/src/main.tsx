@@ -1,3 +1,4 @@
+import {LegacyMemoryCredentialMigration} from './components/security/LegacyMemoryCredentialMigration';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { HashRouter as Router } from 'react-router-dom';
@@ -27,6 +28,7 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <LocaleProvider>
+            <LegacyMemoryCredentialMigration/>
             <ThemeProvider>
               <AppearanceProvider>
                 <ThreadListProvider>

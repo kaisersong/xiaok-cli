@@ -1,5 +1,20 @@
+import {MemoryCredentialSettingsStore} from './memory-credential-settings.js';
+import {createCredentialInputOwner} from './credential-input-consumers.js';
+import {registerCredentialInputIpc} from './credential-input-ipc.js';
+import {readProtectedJson} from '../../src/utils/protected-json-async.js';
+import { createDesktopAssistantInbox } from './desktop-assistant-inbox.js';
+import { registerAssistantInboxIpc } from './assistant-inbox-ipc.js';
+import { MailAccountStore } from './mail-account-store.js';
+import { MailConnectorService } from './mail-connector-service.js';
+import { registerMailConnectorIpc } from './mail-connector-typed-ipc.js';
+import { EnterpriseCliConnectorService } from './enterprise-cli-service.js';
+import { registerEnterpriseCliIpc } from './enterprise-cli-typed-ipc.js';
+import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-cli-runtime.js';
+import { YzjCliAuthService } from './yzj-cli-auth-service.js';
+import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
+import { configureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
 import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
@@ -29,10 +44,12 @@ import {registerLoopPublicationIpc,createLoopPublicationIpcAuthorizer} from './l
 import {createLoopPublicationShutdownOwner} from './loop-publication-shutdown.js';
 import {createShutdownAwareTimedActionService} from './timed-action-service-lifetime.js';
 import { scheduledRunPresentation } from './scheduled-run-presentation.js';
+import {createScheduledTaskDeliveryReconciler} from './scheduled-task-delivery.js';
+import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
-import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
+import { app, safeStorage, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -685,6 +702,8 @@ function createInitialWindow(): Promise<BrowserWindow> {
 
 async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
+  configureBundledYzjCli();
+  configureInstalledEnterpriseClis();
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
   const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
@@ -709,6 +728,21 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
+  const assistantCrypto: import('./mail-account-store.js').MailSafeStorage = { isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(), encryptString: value => safeStorage.encryptString(value), decryptString: value => safeStorage.decryptString(value), ...(process.platform === 'linux' ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}) };
+  let assistantInbox: ReturnType<typeof createDesktopAssistantInbox> | undefined;
+  const mailConnectors = new MailConnectorService({store:new MailAccountStore(app.getPath('userData'),assistantCrypto),openExternal:url=>shell.openExternal(url)});
+  registerMailConnectorIpc(shutdownAwareIpc, mailConnectors, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('mail-connectors', async () => { mailConnectors.dispose(); });
+  const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
+  const enterpriseClis = {
+    dingtalk: new EnterpriseCliConnectorService('dingtalk', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'dingtalk-connection.json') }),
+    feishu: new EnterpriseCliConnectorService('feishu', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'feishu-connection.json') }),
+    wecom: new EnterpriseCliConnectorService('wecom', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'wecom-connection.json') }),
+  };
+  registerEnterpriseCliIpc(shutdownAwareIpc, enterpriseClis, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('enterprise-cli-connectors', async () => { await Promise.all(Object.values(enterpriseClis).map(service => service.dispose())); });
+  registerLifetimeDisposerStep('yzj-cli-auth', () => yzjCliAuth.dispose());
+  registerYzjCliAuthIpc(shutdownAwareIpc, yzjCliAuth, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
@@ -804,6 +838,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
+  await loadConfig();await readProtectedJson(join(dataRoot,'connectors.json'));
+  let credentialInputs:ReturnType<typeof createCredentialInputOwner>|undefined;
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
   const computerUseAppIdentity = process.platform === 'win32'
@@ -814,6 +850,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!desktopShutdownGate.isOpen) return window;
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
+    mailConnectors,
+    assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
+    onAssistantTaskEvent: input => {assistantInbox?.service.onTask(input.snapshot,'scheduler');if(input.event.type==='task_terminal'&&input.snapshot.prompt.startsWith('[xiaok-assistant-watch:'))void assistantInbox?.service.refresh('scheduler').catch(()=>{});},
     harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
@@ -1358,11 +1398,31 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         updatedAt: source.updatedAt,
       })),
   });
+  assistantInbox = createDesktopAssistantInbox({
+    dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
+    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
+    search:(query,signal)=>services.searchForAssistant(query,signal),
+    launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
+    canLaunch:()=>services.assertAssistantExecutor(),
+    reminders:{create:(item,at)=>timedActionService.createReminder(item.title,at,undefined,{requestSource:'user',ownerKind:'user',ownerId:'desktop-user'}).reminderId,cancel:id=>{timedActionService.cancelReminder(id,{requestSource:'user'});}},
+    changed:()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('desktop:assistantInbox:changed');},
+    internal:()=>assistantContextReader.listMorningSuggestions(),
+    facts:()=>readRecentTaskSnapshots(dataRoot,2000).map(snapshot=>({...snapshot,status:snapshot.executionProtected?'unknown':snapshot.status})),
+  });
+  services.bindAssistantTools(assistantInbox.tools,'user');
+  credentialInputs=createCredentialInputOwner({dataRoot,mail:mailConnectors,refreshConnectors:()=>services.refreshConnectorCredentials(),changed:()=>{mainWindow?.webContents.send('desktop:credentialInput:changed');mainWindow?.webContents.send('desktop:assistantInbox:changed');}});
+  registerCredentialInputIpc(shutdownAwareIpc,credentialInputs,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}),new MemoryCredentialSettingsStore(dataRoot));
+  registerLifetimeDisposerStep('credential-inputs',async()=>{credentialInputs?.dispose();});
+  registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
+  const inboxOwner=assistantInbox;
+  registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});
+  desktopDurableStores.push({name:'assistant-inbox',async close(){inboxOwner.close();}});
   const assistantRuntime = createAssistantRuntime({
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
     collect: async input => {
+      if(input.kind==='morning')await assistantInbox!.service.ensureToday('scheduler');
       const snapshot = await assistantSnapshotReader.collect(input);
       if (input.kind === 'evening') return snapshot;
       return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
@@ -1745,7 +1805,36 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
     captureAdmission(){const original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen)throw Error('loop_timed_shutdown');};},
   });
+  const publishScheduledTaskEvent = (event: ScheduledTaskDueEvent): boolean => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed() || window.webContents.isLoadingMainFrame()) return false;
+    try { window.webContents.send('desktop:scheduledTaskDue', event); }
+    catch (error) { debugMain('scheduled:send-failed', String(error)); return false; }
+    if (event.completed || !event.success) {
+      const title = event.title || event.taskId;
+      void Promise.resolve(createElectronDesktopNotificationPort().show({
+        title: event.completed && event.success ? `定时任务已完成：${title}` : `定时任务失败：${title}`,
+        body: event.success ? '结果已生成，点击查看。' : (event.error || '点击查看运行详情。'),
+        silent: false,
+        onClick: () => {
+          const current = mainWindow;
+          if (!current || current.isDestroyed()) return;
+          if (current.isMinimized()) current.restore();
+          current.show(); current.focus();
+          current.webContents.send('desktop:scheduledTaskFocus', {taskId: event.taskId, runtimeTaskId: event.runtimeTaskId});
+        },
+      })).catch(error => debugMain('scheduled:notification-failed', String(error)));
+    }
+    return true;
+  };
+  const reconcileScheduledTasks = createScheduledTaskDeliveryReconciler({
+    store: timedActionStore,
+    readSnapshot: taskId => services.readScheduledTaskSnapshot(taskId),
+    publish: publishScheduledTaskEvent,
+    onError: error => debugMain('scheduled:completion-reconcile-failed', String(error)),
+  });
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
+    reconcileScheduledTasks,
     loopCompletion:loopTimedCompletion,
     acquireWriter: acquireAutomationWriter,
     executors: createDesktopTimedActionExecutors({
@@ -1765,49 +1854,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       action,
       timedActionRunId,
     }),
-    onRunComplete: (event) => {
-      if (event.action.executor.kind !== 'agent_task' || event.status === 'publication_pending') return;
-      const window = mainWindow;
-      if (!window || window.isDestroyed()) return;
-      const success = event.status === 'success';
-      const title = event.action.title || event.action.id;
-      window.webContents.send('desktop:scheduledTaskDue', {
-        taskId: event.action.id,
-        runtimeTaskId: event.runtimeTaskId,
-        ...scheduledRunPresentation({ status: event.status, runtimeTaskId: event.runtimeTaskId }),
-        success,
-        title,
-        lastRunAt: event.action.lastDueAt ?? event.finishedAt,
-        nextRunAt: event.action.nextDueAt,
-        error: event.error,
+    onRunComplete: event => {
+      if (event.action.executor.kind !== 'agent_task' || event.action.executor.roomTarget || event.status === 'publication_pending') return;
+      publishScheduledTaskEvent({
+        taskId: event.action.id, runId: event.runId, runtimeTaskId: event.runtimeTaskId,
+        ...scheduledRunPresentation({status: event.status, runtimeTaskId: event.runtimeTaskId}),
+        success: event.status === 'success', title: event.action.title || event.action.id,
+        lastRunAt: event.action.lastDueAt ?? event.finishedAt, nextRunAt: event.action.nextDueAt, error: event.error,
       });
-      try {
-        const notificationPort = createElectronDesktopNotificationPort();
-        const notificationTitle = success
-          ? `定时任务已派发：${title}`
-          : `定时任务失败：${title}`;
-        const notificationBody = success
-          ? '任务已派发，实际完成后会更新运行结果。'
-          : (event.error ? `失败原因：${event.error}` : '点击查看失败详情。');
-        void notificationPort.show({
-          title: notificationTitle,
-          body: notificationBody,
-          silent: false,
-          onClick: () => {
-            try {
-              const window = mainWindow;
-              if (!window || window.isDestroyed()) return;
-              if (window.isMinimized()) window.restore();
-              window.show();
-              window.focus();
-              window.webContents.send('desktop:scheduledTaskFocus', {
-                taskId: event.action.id,
-                runtimeTaskId: event.runtimeTaskId,
-              });
-            } catch { /* focus is best-effort */ }
-          },
-        });
-      } catch { /* notification is best-effort */ }
     },
   });
   desktopIngressOwners.push({
@@ -1885,6 +1939,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   scheduledIpc.handle('desktop:getTimedActions', () => {
     return timedActionService.getActions();
   });
+  scheduledIpc.handle('desktop:getRecentScheduledDeliveries', () => timedActionService.getRecentScheduledDeliveries());
   scheduledIpc.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
   });

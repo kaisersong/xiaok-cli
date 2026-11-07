@@ -11,3 +11,19 @@ it('keeps an edit draft and same DOM after unknown update without local rewrite'
 it('treats a valid null toggle as known no change rather than applying local status or claiming missing',async()=>{mocks.list.mockResolvedValue([ownRow]);mocks.toggle.mockResolvedValue(null);page();await screen.findByText(ownRow.name);const before=localStorage.getItem('xiaok:scheduled-tasks');fireEvent.click(screen.getByRole('button',{name:'暂停'}));await screen.findByText('本次未更改计划或提醒，请刷新核对当前状态。');expect(screen.getByRole('button',{name:'暂停'})).toBeTruthy();expect(localStorage.getItem('xiaok:scheduled-tasks')).toBe(before);expect(mocks.toggle).toHaveBeenCalledTimes(1);});
 
 it('keeps the same create DOM and draft when read-only refresh supplies the first successful records after a read failure',async()=>{mocks.list.mockRejectedValueOnce(Error('scheduled_projection_unavailable'));page();await screen.findByText('计划与提醒数据暂时无法读取，请刷新重试。');fireEvent.click(screen.getByRole('button',{name:'新建任务'}));const input=screen.getByRole('textbox',{name:'每日简报'});fireEvent.change(input,{target:{value:'Own late read draft'}});let resolve!:(value:unknown[])=>void;mocks.list.mockImplementation(()=>new Promise<unknown[]>(done=>{resolve=done;}));fireEvent.click(screen.getByRole('button',{name:'刷新计划与提醒'}));await act(async()=>resolve([ownRow]));await screen.findByText(ownRow.name);expect(input.isConnected).toBe(true);expect(screen.getByRole('textbox',{name:'每日简报'})).toBe(input);expect((input as HTMLInputElement).value).toBe('Own late read draft');expect(mocks.create).not.toHaveBeenCalled();});
+
+it('prefills an assistant watch in the original editable form and saves only on user save', async () => {
+  render(<LocaleProvider><MemoryRouter initialEntries={['/automations/schedules?create=1&assistantWatch=yzj_messages']}><ScheduledPage embedded /></MemoryRouter></LocaleProvider>);
+  const name = await screen.findByDisplayValue('云之家重点消息');
+  const instructions = screen.getByRole('textbox', { name: '查看今天的日历会议并汇总未读邮件，标记紧急事项。' });
+  expect((instructions as HTMLTextAreaElement).value).toContain('yzj-cli');
+  expect(screen.getAllByRole('combobox')[0]).toHaveValue('hourly'); expect(mocks.create).not.toHaveBeenCalled();
+  fireEvent.change(name, { target: { value: '我关注的消息' } }); fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+  expect(mocks.create.mock.calls[0][0]).toMatchObject({ name: '我关注的消息', trigger: { kind: 'interval', intervalMinutes: 60 } });
+});
+it('does not accept an unknown watch or arbitrary URL instruction as a template', async () => {
+  render(<LocaleProvider><MemoryRouter initialEntries={['/automations/schedules?create=1&assistantWatch=unknown&prompt=send-all-messages']}><ScheduledPage embedded /></MemoryRouter></LocaleProvider>);
+  expect(await screen.findByRole('textbox', { name: '每日简报' })).toHaveValue('');
+  expect(screen.getByRole('textbox', { name: '查看今天的日历会议并汇总未读邮件，标记紧急事项。' })).toHaveValue(''); expect(mocks.create).not.toHaveBeenCalled();
+});

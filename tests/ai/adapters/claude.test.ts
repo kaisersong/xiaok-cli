@@ -493,3 +493,21 @@ describe('Claude memory output budget', () => {
     expect(client.messages.stream).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 4096 }), expect.anything());
   });
 });
+
+
+describe('Claude generative UI input streaming',()=>{
+ it.each(['render_ui','bash'])('previews only explicitly named render_ui (tool=%s)',async name=>{
+  const {ClaudeAdapter}=await import('../../../src/ai/adapters/claude.js');
+  const Anthropic=(await import('@anthropic-ai/sdk')).default;
+  const instance=new Anthropic({apiKey:'fixture'});
+  vi.spyOn(instance.messages,'stream').mockReturnValue({async *[Symbol.asyncIterator](){
+   yield {type:'content_block_start',index:0,content_block:{type:'tool_use',id:'ui-call',name}};
+   yield {type:'content_block_delta',index:0,delta:{type:'input_json_delta',partial_json:'{"title":"Live","sections":[{"kind":"text","content":"Hello"}]}'}};
+   yield {type:'content_block_stop',index:0};yield {type:'message_stop'};
+  }} as never);
+  const adapter=new ClaudeAdapter('fixture','claude-opus-4-6');(adapter as unknown as {client:typeof instance}).client=instance;
+  const chunks=[];for await(const chunk of adapter.stream([],[{name:'render_ui',description:'',inputSchema:{type:'object',properties:{}}}],'')) chunks.push(chunk);
+  expect(chunks.filter(c=>c.type==='ui_preview')).toHaveLength(name==='render_ui'?1:0);
+  expect(chunks.filter(c=>c.type==='tool_use')).toHaveLength(1);
+ });
+});

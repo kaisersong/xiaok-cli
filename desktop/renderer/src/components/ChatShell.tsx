@@ -1,8 +1,13 @@
+import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
+import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
+import {pendingTaskQuestion} from '../lib/pending-task-question';
+import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
+import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
 import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { GoalBar } from './GoalBar';
@@ -15,7 +20,8 @@ import { ChatRightSurface } from './ChatRightSurface';
 import { MultiAgentPanel } from './MultiAgentPanel';
 import { useMultiAgentConnection } from '../hooks/useMultiAgentConnection';
 import type { ThreadRecord } from '../api/types';
-import { separateAssistantNarration, projectNarrationSummary } from '../lib/assistant-narration';
+import { separateAssistantNarration, projectNarrationSummary, pendingNarration } from '../lib/assistant-narration';
+import { inlineUiKey, isInlineUiArtifact } from '../lib/inline-ui';
 import { ChatTaskApprovals } from './ChatTaskApprovals';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult, TaskSnapshot } from '../../../shared/task-types';
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
@@ -37,6 +43,7 @@ import {
 const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'a2ui', 'other']);
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
+const HISTORY_PAGE_SIZE = 20;
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
 function settleChatProgress(messages: ChatMessage[]): ChatMessage[] {
@@ -64,9 +71,14 @@ interface GoalAttempt { scope: DisplayScope; requestId?: string }
 interface DisplaySource {
   scope: DisplayScope;
   sourceTaskId: string;
+  lastErrorMessage?: string;
   intentOwner: GoalAttempt | null;
   executionScope?: TaskSnapshot['executionScope'];
   eventCount: number;
+  uiPreviewClosed?: boolean;
+  inlineUiArtifacts?: Set<string>;
+  inlineUiPreviewKeys?: Set<string>;
+  inlineUiNarrationCommitted?: boolean;
   terminalSeen: boolean;
   streamEnded: boolean;
   resultSummaryInHistory?: string;
@@ -216,7 +228,8 @@ function collectGeneratedFilesForTurn(events: DesktopTaskEvent[], texts: string[
   const seen = new Set<string>();
   const files: GeneratedFile[] = [];
   for (const file of collectGeneratedFilesFromEvents(events)) addGeneratedFile(files, seen, file.filePath);
-  for (const file of collectGeneratedFilesFromTexts(texts)) addGeneratedFile(files, seen, file.filePath);
+  const narration = events.flatMap(event => event.type === 'assistant_delta' ? [event.delta] : []).join('');
+  for (const file of collectGeneratedFilesFromTexts([...texts, narration])) addGeneratedFile(files, seen, file.filePath);
   return files;
 }
 
@@ -252,8 +265,17 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell() {
-  const { taskId } = useParams<{ taskId: string }>();
+export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, draftRequest, hideObservationControls }: {
+  threadId?: string;
+  emptyContent?: React.ReactNode;
+  conversationHeader?: React.ReactNode;
+  assistantContent?: React.ReactNode;
+  assistantHasMessages?: boolean;
+  draftRequest?: { id: number; text: string };
+  hideObservationControls?: boolean;
+} = {}) {
+  const { taskId: routeTaskId } = useParams<{ taskId: string }>();
+  const taskId = threadId ?? routeTaskId;
   const renderScope = useMemo<DisplayScope>(() => ({ taskId, attachmentObservers: new Set<() => void>() }), [taskId]);
   const liveRenderScope = useRef<typeof renderScope | null>(renderScope);
   const admissionPending = useRef<typeof renderScope | null>(null);
@@ -271,6 +293,7 @@ export function ChatShell() {
     };
   }, [renderScope]);
   const location = useLocation();
+  const navigate = useNavigate();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
   const [observationDraft, setObservationDraft] = useState<string|null>(null);
@@ -284,12 +307,23 @@ export function ChatShell() {
   const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
     thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const olderHistoryRef = useRef<{ remaining: string[]; loading: boolean }>({ remaining: [], loading: false });
+  const [olderHistory, setOlderHistory] = useState({ remaining: 0, loading: false, error: '' });
   const [streamingText, setStreamingText] = useState('');
+  const [uiPreviews, setUiPreviews] = useState<Array<{ toolUseId: string; sourceTaskId: string; title: string; content: string }>>([]);
+  const clearUiPreviews = useCallback(() => {
+    displaySourceRef.current?.inlineUiPreviewKeys?.clear();
+    setUiPreviews([]);
+    setMessages(previous => previous.filter(message => !message.uiCard?.previewToolUseId));
+  }, []);
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
+  const [interruptedTask, setInterruptedTask] = useState<InterruptedTask | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRevision, setLoadRevision] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
   const [goalNativeMutation, setGoalNativeMutation] = useState<DesktopGoalNativeMutationProjection | null>(null);
   const [goalLoading, setGoalLoading] = useState(false);
@@ -381,22 +415,70 @@ export function ChatShell() {
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
 
+  useEffect(() => {
+    if (draftRequest) setPrompt(draftRequest.text);
+  }, [draftRequest]);
+
   const handleEvent = useCallback((rawEvent: { type: string }, source: DisplaySource) => {
     const event = rawEvent as DesktopTaskEvent;
     if (!acceptsSource(source) || source.streamEnded) return;
     source.eventCount += 1;
     const sourceTaskId = source.sourceTaskId;
     const live = !source.terminalSeen;
+    const commitInlinePrefix = () => {
+      const text = streamRef.current;
+      streamRef.current = '';
+      cancelStreamingFlush();
+      setStreamingText('');
+      if (!text.trim()) return;
+      source.inlineUiNarrationCommitted = true;
+      setMessages(previous => [...previous, { id: `inline-prefix:${sourceTaskId}:${source.eventCount}`, role: 'assistant', content: text }]);
+    };
+    if (event.type === 'ui_preview') {
+      if (!live || source.uiPreviewClosed) return;
+      if (event.preview) {
+        const id = `inline-preview:${JSON.stringify([sourceTaskId, event.toolUseId])}`;
+        source.inlineUiPreviewKeys ??= new Set();
+        if (!source.inlineUiPreviewKeys.has(id)) {
+          source.inlineUiPreviewKeys.add(id);
+          commitInlinePrefix();
+        }
+        setMessages(previous => previous.some(message => message.id === id) ? previous : [...previous,
+          { id, role: 'ui_card', content: '', uiCard: { previewToolUseId: event.toolUseId, sourceTaskId } }]);
+      } else {
+        if (event.toolUseId === 'all') source.inlineUiPreviewKeys?.clear();
+        else source.inlineUiPreviewKeys?.delete(`inline-preview:${JSON.stringify([sourceTaskId, event.toolUseId])}`);
+        setMessages(previous => previous.filter(message => !(message.uiCard?.previewToolUseId
+          && message.uiCard.sourceTaskId === sourceTaskId && (event.toolUseId === 'all' || message.uiCard.previewToolUseId === event.toolUseId))));
+      }
+      setUiPreviews(previous => event.preview
+        ? [...previous.filter(item => item.toolUseId !== event.toolUseId), { toolUseId: event.toolUseId, sourceTaskId, ...event.preview }]
+        : event.toolUseId === 'all' ? [] : previous.filter(item => item.toolUseId !== event.toolUseId));
+      return;
+    }
+    if (event.type === 'result' || event.type === 'task_cancelled' || event.type === 'error') {
+      source.uiPreviewClosed = true;
+      clearUiPreviews();
+    }
+    if (event.type === 'execution_health' && event.state === 'recovering') clearUiPreviews();
     if (event.type === 'task_terminal') {
+      clearUiPreviews();
       source.terminalSeen = true;
       source.streamEnded = true;
       setCurrentQuestion(null);
       setMessages(settleChatProgress);
       setStatus(event.status === 'cancelled' ? 'idle' : event.status);
+      if (event.status === 'failed' && isTaskExecutionInterruption(source.lastErrorMessage)) {
+        const terminalEventCount = source.eventCount;
+        void api.recoverTask(sourceTaskId).then(({snapshot}) => {
+          if (!acceptsSource(source) || source.eventCount !== terminalEventCount) return;
+          setInterruptedTask(readTaskInterruption(snapshot, {taskId: sourceTaskId, threadId: source.scope.taskId ?? ''}));
+        }).catch(() => {}); // A closing app may no longer answer; history restore retries on next open.
+      }
       source.release?.();
       return;
     }
-    if (!live && (event.type === 'progress' || event.type === 'needs_user' || event.type === 'task_started')) return;
+    if (!live && (event.type === 'progress' || event.type === 'needs_user' || event.type === 'question_resolved' || event.type === 'task_started')) return;
 
     const eventTaskKey = sourceTaskId ?? taskId ?? '';
     if (event.type !== 'error' || lastLiveErrorRef.current?.taskKey !== eventTaskKey) {
@@ -449,10 +531,11 @@ export function ChatShell() {
       }
       case 'task_cancelled': {
         setMessages(settleChatProgress);
-        const partialText = streamRef.current || (event as { type: 'task_cancelled'; partialText?: string }).partialText || '';
+        const partialText = pendingNarration(streamRef.current, event.partialText ?? '', currentTaskEventsRef.current, Boolean(source.inlineUiNarrationCommitted));
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
+        clearUiPreviews();
         if (partialText.trim()) {
           setMessages(prev => [...prev, {
             id: `msg-${Date.now()}-assistant-cancelled`,
@@ -466,6 +549,15 @@ export function ChatShell() {
       }
       case 'artifact_recorded': {
         const artifact = artifactSummaryFromEvent(event, sourceTaskId);
+        if (isInlineUiArtifact(artifact)) {
+          const key = inlineUiKey(artifact);
+          source.inlineUiArtifacts ??= new Set();
+          if (!source.inlineUiArtifacts.has(key)) {
+            source.inlineUiArtifacts.add(key);
+            commitInlinePrefix();
+            setMessages(previous => [...previous, { id: `inline-ui:${key}`, role: 'ui_card', content: '', uiCard: { artifact } }]);
+          }
+        }
         setResult(prev => {
           if (!prev) return prev;
           return {
@@ -484,7 +576,7 @@ export function ChatShell() {
         const recordedArtifacts = currentTaskEventsRef.current
           .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
           .map((recordedEvent) => artifactSummaryFromEvent(recordedEvent, sourceTaskId));
-        const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, recordedArtifacts), streamRef.current, currentTaskEventsRef.current);
+        const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, recordedArtifacts), streamRef.current, currentTaskEventsRef.current, source.inlineUiNarrationCommitted);
         const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
             && (e as { input: Record<string, unknown> }).input?.file_path)
@@ -496,6 +588,7 @@ export function ChatShell() {
           streamRef.current = '';
           cancelStreamingFlush();
           setStreamingText('');
+          clearUiPreviews();
           if (finalContent) {
             source.resultSummaryInHistory = finalContent;
             setMessages(prev => [...prev, {
@@ -510,11 +603,12 @@ export function ChatShell() {
           setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
         } else {
           // Desktop tasks: artifacts is [], but still set result for generatedFiles extraction
-          const finalText = streamRef.current || r.summary;
+          const finalText = streamRef.current || resultWithArtifacts.summary;
           // Clear streaming FIRST to prevent one-frame duplicate display
           streamRef.current = '';
           cancelStreamingFlush();
           setStreamingText('');
+          clearUiPreviews();
           setResult(resultWithArtifacts);
           if (finalText.trim()) {
             source.resultSummaryInHistory = finalText;
@@ -639,17 +733,20 @@ export function ChatShell() {
         break;
       }
       case 'question_resolved': {
+        if(event.answerText){const id=`${source.sourceTaskId}:answer:${event.questionId}`;setMessages(previous=>previous.some(m=>m.id===id)?previous:[...previous,{id,role:'user',content:event.answerText!}]);}
         setCurrentQuestion(question => question?.questionId === event.questionId ? null : question);
         setStatus('running');
         break;
       }
       case 'needs_user': {
+        const id=`${source.sourceTaskId}:question:${event.question.questionId}`;setMessages(previous=>previous.some(m=>m.id===id)?previous:[...previous,{id,role:'assistant',content:event.question.prompt}]);
         setCurrentQuestion((event as { type: 'needs_user'; question: NeedsUserQuestion }).question);
         setStatus('waiting_user');
         break;
       }
       case 'error': {
         const msg = (event as { type: 'error'; message: string }).message;
+        source.lastErrorMessage = msg;
         if (lastLiveErrorRef.current?.taskKey === eventTaskKey
           && lastLiveErrorRef.current.rawMessage === msg) {
           break;
@@ -667,6 +764,7 @@ export function ChatShell() {
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
+        clearUiPreviews();
         setMessages(prev => {
           let lastUserMessageIndex = -1;
           for (let index = prev.length - 1; index >= 0; index -= 1) {
@@ -688,7 +786,7 @@ export function ChatShell() {
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : msg === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -696,7 +794,7 @@ export function ChatShell() {
         break;
       }
     }
-  }, [taskId, t, acceptsSource]);
+  }, [taskId, t, acceptsSource, clearUiPreviews]);
 
   const retainObserver = useCallback((source: DisplaySource, unsubscribe: () => void) => {
     let released = false;
@@ -717,6 +815,7 @@ export function ChatShell() {
     const previousRelease = unsubRef.current;
     const previousSource = displaySourceRef.current;
     displaySourceRef.current = source;
+    setInterruptedTask(previous => previous?.taskId === source.sourceTaskId ? previous : null);
     unsubRef.current = release;
     if (clearPresentation) {
       const partial = streamRef.current;
@@ -736,6 +835,7 @@ export function ChatShell() {
       streamRef.current = '';
       cancelStreamingFlush();
       setStreamingText('');
+      clearUiPreviews();
       resultRef.current = null;
       setResult(null);
       setCurrentQuestion(null);
@@ -793,13 +893,15 @@ export function ChatShell() {
         if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
           setStatus(snapshot.status);
           if (snapshot.status === 'waiting_user') {
-            const last = [...snapshot.events].reverse().find(event => event.type === 'needs_user');
-            if (last?.type === 'needs_user') setCurrentQuestion(last.question);
+            setCurrentQuestion(pendingTaskQuestion(snapshot));
           }
         } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
+          source.uiPreviewClosed = true;
+          clearUiPreviews();
           source.terminalSeen = true;
           setStatus(snapshot.status === 'cancelled' ? 'idle' : snapshot.status);
           setCurrentQuestion(null);
+          setInterruptedTask(readTaskInterruption(snapshot, {taskId: prepared.taskId, threadId: prepared.threadId}));
         }
       }
     } catch { /* This one read is spent even if the transport or recovery cannot confirm it. */ }
@@ -918,10 +1020,11 @@ export function ChatShell() {
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean, historicalOnly = false): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
+    const actionCodes = historicalOnly ? new Set<string>() : computerUseActionCodesRef.current;
     if (addPromptAsUser && snapshot?.prompt) {
       const display = parseScheduledTaskPromptDisplay(snapshot.prompt);
       if (display.notice) {
@@ -948,18 +1051,37 @@ export function ChatShell() {
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
       const replayArtifacts: ArtifactSummary[] = [];
+      const inlineKeys = new Set<string>();
+      let committedNarration = false;
       for (const ev of snapshot.events) {
+        if(ev.type==='needs_user'||ev.type==='question_resolved'){
+          if(accumulated){msgs.push({id:`${snapshot.taskId}:before-question:${msgs.length}`,role:'assistant',content:accumulated});accumulated='';}
+          if(ev.type==='needs_user')msgs.push({id:`${snapshot.taskId}:question:${ev.question.questionId}`,role:'assistant',content:ev.question.prompt});
+          else if(ev.answerText)msgs.push({id:`${snapshot.taskId}:answer:${ev.questionId}`,role:'user',content:ev.answerText});
+          continue;
+        }
         if (ev.type === 'task_terminal') {
           terminalSeen = true;
           continue;
         }
         if (ev.type === 'artifact_recorded') {
-          replayArtifacts.push(artifactSummaryFromEvent(ev, snapshot.taskId));
+          const artifact = artifactSummaryFromEvent(ev, snapshot.taskId);
+          replayArtifacts.push(artifact);
+          const key = inlineUiKey(artifact);
+          if (isInlineUiArtifact(artifact) && !inlineKeys.has(key)) {
+            inlineKeys.add(key);
+            if (accumulated.trim()) {
+              committedNarration = true;
+              msgs.push({ id: `inline-prefix:${snapshot.taskId}:${msgs.length}`, role: 'assistant', content: accumulated });
+              accumulated = '';
+            }
+            msgs.push({ id: `inline-ui:${key}`, role: 'ui_card', content: '', uiCard: { artifact } });
+          }
           continue;
         }
         if (ev.type === 'progress_plan_reported') {
           const planEv = ev as { type: 'progress_plan_reported'; steps: Array<{ id: string; label: string; status: string }> };
-          setPlanSteps(planEv.steps);
+          if (!historicalOnly) setPlanSteps(planEv.steps);
           continue;
         }
         if (ev.type === 'canvas_file_changed') {
@@ -996,8 +1118,8 @@ export function ChatShell() {
           }
           if (evR.toolName === 'xiaok_computer_use') {
             const action = parseComputerUseRecoverableAction(evR.response, t.chatShell.cuUnavailable);
-            if (action && !computerUseActionCodesRef.current.has(action.code)) {
-              computerUseActionCodesRef.current.add(action.code);
+            if (action && !actionCodes.has(action.code)) {
+              actionCodes.add(action.code);
               msgs.push({
                 id: `msg-computer-use-${action.code}`,
                 role: 'computer_use_action',
@@ -1023,7 +1145,7 @@ export function ChatShell() {
           accumulated += (ev as { delta: string }).delta;
           lastProgress = null;
         } else if (ev.type === 'task_cancelled') {
-          const partialText = accumulated || (ev as { partialText?: string }).partialText || '';
+          const partialText = pendingNarration(accumulated, ev.partialText ?? '', snapshot.events, committedNarration);
           if (partialText.trim()) {
             msgs.push({
               id: `msg-assistant-cancelled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1056,16 +1178,16 @@ export function ChatShell() {
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : rawMessage === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }
         } else if (ev.type === 'result') {
           if (lastProgress?.stage !== 'completed' && lastProgress?.stage !== 'failed') lastProgress = null;
           const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.taskId);
-          const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, replayArtifacts), accumulated, snapshot.events);
-          const assistantContent = accumulated || r.summary;
-          if (accumulated || r.summary) {
+          const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, replayArtifacts), accumulated, snapshot.events, committedNarration);
+          const assistantContent = accumulated || resultWithArtifacts.summary;
+          if (assistantContent) {
             msgs.push({
               id: `msg-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
@@ -1089,12 +1211,48 @@ export function ChatShell() {
         msgs.push(lastProgress);
       }
       if (accumulated) {
-        streamRef.current = accumulated;
-        setStreamingText(accumulated);
+        if (historicalOnly) {
+          msgs.push({ id: `msg-history-partial-${snapshot.taskId}`, role: 'assistant', content: accumulated });
+        } else {
+          streamRef.current = accumulated;
+          setStreamingText(accumulated);
+        }
       }
     }
     return { msgs, result: lastResult, events: replayEvents, toolStepsMsgId: replayToolMsgId };
   }, [t]);
+
+  const loadOlderHistory = useCallback(async () => {
+    const page = olderHistoryRef.current;
+    if (page.loading || !page.remaining.length) return;
+    page.loading = true;
+    const gen = mountGenRef.current;
+    const current = () => mountGenRef.current === gen && liveRenderScope.current === renderScope && olderHistoryRef.current === page;
+    setOlderHistory({ remaining: page.remaining.length, loading: true, error: '' });
+    const ids = page.remaining.slice(-HISTORY_PAGE_SIZE);
+    const olderMessages: ChatMessage[] = [];
+    const olderEvents: DesktopTaskEvent[] = [];
+    const missing: string[] = [];
+    for (const id of ids) {
+      if (!current()) return;
+      try {
+        const { snapshot } = await api.recoverTask(id);
+        if (!current()) return;
+        if (!snapshot) throw Error('history_snapshot_unavailable');
+        const replay = replaySnapshot({ ...snapshot, taskId: snapshot.taskId || id }, true, true);
+        olderMessages.push(...replay.msgs);
+        olderEvents.push(...replay.events);
+      } catch { if (!current()) return; missing.push(id); }
+    }
+    if (!current()) return;
+    page.loading = false;
+    if (!missing.length) {
+      page.remaining = page.remaining.slice(0, -ids.length);
+      allEventsRef.current = [...olderEvents, ...allEventsRef.current];
+      setMessages(previous => [...olderMessages, ...previous]);
+    }
+    setOlderHistory({ remaining: page.remaining.length, loading: false, error: missing.length ? t.chatShell.historyUnavailable(missing.join(', ')) : '' });
+  }, [renderScope, replaySnapshot, t]);
 
   // Scope the Canvas panel to the active session. On a session switch, persist
   // the outgoing session's canvas state and restore the incoming session's
@@ -1163,13 +1321,18 @@ export function ChatShell() {
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
+    clearUiPreviews();
     setResult(null);
     setMessages([]);
+    olderHistoryRef.current = { remaining: [], loading: false };
+    setOlderHistory({ remaining: 0, loading: false, error: '' });
     setPlanSteps([]);
     setCurrentQuestion(null);
+    setInterruptedTask(null);
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    setActionError(null);
     const storedDraft = readStoredThreadDraft(taskId);
     setPrompt(draftPrompt || '');
 
@@ -1214,7 +1377,7 @@ export function ChatShell() {
         let lastSubToolStepsMsgId: string | null = null;
         let lastSnapshot: TaskSnapshot | undefined;
         const missingTaskIds: string[] = [];
-        for (const tid of allTaskIds) {
+        for (const tid of allTaskIds.slice(-HISTORY_PAGE_SIZE)) {
           // Check again after each async operation
           if (!loadCurrent()) return;
 
@@ -1240,7 +1403,7 @@ export function ChatShell() {
               allEventsRef.current.push(...replayEvents);
               if (tid === allTaskIds[allTaskIds.length - 1]) {
                 lastSnapshot = snapshot;
-                currentTaskEventsRef.current = replayEvents;
+                currentTaskEventsRef.current = snapshot.events.filter(event => event.type !== 'ui_preview');
               }
 
               // Keep result separate only for a live latest task. Completed tasks are rendered as
@@ -1276,6 +1439,8 @@ export function ChatShell() {
 
         // Now set all state atomically after final check
         setThread(threadData);
+        olderHistoryRef.current.remaining = allTaskIds.slice(0, -HISTORY_PAGE_SIZE);
+        setOlderHistory({ remaining: olderHistoryRef.current.remaining.length, loading: false, error: '' });
         threadRef.current = threadData;
         if (allMessages.length > 0) {
           setMessages(allMessages);
@@ -1284,10 +1449,16 @@ export function ChatShell() {
           setResult(lastResult);
         }
         setStatus(lastStatus);
+        setCurrentQuestion(pendingTaskQuestion(lastSnapshot));
+        setInterruptedTask(readTaskInterruption(lastSnapshot, {taskId: lastTaskIdForSub, threadId: taskId}));
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
             executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
             terminalSeen: lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: false };
+          const artifacts = (lastSnapshot?.events ?? []).flatMap(event => event.type === 'artifact_recorded'
+            ? [artifactSummaryFromEvent(event, lastTaskIdForSub!)] : []).filter(isInlineUiArtifact);
+          loadedSource.inlineUiArtifacts = new Set(artifacts.map(inlineUiKey));
+          loadedSource.inlineUiNarrationCommitted = artifacts.length > 0 && allMessages.some(message => message.id.startsWith(`inline-prefix:${lastTaskIdForSub}:`));
         }
         if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
           // Guard: if effect was cleaned up during async gap (StrictMode), don't subscribe
@@ -1331,7 +1502,7 @@ export function ChatShell() {
       }
     }).catch((err) => {
       if (loadCurrent()) {
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(t.chatShell.threadLoadFailed);
         setStatus('failed');
       }
     });
@@ -1342,7 +1513,7 @@ export function ChatShell() {
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
@@ -1373,8 +1544,9 @@ export function ChatShell() {
     if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: false });
   }, [queuedPrompt, status, taskId]);
 
-  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
+  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>, intent: 'composer' | 'interrupted_choice' = 'composer') => {
     if (!taskId || admissionPending.current === renderScope) return false;
+    setActionError(null);
     if (observationDraft && files?.length) {
       // Reuse the ordinary task error message position; no Goal panel is required.
       setMessages(previous => [...previous, {
@@ -1383,6 +1555,15 @@ export function ChatShell() {
         content: t.observation.filesUnsupported,
       }]);
       return false;
+    }
+
+    if(currentQuestion?.kind==='freeform'&&files?.length){setActionError(t.assistantInbox.answerFilesUnsupported);return false;}
+    if(currentQuestion?.kind==='freeform'&&thread?.currentTaskId&&!files?.length){
+      const source=displaySourceRef.current;if(!source||!acceptsSource(source))return false;
+      admissionPending.current=renderScope;
+      try{await api.answerQuestion({taskId:thread.currentTaskId,answer:{questionId:currentQuestion.questionId,type:'text',text}});if(!acceptsSource(source))return false;setCurrentQuestion(null);setStatus('running');setPrompt('');return true;}
+      catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setActionError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed);return false;}
+      finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
     }
 
     // If streaming is active, queue the message instead of interrupting
@@ -1413,6 +1594,7 @@ export function ChatShell() {
     setStatus('running');
     cancelStreamingFlush();
     setStreamingText('');
+    clearUiPreviews();
     streamRef.current = '';
     currentTaskEventsRef.current = [];
     setResult(null);
@@ -1436,7 +1618,7 @@ export function ChatShell() {
     try {
       // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
-      if (observationDraft) {
+      if (observationDraft && intent === 'composer') {
         const draftId=observationDraft;setObservationDraft(null);
         newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
       } else if (files && files.length > 0) {
@@ -1484,9 +1666,24 @@ export function ChatShell() {
     }
   };
 
+  const handleInterruptedChoice = (choiceId: string) => {
+    const source = displaySourceRef.current;
+    if (!interruptedTask || !thread || currentQuestion || (status !== 'failed' && status !== 'idle')
+      || !source || source.scope !== renderScope || !acceptsSource(source) || !source.terminalSeen
+      || source.sourceTaskId !== interruptedTask.taskId || thread.taskIds.at(-1) !== interruptedTask.taskId
+      || admissionPending.current === renderScope) return false;
+    const choice = interruptedTask.choices?.find(item => item.id === choiceId);
+    if (!choice) return false;
+    // Normal submission owns synchronous admission/deduplication; the expired execution is never answered.
+    return handleSubmit(choice.label, undefined, 'interrupted_choice');
+  };
+
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
-    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
+    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source) || admissionPending.current===renderScope) return;
+    admissionPending.current=renderScope;
+    setActionError(null);
+    try {
     await api.answerQuestion({
       taskId: thread.currentTaskId,
       answer: { questionId: currentQuestion.questionId, type: 'choice', choiceId },
@@ -1494,6 +1691,8 @@ export function ChatShell() {
     if (!acceptsSource(source) || source.terminalSeen) return;
     setCurrentQuestion(null);
     setStatus('running');
+    } catch(error) { if (acceptsSource(source)) setActionError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed); }
+    finally {if(admissionPending.current===renderScope)admissionPending.current=null;}
   };
 
   const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {
@@ -1548,10 +1747,19 @@ export function ChatShell() {
   };
 
   const clearCancelledTaskPresentation = () => {
+    const source = displaySourceRef.current;
+    if (source) source.uiPreviewClosed = true;
+    const pending = streamRef.current;
+    if (source && acceptsSource(source) && pending.trim()
+      && (source.inlineUiNarrationCommitted || source.inlineUiArtifacts?.size || source.inlineUiPreviewKeys?.size)) {
+      source.inlineUiNarrationCommitted = true;
+      setMessages(previous => [...previous, { id: `inline-cancel:${source.sourceTaskId}:${source.eventCount}`, role: 'assistant', content: pending }]);
+    }
     setStatus('idle');
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
+    clearUiPreviews();
   };
 
   const handleCancel = async () => {
@@ -1733,27 +1941,23 @@ export function ChatShell() {
 
   if (loadError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--c-text-secondary)]">
-        <div className="text-red-500">
-          Failed to load thread: {loadError}
+      <section className="flex h-full flex-col items-center justify-center gap-4 p-6 text-[var(--c-text-secondary)]" aria-label={t.chatShell.threadLoadFailed}>
+        <div role="alert" className="max-w-md text-center">
+          <h2 className="text-base font-medium text-[var(--c-text-primary)]">{loadError}</h2>
+          <p className="mt-2 text-sm">{t.chatShell.threadLoadHelp}</p>
         </div>
-        <button
-          type="button"
-          className="rounded bg-[var(--c-primary)] px-4 py-2 text-white hover:opacity-90"
-          onClick={() => {
-            setLoadError(null);
-            setStatus('idle');
-            setThread(null);
-          }}
-        >
-          Retry
-        </button>
-      </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <button type="button" className="rounded border border-[var(--c-border-subtle)] px-4 py-2 text-sm hover:bg-[var(--c-bg-deep)]"
+            onClick={() => { sidebarCollapse.setCollapsed(false); navigate('/'); }}>{t.chatShell.backToTasks}</button>
+          <button type="button" className="rounded bg-[var(--c-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
+            onClick={() => { setLoadError(null); setLoadRevision(value => value + 1); }}>{t.chatShell.reloadThread}</button>
+        </div>
+      </section>
     );
   }
 
   if (!thread) {
-    return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
+    return <div role="status" className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">{t.chatShell.threadLoading}</div>;
   }
 
   // Extract generated files from multiple sources
@@ -1867,16 +2071,34 @@ export function ChatShell() {
       approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
-      <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
+      {!hideObservationControls && <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />}
+      {actionError && <div role="alert" className="mx-4 mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]">
+        <p>{actionError}</p>
+        <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
+      </div>}
       <ChatView
+        emptyContent={emptyContent}
+        conversationHeader={conversationHeader}
+        assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
+        assistantHasMessages={assistantHasMessages}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         thread={thread}
         messages={messages}
+        historyContent={olderHistory.remaining > 0 ? <div className="space-y-2 text-center">
+          <button type="button" disabled={olderHistory.loading} onClick={() => void loadOlderHistory()}
+            className="cursor-pointer rounded-lg px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] disabled:cursor-wait disabled:opacity-60">
+            {olderHistory.loading ? t.chatShell.historyLoading : t.chatShell.historyLoadEarlier(olderHistory.remaining)}
+          </button>
+          {olderHistory.error && <p role="alert" className="text-xs text-[var(--c-text-secondary)]">{olderHistory.error}</p>}
+        </div> : undefined}
         streamingText={streamingText}
+        uiPreviews={uiPreviews}
         status={status}
         currentQuestion={currentQuestion}
+        interruptedTask={interruptedTask}
+        onInterruptedChoice={handleInterruptedChoice}
         result={result}
         generatedFiles={generatedFiles}
         prompt={prompt}

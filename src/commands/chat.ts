@@ -1,4 +1,4 @@
-import { isKimiCodingModel } from '../ai/providers/kimi-models.js';
+import { isKimiCodingRuntimeModel } from '../ai/providers/kimi-models.js';
 import {inspectProfileAccountHome,ProfileAccountHomeError} from '../runtime/verification/profile-account-home.js';
 import {getUiCopy} from '../ui/locale.js';
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
@@ -115,6 +115,9 @@ import {
 } from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
+import { runStatuslineCommand } from './chat-statusline.js';
+import { selectStatuslineFields } from '../ui/statusline-selector.js';
+import { formatVersionInfo } from '../utils/version-info.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { TuiRuntimeState, type TuiSummarySource } from '../ui/tui/runtime-state.js';
 import { renderWelcomeScreen, renderInputSeparator, dim, boldCyan, yellow, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
@@ -4366,6 +4369,38 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return 'continue';
     }
 
+    if (trimmed === '/version') {
+      writeCommandOutput(trimmed, formatVersionInfo());
+      return 'continue';
+    }
+    if (trimmed === '/statusline' || trimmed.startsWith('/statusline ')) {
+      let argument = trimmed.slice('/statusline'.length).trim();
+      if (!argument) {
+        if (!isTTY() || terminalUiSuspended) {
+          writeCommandOutput(trimmed, runStatuslineCommand('', statusBar)); return 'continue';
+        }
+        if (scrollRegion.isActive() && !terminalUiSuspended) {
+          scrollRegion.clearOverlayPromptState(); replRenderer.prepareForInput();
+        }
+        try {
+          const selected = await withPausedLiveActivity(() => selectStatuslineFields(statusBar.getEditableFields(), {
+            renderer: replRenderer, preview: fields => statusBar.getStatusLineForFields(fields),
+          }));
+          if (selected === null) {
+            writeCommandOutput(trimmed, '已取消状态栏设置。\n'); return 'continue';
+          }
+          argument = selected.length ? selected.join(',') : 'off';
+        } catch (error) {
+          writeCommandOutput(trimmed, `状态栏菜单未能完成：${error instanceof Error ? error.message : String(error)}\n`);
+          return 'continue';
+        }
+      }
+      const output = runStatuslineCommand(argument, statusBar);
+      writeCommandOutput(trimmed, output);
+      scrollRegion.updateStatusLine(statusBar.getStatusLine());
+      return 'continue';
+    }
+
     const goalCommand = parseGoalSlashCommand(trimmed);
     if (goalCommand) {
       if (goalCommand.kind === 'help') {
@@ -4677,7 +4712,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
         const selectedProvider = config.providers[selected.provider];
         const catalogRuntimeEligible = selected.provider !== 'kimi'
-          || !isKimiCodingModel(variant?.model)
+          || !isKimiCodingRuntimeModel(variant?.model)
           || (
             selectedProvider?.protocol === 'openai_legacy'
             && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl)

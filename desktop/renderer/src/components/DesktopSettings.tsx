@@ -1,3 +1,5 @@
+import {SecretInput} from './security/SecretInput';
+import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
 import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
 import { useChannelReadonly } from '../hooks/useChannelReadonly';
 import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
@@ -101,7 +103,7 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'connectors' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
 type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
@@ -233,6 +235,7 @@ function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
     { key: 'voice', icon: Mic, label: t.desktopSettings.voice },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
     { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
+    { key: 'connectors', icon: Plug, label: t.nav.connectors },
     { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
     { key: 'mcp', icon: Plug, label: t.desktopSettings.navMcp },
     { key: 'tools', icon: Wrench, label: t.desktopSettings.navTools },
@@ -294,11 +297,12 @@ export function DesktopSettings({ onClose }: Props) {
 
       {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="px-8 py-6 max-w-[700px]">
+        <div className={`px-8 py-6 ${activeTab === 'connectors' ? 'w-full max-w-[1100px]' : 'max-w-[700px]'}`}>
           {activeTab === 'model' && <ModelPane />}
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
+          {activeTab === 'connectors' && <AppConnectorsSettings />}
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'mobile' && <MobilePane />}
@@ -315,13 +319,30 @@ export function DesktopSettings({ onClose }: Props) {
 
 // ---- Shared UI ----
 
-function SectionHeader({ icon: Icon, children }: { icon?: typeof Settings; children: ReactNode }) {
+function SectionHeader({ icon: Icon, children, action }: { icon?: typeof Settings; children: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-4">
       {Icon && <Icon size={16} className="text-[var(--c-accent)]" />}
       <h3 className="text-sm font-semibold text-[var(--c-text-primary)]">{children}</h3>
+      {action && <div className="ml-auto shrink-0">{action}</div>}
     </div>
   );
+}
+
+function SettingsRefreshButton({ onClick, retry = false }: { onClick: () => void; retry?: boolean }) {
+  const { t } = useLocale();
+  return <button type="button" onClick={onClick}
+    className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border)] px-2.5 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--c-accent)]">
+    <RefreshCw size={13} aria-hidden="true" />
+    {retry ? t.desktopReadonlyRetry : t.desktopReadonlyRefresh}
+  </button>;
+}
+
+function SettingsReadError({ children, onRetry }: { children: ReactNode; onRetry: () => void }) {
+  return <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--c-border)] p-3 text-sm text-[var(--c-text-secondary)]">
+    <div role="alert" className="flex-1">{children}</div>
+    <SettingsRefreshButton retry onClick={onRetry} />
+  </div>;
 }
 
 function Section({ children, className }: { children: ReactNode; className?: string }) {
@@ -648,11 +669,12 @@ function VoicePane() {
 
   return (
     <div className="space-y-6">
-      {modelFacts.failed && <p role="alert">{t.meetingModelsReadonlyUnavailable}</p>}
-      {asrFacts.failed && <p role="alert">{t.meetingAsrReadonlyUnavailable}</p>}
-      <button type="button" onClick={() => { modelFacts.refresh(); asrFacts.refresh(); }}>{t.desktopReadonlyRetry}</button>
+      {(modelFacts.failed || asrFacts.failed) && <SettingsReadError onRetry={() => { modelFacts.refresh(); asrFacts.refresh(); }}>
+        {modelFacts.failed && <p>{t.meetingModelsReadonlyUnavailable}</p>}
+        {asrFacts.failed && <p>{t.meetingAsrReadonlyUnavailable}</p>}
+      </SettingsReadError>}
       <Section>
-        <SectionHeader icon={Mic}>{ds.meetingRecordingSettingsTitle}</SectionHeader>
+        <SectionHeader icon={Mic} action={!modelFacts.failed && !asrFacts.failed && <SettingsRefreshButton onClick={() => { modelFacts.refresh(); asrFacts.refresh(); }} />}>{ds.meetingRecordingSettingsTitle}</SectionHeader>
         <p className="mb-4 text-sm leading-6 text-[var(--c-text-secondary)]">{ds.meetingRecordingSettingsDesc}</p>
         <Card>
           <div className="grid gap-4 md:grid-cols-2">
@@ -736,8 +758,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAppKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAppKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAppKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAppKey}`}
@@ -747,8 +768,7 @@ function VoicePane() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAccessKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAccessKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAccessKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAccessKey}`}
@@ -785,8 +805,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrApiKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.aliyunApiKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, aliyunApiKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrApiKey}`}
@@ -1481,8 +1500,8 @@ function ModelPane() {
                     {selectedProvider === provider.id && (
                       <div className="mt-2 flex items-center gap-2">
                         <div className="relative flex-1">
-                          <input aria-label="sk-..."
-                            type={showKey ? 'text' : 'password'}
+                          <SecretInput aria-label="sk-..."
+                            revealed={showKey}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                             placeholder="sk-..."
@@ -2228,10 +2247,9 @@ function ChannelsPane() {
 
   return (
     <>
-      {channelFacts.failed && <p role="alert">{t.channelReadonlyUnavailable}</p>}
-      <button type="button" onClick={load}>{t.desktopReadonlyRetry}</button>
+      {channelFacts.failed && <SettingsReadError onRetry={load}>{t.channelReadonlyUnavailable}</SettingsReadError>}
       <Section>
-        <SectionHeader icon={Globe}>{channelFacts.data === null ? t.channelReadonlyUnknown : ts.channelsTitle}</SectionHeader>
+        <SectionHeader icon={Globe} action={!channelFacts.failed && <SettingsRefreshButton onClick={load} />}>{channelFacts.data === null ? t.channelReadonlyUnknown : ts.channelsTitle}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -2592,12 +2610,13 @@ function McpPane() {
 
   return (
     <>
-      {installsUnavailable && <p role="alert">{t.mcpInstallsReadonlyUnavailable}</p>}
-      <button type="button" onClick={() => load()}>{t.desktopReadonlyRetry}</button>
-      {catalogUnavailable && <div role="alert" className="mb-3 text-sm text-red-500">{ts.pluginsCatalogUnavailable}</div>}
+      {(installsUnavailable || catalogUnavailable) && <SettingsReadError onRetry={() => load()}>
+        {installsUnavailable && <p>{t.mcpInstallsReadonlyUnavailable}</p>}
+        {catalogUnavailable && <p>{ts.pluginsCatalogUnavailable}</p>}
+      </SettingsReadError>}
       {dependencies.length > 0 && (
         <Section>
-          <SectionHeader icon={Package}>{ts.mcpPluginDeps}</SectionHeader>
+          <SectionHeader icon={Package} action={!installsUnavailable && !catalogUnavailable && <SettingsRefreshButton onClick={() => load()} />}>{ts.mcpPluginDeps}</SectionHeader>
           <div className="flex flex-col gap-2">
             {dependencies.map(dependency => {
               const pluginInstalled = dependency.pluginInstalled ?? pluginServers.some(server => server.pluginName === dependency.pluginName);
@@ -2736,7 +2755,7 @@ function McpPane() {
 
       {pluginServers.length > 0 && (
         <Section>
-          <SectionHeader icon={Plug}>{ts.mcpPluginMcpServices}</SectionHeader>
+          <SectionHeader icon={Plug} action={dependencies.length === 0 && !installsUnavailable && !catalogUnavailable && <SettingsRefreshButton onClick={() => load()} />}>{ts.mcpPluginMcpServices}</SectionHeader>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
             {ts.mcpPluginMcpServicesDesc}
           </p>
@@ -2772,7 +2791,7 @@ function McpPane() {
       )}
 
       <Section>
-        <SectionHeader icon={Plug}>{ts.mcpServersTitle}</SectionHeader>
+        <SectionHeader icon={Plug} action={dependencies.length === 0 && pluginServers.length === 0 && !installsUnavailable && !catalogUnavailable && <SettingsRefreshButton onClick={() => load()} />}>{ts.mcpServersTitle}</SectionHeader>
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
           {ts.mcpServersDesc}
         </p>
@@ -4733,8 +4752,7 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange, ds }: ApiK
 
   return (
     <div className="mt-2 flex items-center gap-2">
-      <input
-        type="password"
+      <SecretInput
         aria-label={ariaLabel}
         placeholder={placeholder}
         className={`flex-1 ${inputCls}`}

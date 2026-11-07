@@ -1,3 +1,4 @@
+export type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../../../shared/mail-connectors-ipc-contract.js';
 import type {ScheduledActionDto,ScheduledBindingDto,ScheduledLoopCreateDto} from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { ScheduledTaskDto, ScheduledCreateDto, ScheduledUpdateDto, ScheduledUpdateResultDto, ScheduledActionDto, ScheduledRunDto, ScheduledBindingDto, ScheduledLoopCreateDto, ScheduledReminderDto, ScheduledReminderStatusDto } from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { KnowledgeCollectionDto, KnowledgeSourceDto, KnowledgeCreateCollectionInput, KnowledgeAddSourceInput, KnowledgeCollectionStateDto, KnowledgeSourceContentInput, KnowledgeSourceContentDto, KnowledgeSearchInput, KnowledgeSearchResultDto } from '../../../shared/knowledge-ipc-contract.js';

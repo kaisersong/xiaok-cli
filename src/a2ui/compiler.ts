@@ -1,14 +1,16 @@
 import {
   A2UI_MIME_TYPE,
   A2UI_PROTOCOL_VERSION,
-  SAFE_A2UI_CATALOG_ID,
+  A2UI_V1_CATALOG_ID,
   sanitizeA2UIIdPart,
   type A2UIComponent,
-  type A2UIMessage,
+  type A2UIV1Message,
   type CompiledA2UIArtifact,
   type RenderUIInput,
 } from './protocol.js';
-import { assertRenderUiInput, validateA2uiMessages } from './validator.js';
+import { assertRenderUiInput } from './validator.js';
+import { MAX_UI_BYTES } from './json-budget.js';
+import { validateA2uiMessages } from './decoder.js';
 
 export interface CompileRenderUiContext {
   taskId: string;
@@ -79,6 +81,12 @@ export function compileRenderUiToA2ui(input: RenderUIInput, context: CompileRend
         children.push(id);
         break;
       }
+      case 'chart': {
+        const id = nextId();
+        components.push({ id, component: 'Chart', title: section.title, chartType: section.chartType, points: section.points });
+        children.push(id);
+        break;
+      }
       case 'divider': {
         const id = nextId();
         components.push({ id, component: 'Divider' });
@@ -88,30 +96,39 @@ export function compileRenderUiToA2ui(input: RenderUIInput, context: CompileRend
     }
   }
 
-  const messages: A2UIMessage[] = [
+  // Keep each container within the catalog child budget, including large reports.
+  const rootChildren = children.length <= 20 ? children : [];
+  if (children.length > 20) for (let i = 0; i < children.length; i += 20) {
+    const id = nextId(); components.push({ id, component: 'Column', children: children.slice(i, i + 20) }); rootChildren.push(id);
+  }
+  const wireComponents = [{ id: 'root', component: 'Column' as const, children: rootChildren }, ...components].map(component => {
+    const result = { ...component } as Record<string, unknown>;
+    for (const key of ['value','rows'] as const) {
+      const ref = result[key];
+      if (ref && typeof ref === 'object' && !Array.isArray(ref) && 'path' in ref) result[key] = { '@path': '/' + String(ref.path).split('.').map(part => part.replace(/~/g,'~0').replace(/\//g,'~1')).join('/') };
+    }
+    return result;
+  });
+  const messages: A2UIV1Message[] = [
     {
       version: A2UI_PROTOCOL_VERSION,
       createSurface: {
         surfaceId,
-        catalogId: SAFE_A2UI_CATALOG_ID,
-        root: 'root',
+        catalogId: A2UI_V1_CATALOG_ID,
       },
     },
     {
       version: A2UI_PROTOCOL_VERSION,
       updateComponents: {
         surfaceId,
-        components: [
-          { id: 'root', component: 'Column', children },
-          ...components,
-        ],
+        components: wireComponents as never,
       },
     },
     {
       version: A2UI_PROTOCOL_VERSION,
       updateDataModel: {
         surfaceId,
-        path: '',
+        path: '/',
         value: dataModel,
       },
     },
@@ -120,11 +137,13 @@ export function compileRenderUiToA2ui(input: RenderUIInput, context: CompileRend
   const validation = validateA2uiMessages(messages);
   if (!validation.ok) throw new Error(validation.reason);
 
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(messages)).length;
+  if (payloadBytes > MAX_UI_BYTES) throw Error('UI payload limit');
   return {
     surfaceId,
     mimeType: A2UI_MIME_TYPE,
     messages,
     componentCount: components.length + 1,
-    payloadBytes: new TextEncoder().encode(JSON.stringify(messages)).length,
+    payloadBytes,
   };
 }

@@ -16,6 +16,7 @@ export interface AssistantDetailPanelProps {
   candidates: AssistantCandidateView[];
   knowledgeCollections: Array<{ id: string; name: string }>;
   busyCandidateId?: string | null;
+  decisionsDisabled?: boolean;
   onClose: () => void;
   onAcceptCandidate: (candidateId: string, collectionId?: string) => void | Promise<void>;
   onRejectCandidate: (candidateId: string) => void | Promise<void>;
@@ -27,6 +28,7 @@ export function AssistantDetailPanel({
   candidates,
   knowledgeCollections,
   busyCandidateId = null,
+  decisionsDisabled = false,
   onClose,
   onAcceptCandidate,
   onRejectCandidate,
@@ -74,7 +76,7 @@ export function AssistantDetailPanel({
             <div className="space-y-3">
               {candidates.map(candidate => {
                 const canDecide = candidate.status === 'pending' || candidate.status === 'accept_failed';
-                const busy = busyCandidateId === candidate.id || candidate.status === 'accepting';
+                const busy = decisionsDisabled || busyCandidateId === candidate.id || candidate.status === 'accepting';
                 const selectedCollectionId = collectionByCandidate[candidate.id];
                 const needsCollection = candidate.kind === 'knowledge';
                 return (

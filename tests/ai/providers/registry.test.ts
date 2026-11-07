@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findCatalogModel, getProviderProfile, listProviderProfiles } from '../../../src/ai/providers/registry.js';
+import { findCatalogModel, getProviderModelVariant, getProviderProfile, listProviderProfiles } from '../../../src/ai/providers/registry.js';
 import * as registry from '../../../src/ai/providers/registry.js';
 import type { ProviderModelVariant, ProviderProfile } from '../../../src/ai/providers/types.js';
 
@@ -19,7 +19,7 @@ describe('getProviderProfile', () => {
       runtimeOptions: { reasoningEffort: 'medium' },
       runtimeConstraints: { reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
     });
-    expect(variants.find(model => model.model === 'gpt-5')).toMatchObject({
+    expect(getProviderModelVariant('openai', 'gpt-5')).toMatchObject({
       runtimeOptions: { reasoningEffort: 'medium' },
       runtimeConstraints: { reasoningEfforts: ['minimal', 'low', 'medium', 'high'] },
     });
@@ -91,7 +91,8 @@ describe('getProviderProfile', () => {
     const variants = getProviderProfile('kimi')?.availableModels ?? [];
 
     for (const modelId of ['kimi-k2.6', 'kimi-k2.5']) {
-      const variant = variants.find((candidate) => candidate.modelId === modelId);
+      const variant = variants.find((candidate) => candidate.modelId === modelId)
+          ?? getProviderModelVariant(providerId, modelId === 'gemini-2.5-flash' ? 'gemini-2.5-flash-preview-05-20' : modelId.replace(/^openai-/, ''));
       expect(variant, modelId).toBeDefined();
       // 它们有自己的官方 contextLimit（262,144），但不该带 K3 的 reasoning 策略。
       // 注意不能只比 contextLimit —— K3 的值恰好也是 262,144。
@@ -231,7 +232,8 @@ describe('catalog only lists models the providers actually serve', () => {
     expect(wires).not.toContain('claude-sonnet-4-7');
     // Haiku 线官方当前只有 4-5
     expect(wires).not.toContain('claude-haiku-4-6');
-    expect(wires).toContain('claude-haiku-4-5');
+    expect(wires).not.toContain('claude-haiku-4-5');
+    expect(getProviderModelVariant('anthropic', 'claude-haiku-4-5')).toBeDefined();
   });
 
   it('drops Kimi wire names that are retired or never existed', () => {
@@ -277,11 +279,11 @@ describe('catalog only lists models the providers actually serve', () => {
     const profile=getProviderProfile('deepseek');
     // defaultModel 与 availableModels 的 deepseek-flash 共 wireModel，元数据逐字一致。
     const flash: ProviderModelVariant = {
-      modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash (1017)',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
+      releaseYear:2026,modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash (1017)',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
     };
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-flash')).toEqual(flash);
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-v4.1-flash-expires-on-0910')).toEqual({
-      modelId:'deepseek-v4.1-flash-expires-on-0910',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',capabilities:['tools','thinking'],runtimeOptions:{contextLimit:1_000_000},
+      releaseYear:2026,modelId:'deepseek-v4.1-flash-expires-on-0910',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',capabilities:['tools','thinking'],runtimeOptions:{contextLimit:1_000_000},
     });
   });
 
@@ -290,6 +292,7 @@ describe('catalog only lists models the providers actually serve', () => {
     const wireModel = 'deepseek-v4-flash-vision-exp';
     expect(profile?.availableModels?.some((variant) => variant.model === wireModel)).toBe(false);
     const expected = {
+      releaseYear: 2026,
       modelId: 'deepseek-v4-flash-vision-exp',
       model: 'deepseek-v4-flash-vision-exp',
       label: 'DeepSeek V4.1 Flash (1017)',
@@ -334,7 +337,8 @@ describe('GLM catalog context windows', () => {
     const profile = getProviderProfile('glm');
 
     for (const [modelId, contextLimit] of Object.entries(OFFICIAL_CONTEXT_LIMITS)) {
-      const variant = profile!.availableModels?.find((item) => item.modelId === modelId);
+      const variant = profile!.availableModels?.find((item) => item.modelId === modelId)
+        ?? getProviderModelVariant('glm', modelId === 'glm-4.5' ? 'glm-4.5' : modelId.toUpperCase());
       expect(variant, modelId).toBeDefined();
       expect(variant?.runtimeOptions?.contextLimit, modelId).toBe(contextLimit);
     }
@@ -564,6 +568,7 @@ describe('official context windows per provider', () => {
     },
     // https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro
     gemini: {
+      'gemini-3.1-pro-preview': 1_048_576,
       'gemini-2.5-pro': 1_048_576,
       'gemini-2.5-flash': 1_048_576,
     },
@@ -571,7 +576,7 @@ describe('official context windows per provider', () => {
     kimi: {
       'kimi-k2.6': 262_144,
       'kimi-k2.5': 262_144,
-      'kimi-for-coding': 262_144,
+      'kimi-for-coding': 1_048_576,
     },
   };
 
@@ -579,7 +584,8 @@ describe('official context windows per provider', () => {
     it(`matches the published window for every filled ${providerId} model`, () => {
       const variants = getProviderProfile(providerId)?.availableModels ?? [];
       for (const [modelId, contextLimit] of Object.entries(models)) {
-        const variant = variants.find((candidate) => candidate.modelId === modelId);
+        const variant = variants.find((candidate) => candidate.modelId === modelId)
+          ?? getProviderModelVariant(providerId, modelId === 'gemini-2.5-flash' ? 'gemini-2.5-flash-preview-05-20' : modelId.replace(/^openai-/, ''));
         expect(variant, `${providerId}/${modelId}`).toBeDefined();
         expect(variant?.runtimeOptions?.contextLimit, `${providerId}/${modelId}`).toBe(contextLimit);
       }

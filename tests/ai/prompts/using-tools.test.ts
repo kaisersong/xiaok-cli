@@ -2,6 +2,19 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { getUsingToolsSection } from '../../../src/ai/prompts/sections/using-tools.js';
 
 describe('getUsingToolsSection — structural-first reading recipe', () => {
+  it('describes natural visual requests and the permitted local table controls', () => {
+    const section = getUsingToolsSection();
+    expect(section).toContain('render_ui');
+    expect(section).toContain('natural language');
+    expect(section).toContain('tool name');
+    expect(section).toContain('filtering');
+    expect(section).toContain('CSV');
+    expect(section).toContain('available');
+    expect(section).toContain('permissions');
+    expect(section).toContain('plain text');
+    expect(section).not.toContain('not forms, scripts or interactive controls');
+  });
+
   const original = process.env.XIAOK_NO_STRUCTURAL_FIRST;
 
   afterEach(() => {

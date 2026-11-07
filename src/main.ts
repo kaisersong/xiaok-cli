@@ -1,3 +1,4 @@
+import { configureInstalledEnterpriseClis } from './runtime/enterprise-cli-runtime.js';
 import {registerProtectedControllerCommands} from './commands/protected-controller.js';
 import {registerProtectedArchiveCommands} from './commands/protected-archive.js';
 import { readFileSync } from 'node:fs';
@@ -15,15 +16,20 @@ import { registerDaemonCommands } from './commands/reminder.js';
 import { registerReviewCommands } from './commands/review.js';
 import { registerTranscriptCommands } from './commands/transcript.js';
 import { registerYZJCommands } from './commands/yzj.js';
+import { registerYzjCliCommand } from './commands/yzj-cli.js';
+import { configureBundledYzjCli } from './runtime/bundled-yzj-cli.js';
 import { registerPluginCommands } from './commands/plugin.js';
 import { registerMemoryCommands } from './commands/memory.js';
 import { registerDiagnoseCommands } from './commands/diagnose.js';
 import { registerTraceCommands } from './commands/trace-export.js';
 import { registerSkillCommands } from './commands/skill.js';
 import { registerUpdateCommand } from './commands/update.js';
+import { registerVersionCommand } from './commands/version.js';
 import { handleFatalError, installGlobalCrashHandlers, setCrashContext } from './utils/crash-reporter.js';
 
 installGlobalCrashHandlers();
+configureBundledYzjCli();
+configureInstalledEnterpriseClis();
 
 const { version } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -51,12 +57,14 @@ registerProtectedControllerCommands(program);
 registerChatCommands(program);
 registerObservationCommands(program);
 registerYZJCommands(program);
+registerYzjCliCommand(program);
 registerPluginCommands(program);
 registerSkillCommands(program);
 registerMemoryCommands(program);
 registerTraceCommands(program);
 registerDiagnoseCommands(program);
 registerUpdateCommand(program, version);
+registerVersionCommand(program);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   setCrashContext({

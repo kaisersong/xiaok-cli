@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
 const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
@@ -42,6 +42,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     result,
     streamingText,
     onToggleCanvas,
+    historyContent,
   }: {
     prompt: string;
     queuedText?: string | null;
@@ -59,8 +60,10 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     result?: { artifacts?: Array<{ title: string; kind: string; mimeType?: string }> } | null;
     streamingText?: string;
     onToggleCanvas?: () => void;
+    historyContent?: ReactNode;
   }) => (
     <div>
+      {historyContent}
       <textarea aria-label="chat-input" readOnly value={prompt} />
       <div data-testid="chat-status">{status}</div>
       <div data-testid="queued-text">{queuedText ?? ''}</div>
@@ -101,8 +104,8 @@ vi.mock('../../renderer/src/components/CanvasPanel', () => ({
   ),
 }));
 vi.mock('../../renderer/src/components/TaskPanel', () => ({
-  TaskPanel: ({ goalContent }: { goalContent?: ReactNode }) => (
-    <aside data-testid="task-panel">{goalContent}</aside>
+  TaskPanel: ({ goalContent, planSteps }: { goalContent?: ReactNode; planSteps?: unknown }) => (
+    <aside data-testid="task-panel">{goalContent}<output data-testid="history-plan">{JSON.stringify(planSteps)}</output></aside>
   ),
 }));
 
@@ -135,6 +138,103 @@ afterEach(() => {
 });
 
 describe('ChatShell draft prompt navigation state', () => {
+  function HistoryNavigation() {
+    const navigate = useNavigate();
+    return <><button onClick={() => navigate('/t/other')}>switch conversation</button><ChatShell /></>;
+  }
+  function renderHistory() {
+    return render(<MemoryRouter initialEntries={['/t/history']}><LocaleProvider><Routes>
+      <Route path="/t/:taskId" element={<HistoryNavigation />} />
+    </Routes></LocaleProvider></MemoryRouter>);
+  }
+  function setupLongHistory() {
+    const taskIds = Array.from({ length: 45 }, (_, index) => `task_${index}`);
+    mockGetThread.mockImplementation(async id => ({ id, title: 'saved title', status: 'idle', mode: 'work',
+      createdAt: 1, updatedAt: 2, currentTaskId: id === 'other' ? 'task_other' : taskIds.at(-1), taskIds: id === 'other' ? ['task_other'] : taskIds }));
+    mockRecoverTask.mockImplementation(async id => ({ snapshot: { taskId: id, status: id === 'task_44' ? 'running' : 'completed',
+      prompt: `history prompt ${id}`, events: [], materials: [], createdAt: 1, updatedAt: 2 } }));
+    mockSubscribeTask.mockImplementation(() => () => {});
+    return taskIds;
+  }
+  it('opens the latest 20 runs, then prepends every older page in order without resubscribing the live task', async () => {
+    const ids = setupLongHistory(); renderHistory();
+    await screen.findByText('history prompt task_44');
+    expect(mockRecoverTask.mock.calls.map(call => call[0])).toEqual(ids.slice(-20));
+    expect(mockSubscribeTask).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeTask).toHaveBeenLastCalledWith('task_44', expect.any(Function), 0);
+    fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+    await screen.findByText('history prompt task_5');
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.slice(5).map(id => `history prompt ${id}`).join(''));
+    expect(mockSubscribeTask).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('chat-status')).toHaveTextContent('running');
+    fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+    await screen.findByText('history prompt task_0');
+    expect(mockRecoverTask).toHaveBeenCalledTimes(45);
+    expect(screen.queryByRole('button', { name: /加载更早记录/ })).toBeNull();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+  it('keeps a failed older page retryable without duplicating the successful records', async () => {
+    setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
+    const recover = mockRecoverTask.getMockImplementation()!;
+    mockRecoverTask.mockImplementation(async id => { if (id === 'task_8') throw Error('unreadable'); return recover(id); });
+    fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+    await screen.findByRole('alert');
+    expect(screen.queryByText('history prompt task_5')).toBeNull();
+    expect(screen.getByText('history prompt task_44')).toBeVisible();
+    mockRecoverTask.mockImplementation(recover);
+    fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+    await screen.findByText('history prompt task_5');
+    expect(screen.getAllByText('history prompt task_5')).toHaveLength(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('keeps the latest streaming text and plan while replaying older partial output', async () => {
+    setupLongHistory();
+    const recover = mockRecoverTask.getMockImplementation()!;
+    mockRecoverTask.mockImplementation(async id => {
+      const reply = await recover(id);
+      if (id === 'task_5' || id === 'task_44') reply.snapshot.events = [
+        { type: 'progress_plan_reported', steps: [{ id, label: id === 'task_44' ? 'latest plan' : 'obsolete plan', status: 'running' }] },
+        { type: 'assistant_delta', delta: id === 'task_44' ? 'latest stream' : 'older partial output' },
+      ];
+      return reply;
+    });
+    renderHistory(); await screen.findByText('history prompt task_44');
+    fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+    await screen.findByText('history prompt task_5');
+    expect(screen.getByTestId('streaming-text')).toHaveTextContent('latest stream');
+    expect(screen.getByTestId('history-plan')).toHaveTextContent('latest plan');
+    expect(screen.getByTestId('history-plan')).not.toHaveTextContent('obsolete plan');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('older partial output');
+  });
+  it('discards late older-page replies after navigating and stops reading the old page', async () => {
+    setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
+    const recover = mockRecoverTask.getMockImplementation()!;
+    let resolve!: (value: unknown) => void;
+    mockRecoverTask.mockImplementation(id => id === 'task_5' ? new Promise(yes => { resolve = yes; }) : recover(id));
+    fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'switch conversation' }));
+    await screen.findByText('history prompt task_other');
+    await act(async () => resolve(await recover('task_5')));
+    expect(screen.queryByText('history prompt task_5')).toBeNull();
+    expect(mockRecoverTask).not.toHaveBeenCalledWith('task_6', undefined);
+    expect(screen.getByText('history prompt task_other')).toBeVisible();
+  });
+  it('keeps live results received during a pending history page and prevents duplicate page reads', async () => {
+    setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
+    const recover = mockRecoverTask.getMockImplementation()!;
+    let resolve!: (value: unknown) => void;
+    mockRecoverTask.mockImplementation(id => id === 'task_5' ? new Promise(yes => { resolve = yes; }) : recover(id));
+    const button = screen.getByRole('button', { name: /加载更早记录/ });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(mockRecoverTask.mock.calls.filter(call => call[0] === 'task_5')).toHaveLength(1);
+    const receive = mockSubscribeTask.mock.calls[0][1];
+    await act(async () => receive({ type: 'result', result: { summary: 'live result during history', artifacts: [] } }));
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('live result during history');
+    await act(async () => resolve(await recover('task_5')));
+    await screen.findByText('history prompt task_5');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('live result during history');
+    expect(mockSubscribeTask).toHaveBeenCalledTimes(1);
+  });
   it.each(['用户手工标题', null])('preserves first user topic when followup completes (title=%s)', async title => {
     mockGetThread.mockResolvedValue({ id: 'thread-title', title, status: 'running', mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task-followup', taskIds: ['task-first', 'task-followup'] });
     mockRecoverTask.mockImplementation(async id => ({ snapshot: { taskId: id, sessionId: id, status: id === 'task-first' ? 'completed' : 'running', prompt: id === 'task-first' ? '创建项目分析金蝶自研模型' : '确认就是Qwen3.8 27B', materials: [], events: [], createdAt: 1, updatedAt: 2 } }));
@@ -1172,4 +1272,19 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.getByTestId('streaming-text')).toBeEmptyDOMElement();
     expect(screen.getByTestId('chat-messages')).toHaveTextContent('第一段第二段第三段');
   });
+});
+
+it('uses the explicit assistant thread on /assistant and applies draft requests without recovering again or starting execution', async () => {
+ mockCreateTask.mockResolvedValue({taskId:'task-assistant-first'});mockUpdateThreadTaskId.mockResolvedValue(undefined);
+ let next!:(event:unknown)=>void;mockSubscribeTask.mockImplementation((_id,handler)=>{next=handler;return ()=>{};});
+ mockGetThread.mockResolvedValue({id:'assistant-dedicated',title:'Assistant',status:'idle',mode:'work',createdAt:1,updatedAt:1,currentTaskId:null,taskIds:[]});
+ const ui=(draftRequest?:{id:number;text:string})=><MemoryRouter initialEntries={['/assistant']}><LocaleProvider><ChatShell threadId="assistant-dedicated" draftRequest={draftRequest} /></LocaleProvider></MemoryRouter>;
+ const view=render(ui()); await screen.findByLabelText('chat-input'); expect(mockGetThread).toHaveBeenCalledWith('assistant-dedicated');
+ const reads=mockGetThread.mock.calls.length;view.rerender(ui({id:1,text:'请继续跟进日程'}));await waitFor(()=>expect(screen.getByLabelText('chat-input')).toHaveValue('请继续跟进日程'));
+ expect(mockGetThread).toHaveBeenCalledTimes(reads);expect(mockCreateTask).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'submit-now'}));await waitFor(()=>expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({context:{threadId:'assistant-dedicated'}})));
+ expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('assistant-dedicated','task-assistant-first');
+ await act(async()=>next({type:'result',result:{summary:'第一条回复',artifacts:[]}}));
+ mockCreateTask.mockResolvedValue({taskId:'task-assistant-followup'});fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+ await waitFor(()=>expect(mockCreateTask).toHaveBeenLastCalledWith(expect.objectContaining({context:{threadId:'assistant-dedicated',taskIds:['task-assistant-first']}})));
 });

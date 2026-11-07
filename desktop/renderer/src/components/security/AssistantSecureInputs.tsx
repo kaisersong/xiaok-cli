@@ -1,0 +1,11 @@
+import {useEffect,useRef,useState} from 'react';
+import {z} from 'zod';
+import {CREDENTIAL_REQUEST_SCHEMA,type CredentialRequest,type CredentialSubmit} from '../../../../shared/credential-input-contract';
+import {getDesktopApi} from '../../shared/desktop';
+import {useLocale} from '../../contexts/LocaleContext';
+import {SecureCredentialCard} from './SecureCredentialCard';
+export function AssistantSecureInputs({taskId}:{taskId?:string|null}){const{t}=useLocale(),[requests,setRequests]=useState<CredentialRequest[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState<string>();const generation=useRef(0),mutation=useRef(false);const refresh=useRef<()=>void>(()=>{});
+ useEffect(()=>{const g=++generation.current;let reading=false,queued=false;const read=()=>{const api=getDesktopApi();if(!api?.listCredentialInputs)return;if(reading){queued=true;return;}reading=true;void api.listCredentialInputs().then(value=>{if(g===generation.current)setRequests(z.array(CREDENTIAL_REQUEST_SCHEMA).parse(value));}).catch(()=>{if(g===generation.current)setError('failed');}).finally(()=>{reading=false;if(queued&&g===generation.current){queued=false;read();}});};refresh.current=read;read();const stop=getDesktopApi()?.onCredentialInputsChanged?.(read);return()=>{generation.current++;stop?.();};},[]);
+ const act=async(run:()=>Promise<unknown>)=>{if(mutation.current)return;mutation.current=true;const g=generation.current;setBusy(true);setError(undefined);try{await run();}catch(e){if(g===generation.current){const text=e instanceof Error?e.message:'';setError(text.match(/\bcredential_[a-z_]+\b/)?.[0]??'failed');}}finally{mutation.current=false;if(g===generation.current){setBusy(false);refresh.current();}}};
+ return <>{requests.filter(r=>!taskId||r.taskId===taskId).map(request=><SecureCredentialCard key={request.id} request={request} busy={busy} onSubmit={(input:CredentialSubmit)=>{void act(()=>getDesktopApi()!.submitCredentialInput(input));}} onCancel={()=>{void act(()=>getDesktopApi()!.cancelCredentialInput({id:request.id,expectedRevision:request.revision}));}}/>)}{error&&<p role="alert" className="my-2 text-xs text-[var(--c-text-secondary)]">{t.secureCredentials.errors[error]??t.secureCredentials.errors.failed}</p>}</>;
+}
