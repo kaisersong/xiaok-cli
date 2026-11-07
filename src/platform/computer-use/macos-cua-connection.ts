@@ -39,6 +39,16 @@ const expectedProperties: NonNullable<CuaAbiProfile['expectedProperties']> = Obj
 export const MACOS_TOKEN_CUA_ABI_PROFILE: CuaAbiProfile = Object.freeze({
   ...MACOS_CUA_ABI_PROFILE, id: 'macos-0.33.1', contracts, expectedProperties,
 });
+// 0.41.2 tokens carry pid for these operations. This is a backend ABI
+// difference only: the public legacy translator still requires explicit pid.
+const tokenPidOperations = new Set(['double_click', 'right_click', 'set_value']);
+export const MACOS_041_CUA_ABI_PROFILE: CuaAbiProfile = Object.freeze({
+  ...MACOS_TOKEN_CUA_ABI_PROFILE,
+  id: 'macos-0.41.2',
+  contracts: Object.freeze(contracts.map(contract => tokenPidOperations.has(contract.backendOperation)
+    ? Object.freeze({ ...contract, backendRequired: Object.freeze(contract.backendRequired.filter(field => field !== 'pid')) })
+    : contract)),
+});
 
 export function macosCuaCatalog(schemas: readonly McpToolSchema[]): BackendOperationSchema[] {
   return schemas.map(schema => {
@@ -54,15 +64,20 @@ export function macosCuaCatalog(schemas: readonly McpToolSchema[]): BackendOpera
 }
 
 export function selectMacosCuaAbiProfile(catalog: readonly BackendOperationSchema[]): CuaAbiProfile {
+  const current = verifyBackendAbi(catalog, MACOS_041_CUA_ABI_PROFILE);
   const modern = verifyBackendAbi(catalog, MACOS_TOKEN_CUA_ABI_PROFILE);
   const fullyRetired = contracts.every(contract => {
     const op = catalog.find(candidate => candidate.name === contract.backendOperation);
     return op && retired.every(field => !(field in op.properties));
   });
-  if (modern.ok && fullyRetired) return MACOS_TOKEN_CUA_ABI_PROFILE;
+  if (fullyRetired) {
+    if (current.ok) return MACOS_041_CUA_ABI_PROFILE;
+    if (modern.ok) return MACOS_TOKEN_CUA_ABI_PROFILE;
+  }
   const legacy = verifyBackendAbi(catalog, MACOS_CUA_ABI_PROFILE);
   if (legacy.ok) return MACOS_CUA_ABI_PROFILE;
   throw Object.assign(new Error(`CUA macOS ABI mismatch: ${[
+    ...(!current.ok ? current.problems : ['partially retired element addressing']),
     ...(!modern.ok ? modern.problems : ['partially retired element addressing']), ...legacy.problems,
   ].join('; ')}`), { code: 'COMPUTER_USE_MACOS_ABI_MISMATCH' });
 }
@@ -84,7 +99,7 @@ export function createMacosCuaConnection(catalog: readonly BackendOperationSchem
       const contract = MACOS_CUA_ABI_PROFILE.contracts.find(candidate => candidate.backendOperation === operation);
       if (!contract) throw new InvalidComputerUseInputError(`unsupported native operation ${operation}`);
       const normalized = translateCuaAction(contract.action, input).input;
-      if (profile === MACOS_TOKEN_CUA_ABI_PROFILE) {
+      if (profile === MACOS_TOKEN_CUA_ABI_PROFILE || profile === MACOS_041_CUA_ABI_PROFILE) {
         const indexed = normalized.element_index !== undefined;
         if ((indexed || normalized.element_token !== undefined) && ['x', 'y', 'to_x', 'to_y'].some(field => normalized[field] !== undefined)) {
           throw new InvalidComputerUseInputError('Use either element or pixel targeting');

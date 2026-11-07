@@ -3,6 +3,8 @@ import {createCredentialInputOwner} from './credential-input-consumers.js';
 import {registerCredentialInputIpc} from './credential-input-ipc.js';
 import {readProtectedJson} from '../../src/utils/protected-json-async.js';
 import { createDesktopAssistantInbox } from './desktop-assistant-inbox.js';
+import {defaultKimDecisionRuntime} from '../../src/ai/kim/runtime.js';
+import {registerKimDecisionIpc} from './kim-decision-typed-ipc.js';
 import { registerAssistantInboxIpc } from './assistant-inbox-ipc.js';
 import { MailAccountStore } from './mail-account-store.js';
 import { MailConnectorService } from './mail-connector-service.js';
@@ -1398,7 +1400,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         updatedAt: source.updatedAt,
       })),
   });
-  assistantInbox = createDesktopAssistantInbox({
+  assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,
     dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
     profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
     search:(query,signal)=>services.searchForAssistant(query,signal),
@@ -1413,6 +1415,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   credentialInputs=createCredentialInputOwner({dataRoot,mail:mailConnectors,refreshConnectors:()=>services.refreshConnectorCredentials(),changed:()=>{mainWindow?.webContents.send('desktop:credentialInput:changed');mainWindow?.webContents.send('desktop:assistantInbox:changed');}});
   registerCredentialInputIpc(shutdownAwareIpc,credentialInputs,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}),new MemoryCredentialSettingsStore(dataRoot));
   registerLifetimeDisposerStep('credential-inputs',async()=>{credentialInputs?.dispose();});
+  registerKimDecisionIpc(shutdownAwareIpc,defaultKimDecisionRuntime,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
   registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
   const inboxOwner=assistantInbox;
   registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});

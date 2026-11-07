@@ -1,3 +1,4 @@
+import {kimDecisionZh} from './kim-decision';
 import {secureCredentialsZh} from './secure-credentials';
 import { assistantInboxZh } from './assistant-inbox';
 import {loopPublicationZh} from './loop-publication';
@@ -7,6 +8,7 @@ import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
   secureCredentials:secureCredentialsZh,
+  kimDecision:kimDecisionZh,
   assistantInbox: assistantInboxZh,
   mailConnectors: {
     manageProvider:(name:string)=>`管理 ${name}`,removeAccount:'移除账号',accountIdentityHint:'可在这里更新授权和发送权限；更换邮箱地址请新增账号。',
