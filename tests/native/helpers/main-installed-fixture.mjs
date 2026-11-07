@@ -21,6 +21,9 @@ export async function prepareMainInstalledFixture(repo, headers, {authorityFamil
     'native/main-installation/protocol.h', 'native/main-installation/wire.h',
     'native/main-installation/wire.c', 'native/main-installation/main-installation-entry.c',
     'native/main-installation/main-installation-helper.c',
+    'native/main-installation/installation-closure.h',
+    'native/main-installation/installation-release.h',
+    'native/main-installation/installation-certificate.h',
     'tests/native/fixtures/main-installed-shared.cjs',
   ];
   const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex');
