@@ -25,7 +25,7 @@ export const TASK7_EVENT = z.discriminatedUnion('type', [
   event('task_started', { taskId: id }), event('task_execution_started', { taskId: id }), event('task_terminal', { status: terminal }),
   event('understanding_updated', { understanding: TASK7_UNDERSTANDING }), event('plan_updated', { plan: z.array(step) }),
   event('progress', { message: text, stage: text.optional(), eventId: id }), event('assistant_delta', { delta: text, eventId: id }),
-  event('needs_user', { question }), event('question_resolved', { questionId: id }),
+  event('needs_user', { question }), event('question_resolved', { questionId: id, answerText: z.string().max(12000).optional() }),
   event('task_cancelled', { taskId: id, reason: text, partialText: text.optional() }), event('result', { result }),
   event('artifact_recorded', { artifactId: id, kind: text, label: text, filePath: text, previewAvailable: z.boolean(), turnId: id, creator: text.optional(), mimeType: text.optional() }),
   event('salvage', { salvage }), event('error', { message: text }),

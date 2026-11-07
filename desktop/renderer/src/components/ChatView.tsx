@@ -1,4 +1,5 @@
 import { A2uiArtifactRenderer } from './a2ui/A2uiArtifactRenderer';
+import type {InterruptedTask} from '../lib/interrupted-task';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
@@ -264,6 +265,10 @@ export interface ArtifactOpenOptions {
 
 interface ChatViewProps {
   uiPreviews?: Array<{toolUseId:string;title:string;content:string}>;
+  emptyContent?: ReactNode;
+  assistantContent?: ReactNode;
+  assistantHasMessages?: boolean;
+  conversationHeader?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -273,6 +278,8 @@ interface ChatViewProps {
   streamingText: string;
   status: 'idle' | 'running' | 'waiting_user' | 'completed' | 'failed';
   currentQuestion: NeedsUserQuestion | null;
+  interruptedTask?: InterruptedTask | null;
+  onInterruptedChoice?: (choiceId: string) => void | boolean | Promise<void | boolean>;
   result: TaskResult | null;
   generatedFiles: GeneratedFile[];
   prompt: string;
@@ -292,7 +299,8 @@ interface ChatViewProps {
 }
 
 export function ChatView({ uiPreviews = [],
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
+  emptyContent, conversationHeader, assistantContent, assistantHasMessages,
+  thread, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -301,6 +309,8 @@ export function ChatView({ uiPreviews = [],
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
+  const showEntry = Boolean(emptyContent) && !assistantHasMessages && messages.length === 0 && !streamingText && status === 'idle';
+  const canContinueInterruption = Boolean(interruptedTask && interruptedTask.taskId === thread.taskIds.at(-1) && (status === 'failed' || status === 'idle') && !currentQuestion);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIndexFrameRef = useRef<number | null>(null);
@@ -391,7 +401,7 @@ export function ChatView({ uiPreviews = [],
       const { scrollTop, scrollHeight, clientHeight } = el;
       const atBottom = scrollHeight - scrollTop - clientHeight < 50;
       isAtBottomRef.current = atBottom;
-      setShowScrollToBottom(!atBottom);
+      setShowScrollToBottom(!showEntry && !atBottom);
       scheduleActivePromptUpdate();
     };
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -402,10 +412,16 @@ export function ChatView({ uiPreviews = [],
         activeIndexFrameRef.current = null;
       }
     };
-  }, [scheduleActivePromptUpdate]);
+  }, [scheduleActivePromptUpdate, showEntry]);
 
   // Throttled auto-scroll: only when at bottom, max once per 100ms
   useEffect(() => {
+    if (showEntry) {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      isAtBottomRef.current = true;
+      setShowScrollToBottom(false);
+      return;
+    }
     if (!isAtBottomRef.current) return;
     const now = Date.now();
     if (now - lastScrollTimeRef.current < 100) return;
@@ -413,7 +429,7 @@ export function ChatView({ uiPreviews = [],
     const scroller = scrollRef.current;
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
     setShowScrollToBottom(false);
-  }, [messages, streamingText, status]);
+  }, [messages, streamingText, status, showEntry]);
 
   // Approvals can arrive after the last text chunk inside the stream throttle.
   // Follow them only for readers already following the latest output; keep
@@ -438,7 +454,8 @@ export function ChatView({ uiPreviews = [],
   }, [onToggleCanvas]);
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+      {(assistantHasMessages || !(messages.length === 0 && !streamingText && status === 'idle')) && conversationHeader}
       <ConversationIndexRail
         entries={promptIndexEntries}
         activeId={activePromptId}
@@ -453,8 +470,9 @@ export function ChatView({ uiPreviews = [],
         className="flex-1 overflow-x-hidden overflow-y-auto"
         style={{ userSelect: 'text' }}
       >
-        <div className="mx-auto max-w-[800px] px-14 py-6">
+        {showEntry ? emptyContent : <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
+            {assistantContent}
             {messages.map((msg, index) => {
               const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
               const outputs = msg.role === 'result_card'
@@ -631,7 +649,14 @@ export function ChatView({ uiPreviews = [],
             )}
 
             {/* Error */}
-            {status === 'failed' && (
+            {canContinueInterruption ? (
+              <div role="note" className="space-y-3 py-2">
+                <p className="text-sm text-[var(--c-text-secondary)]">{onInterruptedChoice && interruptedTask?.choices?.length ? t.chatView.interruptedChoices : t.chatView.interruptedContinue}</p>
+                {onInterruptedChoice && interruptedTask?.choices?.map(choice => <button key={choice.id} type="button"
+                  onClick={() => { void onInterruptedChoice?.(choice.id); }}
+                  className="block rounded-lg border border-[var(--c-border)] px-4 py-2 text-left text-sm text-[var(--c-text-primary)] hover:bg-[var(--c-bg-card)]">{choice.label}</button>)}
+              </div>
+            ) : status === 'failed' && (
               <div className="flex items-start gap-3 py-2">
                 <svg viewBox="0 0 16 16" className="mt-0.5 size-4 shrink-0 text-red-500" fill="currentColor">
                   <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4.5a1 1 0 112 0v3a1 1 0 11-2 0v-3zm1 7a1 1 0 100-2 1 1 0 000 2z" />
@@ -642,7 +667,7 @@ export function ChatView({ uiPreviews = [],
 
             <div />
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Scroll to bottom floating button */}

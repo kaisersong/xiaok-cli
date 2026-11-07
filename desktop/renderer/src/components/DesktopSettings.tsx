@@ -1,3 +1,5 @@
+import {SecretInput} from './security/SecretInput';
+import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
 import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
 import { useChannelReadonly } from '../hooks/useChannelReadonly';
 import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
@@ -101,7 +103,7 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'connectors' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
 type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
@@ -233,6 +235,7 @@ function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
     { key: 'voice', icon: Mic, label: t.desktopSettings.voice },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
     { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
+    { key: 'connectors', icon: Plug, label: t.nav.connectors },
     { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
     { key: 'mcp', icon: Plug, label: t.desktopSettings.navMcp },
     { key: 'tools', icon: Wrench, label: t.desktopSettings.navTools },
@@ -294,11 +297,12 @@ export function DesktopSettings({ onClose }: Props) {
 
       {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="px-8 py-6 max-w-[700px]">
+        <div className={`px-8 py-6 ${activeTab === 'connectors' ? 'w-full max-w-[1100px]' : 'max-w-[700px]'}`}>
           {activeTab === 'model' && <ModelPane />}
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
+          {activeTab === 'connectors' && <AppConnectorsSettings />}
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'mobile' && <MobilePane />}
@@ -736,8 +740,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAppKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAppKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAppKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAppKey}`}
@@ -747,8 +750,7 @@ function VoicePane() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAccessKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAccessKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAccessKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAccessKey}`}
@@ -785,8 +787,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrApiKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.aliyunApiKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, aliyunApiKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrApiKey}`}
@@ -1481,8 +1482,8 @@ function ModelPane() {
                     {selectedProvider === provider.id && (
                       <div className="mt-2 flex items-center gap-2">
                         <div className="relative flex-1">
-                          <input aria-label="sk-..."
-                            type={showKey ? 'text' : 'password'}
+                          <SecretInput aria-label="sk-..."
+                            revealed={showKey}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                             placeholder="sk-..."
@@ -4733,8 +4734,7 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange, ds }: ApiK
 
   return (
     <div className="mt-2 flex items-center gap-2">
-      <input
-        type="password"
+      <SecretInput
         aria-label={ariaLabel}
         placeholder={placeholder}
         className={`flex-1 ${inputCls}`}

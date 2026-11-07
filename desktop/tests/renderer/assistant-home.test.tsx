@@ -8,7 +8,7 @@ const { mockGetAssistantOverview, mockActivateAssistant } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../renderer/src/components/ChatInput', () => ({
-  ChatInput: () => <div data-testid="chat-input" />,
+  ChatInput: ({ value }: { value: string }) => <div data-testid="chat-input" data-value={value} />,
 }));
 
 vi.mock('../../renderer/src/api', () => ({
@@ -70,9 +70,9 @@ describe('AssistantHomeCard', () => {
       pendingCandidateCount: 0,
     });
 
-    expect(screen.getByText('每日助理')).toBeInTheDocument();
+    expect(screen.getByText('小K助理')).toBeInTheDocument();
     expect(screen.getByText(/启用后，小K会在晚间整理工作/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '启用每日助理' }));
+    fireEvent.click(screen.getByRole('button', { name: '启用小K助理' }));
     expect(callbacks.onActivate).toHaveBeenCalledTimes(1);
   });
 
@@ -93,9 +93,9 @@ describe('AssistantHomeCard', () => {
     expect(screen.getByText('跟进失败任务')).toBeInTheDocument();
     expect(screen.queryByText('不应出现在首页')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '查看每日助理详情' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看小K助理详情' }));
     expect(callbacks.onOpenDetails).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: '暂停每日助理' }));
+    fireEvent.click(screen.getByRole('button', { name: '暂停小K助理' }));
     expect(callbacks.onPause).toHaveBeenCalledTimes(1);
   });
 
@@ -106,8 +106,8 @@ describe('AssistantHomeCard', () => {
       pendingCandidateCount: 0,
     });
 
-    expect(screen.getByText('每日助理已暂停')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '恢复每日助理' }));
+    expect(screen.getByText('小K助理已暂停')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '恢复小K助理' }));
     expect(callbacks.onResume).toHaveBeenCalledTimes(1);
   });
 });
@@ -137,10 +137,16 @@ describe('WelcomePage assistant integration', () => {
       </LocaleProvider>,
     );
 
-    expect(await screen.findByRole('button', { name: '启用每日助理' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '启用每日助理' }));
+    expect(await screen.findByRole('button', { name: '启用小K助理' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '启用小K助理' }));
     expect(await screen.findByText('授权后建议')).toBeInTheDocument();
     expect(mockActivateAssistant).toHaveBeenCalledTimes(1);
     expect(mockGetAssistantOverview).toHaveBeenCalledTimes(2);
   });
+});
+
+it('keeps assistant handoff as an editable input without submitting or running it', async () => {
+  mockGetAssistantOverview.mockResolvedValue({ profile: { status: 'active', eveningTime: '22:30', morningTime: '08:30' }, suggestions: [], candidates: [], pendingCandidateCount: 0 });
+  render(<MemoryRouter initialEntries={[{ pathname: '/', state: { assistantDraftPrompt: '推进发布评审，先确认下一步' } }]}><LocaleProvider><WelcomePage /></LocaleProvider></MemoryRouter>);
+  expect(screen.getByTestId('chat-input')).toHaveAttribute('data-value', '推进发布评审，先确认下一步');
 });

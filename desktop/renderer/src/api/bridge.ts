@@ -1,4 +1,5 @@
 import { emitThreadDeletionPhase, type ThreadDeletionPhase } from './thread-deletion-diagnostics';
+import { ASSISTANT_THREAD_ID } from '../lib/assistant-thread';
 import { AUTOMATION_CONFIG_SCHEMA, AUTOMATION_OVERVIEW_SCHEMA } from '../../../shared/automation-config-ipc-contract';
 import type { MobileRelaySignInResult } from '../../../shared/mobile-signin-ipc-contract';
 import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
@@ -256,6 +257,27 @@ export const api = {
     };
     await withStore('readwrite', (store) => store.add(thread));
     return withThreadCompatibility(thread);
+  },
+
+  async ensureAssistantWorkThread(input: {id:string;title:string;taskId:string}): Promise<ThreadRecord> {
+    if(!/^a0c22222-[a-f0-9-]+$/.test(input.id))throw Error('assistant_invalid_thread');
+    await mutateStoredThread(input.id,existing=>{if(existing?.deletionPending)throw Error('thread_deletion_pending');const now=Date.now();return existing?{...existing,currentTaskId:input.taskId,taskIds:existing.taskIds.includes(input.taskId)?existing.taskIds:[...existing.taskIds,input.taskId],updatedAt:now}:{id:input.id,title:input.title,status:'idle',mode:'work',createdAt:now,updatedAt:now,starred:false,gtdBucket:'inbox',pinnedAt:null,currentTaskId:input.taskId,taskIds:[input.taskId]};});
+    const thread=await api.getThread(input.id);if(!thread)throw Error('thread_not_found');return thread;
+  },
+
+  async ensureAssistantThread(title: string): Promise<ThreadRecord> {
+    await mutateStoredThread(ASSISTANT_THREAD_ID, existing => {
+      if (existing?.deletionPending) throw Error('thread_deletion_pending');
+      const now = Date.now();
+      return existing ?? {
+        id: ASSISTANT_THREAD_ID, title, status: 'idle', mode: 'work',
+        createdAt: now, updatedAt: now, starred: false, gtdBucket: 'inbox',
+        pinnedAt: null, currentTaskId: null, taskIds: [],
+      };
+    });
+    const thread = await api.getThread(ASSISTANT_THREAD_ID);
+    if (!thread) throw Error('thread_not_found');
+    return thread;
   },
 
   async getThread(id: string): Promise<ThreadRecord | null> {
@@ -1055,17 +1077,8 @@ export const api = {
   // ---------------------
   // Memory API (localStorage)
   // ---------------------
-  async getMemoryConfig() {
-    try {
-      const raw = localStorage.getItem('xiaok:memory-config');
-      return raw ? JSON.parse(raw) : { enabled: false };
-    } catch { return { enabled: false }; }
-  },
-
-  async saveMemoryConfig(config: { enabled: boolean }) {
-    try { localStorage.setItem('xiaok:memory-config', JSON.stringify(config)) } catch { /* noop */ }
-    return config;
-  },
+  async getMemoryConfig() {return getDesktopApi()!.memory.getConfig();},
+  async saveMemoryConfig(config:{enabled:boolean}) {return getDesktopApi()!.memory.setConfig(config);},
 
   // ---------------------
   // Connectors API

@@ -40,3 +40,12 @@ it('all four actual answer branches validate, and branch mismatch never becomes 
   for (const answer of [{ type: 'choice', questionId: 'q', choiceId: 'yes' }, { type: 'text', questionId: 'q', text: 'text' }, { type: 'materials', questionId: 'q', materialIds: ['m'] }, { type: 'role_update', questionId: 'q', materialId: 'm', role: 'customer_material' }]) expect(TASK7_ANSWER.safeParse(answer).success).toBe(true);
   expect(TASK7_ANSWER.safeParse({ type: 'choice', questionId: 'q', text: 'wrong' }).success).toBe(false);
 });
+it('passes bounded ordinary reply text through both live events and historical snapshots',()=>{
+ const event={type:'question_resolved',questionId:'qa',answerText:'QA selected'};
+ expect(captureTask7Event(event)).toEqual(event);
+ const snapshot={taskId:'qa',sessionId:'qa',status:'completed',prompt:'QA',materials:[],events:[event],createdAt:1,updatedAt:2};
+ expect(captureTask7Output('recoverTask',{snapshot})).toEqual({snapshot});
+ expect(captureTask7Event({type:'question_resolved',questionId:'legacy'})).toEqual({type:'question_resolved',questionId:'legacy'});
+ for(const answerText of [123,'x'.repeat(12001)])expect(()=>captureTask7Event({...event,answerText})).toThrow('task_event_projection_unavailable');
+ expect(()=>captureTask7Event({...event,validateAnswer:()=>{}})).toThrow('task_event_projection_unavailable');
+});
