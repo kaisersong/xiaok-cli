@@ -1,110 +1,123 @@
+import {useEffect} from 'react';
+import {getDesktopApi} from '@xiaok/shared/desktop';
+import {SCHEDULED_DELIVERY_REPLAY_LIMIT, type ScheduledTaskDueEvent} from '../../../shared/scheduled-task-due-event';
 import {reportScheduledReadFailure} from '../lib/scheduled-timed-action-error';
-/**
- * useScheduledTaskBootstrap — global hook that syncs scheduled tasks to main process
- * on app startup and listens for task execution notifications to refresh UI.
- *
- * Architecture: Main process is the Single Source of Truth for task state.
- * Renderer no longer bulk-syncs localStorage into main. It only listens for
- * main-process execution notifications and refreshes UI cache.
- *
- * Must be mounted once at the app root level (App.tsx).
- */
-
-import { useEffect } from 'react';
-import { getDesktopApi } from '@xiaok/shared/desktop';
-import {
-  collectScheduledRuntimeTaskIds,
-  ensureAggregatedScheduledThread,
-  isRuntimeTaskId,
-} from '../lib/scheduled-task-threads';
+import {collectScheduledRuntimeTaskIds, ensureAggregatedScheduledThread, mergeScheduledTaskCache} from '../lib/scheduled-task-threads';
 
 const STORAGE_KEY = 'xiaok:scheduled-tasks';
+const DELIVERED_KEY = 'xiaok:scheduled-delivered-runs';
+const DELIVERED_PLAN_LIMIT = 1000;
+if (DELIVERED_PLAN_LIMIT < SCHEDULED_DELIVERY_REPLAY_LIMIT) {
+  throw Error('scheduled_delivery_dedup_budget_below_replay_limit');
+}
+type DeliveredPlan = {identity: string; notifiedAt: number};
 
+function readDeliveredPlans(): Map<string, DeliveredPlan> {
+  const stored = JSON.parse(localStorage.getItem(DELIVERED_KEY) ?? '{}');
+  if (!Array.isArray(stored)) return new Map(Object.entries(stored));
+  // Legacy arrays are chronological. Keep the last identity per plan and use
+  // ordered synthetic times because that format did not retain timestamps.
+  const plans = new Map<string, DeliveredPlan>();
+  const baseTime = Date.now() - stored.length;
+  stored.forEach((identity: string, index: number) => {
+    const separator = identity.indexOf(':');
+    if (separator < 0) return;
+    const taskId = identity.slice(0, separator);
+    plans.delete(taskId);
+    plans.set(taskId, {identity, notifiedAt: baseTime + index});
+  });
+  localStorage.setItem(DELIVERED_KEY, JSON.stringify(Object.fromEntries(plans)));
+  return plans;
+}
+
+/** Main owns runtime facts; this single root hook projects their durable links into the UI. */
 export function useScheduledTaskBootstrap(): void {
   useEffect(() => {
     const desktop = getDesktopApi();
     if (!desktop?.onScheduledTaskDue) return;
+    let active = true;
+    let queue = Promise.resolve();
+    const enqueue = (work: () => Promise<void>) => {
+      queue = queue.then(async () => {if (active) await work();}).catch(() => {if (active) reportScheduledReadFailure();});
+      return queue;
+    };
+    const readCache = () => {
+      const rows = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
+      if (!Array.isArray(rows)) throw Error('scheduled_cache_invalid');
+      return rows;
+    };
+    const link = async (task: any) => {
+      if (!task.runtimeTaskId && !task.threadId?.startsWith('task_')) return task;
+      const runs = desktop.getTimedActionRuns ? await desktop.getTimedActionRuns(task.id) : [];
+      if (!Array.isArray(runs)) throw Error('scheduled_runs_invalid');
+      if (!active) return task;
+      return ensureAggregatedScheduledThread(task, collectScheduledRuntimeTaskIds(task, runs));
+    };
+    const updated = () => window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
 
-    // Listen for task execution notifications from main — trust main's state
-    const unsub = desktop.onScheduledTaskDue(async (payload: {
-      taskId: string;
-      runtimeTaskId?: string;
-      completed?: boolean;
-      success?: boolean;
-      title?: string;
-      lastRunAt?: number;
-      nextRunAt?: number;
-      error?: string;
-    }) => {
-      if (!payload.completed) return;
-      // Mark task as unread for sidebar badge
-      try {
-        const unreadRaw = localStorage.getItem('xiaok:scheduled-unread');
-        const unread: Record<string, number> = unreadRaw ? JSON.parse(unreadRaw) : {};
-        unread[payload.taskId] = (unread[payload.taskId] ?? 0) + 1;
-        localStorage.setItem('xiaok:scheduled-unread', JSON.stringify(unread));
-      } catch { /* best-effort */ }
-      // Dispatch in-app toast event
-      try {
-        window.dispatchEvent(new CustomEvent('xiaok:scheduled-toast', {
-          detail: {
-            taskId: payload.taskId,
-            title: payload.title ?? '',
-            success: payload.success ?? false,
-            error: payload.error,
-          },
-        }));
-      } catch { /* best-effort */ }
-
-      const raw = localStorage.getItem(STORAGE_KEY);
-      let currentTasks = raw ? JSON.parse(raw) : [];
-      let idx = currentTasks.findIndex((t: any) => t.id === payload.taskId);
-      if (idx === -1 && desktop.getScheduledTasks) {
-        try {
-          const mainTasks = await desktop.getScheduledTasks();
-          if (Array.isArray(mainTasks)) {
-            currentTasks = mainTasks;
-            idx = currentTasks.findIndex((t: any) => t.id === payload.taskId);
-          }
-        } catch { reportScheduledReadFailure();return; }
+    const notify = (payload: ScheduledTaskDueEvent, fallbackTitle = '') => {
+      const identity = payload.runId ? `${payload.taskId}:${payload.runId}` : undefined;
+      const delivered = readDeliveredPlans();
+      if (identity && delivered.get(payload.taskId)?.identity === identity) return;
+      const unread = JSON.parse(localStorage.getItem('xiaok:scheduled-unread') ?? '{}');
+      unread[payload.taskId] = (unread[payload.taskId] ?? 0) + 1;
+      localStorage.setItem('xiaok:scheduled-unread', JSON.stringify(unread));
+      if (identity) {
+        // A hot plan consumes one slot. Stable time ordering also keeps the most
+        // recently notified plan when multiple notifications share a millisecond.
+        delivered.delete(payload.taskId);
+        delivered.set(payload.taskId, {identity, notifiedAt: Date.now()});
+        const retained = [...delivered].sort((a, b) => a[1].notifiedAt - b[1].notifiedAt).slice(-DELIVERED_PLAN_LIMIT);
+        localStorage.setItem(DELIVERED_KEY, JSON.stringify(Object.fromEntries(retained)));
       }
-      if (idx === -1) return;
-
-      // Use authoritative state from main process — no local recalculation
-      if (payload.success && payload.lastRunAt) {
-        const task = currentTasks[idx];
-        const runtimeTaskId = payload.runtimeTaskId ?? task.runtimeTaskId ?? (isRuntimeTaskId(task.threadId) ? task.threadId : undefined);
-        task.runtimeTaskId = runtimeTaskId;
-        if (isRuntimeTaskId(task.threadId)) {
-          task.threadId = undefined;
-        }
-
-        // Associate auto-execution result with a thread
-        if (runtimeTaskId) {
-          try {
-            const runs = desktop.getTimedActionRuns
-              ? await desktop.getTimedActionRuns(payload.taskId)
-              : [];
-            const linked = await ensureAggregatedScheduledThread(
-              { ...task, runtimeTaskId },
-              collectScheduledRuntimeTaskIds({ ...task, runtimeTaskId }, Array.isArray(runs) ? runs : []),
-            );
-            task.threadId = linked.threadId;
-            task.runtimeTaskId = linked.runtimeTaskId;
-          } catch { reportScheduledReadFailure();return; }
-        }
-
-        currentTasks[idx] = {
-          ...task,
-          lastRunAt: payload.lastRunAt,
-          nextRunAt: payload.nextRunAt,
-          updatedAt: payload.lastRunAt,
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(currentTasks));
+      window.dispatchEvent(new CustomEvent('xiaok:scheduled-unread-changed'));
+      window.dispatchEvent(new CustomEvent('xiaok:scheduled-toast', {detail: {
+        taskId: payload.taskId, title: payload.title ?? fallbackTitle,
+        success: payload.completed === true && payload.success === true, error: payload.error,
+      }}));
+    };
+    const unsub = desktop.onScheduledTaskDue((payload: ScheduledTaskDueEvent) => enqueue(async () => {
+      let rows = readCache();
+      let index = rows.findIndex((task: any) => task.id === payload.taskId);
+      if (index < 0 && desktop.getScheduledTasks) {
+        const main = await desktop.getScheduledTasks();
+        if (!Array.isArray(main)) throw Error('scheduled_tasks_invalid');
+        rows = mergeScheduledTaskCache(main, rows);
+        index = rows.findIndex((task: any) => task.id === payload.taskId);
       }
-      window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
+      if (index < 0 || !active) return;
+      const task = {...rows[index], ...(payload.runtimeTaskId ? {runtimeTaskId: payload.runtimeTaskId} : {})};
+      const linked = await link(task);
+      if (!active) return;
+      rows[index] = {...linked,
+        lastRunAt: Math.max(task.lastRunAt ?? 0, payload.lastRunAt ?? 0),
+        nextRunAt: payload.nextRunAt ?? task.nextRunAt,
+        updatedAt: Math.max(task.updatedAt ?? 0, payload.lastRunAt ?? 0),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+      updated();
+      const dispatchFailed = payload.dispatchStatus === 'failed' || payload.dispatchStatus === 'skipped';
+      if (!payload.completed && !dispatchFailed) return;
+      notify(payload, task.name ?? '');
+    }));
+
+    // Register before the initial read, and serialize it with live events.
+    if (desktop.getScheduledTasks) void enqueue(async () => {
+      const recoveredNotices = desktop.getRecentScheduledDeliveries ? await desktop.getRecentScheduledDeliveries() : [];
+      if (!Array.isArray(recoveredNotices)) throw Error('scheduled_deliveries_invalid');
+      const main = await desktop.getScheduledTasks();
+      if (!Array.isArray(main)) throw Error('scheduled_tasks_invalid');
+      const rows = mergeScheduledTaskCache(main, readCache());
+      const linked = [];
+      for (const row of rows) {
+        if (!active) return;
+        linked.push(await link(row));
+      }
+      if (!active) return;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(linked));
+      updated();
+      for (const notice of recoveredNotices) {if (!active) return; notify(notice);}
     });
-
-    return unsub;
+    return () => {active = false; unsub();};
   }, []);
 }

@@ -314,6 +314,7 @@ describe('preload API contract', () => {
       'onLoopConstraintAdded',
       'syncScheduledTasks',
       'getScheduledTasks',
+      'getRecentScheduledDeliveries',
       'createScheduledTask',
       'updateScheduledTask',
       'setScheduledTaskStatus',

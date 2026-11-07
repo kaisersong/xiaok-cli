@@ -59,6 +59,7 @@ export const en: LocaleStrings = {
     eventKinds: { status: 'Status', cleanup: 'Cleanup', output: 'Output', result: 'Result', message_sent: 'Message', message_consumed: 'Applied to context', usage: 'Usage', artifact: 'Artifact', tool_finished: 'Tool call' },
     activityAnnouncement: (running, completed) => `${running} SubAgents running, ${completed} completed`, failureAnnouncement: name => `${name} failed`,
   },
+  scheduledTaskToast: {completed: 'Scheduled task completed', failed: 'Scheduled task failed', open: 'View result', close: 'Close'},
   newChat: "New chat",
   chats: "Chats",
   searchChats: "Search Chats",

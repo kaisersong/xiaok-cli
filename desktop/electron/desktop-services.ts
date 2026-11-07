@@ -4727,6 +4727,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     // Main composition only; never exported through preload or an agent tool.
     captureLoopPublicationAdmission: () => goalCoordinator.captureBackgroundAdmission(),
     reserveBackgroundTask:backgroundTaskIdentity.reserve,
+    // Main scheduler only: a persisted read, without runtime/workflow recovery side effects.
+    readScheduledTaskSnapshot: (taskId: string) => snapshotStore.recoverTask(taskId),
     createReservedBackgroundTask:backgroundTaskIdentity.create,
     discardReservedBackgroundTask:backgroundTaskIdentity.discard,
     createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'> & {
