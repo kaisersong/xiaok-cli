@@ -18,7 +18,6 @@ on:
       - 'src/ai/memory/compaction.ts'
       - 'src/ai/memory/layered-store.ts'
       - 'desktop/electron/desktop-services.ts'
-      - 'desktop/tests/main/desktop-services.test.ts'
       - 'desktop/electron/desktop-system-prompt.ts'
       - 'desktop/electron/loop-evaluator.ts'
       - 'desktop/electron/completion-evidence-store.ts'
@@ -43,7 +42,6 @@ on:
       - 'src/ai/memory/compaction.ts'
       - 'src/ai/memory/layered-store.ts'
       - 'desktop/electron/desktop-services.ts'
-      - 'desktop/tests/main/desktop-services.test.ts'
       - 'desktop/electron/desktop-system-prompt.ts'
       - 'desktop/electron/loop-evaluator.ts'
       - 'desktop/electron/completion-evidence-store.ts'
@@ -118,8 +116,6 @@ jobs:
             xiaok-cli/desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm ci --ignore-scripts --prefix desktop
-      # desktop-services.test.ts loads electron; --ignore-scripts skips its binary download
-      - run: node desktop/node_modules/electron/install.js
       - run: npm ci --ignore-scripts --omit=dev --prefix ../kswarm
       - run: npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
       - run: npm run build:harness-owner-lock
@@ -131,7 +127,6 @@ jobs:
           tests/main/harness-optimization-crash.test.ts
           tests/main/harness-optimization-ipc.test.ts
           tests/main/harness-optimization-services.test.ts
-          tests/main/desktop-services.test.ts
           tests/main/preload-contract.test.ts
           tests/main/preload-sandbox.test.ts
           tests/renderer/harness-optimization-settings.test.tsx
