@@ -11,3 +11,10 @@ it('freezes an isolated private VM configuration without host mounts, automatic 
  expect(plan.bootstrapScript).toContain('Group=xiaokvm');expect(plan.bootstrapScript).toContain('c'.repeat(64));expect(plan.bootstrapScript).not.toMatch(/curl|wget|apt-get/);
  expect(()=>buildPrivateMacEnginePlan({releaseRoot:'/tmp/freeform',stateRoot:state,baseImageSha256:'b'.repeat(64),dockerArchiveSha256:'c'.repeat(64),creationNonce:'d'.repeat(64)})).toThrow();
 });
+it('pins the private classic image store used by immutable config IDs',()=>{
+ const plan=buildPrivateMacEnginePlan({releaseRoot:'/Library/Application Support/xiaok-verification/releases/'+'a'.repeat(64),stateRoot:'/Library/Application Support/xiaok-verification/state',baseImageSha256:'b'.repeat(64),dockerArchiveSha256:'c'.repeat(64),creationNonce:'d'.repeat(64)});
+ expect(plan.unit.match(/--feature=containerd-snapshotter=false/g)).toHaveLength(1);
+ expect(plan.unit.match(/--storage-driver=overlay2/g)).toHaveLength(1);
+ expect(plan.bootstrapScript).toContain(plan.unit);
+ expect(plan.bootstrapScript).toContain('cmp -s "$unit" /etc/systemd/system/xiaok-engine.service');
+});

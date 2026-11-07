@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { DesktopTaskEvent } from '../../../src/runtime/task-host/types';
-const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), createTask: vi.fn(), createTaskWithFiles: vi.fn(), subscribeTask: vi.fn(),
+const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), createTask: vi.fn(), createTaskWithFiles: vi.fn(), submitUserTask:vi.fn(), subscribeTask: vi.fn(),
   answerQuestion: vi.fn(), cancelTask: vi.fn(), updateThreadTaskId: vi.fn(), updateThreadTitle: vi.fn(), selectMaterials: vi.fn(), getModelConfig: vi.fn(), listSkills: vi.fn() }));
 vi.mock('../../renderer/src/api', () => ({ api: { ...f, getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })), getObservationPreconditions: vi.fn(async () => ({ ready: false })) } }));
 // Replace only external app-layout context. ChatShell, ChatView, ChatInput,
@@ -21,7 +21,7 @@ beforeEach(() => {
   f.getThread.mockResolvedValue({ id: 'thread', title: 'history', mode: 'work', status: 'idle', createdAt: 1, updatedAt: 2, currentTaskId: 'old', taskIds: ['old'] });
   f.recoverTask.mockResolvedValue({ snapshot: { taskId: 'old', sessionId: 'thread', status: 'completed', prompt: 'previous topic', materials: [],
     events: [{ type: 'result', result: { summary: 'history visible', artifacts: [] } }], createdAt: 1, updatedAt: 2 } });
-  f.createTask.mockResolvedValue({ taskId: 'new' }); f.createTaskWithFiles.mockResolvedValue({ taskId: 'new' });
+  f.submitUserTask.mockResolvedValue({taskId:'new',submissionId:'fixture-main-id'});f.createTask.mockResolvedValue({ taskId: 'new' }); f.createTaskWithFiles.mockResolvedValue({ taskId: 'new' });
   f.selectMaterials.mockResolvedValue({ filePaths: ['C:\\Users\\User\\context.md'] });
   f.listSkills.mockResolvedValue([]); f.getModelConfig.mockResolvedValue({ defaultProvider: 'test', defaultModelId: 'test', models: [], providers: [] });
   f.updateThreadTaskId.mockResolvedValue(undefined); f.updateThreadTitle.mockResolvedValue(undefined); f.answerQuestion.mockResolvedValue(undefined); f.cancelTask.mockResolvedValue(undefined);
@@ -36,10 +36,11 @@ it.each([false, true])('real normal UI/ChatShell recovery -> files=%s create -> 
   if (files) { fireEvent.click(screen.getByRole('button', { name: zh.chatInput.attachFiles })); await waitFor(() => expect(f.selectMaterials).toHaveBeenCalledOnce(), deadline); }
   const textarea = screen.getByRole('textbox', { name: zh.chatView.replyPlaceholder });
   fireEvent.change(textarea, { target: { value: 'new request' } }); fireEvent.click(screen.getByRole('button', { name: zh.chatInput.send }));
-  const create = files ? f.createTaskWithFiles : f.createTask;
-  await waitFor(() => expect(create).toHaveBeenCalledOnce(), deadline);
-  expect(create).toHaveBeenCalledWith(files ? { prompt: 'new request', filePaths: ['C:\\Users\\User\\context.md'], context: { threadId: 'thread', taskIds: ['old'] } }
-    : { prompt: 'new request', materials: [], context: { threadId: 'thread', taskIds: ['old'] } });
+  await waitFor(() => expect(f.submitUserTask).toHaveBeenCalledOnce(), deadline);
+  expect(f.submitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:files
+    ?{kind:'files',prompt:'new request',filePaths:['C:\\Users\\User\\context.md'],context:{threadId:'thread',taskIds:['old']}}
+    :{kind:'materials',prompt:'new request',materials:[],context:{threadId:'thread',taskIds:['old']}}});
+  expect(f.createTask).not.toHaveBeenCalled();expect(f.createTaskWithFiles).not.toHaveBeenCalled();
   await waitFor(() => expect(observers.some(o => o.id === 'new')).toBe(true), deadline);
   expect(f.updateThreadTaskId).toHaveBeenCalledWith('thread', 'new');
   const observer = observers.findLast(o => o.id === 'new')!;
@@ -53,3 +54,19 @@ it.each([false, true])('real normal UI/ChatShell recovery -> files=%s create -> 
   await waitFor(() => expect(screen.getByRole('button', { name: zh.chatInput.send })).toBeVisible(), deadline);
   view.unmount(); expect(observer.release).toHaveBeenCalledOnce();
 }, 5000);
+
+it('one real send reuses its exact wire across preemption retries; a later explicit send gets a new gesture',async()=>{
+ f.submitUserTask.mockRejectedValueOnce(Error('goal_user_turn_waiting_for_preemption')).mockRejectedValueOnce(Error('goal_user_turn_waiting_for_preemption'));
+ render(<MemoryRouter initialEntries={['/t/thread']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
+ await screen.findByText('history visible');const textarea=screen.getByRole('textbox',{name:zh.chatView.replyPlaceholder});fireEvent.change(textarea,{target:{value:'same request'}});fireEvent.click(screen.getByRole('button',{name:zh.chatInput.send}));
+ await waitFor(()=>expect(f.submitUserTask).toHaveBeenCalledTimes(3),deadline);
+ const calls=f.submitUserTask.mock.calls;expect(calls[0][0]).toBe(calls[1][0]);expect(calls[1][0]).toBe(calls[2][0]);expect(calls[0][0]).toMatchObject({action:'submit_new',gestureId:expect.any(String),input:{kind:'materials',prompt:'same request',materials:[]}});
+ await waitFor(()=>expect(observers.some(o=>o.id==='new')).toBe(true),deadline);await act(async()=>observers.findLast(o=>o.id==='new')!.handler({type:'result',result:{summary:'first request done',artifacts:[]}}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:zh.chatInput.send})).toBeVisible());fireEvent.change(textarea,{target:{value:'same request'}});fireEvent.click(screen.getByRole('button',{name:zh.chatInput.send}));await waitFor(()=>expect(f.submitUserTask).toHaveBeenCalledTimes(4),deadline);
+ expect(calls[3][0].gestureId).not.toBe(calls[0][0].gestureId);expect(f.createTask).not.toHaveBeenCalled();expect(f.createTaskWithFiles).not.toHaveBeenCalled();
+});
+
+it.each(['prepared_mismatch','prepared_changed','result_invalid'])('unconfirmed submission %s is localized and never auto-retried',async code=>{
+ f.submitUserTask.mockRejectedValueOnce(Error('user_submission_'+code));render(<MemoryRouter initialEntries={['/t/thread']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
+ await screen.findByText('history visible');fireEvent.change(screen.getByRole('textbox',{name:zh.chatView.replyPlaceholder}),{target:{value:'new request'}});fireEvent.click(screen.getByRole('button',{name:zh.chatInput.send}));await screen.findByText(zh.chatShell.submissionReconciliationRequired);expect(f.submitUserTask).toHaveBeenCalledOnce();expect(f.createTask).not.toHaveBeenCalled();
+});

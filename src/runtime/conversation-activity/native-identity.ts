@@ -1,3 +1,5 @@
+import {readCapturedGroupsSchema} from '../verification/groups-source-schema.js';
+import {DSH_A_PROFILE,DSH_A_DIGEST} from '../multi-agent/dsh-admission-data.js';
 import { DatabaseSync } from 'node:sqlite';
 import { join, resolve } from 'node:path';
 import { readNativeSessionIdentity } from '../../ai/runtime/session-store/identity.js';
@@ -9,8 +11,19 @@ export class ActivityNativeIdentityRepository {
   constructor(private readonly options: { profileId: string; kind: 'desktop' | 'cli'; path: string; instanceId?: string; workspaceRoot?: string }) {
     if (options.kind === 'desktop') {
       this.db = new DatabaseSync(options.path, { readOnly: true });
-      const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (![3,4].includes(version)) { this.db.close(); throw new Error('activity_native_identity_schema_unsupported'); }
+      try {
+        const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+        if (version === 5) {
+          const schema = this.db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all() as unknown as Parameters<typeof readCapturedGroupsSchema>[0];
+          readCapturedGroupsSchema(schema, 5);
+          const floor = this.db.prepare('SELECT profile,digest FROM dsh_a_profile WHERE singleton=1').get();
+          if (floor?.profile !== DSH_A_PROFILE || floor.digest !== DSH_A_DIGEST) throw Error('activity_native_identity_schema_unsupported');
+        }
+        if (version !== 3 && version !== 4 && version !== 5) throw Error('activity_native_identity_schema_unsupported');
+      } catch (error) {
+        this.db.close();
+        throw error;
+      }
     }
   }
   getThread(threadId: string): ActivityThreadIdentity | null {

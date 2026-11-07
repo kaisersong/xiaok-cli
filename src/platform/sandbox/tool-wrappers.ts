@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+import { withSearchScope } from '../../ai/tools/search-scope-context.js';
 import {types} from 'node:util';
 import {isReadonlySandboxEnforcer} from './enforcer.js';
 import {inheritBuiltinToolIdentity} from '../../ai/tools/native-tool-identity.js';
@@ -13,6 +15,11 @@ function detectNetworkIntent(command:string):boolean{return /(curl|wget|https?:\
 type CompoundSandboxPreparation=(input:Readonly<Record<string,unknown>>,context?:ToolExecutionContext)=>Promise<string|undefined>;
 interface PreparationBinding {execute:Tool['execute'];prepare:CompoundSandboxPreparation}
 const compoundPreparations=new WeakMap<Tool,PreparationBinding>();
+const readonlyScopes=new WeakMap<Tool,{execute:Tool['execute'];current:()=>boolean}>();
+/** A path scope is host wrapper authority, never a readOnly/name descriptor. */
+export function isScopedSandboxReadonlyTool(tool:Tool):boolean {
+ const binding=readonlyScopes.get(tool);return !!binding&&binding.execute===tool.execute&&binding.current();
+}
 /** Only first-party wrappers created below possess this port. A plugin property
  * named compoundPrepare is not consulted and cannot issue a preparation grant. */
 export function getCompoundSandboxPreparation(tool:Tool):CompoundSandboxPreparation|undefined{
@@ -25,16 +32,17 @@ export function inheritCompoundSandboxPreparation(source:Tool,target:Tool):void{
  const prepare=getCompoundSandboxPreparation(source);if(!prepare)return;
  if(target.execute!==source.execute||target.permission!==source.permission||target.definition.name!==source.definition.name)throw Error('compound_sandbox_clone_changed');
  compoundPreparations.set(target,{execute:target.execute,prepare});
+ if(source!==target&&isScopedSandboxReadonlyTool(source))readonlyScopes.set(target,{execute:target.execute,current:()=>isScopedSandboxReadonlyTool(source)});
 }
 
 export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optionsOrCallback?:SandboxToolWrapperOptions|SandboxDenialCallback):Tool[]{
  if(!enforcer)return tools;
  const options=normalizeOptions(optionsOrCallback);
  return tools.map(tool=>{
-  const name=tool.definition.name;if(!['bash','read','write','edit'].includes(name))return tool;
+  const name=tool.definition.name;if(!['bash','read','write','edit','grep','glob'].includes(name))return tool;
   const prepare=async(input:Readonly<Record<string,unknown>>,context:ToolExecutionContext|undefined,allowPrompt:boolean):Promise<string|undefined>=>{
    context?.signal?.throwIfAborted();
-   const path=name==='bash'?input.workdir:input.file_path;
+   const path=name==='bash'?input.workdir:['grep','glob'].includes(name)?(input.path??process.cwd()):input.file_path;
    if(typeof path==='string'){
     const decision=enforcer.enforceFile(path);
     if(!decision.allowed){
@@ -52,6 +60,12 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    const denial=await prepare(input,context,!context?.compoundPhase);
    if(denial)return denial;
    context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();
+   if (name === 'grep' || name === 'glob') {
+    const scope=enforcer.getSearchScope();
+    if(scope.allowedPaths.length===0 && scope.deniedPaths.length===0)return tool.execute(input,context);
+    const path = realpathSync(typeof input.path === 'string' ? input.path : process.cwd());
+    return tool.execute({...input, path}, withSearchScope(context, scope));
+   }
    return tool.execute(input,context);
   }};
   inheritBuiltinToolIdentity(tool,wrapped,()=>{
@@ -60,6 +74,7 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    if(callback)return 'value' in callback&&callback.value===undefined;
    return Object.getOwnPropertyDescriptor(Object.prototype,'onSandboxDenied')===undefined;
   });
+  if(['read','grep','glob'].includes(name))readonlyScopes.set(wrapped,{execute:wrapped.execute,current:()=>isReadonlySandboxEnforcer(enforcer)&&enforcer.getSearchScope().allowedPaths.length>0});
   compoundPreparations.set(wrapped,{execute:wrapped.execute,prepare:(input,context)=>prepare(input,context,true)});
   return wrapped;
  });

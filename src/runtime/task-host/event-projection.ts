@@ -2,6 +2,7 @@ import { formatTaskToolResultResponse } from './tool-result-response.js';
 import type { RuntimeEvent } from '../events.js';
 import type { ArtifactKind, DesktopTaskEvent, PlanStep, TaskUnderstanding } from './types.js';
 import { A2UI_MIME_TYPE, isA2UIMimeType, summarizeRenderUiInput } from '../../a2ui/index.js';
+import {parseNativeApprovalOwner} from './native-approval-owner.js';
 
 interface ProjectRuntimeEventInput {
   taskId: string;
@@ -66,6 +67,10 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
   }
   if (event.type === 'approval_resolved') return { type: 'question_resolved', questionId: event.approvalId };
   if (event.type === 'approval_required') {
+    const descriptor=Object.getOwnPropertyDescriptor(event,'owner');
+    if(descriptor&&!('value'in descriptor))throw Error('native_approval_owner_invalid');
+    const owner=descriptor?.value===undefined?undefined:parseNativeApprovalOwner(descriptor.value);
+    if(owner&&(owner.taskSessionId!==event.sessionId||owner.approvalToken!==event.approvalId))throw Error('native_approval_owner_mismatch');
     return {
       type: 'needs_user',
       question: {
@@ -77,6 +82,7 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
           { id: 'approve', label: '继续' },
           { id: 'deny', label: '暂停' },
         ],
+        ...(owner?{owner}:{}),
       },
     };
   }

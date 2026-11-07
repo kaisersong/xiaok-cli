@@ -1,3 +1,6 @@
+import {registerDefaultDispatchIpc} from '../../electron/default-dispatch-typed-ipc.js';
+import {registerUserTaskSubmissionIpc} from '../../electron/user-task-submission-typed-ipc.js';
+import {registerRoomConversionCaptureIpc} from '../../electron/room-conversion-typed-ipc.js';
 import { registerGoalPublicationIpc } from '../../electron/goal-publication-typed-ipc.js';
 import { registerComputerUseControlIpc } from '../../electron/computer-use-control-typed-ipc.js';
 import { registerGoalTaskMutationsIpc } from '../../electron/goal-task-mutation-typed-ipc.js';
@@ -14,6 +17,7 @@ import { registerMeetingActions10Ipc } from '../../electron/meeting-actions10-ty
 import { createObservationRegistrar, OBSERVATION_METHODS } from '../../electron/observation-typed-ipc.js';
 import { registerMaterialAccessIpc } from '../../electron/material-access-typed-ipc.js';
 import { registerRuntimeActionIpc } from '../../electron/runtime-action-typed-ipc.js';
+import {registerKSwarmWriterControlIpc} from '../../electron/kswarm-writer-control-typed-ipc.js';
 import { registerPluginActionIpc } from '../../electron/plugin-action-typed-ipc.js';
 import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
 import { registerSkillMutationIpc } from '../../electron/skill-mutation-typed-ipc.js';
@@ -45,6 +49,7 @@ import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
 import { registerMemoryDistillationIpc } from '../../electron/memory-distillation.js';
 import { registerHarnessOptimizationIpc } from '../../electron/harness-optimization-ipc.js';
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
+import { projectActivityAttention } from '../../../src/runtime/conversation-activity/attention-projector.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
 import { registerLoopPublicationIpc } from '../../electron/loop-publication-ipc.js';
@@ -57,6 +62,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({
   app: { getPath: () => process.cwd(), getLocale: () => 'en' },
   BrowserWindow: { getAllWindows: () => [], fromWebContents: () => undefined },
+  webContents: { fromId: () => undefined },
   clipboard: { read: vi.fn() },
   dialog: { showOpenDialog: vi.fn(), showMessageBox: vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
@@ -70,6 +76,8 @@ import {
   THREAD_META_KEYS,
   EVENT_SUBSCRIPTION_KEYS,
   LOCAL_CONSTANT_KEYS,
+  NAMESPACE_API_KEYS,
+  DSH_CHANNEL_BY_METHOD,
   INVOKE_API_KEYS,
   INVOKE_CHANNEL_BY_KEY,
   KNOWN_UNROUTED_HANDLERS,
@@ -132,6 +140,9 @@ describe('preload API contract', () => {
       'stopObservationTask',
       'revokeObservationTask',
       'getObservationTaskStatus',
+      'submitUserTask',
+      'captureRoomConversion',
+      'observeRoomConversion',
       'createTask',
       'createTaskWithFiles',
       'subscribeTask',
@@ -141,6 +152,9 @@ describe('preload API contract', () => {
       'subscribeConversationActivityOverview',
       'subscribeConversationActivities',
       'getWorkActivity',
+      'dismissWorkAttention',
+      'getNativeActivityQuestions',
+      'answerNativeActivityQuestion',
       'getMcpTaskInputs',
       'answerMcpTaskInput',
       'cancelMcpWork',
@@ -239,6 +253,10 @@ describe('preload API contract', () => {
       'saveKswarmConfig',
       'getSkillStats',
       'getServiceStatus',
+      'inspectWriterConfiguration',
+      'prepareWriterConfiguration',
+      'migrateWriterConfiguration',
+      'captureDefaultDispatchOperation',
       'restartRelatedService',
       'kswarmGetStatus',
       'kswarmStart',
@@ -1021,6 +1039,16 @@ describe('preload API contract', () => {
       expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:goal:get', { threadId: 'thread' });
     }
   });
+  it('typed and sandbox preload preserve the actual original activity projector result', async () => {
+    const runtime = loadRuntimePreloadApi(), typedIpc = { invoke: vi.fn(), on: vi.fn(), off: vi.fn() }, typed = createPreloadApi(typedIpc, 'test-user');
+    const watch = { operationId:'op',watchId:'watch',source:'kswarm' as const,logicalSourceId:'hub',sourceDataEpoch:'epoch',workId:'project',origin:{profileId:'profile',workspaceId:'workspace',threadId:'thread',actorId:'user'},status:'active' as const,generation:1,preference:'normal' as const,policyRevision:0,nextReportDueAt:100 };
+    const projection = {watchId:'watch',executionState:'queued' as const,businessOutcome:'unknown' as const,freshness:'fresh' as const,sourceSequence:1,revision:1,lastProgressAt:null,lastHeartbeatAt:null,lastReportAt:null,evidenceRefs:[]};
+    const value = {watch,projection,presentation:projectActivityAttention(watch,projection)};
+    for(const {api,ipcRenderer} of [runtime,{api:typed,ipcRenderer:typedIpc}]){
+      ipcRenderer.invoke.mockResolvedValue(value);expect(await (api.getWorkActivity as (id:string)=>Promise<unknown>)('watch')).toEqual(value);expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:activity:work',{watchId:'watch'});
+      const expected={watchId:'watch',expectedProjectionVersion:7,expectedPresentationIncarnation:'b640b9fa-ff47-4758-aeaf-dfe03d047ca8'};ipcRenderer.invoke.mockResolvedValue(value);expect(await (api.dismissWorkAttention as (input:unknown)=>Promise<unknown>)(expected)).toEqual(value);expect(ipcRenderer.invoke).toHaveBeenLastCalledWith('desktop:activity:attention:dismiss',expected);
+    }
+  });
 
   it('runtime preload.cjs forwards K3 runtime policy updates unchanged', async () => {
     const { api, ipcRenderer } = loadRuntimePreloadApi();
@@ -1087,6 +1115,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const goalRegistrar = { handle: (channel: string) => { channels.add(channel); } };
   const unusedGoalProducer = (): never => { throw Error('parity_extractor_must_not_invoke_goal_producer'); };
   registerGoalNativeQueryIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
+  registerDshSettingsIpc(goalRegistrar, {} as never, {} as never);
   registerGoalGetIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
   registerGoalPauseCancelIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
   registerGoalQueuePendingIpc(goalRegistrar, { setGoalUserQueuePending: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer);
@@ -1128,9 +1157,13 @@ function extractRegisteredHandlerChannels(): Set<string> {
 registerMeetingReadonlyIpc({ handle: channel => { channels.add(channel); } });
 registerComputerUseCapabilityReadonlyIpc({ handle: channel => { channels.add(channel); } });registerKswarmStatusReadonlyIpc({ handle: channel => { channels.add(channel); } });registerSkillMutationIpc({ handle: channel => { channels.add(channel); } });registerChannelMcpMutationIpc({ handle: channel => { channels.add(channel); } });registerMeetingMutationIpc({ handle: channel => { channels.add(channel); } }, new Map());
   registerRuntimeActionIpc({ handle: channel => { channels.add(channel); } }, new Map());
+  registerKSwarmWriterControlIpc({handle:channel=>{channels.add(channel);}},{openInspect(){throw Error('registry-only');},openPrepare(){throw Error('registry-only');},openMigrate(){throw Error('registry-only');},readFailure(){return undefined;}});
+  registerDefaultDispatchIpc({handle:channel=>{channels.add(channel);}},{openCurrentPlan(){throw Error('registry-only');}} as never);
   registerPluginActionIpc({ handle: channel => { channels.add(channel); } }, new Map());
   registerMaterialAccessIpc({ handle: channel => { channels.add(channel); } }, new Map());
   registerTask7Ipc({ handle: channel => { channels.add(channel); } }, new Map(TASK7_METHODS.map(method => ['desktop:' + method, () => Promise.resolve(undefined)])), () => {});
+  registerUserTaskSubmissionIpc({handle:channel=>{channels.add(channel);}},async()=>undefined,()=>{});
+  registerRoomConversionCaptureIpc({handle:channel=>{channels.add(channel);}},{async captureRoomConversion(){throw Error('registry-only');},observeRoomConversion(){throw Error('registry-only');}},()=>({requestSource:'user',actorId:'registry-only'}));
   registerProjectPlanningIpc({ handle: channel => { channels.add(channel); } }, () => ({ ok: true, status: 'queued' }));
   registerMeetingActions10Ipc({ handle: channel => { channels.add(channel); } }, new Map());
   const observation = createObservationRegistrar({ handle: channel => { channels.add(channel); } }, () => {}, 36);
@@ -1174,7 +1207,7 @@ describe('IPC handler ↔ preload key parity', () => {
     }
 
     // Cover
-    const union = new Set<string>([...eventSet, ...localSet, ...invokeSet]);
+    const union = new Set<string>([...eventSet, ...localSet, ...invokeSet, ...NAMESPACE_API_KEYS]);
     expect(union.size).toBe(FULL_PRELOAD_KEYS.length);
     for (const key of FULL_PRELOAD_KEYS) {
       expect(union.has(key)).toBe(true);
@@ -1214,6 +1247,7 @@ describe('IPC handler ↔ preload key parity', () => {
     reverseMap.add('desktop:subscribeTask');
     reverseMap.add('desktop:subscribeMultiAgents');
     reverseMap.add('desktop:subscribeLocalExecutionAuthorization');
+    for(const channel of Object.values(DSH_CHANNEL_BY_METHOD))reverseMap.add(channel);
     const knownOrphans = new Set(KNOWN_UNROUTED_HANDLERS);
 
     const undeclaredOrphans: string[] = [];
@@ -1343,4 +1377,20 @@ describe('Small configuration complete4 transport bridge contracts', () => {
     await expect((api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).saveSkillDebugConfig!({ enabled: false })).rejects.toBe(failure);
     expect(ipc.invoke).toHaveBeenCalledTimes(1);
   });
+});
+import {registerDshSettingsIpc} from '../../electron/dsh-settings-typed-ipc.js';
+
+
+describe('DSH semantic namespace',()=>{
+ for(const kind of ['typed','runtime'] as const)it(kind+' exposes only six fixed DSH channels',async()=>{
+  const ipcRenderer={invoke:vi.fn().mockResolvedValue({schemaVersion:1}),on:vi.fn(),off:vi.fn()};
+  const loaded=kind==='runtime'?loadRuntimePreloadApi():{api:createPreloadApi(ipcRenderer),ipcRenderer};
+  const api=loaded.api.dsh as Record<string,(...args:unknown[])=>Promise<unknown>>;
+  expect(Object.keys(api).sort()).toEqual(Object.keys(DSH_CHANNEL_BY_METHOD).sort());
+  for(const [method,channel] of Object.entries(DSH_CHANNEL_BY_METHOD)){
+   const input={schemaVersion:1,operationId:'unchanged'};
+   await api[method]!(...(method==='getState'?[]:[input]));
+   expect(loaded.ipcRenderer.invoke).toHaveBeenLastCalledWith(channel,...(method==='getState'?[]:[input]));
+  }
+ });
 });

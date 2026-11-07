@@ -47,7 +47,7 @@ function sourceTreeHash(): string {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const file = join(directory, entry.name);
       if (entry.isDirectory()) visit(file);
-      else if (entry.isFile() && entry.name.endsWith('.ts')) digest.update(file).update(hash(file));
+      else if (entry.isFile() && /\.(?:[cm]?ts|[cm]?js)$/.test(entry.name)) digest.update(file).update(hash(file));
     }
   };
   visit(join(projectRoot, 'src'));
@@ -85,6 +85,7 @@ export async function compileProtectionWorkerEntry() {
     await promisify(execFile)(process.execPath,
       ['--import', pathToFileURL(inputPreload).href, resolve(projectRoot, 'node_modules/typescript/bin/tsc'), '--project', config],
       { cwd: projectRoot, maxBuffer: 2 * 1024 * 1024 });
+    await promisify(execFile)(process.execPath,[join(projectRoot,'scripts/copy-glob-worker.mjs'),join(root,'ai/tools')],{cwd:projectRoot});
     writeFileSync(join(root, 'package.json'), readFileSync(join(projectRoot, 'package.json')));
     const storeEntry = join(root, 'runtime/task-host/protected-observation-store.js');
     const bundle = join(root, 'runtime/task-host/protected-observation-store.bundle.js');
@@ -92,7 +93,7 @@ export async function compileProtectionWorkerEntry() {
     const result = await build({ absWorkingDir: projectRoot, entryPoints: [storeEntry], outfile: bundle,
       bundle: true, platform: 'node', format: 'esm', packages: 'external', metafile: true,
       plugins: [{ name: 'preserve-fixed-emitted-module-urls', setup(context) {
-        context.onLoad({ filter: /\.js$/ }, input => {
+        context.onLoad({ filter: /\.m?js$/ }, input => {
           const local = relative(root, input.path);
           if (isAbsolute(local) || local === '..' || local.startsWith('..' + sep))
             throw Error('worker_bundle_source_outside_compilation');
@@ -113,7 +114,7 @@ export async function compileProtectionWorkerEntry() {
     if (compilerAudit.exitCode !== 0 || compilerAudit.drift.length || readDrift.length) throw Error('fresh_protection_worker_input_changed');
     const emittedOutputs: Record<string, string> = {};
     const captureOutputs = (directory: string): void => { for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const file = join(directory, entry.name); if (entry.isDirectory()) captureOutputs(file); else if (file.endsWith('.js')) emittedOutputs[file] = hash(file);
+      const file = join(directory, entry.name); if (entry.isDirectory()) captureOutputs(file); else if (/\.m?js$/.test(file)) emittedOutputs[file] = hash(file);
     } }; captureOutputs(root);
     if (!existsSync(output) || !existsSync(join(root, 'runtime/task-host/protection-read-worker-body.js'))
       || !existsSync(join(root, 'runtime/task-host/protected-observation-store.js'))

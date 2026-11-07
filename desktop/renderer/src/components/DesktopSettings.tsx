@@ -11,6 +11,7 @@ import {LoopArtifactList} from './loops/LoopArtifactList';
 import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../lib/loop-run-observation';
 import {LoopPublicationPanel} from './loops/LoopPublicationPanel';
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import {DshSourceSettings} from './DshSourceSettings';
 import * as QRCode from 'qrcode';
 import {
   ChevronLeft,
@@ -91,6 +92,7 @@ import type {
   UserLoopTemplateView,
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
+import {WriterControlSection} from './WriterControlSection';
 import type { LocaleStrings } from '../locales/index';
 import { useToast } from '../shared';
 import { resolveUserLoopStarterTemplates, type UserLoopStarterTemplate } from './loops/userLoopStarterTemplates';
@@ -101,7 +103,7 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'dsh' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
 type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
@@ -229,6 +231,7 @@ interface NavItem {
 function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
   return [
     { key: 'general', icon: SlidersHorizontal, label: t.desktopSettings.navGeneral },
+    { key: 'dsh', icon: Zap, label: t.dshSourceSettings.title },
     { key: 'mobile', icon: Smartphone, label: t.desktopSettings.navMobile },
     { key: 'voice', icon: Mic, label: t.desktopSettings.voice },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
@@ -301,6 +304,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
+          {activeTab === 'dsh' && <DshSourceSettings />}
           {activeTab === 'mobile' && <MobilePane />}
           {activeTab === 'voice' && <VoicePane />}
           {activeTab === 'appearance' && <DesktopAppearanceSettings />}
@@ -4171,6 +4175,10 @@ function GeneralPane() {
             </button>
           </div>
         </Card>
+      </Section>
+
+      <Section>
+        <WriterControlSection />
       </Section>
 
       <Section>

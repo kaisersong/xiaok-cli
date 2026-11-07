@@ -101,8 +101,9 @@ describe('D4: production snapshot read can abandon continuation without clearing
     let writeSettled = false; const write = f.writer.save(next, f.latest).finally(() => { writeSettled = true; }); await entered.promise;
     const controller = new AbortController(); const reason = new Error('stop waiting for write'); const pending = track(controller.signal);
     let readSettled = false; const read = recover(f.writer, pending.options).then(value => ({ value }), error => ({ error })).finally(() => { readSettled = true; });
-    const originalQueue = (f.writer as unknown as { taskWriteQueues: Map<string, Promise<void>> }).taskWriteQueues.get('snapshot-fixture')!;
-    await vi.waitFor(() => expect(pending.raw).toContain(originalQueue));
+    // The second tracked original is the admitted writer wait. Its physical
+    // append is held above; observe that frontier without reading private state.
+    await vi.waitFor(() => expect(pending.raw).toHaveLength(2));
     controller.abort(reason); await flush();
     try { expect.soft(readSettled).toBe(true); expect.soft(writeSettled).toBe(false); expect.soft(pending.raw).toHaveLength(2); expect.soft(pending.settled()).toBe(1); }
     finally { held.resolve(); await write; await read; await Promise.allSettled(pending.raw); }

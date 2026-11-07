@@ -8,7 +8,7 @@ import type { ThreadRecord } from '../../renderer/src/api/types';
 import type { ChatView as ActualChatView } from '../../renderer/src/components/ChatView';
 
 const f = vi.hoisted(() => ({ getThread: vi.fn(), recoverTask: vi.fn(), subscribeTask: vi.fn(), updateThreadTaskId: vi.fn(),
-  createTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
+  submitUserTask: vi.fn(), readFileContent: vi.fn(), answerQuestion: vi.fn(), cancelTask: vi.fn(), setCollapsed: vi.fn() }));
 vi.mock('../../renderer/src/api', () => ({ api: { ...f, getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })), updateThreadTitle: vi.fn(async () => {}), listSkills: vi.fn(async () => []) } }));
 vi.mock('../../renderer/src/layouts/AppLayout', () => ({ useSidebarCollapse: () => ({ collapsed: false, setCollapsed: f.setCollapsed }), AppLayout: () => null }));
 // Leaf presentation only: real ChatShell owns every state transition, real
@@ -154,7 +154,7 @@ beforeEach(() => {
   f.recoverTask.mockImplementation(async (id: string) => ({ snapshot: snapshot(id) }));
   f.updateThreadTaskId.mockImplementation(async (_thread: string, id: string) => { order.push(`update:${id}`); });
   f.readFileContent.mockResolvedValue({ content: 'file content' });
-  f.createTask.mockResolvedValue({ taskId: 'ordinary-B' });
+  f.submitUserTask.mockResolvedValue({ taskId: 'ordinary-B' });
   f.subscribeTask.mockImplementation((taskId: string, handler: (event: DesktopTaskEvent) => void) => {
     order.push(`subscribe:${taskId}`);
     const item: Observer = { taskId, handler, active: true, release: vi.fn() };
@@ -221,7 +221,7 @@ describe('R4 U12–U14: actual semantic correlation, automatic predecessor and i
   it.each(['create', 'replace', 'resume'] as const)('U12 older %s event and reply cannot replace ordinary C after C admission has completed', async method => {
     if (method !== 'create') currentGoal = goal();
     const reply = deferred<DesktopGoalMutationResult>(); ({ create, replace, resume }[method]).mockReturnValue(reply.promise);
-    f.createTask.mockResolvedValue({ taskId: 'C' }); await mount(); const a = observer('A'); clickSemantic(method);
+    f.submitUserTask.mockResolvedValue({ taskId: 'C' }); await mount(); const a = observer('A'); clickSemantic(method);
     const value = requestPayload(method);
     // A's already-written logical result may arrive during the semantic await;
     // this makes ordinary admission reachable even on the old premature-running UI.

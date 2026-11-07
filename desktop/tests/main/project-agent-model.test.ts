@@ -1,3 +1,4 @@
+// @vitest-environment node
 import {createKimiTerminalBoundaryError} from '../../../src/ai/runtime/kimi-terminal-boundary.js';
 import {OpenAIAdapter} from '../../../src/ai/adapters/openai.js';
 import {buildOpenAIAdapterInit} from '../../../src/ai/models.js';

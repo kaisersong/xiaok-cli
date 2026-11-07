@@ -1,12 +1,17 @@
-import { mkdtempSync, rmSync,realpathSync } from 'node:fs';
+// @vitest-environment node
+import { mkdtempSync, rmSync,realpathSync,writeFileSync,existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoomWorkspaceLocalStore, prepareWorkspaceRoot, workspaceDigest } from '../../electron/room-workspace-local.js';
+import {openOwnedWorkflowNormalCase} from '../support/owned-workflow-normal-case.js';
+import {sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
+import {createRoomExternalDiscussionAdapter} from '../../electron/room-external-discussion-adapter.js';
 import { createRoomWorkspaceRuntime } from '../../electron/room-workspace-runtime.js';
-const cleanups: Array<() => void> = [];
-afterEach(() => { for (const fn of cleanups.splice(0).reverse()) fn(); });
+const cleanups: Array<() => void|Promise<void>> = [];
+afterEach(async () => { for (const fn of cleanups.splice(0).reverse()) await fn(); });
+async function originalProjectService(projectId='p'){const owned=await openOwnedWorkflowNormalCase({project:{id:projectId,name:'Original project',goal:'Read state'},workflowName:'room_admission_fixture',phaseTitle:'Read',prompt:'Read state',label:'Original admission'});cleanups.push(()=>owned.close());return owned.kswarmService;}
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'room-runtime-')); cleanups.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
   const store = new RoomWorkspaceLocalStore(join(root, 'local.sqlite')); cleanups.push(() => store.close());
@@ -27,6 +32,36 @@ async function fixture() {
   return { root, store, calls, broker, wake, envelope };
 }
 describe('R3 workspace runtime actual admission and physical cleanup ordering', () => {
+  it.each(['throw', 'refusal'] as const)('preserves an undefined execution cause when wake cleanup reports %s', async mode => {
+    const f = await fixture();
+    f.broker.get.mockResolvedValue({ ok: true, config: null } as never);
+    f.wake.claimWake.mockResolvedValue({ ok: true, claimToken: 'wake' });
+    const cleanupError = new Error('wake cleanup failed');
+    const abandonWake = vi.fn(async () => {
+      if (mode === 'throw') throw cleanupError;
+      return { ok: false, code: 'wake_cleanup_refused' };
+    });
+    const runtime = createRoomWorkspaceRuntime({ ...f, wake: { ...f.wake, abandonWake }, execute: async () => { throw undefined; }, ensureProtocol: async () => {} });
+    let failed = false;
+    let cause: unknown;
+    try { await runtime.run(f.envelope as never); } catch (error) { failed = true; cause = error; }
+    expect(failed).toBe(true);
+    expect(cause).toBeInstanceOf(AggregateError);
+    expect((cause as AggregateError).errors[0]).toBeUndefined();
+    if (mode === 'throw') expect((cause as AggregateError).errors[1]).toBe(cleanupError);
+    else expect((cause as AggregateError).errors[1]).toMatchObject({ message: 'wake_cleanup_refused' });
+    expect(abandonWake).toHaveBeenCalledOnce();
+    await runtime.shutdown();
+  });
+  it.each(['prepare','project_discussion'] as const)('refuses %s without the original B start reader before an execution journal, wake or claim',async entry=>{
+    const f=await fixture(),save=vi.spyOn(f.store,'saveRecord'),execute=vi.fn(async()=>({text:'must not start'})),ensureProtocol=vi.fn(async()=>{}),dispatch=vi.fn(async()=>({ok:true}));
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService:{},execute,ensureProtocol,executeProject:vi.fn(),projectAdapter:{resolve:async()=>({mapping:{workFolder:realpathSync(f.root),artifactsDir:realpathSync(f.root),mappingRevision:1},task:{id:'p__t'}}),dispatch}} as any);
+    let failure:unknown;
+    try{
+      try{if(entry==='prepare')await runtime.prepareProjectTask({roomId:'r',projectId:'p',taskId:'p__t',logicalAgentId:'a',requestId:'unqualified'});else await runtime.run({...f.envelope,contextScope:{kind:'project',projectId:'p'}} as any);}catch(error){failure=error;}
+      expect(save).not.toHaveBeenCalled();expect(f.broker.request).not.toHaveBeenCalled();expect(f.wake.claimWake).not.toHaveBeenCalled();expect(dispatch).not.toHaveBeenCalled();expect(execute).not.toHaveBeenCalled();expect(ensureProtocol).not.toHaveBeenCalled();expect(failure).toMatchObject({message:'project_execution_start_reader_unavailable'});
+    }finally{await runtime.shutdown();}
+  });
   it('recovers only proven exited external groups, isolates missing tokens, and accepts exact already-completed delivery',async()=>{
     const f=await fixture();const child=spawnSync(process.execPath,['-e',''],{detached:true});expect(child.status).toBe(0);
     const common={roomId:'r',sourceMessageId:'msg',logicalAgentId:'a',contextScope:{kind:'room_only'},runtime:'qoder',hostId:'h',hostIncarnation:1,ownerPid:child.pid};
@@ -89,6 +124,23 @@ describe('R3 workspace runtime actual admission and physical cleanup ordering', 
     await expect(runtime.run(f.envelope)).rejects.toThrow('discussion_cleanup_pending');
     expect(f.wake.completeWake).not.toHaveBeenCalled();expect(abandonWake).toHaveBeenCalledOnce();
   });
+  it.skipIf(process.platform==='win32')('retains the actual adapter no-spawn fact after prepared journal revocation and recovers its original wake',async()=>{
+    const f=await fixture(),manager=await originalProjectService(),marker=join(f.root,'must-not-spawn'),cli=join(f.root,'discussion.cjs');
+    writeFileSync(cli,`if(process.argv.includes('--probe'))console.log(JSON.stringify({protocol:'room_discussion_v1',runtime:'xiaok',freshSession:true,toolsDisabled:true,mcpDisabled:true,hooksDisabled:true}));else require('node:fs').writeFileSync(${JSON.stringify(marker)},'bad');`);
+    const adapter=createRoomExternalDiscussionAdapter({profiles:{xiaok:{executable:process.execPath,argsPrefix:[cli]}},temporaryRoot:f.root});
+    const save=f.store.saveRecord.bind(f.store);let seal:Promise<void>|undefined;
+    vi.spyOn(f.store,'saveRecord').mockImplementation((kind,key,value)=>{save(kind,key,value);if(kind==='external-discussion-operation'&&(value as any).phase==='prepared')seal=sealAndDrainKSwarmServiceInstance(manager);});
+    const originalRequest=f.broker.request.getMockImplementation()!;
+    f.broker.request.mockImplementation(async(room,action,input)=>action==='recover-wake'?{ok:true,wake:{roomId:'r',roomMessageId:'msg',logicalAgentId:'a',contextScope:{kind:'project',projectId:'p'},wakeStatus:'failed'}}:originalRequest(room,action,input));
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService:manager,execute:vi.fn(),ensureProtocol:vi.fn(),wake:{...f.wake,abandonWake:async()=>({ok:true,wakeStatus:'failed'})},externalDiscussion:{resolve:async()=>({protocol:'room_discussion_v1',logicalAgentId:'a',runtime:'xiaok',supported:true,proof:{freshSession:true,toolsDisabled:true,mcpDisabled:true,hooksDisabled:true}}),getHostIdentity:async()=>({hostId:'h',hostIncarnation:1}),execute:adapter.execute}} as any);
+    try{
+      await expect(runtime.run({...f.envelope,contextScope:{kind:'project',projectId:'p'}} as any)).rejects.toThrow();await seal;
+      expect(existsSync(marker)).toBe(false);const journal=f.store.listRecords<any>('external-discussion-operation')[0];
+      expect(journal).toMatchObject({phase:'not-spawned',noSpawnVerified:true});expect(journal).not.toHaveProperty('groupExitVerified');
+      expect(await runtime.recoverExternalDiscussions()).toEqual({completed:0,abandoned:1,pending:0});
+    }finally{await runtime.shutdown();}
+  });
+
   it('routes an external bound Room through discussion only, persists physical owner, and completes no file claim',async()=>{
     const f=await fixture();const execute=vi.fn();let captured:any;
     const external=vi.fn(async(input:any)=>{
@@ -137,17 +189,19 @@ describe('R3 workspace runtime actual admission and physical cleanup ordering', 
     expect(execute).toHaveBeenCalledOnce();expect(f.calls).toContain('release');
   });
   it.each(['active','draining'])('allows authorized project discussion without a file mapping when Room is %s',async phase=>{
+    const kswarmService=await originalProjectService('unmapped');
     const f=await fixture();const snapshot=await f.broker.get();f.broker.get.mockResolvedValue({...snapshot,config:{...snapshot.config,phase}} as never);
     const execute=vi.fn(async()=>({text:'discussion only'}));
     const resolve=vi.fn(async()=>{throw new Error('workspace_project_mapping_required');});
-    const runtime=createRoomWorkspaceRuntime({...f,execute,ensureProtocol:async()=>{},projectAdapter:{resolve} as any});
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService,execute,ensureProtocol:async()=>{},projectAdapter:{resolve} as any});
     expect(await runtime.run({...f.envelope,contextScope:{kind:'project',projectId:'unmapped'}} as any)).toEqual({ok:true});
     expect(resolve).not.toHaveBeenCalled();expect(execute.mock.calls[0][2]).toBeUndefined();
     expect(f.calls).toEqual(['claim-wake','completeWake']);
   });
   it('rejects reuse of a project request id for another task before acquiring a claim',async()=>{
+    const kswarmService=await originalProjectService('p');
     const f=await fixture();let finish!:()=>void;const ready=new Promise<void>(resolve=>{finish=resolve;});
-    const runtime=createRoomWorkspaceRuntime({...f,ensureProtocol:()=>ready,execute:vi.fn(),executeProject:vi.fn(),projectAdapter:{} as any});
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService,ensureProtocol:()=>ready,execute:vi.fn(),executeProject:vi.fn(),projectAdapter:{} as any});
     const input={roomId:'r',projectId:'p',taskId:'p__t',logicalAgentId:'a',requestId:'same'};
     const first=runtime.prepareProjectTask(input);const rejected=expect(first).rejects.toThrow();
     const conflict=runtime.prepareProjectTask({...input,taskId:'p__other'});
@@ -156,13 +210,27 @@ describe('R3 workspace runtime actual admission and physical cleanup ordering', 
     const stop=runtime.shutdown();finish();await conflictCheck;await stop;await rejected;
   });
   it('shutdown cancels and releases a prepared handoff that never entered a runner',async()=>{
+    const kswarmService=await originalProjectService('p');
     const f=await fixture();const executeProject=vi.fn();
     const projectAdapter={resolve:async()=>({mapping:{workFolder:realpathSync(f.root),artifactsDir:realpathSync(f.root),mappingRevision:1},task:{id:'p__t'}}),dispatch:async()=>({ok:true})} as any;
-    const runtime=createRoomWorkspaceRuntime({...f,ensureProtocol:async()=>{},execute:vi.fn(),executeProject,projectAdapter});
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService,ensureProtocol:async()=>{},execute:vi.fn(),executeProject,projectAdapter});
     await runtime.prepareProjectTask({roomId:'r',projectId:'p',taskId:'p__t',logicalAgentId:'a',requestId:'pending'});
     expect(f.calls).not.toContain('release');await runtime.shutdown();
     expect(f.calls.slice(-2)).toEqual(['cancel','release']);expect(executeProject).not.toHaveBeenCalled();
     expect(f.store.getRecord<any>('project-execution','claim').status).toBe('cancelled');
+  });
+  it('re-reads a late prepared project handoff and still permits its original cancel/release after the reader is sealed',async()=>{
+    const f=await fixture(),kswarmService=await originalProjectService(),executeProject=vi.fn();
+    const projectAdapter={resolve:async()=>({mapping:{workFolder:realpathSync(f.root),artifactsDir:realpathSync(f.root),mappingRevision:1},task:{id:'p__t'}}),dispatch:async()=>({ok:true}),authorize:async()=>({})} as any;
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService,ensureProtocol:async()=>{},execute:vi.fn(),executeProject,projectAdapter});
+    try{
+      await runtime.prepareProjectTask({roomId:'r',projectId:'p',taskId:'p__t',logicalAgentId:'a',requestId:'late'});
+      const context=f.store.getRecord<any>('project-execution','claim').context;
+      await sealAndDrainKSwarmServiceInstance(kswarmService);
+      let failure:unknown;try{await runtime.runProjectTask({handoff:{kind:'kswarm_task_handoff_v1',runId:context.runId,project:{id:'p',name:'Original',goal:'Read state'},task:{id:'p__t',title:'Read state'},workspaceContext:context},targetParticipantId:'a'});}catch(error){failure=error;}
+      expect(executeProject).not.toHaveBeenCalled();expect(failure).toBeInstanceOf(Error);
+      await runtime.shutdown();expect(f.calls.slice(-2)).toEqual(['cancel','release']);
+    }finally{await runtime.shutdown();}
   });
   it('replays a completed project request before attempting an already released claim', async () => {
     const f=await fixture();
@@ -176,9 +244,10 @@ describe('R3 workspace runtime actual admission and physical cleanup ordering', 
     expect(ensureProtocol).not.toHaveBeenCalled();expect(f.broker.request).not.toHaveBeenCalled();expect(dispatch).not.toHaveBeenCalled();
   });
   it('tracks early project admission through shutdown and never acquires after the stop fence', async () => {
+    const kswarmService=await originalProjectService('p');
     const f=await fixture();let resume!:()=>void;
     const wait=new Promise<void>(resolve=>{resume=resolve;});
-    const runtime=createRoomWorkspaceRuntime({...f,ensureProtocol:()=>wait,execute:vi.fn(),executeProject:vi.fn(),projectAdapter:{} as any});
+    const runtime=createRoomWorkspaceRuntime({...f,kswarmService,ensureProtocol:()=>wait,execute:vi.fn(),executeProject:vi.fn(),projectAdapter:{} as any});
     const input={roomId:'r',projectId:'p',taskId:'p__t',logicalAgentId:'a',requestId:'request'};
     const run=runtime.prepareProjectTask(input);expect(runtime.prepareProjectTask(input)).toBe(run);
     const rejected=expect(run).rejects.toThrow();let settled=false;

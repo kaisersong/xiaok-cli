@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync,realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ensureConversationActivityOwner } from '../../../src/runtime/conversation-activity/owner-launcher.js';
@@ -58,7 +58,10 @@ describe('independent activity process lifecycle', () => {
 
 it.skipIf(!['linux', 'darwin'].includes(process.platform)).each(['empty', 'pending', 'completed'] as const)('handles a real legacy owner with %s tasks', async kind => {
   const { spawn } = await import('node:child_process');
-  const root = mkdtempSync(join(tmpdir(), 'activity-legacy-'));
+  // The real launcher passes the canonical root to argv. Keep this positive
+  // fixture equivalent on macOS, where /var aliases /private/var; do not relax
+  // the production retirement command/identity fence to accommodate a fixture.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'activity-legacy-')));
   const config = { schemaVersion: 1 as const, dataRoot: root, profileId: 'profile', actorId: 'user', identity: { kind: 'cli' as const, path: root } };
   const { ConversationActivityStore } = await import('../../../src/runtime/conversation-activity/store.js');
   const store = new ConversationActivityStore(join(root, 'conversation-activity.sqlite'));
@@ -106,7 +109,7 @@ it.skipIf(!['linux', 'darwin'].includes(process.platform)).each(['empty', 'pendi
 it.skipIf(!['linux', 'darwin'].includes(process.platform)).each(['empty', 'pending'] as const)('retires or reuses an owner built by the previous generation (%s tasks) without a config mismatch', async kind => {
   expect(ACTIVITY_OWNER_GENERATION).toBeGreaterThan(2);
   const { spawn } = await import('node:child_process');
-  const root = mkdtempSync(join(tmpdir(), 'activity-prevgen-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'activity-prevgen-')));
   const config = { schemaVersion: 1 as const, dataRoot: root, profileId: 'profile', actorId: 'user', identity: { kind: 'cli' as const, path: root } };
   const { ConversationActivityStore } = await import('../../../src/runtime/conversation-activity/store.js');
   const store = new ConversationActivityStore(join(root, 'conversation-activity.sqlite'));

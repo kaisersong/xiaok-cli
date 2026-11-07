@@ -117,3 +117,10 @@ if (process.platform !== 'win32') {
     globalRegistryBeforeAfter: 'NOT_OBSERVED', childBinding: 'NOT_PROVEN',
     accountGenerationOrGrantIssued: false}), {flag: 'wx', mode: 0o600});
 }
+
+// Closed fault injection for the genuine production-Main relay test only.
+// All original entry/account checks above run first; this grants no identity.
+if (process.env.RELAY_SDK_TEST_MODE === 'prep-dormant' || process.env.RELAY_SDK_TEST_MODE === 'prep-method-prototype' || process.env.RELAY_SDK_TEST_MODE === 'bound-async' || process.env.RELAY_SDK_TEST_MODE === 'native-error-cause' || process.env.RELAY_SDK_TEST_MODE === 'startup-observer' || process.env.RELAY_SDK_TEST_MODE === 'unknown-held' || process.env.RELAY_SDK_TEST_MODE === 'source-unknown-held' || process.env.RELAY_SDK_TEST_MODE === 'wrong-session' || process.env.RELAY_SDK_TEST_MODE === 'register-message' || process.env.RELAY_SDK_TEST_MODE === 'register-error' || process.env.RELAY_SDK_TEST_MODE === 'cleanup-throw' || process.env.RELAY_SDK_TEST_MODE === 'seal-observer-held') {
+  if (resolve(process.env.RELAY_SDK_TEST_ROOT || '') !== resolve(dirname(process.env.XIAOK_CONFIG_DIR || ''))) rejectOrdinaryUiAccount('ordinary_ui_relay_fixture_root');
+  require(join(__dirname, 'writer-relay-sdk.cjs'));
+}

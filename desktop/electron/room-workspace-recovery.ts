@@ -1,5 +1,6 @@
 import { RoomWorkspaceLocalStore, workspaceDigest } from './room-workspace-local.js';
 import type { RoomWorkspaceBrokerPort } from './room-workspace-service.js';
+import { hasOriginalMainSdkBridgeInstallation } from '../../src/runtime/verification/original-main-sdk-bridge.js';
 
 type Claim = Record<string, unknown> & { roomId: string; claimId: string; executorInstanceId: string; hostIncarnation: number; originHostId: string };
 type Evidence = { executorInstanceId: string; kind: 'process-exit' | 'resources-disposed' | 'session-disposed'; verified: true };
@@ -35,12 +36,17 @@ export function createRoomWorkspaceRecovery(options: {
   }
   async function request(roomId: string, action: string, input: Record<string, unknown>) {
     if (!allowed()) throw new Error('workspace_recovery_not_owner');
+    if (hasOriginalMainSdkBridgeInstallation() && (action === 'release' || action === 'takeover')) throw new Error('workspace_recovery_domain_unconfirmed');
     const result = await broker.request(roomId, action, input);
     if (!result.ok) throw new Error(String(result.code ?? 'broker_unavailable'));
     return result;
   }
   function sameClaim(left: Claim, right: Claim) { return identityKeys.every(key => left[key] === right[key]) && workspaceDigest('scope', left.contextScope) === workspaceDigest('scope', right.contextScope); }
   function proofFor(record: PhysicalRecord): Evidence | null {
+    // Neither owner ESRCH nor an old component receipt closes all descendants.
+    // Installed Native recovery needs the original durable domain proof. This
+    // legacy journal does not contain that proof and cannot manufacture it.
+    if (hasOriginalMainSdkBridgeInstallation()) return null;
     if (record.kind !== 'in-process-tracked') return null;
     if (positiveExit(record.ownerPid)) return { executorInstanceId: record.claim.executorInstanceId, kind: 'process-exit', verified: true };
     const proof = record.releasePending;
@@ -118,12 +124,14 @@ export function createRoomWorkspaceRecovery(options: {
     for(const admission of store.listRecords<AdmissionRecord>('admission-request').filter(item=>item.roomId===roomId&&['requesting','no-executor'].includes(item.state))){
       if(!allowed())break;
       const exited=positiveExit(admission.ownerPid);
+      if(exited&&hasOriginalMainSdkBridgeInstallation()){report.pending++;continue;}
       if(!exited&&!(admission.ownerPid===process.pid&&admission.state==='no-executor')){report.pending++;continue;}
       try{
         const inspected=await request(roomId,'recover-admission',{request:admission.request});
         const claim=inspected.claim as Claim;
         if(!claim||claim.roomId!==roomId||claim.runId!==admission.request.runId||claim.executorInstanceId!==admission.request.executorInstanceId||claim.logicalAgentId!==admission.request.logicalAgentId||workspaceDigest('scope',claim.contextScope)!==workspaceDigest('scope',admission.request.contextScope))throw new Error('workspace_claim_mismatch');
         if(!allowed())break;
+        if(exited&&hasOriginalMainSdkBridgeInstallation())throw new Error('workspace_recovery_domain_unconfirmed');
         // No in-process request failure proves anything about an already running
         // executor. Only the old process's positive exit can cover that state.
         if(!exited&&claim.executionState!=='admitted')throw new Error('workspace_admission_recovery_pending');

@@ -1,9 +1,11 @@
 import {loopPublicationEn} from './loop-publication';
+import {dshSourceSettingsEn} from './dsh-source-settings';
 import type { LocaleStrings } from "./index";
 import { roomWorkspaceEn } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  dshSourceSettings:dshSourceSettingsEn,
   loopPublication: loopPublicationEn,
   observation: {compoundExperiment:'Compound execution experiment enabled; edit and validation results are recorded separately.',compoundStep:{not_started:'Not started',pending:'In progress',denied:'Not approved',succeeded:'Succeeded',failed:'Failed',cancelled:'Cancelled',unknown:'Outcome unknown'},compoundEdit:(status:string)=>`Edit: ${status}`,compoundValidation:(status:string)=>`Validation: ${status}`,compoundUnknown:(count:number)=>`${count} operation(s) have an unknown outcome and require execution confirmation.`,semanticState:{waiting:'Waiting for a confirmed subtask boundary',compacted:'History compacted; original requests and execution facts preserved',skipped:'History compaction skipped',failed:'History compaction did not complete'},semanticReason:{economics:'Expected savings do not cover the additional cost.',changed:'The conversation changed; the previous summary no longer applies.','no-gain':'The new history did not meet the reduction requirement.',budget:'The summary budget is insufficient.',unavailable:'Current conditions are not met. Check the task record.'},semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>`Summary calls ${attempts}/${maximum}; reserved at verified pre-dispatch prices $${reserved} / $${budget} (USD, not an actual invoice)`,semanticExperiment:'Explicit compaction experiment: additional summary calls may increase cost.',enable:'Enable observation memory for this task',ready:'Authorized for this task: native tools only, without prior task materials. Send your task.',cancel:'Cancel activation',stop:'Stop new capture',revoke:'Revoke disclosure and stop task',active:'This task: deepseek-flash, observation memory active',recallOnly:'New capture stopped; existing authorized recall remains available',revokedStopping:'Disclosure authorization revoked; task is stopping',revoked:'Disclosure authorization revoked',unavailable:'Observation memory is not enabled for this task',closed:'Task ended; protected history restoration is unavailable',failed:'Could not complete. Check authorization expiry, model, and local environment.',filesUnsupported:'Use the exact sources in the approved policy without adding attachments.'},
   diffView: { showFull: 'Show full diff' },
@@ -1364,6 +1366,20 @@ export const en: LocaleStrings = {
     langEnSub: "English",
     // general pane - service status
     serviceStatusTitle: "Service Status",
+    writerControlTitle:'Project data preparation',
+    writerControlDescription:'Only workspaces without project data can be prepared. Preparing storage does not enable automatic execution.',
+    writerControlRead:'Read preparation status',
+    writerControlPrepare:'Prepare new workspace',
+    writerControlPreparing:'Preparing',
+    writerControlChecking:'Reading preparation status',
+    writerControlReadError:'Unable to read project data preparation status',
+    writerControlUnknown:'The preparation outcome is unknown. Read the status; it will not be retried automatically.',
+    writerControlPrepared:'Project data storage is prepared',
+    writerControlUnprepared:'Project data storage is not prepared',
+    writerControlExistingData:'This workspace already has project data and cannot be prepared as a new workspace.',
+    writerControlReconciliation:'Existing workspace data must be reconciled before preparation.',
+    writerControlUnavailable:'The current service cannot prepare project data.',
+    writerControlMigrationUnavailable:'Automatic execution upgrade is unavailable',
     serviceStatusChecking: "Checking",
     serviceStatusReadRetry: "Read service status again",
     serviceRestartUnknown: "The restart outcome is unknown. Read the current service status; restart will not be retried automatically.",
@@ -3198,6 +3214,30 @@ export const en: LocaleStrings = {
 
   // chatView
   conversationActivity: {
+    readyForAcceptance:'Ready for acceptance',
+    nativeApprove:'Allow once',nativeDeny:'Deny',nativeSubmitting:'Submitting your choice…',nativeAnswered:'Choice submitted; waiting for the question status to update.',nativeAnswerUnconfirmed:'The answer has not been confirmed. Refresh the questions before taking another action.',nativeRefresh:'Refresh questions',
+    attentionUnavailable: 'Combined status unconfirmed',
+    attentionReasons: {
+      authorization_required: 'Authorization needs confirmation',
+      input_conflict: 'Inputs conflict',
+      budget_exhausted: 'Execution budget exhausted',
+      delivery_unknown: 'Delivery outcome unconfirmed',
+      draft_ready: 'Draft ready for review',
+      source_unavailable: 'Source status unconfirmed',
+      revocation_pending: 'Awaiting authorization revocation',
+      stop_unconfirmed: 'Stop request unconfirmed',
+      mode_change_pending: 'Awaiting work mode change',
+      input_invalidation_pending: 'Awaiting input invalidation',
+      work_deadline_exceeded: 'Work deadline exceeded',
+      egress_policy_changed: 'Content egress policy changed',
+      observation_window_closed: 'Observation window closed',
+      review_required: 'Work needs review',
+      artifact_stale: 'Artifact inputs have changed',
+      budget_reconciliation_pending: 'Reconciling actual budget usage',
+      authority_suspect: 'Authorization needs verification',
+      owner_create_pending: 'Waiting for execution resources',
+    },
+    dismissReminder: 'Dismiss reminder', reminderDismissed: 'Reminder dismissed; work status will keep updating',
     expand: 'Expand work details', collapse: 'Collapse work details', summaryDetails: 'View full update', workCount: (count) => `${count} work items`,
     submitInput: 'Submit', declineInput: 'Decline', cancelWork: 'Cancel work', cancelRequested: 'Cancellation requested; awaiting confirmation', unsupportedInput: 'This input must be handled by the original service.',
     projectClosed: 'Closed (delivery unconfirmed)',
@@ -3334,6 +3374,9 @@ export const en: LocaleStrings = {
     historyUnavailable: (taskIds) => `Historical task records are unavailable (${taskIds}). The conversation remains saved; existing projects and artifacts are preserved and will not restart automatically.`,
     historyRecovered: (taskId) => `The original task record is unavailable. Below is the only completed legacy record with this exact title (${taskId}). Its original content is shown without rewriting the missing task or restarting the project.`,
     taskCreateFailed: "Failed to create task. Please check model configuration or try again later.",
+    submissionConflict: "This submission has changed. Check the original task before sending a new request.",
+    submissionNotPrepared: "This submission has no prepared task. Return to the original message to continue.",
+    submissionReconciliationRequired: "The launch status of this submission is unconfirmed. Check the original task before starting more work.",
     goalAttachmentQuerying: "Task attachment is unconfirmed. Checking its saved state without restarting it.",
     goalAttachmentUnknown: "Task attachment is unconfirmed and execution may have started. Do not resubmit; reopen the conversation to view saved state.",
     taskExecutionFailed: (reason) => `Task failed: ${reason}`,
@@ -3795,6 +3838,9 @@ export const en: LocaleStrings = {
   projectsDetailDispatchFailed: "Failed to dispatch tasks. Please try again later.",
   projectsDetailDispatchWorkflowStarted: "Task workflow started, generating deliverables.",
   projectsDetailDispatchTasksDispatched: (count: number) => `Dispatched ${count} task${count !== 1 ? 's' : ''}.`,
+  projectsDetailDispatchIntentStored:(count:number)=>`Recorded execution requests for ${count} tasks. Execution has not started.`,
+  projectsDetailDispatchObservationSummary:(present:number,missing:number,unavailable:number)=>`This check: ${present} preparation records match, ${missing} local records are missing, and ${unavailable} could not be verified.`,
+  projectsDetailDispatchObservationUnavailable:'Local preparation records could not be verified in this check.',
   projectsDetailDispatchNone: "No dispatchable tasks. Project status refreshed.",
   projectsDetailExecModeSwitched: (label: string) => `Switched to ${label}.`,
   projectsDetailExecModeFailed: "Failed to switch execution mode. Please try again later.",

@@ -1,8 +1,24 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync as LegacyDatabaseSync } from 'node:sqlite';
+import {createRequire} from 'node:module';
 import { randomUUID, createHash } from 'node:crypto';
+import {createDshBudgetLedger,createDshBudgetTransaction} from './harness-dsh-budget-ledger.mjs';
 
 let db;
+let protectedCore,protectedAddon;
+let DatabaseSync=LegacyDatabaseSync;
+if(workerData.originalProtectedBudgetCarrier!==undefined){
+ const requireFixed=createRequire(import.meta.url);
+ protectedAddon=requireFixed('./protected_sqlite.node');
+ protectedCore=protectedAddon.adoptOriginalBudgetWorker(workerData.originalProtectedBudgetCarrier);
+ DatabaseSync=requireFixed('./harness-protected-sqlite.cjs').wrapOriginalProtectedSQLiteNamespace(protectedCore).Database;
+}
+function closeProtectedBorrow(){
+ if(!protectedCore)return;
+ protectedCore.closeOwned();
+ protectedAddon.retireOriginalBudgetWorker(workerData.originalProtectedBudgetCarrier);
+}
+let dshLedger,dshOutcomeUnknown,dshTransaction;
 const fail = code => { throw new Error(code); };
 const one = (sql, ...args) => db.prepare(sql).get(...args);
 const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -22,7 +38,7 @@ function transaction(fn) {
 }
 function observeTime(now) {
   if (!Number.isSafeInteger(now) || now < 0) fail('clock_invalid');
-  return transaction(() => {
+  return (dshLedger?.isSchema2()?dshTransaction:transaction)(() => {
     const previous = number('lastSeenMs');
     if (now < previous - 2000) { put('clockGuard', 1); return false; }
     if (now - previous >= 300000) run('INSERT INTO forward_steps VALUES(?,?,?,?,0)', randomUUID(), previous, now, number('activitySeq'));
@@ -58,15 +74,16 @@ function snapshot() {
 }
 
 function initialize() {
-  db = new DatabaseSync(workerData.dbPath);
-  db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
+  db = protectedCore?new DatabaseSync():new DatabaseSync(workerData.dbPath);
+  db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=${protectedCore?'DELETE':'WAL'}; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;`);
   if (one('PRAGMA integrity_check').integrity_check !== 'ok') fail('database_corrupt');
   const existing = all("SELECT name FROM sqlite_master WHERE type='table'").map(row => row.name);
   if (existing.length) {
     if (!existing.includes('metadata') || meta('ownerId') !== workerData.ownerId || meta('initOperationId') !== workerData.initOperationId
-      || meta('canonicalRoot') !== workerData.root || meta('identity') !== workerData.identity || meta('schemaVersion') !== '1') fail('owner_mismatch');
+      || meta('canonicalRoot') !== workerData.root || meta('identity') !== workerData.identity || !['1','2','3','4','5','6','7','8','9'].includes(meta('schemaVersion'))) fail('owner_mismatch');
     if (workerData.initializing) {
       const activityTables = ['grants', 'runs', 'request_attempts', 'daily_budget', 'formal_trials', 'outbox', 'applied_operations', 'intents', 'forward_steps', 'disabled_bindings'];
+      if(meta('schemaVersion')!=='1')fail('initialization_has_activity');
       if (existing.some(table => !['metadata', 'config', ...activityTables].includes(table))) fail('initialization_unknown_schema');
       for (const table of activityTables) if (!existing.includes(table) || one(`SELECT COUNT(*) AS count FROM ${table}`).count !== 0) fail('initialization_has_activity');
       const c = config();
@@ -95,24 +112,45 @@ function initialize() {
       run('INSERT INTO config VALUES(1,?)', JSON.stringify(workerData.defaultConfig));
     });
   }
+  let writerDepth=0;
+  db.function('xiaok_harness_dsh_budget_v3',()=>writerDepth>0?1:0);
+  db.function('xiaok_harness_dsh_budget_v4',()=>writerDepth>0?1:0);
+  db.function('xiaok_harness_dsh_budget_v6',()=>writerDepth>0?1:0);
+  db.function('xiaok_harness_dsh_budget_v7',()=>writerDepth>0?1:0);
+  db.function('xiaok_harness_dsh_budget_v8',()=>writerDepth>0?1:0);
+  db.function('xiaok_harness_dsh_budget_v9',()=>writerDepth>0?1:0);
+  db.function('xiaok_harness_dsh_budget_v5',()=>writerDepth>0?1:0);
+  const originalDshTransaction=createDshBudgetTransaction(db,error=>{dshOutcomeUnknown=error;});
+  dshTransaction=action=>{writerDepth++;try{return originalDshTransaction(action);}finally{writerDepth--;}};
+  dshLedger=createDshBudgetLedger({db,transaction:dshTransaction,ownerId:workerData.ownerId,profileId:workerData.profileId,workspaceId:workerData.workspaceId});
+  if(meta('schemaVersion')!=='1'){dshLedger.schema(meta('schemaVersion'));dshLedger.graph();}
   return snapshot();
 }
 
 function execute(command, p) {
+  if(dshOutcomeUnknown){if(command==='shutdown'){db.close();return null;}throw dshOutcomeUnknown;}
+  if(command==='dsh_source_read_migrate'||command==='dsh_source_read_scan'||command==='dsh_source_read_reserve'||command==='dsh_source_read_settle')return {result:dshLedger.executeSourceRead(command.slice(4),p),ownerState:snapshot()};
+  if(command==='dsh_observe_receipt')return {result:dshLedger.observeReceipt(p),ownerState:snapshot()};
+  if(command==='dsh_reserve_draft_attempt_receipt')return {result:dshLedger.reserveDraftAttemptReceipt(p),ownerState:snapshot()};
+  if(command==='dsh_reserve_attempt_receipt')return {result:dshLedger.reserveAttemptReceipt(p),ownerState:snapshot()};
+  const dshCommands={dsh_draft_finalize:'draft_finalize',dsh_work_policy:'work_policy',dsh_work_policy_sync:'work_policy_sync',dsh_work_read:'work_read',dsh_work_reserve:'work_reserve',dsh_work_bind:'work_bind',dsh_work_close:'work_close',dsh_open_account:'open',dsh_reserve_attempt:'reserve',dsh_mark_pre_send:'marker',dsh_mark_sent:'sent',dsh_mark_unknown:'unknown',dsh_settle_attempt:'settle',dsh_settle_conservative:'settle_conservative',dsh_status:'read'};
+  if(Object.hasOwn(dshCommands,command))return {result:dshLedger.execute(dshCommands[command],p),ownerState:snapshot()};
   if (command === 'read') return snapshot();
   if (command === 'observe_time') { observeTime(p.now); return snapshot(); }
-  if (command === 'reset_clock') return transaction(() => {
+  if (command === 'reset_clock') return (dshLedger.isSchema2()?dshTransaction:transaction)(() => {
     const previous = number('lastSeenMs');
     if (p.expectedHighWaterMark !== previous) fail('clock_reset_forbidden');
     if (p.now < previous) {
       const event = one('SELECT * FROM forward_steps WHERE id=? AND consumed=0', p.correctionEventId ?? '');
       if (!event || p.now < event.beforeMark || p.now >= event.afterMark || event.activitySeq !== number('activitySeq')
-        || one("SELECT 1 FROM runs WHERE status='active'") || one("SELECT 1 FROM request_attempts WHERE status IN ('pre_send','sent','unknown')")) fail('clock_reset_forbidden');
+        || one("SELECT 1 FROM runs WHERE status='active'") || one("SELECT 1 FROM request_attempts WHERE status IN ('pre_send','sent','unknown')")
+        || dshLedger.isSchema2()&&one("SELECT 1 FROM dsh_budget_attempts WHERE state IN ('prepared','pre_send','sent','unknown')")) fail('clock_reset_forbidden');
       put('lastSeenMs', Math.max(p.now, event.beforeMark)); run('UPDATE forward_steps SET consumed=1 WHERE id=?', event.id);
     } else put('lastSeenMs', p.now);
     put('clockGuard', 0); return snapshot();
   });
-  if (command === 'activate') return transaction(() => {
+  if (command === 'activate') return (dshLedger.isSchema2()?dshTransaction:transaction)(() => {
+    dshLedger.recover();
     put('epoch', number('epoch') + 1);
     if (p.dirty) put('recoveryGuard', 1);
     for (const r of all("SELECT id FROM runs WHERE status='active'")) stopRun(r.id, 'owner_restarted');
@@ -231,15 +269,15 @@ function execute(command, p) {
     buckets: all('SELECT * FROM daily_budget'), attempts: all('SELECT * FROM request_attempts'), runs: all('SELECT id,status,reason FROM runs'), trials: all('SELECT * FROM formal_trials'), ...snapshot(),
   };
   if (command === 'shutdown') {
-    transaction(() => { for (const r of all("SELECT id FROM runs WHERE status='active'")) stopRun(r.id, 'app_shutdown'); });
+    (dshLedger.isSchema2()?dshTransaction:transaction)(() => { dshLedger.recover();for (const r of all("SELECT id FROM runs WHERE status='active'")) stopRun(r.id, 'app_shutdown'); });
     db.close(); return null;
   }
   fail('command_forbidden');
 }
 
-try { parentPort.postMessage({ ready: initialize() }); }
-catch { try { db?.close(); } catch {} parentPort.postMessage({ bootError: 'optimization_store_unavailable' }); }
+try {const ready=initialize();if(protectedCore)protectedAddon.commitOriginalBudgetWorkerNamespace(workerData.originalProtectedBudgetCarrier);parentPort.postMessage({ ready });}
+catch { try { db?.close();closeProtectedBorrow(); } catch {} parentPort.postMessage({ bootError: 'optimization_store_unavailable' });if(protectedCore)parentPort.close(); }
 parentPort.on('message', message => {
-  try { parentPort.postMessage({ id: message.id, value: execute(message.command, message.payload) }); }
-  catch (error) { parentPort.postMessage({ id: message.id, error: /^[a-z_]+$/.test(error.message) ? error.message : 'optimization_store_failure' }); }
+  try { parentPort.postMessage({ id: message.id, value: execute(message.command, message.payload) });if(message.command==='shutdown'&&protectedCore){closeProtectedBorrow();parentPort.close();} }
+  catch (error) { parentPort.postMessage({ id: message.id, error: /^[a-z_]+$/.test(error.message) ? error.message : 'optimization_store_failure',...(error.outcomeUnknown?{outcomeUnknown:true,stage:error.stage,primaryPresent:error.primaryPresent,rollbackErrorPresent:error.rollbackErrorPresent}:{}) }); }
 });

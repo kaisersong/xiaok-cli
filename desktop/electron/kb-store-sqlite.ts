@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { requireKbRequestSource, captureKbMutationInput, assertKbPendingSourceOwner, assertKbAuthorityMetadataUnchanged } from './kb-mutation-authority.js';
 import { KB_CREATE_COLLECTION_SCHEMA, KB_STORE_ADD_SOURCE_SCHEMA, KB_PARSE_RESULT_INPUT_SCHEMA, KB_CHUNK_INPUT_SCHEMA, KB_CREATE_MEETING_INPUT_SCHEMA, KB_UPDATE_MEETING_INPUT_SCHEMA } from '../shared/knowledge-ipc-contract.js';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
   Collection,
@@ -36,7 +36,43 @@ import {
   computeKnowledgeContentHash,
   reconstructKnowledgeSourceText,
 } from './kb-source-identity.js';
-
+const kbOriginGet = WeakMap.prototype.get,
+  kbOriginSet = WeakMap.prototype.set,
+  kbOriginApply = Reflect.apply,
+  kbOriginFreeze = Object.freeze,
+  kbOriginKeys = Object.keys;
+const originalKbStores = new WeakMap<
+  object,
+  { path: string; read(receipt: unknown): OriginalKnowledgeSourceReceipt }
+>();
+export interface OriginalKnowledgeSourceReceipt {
+  readonly requestSource: RequestSource;
+  readonly source: Readonly<Source>;
+  assertCurrent(): void;
+  assertLocal(): void;
+}
+/** Actual addSource return membership; a row DTO/sourceId is not a receipt. */
+export function readOriginalKnowledgeSourceReceipt(
+  store: unknown,
+  receipt: unknown,
+  expectedPath: string,
+): OriginalKnowledgeSourceReceipt {
+  const birth = kbOriginApply(kbOriginGet, originalKbStores, [store]) as
+    | { path: string; read(receipt: unknown): OriginalKnowledgeSourceReceipt }
+    | undefined;
+  if (!birth || birth.path !== resolve(expectedPath))
+    throw Error('MAIN_MATERIAL_KNOWLEDGE_STORE_REQUIRED');
+  return birth.read(receipt);
+}
+function freezeKbOrigin<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    const names = kbOriginKeys(value);
+    for (let i = 0; i < names.length; i++)
+      freezeKbOrigin((value as Record<string, unknown>)[names[i]!]);
+    kbOriginFreeze(value);
+  }
+  return value;
+}
 const SCHEMA_SQL = `
   PRAGMA journal_mode = WAL;
   PRAGMA busy_timeout = 5000;
@@ -138,6 +174,8 @@ const SCHEMA_SQL = `
 `;
 
 export function createKbStoreSqlite(dbPath: string): KbStore {
+  let originClosed=false;
+  const sourceOrigins=new WeakMap<object,OriginalKnowledgeSourceReceipt>();
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA_SQL);
@@ -150,7 +188,34 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   `);
 
   const now = () => Date.now();
-
+  function sourceReceipt(source: Source, requestSource: RequestSource): Source {
+    const snapshot = freezeKbOrigin(captureExecutionValue(source) as Source),
+      encoded = canonicalJson(snapshot);
+    let invalid = false;
+    const local = () => {
+      if (originClosed || invalid)
+        throw Error('MAIN_MATERIAL_KNOWLEDGE_SOURCE_RETIRED');
+    };
+    const current = () => {
+      local();
+      const actual = getSource(snapshot.id);
+      if (!actual || canonicalJson(actual) !== encoded) {
+        invalid = true;
+        throw Error('MAIN_MATERIAL_KNOWLEDGE_SOURCE_RETIRED');
+      }
+      local();
+    };
+    kbOriginApply(kbOriginSet, sourceOrigins, [
+      source,
+      kbOriginFreeze({
+        requestSource,
+        source: snapshot,
+        assertCurrent: current,
+        assertLocal: local,
+      }),
+    ]);
+    return source;
+  }
   function createCollection(input: CreateCollectionInput, requestSource?: RequestSource): Collection {
     requireKbRequestSource(requestSource, ['user', 'agent']);
     input = captureKbMutationInput(input, KB_CREATE_COLLECTION_SCHEMA);
@@ -215,7 +280,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       const existingById = getSource(input.sourceId!);
       if (existingById) {
         assertStableSourceMatches(existingById, input, assistantContentDigest!);
-        return existingById;
+        return sourceReceipt(existingById,requestSource);
       }
       const existingByRequestKey = findSourceByClientRequestKey(input.clientRequestKey!);
       if (existingByRequestKey) throw new Error('kb_client_request_key_conflict');
@@ -247,7 +312,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       metadataJson,
       ts,
     });
-    return getSource(id)!;
+    return sourceReceipt(getSource(id)!,requestSource);
   }
 
   function ensureAssistantSource(raw: AddSourceInput, requestSource: RequestSource): Source {
@@ -685,10 +750,11 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   }
 
   function close(): void {
+    originClosed=true;
     db.close();
   }
 
-  return {
+  const originalStore:KbStore = {
     _db: db,
     createCollection, getCollection, listCollections, renameCollection, deleteCollection,
     addSource, ensureAssistantSource, claimSourceContentHash, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
@@ -696,6 +762,21 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     createMeeting, getMeeting, listMeetings, updateMeeting,
     getCollectionState, getSourceWithContent, close,
   };
+  kbOriginApply(kbOriginSet, originalKbStores, [
+    originalStore,
+    {
+      path: resolve(dbPath),
+      read(receipt: unknown) {
+        const row = kbOriginApply(kbOriginGet, sourceOrigins, [receipt]) as
+          | OriginalKnowledgeSourceReceipt
+          | undefined;
+        if (!row) throw Error('MAIN_MATERIAL_KNOWLEDGE_SOURCE_REQUIRED');
+        row.assertCurrent();
+        return row;
+      },
+    },
+  ]);
+  return originalStore;
 }
 
 function backfillCanonicalSourceHashes(db: DatabaseSync): void {

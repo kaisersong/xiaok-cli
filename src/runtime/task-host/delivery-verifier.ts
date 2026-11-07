@@ -1,3 +1,7 @@
+import {loadOriginalProcessSdk} from '../verification/original-process-sdk-loader.js';
+import type * as OriginalProcessSdk from '../verification/original-process-sdk.js';
+import {readOptionalOriginalTaskHostDeliveryWorkerRequest} from './task-runtime-host.js';
+import {hasOriginalMainSdkBridgeInstallation} from '../verification/original-main-sdk-bridge.js';
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import type { TaskSnapshot } from './types.js';
@@ -25,25 +29,34 @@ export interface DeliveryVerificationResult {
 }
 
 /** A host owns one instance; attempts survive outward failure until physical drain. */
+const verifierBirths=new WeakMap<object,(snapshot:TaskSnapshot,options:DeliveryVerifierOptions,ticket?:unknown)=>Promise<DeliveryVerificationResult>>();
+const verifierApply=Reflect.apply,verifierGet=WeakMap.prototype.get,verifierSet=WeakMap.prototype.set;
+export function verifyOriginalTaskHostDelivery(verifier:unknown,snapshot:TaskSnapshot,options:DeliveryVerifierOptions,ticket?:unknown):Promise<DeliveryVerificationResult>{
+ const verify=verifierApply(verifierGet,verifierBirths,[verifier]) as ((snapshot:TaskSnapshot,options:DeliveryVerifierOptions,ticket?:unknown)=>Promise<DeliveryVerificationResult>)|undefined;
+ if(!verify)throw Error('DELIVERY_VERIFIER_ORIGINAL_REQUIRED');return verify(snapshot,options,ticket);
+}
 export class DeliveryVerifier {
   private readonly attempts = new Set<object>();
+  constructor(){verifierApply(verifierSet,verifierBirths,[this,(snapshot:TaskSnapshot,options:DeliveryVerifierOptions,ticket?:unknown)=>this.#verifyOriginal(snapshot,options,ticket)]);}
+  verify(snapshot:TaskSnapshot,options:DeliveryVerifierOptions):Promise<DeliveryVerificationResult>{return verifyOriginalTaskHostDelivery(this,snapshot,options);}
 
-  verify(snapshot: TaskSnapshot, options: DeliveryVerifierOptions): Promise<DeliveryVerificationResult> {
+  #verifyOriginal(snapshot: TaskSnapshot, options: DeliveryVerifierOptions,ticket?:unknown): Promise<DeliveryVerificationResult> {
+    const originalRequest=hasOriginalMainSdkBridgeInstallation()?readOptionalOriginalTaskHostDeliveryWorkerRequest(ticket,this,snapshot,options):undefined;
+    if(hasOriginalMainSdkBridgeInstallation()&&!originalRequest)throw Error('DELIVERY_VERIFIER_ORIGINAL_SOURCE_REQUIRED');
     if (this.attempts.size >= 2) return Promise.reject(new DeliveryVerificationError('verifier_capacity'));
     if (options.signal.aborted) return Promise.reject(options.signal.reason ?? new DOMException('Aborted', 'AbortError'));
     if (!Number.isFinite(options.deadline) || performance.now() >= options.deadline) return Promise.reject(new DeliveryVerificationError('delivery_timeout'));
     let request: ReturnType<typeof buildDeliveryFactsV1>;
     let worker: Worker;
-    try { request = buildDeliveryFactsV1(snapshot, randomUUID()); }
+    try { request = originalRequest?.deliveryRequest??buildDeliveryFactsV1(snapshot, randomUUID()); }
     catch (error) { return Promise.reject(protocolError(error, true)); }
     if (options.signal.aborted) return Promise.reject(options.signal.reason ?? new DOMException('Aborted', 'AbortError'));
     if (performance.now() >= options.deadline) return Promise.reject(new DeliveryVerificationError('delivery_timeout'));
-    try { worker = new Worker(new URL('./delivery-verifier-worker.js', import.meta.url), { stdout: true, stderr: true }); }
-    catch { return Promise.reject(new DeliveryVerificationError('verifier_start_failed')); }
-
     const attempt = {}; this.attempts.add(attempt);
+    let sdk:typeof OriginalProcessSdk|undefined,owned:Awaited<ReturnType<typeof OriginalProcessSdk.createOriginalHostWorker>>|undefined;
+    if(!originalRequest)try{worker=new Worker(new URL('./delivery-verifier-worker.js',import.meta.url),{stdout:true,stderr:true});}catch{this.attempts.delete(attempt);return Promise.reject(new DeliveryVerificationError('verifier_start_failed'));}
     const controller = new AbortController();
-    let exited = false; let pipelineDone = false; let settled = false; let terminated = false;
+    let exited = false; let pipelineDone = false; let settled = false; let terminated = false;let sdkDrained=!originalRequest;
     let failure: unknown; let failed = false; let frames = 0;
     let response: DeliveryResponseV1 | undefined;
     const pending = new Set<Promise<unknown>>();
@@ -64,15 +77,15 @@ export class DeliveryVerifier {
       if (!settled) { settled = true; stopWatching(); reject(failure); }
     };
     const drain = () => {
-      if (!exited || !pipelineDone || pending.size > 0) return;
+      if (!exited || !pipelineDone || pending.size > 0 || !sdkDrained) return;
       this.attempts.delete(attempt);
       resolveDrained();
       if (failed) rejectOnce();
     };
     const terminateOnce = () => {
-      if (terminated || exited) return; terminated = true;
+      if (terminated || exited || !worker) return; terminated = true;
       // Its Promise is not a physical-exit receipt. Only 'exit' changes exited.
-      try { void worker.terminate().catch(() => undefined); } catch { /* retain owner */ }
+      try { void (owned?sdk!.terminateOriginalToolProcess(owned.attempt):worker.terminate()).catch(() => undefined); } catch { /* retain owner */ }
     };
     const fail = (error: unknown) => {
       if (!failed) {
@@ -96,8 +109,12 @@ export class DeliveryVerifier {
       deadlineTimer = setTimeout(armDeadline, Math.min(2 ** 31 - 1, Math.max(1, Math.ceil(remaining))));
     };
     const parentAborted = () => fail(options.signal.reason ?? new DOMException('Aborted', 'AbortError'));
-    const trackPending = (raw: Promise<unknown>) => {
+    const trackPending = (raw: Promise<unknown>, originalFileOperation?:object) => {
       if (seen.has(raw)) return; seen.add(raw); pending.add(raw);
+      if(owned){
+        if(originalFileOperation!==undefined)sdk!.retainOriginalToolProcessFileOperation(owned.attempt,raw,originalFileOperation);
+        else sdk!.retainOriginalToolProcessValue(owned.attempt,raw);
+      }
       // Attach owner accounting before handing the exact SDK Promise to the host.
       void raw.then(() => { pending.delete(raw); drain(); }, () => { pending.delete(raw); drain(); });
       try { options.trackPending(raw); } catch (error) { fail(error); }
@@ -114,7 +131,9 @@ export class DeliveryVerifier {
       finally { pipelineDone = true; drain(); }
     };
 
-    worker.on('message', (frame: unknown) => {
+    const install=()=>{
+    const listen=(event:string,fn:Function)=>{if(owned)sdk!.listenOriginalToolProcess(owned.attempt,'child',event,fn);else worker.on(event,fn as (...args:any[])=>void);};
+    listen('message', (frame: unknown) => {
       if (++frames !== 1) { fail(new DeliveryVerificationError('verifier_protocol_error')); return; }
       if (failed || !checkDeadline()) return;
       try {
@@ -122,37 +141,51 @@ export class DeliveryVerifier {
         if (value.result.kind === 'error') fail(protocolError(new DeliveryVerificationError(value.result.code), true));
       } catch (error) { fail(protocolError(error)); }
     });
-    worker.on('error', () => fail(new DeliveryVerificationError('verifier_crashed')));
-    worker.once('exit', code => {
+    listen('error', (error:unknown) => {const failure=new DeliveryVerificationError('verifier_crashed');if(owned)Object.defineProperty(failure,'cause',{__proto__:null,value:error} as PropertyDescriptor);fail(failure);});
+    listen('exit', (code:number) => {
       exited = true;
       if (!failed && checkDeadline()) {
         if (code !== 0) fail(new DeliveryVerificationError('verifier_crashed'));
         else if (frames !== 1 || response?.result.kind !== 'facts') fail(new DeliveryVerificationError('verifier_protocol_error'));
       }
       if (failed || response?.result.kind !== 'facts') { pipelineDone = true; drain(); }
-      else void evaluate(response.result);
+      else return evaluate(response.result);
     });
-    for (const stream of [worker.stdout, worker.stderr]) {
-      let bytes = 0;
-      stream?.on('data', (chunk: Buffer | string) => {
-        if (stream.destroyed) return;
-        bytes = Math.min(2048, bytes + (typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength));
-        if (bytes === 2048) stream.destroy();
-        fail(new DeliveryVerificationError('verifier_protocol_error'));
-      });
-      stream?.on('error', () => fail(new DeliveryVerificationError('verifier_protocol_error')));
+    for (const endpoint of ['stdout','stderr'] as const) {
+      const stream=worker[endpoint];let bytes=0;
+      const onData=(chunk:Buffer|string)=>{
+       if(stream?.destroyed)return;bytes=Math.min(2048,bytes+(typeof chunk==='string'?Buffer.byteLength(chunk):chunk.byteLength));
+       fail(new DeliveryVerificationError('verifier_protocol_error'));
+      };
+      if(owned){sdk!.listenOriginalToolProcess(owned.attempt,endpoint,'data',onData);sdk!.listenOriginalToolProcess(owned.attempt,endpoint,'error',()=>fail(new DeliveryVerificationError('verifier_protocol_error')));}
+      else{stream?.on('data',onData);stream?.on('error',()=>fail(new DeliveryVerificationError('verifier_protocol_error')));}
     }
+    listen('online', () => {
+      if (!checkDeadline()) return;
+      try { if(owned){const raw=sdk!.postOriginalHostWorkerRequest(owned.attempt);void raw.catch(error=>fail(protocolError(error)));}else worker.postMessage(encodeDeliveryFrame(request, DELIVERY_INPUT_LIMIT)); }
+      catch { fail(new DeliveryVerificationError('verifier_start_failed')); }
+    });
+    if(owned)sdk!.sealOriginalToolProcessListeners(owned.attempt);
+    };
     options.signal.addEventListener('abort', parentAborted, { once: true });
     armDeadline();
     if (options.signal.aborted) parentAborted();
-    worker.once('online', () => {
-      if (!checkDeadline()) return;
-      try { worker.postMessage(encodeDeliveryFrame(request, DELIVERY_INPUT_LIMIT)); }
-      catch { fail(new DeliveryVerificationError('verifier_start_failed')); }
-    });
     // This is not outcome/terminate(). It stays pending across the outward grace
     // until the native exit AND the entire raw-IO/close pipeline have drained.
     try { options.trackPending(physicalDrain); } catch (error) { fail(error); }
+    if(originalRequest){
+      void (async()=>{
+       try{
+        sdk=await loadOriginalProcessSdk();owned=await sdk.createOriginalHostWorker(ticket);worker=owned.handle;install();if(failed)terminateOnce();
+        try{await sdk.readOriginalHostWorkerPhysicalFate(ticket).waitKnown();sdkDrained=true;drain();}catch(error){fail(error);}
+       }catch(error){
+        // create may have entered Native without a returned handle. Its private
+        // SDK Root/P remains owned; no result absence can certify never-born.
+        fail(error);
+        try{if(sdk){await sdk.readOriginalHostWorkerPhysicalFate(ticket).waitKnown();sdkDrained=true;exited=true;pipelineDone=true;drain();}}catch{/* Unknown SDK/metadata fate remains owned by the original helper/P. */}
+       }
+      })();
+    }else install();
     return outcome;
   }
 }

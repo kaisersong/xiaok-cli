@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ vi.mock('../../../src/runtime/conversation-activity/owner-runtime.js', () => ({
   activityOwnerConfigDigest: (config: ActivityOwnerConfig) => JSON.stringify(config),
 }));
 let root: string;
-beforeEach(() => { vi.useFakeTimers(); root = mkdtempSync(join(tmpdir(), 'owner-exit-')); });
+beforeEach(() => { vi.useFakeTimers(); root = realpathSync(mkdtempSync(join(tmpdir(), 'owner-exit-'))); });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); rmSync(root, { recursive: true, force: true }); });
 function launch(event: 'exit' | 'error' = 'exit', successAt?: number) {
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
@@ -107,4 +107,28 @@ it.each(['kept_pending', 'kept_unknown', 'retired'] as const)('reports legacy ou
   const client = await ensureConversationActivityOwner(config, { retire: async () => outcome, onLegacyOwner, spawn: fakeSpawn as unknown as typeof spawn });
   expect(fakeSpawn).toHaveBeenCalledTimes(outcome === 'retired' ? 1 : 0);
   expect(onLegacyOwner.mock.calls).toEqual(outcome === 'kept_unknown' ? [] : [[outcome === 'retired' ? 'replaced' : 'reused_pending']]); client.dispose();
+});
+
+it('authenticates Native only for an explicitly opted-in actual Desktop attachment',async()=>{
+ const config:ActivityOwnerConfig={schemaVersion:1,dataRoot:root,profileId:'fake',actorId:'fake',identity:{kind:'desktop',path:root}};
+ vi.spyOn(ConversationActivityOwnerClient.prototype,'request').mockResolvedValue({profileId:'fake',generation:ACTIVITY_OWNER_GENERATION,configDigest:activityOwnerConfigDigest(config),nativeSourceProtocol:1} as any);
+ const frame={ownerEpoch:'epoch',connectionIncarnation:'connection'};
+ const authorize=vi.spyOn(ConversationActivityOwnerClient.prototype,'authorizeNativeSource').mockResolvedValue(frame);
+ const assert=vi.spyOn(ConversationActivityOwnerClient.prototype,'assertNativeConnectionCurrent').mockImplementation(()=>{});const spawn=vi.fn();
+ const client=await ensureConversationActivityOwner(config,{nativeSource:true,spawn:spawn as any});
+ expect(authorize).toHaveBeenCalledOnce();expect(assert).toHaveBeenCalledWith(frame);expect(spawn).not.toHaveBeenCalled();client.dispose();
+});
+it('preserves the ordinary attachment on a Native authentication failure without spawning or retrying',async()=>{
+ const config:ActivityOwnerConfig={schemaVersion:1,dataRoot:root,profileId:'fake',actorId:'fake',identity:{kind:'desktop',path:root}};
+ vi.spyOn(ConversationActivityOwnerClient.prototype,'request').mockResolvedValue({profileId:'fake',generation:ACTIVITY_OWNER_GENERATION,configDigest:activityOwnerConfigDigest(config),nativeSourceProtocol:1} as any);
+ const failure=new Error('activity_native_source_forbidden');const authorize=vi.spyOn(ConversationActivityOwnerClient.prototype,'authorizeNativeSource').mockRejectedValue(failure);const unavailable=vi.fn(),spawn=vi.fn();
+ const client=await ensureConversationActivityOwner(config,{nativeSource:true,onNativeSourceUnavailable:unavailable,spawn:spawn as any});
+ expect(authorize).toHaveBeenCalledOnce();expect(unavailable).toHaveBeenCalledExactlyOnceWith(failure);expect(spawn).not.toHaveBeenCalled();client.dispose();
+});
+it('does not read or authenticate a new Native credential when an old pending owner must stay',async()=>{
+ const config:ActivityOwnerConfig={schemaVersion:1,dataRoot:root,profileId:'fake',actorId:'fake',identity:{kind:'desktop',path:root}};
+ vi.spyOn(ConversationActivityOwnerClient.prototype,'request').mockResolvedValue({profileId:'fake',generation:ACTIVITY_OWNER_GENERATION-1} as any);
+ const authorize=vi.spyOn(ConversationActivityOwnerClient.prototype,'authorizeNativeSource');const spawn=vi.fn();
+ const client=await ensureConversationActivityOwner(config,{nativeSource:true,retire:async()=> 'kept_pending',spawn:spawn as any});
+ expect(authorize).not.toHaveBeenCalled();expect(spawn).not.toHaveBeenCalled();client.dispose();
 });

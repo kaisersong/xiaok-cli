@@ -1,8 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {ConversationActivityService} from '../../../src/runtime/conversation-activity/service.js';
 import { createDesktopServices } from '../../electron/desktop-services.js';
 import { createCollaborationRoomBrokerClient } from '../../electron/collaboration-room-broker-client.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
@@ -35,7 +37,16 @@ describe('user project to original conversation activity', () => {
     const hub = createHub({ silent: true, dataDir: { backend: 'sqlite', filePath: join(root, 'state.sqlite'), legacyJsonPath: join(root, 'state.json') },
       brokerClient: createBrokerClient({ brokerUrl: base, participantId: 'kswarm', roomSystemToken: 'kswarm-fixture' }) });
     const agents: Array<Record<string, unknown>> = [{ id: 'xiaok-po', roles: ['po'], status: 'active' }, { id: 'xiaok-worker', roles: ['worker'], status: 'active' }];
+    let sourceReads=0;
+    const sourceFrames=new WeakMap<object,{subject:string;signal:AbortSignal;beforeEffects?:()=>void}>();
     const gateway = {
+      async readProjectSourceActivity(subject:{projectId:string;sourceDataEpoch:string;after:number},context:{signal:AbortSignal;beforeEffects?:()=>void}){
+        context.beforeEffects?.();sourceReads++;
+        const frame=Object.freeze({kind:'kswarm_project_source_activity_read_v1',subject,page:{...hub.getProjectActivity(subject.projectId,{after:subject.after}),delivery:{status:'unavailable',reasonCode:'SNAPSHOT_INCOMPLETE'}}});
+        sourceFrames.set(frame,{subject:JSON.stringify(subject),...context});return frame;
+      },
+      assertProjectSourceActivityRead(subject:unknown,frame:object){const original=sourceFrames.get(frame);if(!original||original.subject!==JSON.stringify(subject)||original.signal.aborted)throw Error('fixture_source_frame_forbidden');original.beforeEffects?.();},
+      assertScopedProjectActivityRead(){throw Error('legacy fixture cannot grant scope');},
       getDesktopMutationToken: () => 'host-fixture', getStatus: () => ({ running: true }), onStatusChange: () => () => {},
       request: async (path: string, init?: RequestInit) => {
         if (path === '/agents' && !init?.method) return Response.json({ agents });
@@ -81,9 +92,13 @@ describe('user project to original conversation activity', () => {
       const activities = await services.conversationActivity!.list('original-thread', actor);
       expect(activities.length).toBeGreaterThan(0);
       expect(activities.every(item => item.threadId === 'original-thread')).toBe(true);
+      const projectRow=activities.find(item=>item.watchId.startsWith('project:'));expect(projectRow).toBeTruthy();
+      const originalProjectView=await services.conversationActivity!.getWork(projectRow!.watchId,actor);
       const before = modelCalls;
       hub.updateProjectExecutionMode('watched-project', 'workflow_preferred');
-      await services.conversationActivity!.projectChanged('watched-project');
+      const invalidation=vi.spyOn(ConversationActivityService.prototype,'invalidateProjectSource');
+      try{const changed=services.conversationActivity!.projectChanged('watched-project');const synchronous=invalidation.mock.calls.length>0;await changed;expect(synchronous).toBe(true);}finally{invalidation.mockRestore();}
+      expect(sourceReads).toBeGreaterThan(0);
       expect(modelCalls).toBe(before);
       expect(hub.listProjects()).toHaveLength(1);
       const final = await services.conversationActivity!.list('original-thread', actor);
@@ -107,6 +122,10 @@ describe('user project to original conversation activity', () => {
       await services.conversationActivity!.projectChanged('watched-project');
       await expect(services.conversationActivity!.list('original-thread', actor)).rejects.toThrow('activity_thread_deleted');
       expect(hub.listProjects()).toHaveLength(1); // Deleting the conversation did not cancel/delete the source project.
+      // Deliberate original-DB binding damage must not reclassify an issued
+      // project output as an unguarded compatibility result.
+      const activityDb=new DatabaseSync(join(root,'data','conversation-activity.sqlite'));try{activityDb.prepare("UPDATE work_watches SET data_json=json_set(data_json,'$.source','agent_group') WHERE watch_id=?").run(projectRow!.watchId);}finally{activityDb.close();}
+      expect(()=>services.conversationActivity!.assertReadResultCurrent!(originalProjectView,actor)).toThrow();
 
     } finally {
       model.mockRestore(); await services.disposeMultiAgent(); hub.closePersistence(); await server.close(); broker.close();

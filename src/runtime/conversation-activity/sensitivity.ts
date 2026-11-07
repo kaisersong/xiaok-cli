@@ -9,7 +9,7 @@ export const WORK_EVENT_SENSITIVITY = {
   sourceDataEpoch: 'metadata', transportGeneration: 'metadata', workId: 'metadata', runId: 'metadata',
   sourceSequence: 'metadata', sourceRevision: 'metadata', kind: 'metadata', occurredAt: 'metadata',
   receivedAt: 'metadata', businessOutcome: 'metadata', summary: 'content', evidenceRefs: 'metadata',
-  executionStarted: 'metadata',
+  executionStarted: 'metadata', questionId: 'forbidden', questionOwner: 'forbidden',
 } as const satisfies Record<keyof WorkEvent, Sensitivity>;
 
 export const WORK_BINDING_SENSITIVITY = {

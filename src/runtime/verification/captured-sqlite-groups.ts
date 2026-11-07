@@ -1,9 +1,10 @@
+import {validateDshAuthorityColdGraph,type DshAuthorityColdSqlRow} from '../multi-agent/dsh-admission-cold-data.js';
 import {createHash} from 'node:crypto';
 import {readProfileSourceCapture,openProfileSqliteReader,closeProfileSqliteReader,readProfileSqliteReaderSchema,readProfileSqliteReaderUserVersion,iterateProfileSqliteReaderRows,iterateProfileSqliteReaderRelation,type ProfileSqliteReader} from './profile-source-capture.js';
 import {METADATA_SESSION_QUERIES,type MetadataSessionQueryId} from './metadata-session-query-manifest.js';
 import type {MetadataSessionRelationId} from './metadata-session-relation-manifest.js';
 import {readCapturedGroupsSchema} from './groups-source-schema.js';
-import {readCapturedGroupsRow,groupsObject,type CapturedGroupsRow} from './captured-sqlite-groups-row.js';
+import {readCapturedGroupsRow,capturedGroupsSqlData,groupsObject,type CapturedGroupsRow} from './captured-sqlite-groups-row.js';
 import {declareCapturedGroupsRow,type CapturedGroupsReference} from './captured-sqlite-groups-references.js';
 import {encodeMultiAgentRow} from '../multi-agent/row-codec.js';
 import {freezeCapturedData,capturedFields} from './captured-source-json.js';
@@ -12,12 +13,14 @@ import type {CapturedSqliteCell} from './source-sqlite-cell.js';
 type Count=Readonly<{table:string;count:string}>;
 type Source=Readonly<{sourceId:string;snapshotHash:string;tables:readonly Count[]}>;
 export type CapturedGroupsStreamEvent=
- |Readonly<{kind:'source-start';sourceId:string;snapshotHash:string;userVersion:1|2|3|4}>
+ |Readonly<{kind:'source-start';sourceId:string;snapshotHash:string;userVersion:1|2|3|4|5|6}>
  |Readonly<{kind:'table-start';sourceId:string;table:string;columns:readonly string[]}>
  |Readonly<{kind:'row';sourceId:string;table:string;rowid:string;ordinal:string;cells:Readonly<Record<string,CapturedSqliteCell>>;parsed:Readonly<Record<string,unknown>>;references:readonly CapturedGroupsReference[];unmapped:readonly string[];observationDeclarations:readonly Readonly<{path:string;reference:unknown}>[]}>
  |Readonly<{kind:'table-end';sourceId:string;table:string;count:string}>
  |Readonly<Source&{kind:'source-end'}>
  |Readonly<{kind:'complete';version:1;sources:readonly Source[];digest:string}>;
+const dshAppend=Object.defineProperty;
+const dshStartsWith=Function.prototype.call.bind(String.prototype.startsWith) as (value:string,prefix:string)=>boolean;
 function fail(reason:string):never{throw Error('captured_groups_'+reason);}
 function scalar(row:CapturedGroupsRow,key:string):string{const cell=row.cells[key];if(cell?.type!=='text')fail('identity');return cell.value;}
 function integer(row:CapturedGroupsRow,key:string):bigint{const cell=row.cells[key];if(cell?.type!=='integer'||BigInt(cell.value)<0n)fail('counter');return BigInt(cell.value);}
@@ -27,6 +30,29 @@ function one(reader:ProfileSqliteReader,relation:MetadataSessionRelationId,table
 function messageDigest(value:Record<string,unknown>):string{const{groupId,messageId,sender,receiverId,kind,preview,contentId,truncated,createdAt,bodyUnavailable}=value;return createHash('sha256').update(encodeMultiAgentRow({groupId,messageId,sender,receiverId,kind,preview,contentId,truncated,createdAt,bodyUnavailable})).digest('hex');}
 function relationships(reader:ProfileSqliteReader,row:CapturedGroupsRow,activityTables:boolean):void{
  const body=row.json.data_json===undefined?undefined:groupsObject(row.json.data_json);
+ if(row.table==='dsh_a_profile_migrations'){
+  const profile=one(reader,'groups:dsh-profile-store','dsh_a_profile',[String(body!.storeId)]);
+  if(scalar(profile,'profile')!==body!.toProfile||scalar(profile,'digest')!==body!.toDigest)fail('dsh_ancestry');
+ }
+ if(row.table==='dsh_a_source_binding_revisions'){
+  const original=one(reader,'groups:dsh-source-binding','dsh_a_source_bindings',[scalar(row,'binding_id')]),current=groupsObject(original.json.data_json);
+  if(integer(row,'binding_revision')>integer(original,'revision')||scalar(row,'source_key')!==scalar(original,'source_key'))fail('dsh_binding_history');
+  if(integer(row,'binding_revision')===integer(original,'revision')&&encodeMultiAgentRow(body!.binding)!==encodeMultiAgentRow(current.binding))fail('dsh_binding_history');
+ }
+ if(row.table==='dsh_a_inbox'||row.table==='dsh_a_object_heads'){
+  const original=one(reader,'groups:dsh-source-binding','dsh_a_source_bindings',[scalar(row,'binding_id')]),binding=groupsObject(groupsObject(original.json.data_json).binding);
+  if(row.table==='dsh_a_inbox'){
+   const envelope=groupsObject(body!.envelope);
+   if(encodeMultiAgentRow(envelope.authScope)!==encodeMultiAgentRow(binding.authScope))fail('dsh_input_binding_scope');
+  }else{
+   // The Head can legitimately have current:null after an incomplete source
+   // observation. Its canonical inbox edge still establishes original scope.
+   const iterator=iterateProfileSqliteReaderRelation(reader,'groups:dsh-object-inputs',[scalar(row,'object_id')]);let found=false;
+   try{for(;;){const next=iterator.next();if(next.done)break;const input=readCapturedGroupsRow('dsh_a_inbox',next.value);if(scalar(input,'binding_id')!==scalar(row,'binding_id'))fail('dsh_head_binding');relationships(reader,input,activityTables);found=true;}}finally{iterator.return();}
+   if(!found)fail('dsh_head_input');
+  }
+ }
+ if(row.table==='dsh_a_input_proofs'){const original=one(reader,'groups:dsh-input','dsh_a_inbox',[scalar(row,'input_id')]),input=groupsObject(original.json.data_json),envelope=groupsObject(input.envelope),proof=groupsObject(row.json.data_json);if(encodeMultiAgentRow(proof.authScope)!==encodeMultiAgentRow(envelope.authScope))fail('dsh_proof_scope');}
  if(row.table==='thread_bindings'&&row.cells.active_group_id?.type==='text'){
   const group=one(reader,'groups:group','groups',[row.cells.active_group_id.value]);if(scalar(group,'thread_id')!==scalar(row,'thread_id'))fail('active_thread');
  }
@@ -68,12 +94,21 @@ export function* iterateCapturedSQLiteGroupsSources(owner:object,token:object):G
   const sourceId=item.source.sourceId,reader=openProfileSqliteReader(owner,token,sourceId),counts:Count[]=[];
   try{
    const schema=readCapturedGroupsSchema(readProfileSqliteReaderSchema(reader),readProfileSqliteReaderUserVersion(reader));
+   if(schema.version===6){
+    const child:DshAuthorityColdSqlRow[]=[];
+    for(let i=0;i<schema.tables.length;i++){const table=schema.tables[i]!;if(!dshStartsWith(table,'dsh_a_'))continue;
+     for(const raw of iterateProfileSqliteReaderRows(reader,('groups:'+table) as MetadataSessionQueryId)){
+      readCapturedGroupsRow(table,raw);dshAppend(child,child.length,{__proto__:null,value:{table,row:capturedGroupsSqlData(raw.record)},enumerable:true} as PropertyDescriptor);
+     }
+    }
+    validateDshAuthorityColdGraph(child);
+   }
    yield frame({kind:'source-start',sourceId,snapshotHash:item.snapshotHash,userVersion:schema.version});
    for(const table of [...schema.tables].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)))){
     const query=(table==='thread_bindings'?schema.threadQuery:'groups:'+table) as MetadataSessionQueryId;let count=0n;
     yield frame({kind:'table-start',sourceId,table,columns:METADATA_SESSION_QUERIES[query].columns});
     for(const raw of iterateProfileSqliteReaderRows(reader,query)){
-     const row=readCapturedGroupsRow(table,raw);relationships(reader,row,schema.version===4);const declared=declareCapturedGroupsRow(row);count++;
+     const row=readCapturedGroupsRow(table,raw);relationships(reader,row,schema.version>=4);const declared=declareCapturedGroupsRow(row);count++;
      yield frame({kind:'row',sourceId,table,rowid:row.rowid,ordinal:String(count),cells:row.cells,parsed:row.json,references:declared.references,unmapped:declared.unmapped,observationDeclarations:declared.observationDeclarations});
     }
     counts.push(Object.freeze({table,count:String(count)}));yield frame({kind:'table-end',sourceId,table,count:String(count)});

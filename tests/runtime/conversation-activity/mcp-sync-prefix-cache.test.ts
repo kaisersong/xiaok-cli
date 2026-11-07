@@ -76,6 +76,8 @@ it('R294 restore: real drive synchronous prefix rejects through the public regis
     await vi.waitFor(async () => expect((await f.stats()).gets).toBeGreaterThan(initial.gets), { timeout: 5000 });
     expect(f.callbackErrors.filter(value => value === error)).toHaveLength(1);
   });
+
+
 }, 30000);
 
 it('R294 restore: real drive prefix synchronously reenters close and its exact rejection remains owned by that memoized close', async () => {
@@ -99,3 +101,17 @@ it('R294 restore: real drive prefix synchronously reenters close and its exact r
     expect((await f.stats()).gets).toBe(initial.gets); expect(lookups).toBe(1);
   });
 }, 30000);
+
+it('observation does not start another real SDK snapshot when its method lookup synchronously seals the original owner',async()=>{
+  await withRealLateFixture(async f=>{
+    const initial=await f.stats(),task=f.connection.tasks!.task.bind(f.connection.tasks);let closing:Promise<void>|undefined;
+    const spy=vi.spyOn(f.connection.tasks!,'task').mockImplementation(id=>{
+      const actual=task(id);return Object.create(actual,{snapshot:{get(){closing=f.activities.close();f.own(closing);return actual.snapshot.bind(actual);}}});
+    });
+    try{
+      const raw=f.observer.event(f.reference,f.event);if(!raw)throw Error('actual_async_event_required');f.own(raw);await resultOf(raw);
+      if(!closing)throw Error('actual_snapshot_lookup_did_not_seal');await closing;
+      expect((await f.stats()).gets).toBe(initial.gets);
+    }finally{spy.mockRestore();}
+  });
+},30000);

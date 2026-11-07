@@ -23,6 +23,14 @@ function model(adapter: ModelAdapter) {
  return createProjectAgentModel({ modelId: null, loadConfig: async () => config(), createAdapter: () => adapter });
 }
 describe('project current model uses the main task recovery owner', () => {
+ it.each(['prepare_return','invocation_callback'] as const)('keeps the selected-model sibling behind the synchronous guard at %s',async frame=>{
+  const selected=config();selected.models.selected={provider:'local',model:'selected',label:'Selected',capabilities:['tools']};
+  let allowed=true,calls=0;const sentinel=Error('original_project_start_revoked');
+  const adapter:ModelAdapter={getModelName:()=> 'Selected',async *stream(){calls++;yield{type:'text',delta:'must not start'};yield{type:'done'};}};
+  const current=await createProjectAgentModel({modelId:'selected',loadConfig:async()=>selected,createAdapter:()=>adapter});
+  let failure:unknown;try{await collect(current.stream({...request(),beforeEffects:()=>{if(!allowed)throw sentinel;},prepareRequest:async value=>{if(frame==='prepare_return')allowed=false;return value;},onInvocation:()=>{if(frame==='invocation_callback')allowed=false;}}));}catch(error){failure=error;}
+  expect(calls).toBe(0);expect(failure).toBe(sentinel);
+ });
  it('retries a transient read before visible output and prepares each actual request once', async () => {
   let calls = 0, authority = 0, preparations = 0;
   const ids: string[] = [], seen: Message[][] = [];

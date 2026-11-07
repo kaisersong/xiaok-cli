@@ -1,4 +1,6 @@
 import { acquireSaveLock } from './mutation-lock.js';
+import {sessionReadSdk,sessionReadStatKind,sessionReadMissing} from './source-read-sdk.js';
+const executionSdkGet=Reflect.get;
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync, lstatSync, existsSync, openSync, closeSync } from 'node:fs';
@@ -127,20 +129,21 @@ export function createSessionExecutionAuthority(options: { root: string; session
 /** Store writer guard. Synchronous and non-waiting: never waits for an execution
  * lock while holding a store transaction. Ordinary sessions without a registered
  * execution lock retain the optional-native startup behavior. */
-export function acquireSessionStoreExecutionGuard(rootDirectory: string, sessionIdentity: string, lease?: SessionExecutionLease, rootLockHeld = false): () => void {
+export function acquireSessionStoreExecutionGuard(rootDirectory: string, sessionIdentity: string, lease?: SessionExecutionLease, rootLockHeld = false,sourceContext?:object): () => void {
   if (lease) { assertSessionExecutionLease(lease, { root: rootDirectory, sessionIdentity }); return () => {}; }
-  const root = realpathSync(rootDirectory);
-  const releaseRoot = rootLockHeld ? () => {} : acquireSaveLock(join(root, '.session-store-lock'));
+  const root = sessionReadSdk(sourceContext,'string',realpathSync,[rootDirectory]) as string;
+  const releaseRoot = rootLockHeld ? () => {} : acquireSaveLock(join(root, '.session-store-lock'),sourceContext);
   try {
   const directory = join(root, '.session-execution');
   const path = join(directory, createHash('sha256').update(sessionIdentity.toLowerCase()).digest('hex') + '.sqlite');
   let exists = false;
-  try { lstatSync(path); exists = true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  try { sessionReadSdk(sourceContext,'stat',lstatSync,[path]); exists = true; } catch (error) { if (!sessionReadMissing(error)) throw error; }
   if (!exists) return releaseRoot;
-  if (lstatSync(directory).isSymbolicLink() || lstatSync(path).isSymbolicLink() || !lstatSync(path).isFile()) throw Error('session_execution_lock_path');
-  const Database = requireNative('better-sqlite3') as typeof import('better-sqlite3');
-  const db = new Database(path, { timeout: 0, fileMustExist: true });
-  try { db.exec('BEGIN EXCLUSIVE'); } catch (error) { db.close(); throw error; }
-  return () => { try { db.close(); } finally { releaseRoot(); } };
+  if (sessionReadStatKind(sessionReadSdk(sourceContext,'stat',lstatSync,[directory]),'symlink') || sessionReadStatKind(sessionReadSdk(sourceContext,'stat',lstatSync,[path]),'symlink') || !sessionReadStatKind(sessionReadSdk(sourceContext,'stat',lstatSync,[path]),'file')) throw Error('session_execution_lock_path');
+  const Database = sessionReadSdk(sourceContext,'callable',requireNative,['better-sqlite3']) as typeof import('better-sqlite3');
+  const db = sessionReadSdk(sourceContext,'db-open',()=>new Database(path, { timeout: 0, fileMustExist: true }),[]) as import('better-sqlite3').Database;
+  const close=()=>{if(sourceContext===undefined){db.close();return;}const method=sessionReadSdk(sourceContext,'db-method',executionSdkGet,[db,'close'],db);sessionReadSdk(sourceContext,'db-close',method,[],db);sessionReadSdk(sourceContext,'db-open-state',executionSdkGet,[db,'open'],db);};
+  try {if(sourceContext===undefined)db.exec('BEGIN EXCLUSIVE');else{const execute=sessionReadSdk(sourceContext,'callable',executionSdkGet,[db,'exec'],db);sessionReadSdk(sourceContext,'db-exec',execute,['BEGIN EXCLUSIVE'],db);sessionReadSdk(sourceContext,'db-transaction',executionSdkGet,[db,'inTransaction'],db);}}catch(error){try{close();}catch(cleanupError){if(sourceContext!==undefined)throw new AggregateError([error,cleanupError],'source_execution_guard_and_close_failed',{cause:error});throw cleanupError;}throw error;}
+  return () => { try { close(); } finally { releaseRoot(); } };
   } catch (error) { releaseRoot(); throw error; }
 }

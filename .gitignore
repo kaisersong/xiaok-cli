@@ -99,3 +99,5 @@ docs/skill-observability-design.md
 
 # MSVC leaves this intermediate object next to the payload it produces
 /data/verification/windows/**/*.obj
+
+/native/root-resource-authority/build/

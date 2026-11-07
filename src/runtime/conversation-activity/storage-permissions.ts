@@ -4,6 +4,7 @@ import { basename, dirname, resolve, parse, join } from 'node:path';
 export const ACTIVITY_STORAGE_NAMES = {
   database: 'conversation-activity.sqlite', ownerPrefix: 'activity-owner.',
   config: 'activity-owner.config.json', log: 'activity-owner.log', status: 'activity-owner.status.json', credentials: 'activity-owner.credentials.json',
+  nativeSourceCredential: 'activity-owner.native-source.credentials.json',
   supervision: 'activity-source-supervision.json', kswarmLog: 'activity-kswarm.log', brokerLog: 'activity-broker.log',
   endpoints: 'activity-mcp-endpoints.json', notice: 'first-start-notice-shown', snapshots: 'snapshots',
 } as const;
@@ -41,6 +42,10 @@ export function secureActivityStorage(root: string, options: { chmodSync?: typeo
     while (paths.length) {
       const path = paths.pop()!;
       if (++count > (options.maxEntries ?? MAX_STORAGE_ENTRIES)) throw new Error();
+      // An exposed capability cannot become secret again by chmod. Its fixed
+      // owner validates it without repair; invalid Native credentials must not
+      // disable ordinary activity or change a linked/unrelated target.
+      if (path === join(root, ACTIVITY_STORAGE_NAMES.nativeSourceCredential)) continue;
       const state = lstatSync(path);
       if (state.isSymbolicLink() || state.uid !== process.getuid?.()) throw new Error();
       if (state.isSocket() && dedicated) continue;

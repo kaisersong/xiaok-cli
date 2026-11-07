@@ -1,7 +1,8 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+// @vitest-environment node
+import { mkdirSync, rmSync, writeFileSync, existsSync,readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it,vi } from 'vitest';
 import {
   buildOfficeWorkerEnv,
   createOfficeDocumentParser,
@@ -20,6 +21,17 @@ describe('OfficeDocumentParser process isolation', () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
+  it('rechecks each original queued job before spawn and rejects its exact cause without blocking the next job',async()=>{
+    const parser=createOfficeDocumentParser({workerPath,maxConcurrency:1});
+    const first=parser.parse({absolutePath:createInput(rootDir,'queue-first.docx'),maxOutputChars:1000});
+    await vi.waitFor(()=>expect(existsSync(join(rootDir,'queue.trace'))).toBe(true));
+    let allowed=true;const sentinel={code:'original_queued_parse_revoked'};
+    const queued=parser.parse({absolutePath:createInput(rootDir,'queue-revoked.docx'),maxOutputChars:1000,beforeEffects:()=>{if(!allowed)throw sentinel;}} as any).then(value=>({value}),error=>({error}));
+    allowed=false;await first;expect(await queued).toEqual({error:sentinel});
+    expect(readFileSync(join(rootDir,'queue.trace'),'utf8')).not.toContain('queue-revoked');
+    expect(await parser.parse({absolutePath:createInput(rootDir,'success-after.docx'),maxOutputChars:1000})).toMatchObject({ok:true});
   });
 
   it('rejects unsupported formats without starting a worker', async () => {

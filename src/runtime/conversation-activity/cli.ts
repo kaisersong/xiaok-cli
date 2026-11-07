@@ -1,3 +1,4 @@
+import {closeConversationActivity} from './close.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -10,6 +11,8 @@ import { ConversationActivityService, type ConversationActivityApi } from './ser
 import { ConversationMcpActivities } from './mcp.js';
 import type { ConversationActivity } from './types.js';
 import type { PlatformRuntimeContext } from '../../platform/runtime/context.js';
+import {readNativeSessionIdentity} from '../../ai/runtime/session-store/identity.js';
+import type {AttentionInventoryReader} from './attention-work-reader.js';
 
 const NOTICE_KINDS = new Set(['report', 'artifact_available', 'input_required', 'blocked', 'completed', 'failed', 'cancelled']);
 const labels: Record<string, string> = { accepted: '已接收', queued: '排队中', running: '进行中', blocked: '需要处理', input_required: '等待你的输入', completed: '已完成', failed: '失败', cancelled: '已取消' };
@@ -28,6 +31,7 @@ export class CliConversationActivities {
   private refreshPending?: Promise<void>;
   private through = 0;
   private disposed = false;
+  private closing?:Promise<void>;
   private pendingPresentation: Promise<unknown> = Promise.resolve();
   private readonly profileId: string;
   static async attach(options: { cwd: string; sessionId: string; instanceId: string; identityPath: string; platform: PlatformRuntimeContext; changed(): void; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; onOwnerReplaced?(): void; onError?(error: unknown): void }) {
@@ -36,7 +40,7 @@ export class CliConversationActivities {
     const ownerClient = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: root, profileId, actorId: 'cli-user', identity: { kind: 'cli', path: options.identityPath, workspaceRoot: options.cwd } }, { instanceId: options.instanceId, onLegacyOwner: options.onLegacyOwner });
     try { return new CliConversationActivities({ ...options, ownerClient, dataRoot: root }); } catch (error) { ownerClient.dispose(); throw error; }
   }
-  constructor(private readonly options: { cwd: string; sessionId: string; platform: PlatformRuntimeContext; changed(): void; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; onOwnerReplaced?(): void; onError?(error: unknown): void; ownerClient?: ConversationActivityOwnerClient; dataRoot?: string }) {
+  constructor(private readonly options: { cwd: string; sessionId: string; platform: PlatformRuntimeContext; changed(): void; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; onOwnerReplaced?(): void; onError?(error: unknown): void; ownerClient?: ConversationActivityOwnerClient; dataRoot?: string;identityPath?:string }) {
     const root = options.dataRoot ?? join(options.cwd, '.xiaok', 'state');
     const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
     this.profileId = profileId;
@@ -47,11 +51,19 @@ export class CliConversationActivities {
     });
     this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
     this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
-    this.service = options.ownerClient ? new ConversationActivityAttachedService(options.ownerClient, this.actor.actorId) : new ConversationActivityService({ store: this.store, profileId, actorId: this.actor.actorId,
+    const assertAttachedNative=(watch:import('./types.js').WorkWatch,actor:import('./service.js').ActivityActor)=>{
+      if(this.disposed||actor.requestSource!=='user'||actor.actorId!==this.actor.actorId)throw Error('activity_actor_forbidden');
+      if(!options.identityPath)throw Error('activity_native_identity_unavailable');
+      const identity=readNativeSessionIdentity(join(options.identityPath,`${options.sessionId}.json`));
+      if(!identity||identity.sessionId!==options.sessionId||watch.origin.profileId!==profileId||watch.origin.threadId!==identity.sessionId
+        ||resolve(identity.cwd)!==resolve(options.cwd)||watch.origin.workspaceId!==resolve(identity.cwd))throw Error('activity_thread_forbidden');
+    };
+    const reader:AttentionInventoryReader={hasBinding:id=>this.mcp?.hasAttentionReaderBinding(id)??false,collect:(slot,actor)=>this.mcp.collectAttentionInventory(slot,actor),assertCurrent:(slot,actor)=>this.mcp.assertAttentionInventoryCurrent(slot,actor)};
+    this.service = options.ownerClient ? new ConversationActivityAttachedService(options.ownerClient, this.actor.actorId,{reader,assertNative:assertAttachedNative,onError:options.onError}) : new ConversationActivityService({ store: this.store, profileId, actorId: this.actor.actorId,attentionReader:reader,
       getThread: threadId => threadId === options.sessionId ? { threadId, profileId, workspaceId: root, deleteState: 'none' } : null,
       canObserveWork: watch => this.mcp.canObserve(watch), onError: options.onError });
     this.mcp = new ConversationMcpActivities({ store: this.store, service: this.service, actorId: this.actor.actorId,
-      ...(options.ownerClient ? { externalObserver: (connection: import('../../platform/mcp/transport.js').McpClientConnection) => connection.activityEndpoint?.config.type !== 'stdio',
+      ...(options.ownerClient ? {assertLocalUserRead:assertAttachedNative, externalObserver: (connection: import('../../platform/mcp/transport.js').McpClientConnection) => connection.activityEndpoint?.config.type !== 'stdio',
         endpointReady: async (connection: import('../../platform/mcp/transport.js').McpClientConnection) => {
           const endpoint = connection.activityEndpoint;
           if (!endpoint || !connection.tasks) throw new Error('activity_mcp_endpoint_unverified');
@@ -107,11 +119,14 @@ export class CliConversationActivities {
     catch (error) { this.options.onError?.(error); }
   }
 
-  async close(): Promise<void> { await this.pendingPresentation; this.dispose(); }
+  close():Promise<void>{
+    if(this.closing)return this.closing;
+    this.disposed=true;this.stopDisconnect?.();this.unsubscribe?.();this.pending.clear();
+    this.closing=closeConversationActivity({mcp:this.mcp,service:this.service,store:this.store,presentationTails:[this.pendingPresentation,...(this.refreshPending?[this.refreshPending]:[])]});return this.closing;
+  }
 
   dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true; this.stopDisconnect?.(); this.unsubscribe?.(); this.mcp.dispose(); this.service.dispose(); this.store.close(); this.pending.clear();
+    void this.close().catch(error=>this.options.onError?.(error));
   }
 }
 

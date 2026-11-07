@@ -1,4 +1,5 @@
 import type { ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { ModelTextRepetitionGuard, MODEL_TEXT_REPETITION_CODE } from '../../src/ai/runtime/model-text-repetition.js';
 import { randomUUID } from 'node:crypto';
 import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types.js';
@@ -68,6 +69,7 @@ export async function createProjectAgentModel(options: {
       let closingFailure: { error: unknown } | undefined, closingBusiness: { error: unknown } | undefined;
       const source = (async function* () {
       for (;;) {
+        assertBeforeEffects(input.beforeEffects);
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const messages: Message[] = switched ? input.messages.map(message => ({...message, content: message.content.filter(block => block.type !== 'thinking')})).filter(message => message.content.length > 0) : input.messages;
@@ -79,14 +81,17 @@ export async function createProjectAgentModel(options: {
           return;
         }
         await input.beforeRequest?.();
+        assertBeforeEffects(input.beforeEffects);
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const invocationId = randomUUID();
         const request = {...input, adapter, messages, systemPrompt, invocationId};
         const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
+        assertBeforeEffects(input.beforeEffects);
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         input.onInvocation?.(invocationId);
+        assertBeforeEffects(input.beforeEffects);
         const chunks: StreamChunk[] = [];
         const textGuard = new ModelTextRepetitionGuard();
         let providerFailed = false;
@@ -128,9 +133,12 @@ export async function createProjectAgentModel(options: {
         }
         if (providerFailed) {
           if (isBoundaryFailure(providerError)) throw providerError;
+          assertBeforeEffects(input.beforeEffects);
           const current = resolveRuntimeModelBinding(await options.loadConfig());
+          assertBeforeEffects(input.beforeEffects);
           if (current.modelId === binding.modelId && current.providerId === binding.providerId && current.wireModel === binding.wireModel) throw providerError;
           await input.onRecovery?.({summaryOnly: false});
+          assertBeforeEffects(input.beforeEffects);
           input.options?.signal?.throwIfAborted();
           if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
           canFallback = false;

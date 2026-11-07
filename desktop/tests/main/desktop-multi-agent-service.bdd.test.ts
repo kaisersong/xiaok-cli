@@ -2160,4 +2160,28 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(false);
   });
 
+  it('staged shutdown waits the actual child session close while keeping original store facts open',async()=>{
+    const entered=deferred<void>(),release=deferred<void>(),rootEntered=deferred<void>(),rootRelease=deferred<void>();let childId='',groupId='';
+    const f=await setup(async()=>({run:async(_message,signal)=>{await new Promise<void>(resolve=>{if(signal?.aborted)resolve();else signal?.addEventListener('abort',()=>resolve(),{once:true});});return 'original child stopped';},dispose:async()=>{entered.resolve();await release.promise;}}),async context=>{
+      groupId=context.groupId;const result=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'original-shutdown-child',taskName:'shutdown_child',message:'original child'});childId=result.targetAgentId!;rootEntered.resolve();await rootRelease.promise;
+    });
+    try{
+      await f.start();await rootEntered.promise;f.host.stopAccepting();f.host.abortAllActive();f.service.beginShutdown();rootRelease.resolve();const original=f.service.quiesceShutdown();expect(f.service.quiesceShutdown()).toBe(original);await entered.promise;
+      expect(await f.service.drainShutdown(10)).toBe(false);expect(f.store.isClosed()).toBe(false);expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(false);
+      await expect(f.service.prepareRoot(f.host,'t1',{prompt:'late replacement root',materials:[]})).rejects.toThrow();
+    }finally{release.resolve();rootRelease.resolve();}
+    await f.service.quiesceShutdown();await f.host.drain();expect(await f.service.drainShutdown(1000)).toBe(true);expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(true);
+  });
+  it('staged shutdown accepts the original delayed Host delivery before final authority revocation',async()=>{
+    const entered=deferred<void>(),release=deferred<void>();
+    const f=await setup(async()=>({run:async()=>'',dispose:async()=>{}}),async(_context,input)=>{await input.emitUsage({inputTokens:1,outputTokens:2});await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:input.taskId,intentId:'original',stepId:'original',note:'Original completed root answer.'});});
+    const record=f.service.recordHostDelivery.bind(f.service);let first=true;
+    const reports=vi.spyOn(f.service,'recordHostDelivery').mockImplementation(async input=>{if(first){first=false;entered.resolve();await release.promise;}return record(input);});
+    cleanup.push(()=>reports.mockRestore());
+    const taskId=await f.start();await entered.promise;
+    try{f.host.stopAccepting();f.host.abortAllActive();f.service.beginShutdown();await f.service.quiesceShutdown();expect(await f.service.drainShutdown(10)).toBe(false);expect(f.store.isClosed()).toBe(false);}
+    finally{release.resolve();}
+    await f.host.drain();expect(await f.service.drainShutdown(1000)).toBe(true);expect(f.store.getRootBinding(taskId)?.delivery?.hostSettlement).toBe('committed');
+  });
+
 });

@@ -1,9 +1,11 @@
 import {loopPublicationZh} from './loop-publication';
+import {dshSourceSettingsZh} from './dsh-source-settings';
 import type { LocaleStrings } from "./index";
 import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  dshSourceSettings:dshSourceSettingsZh,
   loopPublication: loopPublicationZh,
   observation: {compoundExperiment:'本次已启用融合执行实验；编辑和验证结果分别记录。',compoundStep:{not_started:'未开始',pending:'进行中',denied:'未获批准',succeeded:'已成功',failed:'失败',cancelled:'已取消',unknown:'结果未知'},compoundEdit:(status:string)=>`编辑：${status}`,compoundValidation:(status:string)=>`验证：${status}`,compoundUnknown:(count:number)=>`有 ${count} 项操作结果未知，需要确认执行状态。`,semanticState:{waiting:'等待已确认的子任务边界',compacted:'历史已压缩，原始要求和执行事实已保留',skipped:'本次未执行历史压缩',failed:'历史压缩未完成'},semanticReason:{economics:'本次预计节约不足以覆盖额外成本。',changed:'对话内容已变化，旧摘要不再适用。','no-gain':'新历史没有达到缩减要求。',budget:'摘要预算不足。',unavailable:'当前条件不满足，请检查任务记录。'},semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>`摘要调用 ${attempts}/${maximum}；按发送前核验价格预留 $${reserved} / $${budget}（USD，并非实际账单）`,semanticExperiment:'本次为显式压缩实验，额外摘要调用可能增加费用。',enable:'为本次任务启用观测记忆',ready:'本次任务已授权：仅原生工具，不继承旧任务材料。请发送任务。',cancel:'取消本次启用',stop:'停止新采集',revoke:'撤销披露并停止任务',active:'本次任务：deepseek-flash，观测记忆已启用',recallOnly:'已停止新采集，原有授权仍可召回',revokedStopping:'披露授权已撤销；任务正在停止',revoked:'披露授权已撤销',unavailable:'此任务未启用观测记忆',closed:'任务已结束；保护历史恢复尚不可用',failed:'操作未完成，请检查授权期限、模型与本机环境。',filesUnsupported:'已启用任务请使用授权文件中的精确来源，不另附材料。'},
   diffView: { showFull: '展开完整差异' },
@@ -1315,6 +1317,20 @@ export const zh: LocaleStrings = {
     langEnSub: "英文",
     // general pane - service status
     serviceStatusTitle: "服务状态",
+    writerControlTitle:'项目数据准备',
+    writerControlDescription:'仅支持没有项目数据的新工作区。准备数据存储不会启用自动执行。',
+    writerControlRead:'读取准备状态',
+    writerControlPrepare:'准备新工作区',
+    writerControlPreparing:'准备中',
+    writerControlChecking:'正在读取准备状态',
+    writerControlReadError:'无法读取项目数据准备状态',
+    writerControlUnknown:'准备操作结果尚未确认，请读取状态；不会自动重试。',
+    writerControlPrepared:'项目数据存储已准备',
+    writerControlUnprepared:'项目数据存储尚未准备',
+    writerControlExistingData:'当前工作区已有项目数据，无法按新工作区准备。',
+    writerControlReconciliation:'当前工作区需要核对已有数据，暂时无法准备。',
+    writerControlUnavailable:'当前服务无法准备项目数据。',
+    writerControlMigrationUnavailable:'自动执行升级暂不可用',
     serviceStatusChecking: "检查中",
     serviceStatusReadRetry: "重新读取服务状态",
     serviceRestartUnknown: "重启操作的结果尚不确定。请读取当前服务状态；不会自动重试重启。",
@@ -3178,6 +3194,30 @@ export const zh: LocaleStrings = {
 
   // chatView
   conversationActivity: {
+    readyForAcceptance:'待验收',
+    nativeApprove:'允许一次',nativeDeny:'拒绝',nativeSubmitting:'正在提交选择…',nativeAnswered:'已提交选择，等待问题状态更新。',nativeAnswerUnconfirmed:'选择是否已生效尚未确认。请刷新问题状态，勿重复提交。',nativeRefresh:'刷新问题状态',
+    attentionUnavailable: '综合状态暂不可确认',
+    attentionReasons: {
+      authorization_required: '需要确认授权',
+      input_conflict: '输入内容有冲突',
+      budget_exhausted: '执行预算已用尽',
+      delivery_unknown: '交付结果尚未确认',
+      draft_ready: '草稿已就绪，等待审阅',
+      source_unavailable: '来源状态暂不可确认',
+      revocation_pending: '正在等待授权收回确认',
+      stop_unconfirmed: '停止请求尚未确认',
+      mode_change_pending: '正在等待工作模式变更确认',
+      input_invalidation_pending: '正在等待旧输入失效确认',
+      work_deadline_exceeded: '工作已超过执行期限',
+      egress_policy_changed: '内容出口规则已变更',
+      observation_window_closed: '观察窗口已关闭',
+      review_required: '需要检查当前工作',
+      artifact_stale: '产物依据的内容已更新',
+      budget_reconciliation_pending: '正在核对实际预算用量',
+      authority_suspect: '当前授权信息需要核实',
+      owner_create_pending: '正在等待执行资源',
+    },
+    dismissReminder: '关闭此提醒', reminderDismissed: '此提醒已关闭，工作状态仍会更新',
     expand: '展开跟进详情', collapse: '收起跟进详情', summaryDetails: '查看完整内容', workCount: (count) => `${count} 项工作`,
     submitInput: '提交', declineInput: '拒绝提供', cancelWork: '取消工作', cancelRequested: '已请求取消，等待来源确认', unsupportedInput: '此类输入需通过原服务处理。',
     projectClosed: '已关闭（未确认交付）',
@@ -3314,6 +3354,9 @@ export const zh: LocaleStrings = {
     historyUnavailable: (taskIds) => `历史任务记录暂时无法读取（${taskIds}）。会话仍保留；已有项目及产物不会因此删除，也不会自动重跑。`,
     historyRecovered: (taskId) => `原任务记录不可用，以下显示唯一同标题的成功历史记录（${taskId}）。这是该历史任务的真实内容，未改写原任务或重新启动项目。`,
     taskCreateFailed: "任务创建失败，请检查模型配置或稍后重试。",
+    submissionConflict: "这次提交的内容已改变，请核对原任务后再发送新请求。",
+    submissionNotPrepared: "这次提交尚未准备任务，请回到原消息继续提交。",
+    submissionReconciliationRequired: "这次提交的启动状态尚未确认，请先核对原任务，避免重复执行。",
     goalAttachmentQuerying: "任务附着结果尚未确认，正在只读核对。",
     goalAttachmentUnknown: "任务附着结果尚未确认；可能已经开始，请勿重复提交。可重新打开会话查看已保存状态。",
     taskExecutionFailed: (reason) => `任务执行失败：${reason}`,
@@ -3775,6 +3818,9 @@ export const zh: LocaleStrings = {
   projectsDetailDispatchFailed: "分发任务失败，请稍后重试。",
   projectsDetailDispatchWorkflowStarted: "已启动任务工作流，正在生成交付物。",
   projectsDetailDispatchTasksDispatched: (count: number) => `已分发 ${count} 个任务。`,
+  projectsDetailDispatchIntentStored:(count:number)=>`已记录 ${count} 个任务的执行请求，尚未开始执行。`,
+  projectsDetailDispatchObservationSummary:(present:number,missing:number,unavailable:number)=>`本次核验：${present} 条准备记录匹配，${missing} 条本地记录缺失，${unavailable} 条暂无法核验。`,
+  projectsDetailDispatchObservationUnavailable:'本次无法核验本地准备记录。',
   projectsDetailDispatchNone: "没有可分发任务，项目状态已刷新。",
   projectsDetailExecModeSwitched: (label: string) => `已切换为${label}。`,
   projectsDetailExecModeFailed: "切换执行方式失败，请稍后重试。",

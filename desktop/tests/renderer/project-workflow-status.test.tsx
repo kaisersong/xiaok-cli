@@ -927,41 +927,32 @@ describe('ProjectDetailPage workflow action', () => {
     expect(dialog).toHaveTextContent('恢复方式：复用已完成节点');
   });
 
-  it('shows a success notice when dispatch starts task workflows', async () => {
+  it('reports the stored intent receipt without claiming a workflow has started', async () => {
     const initial = workflowDetail({
-      project: {
-        ...workflowDetail().project,
-        status: 'active',
-        executionMode: 'workflow_preferred',
-      },
+      project: { ...workflowDetail().project, status: 'active', executionMode: 'workflow_preferred' },
       workflowRuns: [],
     });
-    const refreshed = workflowDetail({
-      project: {
-        ...workflowDetail().project,
-        status: 'active',
-        executionMode: 'workflow_preferred',
-      },
-      workflowRuns: [taskWorkflowRun()],
-    });
-    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(refreshed);
-    mockDispatchTasks.mockResolvedValue({
-      dispatched: [],
-      workflowRuns: [{ id: 'wf-proj-workflow-po-generated-task-workflow-1770000000000' }],
-      workflowNodeDispatches: [{ workflowRunId: 'wf-proj-workflow-po-generated-task-workflow-1770000000000', nodeId: 'worker-produce-deliverable' }],
-    });
-
+    mockGetProjectFullDetail.mockResolvedValue(initial);
+    mockDispatchTasks.mockResolvedValue({ ok: true, operation: { children: [{ taskId: 'task', state: 'intent_pending' }] } });
     renderWithProviders(
-      <Routes>
-        <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
-      </Routes>,
+      <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>,
       '/projects/proj-workflow'
     );
-
     fireEvent.click(await screen.findByRole('button', { name: '分发任务' }));
-
-    await waitFor(() => expect(mockDispatchTasks).toHaveBeenCalledWith('proj-workflow', 'xiaok-po'));
-    expect(await screen.findByRole('status')).toHaveTextContent('已启动任务工作流，正在生成交付物。');
+    await waitFor(() => expect(mockDispatchTasks).toHaveBeenCalledWith('proj-workflow'));
+    expect(await screen.findByRole('status')).toHaveTextContent('已记录 1 个任务的执行请求，尚未开始执行。');
+  });
+  it('shows this Main preparation observation separately from the stored execution intent',async()=>{
+    const initial=workflowDetail({project:{...workflowDetail().project,status:'active',executionMode:'workflow_preferred'},workflowRuns:[]});mockGetProjectFullDetail.mockResolvedValue(initial);
+    mockDispatchTasks.mockResolvedValue({ok:true,operation:{children:[{taskId:'task',state:'intent_pending'}]},preparationObservations:[{childKey:'original-child',taskId:'task',status:'present'}]});
+    renderWithProviders(<Routes><Route path="/projects/:projectId" element={<ProjectDetailPage/>}/></Routes>,'/projects/proj-workflow');fireEvent.click(await screen.findByRole('button',{name:'分发任务'}));
+    const notice=await screen.findByRole('status');expect(notice).toHaveTextContent('已记录 1 个任务的执行请求，尚未开始执行。');expect(notice).toHaveTextContent('本次核验：1 条准备记录匹配，0 条本地记录缺失，0 条暂无法核验。');
+  });
+  it('keeps the stored intent success when its optional preparation observation is unavailable',async()=>{
+    const initial=workflowDetail({project:{...workflowDetail().project,status:'active',executionMode:'workflow_preferred'},workflowRuns:[]});mockGetProjectFullDetail.mockResolvedValue(initial);
+    mockDispatchTasks.mockResolvedValue({ok:true,operation:{children:[{taskId:'task',state:'intent_pending'}]},preparationObservationUnavailable:true});
+    renderWithProviders(<Routes><Route path="/projects/:projectId" element={<ProjectDetailPage/>}/></Routes>,'/projects/proj-workflow');fireEvent.click(await screen.findByRole('button',{name:'分发任务'}));
+    const notice=await screen.findByRole('status');expect(notice).toHaveTextContent('已记录 1 个任务的执行请求，尚未开始执行。');expect(notice).toHaveTextContent('本次无法核验本地准备记录。');
   });
 
   it('starts project diagnose workflow and refreshes project detail', async () => {

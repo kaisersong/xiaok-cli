@@ -12,6 +12,11 @@ export interface MetadataSessionRelationDefinition {
 }
 
 const definitions = {
+  "groups:dsh-profile-store":{"queryId":"groups:dsh_a_profile","whereEqual":["store_id"],"orderBy":["singleton"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
+  "groups:dsh-object-inputs":{"queryId":"groups:dsh_a_inbox","whereEqual":["object_id"],"orderBy":["input_id"],"rowidTieBreak":true,"cardinality":"many","boundKeyTypes":["text"]},
+  "groups:dsh-source-binding":{"queryId":"groups:dsh_a_source_bindings","whereEqual":["binding_id"],"orderBy":["binding_id"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
+  "groups:dsh-input":{"queryId":"groups:dsh_a_inbox","whereEqual":["input_id"],"orderBy":["input_id"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
+  "groups:dsh-input-proofs":{"queryId":"groups:dsh_a_input_proofs","whereEqual":["input_id"],"orderBy":["proof_version"],"rowidTieBreak":true,"cardinality":"many","boundKeyTypes":["text"]},
   "groups:activity-run": {"queryId":"groups:activity_runs","whereEqual":["run_id"],"orderBy":["run_id"],"rowidTieBreak":true,"cardinality":"zero-or-one","boundKeyTypes":["text"]},
   "groups:group-activity_runs": {"queryId":"groups:activity_runs","whereEqual":["group_id"],"orderBy":["run_id"],"rowidTieBreak":true,"cardinality":"many","boundKeyTypes":["text"]},
   "groups:group-activity_members": {"queryId":"groups:activity_members","whereEqual":["group_id"],"orderBy":["run_id","member_id"],"rowidTieBreak":true,"cardinality":"many","boundKeyTypes":["text"]},

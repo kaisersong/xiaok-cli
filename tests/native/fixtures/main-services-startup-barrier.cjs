@@ -1,0 +1,27 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{pathToFileURL}=require('node:url');
+const [bundle,root]=process.argv.slice(2);process.env.XIAOK_CONFIG_DIR=path.join(root,'config');fs.mkdirSync(process.env.XIAOK_CONFIG_DIR,{recursive:true,mode:0o700});
+const {app,BrowserWindow}=require('electron');app.setPath('userData',path.join(root,'profile'));app.disableHardwareAcceleration();app.on('window-all-closed',()=>{});
+const counts={initialize:0,plan:0};let services,source,api,window,user;
+(async()=>{
+ await app.whenReady();const module=await import(pathToFileURL(bundle).href);
+ const control=module;api=module;
+ const scopeModule=module;
+ const multi=module,plans=module;
+ const originalInit=multi.DesktopMultiAgentService.prototype.initialize,originalPlan=plans.KSwarmInitialPlanBootstrapQueue.prototype.startRecovery;
+ multi.DesktopMultiAgentService.prototype.initialize=function(...args){counts.initialize++;return Reflect.apply(originalInit,this,args);};
+ plans.KSwarmInitialPlanBootstrapQueue.prototype.startRecovery=function(...args){counts.plan++;return Reflect.apply(originalPlan,this,args);};
+ const dataRoot=path.join(root,'desktop'),workspaceRoot=path.join(root,'workspace');fs.mkdirSync(workspaceRoot,{recursive:true});const actual=scopeModule.resolveDesktopServiceScope({dataRoot,workspaceRoot}),scope={profileId:actual.profileId,workspaceId:actual.workspaceId};
+ const html=path.join(root,'index.html');fs.writeFileSync(html,'<!doctype html><title>startup barrier</title>');window=new BrowserWindow({show:false,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});await window.loadFile(html);
+ user=control.createMainDshControlSource({window,scope,isTrustedUrl:url=>url===pathToFileURL(html).href});source=api.createOriginalMainDshServiceSources({scope,userSource:user});const actor=Object.freeze({requestSource:'user',principalId:'desktop-main-window'});await api.prepareOriginalMainDshServiceSources(source,{dataRoot,workspaceRoot,harnessUserActor:actor});
+ const lease=api.readOriginalMainDshPreparedSources(source),ks=module,sdk=module;
+ const kswarm=ks.createKSwarmService({desktopProjectScope:scope,ownedDshAdmission:lease.businessSource.admission});
+ services=sdk.createDesktopServices({dataRoot,workspaceRoot,kswarmService:kswarm,harnessOptimizationUserActor:actor,dshServiceSources:source,knowledgeDbPath:path.join(root,'profile','knowledge.db')});
+ assert.equal(counts.initialize,0,'actual MA initialize/recovery must not enter before Root/source completion');assert.equal(counts.plan,0,'actual initial-plan recovery must not start in Services constructor');
+ const binding=sdk.readOriginalMainDshServicesBinding(services,source);assert.equal(binding.kswarmService,kswarm);assert.ok(binding.constructionReady);await binding.constructionReady;
+ let proofGetterCalls=0;const foreignProof=new Proxy({},{get(){proofGetterCalls++;throw Error('foreign proof get');},ownKeys(){proofGetterCalls++;throw Error('foreign proof keys');}});
+ await assert.rejects(sdk.startOriginalMainDshServicesRecovery(services,source,foreignProof));assert.equal(proofGetterCalls,0);assert.equal(counts.initialize,0);assert.equal(counts.plan,0);
+ let recoveryDone=false;binding.ready.then(()=>recoveryDone=true,()=>{});await new Promise(yes=>setImmediate(yes));assert.equal(recoveryDone,false);
+ const closed=await services.disposeMultiAgent();assert.equal(closed.drained,true);services=undefined;user.seal();await user.drain();window.destroy();
+ fs.writeFileSync(path.join(root,'facts.json'),JSON.stringify({ok:true,pid:process.pid,counts,constructionReady:true,recoveryHeldUntilCompletion:true,closedBeforeStart:true,proofGetterCalls}));app.exit(0);
+})().catch(async error=>{try{if(services)await services.disposeMultiAgent();else if(source&&api)await api.closeOriginalMainDshStartupSources(source);}catch{}try{user?.seal();await user?.drain();}catch{}try{window?.destroy();}catch{}fs.writeFileSync(path.join(root,'facts.json'),JSON.stringify({ok:false,pid:process.pid,counts,error:error.stack}));app.exit(1);});

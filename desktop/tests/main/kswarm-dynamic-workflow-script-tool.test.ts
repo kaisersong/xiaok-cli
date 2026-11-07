@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {openOwnedWorkflowNormalCase} from '../support/owned-workflow-normal-case.js';
+import {assertBeforeEffects} from '../../../src/runtime/verification/before-effects.js';
+import {sealKSwarmWorkflowScriptJobs,sealAndDrainKSwarmWorkflowScriptJobs} from '../../electron/kswarm-dynamic-workflow-script-tool.js';
+let original:Awaited<ReturnType<typeof openOwnedWorkflowNormalCase>>;
+beforeEach(async()=>{original=await openOwnedWorkflowNormalCase({project:{id:'proj-1',name:'Original dynamic workflow',goal:'Read temporary state'},workflowName:'dynamic_tool_fixture',phaseTitle:'Read',prompt:'Read',label:'Read'});await original.kswarmService.readProjectExecutionStart('proj-1');});
+afterEach(async()=>{sealKSwarmWorkflowScriptJobs(original.kswarmService);try{await sealAndDrainKSwarmWorkflowScriptJobs(original.kswarmService);}finally{await original.close();}});
 
 import {
   createKSwarmGetDynamicWorkflowStatusTool,
@@ -17,8 +24,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function createMockService(responses: Response[]): { service: KSwarmService; requests: Array<{ path: string; body: unknown; method: string }> } {
   const requests: Array<{ path: string; body: unknown; method: string }> = [];
-  const service = {
-    async request(path: string, init?: RequestInit): Promise<Response> {
+  const service = original.kswarmService;
+  service.request = async (path: string, init?: RequestInit, beforeEffects?:()=>void): Promise<Response> => {
+      assertBeforeEffects(beforeEffects);
       requests.push({
         path,
         method: init?.method || 'GET',
@@ -27,8 +35,7 @@ function createMockService(responses: Response[]): { service: KSwarmService; req
       const response = responses.shift();
       if (!response) throw new Error(`unexpected request: ${path}`);
       return response;
-    },
-  } as KSwarmService;
+    };
   return { service, requests };
 }
 
@@ -150,13 +157,13 @@ describe('KSwarm dynamic workflow script tool', () => {
 
   it('runs a generated workflow script through KSwarm and completes the workflow run', async () => {
     const { service, requests } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ ok: true, nodeId: 'script-agent-1', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '项目可推进' } }] } }),
-      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+      jsonResponse({ ok: true, workflowProposal: { projectId:'proj-1', id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ ok: true, nodeId: 'script-agent-1', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '项目可推进' } }] } }),
+      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'completed' } }, 200),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -208,8 +215,8 @@ describe('KSwarm dynamic workflow script tool', () => {
 
   it('starts a background script job and returns the workflow run id without waiting by default', async () => {
     const { service, requests } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'running' } }, 201),
+      jsonResponse({ ok: true, workflowProposal: { projectId:'proj-1', id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'running' } }, 201),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -237,13 +244,13 @@ describe('KSwarm dynamic workflow script tool', () => {
 
   it('defaults script agent nodes to the desktop worker when assignedAgent is omitted', async () => {
     const { service, requests } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ ok: true, nodeId: 'script-agent-1', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '项目可推进' } }] } }),
-      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+      jsonResponse({ ok: true, workflowProposal: { projectId:'proj-1', id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ ok: true, nodeId: 'script-agent-1', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '项目可推进' } }] } }),
+      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'completed' } }, 200),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -262,7 +269,7 @@ describe('KSwarm dynamic workflow script tool', () => {
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           status: 'running',
           workflowId: 'project_snapshot_review',
           nodes: [{
@@ -279,12 +286,12 @@ describe('KSwarm dynamic workflow script tool', () => {
           }],
         },
       }),
-      jsonResponse({ node: completedProjectCheckNode() }),
-      jsonResponse({ node: {} }),
-      jsonResponse({ workflowRun: { id: 'run-1', status: 'running', nodes: [] } }),
-      jsonResponse({ ok: true, nodeId: 'node-project_snapshot_review-2', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'node-project_snapshot_review-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+      jsonResponse({ workflowRun:{projectId:'proj-1',id:'run-1',nodes:[completedProjectCheckNode()]}}),
+      jsonResponse({ workflowRun:{projectId:'proj-1',id:'run-1',nodes:[]}}),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', status: 'running', nodes: [] } }),
+      jsonResponse({ ok: true, nodeId: 'node-project_snapshot_review-2', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'node-project_snapshot_review-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'completed' } }, 200),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -306,8 +313,8 @@ describe('KSwarm dynamic workflow script tool', () => {
     });
     expect(requests.map((request) => [request.method, request.path])).toEqual([
       ['GET', '/projects/proj-1/workflows/run-1'],
-      ['GET', '/projects/proj-1/workflows/run-1/nodes/node-project_snapshot_review-1'],
-      ['GET', '/projects/proj-1/workflows/run-1/nodes/node-project_snapshot_review-2'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
       ['GET', '/projects/proj-1/workflows/run-1'],
       ['POST', '/projects/proj-1/workflows/run-1/script/nodes'],
       ['GET', '/projects/proj-1/workflows/run-1'],
@@ -324,7 +331,7 @@ describe('KSwarm dynamic workflow script tool', () => {
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           status: 'blocked',
           workflowId: 'project_snapshot_review',
           recovery: { mode: 'resume_completed_nodes', reusableNodeCount: 1, nextAction: 'resume_workflow' },
@@ -342,12 +349,12 @@ describe('KSwarm dynamic workflow script tool', () => {
           }],
         },
       }),
-      jsonResponse({ node: completedProjectCheckNode() }),
-      jsonResponse({ node: {} }),
-      jsonResponse({ workflowRun: { id: 'run-1', status: 'blocked', nodes: [] } }),
-      jsonResponse({ ok: true, nodeId: 'node-project_snapshot_review-2', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'node-project_snapshot_review-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+      jsonResponse({ workflowRun:{projectId:'proj-1',id:'run-1',nodes:[completedProjectCheckNode()]}}),
+      jsonResponse({ workflowRun:{projectId:'proj-1',id:'run-1',nodes:[]}}),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', status: 'blocked', nodes: [] } }),
+      jsonResponse({ ok: true, nodeId: 'node-project_snapshot_review-2', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'node-project_snapshot_review-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'completed' } }, 200),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -368,8 +375,8 @@ describe('KSwarm dynamic workflow script tool', () => {
     });
     expect(requests.map((request) => [request.method, request.path])).toEqual([
       ['GET', '/projects/proj-1/workflows/run-1'],
-      ['GET', '/projects/proj-1/workflows/run-1/nodes/node-project_snapshot_review-1'],
-      ['GET', '/projects/proj-1/workflows/run-1/nodes/node-project_snapshot_review-2'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
       ['GET', '/projects/proj-1/workflows/run-1'],
       ['POST', '/projects/proj-1/workflows/run-1/script/nodes'],
       ['GET', '/projects/proj-1/workflows/run-1'],
@@ -403,7 +410,7 @@ await agent('x')`,
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           workflowId: 'report_final_review',
           source: 'script_generated',
           status: 'running',
@@ -482,7 +489,7 @@ await agent('x')`,
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           workflowId: 'report_final_review',
           status: 'completed',
           scriptResult: {
@@ -523,8 +530,8 @@ await agent('x')`,
 
   it('persists scriptSource and scriptHash in the proposal body on new create', async () => {
     const { service, requests } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'running' } }, 201),
+      jsonResponse({ ok: true, workflowProposal: { projectId:'proj-1', id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'running' } }, 201),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -545,8 +552,8 @@ await agent('x')`,
 
   it('sends workflow pattern preview hints to KSwarm proposal while leaving KSwarm as contract authority', async () => {
     const { service, requests } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1', compiledContract: { pattern: 'tournament' } } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'running', workflowPattern: 'tournament' } }, 201),
+      jsonResponse({ ok: true, workflowProposal: { projectId:'proj-1', id: 'proposal-1', compiledContract: { pattern: 'tournament' } } }, 201),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'running', workflowPattern: 'tournament' } }, 201),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -578,7 +585,7 @@ await agent('x')`,
 
   it('recovers the persisted script source when resuming without a script', async () => {
     const runSnapshot = {
-      id: 'run-1',
+      projectId:'proj-1', id: 'run-1',
       status: 'running',
       workflowId: 'project_snapshot_review',
       scriptHash: WORKFLOW_SCRIPT_HASH,
@@ -598,12 +605,12 @@ await agent('x')`,
     };
     const { service, requests } = createMockService([
       jsonResponse({ workflowRun: runSnapshot }),
-      jsonResponse({ node: completedProjectCheckNode() }),
-      jsonResponse({ node: {} }),
-      jsonResponse({ workflowRun: { id: 'run-1', status: 'running', nodes: [] } }),
-      jsonResponse({ ok: true, nodeId: 'node-project_snapshot_review-2', workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'node-project_snapshot_review-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+      jsonResponse({ workflowRun:{projectId:'proj-1',id:'run-1',nodes:[completedProjectCheckNode()]}}),
+      jsonResponse({ workflowRun:{projectId:'proj-1',id:'run-1',nodes:[]}}),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', status: 'running', nodes: [] } }),
+      jsonResponse({ ok: true, nodeId: 'node-project_snapshot_review-2', workflowRun: { projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { projectId:'proj-1', id: 'run-1', nodes: [{ id: 'node-project_snapshot_review-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { projectId:'proj-1', id: 'run-1', status: 'completed' } }, 200),
     ]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
 
@@ -630,7 +637,7 @@ await agent('x')`,
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           status: 'running',
           workflowId: 'project_snapshot_review',
           scriptHash: WORKFLOW_SCRIPT_HASH,
@@ -658,7 +665,7 @@ await agent('x')`,
     const { service } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           status: 'running',
           workflowId: 'project_snapshot_review',
           scriptHash: 'deadbeef'.repeat(8),

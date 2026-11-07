@@ -1,0 +1,25 @@
+{
+  "profile": "ordinary_runtime_root_resource_reservation_writer_v8_protected_io",
+  "schemaVersion": 4,
+  "guardFunction": "xiaok_root_resource_reservation_writer_v7",
+  "baseSemanticDigest": "803ead1653ac39ab8b82226ec500cebf76916c3635e4c12e2c6122a53788b780",
+  "scope": "same original installation root_io; product qualification remains false",
+  "identity": "helper CLAIM poolId only; durable namespace/birth/claim/anchor/profile and physical facts; logical Main principal distinct file owner",
+  "bindingTable": [
+    "singleton",
+    "binding_version",
+    "pool_id",
+    "namespace_id",
+    "birth_id",
+    "claim_id",
+    "anchor_digest",
+    "profile_digest",
+    "file_owner_uid",
+    "directory_nlink",
+    "lock_nlink",
+    "database_nlink"
+  ],
+  "cold": "same protected tuple plus exact complete original schema and accounting graphs; CLAIMED without matching committed graph never fresh; old capability and eligibility never restored",
+  "close": "sqlite3_close BUSY retains family and root_io; global installation CLOSE waits for actual original borrower release; unknown stays held",
+  "legacy": "uninstalled v7 exact ABI retained; legacy v7 is not converted to protected identity"
+}

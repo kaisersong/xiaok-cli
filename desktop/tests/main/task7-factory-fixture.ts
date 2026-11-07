@@ -50,7 +50,7 @@ function mainAuthority(service: ReturnType<typeof createDesktopServices>, sender
   return compileFunction(code, ['initialMain', 'initialRecorder', 'services', 'isTrustedDesktopRendererUrl', 'join', '__dirname', 'rendererFile', 'devServer', 'process'])(
     { webContents: sender, isDestroyed: () => false }, { ownsWebContents: (value: unknown) => value === recorder }, service, isTrustedDesktopRendererUrl, join, dirname, rendererFile, undefined, { env: {} });
 }
-export async function task7FactoryFixture(seedFields: Record<string, unknown> = {}) {
+export async function task7FactoryFixture(seedFields: Record<string, unknown> = {},cleanupPolicy:{expectedSourceCloseFailure?:'task_source_close_unconfirmed'}={}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'task7-factory-')));
   cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
   vi.stubEnv('XIAOK_CONFIG_DIR', join(root, 'config'));
@@ -113,7 +113,10 @@ export async function task7FactoryFixture(seedFields: Record<string, unknown> = 
     } finally { await reader.closeAndDrain(); }
     // Metadata close seals and waits; it does NOT cancel a live model stream.
     // Reach it only after real owned cancellation and iterator/Host drain.
-    await service.closeTaskSourceWritersForMigration();
+    try{await service.closeTaskSourceWritersForMigration();}
+    catch(error){if(!(error instanceof AggregateError) || error.message!==cleanupPolicy.expectedSourceCloseFailure)throw error;}
+    // Negative shutdown tests assert the unconfirmed receipt before teardown.
+    // This policy accepts only that exact expected failure, never arbitrary IO.
     await service.closeMaterialRegistryAndArtifactFileManagerInstances();
     await service.disposeMultiAgent();
     await coldStoreForCleanup?.closeAndDrain();

@@ -1,3 +1,5 @@
+import {createOriginalModelSdkAttemptTransport,finishOriginalModelSdkAttempt} from '../runtime/original-model-sdk-attempt.js';
+import type {Stream as OriginalOpenAiStream} from 'openai/core/streaming';
 import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
@@ -1007,14 +1009,21 @@ export class OpenAIAdapter implements ModelAdapter {
       || semantic && (strictKimiK3 || request.max_tokens !== semantic.maxOutputTokens || tools.length)) {
       throw new Error('SEMANTIC_SUMMARY_ATTEMPT_REQUIRED');
     }
-    const transport = semantic?.fetch ?? globalThis.fetch.bind(globalThis);
+    const modelPhysical=createOriginalModelSdkAttemptTransport(signal,options?.providerDisclosure,undefined,semantic?.modelTransport);
+    let originalFailure:{raw:unknown}|undefined;
+    try {
+    const transport = modelPhysical?.fetch ?? semantic?.fetch ?? globalThis.fetch.bind(globalThis);
     const guardedFetch = options?.providerDisclosure ? createProviderDisclosureFetch(options.providerDisclosure, transport) : transport;
-    const client = semantic ? this.client.withOptions({ fetch: guardedFetch, maxRetries: 0 })
+    const client = semantic || modelPhysical ? this.client.withOptions({ fetch: guardedFetch, maxRetries: 0 })
       : options?.providerDisclosure ? this.client.withOptions({ fetch: guardedFetch }) : this.client;
     authorizeDispatch?.();
     const stream = await runProviderOperation(
       strictKimiK3,
-      () => client.chat.completions.create(request, { signal }),
+      () => {
+        return modelPhysical
+          ? modelPhysical.createOpenAI(client,request) as Promise<OriginalOpenAiStream<OpenAI.Chat.Completions.ChatCompletionChunk>>
+          : client.chat.completions.create(request, { signal });
+      },
     );
 
     const toolBuffers = new Map<number, BufferedToolCall>();
@@ -1300,5 +1309,7 @@ export class OpenAIAdapter implements ModelAdapter {
       try { await streamIterator.return?.(); }
       catch { /* Cleanup must not replace the provider/consumer outcome. */ }
     }
+    } catch(raw) {originalFailure={raw};throw raw;}
+    finally {await finishOriginalModelSdkAttempt(modelPhysical,originalFailure);}
   }
 }

@@ -1,0 +1,11 @@
+{
+  "source": "actual Native openOriginalMainIssuer/installFresh via workflow-process-gang api, NOT caller SQL",
+  "runLog": "/tmp/xiaok-dsh-implementation-20261103/d23-process-intent-old-v4-fixture-birth.log",
+  "databaseSha256": "db993e1ae25fe47c2614c0f73f8320c550d8aac81b42c3605864fa420576e649",
+  "nativeArtifactSha256": "497c6b6657383ed0d33618b862b577ed1df30098325af272515b8418c0135fac",
+  "profile": "ordinary_runtime_root_resource_reservation_writer_v4",
+  "semanticDigest": "4fc694504210cfabe49e3f82f7ea90c582ad9307522bf17bcbe357c88330f29e",
+  "mainPid": 31016,
+  "exitCode": 0,
+  "reaped": true
+}

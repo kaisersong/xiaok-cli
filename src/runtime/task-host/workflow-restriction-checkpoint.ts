@@ -1,3 +1,4 @@
+import {types} from 'node:util';
 import {createHash} from 'node:crypto';
 import {lstatSync, mkdirSync, readFileSync, realpathSync, statSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
@@ -113,10 +114,18 @@ export function isNativeWorkflowArtifactCheckpoint(checkpoint:NativeWorkflowRest
  * Ordinary workspace confinement, not a same-UID directory-race/native writer
  * capability. No UI/editor lease or artifact-workspace scope is fabricated.
  */
-export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWorkflowRestrictionCheckpoint):Promise<{registry:ToolRegistry;tools:Tool[]}> {
+export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWorkflowRestrictionCheckpoint,beforeEffects?:()=>void):Promise<{registry:ToolRegistry;tools:Tool[]}> {
  const stored=checkpoints.get(checkpoint);if(!stored?.artifactOnly)denied();
- const {ToolRegistry:WorkflowToolRegistry}=await import('../../ai/tools/index.js');
- const current=await facts(stored.port,stored.binding);if(current.fingerprint!==stored.fingerprint)denied();
+ // This callback can only narrow an already branded ordinary checkpoint. It
+ // is never a caller-supplied grant, and must finish in the current frame.
+ const assertFresh=()=>{
+  if(beforeEffects!==undefined&&typeof beforeEffects!=='function')denied();
+  const returned:unknown=beforeEffects?.();
+  if(returned!==undefined){if(types.isPromise(returned))void Promise.prototype.then.call(returned,()=>{},()=>{});denied();}
+ };
+ assertFresh();
+ const {ToolRegistry:WorkflowToolRegistry}=await import('../../ai/tools/index.js');assertFresh();
+ const current=await facts(stored.port,stored.binding);assertFresh();if(current.fingerprint!==stored.fingerprint)denied();
  const root=stored.root,artifacts=join(root,'artifacts');
  mkdirSync(artifacts,{recursive:true});
  const rootIdentity=lstatSync(root),artifactIdentity=lstatSync(artifacts);
@@ -140,17 +149,17 @@ export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWork
   installCompoundExecutionPort():never {return denied();}
   dispose():void {closed=true;super.dispose();}
  }
- const registry=new ArtifactRegistry();
+ assertFresh();const registry=new ArtifactRegistry();
  registry.unregisterTool('tool_search');constructing=false;
  const read=createReadTool({cwd:root,allowOutsideCwd:false});
  tools.push({permission:read.permission,definition:read.definition,async execute(input,context){
-  await assertNativeRegistryCheckpointCurrent(registry);context?.signal?.throwIfAborted();assertPaths();
-  return read.execute(input,context);
+  await assertNativeRegistryCheckpointCurrent(registry);assertFresh();context?.signal?.throwIfAborted();assertPaths();
+  const output=await read.execute(input,context);assertFresh();context?.signal?.throwIfAborted();assertPaths();return output;
  }});
  for(const name of ['write','edit'] as const){
   const original=name==='write'?createWriteTool({cwd:artifacts,allowOutsideCwd:false}):createEditTool({cwd:artifacts,allowOutsideCwd:false});
   tools.push({permission:'write',definition:{...original.definition,description:`${original.definition.description} 只能写入当前 workflow 项目的 artifacts；严禁改项目源码、其他项目或任何目录外文件。`},async execute(input,context){
-   await assertNativeRegistryCheckpointCurrent(registry);context?.signal?.throwIfAborted();
+   await assertNativeRegistryCheckpointCurrent(registry);assertFresh();context?.signal?.throwIfAborted();
    // No caller compound/file hook may suspend the confinement check-to-write
    // interval. Keep the final check and ordinary atomic write synchronous.
    if(context?.compoundPhase)denied();
@@ -163,7 +172,7 @@ export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWork
     const before=readFileSync(file,'utf8'),parts=before.split(input.old_string);if(parts.length!==2)throw Error('workflow_artifact_edit_not_unique');
     content=parts.join(input.new_string);
    }
-   context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();
+   context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();assertFresh();
    assertPaths();assertWorkspacePath(file,artifacts,'write',false);mkdirSync(dirname(file),{recursive:true});
    assertPaths();assertWorkspacePath(file,artifacts,'write',false);
    writeFileAtomicallySync(file,content);
@@ -180,7 +189,7 @@ export async function createNativeWorkflowArtifactRegistry(checkpoint:NativeWork
  const unchanged=registry.captureObservationRegistryCurrent();
  const entries=tools.map(tool=>({tool,name:tool.definition.name,execute:tool.execute}));
  artifactRegistryChecks.set(registry,()=>{
-  if(closed)denied();assertPaths();
+  assertFresh();if(closed)denied();assertPaths();
   try{unchanged();}catch{denied();}
   if(entries.some(({tool,name,execute})=>registry.getRegisteredTool(name)!==tool||tool.definition.name!==name||tool.execute!==execute||tool.companionTools?.length))denied();
  });

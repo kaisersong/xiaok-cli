@@ -1,3 +1,6 @@
+import {hasOriginalMainSdkBridgeInstallation} from '../../runtime/verification/original-main-sdk-bridge.js';
+import { getSearchScope } from './search-scope-context.js';
+import { permitsSearchPath, type SearchScope } from './search-scope.mjs';
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
 import { runBoundedGlob } from './bounded-glob.js';
@@ -23,6 +26,23 @@ function canRunCommand(command: string): boolean {
   return result.status === 0 && !result.error;
 }
 
+/** The Native backend uses the existing bounded JS-regex worker. Reject
+ * syntax whose Rust/PCRE meaning is not established instead of claiming an
+ * empty result. Literal Unicode remains supported; regex text is ASCII-only. */
+function supportsNativeGrepPattern(pattern:unknown):boolean {
+ if(typeof pattern!=='string'||pattern.length>2048||pattern.includes('\\')||pattern.includes('(?')||pattern.includes('{')||pattern.includes('}'))return false;
+ let meta=false,inClass=false;
+ for(let i=0;i<pattern.length;i++){
+  const code=pattern.charCodeAt(i),char=pattern[i]!;
+  if(code>=0xd800&&code<=0xdbff){const next=pattern.charCodeAt(++i);if(!(next>=0xdc00&&next<=0xdfff))return false;continue;}
+  if(code>=0xdc00&&code<=0xdfff)return false;
+  if(inClass){if(char===']')inClass=false;else if(char==='['||char===':'||char==='&'||char==='|'||char==='~')return false;}
+  else if(char==='['){meta=true;inClass=true;}
+  else if('.^$*+?()|'.includes(char))meta=true;
+ }
+ if(meta)for(let i=0;i<pattern.length;i++)if(pattern.charCodeAt(i)>127)return false;
+ return !inClass&&!pattern.includes('[]')&&!pattern.includes('[^]');
+}
 function buildRegex(pattern: string): RegExp {
   try {
     return new RegExp(pattern);
@@ -31,7 +51,7 @@ function buildRegex(pattern: string): RegExp {
   }
 }
 
-async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal): Promise<string[]> {
+async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?: string, signal?: AbortSignal, searchScope?: SearchScope): Promise<string[]> {
   signal?.throwIfAborted();
   const resolvedPath = resolve(searchPath);
   const stats = statSync(resolvedPath);
@@ -47,6 +67,7 @@ async function resolveFallbackFiles(searchPath: string, fileGlob?: string, type?
 
   return (await runBoundedGlob({ patterns,
     cwd: resolvedPath,
+    searchScope,
     dot: true,
     skipInaccessible: true,
     ignore: ['**/.git/**', '**/node_modules/**'],
@@ -61,6 +82,7 @@ export async function runFallbackGrepSearch(input: {
   output_mode?: string;
   type?: string;
   signal?: AbortSignal;
+  searchScope?: SearchScope;
 }): Promise<string[]> {
   const {
     pattern,
@@ -70,12 +92,24 @@ export async function runFallbackGrepSearch(input: {
     output_mode = 'lines',
     type,
   } = input;
+  if (input.searchScope || hasOriginalMainSdkBridgeInstallation()) {
+    const resolved = resolve(searchPath);
+    if (!permitsSearchPath(resolved, input.searchScope)) throw new Error('search_scope_denied');
+    const patterns = fileGlob ? [fileGlob] : type ? (TYPE_GLOBS[type] ?? ['**/*.' + type]) : ['**/*'];
+    const entries = await runBoundedGlob({
+      cwd: resolved, patterns, dot: true, skipInaccessible: true, ignore: ['**/.git/**', '**/node_modules/**'],
+      searchScope: input.searchScope,
+      grep: { pattern, context, outputMode: output_mode, directFile: statSync(resolved).isFile() },
+    }, input.signal);
+    return entries.map(entry => entry.text ?? '');
+  }
   const matcher = buildRegex(pattern);
-  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal);
+  const files = await resolveFallbackFiles(searchPath, fileGlob, type, input.signal, input.searchScope);
   const results: string[] = [];
 
   for (const file of files) {
     input.signal?.throwIfAborted();
+    if (!permitsSearchPath(file, input.searchScope)) continue;
     let lines: string[];
     try {
       lines = readFileSync(file, 'utf-8').split(/\r?\n/);
@@ -164,8 +198,11 @@ export const grepTool: Tool = {
     };
 
     // 优先使用 rg（ripgrep），回退到 grep，再回退到纯 Node 搜索。
-    const hasRg = canRunCommand('rg');
-    const hasGrep = !hasRg && canRunCommand('grep');
+    const searchScope = getSearchScope(toolContext);
+    const nativeInstalled=hasOriginalMainSdkBridgeInstallation();
+    if(nativeInstalled&&!supportsNativeGrepPattern(pattern))return 'Error: grep_native_regex_profile_unavailable';
+    const hasRg = !nativeInstalled && !searchScope && canRunCommand('rg');
+    const hasGrep = !nativeInstalled && !searchScope && !hasRg && canRunCommand('grep');
     const cmd = hasRg ? 'rg' : 'grep';
     const args = hasRg
       ? [
@@ -202,6 +239,7 @@ export const grepTool: Tool = {
         output_mode,
         type,
         signal: toolContext?.signal,
+        searchScope,
       })).join('\n').trim();
     if (!output) return '（无匹配结果）';
     const page = paginateItems(output.split(/\r?\n/), offset, head_limit);

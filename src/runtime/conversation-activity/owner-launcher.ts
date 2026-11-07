@@ -26,14 +26,14 @@ export type ActivityOwnerSpawner = (command: string, args: readonly string[], op
 
 /** Native callers attach instead of competing for a writer. An outdated owner
  * may be retired after identity checks; RPC mutations are never retried. */
-export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: ActivityOwnerSpawner; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; retire?: typeof retireOutdatedOwner } = {}): Promise<ConversationActivityOwnerClient> {
+export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: ActivityOwnerSpawner; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; retire?: typeof retireOutdatedOwner;nativeSource?:boolean;onNativeSourceUnavailable?(error:unknown):void } = {}): Promise<ConversationActivityOwnerClient> {
   const address = activityOwnerAddress(config.dataRoot);
   const normalized = { ...config, dataRoot: address.dataRoot };
   const expectedDigest = activityOwnerConfigDigest(normalized);
   const attach = async () => {
     const client = new ConversationActivityOwnerClient(address.dataRoot, 'producer', options.instanceId);
     try {
-      const status = await client.request<ActivityOwnerRetirementStatus & { profileId: string; generation?: unknown; configDigest?: string; ready?: boolean }>('status');
+      const status = await client.request<ActivityOwnerRetirementStatus & { profileId: string; generation?: unknown; configDigest?: string; ready?: boolean;nativeSourceProtocol?:unknown }>('status');
       if (status.profileId !== config.profileId) throw new Error('activity_owner_profile_mismatch');
       if (typeof status.generation !== 'number' || status.generation < ACTIVITY_OWNER_GENERATION) {
         const outcome = await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status);
@@ -46,6 +46,9 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
       }
       if (status.configDigest !== expectedDigest) throw new Error('activity_owner_config_mismatch');
       if (status.ready === false) throw new Error('activity_owner_initializing');
+      if(options.nativeSource&&config.identity.kind==='desktop'&&status.nativeSourceProtocol===1)try{
+        const connection=await client.authorizeNativeSource();client.assertNativeConnectionCurrent(connection);
+      }catch(error){options.onNativeSourceUnavailable?.(error);}
       return client;
     } catch (error) { client.dispose(); throw error; }
   };

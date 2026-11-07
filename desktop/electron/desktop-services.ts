@@ -1,3 +1,34 @@
+import {createRequire as createOptionalMemoryRequire} from 'node:module';
+import {resolveDesktopServiceScope} from './desktop-service-scope.js';
+import {readOriginalMainModelProbeEvent} from './main-dsh-control-source.js';
+import {loadOriginalMainModelProbeSource} from './main-model-probe-source-loader.js';
+import {hasOriginalMainSdkBridgeInstallation} from '../../src/runtime/verification/original-main-sdk-bridge.js';
+import {runWithOriginalRootExecutionContext} from '../../src/runtime/verification/original-root-execution-context.js';
+import {readOriginalRoomWorkspaceExecutorPhysicalFate} from './room-workspace-executor.js';
+import {createRoomTurnCustody} from './original-room-turn-custody.js';
+import {createMainDshServicesStartupState,type MainDshServicesStartupState} from './main-dsh-services-startup-state.js';
+import {loadOriginalMainDshRuntimeLifecycle} from './main-dsh-runtime-lifecycle-loader.js';
+import type * as MainDshRuntimeLifecycle from './main-dsh-runtime-lifecycle.js';
+import {readOriginalKSwarmServiceIdentity} from './kswarm-service.js';
+import {appendIntrinsic,settleIntrinsicOperations} from '../../src/runtime/verification/intrinsic-async-collection.js';
+import {readCurrentOriginalRootExecutionContext} from '../../src/runtime/verification/original-root-execution-context.js';
+import {types as roomRunnerTypes} from 'node:util';
+import {readDefaultDispatchPreparationOwnerPorts,type DefaultDispatchPreparationOwner} from './default-dispatch-preparation-owner.js';
+import {createDesktopPreparationCompositionCapsule} from './default-dispatch-preparation-composition-bootstrap.js';
+import {buildKSwarmTaskCreateInput,buildKSwarmTaskArtifactPaths,shouldRequireKSwarmArtifactEvidence} from './kswarm-task-input.js';
+import type {DefaultDispatchBusinessController} from './default-dispatch-business-controller.js';
+import {ensureDesktopConversationActivityOwner} from './activity-owner-writer-launcher.js';
+import type {KSwarmWriterControlSource} from './kswarm-writer-control-source.js';
+import {executeTaskMetadataPlanning} from './kswarm-task-planning-action.js';
+import type {ProjectPlanningInput} from '../shared/project-planning-ipc-contract.js';
+import {closeConversationActivity} from '../../src/runtime/conversation-activity/close.js';
+import {NativeActivityAttention} from './native-activity-attention.js';
+import type {NativeActivityReadAdmission} from './conversation-activity-ipc.js';
+import type {NativeActivityAnswer} from '../shared/native-activity-question-contract.js';
+import {createDesktopTaskShutdownOwner} from './desktop-task-shutdown-owner.js';
+import {MainUserSubmissionOwner} from './main-user-submission.js';
+import {createMainRoomConversionCaptureOwner} from './main-room-conversion-owner.js';
+import {expandSelectedMaterialPaths} from './material-selection.js';
 import { isKimiCodingModel, isStrictKimiK3ProfileId } from '../../src/ai/providers/kimi-models.js';
 import { buildKSwarmReviewPrompt } from './kswarm-task-review-prompt.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
@@ -51,14 +82,14 @@ import {runMonitoredTool} from '../../src/runtime/tool-execution-health.js';
 import {createRoomToolRegistry,runRoomWorkspaceExecutor,roomUnsupportedCapabilities,type RoomWorkspaceRunOptions} from './room-workspace-executor.js';
 import {assembleRoomWorkspaceContext,resolveRoomWorkspaceContextLimit,type RoomWorkspaceContextSources} from './room-workspace-context.js';
 import { CodexTaskBridge, LOCAL_CODEX_MODEL } from './codex-task-bridge.js';
-import type { NativeActor } from './codex-native-service.js';
+import type { NativeActor,NativeServiceOptions } from './codex-native-service.js';
 import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
 import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync, mkdir as mkdirAsync, mkdtemp, rm as rmAsync } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { buildDesktopSystemPrompt, VISUAL_PDF_EXPORT_GUIDANCE } from './desktop-system-prompt.js';
 import { spawnSync, execFile } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, Hash, randomUUID } from 'node:crypto';
 import { parseGoalRequestId, type GoalAttachmentRequest } from '../shared/goal-attachment.js';
 import { bumpSkillCatalogVersion, getSkillCatalogVersion } from './skill-catalog-invalidation.js';
 import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js';
@@ -88,10 +119,11 @@ import type {
 } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
-import { InProcessTaskRuntimeHost, createTaskSourceWriterPopulation, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
+import { InProcessTaskRuntimeHost, createTaskSourceWriterPopulation,readOriginalTaskHostIdentityIO,readOriginalTaskExecutionPhysicalReceipt,readOriginalTaskHostPhysicalFate,type OriginalTaskHostPhysicalFate,withOriginalMaterialTurnResource, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
 import { loadCustomAgents } from '../../src/ai/agents/loader.js';
 import { PermissionManager } from '../../src/ai/permissions/manager.js';
-import { DesktopMultiAgentStore } from './desktop-multi-agent-store.js';
+import { DesktopMultiAgentStore,readOriginalDshAdmissionPort } from './desktop-multi-agent-store.js';
+import {claimOriginalMainDshServiceSources,readOriginalMainDshPreparedSources,recordOriginalMainDshServiceStore,transferOriginalMainDshServiceSources,closeOriginalMainDshStartupSources,closeOriginalMainDshServiceResources,finishOriginalMainDshServiceStore,type OriginalMainDshServiceSourceLease} from './main-dsh-service-sources.js';
 import { DesktopMultiAgentService, type DesktopAgentExecutionContext, type DesktopHostDeliveryAuthority } from './desktop-multi-agent-service.js';
 import { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approval-transport.js';
 import { DesktopMultiAgentRuntime } from './desktop-multi-agent-runtime.js';
@@ -184,18 +216,26 @@ import {
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import { createKbTools } from './kb-tools.js';
 import { captureProjectPlanningInput } from './project-planning-service.js';
+import { buildScopedNativeReadonlyTools } from '../../src/ai/tools/scoped-native-readonly.js';
+import { isScopedNativeReadonlyRegistry } from '../../src/ai/tools/index.js';
 import { createKbStoreSqlite } from './kb-store-sqlite.js';
 import { createKbRetriever } from './kb-retrieval.js';
 import { createSourceExtractor } from './kb-source-extractor.js';
 import type { MemoryRecord, MemoryStore } from '../../src/ai/memory/store.js';
-import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
-import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
+import type { KSwarmService, KSwarmUnavailableError, KSwarmProjectSourceActivityRead, KSwarmScopedProjectActivityRead } from './kswarm-service.js';
+import {readKSwarmExecutionStart,assertKSwarmExecutionStart,type KSwarmExecutionStartContext} from './kswarm-execution-start-guard.js';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
+import {createInitialPlanOwnerClient,readPlanningOwnerResponse} from './kswarm-initial-plan-owner-client.js';
+import {inspectProjectPlanningTrigger,type ProjectPlanningTriggerProof} from './project-planning-typed-ipc.js';
+import {executeOwnedInitialPlanBootstrap} from './kswarm-owned-initial-plan.js';
+import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue, createKSwarmBootstrapShutdownOwner, type KSwarmInitialPlanBootstrapJob } from './kswarm-initial-plan-bootstrap.js';
 import { extractCreatedAgentId, resolveCreateProjectMembers, sanitizeCreateProjectMembers } from './kswarm-project-tool.js';
 import {
   createKSwarmGetDynamicWorkflowStatusTool,
   createKSwarmRunDynamicWorkflowScriptTool,
   isResumableWorkflowRunStatus,
   restoreWorkflowScriptBackgroundJob,
+  sealKSwarmWorkflowScriptJobs,sealAndDrainKSwarmWorkflowScriptJobs,
 } from './kswarm-dynamic-workflow-script-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
@@ -217,21 +257,34 @@ import {createKSwarmWorkflowExecutionWindow,resolveKSwarmWorkflowDeadline,workfl
 import { ConversationProjectService, type ConversationProjectRoomClient } from './conversation-project-service.js';
 import { ConversationActivityStore } from '../../src/runtime/conversation-activity/store.js';
 import { ConversationActivityService, type ActivityActor, type ConversationActivityApi } from '../../src/runtime/conversation-activity/service.js';
-import { ConversationActivitySources, type ProjectActivityPage } from '../../src/runtime/conversation-activity/sources.js';
+import type {AttentionInventoryReader} from '../../src/runtime/conversation-activity/attention-work-reader.js';
+import { ConversationActivitySources } from '../../src/runtime/conversation-activity/sources.js';
 import { ConversationMcpActivities } from '../../src/runtime/conversation-activity/mcp.js';
 import { callMcpToolWithTasks } from '../../src/platform/mcp/tasks.js';
 import type { ReportingPreference } from '../../src/runtime/conversation-activity/types.js';
-// NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
+// NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded synchronously from
+// the same emitted ESM module. Services must not suspend its cyclic imports.
+// The native ABI remains optional, with the existing fallback.
+// Layered memory is separate from Root/P4 execution qualification.
+// LayeredMemoryStore/resolveLayeredConfig are optional
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
 let _LayeredMemoryStoreClass: (typeof import('../../src/ai/memory/layered-store.js'))['LayeredMemoryStore'] | null = null;
 let _resolveLayeredConfigFn: (typeof import('../../src/ai/memory/layered-store.js'))['resolveLayeredConfig'] | null = null;
+const originalOptionalMemoryModule: {raw?:unknown;failure?:{raw:unknown}} = {};
 try {
-  const mod = await import('../../src/ai/memory/layered-store.js');
-  _LayeredMemoryStoreClass = mod.LayeredMemoryStore;
-  _resolveLayeredConfigFn = mod.resolveLayeredConfig;
-} catch (e) {
-  console.warn('[memory] Could not load layered-store module:', (e as Error).message);
+  // Node >=22.14/Electron Node supports synchronous require of this no-TLA
+  // ESM graph. It shares the original ESM cache; do not bundle another Core.
+  const raw:unknown = createOptionalMemoryRequire(import.meta.url)('../../src/ai/memory/layered-store.js');
+  originalOptionalMemoryModule.raw=raw;
+  if(!raw||typeof raw!=='object'||roomRunnerTypes.isProxy(raw))throw Error('DESKTOP_MEMORY_MODULE_UNCONFIRMED');
+  const store=Object.getOwnPropertyDescriptor(raw,'LayeredMemoryStore'),config=Object.getOwnPropertyDescriptor(raw,'resolveLayeredConfig');
+  if(!store||!Object.hasOwn(store,'value')||typeof store.value!=='function'||!config||!Object.hasOwn(config,'value')||typeof config.value!=='function')throw Error('DESKTOP_MEMORY_MODULE_UNCONFIRMED');
+  _LayeredMemoryStoreClass = store.value;
+  _resolveLayeredConfigFn = config.value;
+} catch (raw) {
+  originalOptionalMemoryModule.failure={raw};
+  console.warn('[memory] Could not load optional layered-store module; using fallback.');
 }
 
 // ---- Shared memory store (singleton per dataRoot) ----
@@ -519,7 +572,99 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
   return names.length > 0 ? names : ['unknown'];
 }
 
+interface MainModelProbeServicesBinding {source:object|undefined;storageScope:Readonly<{profileId:string;workspaceId:string}>;principalId:string;configPath?:string;operations:WeakMap<object,ModelProbeOperation>;held:Set<ModelProbeOperation>;unknown?:{raw:unknown}}
+interface ModelProbeOperation {bodyHash:string;promise?:Promise<{success:boolean;latencyMs?:number;error?:string}>;fault?:{raw:unknown};sdk:ReturnType<typeof createRoomTurnCustody>;configSdk:ReturnType<typeof createRoomTurnCustody>}
+export interface MainModelProbeConfigurationView {
+ readonly userSource:object;readonly eventProof:object;readonly bodyHash:string;
+ readonly storageScope:Readonly<{profileId:string;workspaceId:string}>;readonly principalId:string;
+ readonly requestedProviderId:string;readonly requestedModelId:string|null;readonly providerId:string;readonly resolvedModelId:string;readonly configDigest:string;
+ assertCurrent():void;assertLocal():void;
+}
+const modelProbeServiceMembers=new WeakMap<object,MainModelProbeServicesBinding>();
+const materialServiceMembers=new WeakMap<object,Readonly<{source:object|undefined;storageScope:Readonly<{profileId:string;workspaceId:string}>;principalId:string;parseOfficeDocument:Function}>>();
+interface MainDshServicesBinding {
+ readonly sources:object;readonly lease:OriginalMainDshServiceSourceLease;
+ readonly host:InProcessTaskRuntimeHost;readonly taskStore:FileTaskSnapshotStore;
+ readonly taskPopulation:ReturnType<typeof createTaskSourceWriterPopulation>;
+ readonly store:DesktopMultiAgentStore;readonly kswarmService:object;readonly directRunner:Function;readonly constructionReady:Promise<void>;readonly ready:Promise<void>;
+}
+const mainDshServiceMembers=new WeakMap<object,MainDshServicesBinding>();
+interface MainDshServiceStartup {
+ readonly state:MainDshServicesStartupState;
+ readonly construction:ReturnType<typeof createRoomTurnCustody>;readonly recovery:ReturnType<typeof createRoomTurnCustody>;readonly remote:ReturnType<typeof createRoomTurnCustody>;
+ lifecycle?:typeof MainDshRuntimeLifecycle;
+ startRecovery?:()=>void;startRemote?:()=>void;recoveryProof?:unknown;remoteProof?:unknown;
+}
+const mainDshServiceStartups=new WeakMap<object,MainDshServiceStartup>();
+const modelProbeConfigurations=new WeakMap<object,{services:object;binding:MainModelProbeServicesBinding;view:MainModelProbeConfigurationView}>();
+const modelProbeWeakGet=WeakMap.prototype.get,modelProbeWeakSet=WeakMap.prototype.set,modelProbeApply=Reflect.apply,modelProbeFreeze=Object.freeze;
+const modelProbeReadFile=readFileSync,modelProbeConfigPath=getConfigPath,modelProbeResolve=resolve,modelProbeHash=createHash,modelProbeHashUpdate=Hash.prototype.update,modelProbeHashDigest=Hash.prototype.digest;
+const ModelProbePromise=Promise,modelProbeThen=Promise.prototype.then,modelProbeAny=AbortSignal.any,modelProbeString=String,modelProbeBytes=Buffer.byteLength;
+const modelProbeCreate=Object.create,modelProbeKeys=Reflect.ownKeys,modelProbeDescriptor=Object.getOwnPropertyDescriptor,modelProbeOwn=Object.hasOwn;
+function modelProbeRejected(raw:unknown):Promise<never>{return new ModelProbePromise((_,no)=>no(raw));}
+function modelProbeDigest(value:string,hex=false):string{const hash=modelProbeHash('sha256');modelProbeApply(modelProbeHashUpdate,hash,[value,hex?'hex':'utf8']);return modelProbeApply(modelProbeHashDigest,hash,['hex']) as string;}
+function modelProbeInputDigest(input:{providerId:string;modelId?:string}):string{const provider=input.providerId,model=input.modelId??null;return modelProbeDigest('main_model_probe_operation_v1\0'+modelProbeString(modelProbeBytes(provider,'utf8'))+':'+provider+'\0'+(model===null?'null':modelProbeString(modelProbeBytes(model,'utf8'))+':'+model));}
+function modelProbeConfigBytes(sdk:ReturnType<typeof createRoomTurnCustody>,path:string):string{
+ let result:string|undefined;
+ sdk.syncVoid(()=>{const raw:unknown=modelProbeApply(modelProbeReadFile,undefined,[path,'hex']);sdk.inventory(raw);if(typeof raw!=='string')return{raw,contract:'model_probe_config_bytes'};if(raw.length>2*1024*1024)throw Error('MAIN_MODEL_PROBE_CONFIG_LIMIT');result=raw;},undefined,[]);
+ if(result===undefined)throw Error('MAIN_MODEL_PROBE_CONFIG_UNCONFIRMED');return result;
+}
+export function readOriginalMainModelProbeServicesBinding(services:unknown,exactUserSource:unknown):Readonly<{storageScope:Readonly<{profileId:string;workspaceId:string}>;principalId:string}> {
+ const row=modelProbeApply(modelProbeWeakGet,modelProbeServiceMembers,[services]) as MainModelProbeServicesBinding|undefined;
+ if(!row||!row.source||row.source!==exactUserSource)throw Error('MAIN_MODEL_PROBE_SERVICES_REQUIRED');
+ return modelProbeFreeze({storageScope:row.storageScope,principalId:row.principalId});
+}
+/** Exact original Services birth only. No file or process permission is granted. */
+export function readOriginalMainMaterialServicesBinding(services:unknown,exactUserSource:unknown):Readonly<{storageScope:Readonly<{profileId:string;workspaceId:string}>;principalId:string;parseOfficeDocument:Function}> {
+ const row=modelProbeApply(modelProbeWeakGet,materialServiceMembers,[services]) as Readonly<{source:object|undefined;storageScope:Readonly<{profileId:string;workspaceId:string}>;principalId:string;parseOfficeDocument:Function}>|undefined;
+ if(!row||!row.source||row.source!==exactUserSource)throw Error('MAIN_MATERIAL_SERVICES_REQUIRED');
+ return modelProbeFreeze({storageScope:row.storageScope,principalId:row.principalId,parseOfficeDocument:row.parseOfficeDocument});
+}
+/** Original Services private composition, never a renderer method table. */
+export function readOriginalMainDshServicesBinding(services:unknown,exactSources:unknown):Readonly<MainDshServicesBinding> {
+ const row=modelProbeApply(modelProbeWeakGet,mainDshServiceMembers,[services]) as MainDshServicesBinding|undefined;
+ if(!row||row.sources!==exactSources)throw Error('DSH_MAIN_ORIGINAL_SERVICES_REQUIRED');return row;
+}
+function originalDshStartup(services:unknown,sources:unknown){
+ const binding=readOriginalMainDshServicesBinding(services,sources),row=modelProbeApply(modelProbeWeakGet,mainDshServiceStartups,[services]) as MainDshServiceStartup|undefined;
+ if(!row)throw Error('DSH_MAIN_ORIGINAL_SERVICES_REQUIRED');return {binding,row};
+}
+/** Fixed original completion proof, never a caller start/ready callback. */
+export function startOriginalMainDshServicesRecovery(services:unknown,sources:unknown,proof:unknown):Promise<void>{
+ const {row}=originalDshStartup(services,sources);
+ try{if(!row.lifecycle)throw Error('DSH_MAIN_SERVICES_CONSTRUCTION_REQUIRED');row.lifecycle.readOriginalMainDshRuntimeCompletion(services,sources,proof);}catch(raw){return modelProbeRejected(raw);}
+ try{
+  row.state.current();
+  if(!row.state.beginRecovery()){if(row.recoveryProof!==proof)return modelProbeRejected(Error('DSH_MAIN_SERVICES_STARTUP_PROOF_CONFLICT'));return row.state.recoveryReady;}
+  row.recoveryProof=proof;row.startRecovery!();
+ }catch(raw){row.state.recoveryFailed(raw);}
+ return row.state.recoveryReady;
+}
+export function startOriginalMainDshServicesRemoteRecovery(services:unknown,sources:unknown,proof:unknown):Promise<void>{
+ const {row}=originalDshStartup(services,sources);
+ try{if(!row.lifecycle)throw Error('DSH_MAIN_SERVICES_CONSTRUCTION_REQUIRED');row.lifecycle.readOriginalMainDshRuntimeCompletion(services,sources,proof);}catch(raw){return modelProbeRejected(raw);}
+ try{
+  row.state.current();
+  if(!row.state.beginRemote()){if(row.remoteProof!==proof)return modelProbeRejected(Error('DSH_MAIN_SERVICES_STARTUP_PROOF_CONFLICT'));return row.state.remoteReady;}
+  row.remoteProof=proof;row.startRemote!();
+ }catch(raw){row.state.remoteFailed(raw);}
+ return row.state.remoteReady;
+}
+export function readOriginalMainModelProbeConfiguration(services:unknown,receipt:unknown):MainModelProbeConfigurationView {
+ const binding=modelProbeApply(modelProbeWeakGet,modelProbeServiceMembers,[services]) as MainModelProbeServicesBinding|undefined;
+ const row=modelProbeApply(modelProbeWeakGet,modelProbeConfigurations,[receipt]) as {services:object;binding:MainModelProbeServicesBinding;view:MainModelProbeConfigurationView}|undefined;
+ if(!binding||!row||row.services!==services||row.binding!==binding||!binding.source)throw Error('MAIN_MODEL_PROBE_CONFIGURATION_REQUIRED');return row.view;
+}
+
 export interface DesktopServicesOptions {
+  /** Pre-Services original Sources; no renderer late-binding or runtime injection. */
+  dshServiceSources?:object;
+  /** Original Main user-event identity for material import; never a DTO field. */
+  materialUserSource?:object;
+  /** Main-owned user-event provenance only; never a renderer/config field. */
+  modelProbeUserSource?:object;
+  /** Main-owned transport dependency, never a renderer/configuration field. */
+  codexClientFactory?:NativeServiceOptions['createClient'];
   /** Main owns this object identity; it is never supplied by renderer/tools. */
   harnessOptimizationUserActor?: HarnessUserContext;
   notifyConversationActivity?: (activity: import('../../src/runtime/conversation-activity/types.js').ConversationActivity,
@@ -534,6 +679,10 @@ export interface DesktopServicesOptions {
   now?: () => number;
   runner?: TaskRunner;
   kswarmService: KSwarmService;
+  /** Main-only original identities; never configuration JSON or a tool input. */
+  writerControlBootstrap?:{source:KSwarmWriterControlSource;capsule:object};
+  defaultDispatchBootstrap?:{controller:DefaultDispatchBusinessController;capsule:object};
+  defaultDispatchPreparationOwner?:DefaultDispatchPreparationOwner;
   pluginRootDir?: string;
   /** Main-owned bundled resource; only used to upgrade incompatible managed Windows CUA. */
   computerUseBundledPluginDir?: string;
@@ -939,7 +1088,159 @@ function sanitizeSystemOnePatch(input: DesktopSaveSystemOneConfigInput | undefin
   return patch;
 }
 
+const originalRoomRunners=new WeakMap<object,Function>(),roomRunnerGet=WeakMap.prototype.get,roomRunnerSet=WeakMap.prototype.set,roomRunnerApply=Reflect.apply;
+interface RoomDiscussionPhysicalRow {
+ readonly fn:Function;readonly parent:object;readonly stock:ReturnType<typeof createRoomTurnCustody>;readonly executorProof:object;
+ completed:boolean;workspaceEntered:boolean;workspaceFate?:{waitKnown():Promise<void>;assertKnown():void};
+ cleanups:ReturnType<typeof createRoomTurnCustody>[];primary?:{raw:unknown};
+ completion:Promise<void>;finish():void;
+}
+const roomDiscussionPhysicalRows=new WeakMap<object,RoomDiscussionPhysicalRow>();
+/** Same original runner, raw invocation Promise and consumed parent only. */
+export function readOriginalRoomDiscussionPhysicalFate(fn:unknown,raw:unknown,parent:unknown):Readonly<{waitKnown():Promise<void>;assertKnown():void}> {
+ const row=roomRunnerApply(roomRunnerGet,roomDiscussionPhysicalRows,[raw]) as RoomDiscussionPhysicalRow|undefined;
+ if(!row||row.fn!==fn||row.parent!==parent)throw Error('ROOM_DISCUSSION_ORIGINAL_PHYSICAL_FATE_REQUIRED');
+ const assertKnown=()=>{if(!row.completed)throw Error('ROOM_DISCUSSION_PHYSICAL_UNCONFIRMED');row.stock.assertPhysicalKnown();for(let i=0;i<row.cleanups.length;i++)row.cleanups[i]!.assertPhysicalKnown();if(row.workspaceEntered){if(!row.workspaceFate)throw Error('ROOM_DISCUSSION_WORKSPACE_PHYSICAL_UNCONFIRMED');row.workspaceFate.assertKnown();}};
+ return Object.freeze({async waitKnown(){await row.completion;await row.stock.waitPhysicalKnown();for(let i=0;i<row.cleanups.length;i++)await row.cleanups[i]!.waitPhysicalKnown();if(row.workspaceEntered){if(!row.workspaceFate)throw Error('ROOM_DISCUSSION_WORKSPACE_PHYSICAL_UNCONFIRMED');await row.workspaceFate.waitKnown();}assertKnown();},assertKnown});
+}
+/** Original factory membership only. This data does not certify Main or N. */
+export function readOriginalRoomDiscussionRunner(services:object):Function {
+ const runner=roomRunnerApply(roomRunnerGet,originalRoomRunners,[services]) as Function|undefined;
+ if(!runner||roomRunnerTypes.isProxy(services))throw Error('ROOM_TURN_ORIGINAL_SERVICES_REQUIRED');return runner;
+}
+
+const workflowHostFunctions=new WeakSet<Function>(),workflowHostResults=new WeakMap<object,{fn:Function;parentRef:object;fates:OriginalTaskHostPhysicalFate[]}>();
+const workflowHostApply=Reflect.apply,workflowHostGet=WeakMap.prototype.get,workflowHostSet=WeakMap.prototype.set,workflowHostHas=WeakSet.prototype.has,workflowHostAdd=WeakSet.prototype.add;
+/** Exact actual DesktopServices invocation, never callback-supplied closure. */
+export function readOriginalKSwarmWorkflowNodePhysicalFate(originalFunction:unknown,originalResultOrError:unknown,parentRef:unknown):OriginalTaskHostPhysicalFate {
+ if(!workflowHostApply(workflowHostHas,workflowHostFunctions,[originalFunction]))throw Error('KSWARM_WORKFLOW_ORIGINAL_HOST_FATE_REQUIRED');
+ const row=workflowHostApply(workflowHostGet,workflowHostResults,[originalResultOrError]) as {fn:Function;parentRef:object;fates:OriginalTaskHostPhysicalFate[]}|undefined;
+ if(!row||row.fn!==originalFunction||row.parentRef!==parentRef)throw Error('KSWARM_WORKFLOW_ORIGINAL_HOST_FATE_REQUIRED');
+ const assertKnown=()=>{for(let i=0;i<row.fates.length;i++)row.fates[i]!.assertKnown();};
+ return Object.freeze({componentOnly:true as const,async waitKnown(){const outcomes=await Promise.allSettled(row.fates.map(fate=>fate.waitKnown()));for(const outcome of outcomes)if(outcome.status==='rejected')throw outcome.reason;assertKnown();},assertKnown});
+}
+interface DirectHostPhysicalRow {
+  fn: Function;
+  parentRef: object;
+  fates: OriginalTaskHostPhysicalFate[];
+  completed: boolean;
+  completion: Promise<void>;
+  complete(): void;
+}
+const directNativePromise = Promise,
+  directFreeze = Object.freeze;
+const directHostFunctions = new WeakSet<Function>();
+const directHostRows = new WeakMap<object, DirectHostPhysicalRow>();
+/** Fixed invocation identity, independent of a returned object or thrown value. */
+export function readOriginalKSwarmHandoffPhysicalFate(
+  originalFunction: unknown,
+  originalProof: unknown,
+  parentRef: unknown,
+): OriginalTaskHostPhysicalFate {
+  if (
+    !workflowHostApply(workflowHostHas, directHostFunctions, [originalFunction])
+  )
+    throw Error('KSWARM_DIRECT_ORIGINAL_HOST_FATE_REQUIRED');
+  const row = workflowHostApply(workflowHostGet, directHostRows, [
+    originalProof,
+  ]) as DirectHostPhysicalRow | undefined;
+  if (!row || row.fn !== originalFunction || row.parentRef !== parentRef)
+    throw Error('KSWARM_DIRECT_ORIGINAL_HOST_FATE_REQUIRED');
+  const assertKnown = () => {
+    if (!row.completed) throw Error('KSWARM_DIRECT_HOST_PHYSICAL_UNCONFIRMED');
+    for (let i = 0; i < row.fates.length; i++) row.fates[i]!.assertKnown();
+  };
+  return directFreeze({
+    componentOnly: true as const,
+    async waitKnown() {
+      await row.completion;
+      const outcomes = await settleIntrinsicOperations(row.fates, (fate) =>
+        fate.waitKnown(),
+      );
+      for (let i = 0; i < outcomes.length; i++)
+        if (outcomes[i]!.status === 'rejected')
+          throw (outcomes[i] as PromiseRejectedResult).reason;
+      assertKnown();
+    },
+    assertKnown,
+  });
+}
+interface RoomProjectPhysicalRow {
+  fn: Function;
+  parent: object;
+  completed: boolean;
+  completion: Promise<void>;
+  finish(): void;
+  executorInvoked: boolean;
+  fate?: { waitKnown(): Promise<void>; assertKnown(): void };
+  sdk: ReturnType<typeof createRoomTurnCustody>[];
+}
+const roomProjectFunctions = new WeakSet<Function>(),
+  roomProjectExecutions = new WeakMap<object, RoomProjectPhysicalRow>();
+export function readOriginalRoomProjectExecutorPhysicalFate(
+  fn: unknown,
+  proof: unknown,
+  parent: unknown,
+): { waitKnown(): Promise<void>; assertKnown(): void } {
+  if (!workflowHostApply(workflowHostHas, roomProjectFunctions, [fn]))
+    throw Error('ROOM_PROJECT_ORIGINAL_EXECUTOR_REQUIRED');
+  const row = workflowHostApply(workflowHostGet, roomProjectExecutions, [
+    proof,
+  ]) as RoomProjectPhysicalRow | undefined;
+  if (!row || row.fn !== fn || row.parent !== parent)
+    throw Error('ROOM_PROJECT_ORIGINAL_EXECUTOR_REQUIRED');
+  const assertKnown = () => {
+    if (!row.completed)
+      throw Error('ROOM_PROJECT_EXECUTOR_PHYSICAL_UNCONFIRMED');
+    for (let i = 0; i < row.sdk.length; i++) row.sdk[i]!.assertPhysicalKnown();
+    if (row.executorInvoked) {
+      if (!row.fate) throw Error('ROOM_PROJECT_EXECUTOR_PHYSICAL_UNCONFIRMED');
+      row.fate.assertKnown();
+    }
+  };
+  return directFreeze({
+    async waitKnown() {
+      await row.completion;
+      const outcomes = await settleIntrinsicOperations(row.sdk, (fate) =>
+        fate.waitPhysicalKnown(),
+      );
+      for (let i = 0; i < outcomes.length; i++) {
+        const outcome = outcomes[i]!;
+        if (outcome.status === 'rejected') throw outcome.reason;
+      }
+      if (row.executorInvoked) {
+        if (!row.fate)
+          throw Error('ROOM_PROJECT_EXECUTOR_PHYSICAL_UNCONFIRMED');
+        await row.fate.waitKnown();
+      }
+      assertKnown();
+    },
+    assertKnown,
+  });
+}
 export function createDesktopServices(options: DesktopServicesOptions) {
+  let dshLease:OriginalMainDshServiceSourceLease|undefined;
+  try {
+    if(options.dshServiceSources!==undefined){
+      if(options.runner)throw Error('DSH_MAIN_SERVICE_SOURCES_REQUIRED');
+      dshLease=readOriginalMainDshPreparedSources(options.dshServiceSources);
+      const actual=resolveDesktopServiceScope(options);
+      dshLease=claimOriginalMainDshServiceSources(options.dshServiceSources,{profileId:actual.profileId,workspaceId:actual.workspaceId});
+      if(dshLease.harnessUserActor!==options.harnessOptimizationUserActor)throw Error('DSH_MAIN_SERVICE_SOURCES_REQUIRED');
+    }
+    return createDesktopServicesBody(options,dshLease);
+  } catch(raw) {
+    if(dshLease){
+      const cleanup=closeOriginalMainDshStartupSources(dshLease,{raw});
+      // The startup lease retains the original cleanup and every negative SDK
+      // fate. This observer only handles notification; it does not certify it.
+      modelProbeApply(modelProbeThen,cleanup,[()=>undefined,()=>undefined]);
+    }
+    throw raw;
+  }
+}
+function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:OriginalMainDshServiceSourceLease|undefined) {
+  const dshStartup:MainDshServiceStartup|undefined=dshLease?{state:createMainDshServicesStartupState(),construction:createRoomTurnCustody(),recovery:createRoomTurnCustody(),remote:createRoomTurnCustody()}:undefined;
   const channelMcpMutations = createChannelMcpMutationOwner(options.dataRoot);
   let roomTimedActions:TimedActionService|undefined;
   const getManagedPythonCommand = options.getManagedPythonCommand;
@@ -953,6 +1254,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const taskSourcePopulation = createTaskSourceWriterPopulation(snapshotStore);
+  workflowHostApply(workflowHostAdd,workflowHostFunctions,[runKSwarmWorkflowNode]);
+  workflowHostApply(workflowHostAdd,directHostFunctions,[runKSwarmHandoffTask]);
+  workflowHostApply(workflowHostAdd,roomProjectFunctions,[runWorkspaceProjectTask]);
+  let preparationBootstrap:{owner:DefaultDispatchPreparationOwner;capsule:object}|undefined;
+  const preparationOwner=options.defaultDispatchPreparationOwner;
+  if(preparationOwner){let knownOwner:DefaultDispatchPreparationOwner|undefined;try{
+    // Membership precedes all candidate owner properties. This is a dormant
+    // Host in the existing population, not another runner or storage owner.
+    const ports=readDefaultDispatchPreparationOwnerPorts(preparationOwner,options.kswarmService);knownOwner=preparationOwner;
+    const host=taskSourcePopulation.createHost({materialRegistry,defaultDispatchPreparationSource:ports.hostSource,runner:async()=>{throw Error('DEFAULT_DISPATCH_PREPARATION_EXECUTION_UNAVAILABLE');}});
+    preparationOwner.bindOriginalHost(taskSourcePopulation,host);
+    preparationBootstrap={owner:preparationOwner,capsule:createDesktopPreparationCompositionCapsule(preparationOwner,options.kswarmService)};
+  }catch(error){knownOwner?.seal();console.warn('[default-dispatch-preparation] composition unavailable',error);}}
+
   const observationTasks = new Map<string, DesktopObservationTaskActivation>();
   let observationAdmissionBusy = false;
   const observationTaskControls = new Map<string, object>();
@@ -961,9 +1276,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let activityService: ConversationActivityApi | undefined;
   let activitySources: ConversationActivitySources | ConversationActivityAttachedSources | undefined;
   let activityMcp: ConversationMcpActivities | undefined;
+  let activityInitializationCleanup:Promise<void>|undefined;
+  let nativeActivity:NativeActivityAttention|undefined;
+  let nativeActivityFacade:object|null|undefined;
+  const assertLocalActivityUserRead=(watch:import('../../src/runtime/conversation-activity/types.js').WorkWatch,actor:{requestSource:'user'|'agent'|'scheduler';actorId:string})=>{
+    if(actor.requestSource!=='user'||actor.actorId!==`desktop-user:${multiAgentProfileId}`||watch.origin.profileId!==multiAgentProfileId)throw Error('activity_actor_forbidden');
+    const thread=multiAgentStore?.getThread(watch.origin.threadId);
+    if(!thread||thread.profileId!==watch.origin.profileId||thread.workspaceId!==watch.origin.workspaceId)throw Error('activity_thread_forbidden');
+    if(thread.deleteState&&thread.deleteState!=='none')throw Error('activity_thread_deleted');
+  };
+  const activityAttentionReader:AttentionInventoryReader={hasBinding:id=>Boolean(nativeActivity?.hasBinding(id)||activityMcp?.hasAttentionReaderBinding(id)),
+    collect:(slot,actor)=>{if(slot.sourceKind==='codex_native_approval'){if(!nativeActivity)throw Error('attention_inventory_unavailable');return nativeActivity.collect(slot,actor);}if(!activityMcp)throw Error('attention_inventory_unavailable');return activityMcp.collectAttentionInventory(slot,actor);},
+    assertCurrent:(slot,actor)=>{if(slot.sourceKind==='codex_native_approval'){if(!nativeActivity)throw Error('attention_inventory_unavailable');return nativeActivity.assertCurrent(slot,actor);}if(!activityMcp)throw Error('attention_inventory_unavailable');return activityMcp.assertAttentionInventoryCurrent(slot,actor);},
+    assertCollectedCurrent:(inventory,actor)=>{if('sourceKind'in inventory){if(!nativeActivity)throw Error('attention_inventory_unavailable');nativeActivity.assertCollectedCurrent(inventory,actor);}}};
   const activityMcpConnections = new Set<McpClientConnection>();
   let unsubscribeActivityGroups: (() => void) | undefined;
   let activityAttachment: Promise<void> | undefined;
+  let activityChangingOwner=false;
   /** Set while the last attach attempt failed. A failed attempt is never cached: the next
    * attachConversationActivityOwner() call starts a fresh one. Consumers see one stable,
    * user-safe code instead of the owner's internal error (e.g. a config digest mismatch). */
@@ -973,9 +1302,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if (activityAttachFailure !== undefined) throw new Error('activity_owner_unavailable');
   };
   let activityRoomClient: ConversationProjectRoomClient | undefined;
+  let activityRoomRecoveryPending=false;
+  let startPendingLocalActivity:(()=>void)|undefined;
+  const restoreActivityRoomBindings=async()=>{
+    if(dshStartup)dshStartup.state.assertRemoteOpen();
+    if(!activityRoomClient||!activityRoomRecoveryPending)return;
+    await conversationProjects.recoverActivityBindings();
+    for(const watch of activityStore?.listWatches()??[])await activitySources?.startWatch(watch.watchId);
+    activityRoomRecoveryPending=false;
+  };
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
-  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
-    readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),
+  const modelProbeScope=resolveDesktopServiceScope(options);
+  const multiAgentCwd = modelProbeScope.cwd;
+  const multiAgentProfileId = modelProbeScope.profileId;
+  const multiAgentWorkspaceId = modelProbeScope.workspaceId;
+  const defaultDispatchController=options.defaultDispatchBootstrap?.controller;
+  const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
+  defaultDispatchController?.bindUserOwner(userSubmissions);
+  const roomConversions=createMainRoomConversionCaptureOwner({submissions:userSubmissions,scope:{profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId},gateway:options.kswarmService});
+  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
+    initialPlanBootstrap:{enqueue:input=>enqueueInitialPlan(input)},
+    readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),sourceSnapshots:snapshotStore,
     ...(activityEnabled ? { activityHooks: {
       prepare: async input => {
         await awaitActivityAttachment();
@@ -995,13 +1342,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         return { activityWatchId: watchId };
       },
     } } : {}) });
-  const readActivityProject = async (projectId: string, after: number, signal: AbortSignal): Promise<ProjectActivityPage> => {
-    const response = await options.kswarmService.request(`/projects/${encodeURIComponent(projectId)}/activity?after=${after}`, {
-      signal, headers: { 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
-    });
-    if (!response.ok) throw new Error(`activity_source_http_${response.status}`);
-    return await response.json() as ProjectActivityPage;
-  };
   const readActivityIdentity = async (projectId: string): Promise<{ ok: boolean; sourceDataEpoch?: string; roomId?: string }> => {
     const response = await options.kswarmService.request(`/projects/${encodeURIComponent(projectId)}/activity-identity`, {
       headers: { 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
@@ -1034,15 +1374,32 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
   let goalCoordinator: DesktopGoalCoordinator | undefined;
+  let unsubscribeMultiAgentGoal:(()=>void)|undefined;
   const builtinDescriptions = new Map<Tool, ToolDescriptionMetadata>();
   const tools = buildToolList(undefined, undefined, [], builtinDescriptions);
   const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools, builtinDescriptions);
   const staticGatewayNames = new Set(options.pluginProviderRuntime ? createAllHostGateways(options.pluginProviderRuntime).map(tool => tool.definition.name) : []);
-  const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
-  const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
-  const multiAgentWorkspaceId = createHash('sha256').update(multiAgentCwd).digest('hex');
-  let harnessRuntime: ReturnType<typeof createHarnessOptimizationRuntime> | undefined;
+  let harnessRuntime: ReturnType<typeof createHarnessOptimizationRuntime> | undefined = dshLease?.runtimePromise;
   let harnessDisposed = false;
+  let harnessShutdown:Promise<void>|undefined;
+  const stopHarness=()=>{harnessDisposed=true;};
+  const quiesceHarness=():Promise<void>=>{
+    if(harnessShutdown)return harnessShutdown;
+    harnessShutdown=Promise.resolve().then(async()=>{if(dshLease){
+      if(dshStartup){
+        // Construction may still be loading fixed lifecycle methods. Closing the
+        // bookkeeping gate never claims that its real import/SDK tails stopped.
+        await dshStartup.construction.waitPhysicalKnown();
+        if(dshStartup.lifecycle)await dshStartup.lifecycle.closeOriginalMainDshRuntimeComposition(originalServices,options.dshServiceSources!);
+      }
+      if(dshStartup){
+        const results=await Promise.allSettled([dshStartup.construction.waitPhysicalKnown(),dshStartup.recovery.waitPhysicalKnown(),dshStartup.remote.waitPhysicalKnown()]);
+        const failures=results.flatMap(result=>result.status==='rejected'?[result.reason]:[]);if(failures.length)throw new AggregateError(failures,'DSH_MAIN_SERVICES_STARTUP_UNCONFIRMED');
+      }
+      await closeOriginalMainDshServiceResources(dshLease);
+    }else if(harnessRuntime)await(await harnessRuntime).dispose();});
+    stopHarness();return harnessShutdown;
+  };
   const requireHarnessUserActor = (actor: HarnessUserContext) => {
     if (!actor || actor.requestSource !== 'user' || actor !== options.harnessOptimizationUserActor) throw new Error('actor_forbidden');
   };
@@ -1055,13 +1412,30 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       manifestLookup: () => undefined });
     return harnessRuntime;
   };
-  const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, sourcePopulation: taskSourcePopulation, admitThread: async threadId => {
-    await multiAgentReady;
-    const revision=multiAgentService?.assertExecutionAdmission(threadId);
-    await prepareMultiAgentThread(threadId);
+  const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, sourcePopulation: taskSourcePopulation,createClient:options.codexClientFactory,admitThread: async (threadId,current) => {
+    await multiAgentReady;current();
+    const revision=multiAgentStore?.getThread(threadId)?multiAgentService?.assertExecutionAdmission(threadId):undefined;
+    await prepareMultiAgentThread(threadId,current);current();
     const revalidate=()=>{multiAgentService?.assertExecutionAdmission(threadId,revision);};
     revalidate(); return revalidate;
-  } });
+  },beforeStartTask:async(task,actor,current)=>{
+    current();const prepared=await codexTasks.host.inspectTask(task.taskId);current();
+    if(!prepared||prepared.taskId!==task.taskId||prepared.status!=='understanding'||!prepared.context?.threadId)throw Error('native_activity_prepared_missing');
+    codexTasks.assertTaskRouteIdentity({taskId:prepared.taskId,threadId:prepared.context.threadId},actor);
+    const receipt=codexTasks.host.getPreparedSourceReceipt(task.taskId);
+    userSubmissions.recordPreparedTask(prepared,receipt);
+    const submissionSource=userSubmissions.currentPreparedSourceProof();
+    conversationProjects.recordPreparedUserTask(prepared,{requestSource:'user',preparedSource:receipt,...(submissionSource?{submissionSource}:{})});current();
+    if(!activityEnabled)return;
+    await awaitActivityAttachment();current();
+    if(!activityService||!activitySources)throw Error('activity_unavailable');
+    const thread=multiAgentStore?.getThread(prepared.context.threadId);
+    if(!thread||thread.profileId!==multiAgentProfileId||(thread.deleteState??'none')!=='none')throw Error('activity_thread_forbidden');
+    const operationId=`native-task:${prepared.taskId}`,watchId=`task:${prepared.taskId}`;
+    await activityService.prepareAssociation({threadId:thread.threadId,operationId,creationIdempotencyKey:operationId},actor);current();
+    await activityService.bindWork({operationId,watchId,source:'task_host',logicalSourceId:'task-host-local',sourceDataEpoch:prepared.sessionId,workId:prepared.taskId,actualExecutionThreadId:prepared.context.threadId});current();
+    await activitySources.startWatch(watchId);current();
+  }});
   const modelSnapshot = (config: Config): DesktopModelConfigSnapshot => {
     const snapshot = createModelConfigSnapshot(config);
     snapshot.configuredDefaultModelId = config.defaultModelId;
@@ -1071,18 +1445,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return snapshot;
   };
   // Unknown injected runners and every non-local host remain ordinary.
-  const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'));
+  const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'),dshLease?{
+    dshAdmissionSource:dshLease.realm,dshUserControlSource:dshLease.userSource,
+    dshBudgetBinding:{runtime:dshLease.runtime,exactConstructorSource:dshLease.budgetSource},
+    dshOwnerBinding:{service:options.kswarmService,exactAdmission:dshLease.businessSource.admission},
+  }:undefined);
+  if(dshLease&&multiAgentStore){
+    recordOriginalMainDshServiceStore(dshLease,multiAgentStore);
+    dshLease.budgetSource.bindStore(multiAgentStore);dshLease.realm.bindStore(multiAgentStore);dshLease.userSource.bindStore(multiAgentStore);
+    dshLease.sourcePopulation.bindStore(multiAgentStore);dshLease.sourcePopulation.bindRuntime(dshLease.runtime);
+    dshLease.businessSource.bindStore(multiAgentStore);dshLease.businessSource.bindService(options.kswarmService);
+  }
   const observationLifecycle=createDesktopObservationLifecycle({tasksRoot:join(options.dataRoot,'tasks'),profileRoot:getConfigDir('observation-profile'),getDeletionState:threadId=>{const thread=multiAgentStore?.getThread(threadId);return thread?.deletionReceipt?{operationId:thread.deletionReceipt.operationId,completed:thread.deleteState==='deleted'&&thread.deletionReceipt.result.state==='completed'}:undefined;}});
-  const observationLifecycleReady=observationLifecycle.recover();
+  const observationLifecycleReady=dshStartup?dshStartup.state.recoveryReady:observationLifecycle.recover();
   const multiAgentCatalog = multiAgentStore ? new DesktopToolCatalogBridge({ registry, workspaceId: multiAgentWorkspaceId,
     getService: () => multiAgentService }) : undefined;
   const multiAgentWorktrees = multiAgentStore ? new DesktopMultiAgentWorktrees({ store: multiAgentStore }) : undefined;
   let multiAgentRuntime: DesktopMultiAgentRuntime | undefined;
-  const multiAgentService = multiAgentStore ? new DesktopMultiAgentService({ store: multiAgentStore, coordinator: executionCoordinator,
-    worktrees: multiAgentWorktrees,
-    executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
-      actorId: `desktop-user:${multiAgentProfileId}` }),
-    ...(options.restoreHistoricalLaunchWorkspaces ? { authorizeHistoricalThreadDomain: (thread: import('./desktop-multi-agent-store.js').MultiAgentThreadBinding): boolean => {
+  const authorizeHistoricalNativeThread=(thread:import('./desktop-multi-agent-store.js').MultiAgentThreadBinding):boolean=>{
+    if(!options.restoreHistoricalLaunchWorkspaces||!multiAgentStore)return false;
+
       // Only main-issued, existing bindings can qualify. No IPC/model path can
       // initialize a new workspace grant or override a revoked historical one.
       if (thread.profileId !== multiAgentProfileId || !isAbsolute(thread.cwd)
@@ -1091,7 +1473,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!stored || stored.profileId !== thread.profileId || stored.workspaceId !== thread.workspaceId || stored.cwd !== thread.cwd) return false;
       const authorization = multiAgentStore.readWorkspaceAuthorization({ profileId: thread.profileId, workspaceId: thread.workspaceId });
       return authorization?.executionAllowed === true;
-    } } : {}),
+  };
+  const multiAgentService = multiAgentStore ? new DesktopMultiAgentService({ store: multiAgentStore, coordinator: executionCoordinator,
+    worktrees: multiAgentWorktrees,
+    executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
+      actorId: `desktop-user:${multiAgentProfileId}` }),
+    ...(options.restoreHistoricalLaunchWorkspaces ? {authorizeHistoricalThreadDomain:authorizeHistoricalNativeThread}:{}),
     onExecutionAuthorizationChanged: snapshot => multiAgentCatalog!.applyExecutionAuthorization(snapshot),
     stopForWorkspaceExecutionRevocation: async () => {
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
@@ -1121,24 +1508,29 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     createSession: input => multiAgentRuntime!.createSession(input) }) : undefined;
   const multiAgentApprovals = multiAgentService ? new DesktopMultiAgentApprovalTransport({ store: multiAgentStore!, service: multiAgentService }) : undefined;
   if (multiAgentService) multiAgentRuntime = new DesktopMultiAgentRuntime({ service: multiAgentService, worktrees: multiAgentWorktrees, approvals: multiAgentApprovals });
-  const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot);
+  const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot,options.kswarmService?{projectSources:conversationProjects,gateway:options.kswarmService}:undefined);
   const initialPlanBootstrapQueue = new KSwarmInitialPlanBootstrapQueue(
     initialPlanBootstrapStore,
     // Design R44-06: the producer receives the shutdown signal explicitly. The
     // broker call itself is not yet cancellable, so we fail fast at the job
     // boundary instead of starting work that nobody will await.
     (input, signal) => {
+      if(dshStartup)dshStartup.state.assertRemoteOpen();
       if (signal.aborted) {
-        return Promise.resolve({ ok: false as const, error: 'app_shutdown' });
+        return Promise.resolve({ ok: false as const, error: 'app_shutdown',launchOutcome:'not_started' as const });
       }
-      return bootstrapKSwarmInitialPlan(input);
+      return bootstrapKSwarmInitialPlan(input,signal);
     },
     { now: options.now }
   );
+  function enqueueInitialPlan(input:Parameters<KSwarmInitialPlanBootstrapQueue['enqueue']>[0]){
+    if(dshStartup)dshStartup.state.assertRemoteOpen();
+    return initialPlanBootstrapQueue.enqueue(input);
+  }
   let kbStore: ReturnType<typeof createKbStoreSqlite> | undefined;
   const kswarmCreateProjectToolOptions: KSwarmCreateProjectToolOptions = {
     createRoom: (input, context) => conversationRooms.create(input, {...context, requestSource:'agent'}),
-    enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
+    enqueuePlanBootstrap: input => enqueueInitialPlan(input),
     finalizeProjectProposal: (proposal, context) => conversationProjects.isAuthorized(context.taskId)
       ? conversationProjects.create(proposal, { ...context, requestSource: 'agent' })
       : Promise.resolve(undefined),
@@ -1161,7 +1553,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     console.error('[KB] tool registration failed:', e);
   }
 
-  initialPlanBootstrapQueue.startRecovery();
+  if(!dshStartup)initialPlanBootstrapQueue.startRecovery();
   // [2026-05-10] Intent delegation disabled — passive tracking only, no functional value.
   // See docs/2026-05-10-desktop-intent-delegation-removal.md
   // const intentStore = new InMemoryIntentLedgerStore();
@@ -1953,30 +2345,24 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     // Use timestamp + random suffix to ensure unique taskId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     onPersistedEvent: async input => {
-      if (input.event.type === 'task_terminal' && multiAgentService && hostDeliveryAuthority) {
-        try { await multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority, taskId: input.taskId }); }
-        catch (error) { console.warn('[conversation-activity] run reconciliation failed:', error instanceof Error ? error.message : 'activity_run_pending'); }
+      const failures:unknown[]=[];
+      const consume=async(name:string,work:()=>Promise<unknown>)=>{
+        try{await work();}catch(error){failures.push(error);console.warn(`[${name}] persisted task consumer failed:`,error instanceof Error?error.message:String(error));}
+      };
+      if(input.event.type==='task_terminal' && multiAgentService && hostDeliveryAuthority){
+        await consume('conversation-activity',()=>multiAgentService!.reconcileActivityRuns({requestSource:'scheduler',authority:hostDeliveryAuthority!,taskId:input.taskId}));
       }
-      if (artifactWorkspaceService) {
-        try {
-          await artifactWorkspaceService.handlePersistedTaskEvent(input);
-        } catch (error) {
-          console.warn('[artifact-workspace] task event projection failed:', error instanceof Error ? error.message : String(error));
-        }
-      }
-      if (goalCoordinator) {
-        try {
-          await goalCoordinator.handlePersistedTaskEvent(input);
-        } catch (error) {
-          console.warn('[goal] task event settlement failed:', error instanceof Error ? error.message : String(error));
-        }
-      }
+      if(artifactWorkspaceService)await consume('artifact-workspace',()=>artifactWorkspaceService!.handlePersistedTaskEvent(input));
+      if(goalCoordinator)await consume('goal',()=>goalCoordinator!.handleNativePersistedTaskEvent(input,taskSourcePopulation.getNativePersistedEventReceipt(input)));
+      // Every registered sibling runs, but settled errors cannot mint a drained
+      // receipt or permit Main to close their original dependent stores.
+      if(failures.length)throw new AggregateError(failures,'desktop_task_consumers_unconfirmed');
     },
   });
 
-  const prepareMultiAgentThread = async (threadId: string): Promise<void> => {
-    await multiAgentReady;
-    await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user');
+  const prepareMultiAgentThread = async (threadId: string,current?:()=>void): Promise<void> => {
+    await multiAgentReady;assertBeforeEffects(current);
+    await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user',current);
   };
   const prepareActivityViewerThread = async (threadId: string, actor: ActivityActor): Promise<void> => {
     if (actor?.requestSource !== 'user' || actor.actorId !== `desktop-user:${multiAgentProfileId}`) throw new Error('activity_actor_forbidden');
@@ -1987,6 +2373,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
   const localTaskHost = {
     prepareTask: async (input: TaskCreateInput) => {
+      userSubmissions.beginEffects();
       let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
       if (multiAgentService && (!input.executionScope || input.executionScope.kind === 'goal_turn')) {
         await multiAgentReady;
@@ -2000,9 +2387,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         try {
           const actualPrepared = await host.inspectTask(prepared.taskId);
           if (!actualPrepared || actualPrepared.taskId !== prepared.taskId || actualPrepared.prompt !== input.prompt) throw Error('conversation_user_preparation_mismatch');
-          conversationProjects.recordPreparedUserTask(actualPrepared, {requestSource: 'user'});
-          await conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
-          conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+          userSubmissions.recordPreparedTask(actualPrepared,host.getPreparedSourceReceipt(prepared.taskId));
+          const submissionSource=userSubmissions.currentPreparedSourceProof();
+          const recorded=conversationProjects.recordPreparedUserTask(actualPrepared, {requestSource: 'user',preparedSource:host.getPreparedSourceReceipt(prepared.taskId),...(submissionSource?{submissionSource}:{})});
+          if(recorded){
+            const actualInput={...input,taskId:prepared.taskId,executionScope:actualPrepared.executionScope};
+            await conversationProjects.bindPreparedTask(actualInput, { requestSource: 'user' });
+            conversationRooms.bindPreparedTask(actualInput, { requestSource: 'user' });
+          }
         } catch (error) {
           try { await host.cancelTask(prepared.taskId, 'conversation_user_admission_failed'); }
           catch (cleanupError) { throw new AggregateError([error, cleanupError], 'conversation_user_admission_and_cancel_failed', {cause:error}); }
@@ -2022,6 +2414,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     store: goalStore,
     nativeJournal: new FileGoalNativeJournal(join(options.dataRoot, 'goals')),
     taskHost: localTaskHost,
+    assertNativePersistedEvent:taskSourcePopulation.assertNativePersistedEvent,
+    assertTaskSourceShutdownDrainedReceipt:taskSourcePopulation.assertShutdownDrainedReceipt,
     multiAgent: multiAgentService,
     prepareThread: prepareMultiAgentThread,
     authorizeRecoveredDelivery: input => {
@@ -2040,7 +2434,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const goalShutdownBase = createDesktopGoalShutdownOwner(goalCoordinator, goalStore);
   // Goal construction only installs its owner; recovery can now await its real
   // receipt before the same ready Promise opens any local task admission.
-  const multiAgentReady = multiAgentService?.initialize(host) ?? Promise.resolve();
+  const multiAgentReady = dshStartup?dshStartup.state.recoveryReady:(multiAgentService?.initialize(host) ?? Promise.resolve());
+  // Existing ready remains recovery-complete. Native A construction/schema is
+  // separate so the original Root composition never waits on its own recovery.
+  const dshReady:Promise<void>|undefined=dshStartup?modelProbeApply(modelProbeThen,multiAgentReady,[()=>dshStartup.state.constructionReady]) as Promise<void>:undefined;
+  if(dshReady)modelProbeApply(modelProbeThen,dshReady,[()=>undefined,()=>undefined]);
   const installActivityGroupSubscription = () => {
     if (!multiAgentStore || unsubscribeActivityGroups) return;
     unsubscribeActivityGroups = multiAgentStore.subscribe(event => {
@@ -2061,16 +2459,28 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
   if (activityEnabled && multiAgentStore) {
     try {
-      activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { now: options.now });
+      activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { now: options.now,projectOrdinarySource:frame=>{if(!activityService||!('resolveProjectOrdinarySource' in activityService))throw Error('activity_project_source_forbidden');return (activityService as ConversationActivityService).resolveProjectOrdinarySource(frame);},projectDeliverySource:frame=>{if(!activityService||!('resolveProjectDeliverySource' in activityService))throw Error('activity_project_source_forbidden');return (activityService as ConversationActivityService).resolveProjectDeliverySource(frame);} });
       activityService = new ConversationActivityService({ store: activityStore, profileId: multiAgentProfileId,
+        attentionReader:activityAttentionReader,
+        projectSource:{
+          assertOwner(owner){if(owner!==activitySources)throw Error('activity_project_source_forbidden');},
+          read(audience,signal,beforeEffects){
+            if(audience.profileId!==multiAgentProfileId||audience.workspaceId!==multiAgentWorkspaceId||!options.kswarmService.readProjectSourceActivity)throw Error('activity_project_source_unsupported');
+            return options.kswarmService.readProjectSourceActivity({projectId:audience.projectId,sourceDataEpoch:audience.sourceDataEpoch,after:audience.after},{requestSource:'scheduler',signal,beforeEffects});
+          },
+          assertRead(audience,frame){if(!options.kswarmService.assertProjectSourceActivityRead)throw Error('activity_project_source_unsupported');options.kswarmService.assertProjectSourceActivityRead({projectId:audience.projectId,sourceDataEpoch:audience.sourceDataEpoch,after:audience.after},frame as KSwarmProjectSourceActivityRead);},
+          assertScoped(audience,frame){if(!options.kswarmService.assertScopedProjectActivityRead)throw Error('activity_project_source_unsupported');options.kswarmService.assertScopedProjectActivityRead({projectId:audience.projectId,sourceDataEpoch:audience.sourceDataEpoch,after:audience.after},frame as KSwarmScopedProjectActivityRead);},
+          ensureRound(projectId){if(!activitySources||!('ensureProjectRound' in activitySources))throw Error('activity_project_source_unavailable');return activitySources.ensureProjectRound(projectId);},
+        },
+        nativeAttentionSource:{assertActorCurrent:actor=>{if(!nativeActivity)throw Error('activity_native_read_forbidden');nativeActivity.assertReadActorCurrent(actor);},inspect:(actor,watchId)=>{if(!nativeActivity)throw Error('activity_native_read_forbidden');return nativeActivity.inspectLocalSource(actor,watchId);}},
         notify: options.notifyConversationActivity,
         actorId: `desktop-user:${multiAgentProfileId}`, getThread: threadId => { const thread = multiAgentStore.getThread(threadId); return thread ? {
           profileId: thread.profileId, threadId: thread.threadId, workspaceId: thread.workspaceId, deleteState: thread.deleteState ?? 'none',
         } : null; },
         canObserveWork: async watch => {
           if (watch.source === 'task_host') {
-            const snapshot = (await resolveScopedTaskHost(watch.workId, host).recoverTask(watch.workId)).snapshot;
-            return snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
+            const snapshot = await (codexTasks.owns(watch.workId)?codexTasks.host:resolveScopedTaskHost(watch.workId, host)).inspectTask(watch.workId);
+            return snapshot?.taskId===watch.workId&&snapshot.sessionId===watch.sourceDataEpoch&&snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
           }
           if (watch.source === 'agent_group') return multiAgentStore.requireGroup(watch.workId).threadId === watch.origin.threadId;
           if (watch.source === 'mcp') return activityMcp?.canObserve(watch) ?? false;
@@ -2086,14 +2496,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             return isRecord(snapshot) && snapshot.ok !== false && isRecord(snapshot.room);
           }
           return false;
-        }, onError: error => console.warn('[conversation-activity]', error instanceof Error ? error.message : 'activity_delivery_failed'),
+        }, assertTaskSourceOwner:(watch,owner)=>watch.source==='task_host'&&owner===(codexTasks.owns(watch.workId)?codexTasks.host:resolveScopedTaskHost(watch.workId,host)),
+        onError: error => console.warn('[conversation-activity]', error instanceof Error ? error.message : 'activity_delivery_failed'),
       });
       activitySources = new ConversationActivitySources({ store: activityStore, service: activityService,
-        taskHost: taskId => resolveScopedTaskHost(taskId, host), readProject: readActivityProject,
+        taskHost: taskId => codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host),fixedProjectSource:true,
         readGroup: (groupId, after) => multiAgentStore.readEvents(groupId, after),
         groupMembers: runId => multiAgentStore.getActivityMembers(runId),
         onError: error => console.warn('[conversation-activity-source]', error instanceof Error ? error.message : 'activity_source_failed') });
-      activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+      activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,assertLocalUserRead:assertLocalActivityUserRead,
         originThread: async taskId => {
           const parent = activityStore!.listWatches().find(watch => watch.source === 'task_host' && watch.workId === taskId);
           if (parent) return parent.origin.threadId;
@@ -2102,15 +2513,19 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         }, onError: error => console.warn('[conversation-activity-mcp]', error instanceof Error ? error.message : 'activity_mcp_unavailable') });
       for (const connection of activityMcpConnections) activityMcp.register(connection);
       installActivityGroupSubscription();
-      activityService.start();
+      if(!dshStartup)activityService.start();
+      else{const local=activityService;startPendingLocalActivity=()=>{if(activityService===local)local.start();};}
     } catch (error) {
-      activityService?.dispose(); activityStore?.close(); activityService = undefined; activityStore = undefined;
+      const failed={mcp:activityMcp,sources:activitySources,service:activityService,store:activityStore};
+      activityInitializationCleanup=closeConversationActivity(failed);
+      void activityInitializationCleanup.catch(cleanupError=>console.warn('[conversation-activity] initialization close unconfirmed:',cleanupError instanceof Error?cleanupError.message:'activity_close_failed'));
+      activityMcp=undefined;activitySources=undefined;activityService = undefined; activityStore = undefined;
       console.warn('[conversation-activity] unavailable:', error instanceof Error ? error.message : 'initialization_failed');
     }
   }
 
   let multiAgentStartupReady = !multiAgentService;
-  if (multiAgentService) hostDeliveryAuthority = multiAgentService.bindHostDeliveryOwner(host);
+  if (multiAgentService&&!dshStartup) hostDeliveryAuthority = multiAgentService.bindHostDeliveryOwner(host);
   // Keep initialization failure observable by every admission path, without an
   // unhandled rejection when the window has not submitted its first task yet.
     void multiAgentReady.then(() => {
@@ -2130,9 +2545,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const backgroundTaskIdentity=createBackgroundTaskIdentityController({host,assertAdmission:()=>goalCoordinator.assertBackgroundAdmission(),captureAdmission:()=>goalCoordinator.captureBackgroundAdmission(),
     create:(input,reservation,guard)=>withExecutionLane('background',()=>afterLocalRecovery(()=>goalCoordinator.admitReservedBackgroundTask(input,reservation,guard)))});
   const originalGoalStop=goalShutdownBase.ingress.stopAccepting.bind(goalShutdownBase.ingress);
-  const stopBackgroundAndGoal=()=>{conversationProjects.sealUserTaskFacts();backgroundTaskIdentity.close();originalGoalStop();};
+  const stopBackgroundAndGoal=()=>{roomConversions.seal();userSubmissions.seal();conversationProjects.sealUserTaskFacts();backgroundTaskIdentity.close();unsubscribeMultiAgentGoal?.();unsubscribeMultiAgentGoal=undefined;originalGoalStop();};
   const goalShutdown=Object.freeze({...goalShutdownBase,ingress:Object.freeze({...goalShutdownBase.ingress,stopAccepting:stopBackgroundAndGoal,abortAllActive:stopBackgroundAndGoal})});
-  const unsubscribeMultiAgentGoal = multiAgentStore?.subscribe(event => {
+  unsubscribeMultiAgentGoal = multiAgentStore?.subscribe(event => {
     if (!['status', 'result', 'message_consumed'].includes(event.kind)) return;
     const threadId = multiAgentStore.requireGroup(event.groupId).threadId;
     // Same durable source as the Agents panel; no renderer/Goal polling owner.
@@ -2180,18 +2595,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return createProjectAgentModel({ modelId, loadConfig });
   };
 
-  type KSwarmScopedTaskOptions = { workflowRestrictionCheckpoint?: NativeWorkflowRestrictionCheckpoint; workflowDeadline?: number; nativeReadonlyOnly?: boolean; readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; signal?: AbortSignal; onStarted?: () => void | Promise<void> };
+  type KSwarmScopedTaskOptions = { beforeEffects?:()=>void; executionStart?:KSwarmExecutionStartContext; workflowRestrictionCheckpoint?: NativeWorkflowRestrictionCheckpoint; workflowDeadline?: number; nativeReadonlyOnly?: boolean; readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; signal?: AbortSignal; onStarted?: () => void | Promise<void> };
+  const assertKSwarmTaskStart = (taskOptions:KSwarmScopedTaskOptions) => {
+    taskSourcePopulation.assertAccepting();
+    assertBeforeEffects(taskOptions.beforeEffects);
+    taskOptions.signal?.throwIfAborted();
+    if(taskOptions.executionStart)assertKSwarmExecutionStart(options.kswarmService,taskOptions.executionStart);
+  };
+  const prepareRoomStart=async(projectId:string|undefined,signal?:AbortSignal,outer?:()=>void)=>{
+    let executionStart:KSwarmExecutionStartContext|undefined,failure:{error:unknown}|undefined;
+    const check=()=>{try{assertKSwarmTaskStart({executionStart,signal});assertBeforeEffects(outer);}catch(error){failure={error};throw error;}};
+    check();if(projectId)executionStart=await readKSwarmExecutionStart(options.kswarmService,projectId);check();
+    return {check,failed:(error:unknown)=>Boolean(failure&&Object.is(error,failure.error))};
+  };
   const workflowArtifactRegistries = new WeakMap<InProcessTaskRuntimeHost, ToolRegistry>();
   const createKSwarmTaskHost = async (workspaceRoot: string, participantId?: string, taskOptions: KSwarmScopedTaskOptions = {}) => {
-    taskSourcePopulation.assertAccepting();
+    assertKSwarmTaskStart(taskOptions);
     const execution = { clock: undefined as KSwarmExecutionClock | undefined, deadline: taskOptions.workflowDeadline };
     const artifactScope = taskOptions.workflowRestrictionCheckpoint && isNativeWorkflowArtifactCheckpoint(taskOptions.workflowRestrictionCheckpoint)
-      ? await createNativeWorkflowArtifactRegistry(taskOptions.workflowRestrictionCheckpoint) : undefined;
+      ? await createNativeWorkflowArtifactRegistry(taskOptions.workflowRestrictionCheckpoint,()=>assertKSwarmTaskStart(taskOptions)) : undefined;
+    try{assertKSwarmTaskStart(taskOptions);}catch(error){artifactScope?.registry.dispose();throw error;}
     const scopedDescriptions = new Map<Tool, ToolDescriptionMetadata>();
-    const builtScopedTools = artifactScope?.tools ?? buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions);
+    const builtScopedTools = artifactScope?.tools ?? (taskOptions.nativeReadonlyOnly
+      ? buildScopedNativeReadonlyTools({cwd:workspaceRoot,readOnlyPaths:taskOptions.readOnlyPaths ?? []},scopedDescriptions)
+      : buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions));
     const scopedTools = taskOptions.nativeReadonlyOnly
       ? builtScopedTools.filter(tool => getBuiltinToolIdentity(tool) === 'readonly') : builtScopedTools;
-    const scopedRegistry = artifactScope?.registry ?? new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
+    const scopedRegistry = artifactScope?.registry ?? new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly, requireSandboxScope:taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
     if(taskOptions.workflowRestrictionCheckpoint&&!artifactScope)bindNativeWorkflowRestrictionCheckpoint(scopedRegistry,taskOptions.workflowRestrictionCheckpoint);
     const scopedHost = taskSourcePopulation.createHost({
       // This scoped owner is bounded by the KSwarm queue/run clocks.
@@ -2201,8 +2631,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const signal = taskOptions.signal ? AbortSignal.any([input.signal, taskOptions.signal]) : input.signal;
         const window = createKSwarmWorkflowExecutionWindow(execution.deadline, signal, input.deadlineMs);
         execution.deadline = window.deadline;
-        try { return await withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
-        const freshGate = () => { window.assertCurrent(); runInput.signal.throwIfAborted(); taskOptions.signal?.throwIfAborted(); taskSourcePopulation.assertAccepting(); };
+        try { assertKSwarmTaskStart(taskOptions); return await withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
+        const freshGate = () => { window.assertCurrent(); runInput.signal.throwIfAborted(); assertKSwarmTaskStart(taskOptions); };
         freshGate();
         const startedAt = Date.now();
         execution.clock = new KSwarmExecutionClock(window.deadline === undefined ? 10 * 60 * 1000 : Math.max(0, window.deadline - startedAt));
@@ -2220,6 +2650,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         materialRegistry,
         kswarmCreateProjectToolOptions,
         {
+          beforeEffects:()=>assertKSwarmTaskStart(taskOptions),
           cwd:workspaceRoot,
           nativeReadonlyOnly: taskOptions.nativeReadonlyOnly,
           restrictedArtifactGeneration: Boolean(artifactScope),
@@ -2260,6 +2691,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     try {
         try {
             {
+                assertKSwarmTaskStart(taskOptions);
                 settledBodyResult = await work(taskHost);
             }
         }
@@ -2287,15 +2719,37 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return settledBodyResult;
   };
 
-  const createCollaborationRoomTaskRunner = () => {
+  const createCollaborationRoomTaskRunner = (beforeEffects:()=>void) => {
+    beforeEffects();
     const roomDescriptions = new Map<Tool, ToolDescriptionMetadata>();
     const roomTools=buildToolList(undefined, undefined, [], roomDescriptions);
-    const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools,metadata:roomDescriptions});
+    const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools,metadata:roomDescriptions,beforeEffects});
     connectorsService.bindTools(roomRegistry);
-    return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
+    return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true,beforeEffects})};
   };
 
-  async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string, workspace?:RoomWorkspaceRunOptions,discussionSignal?:AbortSignal): Promise<{ text: string }> {
+  function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string, workspace?:RoomWorkspaceRunOptions,discussionSignal?:AbortSignal,outerBeforeEffects?:()=>void): Promise<{text:string}> {
+    const parent=readCurrentOriginalRootExecutionContext();
+    // Ordinary unqualified ABI remains the original execution path.
+    if(!parent)return runCollaborationRoomAgentTaskBody(envelope,claimToken,workspace,discussionSignal,outerBeforeEffects);
+    let finish!:()=>void;const completion=new ModelProbePromise<void>(yes=>finish=yes);
+    const row:RoomDiscussionPhysicalRow={fn:runCollaborationRoomAgentTask,parent,stock:createRoomTurnCustody(),executorProof:Object.freeze(Object.create(null)),completed:false,workspaceEntered:false,completion,finish,cleanups:[]};
+    let yes!:(value:{text:string})=>void,no!:(raw:unknown)=>void;
+    const promise=new ModelProbePromise<{text:string}>((resolve,reject)=>{yes=resolve;no=reject;});
+    roomRunnerApply(roomRunnerSet,roomDiscussionPhysicalRows,[promise,row]);
+    const operation=(async()=>{try{return await row.stock.sdk<{text:string}>(runCollaborationRoomAgentTaskBody,undefined,[envelope,claimToken,workspace,discussionSignal,outerBeforeEffects,row]);}
+      finally{try{if(row.workspaceEntered)row.workspaceFate=readOriginalRoomWorkspaceExecutorPhysicalFate(row.executorProof,parent);}finally{row.completed=true;row.finish();}}})();
+    modelProbeApply(modelProbeThen,operation,[yes,no]);return promise;
+  }
+  async function closeOriginalRoomDiscussionRegistry(physical:RoomDiscussionPhysicalRow,registry:ReturnType<typeof createRoomToolRegistry>):Promise<void>{
+          const failures:unknown[]=[];
+          const draining=createRoomTurnCustody();appendIntrinsic(physical.cleanups,draining);
+          try{await draining.sdk(registry.drain,registry,[]);}catch(raw){failures.push(raw);}
+          const disposing=createRoomTurnCustody();appendIntrinsic(physical.cleanups,disposing);
+          try{disposing.syncVoid(registry.dispose,registry,[]);}catch(raw){failures.push(raw);}
+          if(failures.length){if(physical.primary)throw new AggregateError([physical.primary.raw,...failures],'ROOM_DISCUSSION_CLEANUP_UNCONFIRMED',{cause:physical.primary.raw});throw failures.length===1?failures[0]:new AggregateError(failures,'ROOM_DISCUSSION_CLEANUP_UNCONFIRMED');}
+  }
+  async function runCollaborationRoomAgentTaskBody(envelope: CollaborationRoomTurnEnvelope, claimToken: string, workspace?:RoomWorkspaceRunOptions,discussionSignal?:AbortSignal,outerBeforeEffects?:()=>void,physical?:RoomDiscussionPhysicalRow): Promise<{ text: string }> {
     // design §6.2：consumer boundary runtime schema 校验。contextWindow
     // 缺失、sequence 不连续、或 message 边界/total/isComplete 不一致时
     // 拒绝执行，不退回"默认完整"——防止一个绕过 buildRoomContextWindow 的
@@ -2306,6 +2760,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       throw new Error(`collaboration_room_envelope_invalid: ${parsed.error}`);
     }
     if(workspace&&(workspace.context.roomId!==envelope.roomId||workspace.context.logicalAgentId!==envelope.logicalAgentId||JSON.stringify(workspace.context.contextScope)!==JSON.stringify(envelope.contextScope))){await workspace.port.release(workspace.context,{executorInstanceId:workspace.context.executorInstanceId,kind:'resources-disposed',verified:true});throw new Error('workspace_execution_context_mismatch');}
+    let start:Awaited<ReturnType<typeof prepareRoomStart>>;
+    try{
+      if(envelope.contextScope.kind==='project'&&(typeof envelope.contextScope.projectId!=='string'||!envelope.contextScope.projectId.trim()))throw Error('project_execution_start_project_required');
+      start=await prepareRoomStart(envelope.contextScope.kind==='project'?envelope.contextScope.projectId:undefined,workspace?.signal??discussionSignal,()=>{assertBeforeEffects(workspace?.beforeEffects);assertBeforeEffects(outerBeforeEffects);});
+      start.check();
+    }
+    catch(error){if(workspace)try{await workspace.port.release(workspace.context,{executorInstanceId:workspace.context.executorInstanceId,kind:'resources-disposed',verified:true});}catch(cleanup){throw new AggregateError([error,cleanup],'workspace_start_cleanup_unconfirmed',{cause:error});}throw error;}
+    const beforeEffects=start.check;let executorOwnsCleanup=false;
+    try{
     const transcript = envelope.messages.map(message => {
       const sender = message.sender && typeof message.sender === 'object'
         ? ((message.sender as { kind?: string; logicalAgentId?: string; userId?: string }).logicalAgentId
@@ -2338,9 +2801,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           sourcePath: filePath,
           role: 'customer_material',
           roleSource: 'user',
-        });
+        },beforeEffects);
         materials.push({ materialId: record.materialId, role: record.role });
-      } catch {
+      } catch(error) {
+        if(start.failed(error))throw error;beforeEffects();
         // A missing attachment is represented by the persisted message metadata;
         // other valid materials still reach the agent.
       }
@@ -2351,32 +2815,45 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if(workspace) {
         let modelBinding:Promise<ReturnType<typeof resolveRuntimeModelBinding>>|undefined;
         const getModelBinding=()=>modelBinding??=loadConfig().then(config=>resolveRuntimeModelBinding(config));
-        return await runRoomWorkspaceExecutor({...workspace,prompt,
+        executorOwnsCleanup=true;
+        if(physical)physical.workspaceEntered=true;
+        return await runRoomWorkspaceExecutor({...workspace,prompt,beforeEffects,...(physical?{originalRootCandidate:physical.executorProof}:{}),
         materials:materials.map(item=>materialRegistry.get(item.materialId)).filter((item):item is MaterialRecord=>Boolean(item)),
         onTaskCreated:taskId=>{registeredTaskIds.add(taskId);registerRoomHistoryCapability(taskId,{roomId:envelope.roomId,claimToken});},
         createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
-          {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
+          {beforeEffects:input.beforeEffects,cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
       });
       }
-      const discussion=createCollaborationRoomTaskRunner();
+      const discussion=createCollaborationRoomTaskRunner(beforeEffects);
       registeredTaskId=`room_turn_${randomUUID()}`;
       registerRoomHistoryCapability(registeredTaskId,{roomId:envelope.roomId,claimToken});
       let text='';
       try {
-        await discussion.runner({taskId:registeredTaskId,sessionId:registeredTaskId,prompt,
+        beforeEffects();
+        const taskInput:TaskRunnerInput={taskId:registeredTaskId,sessionId:registeredTaskId,prompt,
           materials:materials.map(item=>materialRegistry.get(item.materialId)).filter((item):item is MaterialRecord=>Boolean(item)),
           understanding:{goal:prompt,deliverable:'room response',taskType:'unknown',audience:'room members',inputs:[],missingInfo:[],assumptions:[],riskLevel:'low',suggestedPlan:[],nextAction:'execute'},
           signal:discussionSignal??new AbortController().signal,history:[],permissionMode:'auto',emitUsage:async()=>{},
           emitRuntimeEvent:async event=>{if(event.type==='receipt_emitted')text=event.note;},
-        });
+        };
+        if(physical)await physical.stock.sdk(discussion.runner,undefined,[taskInput]);else await discussion.runner(taskInput);
         return {text:text.trim()};
-      } finally {await discussion.registry.drain();discussion.registry.dispose();}
+      }catch(raw){if(physical)physical.primary??={raw};throw raw;}
+      finally {
+        if(physical){
+          await closeOriginalRoomDiscussionRegistry(physical,discussion.registry);
+        }else{await discussion.registry.drain();discussion.registry.dispose();}
+      }
     } finally {
       // design §6.2 RoomHistoryReadCapability：任务结束（无论成功/失败/
       // 异常）后立即释放绑定，防止 taskId 被复用或绑定残留导致陈旧
       // capability 被误用。
       if (registeredTaskId) releaseRoomHistoryCapability(registeredTaskId);
       for(const taskId of registeredTaskIds)releaseRoomHistoryCapability(taskId);
+    }
+    }catch(error){
+      if(workspace&&!executorOwnsCleanup)try{await workspace.port.release(workspace.context,{executorInstanceId:workspace.context.executorInstanceId,kind:'resources-disposed',verified:true});}catch(cleanup){throw new AggregateError([error,cleanup],'workspace_start_cleanup_unconfirmed',{cause:error});}
+      throw error;
     }
   }
 
@@ -2392,161 +2869,448 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
   });
 
-  async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal, onExecutionStarted }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal; onExecutionStarted?: () => void | Promise<void> }) {
-    if(handoff.workspaceContext||handoff.project.requiredProtocol==='room_workspace_v1')throw new Error('workspace_runtime_protocol_required');
-    const throwIfAborted = () => {
-      taskSourcePopulation.assertAccepting();
-      if (signal?.aborted) {
-        throw new DOMException('agent aborted', 'AbortError');
-      }
-    };
 
-    throwIfAborted();
-    const baseArtifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
-    const workspaceRoot = handoff.project.workFolder || (baseArtifactsDir ? dirname(baseArtifactsDir) : process.cwd());
-    const runDirectory = createHash('sha256').update(JSON.stringify([handoff.project.id, handoff.task.id, handoff.runId])).digest('hex').slice(0, 32);
-    const artifactsDir = baseArtifactsDir && executionCoordinator.hasLaneCapacity('project_worker')
-      ? join(baseArtifactsDir, 'run-' + runDirectory) : baseArtifactsDir;
-    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
-    const clock = new KSwarmExecutionClock(resolveKSwarmWorkerRunMs(handoff.task));
-    let executionStarted = false;
-    const queueDeadline = Date.now() + 60 * 60 * 1000;
-    return withKSwarmTaskHost(workspaceRoot, targetParticipantId, async taskHost => {
-    const runStartedAt = Date.now();
-    const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
-    const requiredOutputsText = formatKSwarmRequiredOutputs(handoff.task.requiredOutputs);
-    const prompt = [
-      'KSwarm 项目任务执行。',
-      `执行者：${targetParticipantId || 'xiaok-worker'}`,
-      `项目：${handoff.project.name}`,
-      `目标：${handoff.project.goal}`,
-      handoff.project.requirements ? `要求：${handoff.project.requirements}` : '',
-      artifactsDir ? `产物目录：${artifactsDir}` : '',
-      baseArtifactsDir && artifactsDir !== baseArtifactsDir ? `已有项目资料目录（只读参考，当前产物写入上面的产物目录）：${baseArtifactsDir}` : '',
-      `任务：${handoff.task.title}`,
-      handoff.task.brief ? `任务说明：${handoff.task.brief}` : '',
-      handoff.task.acceptanceCriteria ? `验收标准：${handoff.task.acceptanceCriteria}` : '',
-      requiredOutputsText ? `必须产出：${requiredOutputsText}` : '',
-      handoff.task.evidenceContract ? `外部来源证据要求：${JSON.stringify(handoff.task.evidenceContract)}` : '',
-      handoff.task.repairInstruction ? `修复反馈：${handoff.task.repairInstruction}` : '',
-      requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
-      VISUAL_PDF_EXPORT_GUIDANCE,
-      requiresArtifactEvidence
-        ? '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。'
-        : '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，并返回 result manifest。如果任务没有要求生成文件，artifacts 可以为空数组，但 summary 必须说明完成了哪些要求。',
-    ].filter(Boolean).join('\n');
-    let createdTaskId: string | undefined;
-    let cancellationRequested = false;
-    let cancellation: Promise<void> | undefined;
-    let bodyFailure: { error: unknown } | undefined;
-    const cancelCreatedTask = () => {
-      cancellationRequested = true;
-      if (createdTaskId && !cancellation) {
-        cancellation = taskHost.cancelTask(createdTaskId);
-        // The finally block observes the original failure after physical settle.
-        void cancellation.catch(() => {});
-      }
-    };
-    signal?.addEventListener('abort', cancelCreatedTask, { once: true });
-    const runPreparedTask = async () => {
+  async function runKSwarmHandoffTask({
+    handoff,
+    targetParticipantId,
+    signal,
+    onExecutionStarted,
+    beforeEffects,
+    originalRootCandidate,
+  }: {
+    handoff: KSwarmTaskHandoff;
+    targetParticipantId?: string;
+    signal?: AbortSignal;
+    beforeEffects?: () => void;
+    onExecutionStarted?: () => void | Promise<void>;
+    originalRootCandidate?: object;
+  }) {
+    const parentRef = readCurrentOriginalRootExecutionContext();
+    let physical: DirectHostPhysicalRow | undefined;
+    if (parentRef) {
+      if (
+        !originalRootCandidate ||
+        workflowHostApply(workflowHostGet, directHostRows, [
+          originalRootCandidate,
+        ])
+      )
+        throw Error('KSWARM_DIRECT_ORIGINAL_INVOCATION_REQUIRED');
+      let complete!: () => void;
+      const completion = new directNativePromise<void>((yes) => {
+        complete = yes;
+      });
+      physical = {
+        fn: runKSwarmHandoffTask,
+        parentRef,
+        fates: [],
+        completed: false,
+        completion,
+        complete,
+      };
+      workflowHostApply(workflowHostSet, directHostRows, [
+        originalRootCandidate,
+        physical,
+      ]);
+    }
+    try {
+      if (
+        handoff.workspaceContext ||
+        handoff.project.requiredProtocol === 'room_workspace_v1'
+      )
+        throw new Error('workspace_runtime_protocol_required');
+      let executionStart: KSwarmExecutionStartContext | undefined;
+      const throwIfAborted = () => {
+        taskSourcePopulation.assertAccepting();
+        assertBeforeEffects(beforeEffects);
+        if (signal?.aborted) {
+          throw new DOMException('agent aborted', 'AbortError');
+        }
+        if (executionStart)
+          assertKSwarmExecutionStart(options.kswarmService, executionStart);
+      };
+
       throwIfAborted();
-      const created = await taskHost.prepareTask({ prompt, materials: [] });
-      createdTaskId = created.taskId;
-      if (cancellationRequested || signal?.aborted) cancelCreatedTask();
+      executionStart = await readKSwarmExecutionStart(
+        options.kswarmService,
+        handoff.project.id,
+      );
       throwIfAborted();
-      await taskHost.startTask(created.taskId);
-      throwIfAborted();
-      while (executionStarted ? !clock.expired() : Date.now() < queueDeadline) {
-        throwIfAborted();
-        const current = await taskHost.inspectTask(created.taskId);
-        if (!current) throw Error('desktop_task_snapshot_missing');
-        const recovered = { snapshot: current };
-        throwIfAborted();
-        if (recovered.snapshot.status === 'completed') {
-          const resultEvent = [...recovered.snapshot.events].reverse().find(event => event.type === 'result');
-          const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
-          const eventArtifacts = artifactEvents.map(event => ({
-            path: (event as any).filePath || (event as any).path,
-            kind: inferKSwarmArtifactKind((event as any).kind, (event as any).label),
-            label: (event as any).label,
-          })).filter(artifact => artifact.path);
-          const discoveredArtifacts = discoverKSwarmArtifactsFromDirectory({
+      const { baseArtifactsDir, runArtifactsDir } =
+        buildKSwarmTaskArtifactPaths(handoff, handoff.runId);
+      const workspaceRoot =
+        handoff.project.workFolder ||
+        (baseArtifactsDir ? dirname(baseArtifactsDir) : process.cwd());
+      const artifactsDir =
+        baseArtifactsDir &&
+        executionCoordinator.hasLaneCapacity('project_worker')
+          ? runArtifactsDir
+          : baseArtifactsDir;
+      if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+      const clock = new KSwarmExecutionClock(
+        resolveKSwarmWorkerRunMs(handoff.task),
+      );
+      let executionStarted = false;
+      const queueDeadline = Date.now() + 60 * 60 * 1000;
+      return await withKSwarmTaskHost(
+        workspaceRoot,
+        targetParticipantId,
+        async (taskHost) => {
+          const runStartedAt = Date.now();
+          const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(
+            handoff.task,
+          );
+          const taskInput = buildKSwarmTaskCreateInput({
+            execution: handoff,
+            targetParticipantId,
             artifactsDir,
-            runStartedAt,
-            knownPaths: eventArtifacts.map(artifact => artifact.path),
+            baseArtifactsDir,
           });
-          const artifacts = [...eventArtifacts, ...discoveredArtifacts];
-          if (artifacts.length === 0 && requiresArtifactEvidence) {
-            throw new Error('artifact_evidence_missing');
-          }
-          return {
-            summary: resultEvent?.type === 'result' ? resultEvent.result.summary : 'completed',
-            artifacts,
-            provenance: {
-              runtimeSource: 'desktop-agent-runtime',
-              producingAgent: targetParticipantId || 'xiaok-worker',
-              desktopTaskId: created.taskId,
-            },
+          let createdTaskId: string | undefined;
+          let cancellationRequested = false;
+          let cancellation: Promise<void> | undefined;
+          let bodyFailure: { error: unknown } | undefined;
+          const cancelCreatedTask = () => {
+            cancellationRequested = true;
+            if (createdTaskId && !cancellation) {
+              cancellation = taskHost.cancelTask(createdTaskId);
+              // The finally block observes the original failure after physical settle.
+              void cancellation.catch(() => {});
+            }
           };
-        }
-        if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
-          throw new Error(`desktop_task_${recovered.snapshot.status}: ${getKSwarmRuntimeTaskFailureReason(recovered.snapshot) || 'unknown_runtime_failure'}`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 500));
+          signal?.addEventListener('abort', cancelCreatedTask, { once: true });
+          const runPreparedTask = async () => {
+            throwIfAborted();
+            const created = await taskHost.prepareTask(taskInput);
+            createdTaskId = created.taskId;
+            if (cancellationRequested || signal?.aborted) cancelCreatedTask();
+            throwIfAborted();
+            try {
+              await taskHost.startTask(created.taskId);
+            } finally {
+              if (physical && parentRef) {
+                const receipt = readOriginalTaskExecutionPhysicalReceipt(
+                  taskHost,
+                  snapshotStore,
+                  created.taskId,
+                  parentRef,
+                );
+                appendIntrinsic(
+                  physical.fates,
+                  readOriginalTaskHostPhysicalFate(
+                    receipt,
+                    taskHost,
+                    snapshotStore,
+                    parentRef,
+                  ),
+                );
+              }
+            }
+            throwIfAborted();
+            while (
+              executionStarted ? !clock.expired() : Date.now() < queueDeadline
+            ) {
+              throwIfAborted();
+              const current = await taskHost.inspectTask(created.taskId);
+              if (!current) throw Error('desktop_task_snapshot_missing');
+              const recovered = { snapshot: current };
+              throwIfAborted();
+              if (recovered.snapshot.status === 'completed') {
+                const resultEvent = [...recovered.snapshot.events]
+                  .reverse()
+                  .find((event) => event.type === 'result');
+                const artifactEvents = recovered.snapshot.events.filter(
+                  (event) => event.type === 'artifact_recorded',
+                );
+                const eventArtifacts = artifactEvents
+                  .map((event) => ({
+                    path: (event as any).filePath || (event as any).path,
+                    kind: inferKSwarmArtifactKind(
+                      (event as any).kind,
+                      (event as any).label,
+                    ),
+                    label: (event as any).label,
+                  }))
+                  .filter((artifact) => artifact.path);
+                const discoveredArtifacts =
+                  discoverKSwarmArtifactsFromDirectory({
+                    artifactsDir,
+                    runStartedAt,
+                    knownPaths: eventArtifacts.map((artifact) => artifact.path),
+                  });
+                const artifacts = [...eventArtifacts, ...discoveredArtifacts];
+                if (artifacts.length === 0 && requiresArtifactEvidence) {
+                  throw new Error('artifact_evidence_missing');
+                }
+                return {
+                  summary:
+                    resultEvent?.type === 'result'
+                      ? resultEvent.result.summary
+                      : 'completed',
+                  artifacts,
+                  provenance: {
+                    runtimeSource: 'desktop-agent-runtime',
+                    producingAgent: targetParticipantId || 'xiaok-worker',
+                    desktopTaskId: created.taskId,
+                  },
+                };
+              }
+              if (
+                recovered.snapshot.status === 'failed' ||
+                recovered.snapshot.status === 'cancelled'
+              ) {
+                throw new Error(
+                  `desktop_task_${recovered.snapshot.status}: ${getKSwarmRuntimeTaskFailureReason(recovered.snapshot) || 'unknown_runtime_failure'}`,
+                );
+              }
+              await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+            await taskHost.cancelTask(created.taskId);
+            throw new Error('desktop_task_timeout');
+          };
+          let result!: Awaited<ReturnType<typeof runPreparedTask>>;
+          try {
+            result = await runPreparedTask();
+          } catch (error) {
+            bodyFailure = { error };
+          }
+          signal?.removeEventListener('abort', cancelCreatedTask);
+          if (cancellation) {
+            try {
+              await cancellation;
+            } catch (error) {
+              if (bodyFailure)
+                throw new AggregateError(
+                  [bodyFailure.error, error],
+                  'kswarm_handoff_cancellation_unconfirmed',
+                );
+              throw error;
+            }
+          }
+          if (bodyFailure) throw bodyFailure.error;
+          return result;
+        },
+        {
+          beforeEffects,
+          executionStart,
+          projectWorker: true,
+          signal,
+          onStarted: async () => {
+            throwIfAborted();
+            executionStarted = true;
+            clock.start();
+            await onExecutionStarted?.();
+            throwIfAborted();
+          },
+        },
+      );
+    } finally {
+      if (physical) {
+        physical.completed = true;
+        physical.complete();
       }
-      await taskHost.cancelTask(created.taskId);
-      throw new Error('desktop_task_timeout');
+    }
+  }
+  async function runWorkspaceProjectTask({
+    handoff,
+    workspace,
+    targetParticipantId,
+    originalRootCandidate,
+  }: {
+    handoff: KSwarmTaskHandoff;
+    workspace: RoomWorkspaceRunOptions;
+    targetParticipantId?: string;
+    originalRootCandidate?: object;
+  }) {
+    const parent = readCurrentOriginalRootExecutionContext();
+    let physical: RoomProjectPhysicalRow | undefined;
+    if (parent) {
+      if (
+        !originalRootCandidate ||
+        workflowHostApply(workflowHostGet, roomProjectExecutions, [
+          originalRootCandidate,
+        ])
+      )
+        throw Error('ROOM_PROJECT_ORIGINAL_INVOCATION_REQUIRED');
+      let finish!: () => void;
+      const completion = new directNativePromise<void>((yes) => {
+        finish = yes;
+      });
+      physical = {
+        fn: runWorkspaceProjectTask,
+        parent,
+        completed: false,
+        completion,
+        finish,
+        executorInvoked: false,
+        sdk: [],
+      };
+      workflowHostApply(workflowHostSet, roomProjectExecutions, [
+        originalRootCandidate,
+        physical,
+      ]);
+    }
+    const release = async () => {
+      const custody = createRoomTurnCustody();
+      if (physical) appendIntrinsic(physical.sdk, custody);
+      await custody.sdk(workspace.port.release, workspace.port, [
+        workspace.context,
+        {
+          executorInstanceId: workspace.context.executorInstanceId,
+          kind: 'resources-disposed',
+          verified: true,
+        },
+      ]);
+      await custody.waitPhysicalKnown();
     };
-    let result!: Awaited<ReturnType<typeof runPreparedTask>>;
-    try { result = await runPreparedTask(); }
-    catch (error) { bodyFailure = { error }; }
-    signal?.removeEventListener('abort', cancelCreatedTask);
-    if (cancellation) {
-      try { await cancellation; }
-      catch (error) {
-        if (bodyFailure) throw new AggregateError([bodyFailure.error, error], 'kswarm_handoff_cancellation_unconfirmed');
+    try {
+      const context = workspace.context;
+      if (
+        context.contextScope.kind !== 'project' ||
+        context.contextScope.projectId !== handoff.project.id ||
+        context.taskId !== handoff.task.id ||
+        context.runId !== handoff.runId ||
+        handoff.workspaceContext?.claimId !== context.claimId ||
+        handoff.project.workFolder !== context.effectiveCwd ||
+        (targetParticipantId && targetParticipantId !== context.logicalAgentId)
+      ) {
+        // No registry/model/resource exists yet; report the actual pre-start
+        // evidence so the runtime can release this rejected admission.
+        await release();
+        throw new Error('workspace_project_handoff_mismatch');
+      }
+      let beforeEffects: () => void;
+      try {
+        beforeEffects = (
+          await prepareRoomStart(
+            handoff.project.id,
+            workspace.signal,
+            workspace.beforeEffects,
+          )
+        ).check;
+        beforeEffects();
+      } catch (error) {
+        try {
+          await release();
+        } catch (cleanup) {
+          throw new AggregateError(
+            [error, cleanup],
+            'workspace_start_cleanup_unconfirmed',
+            { cause: error },
+          );
+        }
         throw error;
       }
-    }
-    if (bodyFailure) throw bodyFailure.error;
-    return result;
-    }, { projectWorker: true, signal, onStarted: async () => {
-      throwIfAborted();
-      executionStarted = true;
-      clock.start();
-      await onExecutionStarted?.();
-      throwIfAborted();
-    } });
-  }
-
-  async function runWorkspaceProjectTask({handoff,workspace,targetParticipantId}:{handoff:KSwarmTaskHandoff;workspace:RoomWorkspaceRunOptions;targetParticipantId?:string}) {
-    const context=workspace.context;
-    if(context.contextScope.kind!=='project'||context.contextScope.projectId!==handoff.project.id||context.taskId!==handoff.task.id||context.runId!==handoff.runId||handoff.workspaceContext?.claimId!==context.claimId||handoff.project.workFolder!==context.effectiveCwd||(targetParticipantId&&targetParticipantId!==context.logicalAgentId)){
-      // No registry/model/resource exists yet; report the actual pre-start
-      // evidence so the runtime can release this rejected admission.
-      await workspace.port.release(context,{executorInstanceId:context.executorInstanceId,kind:'resources-disposed',verified:true});
-      throw new Error('workspace_project_handoff_mismatch');
-    }
-    const manifests=new Map<string,{summary:string;artifacts:Array<{path:string;label?:string;kind?:string}>}>();
-    let binding:Promise<ReturnType<typeof resolveRuntimeModelBinding>>|undefined;
-    const getProjectModel = () => resolveProjectAgentModel(targetParticipantId || context.logicalAgentId);
-    const getModelBinding=()=>binding??=getProjectModel().then(model=>model.binding);
-    const prompt=[`KSwarm project task ${handoff.task.id}`,`Project: ${handoff.project.name}`,`Goal: ${handoff.project.goal}`,`Task: ${handoff.task.title}`,handoff.task.brief??'',handoff.task.acceptanceCriteria??'',`Required outputs: ${JSON.stringify(handoff.task.requiredOutputs??[])}`,`Write deliverables to the administrator-selected artifacts directory: ${handoff.project.artifactsDir}. No directory name implies acceptance. Report actual output references, not success claims.`].join('\n');
-    const result=await runRoomWorkspaceExecutor({...workspace,prompt,port:{...workspace.port,
-      async submitManifest(current,manifest){
-        manifests.set(current.claimId,manifest);
-        if(current.claimId===context.claimId){
-          const artifacts=[...new Map([...manifests.values()].flatMap(m=>m.artifacts).map(a=>[resolve(context.effectiveCwd,a.path),{...a,path:resolve(context.effectiveCwd,a.path)}])).values()];
-          if(shouldRequireKSwarmArtifactEvidence(handoff.task)&&!artifacts.length)throw new Error('artifact_evidence_missing');
-          await workspace.port.submitManifest(current,{summary:manifest.summary,artifacts});
+      const manifests = new Map<
+        string,
+        {
+          summary: string;
+          artifacts: Array<{ path: string; label?: string; kind?: string }>;
         }
-      },
-    },createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
-      {cwd:input.cwd,getProjectModel,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
-    });
-    return {summary:result.text,artifacts:[...manifests.values()].flatMap(m=>m.artifacts)};
+      >();
+      let binding:
+        | Promise<ReturnType<typeof resolveRuntimeModelBinding>>
+        | undefined;
+      const getProjectModel = () =>
+        resolveProjectAgentModel(targetParticipantId || context.logicalAgentId);
+      const getModelBinding = () =>
+        (binding ??= getProjectModel().then((model) => model.binding));
+      const prompt = [
+        `KSwarm project task ${handoff.task.id}`,
+        `Project: ${handoff.project.name}`,
+        `Goal: ${handoff.project.goal}`,
+        `Task: ${handoff.task.title}`,
+        handoff.task.brief ?? '',
+        handoff.task.acceptanceCriteria ?? '',
+        `Required outputs: ${JSON.stringify(handoff.task.requiredOutputs ?? [])}`,
+        `Write deliverables to the administrator-selected artifacts directory: ${handoff.project.artifactsDir}. No directory name implies acceptance. Report actual output references, not success claims.`,
+      ].join('\n');
+      if (physical) physical.executorInvoked = true;
+      const result = await runRoomWorkspaceExecutor({
+        ...workspace,
+        originalRootCandidate,
+        prompt,
+        beforeEffects,
+        port: {
+          ...workspace.port,
+          async submitManifest(current, manifest) {
+            manifests.set(current.claimId, manifest);
+            if (current.claimId === context.claimId) {
+              const artifacts = [
+                ...new Map(
+                  [...manifests.values()]
+                    .flatMap((m) => m.artifacts)
+                    .map((a) => [
+                      resolve(context.effectiveCwd, a.path),
+                      { ...a, path: resolve(context.effectiveCwd, a.path) },
+                    ]),
+                ).values(),
+              ];
+              if (
+                shouldRequireKSwarmArtifactEvidence(handoff.task) &&
+                !artifacts.length
+              )
+                throw new Error('artifact_evidence_missing');
+              await workspace.port.submitManifest(current, {
+                summary: manifest.summary,
+                artifacts,
+              });
+            }
+          },
+        },
+        createRunner: (input) => {
+          connectorsService.bindTools(input.registry);
+          if (
+            roomTimedActions &&
+            input.context.contextScope.kind === 'room_only'
+          )
+            for (const tool of createRoomTimedActionTools(
+              roomTimedActions,
+              input.context,
+            ))
+              input.registry.registerTool(tool);
+          return (
+            options.runner ??
+            createDesktopModelRunnerWithRegistry(
+              input.registry,
+              input.tools,
+              options.dataRoot,
+              options.kswarmService,
+              materialRegistry,
+              {},
+              {
+                beforeEffects: input.beforeEffects,
+                cwd: input.cwd,
+                getProjectModel,
+                roomExecution: {
+                  context: input.context,
+                  getModelBinding,
+                  authorize: input.authorize,
+                  takePendingInput: input.takePendingInput,
+                },
+              },
+            )
+          );
+        },
+      });
+      return {
+        summary: result.text,
+        artifacts: [...manifests.values()].flatMap((m) => m.artifacts),
+      };
+    } finally {
+      if (physical) {
+        try {
+          if (physical.executorInvoked)
+            physical.fate = readOriginalRoomWorkspaceExecutorPhysicalFate(
+              originalRootCandidate,
+              parent,
+            );
+        } finally {
+          physical.completed = true;
+          physical.finish();
+        }
+      }
+    }
   }
-
   async function runKSwarmReadinessProbe({ targetParticipantId }: { targetParticipantId?: string } = {}) {
     const participantId = targetParticipantId || XIAOK_PO_SEED_ID;
     const base = {
@@ -2610,11 +3374,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   }
 
-  async function runKSwarmWorkflowNode({ handoff, targetParticipantId }: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string }) {
+  async function runKSwarmWorkflowNode({ handoff, targetParticipantId,beforeEffects }: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string;beforeEffects?:()=>void }) {
+    const parentRef=readCurrentOriginalRootExecutionContext(),fates:OriginalTaskHostPhysicalFate[]=[];
+    const remember=(raw:object)=>{if(parentRef)workflowHostApply(workflowHostSet,workflowHostResults,[raw,{fn:runKSwarmWorkflowNode,parentRef,fates}]);};
+    try{
+    taskSourcePopulation.assertAccepting();assertBeforeEffects(beforeEffects);
+    const executionStart=await readKSwarmExecutionStart(options.kswarmService,handoff.projectId);
+    const assertCurrent=()=>assertKSwarmTaskStart({executionStart,beforeEffects});
+    assertCurrent();
     const { getKSwarmWorkflowReadPort,readKSwarmWorkflowRunForExecution } = await import('./kswarm-service.js');
-    const restriction=await createNativeWorkflowRestrictionCheckpoint(await getKSwarmWorkflowReadPort(options.kswarmService),{projectId:handoff.projectId,workflowRunId:handoff.workflowRunId,workflowId:handoff.workflowId,nodeId:handoff.nodeId,nodeKind:handoff.nodeKind,attempt:handoff.attempt,handoffId:handoff.handoffId,participantId:targetParticipantId||'xiaok-worker',...(handoff.project?.workFolder?{admittedRoot:handoff.project.workFolder}:{})});
+    assertCurrent();
+    const readPort=await getKSwarmWorkflowReadPort(options.kswarmService);
+    assertCurrent();
+    const restriction=await createNativeWorkflowRestrictionCheckpoint(readPort,{projectId:handoff.projectId,workflowRunId:handoff.workflowRunId,workflowId:handoff.workflowId,nodeId:handoff.nodeId,nodeKind:handoff.nodeKind,attempt:handoff.attempt,handoffId:handoff.handoffId,participantId:targetParticipantId||'xiaok-worker',...(handoff.project?.workFolder?{admittedRoot:handoff.project.workFolder}:{})});
+    assertCurrent();
     const workflowDeadline = ['po-generated-task-workflow','po-generated-project-workflow'].includes(handoff.workflowId)
       ? resolveKSwarmWorkflowDeadline(await readKSwarmWorkflowRunForExecution(options.kswarmService,handoff.projectId,handoff.workflowRunId),handoff) : undefined;
+    assertCurrent();
     if(handoff.project?.id&&handoff.project.id!==handoff.projectId)throw Error('workflow_project_binding_mismatch');
     const workspaceRoot = restriction.root;
     const artifactsDir = join(workspaceRoot, 'artifacts');
@@ -2622,12 +3398,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const projectDeliverableNode = isKSwarmProjectDeliverableWorkflowNode(handoff);
     const deliverableNode = taskDeliverableNode || projectDeliverableNode;
     if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
-    return withKSwarmTaskHost(workspaceRoot, targetParticipantId, async taskHost => {
+    const result=await withKSwarmTaskHost(workspaceRoot, targetParticipantId, async taskHost => {
     const runStartedAt = Date.now();
     const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
     const runtimeResult = await runKSwarmRuntimeTextTask(taskHost, prompt, {
       artifactsDir,
       runStartedAt,
+      onTaskCreated(taskId){if(parentRef){const receipt=readOriginalTaskExecutionPhysicalReceipt(taskHost,snapshotStore,taskId,parentRef);fates.push(readOriginalTaskHostPhysicalFate(receipt,taskHost,snapshotStore,parentRef));}},
     });
     const { summary, artifacts } = runtimeResult;
     let parsed: Record<string, unknown>;
@@ -2688,18 +3465,41 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       },
       reviewDecision: null,
     };
-    }, {workflowRestrictionCheckpoint:restriction.checkpoint,workflowDeadline,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly});
+    }, {executionStart,beforeEffects,workflowRestrictionCheckpoint:restriction.checkpoint,workflowDeadline,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly,
+      ...(restriction.readonly?{readOnlyPaths:[restriction.root]}:{})});
+    remember(result);return result;
+    }catch(error){
+      if(!parentRef)throw error;
+      const original=error&&typeof error==='object'?error:new Error('KSWARM_WORKFLOW_EXECUTION_FAILED',{cause:error});remember(original);throw original;
+    }
+  }
+
+  async function readInitialPlanProducer(projectId:string,beforeEffects?:()=>void):Promise<'desktop_main_v1'|'broker_legacy_v1'|'legacy_unverified'>{
+    assertBeforeEffects(beforeEffects);const path=`/projects/${encodeURIComponent(projectId)}/initial-plan-producer`;
+    const response=await options.kswarmService.request(path,withKSwarmDesktopMutationToken(options.kswarmService,{method:'GET'}),beforeEffects);
+    const value=await readPlanningOwnerResponse(response,beforeEffects);
+    if(response.status===404 && isRecord(value) && value.error==='not_found' && value.path===path)return 'broker_legacy_v1';
+    if(!response.ok || !isRecord(value) || value.ok!==true || value.projectId!==projectId
+      || typeof value.producer!=='string' || !['desktop_main_v1','broker_legacy_v1','legacy_unverified'].includes(value.producer))throw Error('initial_plan_producer_unverified');
+    return value.producer as 'desktop_main_v1'|'broker_legacy_v1'|'legacy_unverified';
   }
 
   async function runKSwarmAssignPo({ payload, targetParticipantId, startAfterPlanning }: { payload: Record<string, unknown>; targetParticipantId?: string; startAfterPlanning?: boolean }) {
     try {
       const projectId = readString(payload.projectId) || readString(payload.taskId);
       if (!projectId) return { ok: false as const, error: 'project_id_missing' };
+      taskSourcePopulation.assertAccepting();
+      const executionStart=await readKSwarmExecutionStart(options.kswarmService,projectId);
+      const assertCurrent=()=>assertKSwarmTaskStart({executionStart});
+      assertCurrent();
+      if(await readInitialPlanProducer(projectId)==='desktop_main_v1')return {ok:false as const,error:'INITIAL_PLAN_MAIN_RECOVERY_REQUIRED'};
+      assertCurrent();
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const members = readStringArray(payload.members);
       const fallbackWorkerId = members[0] || 'xiaok-worker';
       const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
-      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, prompt), { control: true });
+      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, prompt), { executionStart, control: true });
+      assertCurrent();
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
         userGoal: readString(payload.goal),
@@ -2712,6 +3512,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       // the plan is durable, but tasks/dispatch may still be missing, so we
       // must continue rather than short-circuit a half-bootstrapped project.
       try {
+        assertCurrent();
         await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/plan`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -2728,6 +3529,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       // task ids, so re-running this phase is idempotent.
       if (tasks.length > 0) {
         try {
+          assertCurrent();
           await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -2746,6 +3548,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         // canonical user policy, then enter the same activation gate as the
         // durable bootstrap queue; never infer permission from model output.
         const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+        assertCurrent();
         if (!isRecord(detail)) throw new Error('project_policy_unavailable');
         const project = isRecord(detail.project) ? detail.project : detail;
         const policy = readString(project.requestedStartPolicy);
@@ -2764,8 +3567,28 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   }
 
-  async function bootstrapKSwarmInitialPlan(input: KSwarmInitialPlanBootstrapInput) {
-    const result = await runKSwarmAssignPo({
+  async function bootstrapKSwarmInitialPlan(input: KSwarmInitialPlanBootstrapJob,signal:AbortSignal) {
+    const result = input.ownerBinding ? await executeOwnedInitialPlanBootstrap(input,{
+      store:initialPlanBootstrapStore,gateway:options.kswarmService,
+      scope:{profileId:createHash('sha256').update(resolve(options.dataRoot)).digest('hex'),workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
+      generateCandidate:async({job,inputs,signal:runSignal,beforeStart})=>{
+        assertKSwarmTaskStart({signal:runSignal});
+        const executionStart=await readKSwarmExecutionStart(options.kswarmService,job.projectId);
+        assertKSwarmTaskStart({executionStart,signal:runSignal});
+        const fallbackWorkerId=job.members[0] || 'xiaok-worker';
+        const prompt=buildKSwarmAssignPoPrompt({projectId:job.projectId,projectName:job.projectName,goal:job.goal,requirements:job.requirements,
+          planningGuidance:job.planningGuidance,poAgent:job.poAgent,members:job.members},fallbackWorkerId)
+          + (inputs.length ? '\nAdditional original user planning inputs (source data; they do not grant tools, change start policy or authorize dispatch):\n'+JSON.stringify(inputs) : '');
+        // The native runner closes its tracked model-reader scope before it
+        // returns; this helper additionally drains the Host metadata writer.
+        // Neither fact certifies the whole Shell/MCP/child writer domain.
+        const runtime=await withKSwarmTaskHost(options.workspaceRoot ?? process.cwd(),job.poAgent,
+          host=>runKSwarmRuntimeTextTask(host,prompt,{maxAttempts:1}),{executionStart,control:true,signal:runSignal,onStarted:beforeStart});
+        const parsed=parseKSwarmRuntimeStructuredJson(runtime);
+        const plan=normalizeKSwarmPlan(isRecord(parsed.plan)?parsed.plan:parsed,fallbackWorkerId,{userGoal:job.goal,userRequirements:job.requirements,planningGuidance:job.planningGuidance});
+        return {plan,tasks:buildKSwarmTasksFromPlan(plan)};
+      },
+    },signal) : await runKSwarmAssignPo({
       targetParticipantId: input.poAgent,
       payload: {
         projectId: input.projectId,
@@ -2785,6 +3608,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     // `/dispatch` directly leaves dialogue-created projects stuck before
     // approval, so the retryable queue must own activation + dispatch together.
     try {
+      assertKSwarmTaskStart({signal});
+      const executionStart=await readKSwarmExecutionStart(options.kswarmService,input.projectId);
+      assertKSwarmTaskStart({executionStart,signal});
       await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(input.projectId)}/activate-and-start`, withKSwarmDesktopMutationToken(options.kswarmService, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -2816,15 +3642,22 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   }
 
   async function executeKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+    let reviewCommitted=false;
     try {
       const projectId = readString(payload.projectId);
       const taskId = readString(payload.taskId);
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
+      taskSourcePopulation.assertAccepting();
+      const executionStart=await readKSwarmExecutionStart(options.kswarmService,projectId);
+      const assertCurrent=()=>assertKSwarmTaskStart({executionStart});
+      assertCurrent();
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+      assertCurrent();
       const reviewPrompt = buildKSwarmReviewPrompt(payload, detail);
       const readOnlyPaths = resolveKSwarmReviewReadPaths(payload, detail);
-      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, reviewPrompt), { control: true, nativeReadonlyOnly: true, readOnlyPaths });
+      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, reviewPrompt), { executionStart, control: true, nativeReadonlyOnly: true, readOnlyPaths });
+      assertCurrent();
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
@@ -2833,12 +3666,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ review, fromAgent }),
       });
+      reviewCommitted=true;
 
       if (review.passed) {
         const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
         if (shouldSynthesizeKSwarmProject(detail)) {
+          const synthesisStart=await readKSwarmExecutionStart(options.kswarmService,projectId);
+          assertKSwarmTaskStart({executionStart:synthesisStart});
           const synthesisPrompt = buildKSwarmSynthesisPrompt(detail);
-          const synthesis = (await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, synthesisPrompt), { control: true })).summary;
+          const synthesis = (await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, synthesisPrompt), { executionStart:synthesisStart, control: true })).summary;
+          assertKSwarmTaskStart({executionStart:synthesisStart});
           await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/synthesize`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -2848,6 +3685,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       return { ok: true as const };
     } catch (error) {
+      if(reviewCommitted)return {ok:true as const,reviewCommitted:true as const,continuation:{ok:false as const,phase:'synthesis' as const,error:error instanceof Error?error.message:String(error)}};
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -2856,6 +3694,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     try {
       const projectId = readString(payload.projectId) || readString(payload.taskId);
       if (!projectId) return { ok: false as const, error: 'project_id_missing' };
+      taskSourcePopulation.assertAccepting();
+      const executionStart=await readKSwarmExecutionStart(options.kswarmService,projectId);
+      assertKSwarmTaskStart({executionStart});
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/dispatch`, {
         method: 'POST',
@@ -2941,28 +3782,134 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const thread = threadId ? multiAgentStore?.getThread(threadId) : null;
     if (thread && (thread.profileId !== multiAgentProfileId || (thread.deleteState ?? 'none') !== 'none')) throw new Error('task_scope_forbidden');
   };
+  nativeActivity=new NativeActivityAttention({bridge:codexTasks,profileId:multiAgentProfileId,actorId:`desktop-user:${multiAgentProfileId}`,
+    store:()=>activityStore,service:()=>activityService,owner:()=>{if(!nativeActivityFacade)throw Error('activity_unavailable');return nativeActivityFacade;},
+    getThread:id=>{const thread=multiAgentStore?.getThread(id);return thread?{threadId:thread.threadId,profileId:thread.profileId,workspaceId:thread.workspaceId,deleteState:thread.deleteState??'none'}:null;},authorizeTaskRead:authorizeLocalTaskActor});
 
-  return {
-    multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
-    goalShutdown,
-    // Main-only Task metadata close. Group/native effects require their own drain.
-    closeTaskSourceWritersForMigration: taskSourcePopulation.close,
-    closeMaterialRegistryAndArtifactFileManagerInstances,
-    sealAndDrainArtifactWorkspaceServiceInstance: () => artifactWorkspaceService.sealAndDrainInstanceMutations(),
-    async disposeMultiAgent(): Promise<void> {
+  const createTaskWithFiles = async function (input: {
+      prompt: string;
+      filePaths: string[];
+      context?: TaskCreateContext;
+      permissionMode?: TaskCreateInput['permissionMode'];
+    }, nativeActor?: NativeActor,current?:()=>void): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+      userSubmissions.beginEffects();
+      const nativeSelected=codexTasks.selected();
+      let guardFailed=false,guardFailure:unknown;
+      const check=()=>{if(guardFailed)throw guardFailure;try{assertBeforeEffects(current);if(nativeSelected)codexTasks.authorize(nativeActor);}catch(error){guardFailed=true;guardFailure=error;throw error;}};
+      check();
+      return afterLocalRecovery(async () => {
+        check();
+        const context = nativeSelected ? input.context : localChatContext(input.context);
+        const permissionRevision = !nativeSelected && context?.threadId ? multiAgentService?.assertExecutionAdmission(context.threadId) : undefined;
+        mkdirSync(options.dataRoot, { recursive: true });
+        const taskId = `task_${Date.now().toString(36)}`;
+        const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
+        for (const filePath of input.filePaths) {
+          check();
+          try {
+            const record = await materialRegistry.importMaterial({
+              taskId,
+              sourcePath: filePath,
+              role: 'customer_material',
+              roleSource: 'user',
+            },check);
+            materials.push({ materialId: record.materialId, role: record.role });
+          } catch (e) {
+            if(guardFailed)throw e;
+          }
+          check();
+          // Import failures keep their original skip behavior, but neither a
+          // success nor a failure may advance an old submission after revoke.
+          if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
+        }
+        if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
+        check();return nativeSelected ? conversationProjects.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode,threadId:context?.threadId},{requestSource:'user'},()=>codexTasks.create({ prompt: input.prompt, materials, context,permissionMode:input.permissionMode },nativeActor,check))
+          : conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode:input.permissionMode, threadId: context?.threadId }, { requestSource: 'user' },
+            () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context,permissionMode:input.permissionMode })));
+      });
+    };
+
+  const createTask = (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor,current?:()=>void) => {
+      assertBeforeEffects(current);
+      if(codexTasks.selected()){userSubmissions.beginEffects();return conversationProjects.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode,threadId:input.context?.threadId},{requestSource:'user'},()=>codexTasks.create(input,nativeActor,current));}
+      return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
+        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
+    };
+
+  const submitUserTask = (raw:unknown,actor?:NativeActor,recheckAfterFileSelection?:()=>void) => {
+    if(currentExecutionLane()!=='foreground')throw Error('user_submission_lane_forbidden');
+    return userSubmissions.submit(raw,actor,async input=>{
+    if(input.kind==='files'){
+      // Freeze the identity before original selection IO; failed imports cannot
+      // be relabelled as a harmless preemption and repeated silently.
+      userSubmissions.beginEffects();
+      const expanded=await expandSelectedMaterialPaths(input.filePaths);
+      recheckAfterFileSelection?.();
+      return createTaskWithFiles({...input,filePaths:expanded},actor,recheckAfterFileSelection);
+    }
+    return createTask(input,actor,recheckAfterFileSelection);
+    });
+  };
+
+  let multiAgentDisposal:Promise<void>|undefined;
+  const finalizeMultiAgentStores=():Promise<void>=>{
+    if(multiAgentDisposal)return multiAgentDisposal;
+    multiAgentDisposal=Promise.resolve().then(async()=>{
       goalShutdown.ingress.stopAccepting();
-      harnessDisposed = true;
-      if (harnessRuntime) await (await harnessRuntime).dispose();
-      activityMcp?.dispose();
-      unsubscribeActivityGroups?.(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
+      initialPlanBootstrapQueue.stopAccepting();initialPlanBootstrapQueue.abortActive('app_shutdown');
+      await activityInitializationCleanup;
+      await initialPlanBootstrapQueue.drain();
+      // Original harness worker/operations already closed in phase five.
+      unsubscribeActivityGroups?.();
+      let activityCloseError:unknown;try{await nativeActivity?.close();await closeConversationActivity({mcp:activityMcp,sources:activitySources,service:activityService,store:activityStore});}catch(error){activityCloseError=error;}
       await codexTasks.dispose();
       unsubscribeMultiAgentGoal?.();
       await multiAgentApprovals?.dispose();
       await multiAgentService?.dispose(); multiAgentCatalog?.dispose();
       // A never-settled owner still needs its journal until process exit.
-      if (executionCoordinator.snapshot().active === 0 && !multiAgentService?.runtimeStatus().blocked) multiAgentStore?.close();
-    },
-    parseOfficeDocument(input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) {
+      if (!activityCloseError && executionCoordinator.snapshot().active === 0 && !multiAgentService?.runtimeStatus().blocked) {
+        if(dshLease)await finishOriginalMainDshServiceStore(dshLease);else multiAgentStore?.close();
+      }
+      if(activityCloseError)throw activityCloseError;
+    });return multiAgentDisposal;
+  };
+  const taskShutdown=createDesktopTaskShutdownOwner({population:taskSourcePopulation,goal:goalCoordinator,
+    stopGoal:goalShutdown.ingress.stopAccepting,closeGoal:goalShutdownBase.durable.close,
+    codex:codexTasks,multiAgent:multiAgentService,bootstrap:initialPlanBootstrapQueue,
+    stopAuxiliary:()=>{
+      if(dshStartup)dshStartup.state.close();
+      if(dshStartup?.lifecycle)dshStartup.lifecycle.stopOriginalMainDshRuntimeComposition(originalServices,options.dshServiceSources!);
+      stopHarness();void nativeActivity?.close().catch(()=>{});sealKSwarmWorkflowScriptJobs(options.kswarmService);
+    },quiesceAuxiliary:async()=>{
+      const results=await Promise.allSettled([quiesceHarness(),nativeActivity?.close(),roomConversions.drain(),conversationProjects.drainOriginalTaskReads(),sealAndDrainKSwarmWorkflowScriptJobs(options.kswarmService)]);
+      const errors=results.flatMap(result=>result.status==='rejected'?[result.reason]:[]);if(errors.length)throw new AggregateError(errors,'desktop_auxiliary_quiesce_failed');
+    },finalizeServices:finalizeMultiAgentStores});
+
+  let publicTaskDisposal:Promise<{drained:boolean}>|undefined;
+  const disposeMultiAgent=():Promise<{drained:boolean}>=>{
+    if(publicTaskDisposal)return publicTaskDisposal;
+    publicTaskDisposal=Promise.resolve().then(async()=>{
+      const failures:unknown[]=[];
+      try{taskShutdown.ingress.stopAccepting();}catch(error){failures.push(error);}
+      try{taskShutdown.ingress.abortAllActive('app_shutdown');}catch(error){failures.push(error);}
+      let drained=false;try{drained=await taskShutdown.ingress.drain(5000);}catch(error){failures.push(error);}
+      if(failures.length)throw new AggregateError(failures,'desktop_task_shutdown_unconfirmed');
+      if(!drained)return {drained:false};
+      await taskShutdown.durable.close();return {drained:true};
+    });return publicTaskDisposal;
+  };
+  const originalServices = {
+    submitUserTask,
+    taskShutdown,
+    multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
+    goalShutdown,
+    kswarmBootstrapShutdown:createKSwarmBootstrapShutdownOwner(initialPlanBootstrapQueue),
+    // Main-only Task metadata close. Group/native effects require their own drain.
+    closeTaskSourceWritersForMigration: taskSourcePopulation.close,
+    closeMaterialRegistryAndArtifactFileManagerInstances,
+    sealAndDrainArtifactWorkspaceServiceInstance: () => artifactWorkspaceService.sealAndDrainInstanceMutations(),
+    disposeMultiAgent,
+    parseOfficeDocument(input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal;beforeEffects?:()=>void }) {
       return officeDocumentParser.parse(input);
     },
     registerTimedActionService(service: TimedActionService) {
@@ -3378,40 +4325,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async uninstallSkill(skillName: string, context: DesktopSkillMutationContext): Promise<{ success: boolean; message: string }> {
       return runDesktopSkillMutation('uninstall', skillName, context, process.cwd());
     },
-    async createTaskWithFiles(input: {
-      prompt: string;
-      filePaths: string[];
-      context?: TaskCreateContext;
-    }, nativeActor?: NativeActor): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
-      const nativeSelected=codexTasks.selected();
-      if(nativeSelected) codexTasks.authorize(nativeActor);
-      return afterLocalRecovery(async () => {
-        const context = nativeSelected ? input.context : localChatContext(input.context);
-        const permissionRevision = !nativeSelected && context?.threadId ? multiAgentService?.assertExecutionAdmission(context.threadId) : undefined;
-        mkdirSync(options.dataRoot, { recursive: true });
-        const taskId = `task_${Date.now().toString(36)}`;
-        const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
-        for (const filePath of input.filePaths) {
-          try {
-            const record = await materialRegistry.importMaterial({
-              taskId,
-              sourcePath: filePath,
-              role: 'customer_material',
-              roleSource: 'user',
-            });
-            materials.push({ materialId: record.materialId, role: record.role });
-          } catch (e) {
-          }
-          // Import failures keep their original skip behavior, but neither a
-          // success nor a failure may advance an old submission after revoke.
-          if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
-        }
-        if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
-        return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor)
-          : conversationRooms.withUserRequest({prompt:input.prompt},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, threadId: context?.threadId }, { requestSource: 'user' },
-            () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context })));
-      });
-    },
+    createTaskWithFiles,
     async getModelConfig() {
       return modelSnapshot(await loadConfig());
     },
@@ -3575,7 +4489,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const records = await loadExecRecords(options.dataRoot);
       return aggregateStats(records);
     },
-    async testProviderConnection(input: { providerId: string; modelId?: string }, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+    testProviderConnection(input: { providerId: string; modelId?: string }, requestSource?: 'user' | 'agent' | 'scheduler',eventProof?:object): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+      const owner=modelProbeApply(modelProbeWeakGet,modelProbeServiceMembers,[originalServices]) as MainModelProbeServicesBinding|undefined;
+      if(owner?.source)return runModelProbe(input,requestSource,eventProof,owner);
+      if(hasOriginalMainSdkBridgeInstallation())return modelProbeRejected(Error('MAIN_MODEL_PROBE_SOURCE_REQUIRED'));
+      const legacy=async():Promise<{success:boolean;latencyMs?:number;error?:string}>=>{
       if (requestSource !== 'user') throw new Error('model_config_user_required');
       input = captureModelProviderInput(input, PROVIDER_CONNECTION_INPUT_SCHEMA);
       const config = await loadConfig();
@@ -3629,6 +4547,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       } catch (e) {
         return { success: false, error: (e as Error).message };
       }
+      };
+      return legacy();
     },
     async listAvailableModelsForProvider(providerId: string) {
       const profile = getProviderProfile(providerId);
@@ -3702,34 +4622,44 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     stopObservationTask(taskId: string, context: {requestSource:'user';control:object}) { if(context?.requestSource!=='user'||observationTaskControls.get(taskId)!==context.control)throw new Error('observation_task_owner_required'); const live = observationTasks.get(taskId)?.live; if (!live) throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_ACTIVE'); live.stopNewCapture(); },
     async revokeObservationTask(taskId: string, context: {requestSource:'user';control:object}) { if(context?.requestSource!=='user'||observationTaskControls.get(taskId)!==context.control)throw new Error('observation_task_owner_required'); const entry=observationTasks.get(taskId); if(!entry)throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_ACTIVE'); entry.consumed=true; entry.revoked=true; entry.live?.revoke(); await host.cancelTask(taskId, 'observation_permission_revoked'); },
-    createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
-      if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
-      return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
-        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
-    },
+    createTask,
     /** Main-only binding; never exposed through preload or a model tool. */
     bindConversationRoomCreator: (creator: (input:Record<string,unknown>,context:{requestSource:'user';signal?:AbortSignal})=>Promise<unknown>) => conversationRooms.bindCreator(creator),
+    bindRoomConversionBroker:roomConversions.bindBroker,
+    captureRoomConversion:roomConversions.capture,
+    observeRoomConversion:roomConversions.observe,
     bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => {
+      if(dshStartup)dshStartup.state.current();
       activityRoomClient = client; conversationProjects.bindRoomClient(client);
-      void multiAgentReady.then(async () => { await conversationProjects.recoverActivityBindings(); for (const watch of activityStore?.listWatches() ?? []) await activitySources?.startWatch(watch.watchId); }).catch(error => console.warn('[conversation-activity] restore failed:', error));
+      activityRoomRecoveryPending=true;
+      if(dshStartup){
+        if(dshStartup.state.isRemoteOpen()){
+          const work=dshStartup.remote.sdk(restoreActivityRoomBindings,undefined,[]);dshStartup.remote.inventory(work);
+          modelProbeApply(modelProbeThen,work,[()=>undefined,(raw:unknown)=>dshStartup.state.remoteFailed(raw)]);
+        }
+      }else void multiAgentReady.then(restoreActivityRoomBindings).catch(error => console.warn('[conversation-activity] restore failed:', error));
     },
     async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
       if (!activityEnabled || !multiAgentStore) return;
       if (activityAttachment) return activityAttachment;
+      activityChangingOwner=true;
       const attempt: Promise<void> = (async () => {
         await multiAgentReady;
+        await activityInitializationCleanup;
         // Stop all in-process writers and source owners before acquiring the
         // daemon lock. Native executors keep their original ownership.
-        activityMcp?.dispose(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
+        await closeConversationActivity({mcp:activityMcp,sources:activitySources,service:activityService,store:activityStore});
         activityStore = undefined;
-        const client = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: options.dataRoot,
-          profileId: multiAgentProfileId, actorId: `desktop-user:${multiAgentProfileId}`,
-          identity: { kind: 'desktop', path: join(options.dataRoot, 'multi-agent', 'groups.sqlite') }, ...sourceConfig });
+        const ownerConfig:ActivityOwnerConfig={schemaVersion:1,dataRoot:options.dataRoot,profileId:multiAgentProfileId,actorId:`desktop-user:${multiAgentProfileId}`,identity:{kind:'desktop',path:join(options.dataRoot,'multi-agent','groups.sqlite')},...sourceConfig};
+        const client=options.writerControlBootstrap
+          ?await ensureDesktopConversationActivityOwner(ownerConfig,{...options.writerControlBootstrap,service:options.kswarmService,...(options.defaultDispatchBootstrap?{businessBootstrap:options.defaultDispatchBootstrap}:{}),...(preparationBootstrap?{preparationBootstrap}:{})})
+          :await ensureConversationActivityOwner(ownerConfig,{nativeSource:true,onNativeSourceUnavailable:error=>console.warn('[conversation-activity] Native source unavailable:',error)});
         options.kswarmService.bindActivityOwner?.(client);
         activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { readOnly: true });
-        activityService = new ConversationActivityAttachedService(client, `desktop-user:${multiAgentProfileId}`);
+        activityService = new ConversationActivityAttachedService(client, `desktop-user:${multiAgentProfileId}`,{reader:activityAttentionReader,assertNative:assertLocalActivityUserRead,
+          isNativeBinding:id=>nativeActivity?.hasBinding(id)??false,nativeCurrent:actor=>{if(!nativeActivity)throw Error('activity_native_read_forbidden');nativeActivity.assertReadActorCurrent(actor);}},{store:activityStore,assertUserRead:assertLocalActivityUserRead});
         activitySources = new ConversationActivityAttachedSources(client);
-        activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+        activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,assertLocalUserRead:assertLocalActivityUserRead,
           externalObserver: connection => connection.activityEndpoint?.config.type !== 'stdio',
           endpointReady: async connection => {
             const endpoint = connection.activityEndpoint;
@@ -3745,7 +4675,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         installActivityGroupSubscription();
       })();
       activityAttachment = attempt;
-      attempt.then(() => { activityAttachFailure = undefined; }, error => {
+      attempt.then(() => { activityChangingOwner=false;activityAttachFailure = undefined; }, error => {
+        activityChangingOwner=false;
         // Do not cache the failure: allow a later retry. The in-process writers were disposed
         // before the owner was contacted, so drop them rather than keep dead handles.
         if (activityAttachment === attempt) activityAttachment = undefined;
@@ -3755,24 +4686,41 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       });
       return attempt;
     },
-    conversationActivity: activityEnabled && multiAgentStore ? {
+    conversationActivity: nativeActivityFacade = activityEnabled && multiAgentStore ? {
+      nativeQuestions:async(watchId:string,actor:ActivityActor,frame:NativeActivityReadAdmission)=>{await awaitActivityAttachment();if(!nativeActivity)throw Error('activity_native_read_forbidden');return nativeActivity.questions(watchId,actor,frame);},
+      nativeAnswer:async(watchId:string,input:NativeActivityAnswer,actor:ActivityActor,frame:NativeActivityReadAdmission)=>{await awaitActivityAttachment();if(!nativeActivity)throw Error('activity_native_read_forbidden');return nativeActivity.answer(watchId,input,actor,frame);},
+      assertNativeReadResultCurrent:(raw:unknown,frame:NativeActivityReadAdmission)=>{if(!nativeActivity)throw Error('activity_native_read_forbidden');nativeActivity.assertReadResultCurrent(raw,frame);},
+      assertReadResultCurrent:(raw:unknown,actor:ActivityActor)=>{
+        if(!raw||typeof raw!=='object'||!('watch' in raw)||!raw.watch||typeof raw.watch!=='object'||!('watchId' in raw.watch)||typeof raw.watch.watchId!=='string')return;
+        if(activityChangingOwner||activityAttachFailure!==undefined)throw Error('activity_owner_unavailable');
+        const watch=activityStore?.getWatch(raw.watch.watchId),originalProject='source' in raw.watch&&raw.watch.source==='kswarm';
+        if(!originalProject&&watch?.source!=='kswarm')return;
+        if(!watch||watch.source!=='kswarm')throw Error('activity_source_superseded');
+        if(activityService instanceof ConversationActivityService){activityService.assertProjectWorkReadCurrent(raw,actor);return;}
+        if(activityService instanceof ConversationActivityAttachedService){activityService.assertProjectWorkReadCurrent(raw,actor);return;}
+        if('attentionState' in raw||'presentation' in raw&&raw.presentation&&typeof raw.presentation==='object'&&'deliveryStage' in raw.presentation&&raw.presentation.deliveryStage!=='none')throw Error('activity_project_return_unverified');
+        assertLocalActivityUserRead(watch,actor);
+      },
       mcpInputs: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
       mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
       mcpCancel: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
       unread: async (actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.unreadThreads(actor); },
       read: async (threadId: string, through: number, actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.markRead(threadId, through, actor); },
       overview: async (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => { await awaitActivityAttachment(); return activityService!.subscribeOverview(actor, callback); },
-      getWork: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.getWork(watchId, actor); },
+      getWork: async (watchId: string, actor: ActivityActor,frame?:NativeActivityReadAdmission) => { await awaitActivityAttachment();if(nativeActivity?.isNativeWatch(watchId))return nativeActivity.read(watchId,actor,frame);return activityService!.getWork(watchId, actor); },
+      dismissAttention:async(watchId:string,input:{expectedProjectionVersion:number;expectedPresentationIncarnation:string},actor:ActivityActor,frame?:NativeActivityReadAdmission)=>{await awaitActivityAttachment();if(nativeActivity?.isNativeWatch(watchId))return nativeActivity.read(watchId,actor,frame,input);if(!activityService?.dismissAttention)throw Error('attention_inventory_unavailable');return activityService.dismissAttention(watchId,input,actor);},
       list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
       subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
       reporting: async (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => { await awaitActivityAttachment(); return activityService!.updateReporting(watchId, preference, revision, actor); },
       stop: async (watchId: string, revision: number, actor: ActivityActor) => { await awaitActivityAttachment(); const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
       projectChanged: async (projectId: string) => {
+        if(!activityChangingOwner&&activitySources)return activitySources.refreshProject(projectId,true);
         await awaitActivityAttachment();
         if (!activitySources) throw new Error('activity_owner_unavailable');
         await activitySources.refreshProject(projectId, true);
       },
       projectConnectionChanged: async (status: 'connected' | 'disconnected' | 'reconnecting') => {
+        if(!activityChangingOwner&&activitySources)return activitySources.projectConnectionChanged(status);
         await awaitActivityAttachment();
         if (!activitySources) throw new Error('activity_owner_unavailable');
         await activitySources.projectConnectionChanged(status);
@@ -3872,8 +4820,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     runKSwarmPlanApproved,
     authorizeTaskRead: authorizeLocalTaskActor,
     subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number; signal?: AbortSignal }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTask(taskId,sinceIndex),
-    answerQuestion: async (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => {
-      if (codexTasks.owns(input.taskId)) return codexTasks.answer(input, nativeActor);
+    answerQuestion: async (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor,current?:()=>void) => {
+      if (codexTasks.owns(input.taskId)) {
+        codexTasks.authorize(nativeActor);assertBeforeEffects(current);
+        const snapshot=await codexTasks.host.inspectTask(input.taskId);assertBeforeEffects(current);
+        if(!snapshot||snapshot.taskId!==input.taskId||!snapshot.context?.threadId)throw Error('task_scope_forbidden');
+        const check=()=>{
+          assertBeforeEffects(current);codexTasks.assertTaskRouteIdentity({taskId:input.taskId,threadId:snapshot.context!.threadId!,sessionId:snapshot.sessionId},nativeActor!);
+          const thread=multiAgentStore?.getThread(snapshot.context!.threadId!);
+          if(!thread||thread.profileId!==multiAgentProfileId||thread.workspaceId!==multiAgentWorkspaceId&&!authorizeHistoricalNativeThread(thread)||(thread.deleteState??'none')!=='none')throw Error('task_scope_forbidden');
+        };check();return codexTasks.answer(input,nativeActor,check);
+      }
       if (nativeActor) await authorizeLocalTaskActor(input.taskId, nativeActor);
       return resolveScopedTaskHost(input.taskId, host).answerQuestion(input);
     },
@@ -4047,6 +5004,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return { recorded: workspaceService.recordArtifactWorkspaceEvent(mutation) };
     },
     async reconcileArtifactWorkspace(): Promise<void> {
+      if(dshStartup)dshStartup.state.assertRemoteOpen();
       await workspaceService.reconcileStartup();
       workspaceService.cleanup();
     },
@@ -4122,12 +5080,146 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!kbStore) throw new Error('knowledge_base_unavailable');
       return kbStore;
     },
-    startProjectPlanning(input: KSwarmInitialPlanBootstrapInput, source?: 'user' | 'agent' | 'scheduler') {
+    /** Main composition identity only. Never registered in preload/IPC/tool DTOs. */
+    getProjectPlanningTriggerOwner(){return initialPlanBootstrapStore;},
+    startProjectPlanning(input: ProjectPlanningInput, source?: 'user' | 'agent' | 'scheduler',beforeEffects?:()=>void,triggerProof?:ProjectPlanningTriggerProof) {
       if (source !== 'user') throw Error('project_planning_source_forbidden');
-      const result = initialPlanBootstrapQueue.enqueue(captureProjectPlanningInput(input));
-      return result.ok ? result : { ok: false as const, error: 'project_planning_failed' };
+      let admissionFailed=false,triggerProjectId:string|undefined;const current=()=>{try{taskSourcePopulation.assertAccepting();assertBeforeEffects(beforeEffects);if(triggerProof!==undefined){const fact=inspectProjectPlanningTrigger(triggerProof,initialPlanBootstrapStore);if(triggerProjectId!==undefined&&fact.projectId!==triggerProjectId)throw Error('project_planning_trigger_project_mismatch');}}catch(error){admissionFailed=true;throw error;}};current();
+      const captured=captureProjectPlanningInput(input);triggerProjectId=captured.projectId;current();
+      if('action' in captured){
+        if(!triggerProof)throw Error('project_planning_trigger_unverified');
+        return executeTaskMetadataPlanning({store:initialPlanBootstrapStore,gateway:options.kswarmService,projects:conversationProjects,
+          scope:{profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId},now:options.now??Date.now,
+          authorizeSource:async(source,sourceCurrent)=>{
+            sourceCurrent();await multiAgentReady;sourceCurrent();
+            const sourceHost=codexTasks.owns(source.sourceTaskId)?codexTasks.host:resolveScopedTaskHost(source.sourceTaskId,host);
+            const snapshot=await sourceHost.inspectTask(source.sourceTaskId);sourceCurrent();
+            if(!snapshot||snapshot.taskId!==source.sourceTaskId||snapshot.sessionId!==source.sourceSessionId||snapshot.context?.threadId!==source.identity.threadId)throw Error('task_scope_forbidden');
+            const check=()=>{sourceCurrent();const thread=multiAgentStore?.getThread(source.identity.threadId);
+              if(!thread||thread.profileId!==multiAgentProfileId||thread.workspaceId!==multiAgentWorkspaceId||(thread.deleteState??'none')!=='none')throw Error('task_scope_forbidden');};check();return check;
+          }},captured,{requestSource:'user',triggerProof,current});
+      }
+      return (async()=>{
+        try{
+          current();const producer=await readInitialPlanProducer(captured.projectId,current);current();
+          if(producer==='desktop_main_v1'){
+            const job=initialPlanBootstrapStore.list().find(job=>job.projectId===captured.projectId);
+            if(!job?.ownerBinding || job.ownerBinding.profileId!==multiAgentProfileId || job.ownerBinding.workspaceId!==multiAgentWorkspaceId)
+              return {ok:false as const,error:'initial_plan_source_reconciliation_required'};
+            const observed=await createInitialPlanOwnerClient(options.kswarmService,job.ownerBinding,new AbortController().signal,current).read();current();
+            if(!observed.state.ok)return {ok:false as const,error:'initial_plan_owner_unavailable'};
+            // A repeated user start observes the original frozen job. Renderer
+            // title/goal/PO/policy fields cannot replace a committed generation.
+            return enqueueInitialPlan(job);
+          }
+          return enqueueInitialPlan(captured);
+        }catch(error){if(admissionFailed)throw error;return {ok:false as const,error:error instanceof Error && error.message==='initial_plan_producer_unverified'?'initial_plan_producer_unverified':'project_planning_failed'};}
+      })();
     },
   };
+  roomRunnerApply(roomRunnerSet,originalRoomRunners,[originalServices,runCollaborationRoomAgentTask]);
+  function runModelProbe(rawInput:{providerId:string;modelId?:string},requestSource:unknown,eventProof:object|undefined,binding:MainModelProbeServicesBinding):Promise<{success:boolean;latencyMs?:number;error?:string}>{
+    let captured:{providerId:string;modelId?:string},digest:string;
+    try{if(requestSource!=='user'||!eventProof||typeof eventProof!=='object'||roomRunnerTypes.isProxy(eventProof)||!binding.source||!binding.configPath)throw Error('MAIN_MODEL_PROBE_SOURCE_REQUIRED');captured=captureModelProviderInput(rawInput,PROVIDER_CONNECTION_INPUT_SCHEMA);digest=modelProbeInputDigest(captured);}catch(raw){return modelProbeRejected(raw);}
+    const prior=modelProbeApply(modelProbeWeakGet,binding.operations,[eventProof]) as ModelProbeOperation|undefined;
+    if(prior){if(prior.bodyHash!==digest)return modelProbeRejected(Error('MAIN_MODEL_PROBE_OPERATION_CONFLICT'));if(prior.promise)return prior.promise;if(prior.fault)return modelProbeRejected(prior.fault.raw);return modelProbeRejected(Error('MAIN_MODEL_PROBE_OPERATION_PENDING'));}
+    if(binding.unknown)return modelProbeRejected(binding.unknown.raw);
+    const op:ModelProbeOperation={bodyHash:digest,sdk:createRoomTurnCustody(),configSdk:createRoomTurnCustody()};
+    modelProbeApply(modelProbeWeakSet,binding.operations,[eventProof,op]);binding.held.add(op);
+    let yes!:(value:{success:boolean;latencyMs?:number;error?:string})=>void,no!:(raw:unknown)=>void;
+    try{op.promise=new ModelProbePromise((resolve,reject)=>{yes=resolve;no=reject;});}catch(raw){op.fault={raw};binding.unknown={raw};throw raw;}
+    const operation=op.sdk.root(async()=>{
+      let result:{success:boolean;latencyMs?:number;error?:string}|undefined,first:{raw:unknown}|undefined;
+      try{
+        const event=readOriginalMainModelProbeEvent(binding.source!,eventProof!);
+        if(event.storageScope.profileId!==binding.storageScope.profileId||event.storageScope.workspaceId!==binding.storageScope.workspaceId||event.principalId!==binding.principalId||event.body.providerId!==captured.providerId||event.body.modelId!==(captured.modelId??null))throw Error('MAIN_MODEL_PROBE_OPERATION_CONFLICT');
+        event.assertCurrent();event.assertLocal();
+        const path=binding.configPath!;if(modelProbeResolve(modelProbeConfigPath())!==path)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');
+        const before=modelProbeConfigBytes(op.configSdk,path),config=await op.configSdk.sdk<Awaited<ReturnType<typeof loadConfig>>>(loadConfig,undefined,[]);
+        const after=modelProbeConfigBytes(op.configSdk,path);if(before!==after||modelProbeResolve(modelProbeConfigPath())!==path)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');
+        const providerId=normalizeProviderId(captured.providerId),provider=config.providers[providerId];if(!provider?.apiKey)throw Error('MAIN_MODEL_PROBE_CONFIG_REQUIRED');
+        const modelId=resolveProviderConnectionModelId(config,providerId,captured.modelId);if(!modelId)throw Error('MAIN_MODEL_PROBE_CONFIG_REQUIRED');
+        const selected=resolveRuntimeModelBinding(config,modelId);if(selected.providerId!==providerId)throw Error('MAIN_MODEL_PROBE_OPERATION_CONFLICT');
+        const receipt=modelProbeFreeze(modelProbeCreate(null)) as object,configDigest=modelProbeDigest(before,true);let lost:{raw:unknown}|undefined;
+        const local=()=>{if(lost)throw lost.raw;event.assertLocal();op.configSdk.local();};
+        const current=()=>{local();try{event.assertCurrent();const actual=modelProbeConfigBytes(op.configSdk,path);if(modelProbeResolve(modelProbeConfigPath())!==path||modelProbeDigest(actual,true)!==configDigest)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');local();}catch(raw){if(!lost)lost={raw};throw raw;}};
+        const view:MainModelProbeConfigurationView=modelProbeFreeze({userSource:binding.source!,eventProof:eventProof!,bodyHash:event.bodyHash,storageScope:binding.storageScope,principalId:binding.principalId,requestedProviderId:captured.providerId,requestedModelId:captured.modelId??null,providerId,resolvedModelId:selected.modelId,configDigest,assertCurrent:current,assertLocal:local});
+        modelProbeApply(modelProbeWeakSet,modelProbeConfigurations,[receipt,{services:originalServices,binding,view}]);
+        const producer=await loadOriginalMainModelProbeSource();const context=producer.createOriginalMainModelProbeContext(binding.source!,eventProof!,originalServices,receipt),adapter=createAdapterFromBinding(selected),controller=new AbortController();
+        const signal=modelProbeApply(modelProbeAny,AbortSignal,[[controller.signal,event.signal]]) as AbortSignal;
+        const timeout=setTimeout(()=>controller.abort(new DOMException('provider connection timeout','TimeoutError')),30000),start=Date.now();
+        try{await runWithOriginalRootExecutionContext(context,async()=>{let saw=false;current();for await(const chunk of streamStatelessSideCallProviderConversation({adapter,messages:[{role:'user',content:[{type:'text',text:'ping'}]}],tools:[],systemPrompt:'Reply with "ok" to verify connection.',options:{signal},invocationId:`inv_${randomUUID()}`})){if(chunk.type!=='usage')saw=true;}signal.throwIfAborted();if(!saw)throw Error('provider_connection_empty_stream');});}
+        finally{clearTimeout(timeout);}
+        result={success:true,latencyMs:Date.now()-start};
+      }catch(raw){first={raw};op.sdk.inventory(raw);result={success:false,error:'MAIN_MODEL_PROBE_FAILED'};}
+      try{await op.configSdk.waitPhysicalKnown();}catch(raw){binding.unknown??={raw};if(!first)first={raw};throw raw;}
+      if(!result)throw first?.raw;return result;
+    });
+    function complete(value:{success:boolean;latencyMs?:number;error?:string}|undefined,failure?:{raw:unknown}):void {
+      const draining=op.sdk.waitPhysicalKnown();
+      modelProbeApply(modelProbeThen,draining,[()=>{if(!binding.unknown)binding.held.delete(op);if(failure){op.fault=failure;no(failure.raw);}else yes(value!);},(raw:unknown)=>{op.fault=failure??{raw};binding.unknown??={raw};no(failure?new AggregateError([failure.raw,raw],'MAIN_MODEL_PROBE_UNCONFIRMED',{cause:failure.raw}):raw);}]);
+    }
+    // This observer returns void before the physical join can finish; inventory
+    // its raw Promise without making the join await its own async callback.
+    const observer=modelProbeApply(modelProbeThen,operation,[(value:{success:boolean;latencyMs?:number;error?:string})=>{complete(value);},(raw:unknown)=>{complete(undefined,{raw});}]);op.sdk.inventory(observer);
+    return op.promise;
+  }
+  modelProbeApply(modelProbeWeakSet,modelProbeServiceMembers,[originalServices,{source:options.modelProbeUserSource,storageScope:modelProbeFreeze({profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId}),principalId:'desktop-user:'+multiAgentProfileId,configPath:options.modelProbeUserSource?modelProbeResolve(modelProbeConfigPath()):undefined,operations:new WeakMap(),held:new Set()}]);
+  modelProbeApply(modelProbeWeakSet,materialServiceMembers,[originalServices,modelProbeFreeze({source:options.materialUserSource,storageScope:modelProbeFreeze({profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId}),principalId:'desktop-user:'+multiAgentProfileId,parseOfficeDocument:originalServices.parseOfficeDocument})]);
+  if(dshLease&&multiAgentStore&&dshReady&&dshStartup){
+    const observeStartup=(stock:ReturnType<typeof createRoomTurnCustody>,work:Promise<void>,failed:(raw:unknown)=>void)=>{
+      const observed=modelProbeApply(modelProbeThen,work,[()=>undefined,failed]);stock.inventory(observed);
+    };
+    dshStartup.startRecovery=()=>{
+      const stock=dshStartup.recovery,work=stock.root(async()=>{
+        await dshStartup.state.constructionReady;dshStartup.state.current();
+        await stock.sdk(observationLifecycle.recover,observationLifecycle,[]);dshStartup.state.current();
+        if(multiAgentService){
+          const initializing=stock.sdk(multiAgentService.initialize,multiAgentService,[host]);
+          dshStartup.state.current();
+          hostDeliveryAuthority=await stock.sdk<DesktopHostDeliveryAuthority>(multiAgentService.bindHostDeliveryOwner,multiAgentService,[host]);
+          await initializing;dshStartup.state.current();
+        }
+        dshStartup.state.recoveryDone();
+      });observeStartup(stock,work,raw=>dshStartup.state.recoveryFailed(raw));
+    };
+    dshStartup.startRemote=()=>{
+      const stock=dshStartup.remote,work=stock.root(async()=>{
+        await dshStartup.state.recoveryReady;dshStartup.state.current();
+        const identity=readOriginalKSwarmServiceIdentity(options.kswarmService);
+        stock.syncVoid(identity.assertCurrent,identity,[]);dshStartup.state.current();
+        dshStartup.state.openRemote();
+        if(startPendingLocalActivity){stock.syncVoid(startPendingLocalActivity,undefined,[]);startPendingLocalActivity=undefined;}
+        stock.syncVoid(initialPlanBootstrapQueue.startRecovery,initialPlanBootstrapQueue,[]);
+        await stock.sdk(restoreActivityRoomBindings,undefined,[]);dshStartup.state.current();
+        await stock.sdk(workspaceService.reconcileStartup,workspaceService,[]);await stock.sdk(workspaceService.cleanup,workspaceService,[]);
+        dshStartup.state.remoteDone();
+      });observeStartup(stock,work,raw=>dshStartup.state.remoteFailed(raw));
+    };
+    modelProbeApply(modelProbeWeakSet,mainDshServiceStartups,[originalServices,dshStartup]);
+    modelProbeApply(modelProbeWeakSet,mainDshServiceMembers,[originalServices,modelProbeFreeze({sources:options.dshServiceSources!,lease:dshLease,host,taskStore:snapshotStore,taskPopulation:taskSourcePopulation,store:multiAgentStore,kswarmService:options.kswarmService,directRunner:runKSwarmHandoffTask,constructionReady:dshStartup.state.constructionReady,ready:dshReady})]);
+    transferOriginalMainDshServiceSources(dshLease);
+    const stock=dshStartup.construction,work=stock.root(async()=>{
+      dshStartup.state.current();
+      const consumeLifecycle=()=>{};
+      const lifecycle=await stock.sdk<typeof MainDshRuntimeLifecycle>(loadOriginalMainDshRuntimeLifecycle,undefined,[],{accept:value=>!!value&&typeof value==='object',consumer:consumeLifecycle});
+      dshStartup.lifecycle=lifecycle;
+      // The fixed loader consumed the namespace; only its three captured methods
+      // are retained here, with no caller callback or late Services lookup.
+      await stock.consumeResource(consumeLifecycle,lifecycle,[]);
+      dshStartup.state.current();
+      const identity=readOriginalTaskHostIdentityIO(host,snapshotStore);
+      await stock.sdk(identity.initialize,identity,[]);dshStartup.state.current();
+      // The original Store claim is idempotent on this exact instance
+      // (ownerClaimed guard). Later MA recovery reuses it without a new boot.
+      await stock.sdk(multiAgentStore.claimBootOwnership,multiAgentStore,[]);dshStartup.state.current();
+      const port=readOriginalDshAdmissionPort(multiAgentStore,dshLease.realm);
+      await stock.sdk(port.initialize,port,[dshLease.realm.openBootstrap('initialize'),{requestSource:'user'}]);dshStartup.state.current();
+      await stock.sdk(port.upgradeAdmission,port,[dshLease.realm.openBootstrap('migrate_admission'),{requestSource:'user'}]);
+      dshStartup.state.constructionDone();
+    });observeStartup(stock,work,raw=>dshStartup.state.constructionFailed(raw));
+  }
+  return originalServices;
 }
 
 function buildComputerUseNeedsEnablementError(): ComputerUseUnavailableError {
@@ -4235,30 +5327,11 @@ function resolveCodeSignatureTeamId(appPath: string): string | undefined {
   }
 }
 
-function formatKSwarmRequiredOutputs(outputs: KSwarmTaskHandoff['task']['requiredOutputs']): string {
-  if (!Array.isArray(outputs)) return '';
-  const normalized: string[] = [];
-  for (const output of outputs) {
-    const raw = typeof output === 'string'
-      ? output
-      : output?.type || output?.format || output?.kind || output?.mimeType || '';
-    const value = String(raw || '').trim();
-    if (value && !normalized.includes(value)) normalized.push(value);
-  }
-  return normalized.join(', ');
-}
-
 function inferKSwarmArtifactKind(kind: string, label: string): string {
   const normalized = String(kind || '').toLowerCase();
   const lowerLabel = String(label || '').toLowerCase();
   if ((normalized === 'text' || normalized === 'other') && lowerLabel.endsWith('.md')) return 'markdown';
   return normalized || 'file';
-}
-
-function shouldRequireKSwarmArtifactEvidence(task: KSwarmTaskHandoff['task']): boolean {
-  if ((task.requiredOutputs ?? []).length > 0) return true;
-  if (task.evidenceContract && task.evidenceContract.required === true) return true;
-  return false;
 }
 
 function discoverKSwarmArtifactsFromDirectory(input: {
@@ -4315,6 +5388,7 @@ async function runKSwarmRuntimeTextTask(
     artifactsDir?: string;
     runStartedAt?: number;
     materials?: Array<{ materialId: string; role?: MaterialRole }>;
+    maxAttempts?:1|2;
     // design §6.2 RoomHistoryReadCapability：可选钩子，在 host.createTask
     // 成功产出真实 taskId 后立即调用（不等到任务完成）。通用签名，不专属
     // Room——其它调用方可以忽略它；Room 任务用它在 agent 真正开始执行前
@@ -4323,7 +5397,7 @@ async function runKSwarmRuntimeTextTask(
   } = {},
 ): Promise<{ taskId: string; summary: string; structuredOutput?: Record<string, unknown>; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
   const runStartedAt = options.runStartedAt || Date.now();
-  const maxAttempts = 2;
+  const maxAttempts = options.maxAttempts ?? 2;
   let lastFailure: string | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let retry = false;
@@ -4846,12 +5920,13 @@ export async function recoverInterruptedScriptWorkflows(kswarmService: KSwarmSer
     }
     for (const run of runs) {
       if (restarted >= maxRestarts) break;
+      if (run.projectId !== projectId || typeof run.id !== 'string' || !run.id.trim() || run.id !== run.id.trim()) continue;
       if (readString(run.source) !== 'script_generated') continue;
       if (!isResumableWorkflowRunStatus(run)) continue;
       const scriptSource = readString(run.scriptSource);
       if (!scriptSource) continue;
       try {
-        const result = restoreWorkflowScriptBackgroundJob({
+        const result = await restoreWorkflowScriptBackgroundJob({
           kswarmService,
           projectId,
           workflowRunId: readString(run.id),
@@ -4893,6 +5968,7 @@ export async function resumeOneScriptWorkflow(
     return { restored: false, reason: 'kswarm_unavailable' };
   }
   if (!run) return { restored: false, reason: 'not_found' };
+  if (run.projectId !== projectId || run.id !== workflowRunId) return {restored:false,reason:'workflow_scope_mismatch'};
   if (readString(run.source) !== 'script_generated') {
     return { restored: false, reason: 'not_script_workflow' };
   }
@@ -4902,10 +5978,10 @@ export async function resumeOneScriptWorkflow(
   const scriptSource = readString(run.scriptSource);
   if (!scriptSource) return { restored: false, reason: 'no_script_source' };
   try {
-    return restoreWorkflowScriptBackgroundJob({
+    return await restoreWorkflowScriptBackgroundJob({
       kswarmService,
       projectId,
-      workflowRunId: readString(run.id) || workflowRunId,
+      workflowRunId,
       scriptSource,
       scriptHash: readString(run.scriptHash) || null,
       assignedAgent: readString(run.assignedAgent) || undefined,
@@ -5837,11 +6913,14 @@ export async function executeReadMaterialForDesktop(
     materials: MaterialRecord[];
     materialRegistry?: MaterialRegistry;
     maxChars?: number;
-    pdfToText?: (bytes: Uint8Array) => Promise<string>;
-    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
+    pdfToText?: (bytes: Uint8Array,beforeEffects?:()=>void) => Promise<string>;
+    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal;beforeEffects?:()=>void }) => Promise<OfficeTextExtractionResult>;
     signal?: AbortSignal;
+    beforeEffects?:()=>void;
   },
 ): Promise<{ ok: boolean; result: string }> {
+  return withOriginalMaterialTurnResource(async()=>{
+  assertBeforeEffects(options.beforeEffects);
   const materialId = typeof input.materialId === 'string' ? input.materialId.trim() : '';
   const maxChars = normalizeReadMaterialLimit(input.maxChars, options.maxChars);
   if (!materialId) {
@@ -5896,7 +6975,9 @@ export async function executeReadMaterialForDesktop(
     pdfToText: options.pdfToText,
     officeToMarkdown: options.officeToMarkdown,
     signal: options.signal,
+    beforeEffects: options.beforeEffects,
   });
+  assertBeforeEffects(options.beforeEffects);
   if (extraction.parseStatus === 'parsed' && extraction.text) {
     await options.materialRegistry.updateMaterialExtraction(material.materialId, {
       extractorVersion: MATERIAL_EXTRACTOR_VERSION,
@@ -5906,7 +6987,7 @@ export async function executeReadMaterialForDesktop(
       extractionEngineVersion: extraction.engineVersion,
       extractionTruncated: extraction.truncated,
       sourceFingerprint: material.sha256,
-    }, extraction.text);
+    }, extraction.text,options.beforeEffects);
     return createReadMaterialResult(true, {
       ok: true,
       ...buildReadMaterialMetadata(material),
@@ -5925,7 +7006,7 @@ export async function executeReadMaterialForDesktop(
     extractionTruncated: extraction.truncated,
     sourceFingerprint: material.sha256,
     extractionErrorCode: extraction.errorCode,
-  });
+  },undefined,options.beforeEffects);
   if (extraction.parseStatus === 'unsupported') {
     return createReadMaterialResult(true, {
       ok: true,
@@ -5944,6 +7025,7 @@ export async function executeReadMaterialForDesktop(
     contentAvailable: false,
     message: extraction.errorMessage ?? '附件读取失败。',
   });
+  });
 }
 
 async function executeDesktopTaskTool(
@@ -5955,20 +7037,23 @@ async function executeDesktopTaskTool(
     materialRegistry?: MaterialRegistry;
     context: ToolExecutionContext;
     scoped?: boolean;
-    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
+    beforeEffects?:()=>void;
+    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal;beforeEffects?:()=>void }) => Promise<OfficeTextExtractionResult>;
   },
 ): Promise<{ ok: boolean; result: string }> {
+  assertBeforeEffects(options.beforeEffects);
   if (toolCall.name === 'read_material' && !options.scoped && !options.registry.isNativeReadonlyOnly) {
     return runMonitoredTool({name:toolCall.name,context:options.context,run: context => executeReadMaterialForDesktop(toolCall.input, {
       taskId: options.taskId,
       materials: options.materials,
       materialRegistry: options.materialRegistry,
-      pdfToText: async (bytes) => {
+      pdfToText: async (bytes,beforeEffects) => {
         const { extractPdfText } = await import('./pdf-text.js');
-        return extractPdfText(bytes);
+        assertBeforeEffects(beforeEffects);return extractPdfText(bytes,beforeEffects);
       },
       officeToMarkdown: options.officeToMarkdown,
       signal: context?.signal,
+      beforeEffects:options.beforeEffects,
     })});
   }
   const context: ToolExecutionContext = { ...options.context,
@@ -6051,6 +7136,7 @@ function assertDesktopRunCurrent(signal: AbortSignal, deadline: number): void {
 }
 
 async function streamDesktopToolLoopFinalization(input: {
+  beforeEffects?:()=>void;
   modelPhysicalScope?: DesktopModelPhysicalScope;
   prepareRequest?: DesktopTaskRequestPreparer;
   projectModel?: ProjectAgentModel;
@@ -6086,6 +7172,7 @@ async function streamDesktopToolLoopFinalization(input: {
     },
     onInvocation: (id: string) => { providerInvocationId = id; },
     beforeRequest: input.beforeRequest,
+    beforeEffects:input.beforeEffects,
     adapter: input.adapter,
     messages: input.apiMessages,
     tools: [],
@@ -6168,6 +7255,7 @@ interface ToolLoopStrategies {
 }
 
 interface ToolLoopContext {
+  beforeEffects?:()=>void;
   modelPhysicalScope?: DesktopModelPhysicalScope;
   observationBinding?: DesktopObservationBinding;
   /** Not ready until main-owned protected-history durability is available. */
@@ -6193,7 +7281,7 @@ interface ToolLoopContext {
   executionScope?: TaskRunnerInput['executionScope'];
   materials: MaterialRecord[];
   materialRegistry?: MaterialRegistry;
-  officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
+  officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal;beforeEffects?:()=>void }) => Promise<OfficeTextExtractionResult>;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
   skillInvocation: SkillInvocation | null;
   skillCatalog: SkillCatalog;
@@ -6689,6 +7777,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       adapter: ctx.adapter,
       prepareRequest: observationRequestPreparer(ctx),
       beforeRequest: async()=>{await assertNativeRegistryCheckpointCurrent(ctx.registry);await ctx.roomExecution?.authorize();},
+      beforeEffects:ctx.beforeEffects,
       messages: apiMessages,
       tools: ctx.allToolDefs,
       systemPrompt: ctx.systemPrompt,
@@ -6913,6 +8002,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         context:monitoredToolContext,
         officeToMarkdown: ctx.officeToMarkdown,
         scoped: Boolean(ctx.mailbox),
+        beforeEffects:ctx.beforeEffects,
       }); assertDesktopRunCurrent(ctx.signal, ctx.taskDeadline); } catch (error) { toolImages.finish(false); throw error; }
       let { ok, result } = execution;
       if (ok && isToolName(toolCall.name, 'create_project') && ctx.finalizeProjectProposal) {
@@ -7110,6 +8200,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       projectModel: ctx.projectModel,
       prepareRequest: observationRequestPreparer(ctx),
       beforeRequest: async()=>{await assertNativeRegistryCheckpointCurrent(ctx.registry);await ctx.roomExecution?.authorize();},
+      beforeEffects:ctx.beforeEffects,
       deadline: ctx.taskDeadline,
       adapter: ctx.adapter,
       apiMessages: await prepareDesktopLoopRequest(ctx, streamOptions, true, lastRequestInputTokens),
@@ -7265,7 +8356,7 @@ type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'acti
 
 interface KSwarmCreateProjectToolOptions {
   createRoom?: (input: Record<string,unknown>, context:{taskId:string;signal?:AbortSignal})=>Promise<Record<string,unknown>>;
-  enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
+  enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => import('./kswarm-initial-plan-bootstrap.js').KSwarmBootstrapEnqueueResult;
   finalizeProjectProposal?: (proposal: Record<string, unknown>, context: { taskId: string; signal: AbortSignal }) => Promise<Record<string, unknown> | undefined>;
 }
 
@@ -8028,6 +9119,7 @@ export function createDesktopModelRunnerWithRegistry(
   materialRegistry: MaterialRegistry,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
   runnerOptions: {
+    beforeEffects?:()=>void;
     observationTasks?: Map<string, DesktopObservationTaskActivation>;
     observationGroupHost?: { getHost(): InProcessTaskRuntimeHost; observationStore: import('../../src/runtime/task-host/protected-observation-store.js').DesktopTaskObservationStore };
     cwd?:string;
@@ -8040,10 +9132,12 @@ export function createDesktopModelRunnerWithRegistry(
     /** Stable provider-runtime identity captured before services exist (§4). */
     pluginProviderRuntime?: GatewayRuntimeFacade;
     multiAgent?: { runtime: DesktopMultiAgentRuntime; service: DesktopMultiAgentService; catalog: DesktopToolCatalogBridge; workspaceId: string; cwd: string };
-    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
+    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal;beforeEffects?:()=>void }) => Promise<OfficeTextExtractionResult>;
   } = {},
 ): (input: TaskRunnerInput, rootContext?: DesktopAgentExecutionContext) => Promise<void> {
+  assertBeforeEffects(runnerOptions.beforeEffects);
   const nativeReadonlyOnly = registry.isNativeReadonlyOnly;
+  if(nativeReadonlyOnly&&!isScopedNativeReadonlyRegistry(registry))throw Error('native_readonly_scope_required');
   const cwd = runnerOptions.cwd ?? runnerOptions.multiAgent?.cwd ?? process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
@@ -8084,19 +9178,20 @@ export function createDesktopModelRunnerWithRegistry(
       ownerId: 'desktop-host', slotKey: 'read_material', binding: 'custom', verifiedReadOnly: true,
       bindInvocation: authority => async input => (await executeReadMaterialForDesktop(input, {
         taskId: authority.agentId, materials: authority.materialIds.map(id => materialRegistry.get(id)).filter((item): item is MaterialRecord => Boolean(item)),
-        materialRegistry, signal: authority.signal, officeToMarkdown: runnerOptions.officeToMarkdown,
-        pdfToText: async bytes => (await import('./pdf-text.js')).extractPdfText(bytes),
+        materialRegistry, signal: authority.signal,beforeEffects:runnerOptions.beforeEffects, officeToMarkdown: runnerOptions.officeToMarkdown,
+        pdfToText: async (bytes,beforeEffects) => (await import('./pdf-text.js')).extractPdfText(bytes,beforeEffects),
       })).result,
     });
   }
 
   const run = async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, persistObservationSnapshot, executionPersistence, registerCompoundFinalPublication, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }: TaskRunnerInput, rootContext: DesktopAgentExecutionContext | undefined, observationActivation: DesktopObservationTaskActivation | undefined) => {
+    assertBeforeEffects(runnerOptions.beforeEffects);
     // Initialization consumes the caller's remaining duration too.
     const runDeadline = resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs);
     const pendingRoomImages:MessageBlock[]=[];
     if(!nativeReadonlyOnly && runnerOptions.roomExecution)registry.registerTool({permission:'safe',definition:{name:'read_workspace_material',description:'Read a document or image downloaded into the current collaboration workspace. Use file_path relative to the workspace. Images are supplied to the model visually; documents return extracted text. Paths outside the workspace are forbidden.',inputSchema:{type:'object',properties:{file_path:{type:'string'},maxChars:{type:'number'}},required:['file_path']}},async execute(input,context){
-      const record=await materialRegistry.importMaterial({taskId,sourcePath:String(input.file_path),role:'customer_material',roleSource:'auto'});
-      const result=await executeReadMaterialForDesktop({materialId:record.materialId,maxChars:input.maxChars},{taskId,materials:[record],materialRegistry,signal:context?.signal,officeToMarkdown:runnerOptions.officeToMarkdown,pdfToText:async bytes=>(await import('./pdf-text.js')).extractPdfText(bytes)});
+      const record=await materialRegistry.importMaterial({taskId,sourcePath:String(input.file_path),role:'customer_material',roleSource:'auto'},runnerOptions.beforeEffects);
+      const result=await executeReadMaterialForDesktop({materialId:record.materialId,maxChars:input.maxChars},{taskId,materials:[record],materialRegistry,signal:context?.signal,beforeEffects:runnerOptions.beforeEffects,officeToMarkdown:runnerOptions.officeToMarkdown,pdfToText:async (bytes,beforeEffects)=>(await import('./pdf-text.js')).extractPdfText(bytes,beforeEffects)});
       if(result.ok)pendingRoomImages.push(...buildImageBlocksForMaterials([record]));
       return result.result;
     }});
@@ -8168,9 +9263,12 @@ export function createDesktopModelRunnerWithRegistry(
     if (observationActivation && (runnerOptions.roomExecution || executionScope || !persistObservationSnapshot || (!rootContext&&hostHistory.length) || (observationActivation.consumed&&!observationActivation.group) || observationActivation.revoked)) throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_READY');
     if (observationActivation) observationActivation.consumed = true;
     const baseConfig = await loadConfig();
+    assertBeforeEffects(runnerOptions.beforeEffects);
     const config = observationActivation ? (await import('../../src/runtime/sol-pi/product-bootstrap.js')).prepareObservationConfig(baseConfig, observationActivation.policy) : baseConfig;
     const projectModel = await runnerOptions.getProjectModel?.();
+    assertBeforeEffects(runnerOptions.beforeEffects);
     const binding = projectModel?.binding ?? await runnerOptions.roomExecution?.getModelBinding?.() ?? resolveRuntimeModelBinding(config);
+    assertBeforeEffects(runnerOptions.beforeEffects);
     const profileId = resolveDesktopHarnessProfileId(binding);
     if (isStrictKimiK3ProfileId(profileId)) {
       validateStrictDesktopHistory(hostHistory);
@@ -8267,6 +9365,7 @@ export function createDesktopModelRunnerWithRegistry(
     let loopResult!: Awaited<ReturnType<typeof runDesktopToolLoop>>;
     try {
       const runLoop=(loopBinding=observed?.binding,loopRegistry=invocationRegistry,loopMessages=messages,loopSignal=signal,beforeManagedTurnSeal?:()=>Promise<void>)=>runDesktopToolLoop({
+      beforeEffects:runnerOptions.beforeEffects,
       modelPhysicalScope,
       beforeManagedTurnSeal,
       observationBinding: loopBinding,

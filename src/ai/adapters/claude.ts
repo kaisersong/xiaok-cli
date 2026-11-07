@@ -1,3 +1,4 @@
+import {createOriginalModelSdkAttemptTransport,finishOriginalModelSdkAttempt} from '../runtime/original-model-sdk-attempt.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
 import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -234,17 +235,25 @@ export class ClaudeAdapter implements ModelAdapter {
       cache_control: (t as CachedToolDefinition).cache_control,
     }));
 
+    const modelPhysical=createOriginalModelSdkAttemptTransport(signal,options?.providerDisclosure);let originalFailure:{raw:unknown}|undefined;
+    try {
     const sharedClient = await this.getClient();
-    const client = options?.providerDisclosure
-      ? sharedClient.withOptions({ fetch: createProviderDisclosureFetch(options.providerDisclosure, globalThis.fetch.bind(globalThis)) })
+    const physicalFetch=modelPhysical?.fetch??globalThis.fetch.bind(globalThis);
+    const client = options?.providerDisclosure||modelPhysical
+      ? sharedClient.withOptions({ fetch: options?.providerDisclosure?createProviderDisclosureFetch(options.providerDisclosure, physicalFetch):physicalFetch,...(modelPhysical?{maxRetries:0}:{}) })
       : sharedClient;
-    const stream = client.messages.stream({
+    const parameters={
       model: this.model,
       max_tokens: options?.maxOutputTokens ?? CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
       system: (options?.promptCache?.systemPrompt ?? systemPrompt) as string | SystemPromptBlock[],
       messages: anthropicMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
-    }, { signal });
+    };
+    // The high-level MessageStream uses this exact low-level SDK entry. This
+    // consumer needs raw events, not its additional lazy-input accumulator.
+    const stream=modelPhysical
+      ? await modelPhysical.createAnthropic(client,{...parameters,stream:true}) as AsyncIterable<Anthropic.RawMessageStreamEvent>
+      : client.messages.stream(parameters,{signal});
 
     // Buffer for tool_use arguments
     const toolBuffers = new Map<number, { id: string; name: string; jsonBuffer: string }>();
@@ -307,5 +316,6 @@ export class ClaudeAdapter implements ModelAdapter {
         yield { type: 'done' };
       }
     }
+    }catch(raw){originalFailure={raw};throw raw;}finally{await finishOriginalModelSdkAttempt(modelPhysical,originalFailure);}
   }
 }

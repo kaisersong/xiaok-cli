@@ -1,4 +1,5 @@
 import { createLocalSourceWriterLifetime } from '../verification/local-source-writer-lifetime.js';
+import {assertBeforeEffects} from '../verification/before-effects.js';
 import { createHash } from 'node:crypto';
 import { constants, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { writeFileAtomicallySync } from '../../utils/atomic-file.js';
@@ -74,16 +75,19 @@ export class MaterialRegistry {
     sourceWriters.set(this, createLocalSourceWriterLifetime('material_source'));
   }
 
-  async importMaterial(input: ImportMaterialInput): Promise<MaterialRecord> {
+  async importMaterial(input: ImportMaterialInput,beforeEffects?:()=>void): Promise<MaterialRecord> {
     return sourceWriter(this).runAsync(async () => {
+      assertBeforeEffects(beforeEffects);
       input = structuredClone(input);
       this.assertIndexWritable();
       validateMaterialTaskId(input.taskId);
       if (!isMaterialRole(input.role) || !isMaterialRoleSource(input.roleSource)
         || input.parseStatus !== undefined && !isMaterialParseStatus(input.parseStatus)
         || input.parseSummary !== undefined && typeof input.parseSummary !== 'string') throw Error('material_input_schema');
-      const workspaceRoot = await ensureRealDir(this.options.workspaceRoot);
+      const workspaceRoot = await ensureRealDir(this.options.workspaceRoot,beforeEffects);
+      assertBeforeEffects(beforeEffects);
       const sourceRealPath = await realpath(input.sourcePath);
+      assertBeforeEffects(beforeEffects);
       if (isMaterialPathInside(sourceRealPath, workspaceRoot)) {
         throw new Error('unsafe material source path: source is already inside task workspace');
       }
@@ -95,6 +99,7 @@ export class MaterialRegistry {
       }
 
       const sourceStat = await stat(sourceRealPath);
+      assertBeforeEffects(beforeEffects);
       if (!sourceStat.isFile()) {
         throw new Error('unsupported material source: not a file');
       }
@@ -102,15 +107,19 @@ export class MaterialRegistry {
         throw new Error(`oversized material: ${sourceStat.size} bytes`);
       }
 
-      const taskRoot = await ensureChildDirectory(workspaceRoot, input.taskId);
-      const taskDir = await ensureChildDirectory(taskRoot, 'materials');
+      const taskRoot = await ensureChildDirectory(workspaceRoot, input.taskId,beforeEffects);
+      assertBeforeEffects(beforeEffects);
+      const taskDir = await ensureChildDirectory(taskRoot, 'materials',beforeEffects);
+      assertBeforeEffects(beforeEffects);
 
       const materialId = this.createMaterialId(workspaceRoot);
       const originalName = basename(sourceRealPath);
       const workspacePath = join(taskDir, `${materialId}${ext}`);
       await copyFile(sourceRealPath, workspacePath, constants.COPYFILE_EXCL);
+      assertBeforeEffects(beforeEffects);
 
       const sha256 = await hashFile(workspacePath);
+      assertBeforeEffects(beforeEffects);
       const record: MaterialRecord = {
         materialId,
         taskId: input.taskId,
@@ -125,8 +134,7 @@ export class MaterialRegistry {
         parseSummary: input.parseSummary,
         createdAt: this.options.now?.() ?? Date.now(),
       };
-      this.records.set(materialId, record);
-      await this.saveIndex();
+      await this.saveIndex(beforeEffects,()=>this.records.set(materialId,record));
       return structuredClone(record);
     });
   }
@@ -151,11 +159,11 @@ export class MaterialRegistry {
     return [...this.records.values()].filter((record) => record.taskId === taskId).map(record => structuredClone(record));
   }
 
-  updateMaterialExtraction(materialId: string, extraction: MaterialExtractionUpdate): Promise<MaterialRecord>;
-  updateMaterialExtraction(materialId: string, extraction: MaterialExtractionUpdate & { parseStatus: 'parsed' }, text: string): Promise<MaterialRecord>;
-  async updateMaterialExtraction(materialId: string, extraction: MaterialExtractionUpdate, text?: string): Promise<MaterialRecord> {
+  updateMaterialExtraction(materialId: string, extraction: MaterialExtractionUpdate,text?:undefined,beforeEffects?:()=>void): Promise<MaterialRecord>;
+  updateMaterialExtraction(materialId: string, extraction: MaterialExtractionUpdate & { parseStatus: 'parsed' }, text: string,beforeEffects?:()=>void): Promise<MaterialRecord>;
+  async updateMaterialExtraction(materialId: string, extraction: MaterialExtractionUpdate, text?: string,beforeEffects?:()=>void): Promise<MaterialRecord> {
     return sourceWriter(this).runAsync(async () => {
-      this.assertIndexWritable();
+      assertBeforeEffects(beforeEffects);this.assertIndexWritable();
       if (Object.hasOwn(extraction, 'extractedTextPath')) throw Error('material_extraction_target');
       extraction = structuredClone(extraction);
       if (!isMaterialParseStatus(extraction.parseStatus) || !hasValidExtractionFields(extraction)) throw Error('material_extraction_schema');
@@ -166,6 +174,7 @@ export class MaterialRegistry {
       let extractedTextPath: string | undefined;
       if (text !== undefined) {
         extractedTextPath = await this.extractionTarget(existing);
+        assertBeforeEffects(beforeEffects);
         writeFileAtomicallySync(extractedTextPath, text);
       }
       const updated: MaterialRecord = {
@@ -181,8 +190,7 @@ export class MaterialRegistry {
         sourceFingerprint: extraction.sourceFingerprint,
         extractionErrorCode: extraction.extractionErrorCode,
       };
-      this.records.set(materialId, updated);
-      await this.saveIndex();
+      await this.saveIndex(beforeEffects,()=>this.records.set(materialId,updated));
       return structuredClone(updated);
     });
   }
@@ -274,9 +282,12 @@ export class MaterialRegistry {
     }
   }
 
-  private async saveIndex(): Promise<void> {
+  private async saveIndex(beforeEffects?:()=>void,beforeCommit?:()=>unknown): Promise<void> {
     try {
+      assertBeforeEffects(beforeEffects);
       await mkdir(this.options.workspaceRoot, { recursive: true });
+      assertBeforeEffects(beforeEffects);
+      beforeCommit?.();
       // Serialize the latest complete map in the same stack as its atomic commit.
       writeFileAtomicallySync(this.indexPath(), JSON.stringify({ ...this.indexEnvelope, records: [...this.records.values()] }, null, 2));
       this.indexFailure = undefined;
@@ -288,17 +299,23 @@ export class MaterialRegistry {
   }
 }
 
-async function ensureRealDir(path: string): Promise<string> {
+async function ensureRealDir(path: string,beforeEffects?:()=>void): Promise<string> {
+  assertBeforeEffects(beforeEffects);
   await mkdir(path, { recursive: true });
+  assertBeforeEffects(beforeEffects);
   return realpath(path);
 }
 
-async function ensureChildDirectory(parent: string, name: string): Promise<string> {
+async function ensureChildDirectory(parent: string, name: string,beforeEffects?:()=>void): Promise<string> {
   const child = join(parent, name);
+  assertBeforeEffects(beforeEffects);
   try { await mkdir(child); } catch (error) { if (!isNodeErrorCode(error, 'EEXIST')) throw error; }
+  assertBeforeEffects(beforeEffects);
   const info = await lstat(child);
+  assertBeforeEffects(beforeEffects);
   if (!info.isDirectory() || info.isSymbolicLink()) throw Error('material_task_path');
   const canonical = await realpath(child);
+  assertBeforeEffects(beforeEffects);
   if (!isMaterialPathInside(canonical, parent)) throw Error('material_task_path');
   return canonical;
 }

@@ -1,4 +1,5 @@
 import { ModelStreamPhysicalOwner, type ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { randomUUID } from 'node:crypto';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
@@ -9,6 +10,7 @@ export type DesktopTaskRequestPreparer = (request: Request) => Promise<Request>;
 type Input = Request & {
   deadline: number;
   beforeRequest?: () => Promise<void>;
+  beforeEffects?:()=>void;
   prepareRequest?: DesktopTaskRequestPreparer;
   onInvocation?: (id: string) => void;
   onRecovery?: (notice: ModelRecoveryNotice & { summaryOnly: boolean }) => void | Promise<void>;
@@ -74,13 +76,17 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
         let originalBodyFailure: { error: unknown } | undefined;
         const source = (async function*() {
         prepared = false;
+        assertBeforeEffects(input.beforeEffects);
         await input.beforeRequest?.();
         requestSignal.throwIfAborted();
+        assertBeforeEffects(input.beforeEffects);
         const request = { ...input, messages, tools: summaryOnly ? [] : input.tools, invocationId,
           options: { ...input.options, signal: requestSignal } };
         const current = input.prepareRequest ? await input.prepareRequest(request) : request;
         requestSignal.throwIfAborted();
+        assertBeforeEffects(input.beforeEffects);
         input.onInvocation?.(invocationId);
+        assertBeforeEffects(input.beforeEffects);
         prepared = true;
         const claimOwner = physicalRun && physicalClaimOwners.get(physicalRun);
         if (physicalRun && !claimOwner) throw Error('desktop_model_physical_claim_invalid');

@@ -7,6 +7,18 @@ const request = (adapter: any, extra: any = {}) => ({ adapter,
   options: { signal: new AbortController().signal }, invocationId: 'first', deadline: Date.now() + 1000, policy, ...extra });
 const collect = async (input: any) => { const out = []; for await (const x of streamDesktopTaskRecovery(input)) out.push(x); return out; };
 describe('Desktop model request recovery', () => {
+  it.each(['prepare_return','invocation_callback'] as const)('rechecks the private synchronous guard at %s before the actual provider',async frame=>{
+    let allowed=true;const sentinel=Error('original_project_start_revoked'),stream=vi.fn(async function*(){yield{type:'done'};});
+    const beforeEffects=()=>{if(!allowed)throw sentinel;};
+    const input=request({stream},{beforeEffects,prepareRequest:async(current:any)=>{if(frame==='prepare_return')allowed=false;return current;},onInvocation:()=>{if(frame==='invocation_callback')allowed=false;}});
+    let failure:unknown;try{await collect(input);}catch(error){failure=error;}
+    expect(stream).not.toHaveBeenCalled();expect(failure).toBe(sentinel);
+  });
+  it.each(['boolean','promise'] as const)('rejects a non-void %s start guard before the actual provider',async kind=>{
+    const stream=vi.fn(async function*(){yield{type:'done'};});
+    let failure:unknown;try{await collect(request({stream},{beforeEffects:()=>kind==='boolean'?false:Promise.reject(Error('guard_must_be_synchronous'))}));}catch(error){failure=error;}
+    expect(stream).not.toHaveBeenCalled();expect(failure).toBeInstanceOf(Error);
+  });
   it('recovers before any text without child agents, refreshing request and usage identity', async () => {
     const prepare = vi.fn(async (r: any) => r), ids: string[] = [], signals: AbortSignal[] = [];
     let calls = 0;

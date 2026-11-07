@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync, realpathSync } from 'fs';
+import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync, realpathSync, constants } from 'fs';
 import { extname, resolve } from 'path';
 import type { Tool } from '../../types.js';
 import { assertWorkspacePath, type OutsideWorkspaceGuard } from '../permissions/workspace.js';
@@ -22,11 +22,36 @@ export interface WorkspaceToolOptions {
   artifactRoot?: string;
   /** Host-owned exact read-only references; never accepted from model input. */
   readOnlyPaths?: string[];
+  /** Host-only physical input ceiling for bounded readonly roles. */
+  maxReadBytes?: number;
 }
 
 const OOXML_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx']);
 const HEADER_SNIFF_BYTES = 4096;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+function readBoundedReadonlyFile(path: string, ceiling: number): Buffer {
+  // O_NONBLOCK prevents opening a FIFO from waiting for another writer before
+  // fstat can reject it. The same descriptor supplies both identity and bytes.
+  const handle = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const initial = fstatSync(handle);
+    if (!initial.isFile()) throw new Error('read_regular_file_required');
+    if (initial.size > ceiling) throw new Error('read_scan_limit');
+    const buffer = Buffer.alloc(Math.min(initial.size + 1, ceiling + 1));
+    let size = 0;
+    while (size < buffer.length) {
+      const read = readSync(handle, buffer, size, buffer.length - size, size);
+      if (!read) break;
+      size += read;
+    }
+    const current = fstatSync(handle);
+    if (size > ceiling) throw new Error('read_scan_limit');
+    if (size !== initial.size || current.size !== initial.size || current.mtimeMs !== initial.mtimeMs)
+      throw new Error('read_changed_during_scan');
+    return buffer.subarray(0, size);
+  } finally { closeSync(handle); }
+}
 
 function readBoundedImage(path: string): Buffer {
   const handle = openSync(path, 'r');
@@ -80,6 +105,9 @@ function classifyReadContent(path: string, header: Buffer): ReadContentKind {
 export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
+  const maxReadBytes = options.maxReadBytes;
+  if (maxReadBytes !== undefined && (!Number.isSafeInteger(maxReadBytes) || maxReadBytes < 1 || maxReadBytes > 16 * 1024 * 1024))
+    throw new Error('read_byte_ceiling_invalid');
   const readOnlyPaths = new Set((options.readOnlyPaths ?? []).flatMap(file => {try {return [realpathSync(file)];}catch{return [];}}));
 
   return {
@@ -125,14 +153,16 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         return SENSITIVE_FILE_REDACTION;
       }
       try {
-        const header = readHeader(resolvedPath);
+        const bounded = maxReadBytes === undefined ? undefined : readBoundedReadonlyFile(resolvedPath, maxReadBytes);
+        const header = bounded?.subarray(0, HEADER_SNIFF_BYTES) ?? readHeader(resolvedPath);
         const kind = classifyReadContent(resolvedPath, header);
         const mediaType = detectImageMediaType(header);
         if (mediaType && kind !== 'ooxml' && kind !== 'pdf') {
           if (context?.modelSupportsImageInput !== true || !context.emitToolImage) {
             return 'Error: 当前调用没有可用的视觉图片输入通道。请切换到支持图片输入的模型；不能根据文件大小推断画面内容。';
           }
-          const data = readBoundedImage(resolvedPath);
+          const data = bounded ?? readBoundedImage(resolvedPath);
+          if (data.length > MAX_IMAGE_BYTES) throw new Error('图片只能是最多 4MiB 的普通文件');
           const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: mediaType, data: data.toString('base64') } };
           const dimensions = validateToolImage(image);
           context.signal?.throwIfAborted();
@@ -158,7 +188,7 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
           }
           content = extraction.text;
         } else {
-          content = readFileSync(resolvedPath, 'utf-8');
+          content = bounded?.toString('utf8') ?? readFileSync(resolvedPath, 'utf-8');
         }
 
         const lines = content.split('\n');

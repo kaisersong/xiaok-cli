@@ -8,6 +8,17 @@ import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
+import {createActivityOwnerTestScope,type ActivityOwnerTestScope} from '../support/activity-owner-test-cleanup.js';
+const fixtureActivityOwners=vi.hoisted(()=>({current:undefined as ActivityOwnerTestScope|undefined}));
+vi.mock('../../src/runtime/conversation-activity/owner-launcher.js',async original=>{
+ const actual=await original<typeof import('../../src/runtime/conversation-activity/owner-launcher.js')>();
+ return {...actual,ensureConversationActivityOwner:(config:Parameters<typeof actual.ensureConversationActivityOwner>[0],options:Parameters<typeof actual.ensureConversationActivityOwner>[1]={})=>{
+  const scope=fixtureActivityOwners.current;if(!scope)throw Error('fixture_activity_owner_scope_required');
+  if(config.identity.kind!=='cli'||options.spawn!==undefined)throw Error('fixture_activity_owner_original_producer_required');
+  scope.assertOwnedPath(config.identity.path);
+  return scope.runOriginalLaunch(config.dataRoot,spawn=>actual.ensureConversationActivityOwner(config,{...options,spawn}));
+ }};
+});
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
 
 const watchdogEvents = vi.hoisted(() => [] as string[]);
@@ -1160,6 +1171,7 @@ vi.mock('../../src/ui/model-selector.js', () => ({
 // Windows CI runners spend 7.6-9.9s median per case here; 20s keeps occasional slow cases (Node 24) from timing out.
 describe('chat interactive runtime', { timeout: 20_000 }, () => {
   const tempDirs: string[] = [];
+  const retainedUnknownActivityRoots=new Set<string>();
   let originalConfigDir: string | undefined;
   let originalHome: string | undefined;
   let originalDisableGlobalPlugins: string | undefined;
@@ -1216,6 +1228,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   };
 
   beforeEach(() => {
+    fixtureActivityOwners.current=createActivityOwnerTestScope(()=>tempDirs.filter(root=>!retainedUnknownActivityRoots.has(root)));
     resetAdapterState();
     watchdogEvents.length=0;
     mockSelectModel.mockReset();
@@ -1239,6 +1252,12 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   });
 
   afterEach(async () => {
+    const activityScope=fixtureActivityOwners.current,activityCleanupErrors:unknown[]=[];
+    // The real producer client is closed by chat; join our separately born owner before deleting its files.
+    try{await activityScope?.close();}catch(raw){activityCleanupErrors.push(raw);}
+    try{activityScope?.assertClosed();}catch(raw){activityCleanupErrors.push(raw);}
+    fixtureActivityOwners.current=undefined;
+    let ownersPhysicallyClosed=true;try{activityScope?.assertClosed();}catch{ownersPhysicallyClosed=false;}
     observeOwnCrashReports();
     cwdSpy?.mockRestore();
     cwdSpy = undefined;
@@ -1258,13 +1277,18 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
     }
 
+    if(!ownersPhysicallyClosed)for(const dir of tempDirs)retainedUnknownActivityRoots.add(dir);
+    const retained:string[]=[];
     for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
+      if(retainedUnknownActivityRoots.has(dir))retained.push(dir);
+      else await removeTempDirWithRetry(dir);
     }
+    tempDirs.push(...retained);
 
     vi.resetModules();
     vi.clearAllMocks();
     resetAdapterState();
+    if(activityCleanupErrors.length)throw new AggregateError(activityCleanupErrors,'fixture_activity_owner_cleanup_failed');
   });
 
   it.skipIf(process.platform==='win32')('starts without session persistence when the config link is unsafe', async () => {

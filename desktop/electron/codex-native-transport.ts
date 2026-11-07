@@ -1,4 +1,21 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { types } from 'node:util';
+import { hasOriginalMainSdkBridgeInstallation } from '../../src/runtime/verification/original-main-sdk-bridge.js';
+import { createOriginalCodexProcessSourceTicket } from './codex-process-source.js';
+import { createOriginalSourceProcess, listenOriginalToolProcess, sealOriginalToolProcessListeners,
+  retainOriginalToolProcessValue, waitOriginalToolProcessPhysical, terminateOriginalToolProcess } from '../../src/runtime/verification/original-process-sdk.js';
+import { createRoomTurnCustody, type RoomTurnCustody } from '../../src/runtime/verification/original-sdk-custody.js';
+
+const launchMembers = new WeakMap<object, Readonly<{command:string;argv:readonly string[];options:Readonly<import('node:child_process').SpawnOptions>;assertCurrent():void;assertLocal():void}>>();
+const launchGet=WeakMap.prototype.get,launchSet=WeakMap.prototype.set,launchApply=Reflect.apply;
+const launchDescriptors=Object.getOwnPropertyDescriptors,launchDescriptor=Object.getOwnPropertyDescriptor;
+const launchPrototype=Object.getPrototypeOf,launchOwn=Object.hasOwn,launchIsProxy=types.isProxy;
+const launchKeys=Reflect.ownKeys,launchIsArray=Array.isArray;
+/** Passive private birth reader; the Service reader separately proves ownership. */
+export function readOriginalCodexProcessLaunch(probe:unknown) {
+  const row=launchApply(launchGet,launchMembers,[probe]) as Readonly<{command:string;argv:readonly string[];options:Readonly<import('node:child_process').SpawnOptions>;assertCurrent():void;assertLocal():void}>|undefined;
+  if(!row)throw Error('CODEX_PROCESS_ORIGINAL_LAUNCH_REQUIRED');return row;
+}
 
 export function resolveLaunch(entry: string, args: string[] = [], platform: string = process.platform) {
   if (platform === 'win32' && /\.(cmd|bat)$/i.test(entry)) throw new Error('Use a real JS/executable entry, not a Windows shim');
@@ -17,28 +34,78 @@ export interface NativeOptions {
 export class SessionProbe {
   threadId: string | null = null; activeTurnId: string | null = null; exited = false; events: NativeEvent[] = []; cursor = 0;
   options: NativeOptions & { timeoutMs: number };
-  #child?: ChildProcessWithoutNullStreams; #pending = new Map<number, any>(); #waiters = new Set<any>(); #next = 0; #failure?: Error; #closing?: Promise<void>; #exitPromise?: Promise<void>; #starting = false; #binding = false;
-  constructor(options: NativeOptions) { this.options = { timeoutMs: 30000, ...options }; }
+  #child?: ChildProcessWithoutNullStreams; #pending = new Map<number, any>(); #waiters = new Set<any>(); #next = 0; #failure:unknown; #failurePresent=false; #closing?: Promise<void>; #exitPromise?: Promise<void>; #starting = false; #binding = false;
+  #processTicket?: object;
+  #qualifiedOptions?: NativeOptions & {timeoutMs:number};
+  #processAttempt?: object;
+  #callbackStocks: RoomTurnCustody[]=[];
+  constructor(options: NativeOptions) {
+    const qualified=hasOriginalMainSdkBridgeInstallation();
+    if(qualified) {
+      if(new.target!==SessionProbe||!options||typeof options!=='object'||launchIsProxy(options)||(launchPrototype(options)!==Object.prototype&&launchPrototype(options)!==null))throw Error('CODEX_PROCESS_LAUNCH_INVALID');
+      const fields=launchDescriptors(options);
+      for(const name of launchKeys(fields)){
+        const field=launchDescriptor(fields,name)?.value as PropertyDescriptor|undefined;
+        if(typeof name!=='string'||(name!=='executable'&&name!=='prefixArgs'&&name!=='cwd'&&name!=='timeoutMs'&&name!=='sandbox'&&name!=='onEvent'&&name!=='onApproval'&&name!=='onFailure')||!field||!launchOwn(field,'value'))throw Error('CODEX_PROCESS_LAUNCH_INVALID');
+      }
+      const executable=launchDescriptor(fields,'executable')?.value?.value,cwd=launchDescriptor(fields,'cwd')?.value?.value;
+      const prefix=launchDescriptor(fields,'prefixArgs')?.value?.value as unknown;
+      if(typeof executable!=='string'||typeof cwd!=='string')throw Error('CODEX_PROCESS_LAUNCH_INVALID');
+      if(prefix!==undefined){
+        if(!launchIsArray(prefix)||launchIsProxy(prefix)||launchPrototype(prefix)!==Array.prototype)throw Error('CODEX_PROCESS_LAUNCH_INVALID');
+        for(let i=0;i<prefix.length;i++){const field=launchDescriptor(prefix,String(i));if(!field||!launchOwn(field,'value')||typeof field.value!=='string')throw Error('CODEX_PROCESS_LAUNCH_INVALID');}
+      }
+    }
+    this.options = { timeoutMs: 30000, ...options };
+    if(qualified){
+      const prefixArgs=this.options.prefixArgs?Object.freeze([...this.options.prefixArgs]):undefined;
+      const fixed=Object.freeze({...this.options,prefixArgs}) as NativeOptions & {timeoutMs:number};this.options=fixed;this.#qualifiedOptions=fixed;
+      const launch=resolveLaunch(fixed.executable,prefixArgs?[...prefixArgs]:[]);
+      const argv=Object.freeze([...launch.args]),env=Object.freeze({...process.env,ELECTRON_RUN_AS_NODE:'1'});
+      const spawnOptions=Object.freeze({cwd:fixed.cwd,stdio:'pipe' as const,detached:process.platform!=='win32',windowsHide:true,env});
+      let retired=false;
+      const assertLocal=()=>{if(retired||launchDescriptor(this,'options')?.value!==fixed||this.#closing||this.#failurePresent){retired=true;throw Error('CODEX_PROCESS_ORIGINAL_LAUNCH_RETIRED');}};
+      launchApply(launchSet,launchMembers,[this,Object.freeze({command:launch.command,argv,options:spawnOptions,assertCurrent:assertLocal,assertLocal})]);
+    }
+  }
+  #settings():NativeOptions & {timeoutMs:number}{return this.#qualifiedOptions??this.options;}
   get pid() { return this.#child?.pid; }
-  #assert() { if (this.#failure) throw this.#failure; if (!this.#child) throw new Error('connection closed'); }
-  #fail(error: Error) {
-    if (this.#failure) return;
-    this.#failure = error;
+  #retain<T>(raw:T):T {if(this.#processAttempt)retainOriginalToolProcessValue(this.#processAttempt,raw);return raw;}
+  #syncCallback(fn:Function|undefined,args:unknown[]):void {
+    if(!fn)return;
+    if(!this.#processAttempt){Reflect.apply(fn,this.#settings(),args);return;}
+    const stock=createRoomTurnCustody();this.#callbackStocks.push(stock);
+    stock.syncVoid(fn,this.#settings(),args);
+  }
+  async #asyncCallback<T>(fn:Function,args:unknown[]):Promise<T> {
+    if(!this.#processAttempt)return Reflect.apply(fn,this.#settings(),args) as T;
+    const stock=createRoomTurnCustody();this.#callbackStocks.push(stock);
+    let failed=false,primary:unknown,value!:T,cleanupFailed=false,secondary:unknown;
+    try{value=await stock.sdk<T>(fn,this.#settings(),args);}catch(error){failed=true;primary=error;}
+    try{await stock.waitPhysicalKnown();}catch(error){cleanupFailed=true;secondary=error;}
+    if(failed&&cleanupFailed)throw new AggregateError([primary,secondary],'CODEX_CALLBACK_PHYSICAL_UNCONFIRMED',{cause:primary});
+    if(failed)throw primary;if(cleanupFailed)throw secondary;return value;
+  }
+  #assert() { if (this.#failurePresent) throw this.#failure; if (!this.#child) throw new Error('connection closed'); }
+  #fail(error: unknown) {
+    this.#retain(error);
+    if (this.#failurePresent) return;
+    this.#failurePresent=true;this.#failure = error;
     for (const p of this.#pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.#pending.clear();
-    this.options.onFailure?.(error);
-    for (const w of [...this.#waiters]) w.finish(error);
+    try{this.#syncCallback(this.#settings().onFailure,[error]);}catch(secondary){this.#retain(secondary);}
+    for (const w of [...this.#waiters])try{w.finish(error,undefined,true);}catch(secondary){this.#retain(secondary);}
   }
-  #send(message: any) { this.#assert(); this.#child!.stdin.write(JSON.stringify(message) + '\n'); }
+  #send(message: any) { this.#assert();try{this.#retain(this.#child!.stdin.write(JSON.stringify(message) + '\n'));}catch(error){this.#retain(error);throw error;} }
   #request(method: string, params: any): Promise<any> {
     this.#assert(); const id = ++this.#next;
-    return new Promise((resolve, reject) => {
+    return this.#retain(new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#fail(new Error(`RPC timeout: ${method}`)); void this.close().catch(() => {});
-      }, this.options.timeoutMs);
+      }, this.#settings().timeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
       try { this.#send({ id, method, params }); } catch (e) { this.#fail(e as Error); }
-    });
+    }));
   }
   #event(message: NativeEvent) {
     const event = { ...message, seq: ++this.cursor }; this.events.push(event);
@@ -47,7 +114,7 @@ export class SessionProbe {
       if (event.method === 'turn/started') this.activeTurnId = event.params.turn.id;
       if (event.method === 'turn/completed' && event.params.turn.id === this.activeTurnId) this.activeTurnId = null;
     }
-    this.options.onEvent?.(event);
+    this.#syncCallback(this.#settings().onEvent,[event]);
     for (const w of [...this.#waiters]) if (event.seq! > w.after && event.method === w.method && w.predicate(event)) w.finish(null, event);
   }
   #receive(message: any) {
@@ -57,13 +124,13 @@ export class SessionProbe {
       const result = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(method) ? { decision: 'decline' }
         : method === 'item/permissions/requestApproval' ? { permissions: {}, scope: 'turn' }
         : method === 'mcpServer/elicitation/request' ? { action: 'decline', content: null } : null;
-      void (async () => {
+      const approval=(async () => {
         let decision = result;
-        try { if (this.options.onApproval) decision = await this.options.onApproval(message); } catch { /* default deny */ }
-        if (this.#failure) return;
+        try { const approval=this.#settings().onApproval;if (approval) decision = await this.#retain(this.#asyncCallback(approval,[message])); } catch(error) { this.#retain(error); /* default deny */ }
+        if (this.#failurePresent) return;
         this.#send(decision ? { id: message.id, result: decision } : { id: message.id, error: { code: -32601, message: 'Unsupported server request' } });
         this.#event({ method: 'probe/approval', params: { method, threadId: message.params?.threadId, turnId: message.params?.turnId, decision: decision?.decision === 'accept' ? 'accept' : result ? 'decline' : 'unsupported' } });
-      })().catch(error => this.#fail(error));
+      })();this.#retain(approval);this.#retain(approval.catch(error => this.#fail(error)));
     } else if (message.method) this.#event(message);
     else {
       const pending = this.#pending.get(message.id); if (!pending) return;
@@ -72,16 +139,26 @@ export class SessionProbe {
     }
   }
   async connect() {
-    if (this.#child || this.#failure) throw new Error('connection already used');
-    const launch = resolveLaunch(this.options.executable, this.options.prefixArgs);
-    this.#child = spawn(launch.command, launch.args, { cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
-    this.#exitPromise = new Promise(resolve => this.#child!.once('close', () => { this.exited = true; this.#fail(new Error('connection closed: process exited')); resolve(); }));
-    this.#child.on('error', error => this.#fail(error));
-    this.#child.stdin.on('error', error => this.#fail(error));
-    this.#child.stderr.resume();
+    if (this.#child || this.#failurePresent) throw new Error('connection already used');
+    if(hasOriginalMainSdkBridgeInstallation())this.#processTicket=createOriginalCodexProcessSourceTicket(this);
+    const launch = resolveLaunch(this.#settings().executable, this.#settings().prefixArgs);
+    if(this.#processTicket){
+      const created=await createOriginalSourceProcess(this.#processTicket);this.#processAttempt=created.attempt;
+      const handle=created.handle;
+      if(!handle.stdin||!handle.stdout||!handle.stderr)throw Error('CODEX_PROCESS_STDIO_REQUIRED');
+      this.#child=handle as ChildProcessWithoutNullStreams;
+    }else this.#child = spawn(launch.command, launch.args, { cwd: this.#settings().cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+    const listen=(endpoint:'child'|'stdin'|'stdout'|'stderr',event:string,handler:(...args:any[])=>void)=>{
+      if(this.#processAttempt)listenOriginalToolProcess(this.#processAttempt,endpoint,event,handler);
+      else (endpoint==='child'?this.#child!:this.#child![endpoint]).on(event,handler);
+    };
+    this.#exitPromise = this.#retain(new Promise(resolve => listen('child','close', () => { this.exited = true; this.#fail(new Error('connection closed: process exited')); resolve(); })));
+    listen('child','error', error => this.#fail(error));
+    listen('stdin','error', error => this.#fail(error));
+    if(this.#processAttempt)listen('stderr','data',()=>{});else this.#child.stderr.resume();
     let buffer = Buffer.alloc(0);
-    this.#child.stdout.on('data', chunk => {
-      if (this.#failure) return;
+    listen('stdout','data', chunk => {
+      if (this.#failurePresent) return;
       try {
         buffer = Buffer.concat([buffer, chunk]);
         let end;
@@ -91,8 +168,9 @@ export class SessionProbe {
           if (line.trim()) this.#receive(JSON.parse(line));
         }
         if (buffer.length > 1024 * 1024) throw new Error('protocol frame exceeds limit');
-      } catch { this.#fail(new Error('invalid or oversized protocol frame')); void this.close().catch(() => {}); }
+      } catch(error) { this.#fail(this.#processAttempt?error:new Error('invalid or oversized protocol frame')); void this.close().catch(() => {}); }
     });
+    if(this.#processAttempt)sealOriginalToolProcessListeners(this.#processAttempt);
     const initialized = await this.#request('initialize', { clientInfo: { name: 'xiaok_native_validation', version: '1' }, capabilities: { experimentalApi: true } });
     this.#send({ method: 'initialized' }); return initialized;
   }
@@ -100,7 +178,7 @@ export class SessionProbe {
     this.#assert(); if (this.threadId || this.#binding) throw new Error('thread already bound or binding');
     this.#binding = true;
     try {
-      const r = await this.#request(method, { cwd: this.options.cwd, sandbox: this.options.sandbox ?? 'read-only', approvalPolicy: 'untrusted', approvalsReviewer: 'user', ...extra });
+      const r = await this.#request(method, { cwd: this.#settings().cwd, sandbox: this.#settings().sandbox ?? 'read-only', approvalPolicy: 'untrusted', approvalsReviewer: 'user', ...extra });
       this.threadId = r.thread.id; return r;
     } finally { this.#binding = false; }
   }
@@ -138,13 +216,13 @@ export class SessionProbe {
     }
     return this.waitFor('turn/completed', terminal, { after });
   }
-  async waitFor(method: string, predicate: (event: NativeEvent) => boolean = () => true, { timeoutMs = this.options.timeoutMs, after = 0 } = {}): Promise<NativeEvent> {
+  async waitFor(method: string, predicate: (event: NativeEvent) => boolean = () => true, { timeoutMs = this.#settings().timeoutMs, after = 0 } = {}): Promise<NativeEvent> {
     this.#assert();
     const found = this.events.find(e => e.seq! > after && e.method === method && predicate(e)); if (found) return found;
-    return new Promise((resolve, reject) => {
-      const w = { method, predicate, after, finish: (error: Error | null, result?: NativeEvent) => { clearTimeout(timer); this.#waiters.delete(w); error ? reject(error) : resolve(result!); } };
+    return this.#retain(new Promise((resolve, reject) => {
+      const w = { method, predicate, after, finish: (error: unknown, result?: NativeEvent, failed = error !== null) => { clearTimeout(timer); this.#waiters.delete(w); failed ? reject(error) : resolve(result!); } };
       const timer = setTimeout(() => w.finish(new Error(`event timeout: ${method}`)), timeoutMs); this.#waiters.add(w);
-    });
+    }));
   }
   async close() {
     if (this.#closing) return this.#closing;
@@ -154,6 +232,12 @@ export class SessionProbe {
       if (!this.pid) { await this.#exitPromise; return; }
       const kill = (signal: NodeJS.Signals) => {
         try {
+          if(this.#processAttempt){
+            // Negative control of this exact original handle creates no taskkill
+            // sibling. It proves no hidden descendant/domain has stopped.
+            const raw=terminateOriginalToolProcess(this.#processAttempt,signal);this.#retain(raw);
+            void raw.catch(error=>this.#retain(error));return;
+          }
           if (process.platform !== 'win32') process.kill(-this.pid!, signal);
           else spawn('taskkill', ['/pid', String(this.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {});
         } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e; }
@@ -165,7 +249,13 @@ export class SessionProbe {
         await Promise.race([this.#exitPromise, new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('process cleanup timeout; exit not confirmed')), 5000); })]);
       } finally { clearTimeout(timer); clearTimeout(deadline); }
       // The wrapper may exit before descendants; target only this probe's group.
-      if (process.platform !== 'win32') kill('SIGKILL');
+      if (!this.#processAttempt&&process.platform !== 'win32') kill('SIGKILL');
+      if(this.#processAttempt){
+        const failures:unknown[]=[];let offset=0;
+        while(offset<this.#callbackStocks.length){const stock=this.#callbackStocks[offset++]!;try{await stock.waitPhysicalKnown();}catch(error){failures.push(error);}}
+        try{await waitOriginalToolProcessPhysical(this.#processAttempt);}catch(error){failures.push(error);}
+        if(failures.length)throw new AggregateError(failures,'CODEX_PROCESS_PHYSICAL_UNCONFIRMED',{cause:failures[0]});
+      }
     })();
     return this.#closing;
   }

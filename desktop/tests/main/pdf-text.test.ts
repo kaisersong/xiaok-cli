@@ -8,6 +8,12 @@ import { extractPdfText } from '../../electron/pdf-text.js';
  * stayed green.
  */
 describe('extractPdfText', () => {
+  it('rechecks the private source guard after the real dynamic import before PDF document creation',async()=>{
+    let checks=0;const sentinel=Error('original_pdf_start_revoked');
+    await expect(Reflect.apply(extractPdfText,undefined,[buildMinimalPdf(['must not extract']),()=>{if(++checks===2)throw sentinel;}])).rejects.toBe(sentinel);
+    expect(checks).toBe(2);
+  });
+
   it('extracts text from a minimal valid PDF and tears the loading task down', async () => {
     const pdf = buildMinimalPdf(['Hello PDF', 'Second line']);
 

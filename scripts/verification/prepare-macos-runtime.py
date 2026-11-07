@@ -15,6 +15,8 @@ import tempfile
 import subprocess
 import platform
 
+MAX_WORKER_ARCHIVE_BYTES = 256 * 1024**2
+
 
 def digest(path):
     with path.open('rb') as stream:
@@ -30,6 +32,20 @@ def copy_file(source, target):
             raise ValueError('conflicting runtime basename: ' + target.name)
         return
     shutil.copy2(source, target)
+
+
+def copy_qemu_payload(prefix, output):
+    required = [
+        'bin/qemu-system-aarch64', 'bin/qemu-img',
+        'share/qemu/edk2-aarch64-code.fd', 'share/qemu/edk2-arm-vars.fd',
+        'share/qemu/efi-virtio.rom',
+    ]
+    for relative in required:
+        source = prefix / relative
+        if source.is_symlink() or not source.is_file():
+            raise ValueError('qemu runtime payload: missing or non-regular: ' + relative)
+    for relative in required:
+        copy_file(prefix / relative, output / relative)
 
 
 def extract(archive, target):
@@ -48,9 +64,13 @@ def validate_worker_archive(path, image_id):
     if not re.fullmatch(r'sha256:[a-f0-9]{64}', image_id):
         raise ValueError('worker image identity')
     with tarfile.open(path) as bundle:
-        members = bundle.getmembers()
-        if len(members) > 4096 or sum(m.size for m in members) > 128 * 1024**2:
-            raise ValueError('worker archive budget')
+        members = []
+        total = 0
+        for member in bundle:
+            total += member.size
+            if member.size < 0 or len(members) >= 4096 or total > MAX_WORKER_ARCHIVE_BYTES:
+                raise ValueError('worker archive budget')
+            members.append(member)
         names = {}
         for member in members:
             if member.name in names:
@@ -79,12 +99,30 @@ def validate_worker_archive(path, image_id):
         layers = manifest.get('Layers')
         if not isinstance(layers, list) or not layers or len(layers) > 128 or len(set(layers)) != len(layers):
             raise ValueError('worker image layers')
-        for name in layers:
+        rootfs = config.get('rootfs')
+        if not isinstance(rootfs, dict) or rootfs.get('type') != 'layers' or not isinstance(rootfs.get('diff_ids'), list) or len(rootfs['diff_ids']) != len(layers):
+            raise ValueError('worker image rootfs')
+        for index, name in enumerate(layers):
             if not isinstance(name, str) or not re.fullmatch(r'blobs/sha256/[a-f0-9]{64}', name):
                 raise ValueError('worker image layers')
-            body = read(name, 128 * 1024**2)
-            if hashlib.sha256(body).hexdigest() != name.rsplit('/', 1)[1]:
+            member = names.get(name)
+            if not member or not member.isfile() or member.size > MAX_WORKER_ARCHIVE_BYTES:
+                raise ValueError('worker archive content')
+            checksum = hashlib.sha256()
+            consumed = 0
+            with bundle.extractfile(member) as stream:
+                while chunk := stream.read(min(1024**2, member.size - consumed + 1)):
+                    consumed += len(chunk)
+                    if consumed > member.size:
+                        raise ValueError('worker image layer size')
+                    checksum.update(chunk)
+            if consumed != member.size:
+                raise ValueError('worker image layer size')
+            digest = checksum.hexdigest()
+            if digest != name.rsplit('/', 1)[1]:
                 raise ValueError('worker image layer hash')
+            if rootfs['diff_ids'][index] != 'sha256:' + digest:
+                raise ValueError('worker image rootfs')
 
 
 def prepare(archive_dir, output, lock_path):
@@ -123,10 +161,7 @@ def prepare(archive_dir, output, lock_path):
                 if len(roots) != 1:
                     raise ValueError('ambiguous qemu package')
                 prefix = roots[0].parent.parent
-                for name in ['qemu-system-aarch64', 'qemu-img']:
-                    copy_file(prefix / 'bin' / name, output / 'bin' / name)
-                for name in ['edk2-aarch64-code.fd', 'edk2-arm-vars.fd']:
-                    copy_file(prefix / 'share' / 'qemu' / name, output / 'share' / 'qemu' / name)
+                copy_qemu_payload(prefix, output)
             # Preserve license/provenance inputs without executing bottle hooks.
             for license_file in extracted.rglob('LICENSE*'):
                 if license_file.is_file():

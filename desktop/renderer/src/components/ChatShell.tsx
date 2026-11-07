@@ -1,5 +1,8 @@
+import {emptyNativeQuestionPresentation,nativeQuestionNamespace,nativeQuestionPresentationFromSnapshot,reduceNativeQuestionPresentation,type NativeQuestionPresentation} from '../lib/native-question-state.js';
+import type {UserTaskSubmissionInput} from '../../../shared/user-task-submission-contract.js';
 import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
+import {questionOutsideNativeActivity,type NativeActivityCoverage} from './NativeWorkControls';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
@@ -70,6 +73,7 @@ interface DisplaySource {
   terminalSeen: boolean;
   streamEnded: boolean;
   resultSummaryInHistory?: string;
+  questions?: NativeQuestionPresentation;
   release?: () => void;
 }
 interface GoalAttachmentWork {
@@ -287,6 +291,7 @@ export function ChatShell() {
   const [streamingText, setStreamingText] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
+  const [nativeActivityCoverage,setNativeActivityCoverage]=useState<NativeActivityCoverage|null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -388,6 +393,7 @@ export function ChatShell() {
     const sourceTaskId = source.sourceTaskId;
     const live = !source.terminalSeen;
     if (event.type === 'task_terminal') {
+      source.questions=emptyNativeQuestionPresentation();
       source.terminalSeen = true;
       source.streamEnded = true;
       setCurrentQuestion(null);
@@ -406,6 +412,7 @@ export function ChatShell() {
     // Collect all events for Canvas
     allEventsRef.current = [...allEventsRef.current, event];
     currentTaskEventsRef.current = [...currentTaskEventsRef.current, event];
+    source.questions=reduceNativeQuestionPresentation(source.questions??emptyNativeQuestionPresentation(),event,sourceTaskId);
 
     switch (event.type) {
       case 'task_started': {
@@ -437,14 +444,14 @@ export function ChatShell() {
             stage: prog.stage,
           }];
         });
-        setStatus('running');
+        setStatus(source.questions?.native.length?'waiting_user':'running');
         break;
       }
       case 'assistant_delta': {
         const delta = (event as { type: 'assistant_delta'; delta: string }).delta;
         streamRef.current += delta;
         flushStreamingText(source);
-        if (live) setStatus('running');
+        if (live) setStatus(source.questions?.native.length?'waiting_user':'running');
         break;
       }
       case 'task_cancelled': {
@@ -639,13 +646,12 @@ export function ChatShell() {
         break;
       }
       case 'question_resolved': {
-        setCurrentQuestion(question => question?.questionId === event.questionId ? null : question);
-        setStatus('running');
+        setCurrentQuestion(source.questions.current);
+        setStatus(source.questions.current||source.questions.native.length?'waiting_user':'running');
         break;
       }
       case 'needs_user': {
-        setCurrentQuestion((event as { type: 'needs_user'; question: NeedsUserQuestion }).question);
-        setStatus('waiting_user');
+        if(source.questions.current){setCurrentQuestion(source.questions.current);setStatus('waiting_user');}
         break;
       }
       case 'error': {
@@ -790,12 +796,10 @@ export function ChatShell() {
         && scope.origin === expected.origin && scope.threadId === expected.threadId && scope.goalId === expected.goalId
         && scope.epoch === expected.epoch && scope.goalTurnId === expected.goalTurnId;
       if (valid && !source.terminalSeen && eventCount === source.eventCount) {
+        source.questions=nativeQuestionPresentationFromSnapshot(snapshot);
         if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
-          setStatus(snapshot.status);
-          if (snapshot.status === 'waiting_user') {
-            const last = [...snapshot.events].reverse().find(event => event.type === 'needs_user');
-            if (last?.type === 'needs_user') setCurrentQuestion(last.question);
-          }
+          setStatus(source.questions.native.length?'waiting_user':snapshot.status);
+          setCurrentQuestion(source.questions.current);
         } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
           source.terminalSeen = true;
           setStatus(snapshot.status === 'cancelled' ? 'idle' : snapshot.status);
@@ -1283,10 +1287,13 @@ export function ChatShell() {
         if (lastResult) {
           setResult(lastResult);
         }
+        const restoredQuestions=lastSnapshot?nativeQuestionPresentationFromSnapshot(lastSnapshot):emptyNativeQuestionPresentation();
+        if(restoredQuestions.native.length)lastStatus='waiting_user';
+        setCurrentQuestion(restoredQuestions.current);
         setStatus(lastStatus);
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
-            executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
+            questions:restoredQuestions,executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
             terminalSeen: lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: false };
         }
         if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
@@ -1439,17 +1446,13 @@ export function ChatShell() {
       if (observationDraft) {
         const draftId=observationDraft;setObservationDraft(null);
         newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
-      } else if (files && files.length > 0) {
-        const filePaths = files.map(f => f.filePath);
-        const result = await createGoalAwareTaskWithRetry(() => api.createTaskWithFiles({
-          prompt: text, filePaths, context: submitContext,
-        }));
-        newTaskId = result.taskId;
       } else {
-        const result = await createGoalAwareTaskWithRetry(() => api.createTask({
-          prompt: text, materials: [], context: submitContext,
-        }));
-        newTaskId = result.taskId;
+        // A gesture belongs to this event, outside the technical retry closure.
+        // Main captures the durable identity; React retains only this wire.
+        const wire:UserTaskSubmissionInput={action:'submit_new',gestureId:crypto.randomUUID(),input:files?.length
+          ?{kind:'files',prompt:text,filePaths:files.map(file=>file.filePath),context:submitContext}
+          :{kind:'materials',prompt:text,materials:[],context:submitContext}};
+        newTaskId=(await createGoalAwareTaskWithRetry(()=>api.submitUserTask(wire))).taskId;
       }
       if (!current()) return false;
 
@@ -1470,7 +1473,11 @@ export function ChatShell() {
       promoteSource(source, release, false);
     } catch (e) {
       if (!current()) return false;
-      const displayMessage = sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
+      const errorCode=e instanceof Error?e.message:String(e);
+      const submissionMessage=errorCode.includes('user_submission_conflict')?t.chatShell.submissionConflict
+        :errorCode.includes('user_submission_not_prepared')?t.chatShell.submissionNotPrepared
+        :/user_submission_(?:reconciliation_required|write_unconfirmed|record_invalid|prepared_unverified|prepared_mismatch|prepared_changed|result_invalid|storage_changed|lock_unconfirmed|revision_exhausted)/.test(errorCode)?t.chatShell.submissionReconciliationRequired:undefined;
+      const displayMessage = submissionMessage??sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
       log.error('handleSubmit error', JSON.stringify({ message: displayMessage, raw: e instanceof Error ? e.message : String(e) }));
       setMessages(prev => [...prev, {
         id: `msg-${Date.now()}-err`,
@@ -1487,11 +1494,24 @@ export function ChatShell() {
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
     if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
+    const answered=currentQuestion,namespace=nativeQuestionNamespace(answered);
     await api.answerQuestion({
       taskId: thread.currentTaskId,
-      answer: { questionId: currentQuestion.questionId, type: 'choice', choiceId },
+      answer: { questionId: answered.questionId, type: 'choice', choiceId },
     });
     if (!acceptsSource(source) || source.terminalSeen) return;
+    if(namespace){
+      if(source.questions?.namespace!==namespace)return;
+      source.questions=reduceNativeQuestionPresentation(source.questions,{type:'question_resolved',questionId:answered.questionId},source.sourceTaskId);
+      setCurrentQuestion(source.questions.current);
+      setStatus(source.questions.current||source.questions.native.length?'waiting_user':'running');return;
+    }
+    if(source.questions?.native.length){
+      const state=source.questions,current=state.current;
+      if(current?.owner?.kind!=='codex_native_approval'&&current?.questionId===answered.questionId)source.questions={...state,current:state.native.at(-1)??null};
+      setCurrentQuestion(source.questions.current);setStatus('waiting_user');return;
+    }
+    if(source.questions)source.questions={...source.questions,current:null};
     setCurrentQuestion(null);
     setStatus('running');
   };
@@ -1869,14 +1889,14 @@ export function ChatShell() {
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
       <ChatView
-        activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
+        activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} onNativeCoverage={setNativeActivityCoverage} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         thread={thread}
         messages={messages}
         streamingText={streamingText}
         status={status}
-        currentQuestion={currentQuestion}
+        currentQuestion={questionOutsideNativeActivity(currentQuestion,taskId,nativeActivityCoverage)}
         result={result}
         generatedFiles={generatedFiles}
         prompt={prompt}

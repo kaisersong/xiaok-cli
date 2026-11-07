@@ -1,3 +1,4 @@
+import type {AttentionReason} from '../../../shared/conversation-activity-types';
 import type { PromptInjectionTexts } from "../shared/components/prompt-injection";
 import type { RoomWorkspaceLabels } from './room-workspace';
 import { zh } from "./zh";
@@ -7,6 +8,7 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  dshSourceSettings: import('./dsh-source-settings').DshSourceSettingsLabels;
   loopPublication: import('./loop-publication').LoopPublicationLabels;
   observation: {enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
     compoundExperiment:string;compoundStep:Record<'not_started'|'pending'|'denied'|'succeeded'|'failed'|'cancelled'|'unknown',string>;compoundEdit:(status:string)=>string;compoundValidation:(status:string)=>string;compoundUnknown:(count:number)=>string;
@@ -1244,6 +1246,20 @@ export interface LocaleStrings {
     langEnSub: string;
     // general pane - service status
     serviceStatusTitle: string;
+    writerControlTitle:string;
+    writerControlDescription:string;
+    writerControlRead:string;
+    writerControlPrepare:string;
+    writerControlPreparing:string;
+    writerControlChecking:string;
+    writerControlReadError:string;
+    writerControlUnknown:string;
+    writerControlPrepared:string;
+    writerControlUnprepared:string;
+    writerControlExistingData:string;
+    writerControlReconciliation:string;
+    writerControlUnavailable:string;
+    writerControlMigrationUnavailable:string;
     serviceStatusChecking: string;
     serviceStatusReadRetry: string;
     serviceRestartUnknown: string;
@@ -3085,7 +3101,9 @@ export interface LocaleStrings {
 
   // chatView
   conversationActivity: {
+    dismissReminder: string; reminderDismissed: string; attentionUnavailable: string; readyForAcceptance:string; attentionReasons: Record<AttentionReason, string>;
     expand: string; collapse: string; summaryDetails: string; workCount: (count: number) => string;
+    nativeApprove:string;nativeDeny:string;nativeSubmitting:string;nativeAnswered:string;nativeAnswerUnconfirmed:string;nativeRefresh:string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
     frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;
@@ -3218,6 +3236,9 @@ export interface LocaleStrings {
     historyUnavailable: (taskIds: string) => string;
     historyRecovered: (taskId: string) => string;
     taskCreateFailed: string;
+    submissionConflict: string;
+    submissionNotPrepared: string;
+    submissionReconciliationRequired: string;
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
@@ -3676,6 +3697,9 @@ export interface LocaleStrings {
   projectsDetailDispatchFailed: string;
   projectsDetailDispatchWorkflowStarted: string;
   projectsDetailDispatchTasksDispatched: (count: number) => string;
+  projectsDetailDispatchIntentStored:(count:number)=>string;
+  projectsDetailDispatchObservationSummary:(present:number,missing:number,unavailable:number)=>string;
+  projectsDetailDispatchObservationUnavailable:string;
   projectsDetailDispatchNone: string;
   projectsDetailExecModeSwitched: (label: string) => string;
   projectsDetailExecModeFailed: string;
