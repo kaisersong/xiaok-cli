@@ -11,6 +11,11 @@ on:
       - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
       - 'tests/native/fixtures/accepted-root-binding-entry.ts'
       - 'tests/native/helpers/accepted-root-candidate-observation.*'
+      - 'native/main-installation/**'
+      - 'scripts/build-main-installation-artifacts.mjs'
+      - 'tests/native/main-installation-*.test.mjs'
+      - 'tests/native/fixtures/main-installation-*'
+      - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
       - 'native/protected-sqlite-facade/**'
       - 'package*.json'
@@ -24,6 +29,11 @@ on:
       - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
       - 'tests/native/fixtures/accepted-root-binding-entry.ts'
       - 'tests/native/helpers/accepted-root-candidate-observation.*'
+      - 'native/main-installation/**'
+      - 'scripts/build-main-installation-artifacts.mjs'
+      - 'tests/native/main-installation-*.test.mjs'
+      - 'tests/native/fixtures/main-installation-*'
+      - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
       - 'native/protected-sqlite-facade/**'
       - 'package*.json'
@@ -119,6 +129,13 @@ jobs:
       - name: Genuine Main candidate identity and lifecycle (macOS)
         if: runner.os == 'macOS'
         run: node --test tests/native/accepted-root-candidate-identity.test.mjs
+
+      - name: Fixed installation certificate and original helper (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/main-installation-certificate.test.mjs
+          tests/native/main-installation-helper.test.mjs
 
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
