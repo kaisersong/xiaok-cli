@@ -7,6 +7,12 @@ on:
       - 'desktop/**'
       - 'src/runtime/task-host/**'
       - 'tests/runtime/task-host/**'
+      - 'tests/native/accepted-root-candidate-identity.test.mjs'
+      - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
+      - 'tests/native/fixtures/accepted-root-binding-entry.ts'
+      - 'tests/native/helpers/accepted-root-candidate-observation.*'
+      - 'native/root-resource-authority/**'
+      - 'native/protected-sqlite-facade/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   pull_request:
@@ -14,6 +20,12 @@ on:
       - 'desktop/**'
       - 'src/runtime/task-host/**'
       - 'tests/runtime/task-host/**'
+      - 'tests/native/accepted-root-candidate-identity.test.mjs'
+      - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
+      - 'tests/native/fixtures/accepted-root-binding-entry.ts'
+      - 'tests/native/helpers/accepted-root-candidate-observation.*'
+      - 'native/root-resource-authority/**'
+      - 'native/protected-sqlite-facade/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   workflow_dispatch: {}
@@ -74,6 +86,29 @@ jobs:
           tests/main/workflow-deadline-late-summary.test.ts
           tests/main/kswarm-execution-clock.test.ts
           tests/main/desktop-tool-loop-recovery.test.ts
+
+      - name: Prepare pinned native candidate fixtures (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git -C ../kswarm fetch --depth 1 origin fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
+          git -C ../kswarm checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git -C ../intent-broker fetch --depth 1 origin a323d728ed979570dc81b2fad3be57715ce7e6eb
+          git -C ../intent-broker checkout --detach FETCH_HEAD
+          npm ci --ignore-scripts --omit=dev --prefix ../kswarm
+          npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
+      - name: Uninstalled candidate and owned preparation boundaries (macOS)
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --maxWorkers=1 --minWorkers=1
+          tests/main/kswarm-owned-preparation-service.test.ts
+          tests/main/kswarm-uninstalled-candidate.test.ts
+      - name: Genuine Main candidate identity and lifecycle (macOS)
+        if: runner.os == 'macOS'
+        run: node --test tests/native/accepted-root-candidate-identity.test.mjs
 
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})

@@ -18,3 +18,13 @@ export {
 export { readCurrentOriginalRootExecutionContext } from '../../../src/runtime/verification/original-root-execution-context.js';
 
 export {hasOriginalMainSdkBridgeInstallation} from '../../../src/runtime/verification/original-main-sdk-bridge.js';
+// Candidate metadata readers only; no additional Native permit or issuer export.
+export {
+  readOriginalKSwarmHandoffRootBinding,readOriginalKSwarmHandoffRoot,
+  assertOriginalKSwarmHandoffRootCurrent,revalidateOriginalKSwarmHandoffRoot,
+} from '../../../desktop/electron/kswarm-runtime-bridge.js';
+export {
+  readOriginalRoomProjectRootBinding,readOriginalRoomProjectRoot,
+  assertOriginalRoomProjectRootCurrent,revalidateOriginalRoomProjectRoot,
+} from '../../../desktop/electron/room-workspace-runtime.js';
+export {prepareWorkspaceRoot} from '../../../desktop/electron/room-workspace-local.js';
