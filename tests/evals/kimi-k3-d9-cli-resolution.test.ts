@@ -359,3 +359,98 @@ describe('Kimi K3 D9 recursive resolution graph', () => {
     })).rejects.toThrow('KIMI_D9_RESOLUTION_ESCAPE');
   });
 });
+
+
+// Static graph fixtures only: these files are never imported or dlopened.
+const fixedNativePattern = "require(join(dirname(require.resolve('nodejieba')), 'build', 'Release', 'nodejieba.node'))";
+const fixedNativeTarget = '../../../node_modules/nodejieba/build/Release/nodejieba.node';
+function fixedNativeFixture(change: (source: string) => string = source => source) {
+  const root = fixtureRoot(), importer = join(root, 'dist/ai/memory/segment.js');
+  mkdirSync(dirname(importer), { recursive: true });
+  mkdirSync(join(root, 'node_modules/nodejieba/build/Release'), { recursive: true });
+  writeFileSync(join(root, 'node_modules/nodejieba/package.json'), '{"main":"index.js"}');
+  writeFileSync(join(root, 'node_modules/nodejieba/index.js'), 'module.exports = {};\n');
+  writeFileSync(join(root, 'node_modules/nodejieba/build/Release/nodejieba.node'), 'static graph placeholder, not Native qualification');
+  const source = [
+    "import { createRequire } from 'node:module';",
+    "import { dirname, join } from 'node:path';",
+    'const require = createRequire(import.meta.url);',
+    'export function check() { try { ' + fixedNativePattern + '; } catch {} }',
+  ].join('\n');
+  writeFileSync(importer, change(source));
+  writeFileSync(join(root, 'dist/index.js'), "import './ai/memory/segment.js';\n");
+  return { root, importer };
+}
+
+it('derives only the original fixed nodejieba binding and still requires its exact allowlist', async () => {
+  const { inspectModuleEdges, buildReachableResolutionGraph } = await loadModule();
+  const { root, importer } = fixedNativeFixture();
+  const edge = (await inspectModuleEdges(importer)).find((value: any) => value.pattern === fixedNativePattern);
+  expect(edge.runtimeTargets).toEqual([fixedNativeTarget]);
+  await expect(buildReachableResolutionGraph({ closureRoot: root })).rejects.toThrow('KIMI_D9_COMPUTED_EDGE_NOT_ALLOWED');
+  const entry = { importerSha256: edge.importerSha256, astLocation: edge.astLocation, pattern: edge.pattern, targets: [fixedNativeTarget] };
+  const graph = await buildReachableResolutionGraph({ closureRoot: root, computedEdgeAllowlist: [entry] });
+  expect(graph.modules).toContain('node_modules/nodejieba/build/Release/nodejieba.node');
+  await expect(buildReachableResolutionGraph({ closureRoot: root, computedEdgeAllowlist: [{ ...entry, targets: ['../../../node_modules/pkg-c/index.cjs'] }] })).rejects.toThrow('KIMI_D9_COMPUTED_EDGE_RUNTIME_TARGET_MISMATCH');
+});
+
+const fixedBindingAttacks: Array<[string, (source: string) => string]> = [
+  ['function shadow', s => s + '\nfunction join() {}'],
+  ['class shadow', s => s + '\nclass dirname {}'],
+  ['spread argument', s => s.replace("'build', 'Release'", "...['build'], 'Release'")],
+  ['loader argument escape', s => s + '\nhelper(require);'],
+  ['require update', s => s + '\nrequire++;'],
+  ['require parameter', s => s.replace('function check()', 'function check(require)')],
+  ['join parameter', s => s.replace('function check()', 'function check(join)')],
+  ['dirname parameter', s => s.replace('function check()', 'function check(dirname)')],
+  ['createRequire parameter', s => s.replace('function check()', 'function check(createRequire)')],
+  ['destructured shadow', s => s.replace('function check()', 'function check({ require })')],
+  ['catch shadow', s => s.replace('try { ' + fixedNativePattern + '; } catch {}', 'try {} catch (require) { ' + fixedNativePattern + '; }')],
+  ['block shadow', s => s.replace('try { ', "try { const join = () => ''; ")],
+  ['wrong path import', s => s.replace("from 'node:path'", "from 'foreign-path'")],
+  ['aliased path import', s => s.replace('{ dirname, join }', '{ dirname, resolve as join }')],
+  ['nonconst require', s => s.replace('const require =', 'let require =')],
+  ['different base', s => s.replace('createRequire(import.meta.url)', "createRequire('file:///foreign.js')")],
+  ['resolve write', s => s.replace('export function', "require.resolve = () => '/foreign.js';\nexport function")],
+  ['loader escape', s => s.replace('export function', 'const alias = require;\nexport function')],
+  ['resolve escape', s => s.replace('export function', 'const alias = require.resolve;\nexport function')],
+  ['callee escape', s => s.replace('export function', 'const alias = join;\nexport function')],
+  ['define loader property', s => s.replace('export function', "Object.defineProperty(require, 'resolve', { value() {} });\nexport function")],
+  ['direct eval', s => s.replace('export function', "eval('require.resolve = other');\nexport function")],
+  ['different release path', s => s.replace("'Release'", "'Debug'")],
+  ['different package', s => s.replace("'nodejieba'", "'foreign-package'")],
+  ['extra path argument', s => s.replace("'build', 'Release'", "'extra', 'build', 'Release'")],
+  ['escaped literal', s => s.replace("'Release'", "'Rele\\u0061se'")],
+  ['template literal', s => s.replace("'Release'", '`Release`')],
+  ['bracket resolve', s => s.replace('require.resolve', "require['resolve']")],
+  ['optional call', s => s.replace('require(join(', 'require?.(join(')],
+  ['call alias', s => s.replace('require(join(', 'require.call(null, join(')],
+];
+it.each(fixedBindingAttacks)('refuses fixed nodejieba computed binding drift: %s', async (_name, change) => {
+  const { inspectModuleEdges } = await loadModule();
+  const { importer } = fixedNativeFixture(change);
+  await expect(inspectModuleEdges(importer)).rejects.toThrow('KIMI_D9_FIXED_NODEJIEBA_');
+});
+
+it('does not derive the fixed target from a nearer substitute package', async () => {
+  const { inspectModuleEdges } = await loadModule();
+  const { importer } = fixedNativeFixture();
+  const nested = join(dirname(importer), 'node_modules/nodejieba');
+  mkdirSync(nested, { recursive: true });
+  writeFileSync(join(nested, 'package.json'), '{"main":"index.js"}');
+  writeFileSync(join(nested, 'index.js'), 'module.exports = {};\n');
+  await expect(inspectModuleEdges(importer)).rejects.toThrow('KIMI_D9_FIXED_NODEJIEBA_TARGET');
+});
+
+it('keeps absent-package and native symlink targets failclosed', async () => {
+  const { inspectModuleEdges, buildReachableResolutionGraph } = await loadModule();
+  const missing = fixedNativeFixture();
+  rmSync(join(missing.root, 'node_modules/nodejieba'), { recursive: true });
+  await expect(inspectModuleEdges(missing.importer)).rejects.toThrow('KIMI_D9_FIXED_NODEJIEBA_TARGET');
+  const { root, importer } = fixedNativeFixture();
+  const edge = (await inspectModuleEdges(importer)).find((value: any) => value.pattern === fixedNativePattern);
+  const native = join(root, 'node_modules/nodejieba/build/Release/nodejieba.node');
+  rmSync(native);
+  symlinkSync(join(missing.root, 'package.json'), native);
+  await expect(buildReachableResolutionGraph({ closureRoot: root, computedEdgeAllowlist: [{ ...edge, targets: [fixedNativeTarget] }] })).rejects.toThrow('KIMI_D9_RESOLUTION_ESCAPE');
+});
