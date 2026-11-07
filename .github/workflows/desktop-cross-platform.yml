@@ -168,6 +168,10 @@ jobs:
           tests/main/scheduled-task-delivery.test.ts
           tests/renderer/scheduled-task-delivery.test.tsx
           tests/main/scheduled-preload.test.ts
+          tests/main/remote-debugging.test.ts
+          tests/main/room-scheduled-context.test.ts
+          tests/renderer/scheduled-sidebar-selection.test.tsx
+          tests/renderer/chat-approval-scroll.test.tsx
 
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'

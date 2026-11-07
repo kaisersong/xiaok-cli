@@ -158,6 +158,8 @@ import type { GoalInput } from '../../src/runtime/goal/types.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
+import {captureScheduledMutation} from './scheduled-mutation-authority.js';
+import {SCHEDULED_ROOM_TARGET_SCHEMA} from '../shared/scheduled-timed-action-ipc-contract.js';
 import { SKILL_DEBUG_CONFIG_SCHEMA, KSWARM_CONCURRENCY_CONFIG_SCHEMA } from '../shared/desktop-small-config-ipc-contract.js';
 import { getConfigDir, getConfigPath, loadConfig, loadConfigSync, saveConfig } from '../../src/utils/config.js';
 import { resolveSystemOneConfig, setSystemOneConfig } from '../../src/ai/providers/system-one-config.js';
@@ -917,6 +919,9 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
 }
 
 export function createRoomTimedActionTools(service:TimedActionService, scope:{roomId:string;logicalAgentId:string;bindingId:string;generation:number}):Tool[] {
+  // Runtime supplies a full execution context; persist only the stable target.
+  // Capture once so later context changes cannot change this tool's ownership.
+  scope = captureScheduledMutation({roomId:scope.roomId,logicalAgentId:scope.logicalAgentId,bindingId:scope.bindingId,generation:scope.generation},SCHEDULED_ROOM_TARGET_SCHEMA);
   const ownerId=JSON.stringify([scope.roomId,scope.logicalAgentId]);
   const ownActions=()=>service.getActions().filter(action=>action.executor.kind==='agent_task'&&action.executor.roomTarget?.roomId===scope.roomId&&action.executor.roomTarget.logicalAgentId===scope.logicalAgentId&&action.ownerId===ownerId);
   return createTimedActionTools(service).filter(tool=>tool.definition.name.startsWith('scheduled_task_')).map(tool=>({...tool,

@@ -662,7 +662,10 @@ process.on('unhandledRejection', (reason) => {
 process.on('exit', (code) => {
   debugMain('process exit', { code });
 });
-const remoteDebuggingConfig = configureDefaultRemoteDebugging(app.commandLine, process.argv);
+const remoteDebuggingConfig = configureDefaultRemoteDebugging(app.commandLine, process.argv, {
+  isPackaged: app.isPackaged,
+  env: process.env,
+});
 debugMain('remote-debugging:configured', remoteDebuggingConfig);
 const singleInstanceDisabled = process.env.XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE === '1';
 const singleInstanceLock = singleInstanceDisabled ? true : app.requestSingleInstanceLock();

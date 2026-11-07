@@ -40,6 +40,7 @@ import {
 const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'a2ui', 'other']);
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
+const HISTORY_PAGE_SIZE = 20;
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
 function settleChatProgress(messages: ChatMessage[]): ChatMessage[] {
@@ -288,6 +289,8 @@ export function ChatShell() {
   const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
     thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const olderHistoryRef = useRef<{ remaining: string[]; loading: boolean }>({ remaining: [], loading: false });
+  const [olderHistory, setOlderHistory] = useState({ remaining: 0, loading: false, error: '' });
   const [streamingText, setStreamingText] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
@@ -922,10 +925,11 @@ export function ChatShell() {
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean, historicalOnly = false): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
+    const actionCodes = historicalOnly ? new Set<string>() : computerUseActionCodesRef.current;
     if (addPromptAsUser && snapshot?.prompt) {
       const display = parseScheduledTaskPromptDisplay(snapshot.prompt);
       if (display.notice) {
@@ -963,7 +967,7 @@ export function ChatShell() {
         }
         if (ev.type === 'progress_plan_reported') {
           const planEv = ev as { type: 'progress_plan_reported'; steps: Array<{ id: string; label: string; status: string }> };
-          setPlanSteps(planEv.steps);
+          if (!historicalOnly) setPlanSteps(planEv.steps);
           continue;
         }
         if (ev.type === 'canvas_file_changed') {
@@ -1000,8 +1004,8 @@ export function ChatShell() {
           }
           if (evR.toolName === 'xiaok_computer_use') {
             const action = parseComputerUseRecoverableAction(evR.response, t.chatShell.cuUnavailable);
-            if (action && !computerUseActionCodesRef.current.has(action.code)) {
-              computerUseActionCodesRef.current.add(action.code);
+            if (action && !actionCodes.has(action.code)) {
+              actionCodes.add(action.code);
               msgs.push({
                 id: `msg-computer-use-${action.code}`,
                 role: 'computer_use_action',
@@ -1093,12 +1097,48 @@ export function ChatShell() {
         msgs.push(lastProgress);
       }
       if (accumulated) {
-        streamRef.current = accumulated;
-        setStreamingText(accumulated);
+        if (historicalOnly) {
+          msgs.push({ id: `msg-history-partial-${snapshot.taskId}`, role: 'assistant', content: accumulated });
+        } else {
+          streamRef.current = accumulated;
+          setStreamingText(accumulated);
+        }
       }
     }
     return { msgs, result: lastResult, events: replayEvents, toolStepsMsgId: replayToolMsgId };
   }, [t]);
+
+  const loadOlderHistory = useCallback(async () => {
+    const page = olderHistoryRef.current;
+    if (page.loading || !page.remaining.length) return;
+    page.loading = true;
+    const gen = mountGenRef.current;
+    const current = () => mountGenRef.current === gen && liveRenderScope.current === renderScope && olderHistoryRef.current === page;
+    setOlderHistory({ remaining: page.remaining.length, loading: true, error: '' });
+    const ids = page.remaining.slice(-HISTORY_PAGE_SIZE);
+    const olderMessages: ChatMessage[] = [];
+    const olderEvents: DesktopTaskEvent[] = [];
+    const missing: string[] = [];
+    for (const id of ids) {
+      if (!current()) return;
+      try {
+        const { snapshot } = await api.recoverTask(id);
+        if (!current()) return;
+        if (!snapshot) throw Error('history_snapshot_unavailable');
+        const replay = replaySnapshot({ ...snapshot, taskId: snapshot.taskId || id }, true, true);
+        olderMessages.push(...replay.msgs);
+        olderEvents.push(...replay.events);
+      } catch { if (!current()) return; missing.push(id); }
+    }
+    if (!current()) return;
+    page.loading = false;
+    if (!missing.length) {
+      page.remaining = page.remaining.slice(0, -ids.length);
+      allEventsRef.current = [...olderEvents, ...allEventsRef.current];
+      setMessages(previous => [...olderMessages, ...previous]);
+    }
+    setOlderHistory({ remaining: page.remaining.length, loading: false, error: missing.length ? t.chatShell.historyUnavailable(missing.join(', ')) : '' });
+  }, [renderScope, replaySnapshot, t]);
 
   // Scope the Canvas panel to the active session. On a session switch, persist
   // the outgoing session's canvas state and restore the incoming session's
@@ -1169,6 +1209,8 @@ export function ChatShell() {
     setStreamingText('');
     setResult(null);
     setMessages([]);
+    olderHistoryRef.current = { remaining: [], loading: false };
+    setOlderHistory({ remaining: 0, loading: false, error: '' });
     setPlanSteps([]);
     setCurrentQuestion(null);
     setThread(null);
@@ -1218,7 +1260,7 @@ export function ChatShell() {
         let lastSubToolStepsMsgId: string | null = null;
         let lastSnapshot: TaskSnapshot | undefined;
         const missingTaskIds: string[] = [];
-        for (const tid of allTaskIds) {
+        for (const tid of allTaskIds.slice(-HISTORY_PAGE_SIZE)) {
           // Check again after each async operation
           if (!loadCurrent()) return;
 
@@ -1280,6 +1322,8 @@ export function ChatShell() {
 
         // Now set all state atomically after final check
         setThread(threadData);
+        olderHistoryRef.current.remaining = allTaskIds.slice(0, -HISTORY_PAGE_SIZE);
+        setOlderHistory({ remaining: olderHistoryRef.current.remaining.length, loading: false, error: '' });
         threadRef.current = threadData;
         if (allMessages.length > 0) {
           setMessages(allMessages);
@@ -1894,6 +1938,13 @@ export function ChatShell() {
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         thread={thread}
         messages={messages}
+        historyContent={olderHistory.remaining > 0 ? <div className="space-y-2 text-center">
+          <button type="button" disabled={olderHistory.loading} onClick={() => void loadOlderHistory()}
+            className="cursor-pointer rounded-lg px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] disabled:cursor-wait disabled:opacity-60">
+            {olderHistory.loading ? t.chatShell.historyLoading : t.chatShell.historyLoadEarlier(olderHistory.remaining)}
+          </button>
+          {olderHistory.error && <p role="alert" className="text-xs text-[var(--c-text-secondary)]">{olderHistory.error}</p>}
+        </div> : undefined}
         streamingText={streamingText}
         status={status}
         currentQuestion={questionOutsideNativeActivity(currentQuestion,taskId,nativeActivityCoverage)}

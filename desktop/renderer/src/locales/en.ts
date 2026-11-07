@@ -3373,6 +3373,8 @@ export const en: LocaleStrings = {
     attachmentLabel: "Attachments:",
     cuUnavailable: "Computer Use is currently unavailable.",
     historyUnavailable: (taskIds) => `Historical task records are unavailable (${taskIds}). The conversation remains saved; existing projects and artifacts are preserved and will not restart automatically.`,
+    historyLoadEarlier: (remaining) => `Load earlier records (${remaining} runs remaining)`,
+    historyLoading: 'Loading earlier records…',
     historyRecovered: (taskId) => `The original task record is unavailable. Below is the only completed legacy record with this exact title (${taskId}). Its original content is shown without rewriting the missing task or restarting the project.`,
     taskCreateFailed: "Failed to create task. Please check model configuration or try again later.",
     submissionConflict: "This submission has changed. Check the original task before sending a new request.",
