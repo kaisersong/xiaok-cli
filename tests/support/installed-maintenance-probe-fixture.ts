@@ -25,6 +25,14 @@ import {createEngineBootstrapJournal,readExistingEngineBootstrap} from '../../sr
 
 export type ProbeMode='terminal'|'prepared'|'created'|'missing-record';
 type ProbeRecord={expected:QuiescenceExpectation;body:{Image:string;Cmd:string[];Labels:Record<string,string>;HostConfig:object};allocation:BlobReservationProposal;challenge:string;engineHash:string;deleted:boolean};
+type RunningCleanupStatus='PASS'|'NOT_PROVEN_ALREADY_TERMINAL'|'NOT_PROVEN_A1_NOT_EXPOSED'|'FAIL_PRIMARY_OR_CLEANUP_UNKNOWN';
+type RunningEvent={sequence:number;method:string;stage:'begin'|'end'|'error'|'cut';call:number;parentAbsence?:number;containerId?:string;value?:unknown};
+function property(value:unknown,key:string):unknown{return value!==null&&typeof value==='object'?Reflect.get(value,key):undefined;}
+function errorEvidence(error:unknown,seen=new Set<unknown>()):unknown{
+ if(!(error instanceof Error))return {nonError:error};
+ if(seen.has(error))return {circularError:true};seen.add(error);
+ return {name:error.name,message:error.message,stack:error.stack,cause:error.cause===undefined?undefined:errorEvidence(error.cause,seen),...(error instanceof AggregateError?{errors:error.errors.map(value=>errorEvidence(value,seen))}:{})};
+}
 type Command={executable:string;argv:readonly string[];stdin:string;output:string};
 const leaf=vi.hoisted(()=>({base:'/Library/Application Support/xiaok-verification',physicalRoot:undefined as string|undefined,physicalDB:'',canonicalDB:'/Library/Application Support/xiaok-verification/state/authority.sqlite',projectionActive:false,markerCalls:0,rootStarted:false,
  files:new Map<string,string>(),socket:'',dockerSocket:undefined as string|undefined,uid:502,release:'',fds:new Map<number,string>(),inventory:new WeakSet<object>(),
@@ -218,7 +226,8 @@ function sourceTransport(record:()=>ProbeRecord|undefined){
   async isContainerAbsent(id:string){return !containers.has(id);},async remove(id:string){containers.delete(id);},
  };
 }
-export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;imageId:string;socketPath?:string;sourceOnly?:true}){
+async function installedProbeFixtureImplementation(options:{mode:ProbeMode|'running-cleanup';imageId:string;socketPath?:string;sourceOnly?:true}){
+ if(options.mode==='running-cleanup'&&Object.hasOwn(options,'sourceOnly'))throw Error('running_cleanup_requires_real_transport');
  if(leaf.physicalRoot)throw Error('probe_fixture_previous_owner_active');
  if(!/^sha256:[a-f0-9]{64}$/.test(options.imageId)||!options.sourceOnly&&!options.socketPath)throw Error('probe_fixture_explicit_endpoint');
  const root=realpathSync(mkdtempSync(join(tmpdir(),'maintenance-probe-owner-'))),physicalState=join(root,'state');
@@ -235,6 +244,29 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
  let originalOpaque:object|undefined;
  const originalIds=new Set<string>(),cut=Error('probe_fixture_original_safe_cut:'+options.mode),pause=Error('probe_fixture_after_actual_probe_request');
  let requestObserved=false,terminalInspectorObserved=false,originalState:string|undefined,normalFailure:unknown;
+ const running=options.mode==='running-cleanup',events:RunningEvent[]=[];
+ let callSerial=0,activeAbsence:number|undefined,cutUsed=false,recordIdentity:string|undefined;
+ let ackObserved=false,released=false,deleted=false,terminalCommitted=false,drainObserved=false,databaseClosed=false;
+ const auditPath=join(root,'running-cleanup-audit.json');
+ function event(method:string,stage:RunningEvent['stage'],call:number,value?:unknown,containerId?:string,parentAbsence?:number){events.push({sequence:events.length,method,stage,call,containerId,parentAbsence,value});}
+ function originalTarget(id:unknown){
+  const db=required(originalDatabase,'running_cleanup_database'),found=readProbe(db);
+  if(phase!=='normal'||!found||!capture(found.expected))throw Error('running_cleanup_original_record');
+  const identity=json({expected:found.expected,body:found.body,allocation:found.allocation,engineHash:found.engineHash,challenge:found.challenge});
+  if(recordIdentity===undefined)recordIdentity=identity;else if(identity!==recordIdentity)throw Error('running_cleanup_record_changed');
+  const rows=db.prepare<[],{execution_id:string;state:string;container_id:string|null}>('SELECT execution_id,state,container_id FROM execution_attempts').all();
+  if(rows.length!==1||rows[0].execution_id!==found.expected.executionIdentity)throw Error('running_cleanup_attempt_population');
+  if(id!==undefined&&(typeof id!=='string'||originalIds.size!==1||!originalIds.has(id)||rows[0].container_id!==id))throw Error('running_cleanup_foreign_container');
+  return {found,row:rows[0]};
+ }
+ function saveAudit(status:RunningCleanupStatus,errors:readonly unknown[]=[]){
+  const audit={status,root,auditPath,containerIds:[...originalIds],socketPath:options.socketPath,imageId:options.imageId,
+   scope:'dedicated devDocker normal-owner cleanup; not qualification or native evidence',events:events.slice(),
+   facts:{cutUsed,requestObserved,ackObserved,released,deleted,terminalCommitted,drainObserved,databaseClosed,
+    startupRejectedWithCut:normalFailure===cut,databaseOpen:originalDatabase?.open,unresolved:normalFailure!==undefined&&isInstalledControllerShutdownUnresolved(normalFailure),
+    counters:{...counters},forbiddenEffects:leaf.forbidden.slice()},primary:errorEvidence(normalFailure),errors:errors.map(value=>errorEvidence(value))};
+  writeFileSync(auditPath,JSON.stringify(audit,null,2)+'\n',{flag:'wx',mode:0o600});return audit;
+ }
  const spies:{mockRestore():void}[]=[];
  let unstartedLifetime:InstalledControllerLifetime|undefined,joinNormal:(()=>Promise<void>)|undefined,joinMaintenance:(()=>Promise<void>)|undefined;
  let openingDatabase=false;const ownedDatabases:Database[]=[];
@@ -245,7 +277,7 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
   if(database.name!==leaf.physicalDB||files.length!==1||files[0].name!=='main'||files[0].file!==leaf.physicalDB)throw Error('probe_fixture_native_db_not_physical');
   leaf.projectionActive=true;
   let closed=false;const lifetime:InstalledControllerLifetime=Object.freeze({base:logical?leaf.base:root,state:logical?join(leaf.base,'state'):physicalState,release:logical?leaf.release:join(root,'releases',H),manifest,database,...keys,serviceEpoch:randomUUID(),peerHelper:join(root,'never-executed-peer-helper'),
-   assertCurrent(){if(closed||!database.open)throw Error('probe_fixture_lifetime_closed');},close(){if(closed)return;database.close();closed=true;},
+   assertCurrent(){if(closed||!database.open)throw Error('probe_fixture_lifetime_closed');},close(){if(closed)return;database.close();closed=true;if(running){databaseClosed=!database.open;event('database.close','end',++callSerial,{open:database.open});}},
   });leaf.lifetimes.add(lifetime);leaf.next=lifetime;unstartedLifetime=lifetime;return lifetime;
  }
  function capture(expected:QuiescenceExpectation){
@@ -301,9 +333,46 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
   spies.push(vi.spyOn(ExecutionJournal.prototype,'bindContainer').mockImplementation(function(this:ExecutionJournal,expected,id){
    bind.call(this,expected,id);if(phase==='normal'&&capture(expected)){counters.bindContainer++;if(options.mode==='created'){if(originalState!=='created'||counters.start)throw Error('probe_fixture_created_cut_state');throw cut;}}
   }));
+  if(running){
+   const terminal=ExecutionJournal.prototype.recordPhysicalTerminal,readFailed=stack.readInstalledFailedStackDrain;
+   spies.push(vi.spyOn(ExecutionJournal.prototype,'recordPhysicalTerminal').mockImplementation(function(this:ExecutionJournal,expected,id,exitCode){
+    terminal.call(this,expected,id,exitCode);
+    const {found,row}=originalTarget(id);
+    if(json(expected)!==json(found.expected)||row.state!=='terminal'||terminalCommitted)throw Error('running_cleanup_terminal_commit');
+    terminalCommitted=true;event('journal.recordPhysicalTerminal','end',++callSerial,{state:row.state,exitCode},id);
+   }));
+   spies.push(vi.spyOn(stack,'readInstalledFailedStackDrain').mockImplementation((error,assembly,value)=>{
+    const witness=readFailed(error,assembly,value);
+    drainObserved=error===cut&&witness===cut&&value===normalLifetime;
+    event('readInstalledFailedStackDrain','end',++callSerial,{sameError:error===cut,sameLifetime:value===normalLifetime,returnedOriginalError:witness===cut});
+    return witness;
+   }));
+  }
   const persist=handoff.persistInstalledMaintenanceRequest;
   spies.push(vi.spyOn(handoff,'persistInstalledMaintenanceRequest').mockImplementation(command=>{
-   persist(command);if(phase!=='normal')return;
+   const completion=persist(command);if(phase!=='normal')return completion;
+   if(running){
+    const facts=qualificationModule.inspectQualificationCleanupHandoffCommand(command);
+    if(!facts||facts.source!==actualQualification||facts.database!==originalDatabase||!normalLifetime)throw Error('running_cleanup_command_owner');
+    const {found}=originalTarget([...originalIds][0]);
+    if(facts.kind!=='probe'||facts.resourceId!==found.expected.executionIdentity||json(facts.expected)!==json(found.expected)||json(facts.allocations)!==json([found.allocation]))throw Error('running_cleanup_command_target');
+    const db=facts.database;
+    if(db.inTransaction)throw Error('running_cleanup_uncommitted_handoff');
+    const rows=db.prepare<[string,string],{phase:string;claim_epoch:string|null;item_id:string;target_json:string;target_hash:string;outcome:string;evidence_hash:string|null}>(`SELECT h.phase,h.claim_epoch,i.item_id,i.target_json,i.target_hash,i.outcome,i.evidence_hash FROM verification_maintenance_handoffs h JOIN verification_maintenance_handoff_items i USING(authority_id,origin_epoch) WHERE authority_id=? AND origin_epoch=?`).all(manifest.authorityId,normalLifetime.serviceEpoch);
+    if(rows.length!==1)throw Error('running_cleanup_handoff_population');
+    const row=rows[0],target=JSON.parse(row.target_json);
+    if(row.phase!=='requested'||row.claim_epoch!==null||target.kind!=='probe'||target.resourceId!==facts.resourceId||json(target.expected)!==json(found.expected)||json(target.allocations)!==json([found.allocation])||row.item_id!==hash({kind:'probe',resourceId:facts.resourceId})||row.target_hash!==hash(target))throw Error('running_cleanup_handoff_identity');
+    const state=required(sharedOwner,'running_cleanup_capacity_owner').budget.getState(found.allocation);
+    if(facts.action==='request'){
+     handoff.assertInstalledMaintenanceRequestRecorded(command);
+     if(requestObserved||row.outcome!=='requested'||row.evidence_hash!==null||state!=='reserved'||found.deleted)throw Error('running_cleanup_request');
+     requestObserved=true;
+    }else{
+     if(!requestObserved||ackObserved||row.outcome!=='completed'||!row.evidence_hash||state!=='released'||!found.deleted)throw Error('running_cleanup_ack');
+     ackObserved=true;released=true;deleted=true;
+    }
+    counters.persist++;event('persist.'+facts.action,'end',++callSerial,{row,budgetState:state,deleted:found.deleted});return completion;
+   }
    const assertRecorded=Reflect.get(handoff,'assertInstalledMaintenanceRequestRecorded');
    if(typeof assertRecorded!=='function')throw Error('probe_fixture_recorded_assert_unavailable');
    assertRecorded(command); // Actual private inspector, same opaque command, no mint/copy.
@@ -316,20 +385,72 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
   }));
   const docker=options.sourceOnly?sourceTransport(()=>record??(originalDatabase?.open?readProbe(originalDatabase):undefined)):new (await vi.importActual<typeof import('../../src/runtime/isolated-execution/docker-engine-transport.js')>('../../src/runtime/isolated-execution/docker-engine-transport.js')).DockerEngineTransport({socketPath:options.socketPath!});
   const transport=docker as unknown as Record<string,any>;
-  for(const name of ['create','start','wait','logs','inspect','remove','isContainerAbsent']){
+  for(const name of ['create','start','wait','logs','inspect','remove','isContainerAbsent',...(running?['kill']:[])]){
    const actual=transport[name];if(typeof actual!=='function')throw Error('probe_fixture_transport_method');
    Object.defineProperty(transport,name,{configurable:true,value:async(...args:any[])=>{
     if(phase==='maintenance'&&(name==='create'||name==='start')){if(name==='create')counters.maintenanceCreate++;else counters.maintenanceStart++;return unexpected('maintenance.'+name);}
     if(name in counters)(counters as any)[name]++;
+    if(running){
+     const call=++callSerial,parentAbsence=activeAbsence;
+     const {found,row}=originalTarget(name==='create'?undefined:args[0]);
+     if(name==='create'&&(originalIds.size!==0||counters.create!==1||row.container_id!==null||json(args[0])!==json(found.body)))throw Error('running_cleanup_extra_or_changed_create');
+     if(name==='start'&&counters.start!==1)throw Error('running_cleanup_extra_start');
+     const id=name==='create'?undefined:createdContainerId({Id:args[0]});
+     event(name,'begin',call,undefined,id,parentAbsence);
+     if(name==='wait'&&!cutUsed){
+      const budgetState=required(sharedOwner,'running_cleanup_capacity_owner').budget.getState(found.allocation);
+      if(counters.wait!==1||row.state!=='running'||counters.start!==1||budgetState!=='reserved')throw Error('running_cleanup_cut_not_running_reserved');
+      cutUsed=true;event(name,'cut',call,{journal:row,allocation:found.allocation,budgetState},id);throw cut;
+     }
+     if(name==='isContainerAbsent')activeAbsence=call;
+     try{
+      const result:unknown=await Reflect.apply(actual,transport,args);
+      if(name==='create')originalIds.add(createdContainerId(result));
+      event(name,'end',call,structuredClone(result),name==='create'?createdContainerId(result):id,parentAbsence);
+      return result;
+     }catch(error){event(name,'error',call,errorEvidence(error),id,parentAbsence);throw error;}
+     finally{if(name==='isContainerAbsent')activeAbsence=parentAbsence;}
+    }
     const result:unknown=await Reflect.apply(actual,transport,args);if(name==='create')originalIds.add(createdContainerId(result));return result;
    }});
   }
-  for(const name of ['createMounted','createVolume','populateInputFile','readInputArchive','attachOutput','recoverAttempt','kill','isVolumeAbsent','removeVolume','findMountedAttempt','inspectVolume'])Object.defineProperty(transport,name,{configurable:true,value:()=>unexpected('docker.'+name)});
+  for(const name of ['createMounted','createVolume','populateInputFile','readInputArchive','attachOutput','recoverAttempt',...(!running?['kill']:[]),'isVolumeAbsent','removeVolume','findMountedAttempt','inspectVolume'])Object.defineProperty(transport,name,{configurable:true,value:()=>unexpected('docker.'+name)});
   leaf.transport=transport;
   leaf.rootStarted=true;const startup=startInstalledVerificationController();unstartedLifetime=undefined;void startup.catch(()=>{});
   joinNormal=async()=>{const settled=await Promise.allSettled([startup]);if(settled[0].status==='fulfilled')await settled[0].value.close();};
   const result=await Promise.allSettled([startup]);
   if(result[0].status!=='rejected')throw Error('probe_fixture_unexpected_qualification_issued');normalFailure=result[0].reason;
+  if(options.mode==='running-cleanup'){
+   const errors:unknown[]=[];
+   if(normalFailure!==cut||normalFailure instanceof AggregateError||isInstalledControllerShutdownUnresolved(normalFailure))errors.push(normalFailure);
+   if(!cutUsed||!requestObserved||!ackObserved||!released||!deleted||!terminalCommitted||!drainObserved||!databaseClosed||originalDatabase.open||!sharedOwner||!engine||!actualQualification||originalIds.size!==1||counters.initializer!==1||counters.qualificationFactory!==1||counters.transaction!==1||counters.beginDispatch!==1||counters.bindContainer!==1||counters.create!==1||counters.start!==1||counters.logs!==0||counters.remove!==1||counters.persist!==2||counters.maintenanceCreate!==0||counters.maintenanceStart!==0||leaf.forbidden.length)errors.push(Error('running_cleanup_incomplete_owned_drain'));
+   const ends=(method:string)=>events.filter(item=>item.method===method&&item.stage==='end');
+   const kills=events.filter(item=>item.method==='kill'&&item.stage==='begin'),kill=kills[0];
+   const direct=ends('inspect').filter(item=>item.parentAbsence===undefined);
+   const prekill=kill?direct.find(item=>item.sequence===kill.sequence-1):direct[0];
+   const state=property(prekill?.value,'State'),network=property(prekill?.value,'NetworkSettings');
+   const lifecycle=[property(network,'SandboxID'),property(network,'SandboxKey'),property(property(property(network,'Networks'),'none'),'EndpointID')];
+   const exposed=property(state,'Running')===true&&typeof property(state,'Pid')==='number'&&Number(property(state,'Pid'))>0&&property(state,'Status')==='running'&&lifecycle.some(value=>typeof value==='string'&&value.length>0);
+   const beforeInspect=prekill?events[prekill.sequence-2]:undefined;
+   const adjacent=beforeInspect?.method==='isContainerAbsent'&&beforeInspect.stage==='end'&&beforeInspect.value===false&&events[prekill!.sequence-1]?.method==='inspect'&&events[prekill!.sequence-1]?.stage==='begin';
+   const terminal=direct.find(item=>property(property(item.value,'State'),'Status')==='exited'&&property(property(item.value,'State'),'Running')===false&&property(property(item.value,'State'),'Pid')===0);
+   const removed=ends('remove')[0],absent=ends('isContainerAbsent').find(item=>item.value===true);
+   const absent404=absent&&events.some(item=>item.method==='inspect'&&item.stage==='error'&&item.parentAbsence===absent.call&&property(item.value,'message')==='docker_engine_http_404');
+   const terminalCommit=ends('journal.recordPhysicalTerminal')[0],request=ends('persist.request')[0],ack=ends('persist.ack')[0],drain=ends('readInstalledFailedStackDrain')[0],closed=ends('database.close')[0];
+   const wait=ends('wait')[0],started=ends('start')[0],injected=events.find(item=>item.method==='wait'&&item.stage==='cut');
+   if(!started||!injected||!request||!(started.sequence<injected.sequence&&injected.sequence<request.sequence))errors.push(Error('running_cleanup_start_cut_request_order'));
+   if(!terminal||!terminalCommit||!removed||!absent||!absent404||!request||!ack||!drain||!closed||!(request.sequence<terminal.sequence&&terminal.sequence<terminalCommit.sequence&&terminalCommit.sequence<removed.sequence&&removed.sequence<absent.sequence&&absent.sequence<ack.sequence&&ack.sequence<drain.sequence&&drain.sequence<closed.sequence))errors.push(Error('running_cleanup_physical_ack_order'));
+   if(events.some(item=>item.stage==='error'&&!(item.method==='inspect'&&item.parentAbsence!==undefined&&property(item.value,'message')==='docker_engine_http_404')))errors.push(Error('running_cleanup_transport_error'));
+   if(kills.length>1||ends('kill').length!==kills.length||ends('wait').length!==kills.length||counters.wait!==1+kills.length||kill&&(!wait||!terminal||!(kill.sequence<ends('kill')[0].sequence&&ends('kill')[0].sequence<wait.sequence&&wait.sequence<terminal.sequence)))errors.push(Error('running_cleanup_kill_wait_order'));
+   assertProgramDone();
+   for(const spy of spies.splice(0).reverse())try{spy.mockRestore();}catch(error){errors.push(error);}
+   const status:RunningCleanupStatus=errors.length?'FAIL_PRIMARY_OR_CLEANUP_UNKNOWN':!kill&&property(state,'Status')==='exited'?'NOT_PROVEN_ALREADY_TERMINAL':!kill||!exposed||!adjacent?'NOT_PROVEN_A1_NOT_EXPOSED':'PASS';
+   const audit=saveAudit(status,errors);
+   // Retain the real root and audit. No test-side physical fallback earns PASS.
+   // Only the fully drained, observed path relinquishes this fixture's leaf.
+   if(status==='PASS'){leaf.projectionActive=false;leaf.physicalRoot=undefined;leaf.files.clear();leaf.transport=undefined;leaf.next=undefined;leaf.program=[];}
+   return {kind:'running-cleanup' as const,audit};
+  }
   try{assertOriginalFailure(normalFailure,options.mode,cut,pause);}catch(check){throw new AggregateError([normalFailure,check],'probe_fixture_original_cut_not_preserved:'+root);}
   if(!requestObserved)throw new AggregateError([normalFailure],'probe_fixture_actual_probe_request_missing:'+root);
   if(isInstalledControllerShutdownUnresolved(normalFailure)||originalDatabase.open)throw new AggregateError([normalFailure],'probe_fixture_normal_owner_not_closed:'+root);
@@ -385,13 +506,13 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
    else if(!db.open&&!errors.length){leaf.physicalRoot=undefined;leaf.files.clear();leaf.transport=undefined;leaf.next=undefined;leaf.program=[];}
    if(errors.length)throw new AggregateError(errors,'probe_fixture_close:'+root);
   }
-  return {root,db,engine:transport as unknown as import('../../src/runtime/isolated-execution/docker-engine-transport.js').DockerEngineTransport,budget:maintenanceBudget,maintenance:owner.privateHost.execution,expected,allocation,id,original,counters,
+  return {kind:'maintenance' as const,fixture:{root,db,engine:transport as unknown as import('../../src/runtime/isolated-execution/docker-engine-transport.js').DockerEngineTransport,budget:maintenanceBudget,maintenance:owner.privateHost.execution,expected,allocation,id,original,counters,
    get forbiddenEffects(){return leaf.forbidden.slice();},
    get commandTrace(){return leaf.commands.map(item=>({...item,argv:Array.isArray(item.argv)?[...item.argv]:item.argv}));},
    replayOriginalRequest(){if(!originalOpaque)throw Error('probe_fixture_original_opaque_missing');return persist(originalOpaque);},
    promises:{normal:startup,maintenance:maintenanceStartup},
    pathIdentity:{physicalDB:leaf.physicalDB,canonicalDB:leaf.canonicalDB,physicalState},finish,close(){return closing??=closeOwned();},
-  };
+  }};
  }catch(error){
   // A failed/unknown root retains its own DB/lifetime. No forced close or row
   // repair is used to claim safe handoff. Retained path appears in the error.
@@ -402,7 +523,8 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
   // cleanup. A published/unknown startup never becomes a namespace reset.
   if(knownPrestart)for(const database of ownedDatabases)if(database.open)try{database.close();}catch(cleanup){errors.push(cleanup);}
   for(const spy of spies.reverse())try{spy.mockRestore();}catch(cleanup){errors.push(cleanup);}
-  if(knownPrestart&&errors.length===1){
+  if(running)try{saveAudit('FAIL_PRIMARY_OR_CLEANUP_UNKNOWN',errors);}catch(evidence){errors.push(evidence);}
+  if(knownPrestart&&errors.length===1&&!running){
    try{
     if(leaf.physicalRoot!==root||openingDatabase||ownedDatabases.some(database=>database.open)||originalIds.size!==0||leaf.fds.size!==0||realpathSync(root)!==root)throw Error('probe_fixture_prestart_cleanup_unknown');
     rmSync(root,{recursive:true,force:false});
@@ -411,4 +533,16 @@ export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;i
   }
   throw new AggregateError(errors,'probe_fixture_prepare:'+root);
  }
+}
+
+export async function installedMaintenanceProbeFixture(options:{mode:ProbeMode;imageId:string;socketPath?:string;sourceOnly?:true}){
+ const result=await installedProbeFixtureImplementation(options);
+ if(result.kind!=='maintenance')throw Error('probe_fixture_wrong_result');
+ return result.fixture;
+}
+export async function installedProbeRunningCleanupFixture(options:{socketPath:string;imageId:string}){
+ if(Object.hasOwn(options,'sourceOnly'))throw Error('running_cleanup_requires_real_transport');
+ const result=await installedProbeFixtureImplementation({mode:'running-cleanup',socketPath:options.socketPath,imageId:options.imageId});
+ if(result.kind!=='running-cleanup')throw Error('running_cleanup_wrong_result');
+ return result.audit;
 }
