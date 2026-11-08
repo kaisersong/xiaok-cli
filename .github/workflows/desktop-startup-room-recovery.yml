@@ -103,6 +103,29 @@ jobs:
           tests/main/kswarm-execution-clock.test.ts
           tests/main/desktop-tool-loop-recovery.test.ts
 
+      - name: Loop, CodeX and installed SDK owner boundaries
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
+          tests/main/main-installed-owner-sequence.test.ts
+          tests/main/main-installed-root-pool-bridge.test.ts
+          tests/main/codex-native-writer-cutover.test.ts
+          tests/main/codex-task-writer-cutover.test.ts
+          tests/main/codex-native-service.test.ts
+          tests/main/codex-task-bridge.test.ts
+          tests/main/codex-native-approval-inventory.test.ts
+          tests/main/loop-database-owner.test.ts
+          tests/main/loop-database-metadata.test.ts
+          tests/main/loop-database-source-observation.test.ts
+          tests/main/loop-executor.test.ts
+          tests/main/completion-evidence-store.test.ts
+          tests/main/artifact-evidence-regression-loop.test.ts
+          tests/main/kswarm-health-loop.test.ts
+          tests/main/loop-runtime-source-registration.test.ts
+          tests/main/loop-runtime-source-registration-failure.test.ts
+          tests/main/loop-sqlite-autocommit-compat.test.ts
+          tests/main/loop-transaction-rollback.test.ts
+
       - name: Prepare pinned native candidate fixtures (macOS)
         if: runner.os == 'macOS'
         shell: bash
