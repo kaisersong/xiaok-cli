@@ -1,6 +1,6 @@
 import type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
 export type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
-import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
+import {retainOriginalLoopDatabaseFailure,rollbackOriginalLoopDatabase,openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import {migrateLoopArtifactExportJournal,parseLoopArtifactExportPreparation,parseLoopArtifactExportUpdate,createLoopArtifactExportRecord,advanceLoopArtifactExport,readLoopArtifactExportRow,loopArtifactExportHash,assertLoopArtifactExportDurability,type LoopArtifactExportPreparation,type LoopArtifactExportUpdate,type LoopArtifactExportRecord,type LoopArtifactExportRow} from './loop-artifact-export-journal.js';
 import type {LoopEvaluation} from './loop-evaluator.js';
 import {migrateLoopNativeSchema} from './loop-native-schema.js';
@@ -209,7 +209,7 @@ export class LoopStore {
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try { this.applySchema(); migrateLoopNativeSchema(this.db); migrateLoopArtifactExportJournal(this.db); this.connection.recordComponent('loop'); } catch(error) { this.connection.close(); throw error; }
+    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
   }
 
   close(): void {
@@ -226,10 +226,9 @@ export class LoopStore {
         if(publicationJson(p)!==publicationJson({id:old.id,requestSource:old.requestSource,source:old.source,destination:old.destination,now:old.createdAt}))throw Error('loop_export_journal_conflict');
         return Object.freeze({disposition:'existing' as const,record:old});
       }
-      const inserted=this.db.prepare('INSERT INTO loop_artifact_exports(id,revision,parent_device,parent_inode,temporary_name,record_json,record_hash) VALUES(?,1,?,?,?,\'{}\',\'\')')
-        .run(p.id,p.destination.parentIdentity.device,p.destination.parentIdentity.inode,p.destination.temporaryName);
+      const inserted=this.connection.runWrite('INSERT INTO loop_artifact_exports(id,revision,parent_device,parent_inode,temporary_name,record_json,record_hash) VALUES(?,1,?,?,?,\'{}\',\'\')', p.id, p.destination.parentIdentity.device, p.destination.parentIdentity.inode, p.destination.temporaryName);
       const record=createLoopArtifactExportRecord(p,Number(inserted.lastInsertRowid)),encoded=publicationJson(record);
-      this.db.prepare('UPDATE loop_artifact_exports SET record_json=?,record_hash=? WHERE id=?').run(encoded,loopArtifactExportHash(encoded),p.id);
+      this.connection.runWrite('UPDATE loop_artifact_exports SET record_json=?,record_hash=? WHERE id=?', encoded, loopArtifactExportHash(encoded), p.id);
       return Object.freeze({disposition:'inserted' as const,record:this.getLoopArtifactExport(p.id)!});
     });
   }
@@ -244,8 +243,7 @@ export class LoopStore {
     return this.transaction(()=>{
       assertLoopArtifactExportDurability(this.db);const old=this.getLoopArtifactExport(update.id);if(!old)throw Error('loop_export_journal_missing');
       const next=advanceLoopArtifactExport(old,update);if(next===old)return old;
-      const encoded=publicationJson(next),write=this.db.prepare('UPDATE loop_artifact_exports SET revision=?,record_json=?,record_hash=? WHERE id=? AND revision=?')
-        .run(next.revision,encoded,loopArtifactExportHash(encoded),next.id,old.revision);
+      const encoded=publicationJson(next),write=this.connection.runWrite('UPDATE loop_artifact_exports SET revision=?,record_json=?,record_hash=? WHERE id=? AND revision=?', next.revision, encoded, loopArtifactExportHash(encoded), next.id, old.revision);
       if(write.changes!==1)throw Error('loop_export_journal_conflict');return this.getLoopArtifactExport(next.id)!;
     });
   }
@@ -278,7 +276,7 @@ export class LoopStore {
       if(records.length>=32)throw Error('loop_publication_attempt_capacity');
       if(!Number.isSafeInteger(input.now)||input.now<Math.max(target.attempt.updatedAt,previous?.updatedAt??0))throw Error('loop_publication_attempt_time');
       const next=parseLoopPublicationAttempt({attemptId:randomUUID(),nativeAttemptId:target.attempt.attemptId,candidateId:target.attempt.candidateId,bindingHash:target.attempt.bindingHash,sourceVectorHash:target.attempt.sourceVectorHash,requestSource:'user',routeJson:null,sequence:records.length+1,revision:1,status:'preparing',challenge:null,observation:null,retirement:null,createdAt:input.now,updatedAt:input.now},target);
-      const written=this.db.prepare('INSERT INTO loop_publication_attempts(attempt_id,native_attempt_id,candidate_id,sequence,revision,record_json) VALUES(?,?,?,?,?,?)').run(next.attemptId,next.nativeAttemptId,next.candidateId,next.sequence,next.revision,publicationJson(next));
+      const written=this.connection.runWrite('INSERT INTO loop_publication_attempts(attempt_id,native_attempt_id,candidate_id,sequence,revision,record_json) VALUES(?,?,?,?,?,?)', next.attemptId, next.nativeAttemptId, next.candidateId, next.sequence, next.revision, publicationJson(next));
       this.bumpAutomationStoreVersion();this.assertLoopNativeAttemptCurrentInTransaction(next.nativeAttemptId);if(publicationJson(this.getLoopNativeAttemptTarget(next.nativeAttemptId))!==publicationJson(target))throw Error('loop_publication_attempt_target_changed');const actual=this.getLoopPublicationAttempt(next.attemptId);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(next))throw Error('loop_publication_attempt_conflict');return actual;
     });
@@ -301,7 +299,7 @@ export class LoopStore {
       const before=this.getLoopPublicationAttempt(write.before.attemptId);if(!before||publicationJson(before)!==publicationJson(write.before))throw Error('loop_publication_attempt_conflict');
       const target=this.getLoopNativeAttemptTarget(before.nativeAttemptId),next=parseLoopPublicationAttempt(write.next,target);assertLoopPublicationTransition(before,next);
       if(next.status==='authorizing'){if(write.source!=='user')throw Error('loop_publication_attempt_source');this.assertLoopNativeAttemptCurrentInTransaction(before.nativeAttemptId);}
-      const written=this.db.prepare('UPDATE loop_publication_attempts SET revision=?,record_json=? WHERE attempt_id=? AND revision=?').run(next.revision,publicationJson(next),before.attemptId,before.revision);
+      const written=this.connection.runWrite('UPDATE loop_publication_attempts SET revision=?,record_json=? WHERE attempt_id=? AND revision=?', next.revision, publicationJson(next), before.attemptId, before.revision);
       this.bumpAutomationStoreVersion();if(publicationJson(this.getLoopNativeAttemptTarget(before.nativeAttemptId))!==publicationJson(target))throw Error('loop_publication_attempt_target_changed');if(next.status==='authorizing')this.assertLoopNativeAttemptCurrentInTransaction(before.nativeAttemptId);const actual=this.getLoopPublicationAttempt(before.attemptId);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(next))throw Error('loop_publication_attempt_conflict');return actual;
     });
@@ -321,7 +319,7 @@ export class LoopStore {
         materialRequestId:randomUUID(),verificationRequestId:randomUUID(),phase:'selecting',revision:1,createdAt:input.now,updatedAt:input.now,
         draft:null,challengeId:null,obligationObservation:null,operationId:null,attemptId:null,materialObservation:null,verificationObservation:null};
       parseLoopVerificationExecution(expected,session,this.getLoopNativeAttemptTarget(session.nativeAttemptId));
-      const written=this.db.prepare('INSERT INTO loop_verification_executions(id,session_record_id,revision,record_json) VALUES(?,?,?,?)').run(expected.id,session.id,1,publicationJson(expected));
+      const written=this.connection.runWrite('INSERT INTO loop_verification_executions(id,session_record_id,revision,record_json) VALUES(?,?,?,?)', expected.id, session.id, 1, publicationJson(expected));
       this.bumpAutomationStoreVersion();
       const actual=this.getLoopVerificationExecution(expected.id);if(written.changes!==1||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_execution_commit');
       return actual!;
@@ -352,7 +350,7 @@ export class LoopStore {
       const changed=change(row),expected={...changed,revision:row.revision+1,updatedAt:input.now};
       const session=this.getLoopVerificationSession(row.sessionRecordId)!;
       parseLoopVerificationExecution(expected,session,this.getLoopNativeAttemptTarget(row.nativeAttemptId));
-      const written=this.db.prepare('UPDATE loop_verification_executions SET revision=?,record_json=? WHERE id=? AND revision=?').run(expected.revision,publicationJson(expected),row.id,row.revision);
+      const written=this.connection.runWrite('UPDATE loop_verification_executions SET revision=?,record_json=? WHERE id=? AND revision=?', expected.revision, publicationJson(expected), row.id, row.revision);
       this.bumpAutomationStoreVersion();
       const actual=this.getLoopVerificationExecution(row.id);if(written.changes!==1||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_execution_commit');
       return actual!;
@@ -424,8 +422,8 @@ export class LoopStore {
       if(previous)return previous;
       const expected:LoopVerificationSession={id:randomUUID(),nativeAttemptId:input.nativeAttemptId,candidateId:target.attempt.candidateId,obligationId:input.obligationId,sessionId:input.sessionId,
         operationId:randomUUID(),validationInvocationId:randomUUID(),enrollmentRequestId:randomUUID(),phase:'reserved',revision:1,createdAt:input.now,updatedAt:input.now};
-      const written=this.db.prepare(`INSERT INTO loop_verification_sessions(id,native_attempt_id,candidate_id,obligation_id,session_id,operation_id,validation_invocation_id,enrollment_request_id,phase,revision,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,'reserved',1,?,?)`).run(expected.id,expected.nativeAttemptId,expected.candidateId,expected.obligationId,expected.sessionId,expected.operationId,expected.validationInvocationId,expected.enrollmentRequestId,expected.createdAt,expected.updatedAt);
+      const written=this.connection.runWrite(`INSERT INTO loop_verification_sessions(id,native_attempt_id,candidate_id,obligation_id,session_id,operation_id,validation_invocation_id,enrollment_request_id,phase,revision,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,'reserved',1,?,?)`, expected.id, expected.nativeAttemptId, expected.candidateId, expected.obligationId, expected.sessionId, expected.operationId, expected.validationInvocationId, expected.enrollmentRequestId, expected.createdAt, expected.updatedAt);
       const actual=this.getLoopVerificationSession(expected.id);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_session_conflict');
       this.bumpAutomationStoreVersion();return actual;
@@ -458,7 +456,7 @@ export class LoopStore {
       if(row.revision!==input.expectedRevision||row.phase!=='reserved')throw Error('loop_verification_session_conflict');
       if(!Number.isSafeInteger(input.now)||input.now<row.updatedAt)throw Error('loop_verification_session_time');
       const expected:LoopVerificationSession={...row,phase:'session_ready',revision:2,updatedAt:input.now};
-      const written=this.db.prepare("UPDATE loop_verification_sessions SET phase='session_ready',revision=2,updated_at=? WHERE id=? AND revision=1 AND phase='reserved'").run(input.now,row.id);
+      const written=this.connection.runWrite("UPDATE loop_verification_sessions SET phase='session_ready',revision=2,updated_at=? WHERE id=? AND revision=1 AND phase='reserved'", input.now, row.id);
       const actual=this.getLoopVerificationSession(row.id);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_session_conflict');
       this.bumpAutomationStoreVersion();return actual;
@@ -475,7 +473,7 @@ export class LoopStore {
       if(!Number.isSafeInteger(input.now)||input.now<row.updatedAt)throw Error('loop_verification_session_time');
       if(input.phase==='enrolling')this.assertLoopNativeAttemptCurrentInTransaction(row.nativeAttemptId);
       const expected:LoopVerificationSession={...row,phase:input.phase,revision:row.revision+1,updatedAt:input.now};
-      const written=this.db.prepare('UPDATE loop_verification_sessions SET phase=?,revision=?,updated_at=? WHERE id=? AND revision=?').run(expected.phase,expected.revision,expected.updatedAt,row.id,row.revision);
+      const written=this.connection.runWrite('UPDATE loop_verification_sessions SET phase=?,revision=?,updated_at=? WHERE id=? AND revision=?', expected.phase, expected.revision, expected.updatedAt, row.id, row.revision);
       const actual=this.getLoopVerificationSession(row.id);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(expected))throw Error('loop_verification_session_conflict');
       this.bumpAutomationStoreVersion();return actual;
@@ -499,8 +497,8 @@ export class LoopStore {
       const expected:LoopNativeAttempt={kind:'enrollment-and-application',enrollmentSourceAttemptId:null,reauthorizesAttemptId:null,attemptId:randomUUID(),candidateId:input.candidateId,revision:1,ordinal:records.length+1,originalSource:'user',
         bindingHash:target.candidate.bindingHash,sourceVectorHash:target.candidate.sourceVectorHash,configurationRevision:target.basis.configuration.revision,definitionHash:nativeDefinitionHash(target.definition),
         enrollmentRequestId:randomUUID(),applicationRequestId:randomUUID(),phase:'reserved',createdAt:input.now,updatedAt:input.now};
-      const written=this.db.prepare(`INSERT INTO loop_native_attempts(attempt_id,candidate_id,revision,ordinal,original_source,binding_hash,source_vector_hash,configuration_revision,definition_hash,enrollment_request_id,application_request_id,phase,created_at,updated_at)
-        VALUES(?,?,1,?,'user',?,?,?,?,?,?,'reserved',?,?)`).run(expected.attemptId,expected.candidateId,expected.ordinal,expected.bindingHash,expected.sourceVectorHash,expected.configurationRevision,expected.definitionHash,expected.enrollmentRequestId,expected.applicationRequestId,expected.createdAt,expected.updatedAt);
+      const written=this.connection.runWrite(`INSERT INTO loop_native_attempts(attempt_id,candidate_id,revision,ordinal,original_source,binding_hash,source_vector_hash,configuration_revision,definition_hash,enrollment_request_id,application_request_id,phase,created_at,updated_at)
+        VALUES(?,?,1,?,'user',?,?,?,?,?,?,'reserved',?,?)`, expected.attemptId, expected.candidateId, expected.ordinal, expected.bindingHash, expected.sourceVectorHash, expected.configurationRevision, expected.definitionHash, expected.enrollmentRequestId, expected.applicationRequestId, expected.createdAt, expected.updatedAt);
       const actual=this.getLoopNativeAttempt(expected.attemptId);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(expected))throw Error('loop_native_attempt_conflict');
       this.bumpAutomationStoreVersion();
@@ -522,8 +520,8 @@ export class LoopStore {
       if(!ancestor||ancestor.kind!=='enrollment-and-application'||!['needs_reauthorization','retired'].includes(write.parent.phase)||write.parent.phase==='retired'&&write.parent.kind!=='application-reauthorization')throw Error('loop_native_attempt_lineage');
       if(!Number.isSafeInteger(write.now)||write.now<write.parent.updatedAt)throw Error('loop_native_attempt_time');
       const expected:LoopNativeAttempt={...write.parent,kind:'application-reauthorization',attemptId:randomUUID(),revision:1,ordinal:history.length+1,enrollmentRequestId:null,enrollmentSourceAttemptId:ancestor.attemptId,reauthorizesAttemptId:write.parent.attemptId,applicationRequestId:randomUUID(),phase:'enrolled',createdAt:write.now,updatedAt:write.now};
-      const written=this.db.prepare(`INSERT INTO loop_native_attempts(attempt_id,candidate_id,revision,ordinal,original_source,binding_hash,source_vector_hash,configuration_revision,definition_hash,enrollment_request_id,application_request_id,phase,created_at,updated_at,kind,enrollment_source_attempt_id,reauthorizes_attempt_id)
-        VALUES(?,?,1,?,'user',?,?,?,?,NULL,?,'enrolled',?,?,'application-reauthorization',?,?)`).run(expected.attemptId,expected.candidateId,expected.ordinal,expected.bindingHash,expected.sourceVectorHash,expected.configurationRevision,expected.definitionHash,expected.applicationRequestId,expected.createdAt,expected.updatedAt,expected.enrollmentSourceAttemptId,expected.reauthorizesAttemptId);
+      const written=this.connection.runWrite(`INSERT INTO loop_native_attempts(attempt_id,candidate_id,revision,ordinal,original_source,binding_hash,source_vector_hash,configuration_revision,definition_hash,enrollment_request_id,application_request_id,phase,created_at,updated_at,kind,enrollment_source_attempt_id,reauthorizes_attempt_id)
+        VALUES(?,?,1,?,'user',?,?,?,?,NULL,?,'enrolled',?,?,'application-reauthorization',?,?)`, expected.attemptId, expected.candidateId, expected.ordinal, expected.bindingHash, expected.sourceVectorHash, expected.configurationRevision, expected.definitionHash, expected.applicationRequestId, expected.createdAt, expected.updatedAt, expected.enrollmentSourceAttemptId, expected.reauthorizesAttemptId);
       if(written.changes!==1)throw Error('loop_native_attempt_conflict');
       this.bumpAutomationStoreVersion();
       write.check(true);
@@ -587,7 +585,7 @@ export class LoopStore {
       if(!LOOP_NATIVE_PHASE_EDGES[row.phase].includes(input.phase))throw Error('loop_native_attempt_transition');
       if(!Number.isSafeInteger(input.now)||input.now<row.updatedAt||!Number.isSafeInteger(row.revision+1))throw Error('loop_native_attempt_time');
       if(['enrolling','binding','ready'].includes(input.phase))this.assertLoopNativeAttemptCurrentInTransaction(row.attemptId);
-      const written=this.db.prepare('UPDATE loop_native_attempts SET revision=?,phase=?,updated_at=? WHERE attempt_id=? AND revision=?').run(row.revision+1,input.phase,input.now,row.attemptId,row.revision);
+      const written=this.connection.runWrite('UPDATE loop_native_attempts SET revision=?,phase=?,updated_at=? WHERE attempt_id=? AND revision=?', row.revision+1, input.phase, input.now, row.attemptId, row.revision);
       const expected={...row,revision:row.revision+1,phase:input.phase,updatedAt:input.now},actual=this.getLoopNativeAttempt(row.attemptId);
       if(written.changes!==1||!actual||publicationJson(actual)!==publicationJson(expected))throw Error('loop_native_attempt_conflict');
       this.bumpAutomationStoreVersion();
@@ -692,7 +690,7 @@ export class LoopStore {
       if(this.getLoopRunPublicationBasis(entry.runId))this.assertLoopPublicationBasisCurrent(entry.runId);
       const metadata=JSON.parse(stage.metadata_json);if(metadata.taskId!==undefined)throw Error('loop_task_identity_exists');
       const nextMetadata=publicationJson({...metadata,taskId:entry.taskId,taskStartState:'unknown'});
-      const written=this.db.prepare('UPDATE loop_stages SET metadata_json=? WHERE id=? AND metadata_json=?').run(nextMetadata,entry.stageId,stage.metadata_json);
+      const written=this.connection.runWrite('UPDATE loop_stages SET metadata_json=? WHERE id=? AND metadata_json=?', nextMetadata, entry.stageId, stage.metadata_json);
       this.bumpAutomationStoreVersion();
       const expected=JSON.parse(entry.vector),target=expected.stages.find((item:{id:string})=>item.id===entry.stageId);target.metadata=JSON.parse(nextMetadata);
       if(written.changes!==1||loopTaskIdentityVector(this,entry.runId)!==publicationJson(expected))throw Error('loop_task_identity_changed');
@@ -702,7 +700,7 @@ export class LoopStore {
       return Object.freeze({assertCurrent,markStarted:()=>{if(marked)throw Error('loop_task_identity_consumed');marked=true;this.transaction(()=>{
         if(loopTaskIdentityVector(this,entry.runId)!==original)throw Error('loop_task_identity_changed');
         const started=JSON.parse(original);started.stages.find((item:{id:string})=>item.id===entry.stageId).metadata.taskStartState='started';
-        const changed=this.db.prepare('UPDATE loop_stages SET metadata_json=? WHERE id=? AND metadata_json=?').run(publicationJson({...JSON.parse(nextMetadata),taskStartState:'started'}),entry.stageId,nextMetadata);
+        const changed=this.connection.runWrite('UPDATE loop_stages SET metadata_json=? WHERE id=? AND metadata_json=?', publicationJson({...JSON.parse(nextMetadata),taskStartState:'started'}), entry.stageId, nextMetadata);
         this.bumpAutomationStoreVersion();if(changed.changes!==1||loopTaskIdentityVector(this,entry.runId)!==publicationJson(started))throw Error('loop_task_identity_changed');
         if(this.getLoopRunPublicationBasis(entry.runId))this.assertLoopPublicationBasisCurrent(entry.runId);
       });}});
@@ -716,7 +714,7 @@ export class LoopStore {
       const stage=this.getLoopStage(entry.stageId);
       if(!stage||stage.runId!==entry.runId||stage.stageKind!=='execute'||stage.metadata.taskId!==entry.taskId||!['unknown','started','terminal'].includes(String(stage.metadata.taskStartState)))throw Error('loop_task_identity_changed');
       const previous=publicationJson(stage.metadata),metadata={...stage.metadata,taskStartState:'terminal'};
-      const changed=this.db.prepare('UPDATE loop_stages SET metadata_json=? WHERE id=? AND metadata_json=?').run(publicationJson(metadata),entry.stageId,previous);
+      const changed=this.connection.runWrite('UPDATE loop_stages SET metadata_json=? WHERE id=? AND metadata_json=?', publicationJson(metadata), entry.stageId, previous);
       const expected=JSON.parse(entry.vector);expected.stages.find((item:{id:string})=>item.id===entry.stageId).metadata=metadata;
       this.bumpAutomationStoreVersion();
       if(changed.changes!==1||loopTaskIdentityVector(this,entry.runId)!==publicationJson(expected))throw Error('loop_task_identity_changed');
@@ -784,8 +782,8 @@ export class LoopStore {
     Object.assign(run,{status:evaluation.status,evidence_ids_json:publicationJson(evaluation.evidenceIds),finished_at:input.now,updated_at:input.now,failure_kind:evaluation.status==='failed'?evaluation.failureKind:null,message:evaluation.status==='failed'?message:null,next_action_kind:evaluation.status==='blocked'?evaluation.nextActionKind:null,next_action_summary:evaluation.status==='blocked'?message:null});
     Object.assign(stage,{status:evaluation.status,evidence_ids_json:publicationJson(evaluation.evidenceIds),finished_at:input.now,updated_at:input.now,failure_kind:evaluation.status==='failed'?evaluation.failureKind:null,message,metadata_json:publicationJson({...metadata,localEvaluation:evaluation})});
     expected.definition!.active_run_id=null;expected.definition!.updated_at=input.now;
-    const stageWrite=this.db.prepare("UPDATE loop_stages SET status=?,evidence_ids_json=?,finished_at=?,updated_at=?,failure_kind=?,message=?,metadata_json=? WHERE id=? AND status='running' AND metadata_json=?").run(stage.status,stage.evidence_ids_json,stage.finished_at,stage.updated_at,stage.failure_kind,stage.message,stage.metadata_json,stage.id,verify.metadata_json);
-    const runWrite=this.db.prepare("UPDATE loop_runs SET status=?,evidence_ids_json=?,finished_at=?,updated_at=?,failure_kind=?,message=?,next_action_kind=?,next_action_summary=? WHERE id=? AND status='running'").run(run.status,run.evidence_ids_json,run.finished_at,run.updated_at,run.failure_kind,run.message,run.next_action_kind,run.next_action_summary,run.id);
+    const stageWrite=this.connection.runWrite("UPDATE loop_stages SET status=?,evidence_ids_json=?,finished_at=?,updated_at=?,failure_kind=?,message=?,metadata_json=? WHERE id=? AND status='running' AND metadata_json=?", stage.status, stage.evidence_ids_json, stage.finished_at, stage.updated_at, stage.failure_kind, stage.message, stage.metadata_json, stage.id, verify.metadata_json);
+    const runWrite=this.connection.runWrite("UPDATE loop_runs SET status=?,evidence_ids_json=?,finished_at=?,updated_at=?,failure_kind=?,message=?,next_action_kind=?,next_action_summary=? WHERE id=? AND status='running'", run.status, run.evidence_ids_json, run.finished_at, run.updated_at, run.failure_kind, run.message, run.next_action_kind, run.next_action_summary, run.id);
     this.clearActiveRun(basis.loopId,basis.runId,input.now);this.bumpAutomationStoreVersion();
     if(stageWrite.changes!==1||runWrite.changes!==1||publicationJson(snapshot())!==publicationJson(expected))throw Error('loop_template_outcome_changed');
   }
@@ -809,8 +807,7 @@ export class LoopStore {
           const body=parseLoopCandidateBody({kind:'user-template-execute',taskId:input.taskSnapshot.taskId,executeStageId:stage.id,summary:input.summary,evidenceIds:input.evidenceIds,artifacts:input.artifacts},
             {kind:'loop-run',loopId:current.loopId,runId:current.runId,stage:{stageId:stage.id,stageKind:'execute'}},current.contract);
           const encoded=publicationJson(body),snapshotJson=publicationJson(input.taskSnapshot);
-          this.db.prepare('INSERT INTO loop_stage_execution_results(stage_id,run_id,revision,body_json,body_hash,task_snapshot_json,task_snapshot_hash,evidence_ids_json,terminal_at) VALUES(?,?,1,?,?,?,?,?,?)')
-            .run(stage.id,current.runId,encoded,publicationHash(encoded),snapshotJson,publicationHash(snapshotJson),publicationJson(input.evidenceIds),input.now);
+          this.connection.runWrite('INSERT INTO loop_stage_execution_results(stage_id,run_id,revision,body_json,body_hash,task_snapshot_json,task_snapshot_hash,evidence_ids_json,terminal_at) VALUES(?,?,1,?,?,?,?,?,?)', stage.id, current.runId, encoded, publicationHash(encoded), snapshotJson, publicationHash(snapshotJson), publicationJson(input.evidenceIds), input.now);
           this.bumpAutomationStoreVersion();
   }
 
@@ -892,13 +889,13 @@ export class LoopStore {
       const record={runId:target.runId,originHash,generation,previousGenerationHash:previous?.generationHash??null,observation},generationHash=loopProjectionHash(record),result=freezeProjection({...record,origin,generationHash});
       const update=(table:'loop_runs'|'loop_stages'|'assistant_candidates',row:LoopRunRow|LoopStageRow|AssistantCandidateRow)=>{
         const columns=Object.keys(row).filter(k=>k!=='id');if(columns.some(k=>!/^[a-z_]+$/.test(k)))throw Error('loop_projection_columns');
-        const result=this.db.prepare(`UPDATE ${table} SET ${columns.map(k=>k+'=?').join(',')} WHERE id=?`).run(...columns.map(k=>(row as any)[k]),row.id);if(result.changes!==1)throw Error('loop_projection_write');
+        const result=this.connection.runWrite(`UPDATE ${table} SET ${columns.map(k=>k+'=?').join(',')} WHERE id=?`, ...columns.map(k=>(row as any)[k]), row.id);if(result.changes!==1)throw Error('loop_projection_write');
       };
       if(!previous){
-        if(this.db.prepare('INSERT INTO loop_projection_origins(run_id,origin_hash,record_json) VALUES(?,?,?)').run(target.runId,originHash,publicationJson(origin)).changes!==1)throw Error('loop_projection_write');
+        if(this.connection.runWrite('INSERT INTO loop_projection_origins(run_id,origin_hash,record_json) VALUES(?,?,?)', target.runId, originHash, publicationJson(origin)).changes!==1)throw Error('loop_projection_write');
         update('loop_runs',after.run);for(const stage of after.stages)update('loop_stages',stage);for(const member of after.members)update('assistant_candidates',member);
       }
-      if(this.db.prepare('INSERT INTO loop_projection_generations(run_id,generation,generation_hash,record_json) VALUES(?,?,?,?)').run(target.runId,generation,generationHash,publicationJson(record)).changes!==1)throw Error('loop_projection_write');
+      if(this.connection.runWrite('INSERT INTO loop_projection_generations(run_id,generation,generation_hash,record_json) VALUES(?,?,?,?)', target.runId, generation, generationHash, publicationJson(record)).changes!==1)throw Error('loop_projection_write');
       const expected=JSON.parse(target.vector);expected.rows=after;expected.projection=result;
       if(!previous&&expected.definition.active_run_id===target.runId){this.clearActiveRun(before.run.loop_id,target.runId,now);expected.definition.active_run_id=null;expected.definition.updated_at=now;}
       this.bumpAutomationStoreVersion();
@@ -935,8 +932,8 @@ export class LoopStore {
       const old=this.db.prepare('SELECT candidate_id,source_vector_hash FROM loop_publication_candidates WHERE subject_key=? ORDER BY revision DESC LIMIT 1').get(subjectKey) as {candidate_id:string;source_vector_hash:string}|undefined;
       if(old){if(old.source_vector_hash!==sourceVectorHash)throw Error('loop_publication_candidate_source_changed');return this.getLoopPublicationCandidate(old.candidate_id)!;}
       const candidateId=randomUUID(),binding=createLoopApplicationBinding({version:1,kind:'loop',subject,candidateId,candidateRevision:1,originalTriggerJson:basis.originalTriggerJson,logicalRunKey:basis.logicalRunKey,contract:basis.contract,body});
-      this.db.prepare("INSERT INTO loop_publication_candidates(candidate_id,run_id,stage_id,subject_key,revision,binding_json,binding_hash,source_vector_hash,publication_state,created_at) VALUES(?,?,?,?,?,?,?,?, 'captured',?)").run(candidateId,basis.runId,stage?.id??null,subjectKey,1,publicationJson(binding),loopApplicationBindingHash(binding),sourceVectorHash,result.terminal_at);
-      for(const row of members)this.db.prepare('INSERT INTO loop_publication_candidate_members(candidate_id,assistant_candidate_id,original_row_json) VALUES(?,?,?)').run(candidateId,row.id,publicationJson(row));
+      this.connection.runWrite("INSERT INTO loop_publication_candidates(candidate_id,run_id,stage_id,subject_key,revision,binding_json,binding_hash,source_vector_hash,publication_state,created_at) VALUES(?,?,?,?,?,?,?,?, 'captured',?)", candidateId, basis.runId, stage?.id??null, subjectKey, 1, publicationJson(binding), loopApplicationBindingHash(binding), sourceVectorHash, result.terminal_at);
+      for(const row of members)this.connection.runWrite('INSERT INTO loop_publication_candidate_members(candidate_id,assistant_candidate_id,original_row_json) VALUES(?,?,?)', candidateId, row.id, publicationJson(row));
       this.bumpAutomationStoreVersion();return this.getLoopPublicationCandidate(candidateId)!;
   }
 
@@ -1039,7 +1036,7 @@ export class LoopStore {
     if(!Number.isSafeInteger(now)||now<basis.sourceRows.run.started_at)throw Error('loop_publication_result_time');
     const stage=stageId?this.publicationStage(basis.runId,stageId):null;
     const body=parseLoopCandidateBody(rawBody,{kind:'loop-run',loopId:basis.loopId,runId:basis.runId,stage:stage?{stageId:stage.id,stageKind:stage.stage_kind}:null},basis.contract),encoded=publicationJson(body);
-    this.db.prepare('INSERT INTO loop_producer_results(run_id,revision,body_json,body_hash,stage_id,evidence_ids_json,terminal_at) VALUES(?,1,?,?,?,?,?)').run(basis.runId,encoded,publicationHash(encoded),stageId,publicationJson(evidenceIds),now);
+    this.connection.runWrite('INSERT INTO loop_producer_results(run_id,revision,body_json,body_hash,stage_id,evidence_ids_json,terminal_at) VALUES(?,1,?,?,?,?,?)', basis.runId, encoded, publicationHash(encoded), stageId, publicationJson(evidenceIds), now);
     // Releasing this logical execution slot says nothing about physical guest
     // quiescence or business success. The original runtime still owns cleanup.
     this.clearActiveRun(basis.loopId,basis.runId,now);
@@ -1058,7 +1055,7 @@ export class LoopStore {
       if((previous?.revision??null)!==input.expectedRevision)throw Error('loop_publication_config_conflict');
       const revision=(previous?.revision??0)+1;if(!Number.isSafeInteger(revision)||input.now<(previous?.updatedAt??0))throw Error('loop_publication_config_revision');
       const next={loopId:input.loopId,revision,configuration,createdAt:previous?.createdAt??input.now,updatedAt:input.now};
-      this.db.prepare('INSERT INTO loop_publication_configs(loop_id,revision,configuration_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(loop_id) DO UPDATE SET revision=excluded.revision,configuration_json=excluded.configuration_json,updated_at=excluded.updated_at').run(input.loopId,revision,publicationJson(configuration),next.createdAt,next.updatedAt);
+      this.connection.runWrite('INSERT INTO loop_publication_configs(loop_id,revision,configuration_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(loop_id) DO UPDATE SET revision=excluded.revision,configuration_json=excluded.configuration_json,updated_at=excluded.updated_at', input.loopId, revision, publicationJson(configuration), next.createdAt, next.updatedAt);
       this.bumpAutomationStoreVersion();return freezeLoopPublicationValue(next);
     });
   }
@@ -1108,7 +1105,7 @@ export class LoopStore {
     }
     const basis:LoopRunPublicationBasis={version:1,runId,loopId:run.loop_id,requestSource:source as LoopRunPublicationBasis['requestSource'],originalTriggerJson:publicationJson(JSON.parse(run.trigger_json)),logicalRunKey:run.logical_run_key,configuration,contract:parseLoopBusinessContract(business),sourceRows:{run,definition,template,assistantProfile}};
     const encoded=publicationJson(basis);if(Buffer.byteLength(encoded)>1024*1024)throw Error('loop_publication_basis_limit');
-    this.db.prepare('INSERT INTO loop_run_publication_basis(run_id,basis_json,basis_hash) VALUES(?,?,?)').run(runId,encoded,publicationHash(encoded));
+    this.connection.runWrite('INSERT INTO loop_run_publication_basis(run_id,basis_json,basis_hash) VALUES(?,?,?)', runId, encoded, publicationHash(encoded));
   }
 
   getAutomationStoreVersion(): number {
@@ -1121,7 +1118,7 @@ export class LoopStore {
   ensureBuiltInLoops(now: number): LoopDefinition[] {
     this.transaction(() => {
       for (const loop of BUILT_IN_LOOPS) {
-        this.db.prepare(`
+        this.connection.runWrite(`
           insert into loop_definitions (
             id, title, description, status, origin, active_run_id, created_at, updated_at
           ) values (
@@ -1138,7 +1135,7 @@ export class LoopStore {
               then excluded.updated_at
               else loop_definitions.updated_at
             end
-        `).run({
+        `, {
           id: loop.id,
           title: loop.title,
           description: loop.description,
@@ -1162,13 +1159,13 @@ export class LoopStore {
     const outputFileName = input.kind === 'task_completion' ? '' : input.outputFileName;
     const contract = createDefaultLoopContract(input);
     return this.transaction(() => {
-      this.db.prepare(`
+      this.connection.runWrite(`
         insert into loop_definitions (
           id, title, description, status, origin, active_run_id, deleted_at, delete_reason, created_at, updated_at
         ) values (
           @id, @title, @description, 'active', 'user_template', null, null, null, @createdAt, @updatedAt
         )
-      `).run({
+      `, {
         id: input.loopId,
         title: input.title,
         description: input.description ?? '',
@@ -1176,7 +1173,7 @@ export class LoopStore {
         updatedAt: input.now,
       });
 
-      this.db.prepare(`
+      this.connection.runWrite(`
         insert into user_loop_templates (
           loop_id, kind, prompt, output_directory, output_file_name,
           schedule_action_id, schedule_enabled, schedule_trigger_json, auto_run_approved,
@@ -1188,7 +1185,7 @@ export class LoopStore {
           @contractJson, @contractSchemaVersion,
           @createdAt, @updatedAt
         )
-      `).run({
+      `, {
         loopId: input.loopId,
         kind: input.kind,
         prompt: input.prompt,
@@ -1237,14 +1234,14 @@ export class LoopStore {
 
   setLoopStatus(loopId: string, status: LoopDefinitionStatus, now: number, deleteReason?: string): LoopDefinition | undefined {
     return this.transaction(() => {
-      const result = this.db.prepare(`
+      const result = this.connection.runWrite(`
         update loop_definitions
         set status = @status,
             updated_at = @updatedAt,
             deleted_at = case when @status = 'deleted' then @updatedAt else null end,
             delete_reason = case when @status = 'deleted' then @deleteReason else null end
         where id = @loopId
-      `).run({
+      `, {
         status,
         updatedAt: now,
         deleteReason: status === 'deleted' ? deleteReason ?? 'deleted' : null,
@@ -1266,7 +1263,7 @@ export class LoopStore {
         const params: Record<string, unknown> = { loopId, now };
         if (patch.title !== undefined) { sets.push('title = @title'); params.title = patch.title; }
         if (patch.description !== undefined) { sets.push('description = @description'); params.description = patch.description; }
-        this.db.prepare(`update loop_definitions set ${sets.join(', ')} where id = @loopId`).run(params as any);
+        this.connection.runWrite(`update loop_definitions set ${sets.join(', ')} where id = @loopId`, params as any);
       }
       const tplSets: string[] = ['updated_at = @now'];
       const tplParams: Record<string, unknown> = { loopId, now };
@@ -1299,7 +1296,7 @@ export class LoopStore {
         tplParams.contractSchemaVersion = nextContract.schemaVersion;
       }
       if (tplSets.length > 1) {
-        this.db.prepare(`update user_loop_templates set ${tplSets.join(', ')} where loop_id = @loopId`).run(tplParams as any);
+        this.connection.runWrite(`update user_loop_templates set ${tplSets.join(', ')} where loop_id = @loopId`, tplParams as any);
       }
       this.bumpAutomationStoreVersion();
       return this.getUserLoopTemplate(loopId);
@@ -1309,8 +1306,8 @@ export class LoopStore {
   deleteUserLoopTemplate(loopId: string): void {
     this.transaction(() => {
       const now = Date.now();
-      this.db.prepare("delete from user_loop_templates where loop_id = ?").run(loopId);
-      this.db.prepare("update loop_definitions set status = 'deleted', deleted_at = @now, delete_reason = 'user_deleted', updated_at = @now where id = @loopId").run({ loopId, now });
+      this.connection.runWrite("delete from user_loop_templates where loop_id = ?", loopId);
+      this.connection.runWrite("update loop_definitions set status = 'deleted', deleted_at = @now, delete_reason = 'user_deleted', updated_at = @now where id = @loopId", { loopId, now });
       this.bumpAutomationStoreVersion();
     });
   }
@@ -1337,8 +1334,8 @@ export class LoopStore {
         }
       }
       const idPlaceholders = runIds.map(() => '?').join(',');
-      this.db.prepare(`delete from loop_stages where run_id in (${idPlaceholders})`).run(...runIds);
-      const result = this.db.prepare(`delete from loop_runs where id in (${idPlaceholders})`).run(...runIds);
+      this.connection.runWrite(`delete from loop_stages where run_id in (${idPlaceholders})`, ...runIds);
+      const result = this.connection.runWrite(`delete from loop_runs where id in (${idPlaceholders})`, ...runIds);
       this.bumpAutomationStoreVersion();
       return Number(result.changes ?? runIds.length);
     });
@@ -1383,7 +1380,7 @@ export class LoopStore {
       const runId = randomUUID();
       const triggerJson = JSON.stringify(actualTrigger);
       const evidenceIdsJson = JSON.stringify([]);
-      this.db.prepare(`
+      this.connection.runWrite(`
         insert into loop_runs (
           id, loop_id, status, trigger_json, logical_run_key, evidence_ids_json, started_at, finished_at,
           updated_at, failure_kind, message, summary, next_action_kind, next_action_summary
@@ -1391,7 +1388,7 @@ export class LoopStore {
           @id, @loopId, 'running', @triggerJson, @logicalRunKey, @evidenceIdsJson, @startedAt, null,
           @updatedAt, null, null, null, null, null
         )
-      `).run({
+      `, {
         id: runId,
         loopId,
         triggerJson,
@@ -1401,11 +1398,11 @@ export class LoopStore {
         updatedAt: now,
       });
 
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_definitions
         set active_run_id = ?, updated_at = ?
         where id = ?
-      `).run(runId, now, loopId);
+      `, runId, now, loopId);
 
       this.captureRunPublicationBasis(runId,sourceContext?.requestSource);
       const run = this.getLoopRun(runId);
@@ -1433,12 +1430,12 @@ export class LoopStore {
       if (!current || current.status !== 'running') return current ? this.runRowToRecord(current) : undefined;
       if(this.hasLoopPublicationResults(runId)||this.hasUnknownLoopTask(runId))return this.runRowToRecord(current);
       this.assertRawLoopSuccess(current.id);
-      const updated = this.db.prepare(`
+      const updated = this.connection.runWrite(`
         update loop_runs set status = 'success', evidence_ids_json = ?, finished_at = ?, updated_at = ?, summary = ?
         where id = ? and status = 'running'
-      `).run(JSON.stringify(evidenceIds), now, now, summary, runId);
+      `, JSON.stringify(evidenceIds), now, now, summary, runId);
       if (updated.changes === 1) {
-        this.db.prepare(`update assistant_candidates set status = 'pending' where run_id = ? and status = 'staged'`).run(runId);
+        this.connection.runWrite(`update assistant_candidates set status = 'pending' where run_id = ? and status = 'staged'`, runId);
         this.finishOpenStagesForTerminalRun(current.loop_id, runId, { status: 'success' }, current.status, now);
         this.clearActiveRun(current.loop_id, runId, now);
         this.bumpAutomationStoreVersion();
@@ -1449,11 +1446,11 @@ export class LoopStore {
 
   ensureAssistantProfile(profile: AssistantProfile): AssistantProfile {
     return this.transaction(() => {
-      this.db.prepare(`
+      this.connection.runWrite(`
         insert into assistant_profiles (id, status, locale, time_zone, evening_time, morning_time, workdays_json, quiet_hours_json, data_scopes_json, created_at, updated_at)
         values (@id, @status, @locale, @timeZone, @eveningTime, @morningTime, @workdaysJson, @quietHoursJson, @dataScopesJson, @createdAt, @updatedAt)
         on conflict(id) do nothing
-      `).run({
+      `, {
         id: profile.id,
         status: profile.status,
         locale: profile.locale,
@@ -1477,7 +1474,7 @@ export class LoopStore {
 
   setAssistantProfileStatus(id: AssistantProfile['id'], status: AssistantProfile['status'], now: number): AssistantProfile | undefined {
     return this.transaction(() => {
-      this.db.prepare('update assistant_profiles set status = ?, updated_at = ? where id = ?').run(status, now, id);
+      this.connection.runWrite('update assistant_profiles set status = ?, updated_at = ? where id = ?', status, now, id);
       return this.getAssistantProfile(id);
     });
   }
@@ -1493,10 +1490,10 @@ export class LoopStore {
           throw new Error('Invalid assistant candidate.');
         }
         const id = randomUUID();
-        this.db.prepare(`
+        this.connection.runWrite(`
           insert into assistant_candidates (id, run_id, kind, title, content, scope, project_id, confidence, evidence_refs_json, dedupe_key, status, target_kind, target_id, accepted_target_ref, created_at, decided_at)
           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'staged', null, null, null, ?, null)
-        `).run(id, runId, input.kind, input.title, input.content, input.scope, input.projectId ?? null, input.confidence, JSON.stringify(input.evidenceRefs), input.dedupeKey, now);
+        `, id, runId, input.kind, input.title, input.content, input.scope, input.projectId ?? null, input.confidence, JSON.stringify(input.evidenceRefs), input.dedupeKey, now);
         return this.getAssistantCandidate(id)!;
       });
 
@@ -1557,12 +1554,12 @@ export class LoopStore {
       if(!Number.isSafeInteger(after.updatedAt)||after.updatedAt<member.createdAt||after.candidateId!==member.id||after.runId!==member.runId)throw Error('assistant_promotion_time');
       if(!entry.before){
         if(entry.source!=='user'||after.state!=='accepting'||after.revision!==1||!['pending','accept_failed'].includes(member.status))throw Error('assistant_promotion_transition');
-        if(this.db.prepare('INSERT INTO assistant_promotion_intents(candidate_id,revision,record_json) VALUES(?,?,?)').run(member.id,after.revision,publicationJson(after)).changes!==1)throw Error('assistant_promotion_write');
+        if(this.connection.runWrite('INSERT INTO assistant_promotion_intents(candidate_id,revision,record_json) VALUES(?,?,?)', member.id, after.revision, publicationJson(after)).changes!==1)throw Error('assistant_promotion_write');
       }else{
         if(after.state!=='accepted'||entry.before.state!=='accepting'||after.revision!==entry.before.revision+1||publicationJson(after.target)!==publicationJson(entry.before.target))throw Error('assistant_promotion_transition');
-        if(this.db.prepare('UPDATE assistant_promotion_intents SET revision=?,record_json=? WHERE candidate_id=? AND revision=? AND record_json=?').run(after.revision,publicationJson(after),member.id,entry.before.revision,publicationJson(entry.before)).changes!==1)throw Error('assistant_promotion_write');
+        if(this.connection.runWrite('UPDATE assistant_promotion_intents SET revision=?,record_json=? WHERE candidate_id=? AND revision=? AND record_json=?', after.revision, publicationJson(after), member.id, entry.before.revision, publicationJson(entry.before)).changes!==1)throw Error('assistant_promotion_write');
       }
-      if(this.db.prepare('UPDATE assistant_candidates SET status=?,target_kind=?,target_id=?,accepted_target_ref=?,decided_at=? WHERE id=?').run(after.state,member.kind,after.target.targetId,after.targetRef,after.updatedAt,member.id).changes!==1)throw Error('assistant_promotion_write');
+      if(this.connection.runWrite('UPDATE assistant_candidates SET status=?,target_kind=?,target_id=?,accepted_target_ref=?,decided_at=? WHERE id=?', after.state, member.kind, after.target.targetId, after.targetRef, after.updatedAt, member.id).changes!==1)throw Error('assistant_promotion_write');
       this.bumpAutomationStoreVersion();
       entry.check();
       entry.signal.throwIfAborted();
@@ -1584,10 +1581,10 @@ export class LoopStore {
       const before=this.getAssistantCandidate(candidateId),intent=this.getAssistantPromotionIntent(candidateId);
       if(mode==='protected'&&intent)throw Error('assistant_candidate_reject_conflict');
 
-      this.db.prepare(`
+      this.connection.runWrite(`
         update assistant_candidates set status = 'rejected', decided_at = ?
         where id = ? and status in ('pending', 'accept_failed')
-      `).run(now, candidateId);
+      `, now, candidateId);
       this.bumpAutomationStoreVersion();
       const actual=this.getAssistantCandidate(candidateId),afterIntent=this.getAssistantPromotionIntent(candidateId);
       const expected=before&&['pending','accept_failed'].includes(before.status)?{...before,status:'rejected',decidedAt:now}:before;
@@ -1664,11 +1661,11 @@ export class LoopStore {
 
   touchLoopRun(runId: string, now: number): LoopRun | undefined {
     return this.transaction(() => {
-      const result = this.db.prepare(`
+      const result = this.connection.runWrite(`
         update loop_runs
         set updated_at = ?
         where id = ? and status = 'running'
-      `).run(now, runId);
+      `, now, runId);
       if (result.changes === 1) {
         this.bumpAutomationStoreVersion();
       }
@@ -1721,7 +1718,7 @@ export class LoopStore {
       if (run.status !== 'running') throw new Error('Loop stage can only start for a running loop run.');
 
       const stageId = randomUUID();
-      this.db.prepare(`
+      this.connection.runWrite(`
         insert into loop_stages (
           id, run_id, loop_id, stage_kind, status, started_at, finished_at,
           evidence_ids_json, summary, failure_kind, message, metadata_json,
@@ -1731,7 +1728,7 @@ export class LoopStore {
           @evidenceIdsJson, null, null, null, @metadataJson,
           @createdAt, @updatedAt
         )
-      `).run({
+      `, {
         id: stageId,
         runId,
         loopId,
@@ -1761,9 +1758,9 @@ export class LoopStore {
     }
     if(stage.metadata.taskStartState&&['taskId','taskStartState'].some(key=>Object.hasOwn(patch,key)&&patch[key]!==stage.metadata[key]))throw Error('loop_task_identity_changed');
     const merged = { ...stage.metadata, ...patch };
-    this.db.prepare(`
+    this.connection.runWrite(`
       update loop_stages set metadata_json = @metadataJson, updated_at = @updatedAt where id = @id
-    `).run({
+    `, {
       id: stageId,
       metadataJson: JSON.stringify(merged),
       updatedAt: Date.now(),
@@ -1851,14 +1848,14 @@ export class LoopStore {
 
       if (existing) {
         // Supersede the old constraint
-        this.db.prepare(`
+        this.connection.runWrite(`
           update loop_learned_constraints
           set superseded_by = ?, deactivation_reason = 'superseded', updated_at = ?
           where id = ?
-        `).run(newId, input.now, existing.id);
+        `, newId, input.now, existing.id);
       }
 
-      this.db.prepare(`
+      this.connection.runWrite(`
         insert into loop_learned_constraints (
           id, loop_id, source, rule, source_run_id,
           failure_kind, failure_reason, active, hit_count,
@@ -1870,7 +1867,7 @@ export class LoopStore {
           0, @createdAt, @updatedAt,
           null, null, null, @extractionContext
         )
-      `).run({
+      `, {
         id: newId,
         loopId: input.loopId,
         source: input.source,
@@ -1912,21 +1909,21 @@ export class LoopStore {
     if (ids.length === 0) return;
     const now = Date.now();
     for (const id of ids) {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_learned_constraints
         set hit_count = hit_count + 1, last_hit_at = ?, updated_at = ?
         where id = ?
-      `).run(now, now, id);
+      `, now, now, id);
     }
   }
 
   confirmConstraint(constraintId: string): LearnedConstraint | undefined {
     const now = Date.now();
-    const result = this.db.prepare(`
+    const result = this.connection.runWrite(`
       update loop_learned_constraints
       set active = 1, updated_at = ?
       where id = ? and active = 0 and deactivation_reason is null
-    `).run(now, constraintId);
+    `, now, constraintId);
     if (result.changes === 0) return undefined;
 
     // Check overflow: if more than 10 active for this loop, deactivate oldest
@@ -1940,11 +1937,11 @@ export class LoopStore {
       if (activeRows.length > 10) {
         const overflow = activeRows.slice(10);
         for (const old of overflow) {
-          this.db.prepare(`
+          this.connection.runWrite(`
             update loop_learned_constraints
             set active = 0, deactivation_reason = 'overflow', updated_at = ?
             where id = ?
-          `).run(now, old.id);
+          `, now, old.id);
         }
       }
     }
@@ -1957,17 +1954,17 @@ export class LoopStore {
   setConstraintActive(constraintId: string, active: boolean): LearnedConstraint | undefined {
     const now = Date.now();
     if (active) {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_learned_constraints
         set active = 1, deactivation_reason = null, updated_at = ?
         where id = ?
-      `).run(now, constraintId);
+      `, now, constraintId);
     } else {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_learned_constraints
         set active = 0, deactivation_reason = 'user', updated_at = ?
         where id = ?
-      `).run(now, constraintId);
+      `, now, constraintId);
     }
     this.bumpAutomationStoreVersion();
     const row = this.db.prepare('select * from loop_learned_constraints where id = ?').get(constraintId) as LearnedConstraintRow | undefined;
@@ -1978,20 +1975,20 @@ export class LoopStore {
     if (constraintIds.length === 0) return;
     const now = Date.now();
     for (const id of constraintIds) {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_learned_constraints
         set consecutive_ineffective_count = consecutive_ineffective_count + 1, updated_at = ?
         where id = ?
-      `).run(now, id);
+      `, now, id);
 
       // Auto-deactivate if reached 3
       const row = this.db.prepare('select * from loop_learned_constraints where id = ?').get(id) as LearnedConstraintRow | undefined;
       if (row && row.consecutive_ineffective_count >= 3) {
-        this.db.prepare(`
+        this.connection.runWrite(`
           update loop_learned_constraints
           set active = 0, deactivation_reason = 'ineffective', updated_at = ?
           where id = ? and active = 1
-        `).run(now, id);
+        `, now, id);
       }
     }
     this.bumpAutomationStoreVersion();
@@ -2001,11 +1998,11 @@ export class LoopStore {
     if (constraintIds.length === 0) return;
     const now = Date.now();
     for (const id of constraintIds) {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_learned_constraints
         set consecutive_ineffective_count = 0, updated_at = ?
         where id = ?
-      `).run(now, id);
+      `, now, id);
     }
   }
 
@@ -2014,21 +2011,21 @@ export class LoopStore {
     const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
 
     // Active constraints not hit in 30 days
-    const staleActive = this.db.prepare(`
+    const staleActive = this.connection.runWrite(`
       update loop_learned_constraints
       set active = 0, deactivation_reason = 'stale', updated_at = ?
       where loop_id = ? and active = 1 and deactivation_reason is null
         and ((last_hit_at is null and created_at <= ?)
              or (last_hit_at is not null and last_hit_at <= ?))
-    `).run(now, loopId, now - thirtyDaysMs, now - thirtyDaysMs);
+    `, now, loopId, now - thirtyDaysMs, now - thirtyDaysMs);
 
     // Pending constraints not confirmed in 14 days
-    const stalePending = this.db.prepare(`
+    const stalePending = this.connection.runWrite(`
       update loop_learned_constraints
       set deactivation_reason = 'stale', updated_at = ?
       where loop_id = ? and active = 0 and deactivation_reason is null and superseded_by is null
         and created_at <= ?
-    `).run(now, loopId, now - fourteenDaysMs);
+    `, now, loopId, now - fourteenDaysMs);
 
     const total = Number(staleActive.changes ?? 0) + Number(stalePending.changes ?? 0);
     if (total > 0) {
@@ -2047,15 +2044,15 @@ export class LoopStore {
   }
 
   finishLoopRunWithDuration(runId: string, durationMs: number): void {
-    this.db.prepare(`
+    this.connection.runWrite(`
       update loop_runs
       set duration_ms = ?
       where id = ?
-    `).run(durationMs, runId);
+    `, durationMs, runId);
   }
 
   private applySchema(): void {
-    this.db.exec(`
+    this.connection.execWrite(`
       create table if not exists loop_definitions (
         id text primary key,
         title text not null,
@@ -2265,14 +2262,14 @@ export class LoopStore {
     this.ensureColumn('loop_runs', 'logical_run_key', 'text');
     this.ensureColumn('user_loop_templates', 'contract_json', 'text');
     this.ensureColumn('user_loop_templates', 'contract_schema_version', 'text');
-    this.db.exec(`create unique index if not exists idx_loop_runs_success_logical_key
+    this.connection.execWrite(`create unique index if not exists idx_loop_runs_success_logical_key
       on loop_runs(loop_id, logical_run_key) where status = 'success' and logical_run_key is not null`);
   }
 
   private ensureColumn(tableName: 'loop_definitions' | 'loop_runs' | 'user_loop_templates', columnName: string, definition: string): void {
     const columns = typedRows<TableColumnRow>(this.db.prepare(`pragma table_info(${tableName})`).all());
     if (columns.some(column => column.name === columnName)) return;
-    this.db.exec(`alter table ${tableName} add column ${columnName} ${definition}`);
+    this.connection.execWrite(`alter table ${tableName} add column ${columnName} ${definition}`);
   }
 
   private finishLoopRun(
@@ -2295,24 +2292,13 @@ export class LoopStore {
       if(this.hasLoopPublicationResults(runId)||this.hasUnknownLoopTask(runId))return this.runRowToRecord(current);
       if(input.status==='success')this.assertRawLoopSuccess(runId);
 
-      const result = this.db.prepare(`
+      const result = this.connection.runWrite(`
         update loop_runs
         set status = ?, evidence_ids_json = ?, finished_at = ?, updated_at = ?,
             failure_kind = ?, message = ?, summary = ?,
             next_action_kind = ?, next_action_summary = ?
         where id = ? and status = 'running'
-      `).run(
-        input.status,
-        JSON.stringify(input.evidenceIds),
-        input.now,
-        input.now,
-        input.failureKind ?? null,
-        input.message ?? null,
-        input.summary ?? null,
-        input.nextActionKind ?? null,
-        input.nextActionSummary ?? null,
-        runId
-      );
+      `, input.status, JSON.stringify(input.evidenceIds), input.now, input.now, input.failureKind ?? null, input.message ?? null, input.summary ?? null, input.nextActionKind ?? null, input.nextActionSummary ?? null, runId);
 
       if (result.changes === 1) {
         if (input.status !== 'success') this.supersedeStagedCandidates(runId, input.now);
@@ -2362,23 +2348,13 @@ export class LoopStore {
       if(this.hasLoopPublicationResults(current.run_id)||this.hasUnknownLoopTask(current.run_id))return this.stageRowToRecord(current);
       if(input.status==='success'){this.assertRawLoopSuccess(current.run_id);assertOrdinaryLoopOwner('loop_stage',stageId);}
 
-      const result = this.db.prepare(`
+      const result = this.connection.runWrite(`
         update loop_stages
         set status = ?, evidence_ids_json = ?, finished_at = ?, updated_at = ?,
             summary = ?, failure_kind = ?, message = ?,
             metadata_json = coalesce(?, metadata_json)
         where id = ? and status not in ('success', 'failed', 'blocked', 'skipped')
-      `).run(
-        input.status,
-        JSON.stringify(input.evidenceIds),
-        input.now,
-        input.now,
-        input.summary ?? null,
-        input.failureKind ?? null,
-        input.message ?? null,
-        input.metadata ? JSON.stringify(input.metadata) : null,
-        stageId
-      );
+      `, input.status, JSON.stringify(input.evidenceIds), input.now, input.now, input.summary ?? null, input.failureKind ?? null, input.message ?? null, input.metadata ? JSON.stringify(input.metadata) : null, stageId);
       if (result.changes === 1) {
         this.bumpAutomationStoreVersion();
       }
@@ -2395,12 +2371,12 @@ export class LoopStore {
 
   private markRunExecutorCrash(row: LoopRunRow, now: number): void {
     if(this.hasLoopPublicationResults(row.id)||this.hasUnknownLoopTask(row.id))return;
-    this.db.prepare(`
+    this.connection.runWrite(`
       update loop_runs
       set status = 'failed', finished_at = ?, updated_at = ?,
           failure_kind = 'executor_crash', message = ?
       where id = ? and status = 'running'
-    `).run(now, now, EXECUTOR_CRASH_MESSAGE, row.id);
+    `, now, now, EXECUTOR_CRASH_MESSAGE, row.id);
     this.supersedeStagedCandidates(row.id, now);
     this.failOpenStages(row.loop_id, row.id, 'executor_crash', EXECUTOR_CRASH_MESSAGE, now);
   }
@@ -2427,21 +2403,21 @@ export class LoopStore {
     if (input.status === 'success') {
       this.assertRawLoopSuccess(runId);
       for(const stage of this.listLoopStages(runId))assertOrdinaryLoopOwner('loop_stage',stage.id);
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_stages
         set status = 'skipped', finished_at = ?, updated_at = ?,
             message = coalesce(message, ?)
         where loop_id = ? and run_id = ? and status in ('pending', 'running')
-      `).run(now, now, 'Loop run finished before stage completed.', loopId, runId);
+      `, now, now, 'Loop run finished before stage completed.', loopId, runId);
       return;
     }
     if (input.status === 'blocked') {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update loop_stages
         set status = 'blocked', finished_at = ?, updated_at = ?,
             message = coalesce(message, ?)
         where loop_id = ? and run_id = ? and status in ('pending', 'running')
-      `).run(now, now, input.nextActionSummary ?? 'Loop run blocked before stage completed.', loopId, runId);
+      `, now, now, input.nextActionSummary ?? 'Loop run blocked before stage completed.', loopId, runId);
       return;
     }
     this.failOpenStages(
@@ -2454,43 +2430,44 @@ export class LoopStore {
   }
 
   private failOpenStages(loopId: string, runId: string, failureKind: LoopRunFailureKind, message: string, now: number): void {
-    this.db.prepare(`
+    this.connection.runWrite(`
       update loop_stages
       set status = 'failed', finished_at = ?, updated_at = ?,
           failure_kind = ?, message = ?
       where loop_id = ? and run_id = ? and status in ('pending', 'running')
-    `).run(now, now, failureKind, message, loopId, runId);
+    `, now, now, failureKind, message, loopId, runId);
   }
 
   private clearActiveRun(loopId: string, runId: string, now: number): void {
-    this.db.prepare(`
+    this.connection.runWrite(`
       update loop_definitions
       set active_run_id = null, updated_at = ?
       where id = ? and active_run_id = ?
-    `).run(now, loopId, runId);
+    `, now, loopId, runId);
   }
 
   private transaction<T>(fn: () => T): T {
     const rollbackDatabase = this.db;
-    rollbackDatabase.exec('begin immediate');
+    this.connection.execWrite('begin immediate');
     try {
       const result = fn();
-      this.db.exec('commit');
+      this.connection.execWrite('commit');
       return result;
     } catch (error) {
+      retainOriginalLoopDatabaseFailure(this.connection,rollbackDatabase,error);
       try {
-        rollbackDatabase.exec('rollback');
+        rollbackOriginalLoopDatabase(this.connection,rollbackDatabase);
       } catch { /* ignore rollback errors */ }
       throw error;
     }
   }
 
   private bumpAutomationStoreVersion(): void {
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into automation_store_metadata(key, value)
       values ('version', 1)
       on conflict(key) do update set value = value + 1
-    `).run();
+    `);
   }
 
   private definitionRowToRecord(row: LoopDefinitionRow): LoopDefinition {
@@ -2534,7 +2511,7 @@ export class LoopStore {
   }
 
   private supersedeStagedCandidates(runId: string, now: number): void {
-    this.db.prepare(`update assistant_candidates set status = 'superseded', decided_at = ? where run_id = ? and status = 'staged'`).run(now, runId);
+    this.connection.runWrite(`update assistant_candidates set status = 'superseded', decided_at = ? where run_id = ? and status = 'staged'`, now, runId);
   }
 
   private userLoopTemplateRowToRecord(row: UserLoopTemplateRow): UserLoopTemplate {
