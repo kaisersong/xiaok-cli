@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <limits.h>
+#if defined(NR_LEDGER_SOURCE_ADDON) && defined(NR_MAIN_BOOTSTRAP_EMBEDDED)
+#error Independent ledger Source must not embed Main authority
+#endif
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
 #include "main-session-bridge.h"
 #include "original-root-io-vfs.h"
@@ -100,12 +103,12 @@ static int directory_path(const char *path,int create){
  }return fd;
 }
 
-#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
+#if defined(NR_MAIN_BOOTSTRAP_EMBEDDED) || defined(NR_LEDGER_SOURCE_ADDON)
 static int nr_ledger_existing_current(nr_session *s);
 #endif
 static int current(nr_session *s){
 
-#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
+#if defined(NR_MAIN_BOOTSTRAP_EMBEDDED) || defined(NR_LEDGER_SOURCE_ADDON)
  if(s->ledger_source)return nr_ledger_existing_current(s);
 #endif
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
@@ -293,6 +296,16 @@ static nr_session *effect_session(napi_env env,napi_value candidate){
 #endif
 
 #endif
+#ifdef NR_LEDGER_SOURCE_ADDON
+#include "json-string-data.h"
+#include "physical-history-data.h"
+#include "process-intent-data.h"
+#include "readonly-leaf-history.h"
+#include "root-pool-schema-validation.h"
+#include "root-pool-graph-validation.h"
+#include "root-pool-ledger-reader.h"
+#include "root-pool-ledger-source.h"
+#endif
 #else
 static napi_value open_original(napi_env env,napi_callback_info info){(void)info;return fail(env,"ROOT_RESOURCE_PLATFORM_UNAVAILABLE");}
 #define install_fresh open_original
@@ -304,4 +317,8 @@ static napi_value open_original(napi_env env,napi_callback_info info){(void)info
 #define read_resource open_original
 #define cancel_queued_resource open_original
 #endif
+#ifdef NR_LEDGER_SOURCE_ADDON
+#include "root-ledger-source-addon-exports.h"
+#else
 #include "root-resource-addon-exports.h"
+#endif
