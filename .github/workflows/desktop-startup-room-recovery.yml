@@ -11,6 +11,7 @@ on:
       - 'tests/native/protected-core-model-sdk.test.mjs'
       - 'tests/native/root-nmp-ledger*.test.mjs'
       - 'tests/native/root-ledger-source-artifact.test.mjs'
+      - 'tests/native/root-ledger-source-desktop.test.mjs'
       - 'scripts/verification/build-root-ledger-source.mjs'
       - 'src/runtime/verification/original-root-ledger-source-loader.ts'
       - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
@@ -46,6 +47,7 @@ on:
       - 'tests/native/protected-core-model-sdk.test.mjs'
       - 'tests/native/root-nmp-ledger*.test.mjs'
       - 'tests/native/root-ledger-source-artifact.test.mjs'
+      - 'tests/native/root-ledger-source-desktop.test.mjs'
       - 'scripts/verification/build-root-ledger-source.mjs'
       - 'src/runtime/verification/original-root-ledger-source-loader.ts'
       - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
@@ -240,6 +242,12 @@ jobs:
           tests/native/root-ledger-source-artifact.test.mjs
           tests/native/root-nmp-ledger-reader.test.mjs
           tests/native/root-nmp-ledger-main.test.mjs
+
+      - name: Actual Desktop cold ledger build resource in Node and genuine Main (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          npm run build:main --prefix desktop
+          node --test tests/native/root-ledger-source-desktop.test.mjs
 
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
