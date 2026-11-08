@@ -222,7 +222,7 @@ describe('config commands', () => {
       expect(entry).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-flash-vision-exp',
-        label: 'DeepSeek V4 Flash Vision Exp',
+        label: 'DeepSeek V4.1 Flash (1017)',
         capabilities: ['tools', 'thinking', 'image_in'],
         runtimeOptions: { contextLimit: 1_000_000 },
       });
