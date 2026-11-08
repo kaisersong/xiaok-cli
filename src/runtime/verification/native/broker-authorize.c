@@ -67,7 +67,9 @@ int main(int argc,char **argv) {
   /* Parent supplies canonical escaped review; keep this prompt bounded and reject
    * controls that could hide/substitute scope text in the native security UI. */
   for(size_t i=0;i<count;i++)if((prompt[i]<32&&prompt[i]!='\n'&&prompt[i]!='\t')||prompt[i]>=127)return 65;
-#if defined(XIAOK_PROFILE_SOURCE)
+#if defined(XIAOK_MAINROOT_ENROLLMENT)
+  const char *right="dev.xiaok.verification.mainroot-enrollment";
+#elif defined(XIAOK_PROFILE_SOURCE)
   const char *right="dev.xiaok.verification.profile-sources";
 #elif defined(XIAOK_APPLICATION_BINDING)
   const char *right="dev.xiaok.verification.application";
@@ -82,7 +84,9 @@ int main(int argc,char **argv) {
 #endif
   CFDictionaryRef rule=NULL;if(AuthorizationRightGet(right,&rule)!=errAuthorizationSuccess)return 77;
   int valid=rule_matches(rule);CFRelease(rule);if(!valid)return 77;
-  #if defined(XIAOK_PROFILE_SOURCE)
+  #if defined(XIAOK_MAINROOT_ENROLLMENT)
+  const char *purpose="main-root-family-enrollment";
+#elif defined(XIAOK_PROFILE_SOURCE)
   const char *purpose="profile-source-custody";
 #elif defined(XIAOK_APPLICATION_BINDING)
   const char *purpose="completion-application-binding";
