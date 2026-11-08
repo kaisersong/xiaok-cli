@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Hoisted before service imports: CI skips Electron's binary install script.
+vi.mock('electron', () => ({ app: { isPackaged: false } }));
+
 import {
   configureDefaultRemoteDebugging,
   DEFAULT_DESKTOP_REMOTE_DEBUGGING_ADDRESS,
@@ -125,7 +129,6 @@ import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { prepareDesktopServicePorts, readDesktopServicePorts, desktopServiceUrl } from '../../electron/desktop-service-discovery.js';
 import { createCollaborationRoomBrokerClient } from '../../electron/collaboration-room-broker-client.js';
-import { vi } from 'vitest';
 
 describe('Desktop service port discovery (#168)', () => {
   it('keeps free default ports and publishes them', async (context) => {
