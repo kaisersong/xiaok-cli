@@ -1,10 +1,13 @@
+import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
+import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
+import {pendingTaskQuestion} from '../lib/pending-task-question';
 import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
 import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { GoalBar } from './GoalBar';
@@ -66,6 +69,7 @@ interface GoalAttempt { scope: DisplayScope; requestId?: string }
 interface DisplaySource {
   scope: DisplayScope;
   sourceTaskId: string;
+  lastErrorMessage?: string;
   intentOwner: GoalAttempt | null;
   executionScope?: TaskSnapshot['executionScope'];
   eventCount: number;
@@ -282,6 +286,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     };
   }, [renderScope]);
   const location = useLocation();
+  const navigate = useNavigate();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
   const [observationDraft, setObservationDraft] = useState<string|null>(null);
@@ -298,9 +303,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [streamingText, setStreamingText] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
+  const [interruptedTask, setInterruptedTask] = useState<InterruptedTask | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRevision, setLoadRevision] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
   const [goalNativeMutation, setGoalNativeMutation] = useState<DesktopGoalNativeMutationProjection | null>(null);
   const [goalLoading, setGoalLoading] = useState(false);
@@ -408,6 +416,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       setCurrentQuestion(null);
       setMessages(settleChatProgress);
       setStatus(event.status === 'cancelled' ? 'idle' : event.status);
+      if (event.status === 'failed' && isTaskExecutionInterruption(source.lastErrorMessage)) {
+        const terminalEventCount = source.eventCount;
+        void api.recoverTask(sourceTaskId).then(({snapshot}) => {
+          if (!acceptsSource(source) || source.eventCount !== terminalEventCount) return;
+          setInterruptedTask(readTaskInterruption(snapshot, {taskId: sourceTaskId, threadId: source.scope.taskId ?? ''}));
+        }).catch(() => {}); // A closing app may no longer answer; history restore retries on next open.
+      }
       source.release?.();
       return;
     }
@@ -667,6 +682,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
       case 'error': {
         const msg = (event as { type: 'error'; message: string }).message;
+        source.lastErrorMessage = msg;
         if (lastLiveErrorRef.current?.taskKey === eventTaskKey
           && lastLiveErrorRef.current.rawMessage === msg) {
           break;
@@ -705,7 +721,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : msg === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -734,6 +750,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     const previousRelease = unsubRef.current;
     const previousSource = displaySourceRef.current;
     displaySourceRef.current = source;
+    setInterruptedTask(previous => previous?.taskId === source.sourceTaskId ? previous : null);
     unsubRef.current = release;
     if (clearPresentation) {
       const partial = streamRef.current;
@@ -810,13 +827,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
           setStatus(snapshot.status);
           if (snapshot.status === 'waiting_user') {
-            const last = [...snapshot.events].reverse().find(event => event.type === 'needs_user');
-            if (last?.type === 'needs_user') setCurrentQuestion(last.question);
+            setCurrentQuestion(pendingTaskQuestion(snapshot));
           }
         } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
           source.terminalSeen = true;
           setStatus(snapshot.status === 'cancelled' ? 'idle' : snapshot.status);
           setCurrentQuestion(null);
+          setInterruptedTask(readTaskInterruption(snapshot, {taskId: prepared.taskId, threadId: prepared.threadId}));
         }
       }
     } catch { /* This one read is spent even if the transport or recovery cannot confirm it. */ }
@@ -1079,7 +1096,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: t.chatShell.taskExecutionFailed(reason),
+              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : rawMessage === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }
@@ -1190,9 +1207,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setMessages([]);
     setPlanSteps([]);
     setCurrentQuestion(null);
+    setInterruptedTask(null);
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    setActionError(null);
     const storedDraft = readStoredThreadDraft(taskId);
     setPrompt(draftPrompt || '');
 
@@ -1307,6 +1326,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           setResult(lastResult);
         }
         setStatus(lastStatus);
+        setCurrentQuestion(pendingTaskQuestion(lastSnapshot));
+        setInterruptedTask(readTaskInterruption(lastSnapshot, {taskId: lastTaskIdForSub, threadId: taskId}));
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
             executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
@@ -1354,7 +1375,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
     }).catch((err) => {
       if (loadCurrent()) {
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadError(t.chatShell.threadLoadFailed);
         setStatus('failed');
       }
     });
@@ -1365,7 +1386,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
@@ -1396,8 +1417,9 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: false });
   }, [queuedPrompt, status, taskId]);
 
-  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
+  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>, intent: 'composer' | 'interrupted_choice' = 'composer') => {
     if (!taskId || admissionPending.current === renderScope) return false;
+    setActionError(null);
     if (observationDraft && files?.length) {
       // Reuse the ordinary task error message position; no Goal panel is required.
       setMessages(previous => [...previous, {
@@ -1408,12 +1430,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       return false;
     }
 
-    if(currentQuestion?.kind==='freeform'&&files?.length){setLoadError(t.assistantInbox.answerFilesUnsupported);return false;}
+    if(currentQuestion?.kind==='freeform'&&files?.length){setActionError(t.assistantInbox.answerFilesUnsupported);return false;}
     if(currentQuestion?.kind==='freeform'&&thread?.currentTaskId&&!files?.length){
       const source=displaySourceRef.current;if(!source||!acceptsSource(source))return false;
       admissionPending.current=renderScope;
       try{await api.answerQuestion({taskId:thread.currentTaskId,answer:{questionId:currentQuestion.questionId,type:'text',text}});if(!acceptsSource(source))return false;setCurrentQuestion(null);setStatus('running');setPrompt('');return true;}
-      catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setLoadError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.taskCreateFailed);return false;}
+      catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setActionError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed);return false;}
       finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
     }
 
@@ -1468,7 +1490,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     try {
       // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
-      if (observationDraft) {
+      if (observationDraft && intent === 'composer') {
         const draftId=observationDraft;setObservationDraft(null);
         newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
       } else if (files && files.length > 0) {
@@ -1516,9 +1538,23 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     }
   };
 
+  const handleInterruptedChoice = (choiceId: string) => {
+    const source = displaySourceRef.current;
+    if (!interruptedTask || !thread || currentQuestion || (status !== 'failed' && status !== 'idle')
+      || !source || source.scope !== renderScope || !acceptsSource(source) || !source.terminalSeen
+      || source.sourceTaskId !== interruptedTask.taskId || thread.taskIds.at(-1) !== interruptedTask.taskId
+      || admissionPending.current === renderScope) return false;
+    const choice = interruptedTask.choices?.find(item => item.id === choiceId);
+    if (!choice) return false;
+    // Normal submission owns synchronous admission/deduplication; the expired execution is never answered.
+    return handleSubmit(choice.label, undefined, 'interrupted_choice');
+  };
+
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
-    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
+    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source) || admissionPending.current===renderScope) return;
+    admissionPending.current=renderScope;
+    setActionError(null);
     try {
     await api.answerQuestion({
       taskId: thread.currentTaskId,
@@ -1527,7 +1563,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (!acceptsSource(source) || source.terminalSeen) return;
     setCurrentQuestion(null);
     setStatus('running');
-    } catch(error) { if (acceptsSource(source)) setLoadError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.taskCreateFailed); }
+    } catch(error) { if (acceptsSource(source)) setActionError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed); }
+    finally {if(admissionPending.current===renderScope)admissionPending.current=null;}
   };
 
   const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {
@@ -1767,27 +1804,23 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
   if (loadError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--c-text-secondary)]">
-        <div className="text-red-500">
-          Failed to load thread: {loadError}
+      <section className="flex h-full flex-col items-center justify-center gap-4 p-6 text-[var(--c-text-secondary)]" aria-label={t.chatShell.threadLoadFailed}>
+        <div role="alert" className="max-w-md text-center">
+          <h2 className="text-base font-medium text-[var(--c-text-primary)]">{loadError}</h2>
+          <p className="mt-2 text-sm">{t.chatShell.threadLoadHelp}</p>
         </div>
-        <button
-          type="button"
-          className="rounded bg-[var(--c-primary)] px-4 py-2 text-white hover:opacity-90"
-          onClick={() => {
-            setLoadError(null);
-            setStatus('idle');
-            setThread(null);
-          }}
-        >
-          Retry
-        </button>
-      </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <button type="button" className="rounded border border-[var(--c-border-subtle)] px-4 py-2 text-sm hover:bg-[var(--c-bg-deep)]"
+            onClick={() => { sidebarCollapse.setCollapsed(false); navigate('/'); }}>{t.chatShell.backToTasks}</button>
+          <button type="button" className="rounded bg-[var(--c-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
+            onClick={() => { setLoadError(null); setLoadRevision(value => value + 1); }}>{t.chatShell.reloadThread}</button>
+        </div>
+      </section>
     );
   }
 
   if (!thread) {
-    return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
+    return <div role="status" className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">{t.chatShell.threadLoading}</div>;
   }
 
   // Extract generated files from multiple sources
@@ -1902,6 +1935,10 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       {!hideObservationControls && <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />}
+      {actionError && <div role="alert" className="mx-4 mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]">
+        <p>{actionError}</p>
+        <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
+      </div>}
       <ChatView
         emptyContent={emptyContent}
         conversationHeader={conversationHeader}
@@ -1915,6 +1952,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         streamingText={streamingText}
         status={status}
         currentQuestion={currentQuestion}
+        interruptedTask={interruptedTask}
+        onInterruptedChoice={handleInterruptedChoice}
         result={result}
         generatedFiles={generatedFiles}
         prompt={prompt}

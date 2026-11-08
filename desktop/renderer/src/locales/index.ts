@@ -3185,6 +3185,8 @@ export interface LocaleStrings {
     enableComputerUse: string;
     cuDismiss: string;
     taskFailed: string;
+    interruptedContinue: string;
+    interruptedChoices: string;
     scrollToBottom: string;
     conversationIndexLabel: string;
     conversationIndexItem: (index: number, preview: string) => string;
@@ -3281,6 +3283,7 @@ export interface LocaleStrings {
 
   // chatShell
   chatShell: {
+    threadLoadFailed: string; threadLoadHelp: string; reloadThread: string; backToTasks: string; threadLoading: string; answerFailed: string; dismissError: string;
     attachmentLabel: string;
     cuUnavailable: string;
     historyUnavailable: (taskIds: string) => string;
@@ -3289,6 +3292,8 @@ export interface LocaleStrings {
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
+    taskInterrupted: string;
+    taskExecutionInterrupted: string;
     modelKeyMissing: string;
     modelAuthFailed: string;
     modelServiceFailed: string;
