@@ -25,7 +25,7 @@ export interface MainDshBootstrapAuthority {
  seal():void;
 }
 export interface MainDshKernelClockCut {readonly kind:'main_kernel_clock_cut_v1';readonly domainId:string;readonly continuousLowerNs:string;readonly continuousUpperNs:string;readonly wallMs:number}
-export interface State {assertServiceComponent():void|null;startedCore():object|null;readAdmission():OriginalAdmissionDatabaseBundle|null;prepareInstalled(core?:boolean):object;observeClock(fact:GithubProviderDateFact):void;clockView():MainDshClockView;clock():Readonly<MainDshKernelClockCut>|null;authority:MainDshBootstrapAuthority;store?:object;current():void;local():void;references(proof:object,purpose:string):DshOriginalReferences}
+export interface State {assertServiceComponent():Promise<void>|null;joinServiceComponent():Promise<void>;startedCore():object|null;readAdmission():OriginalAdmissionDatabaseBundle|null;prepareInstalled(core?:boolean):object;observeClock(fact:GithubProviderDateFact):void;clockView():MainDshClockView;clock():Readonly<MainDshKernelClockCut>|null;authority:MainDshBootstrapAuthority;store?:object;current():void;local():void;references(proof:object,purpose:string):DshOriginalReferences}
 export interface InstalledPool {prepareKSwarmChild():Promise<object>;readLedger():Promise<OriginalRootNmpLedger>;assertReadyForOwner():void;open():Promise<object>;close():Promise<void>;startCore():Promise<void>;returnOwner():Promise<void>;readBootstrap(session:unknown):Promise<'fresh'|'restored'>;prepareBudgetWorker(prepared:unknown):Promise<object>;readAdmission():OriginalAdmissionDatabaseBundle|null}
 export interface MainDshClockView {
  readonly projection:Readonly<{state:'verified';domainId:string;qualificationEpoch:number;nowMs:number}|{state:'unverified'|'rollback_detected'}>;

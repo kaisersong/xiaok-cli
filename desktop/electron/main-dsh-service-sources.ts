@@ -13,7 +13,7 @@ import {resolveDesktopServiceScope} from './desktop-service-scope.js';
 import type {HarnessUserContext} from './harness-optimization-types.js';
 import {createMainDshBusinessSource,type MainDshBusinessSource} from './main-dsh-business-source.js';
 import {prepareOriginalMainDshKSwarmChild} from './main-dsh-core-kswarm.js';
-import {assertOptionalOriginalMainDshServiceComponent} from './main-dsh-source-component.js';
+import {assertOptionalOriginalMainDshServiceComponent,joinOriginalMainDshServiceComponent} from './main-dsh-source-component.js';
 
 type Scope=Readonly<{profileId:string;workspaceId:string}>;
 interface OriginalSourceBirth {
@@ -224,6 +224,7 @@ async function closeResources(row:Row,startup:boolean):Promise<void> {
     try{negativeVoid(birth.realm.seal,birth.realm);}catch(raw){errors[errors.length]=raw;}
    }
   }
+  if(birth){const component=createRoomTurnCustody();row.negatives.add(component);try{await component.sdk(joinOriginalMainDshServiceComponent,undefined,[birth.realm]);}catch(raw){errors[errors.length]=raw;}}
   if(row.coreStock&&(startup||!row.coreLease))try{await row.coreStock.waitPhysicalKnown();}catch(raw){errors[errors.length]=raw;}
   try{await row.stock.waitPhysicalKnown();}catch(raw){errors[errors.length]=raw;}
   const negatives=row.negatives.snapshot();
@@ -254,6 +255,8 @@ export async function finishOriginalMainDshServiceStore(lease:unknown):Promise<v
   try{stock.syncVoid(closeStore,row.store,[]);await stock.waitPhysicalKnown();row.storeClosed=true;}catch(raw){first={raw};}
  }
  if(row.coreLease)try{await row.coreStock!.consumeResource(closeOriginalMainDshCoreInfrastructure,row.coreLease,[row.coreLease]);}catch(raw){first??={raw};}
+ const component=createRoomTurnCustody();row.negatives.add(component);
+ try{await component.sdk(joinOriginalMainDshServiceComponent,undefined,[row.birth.realm]);await component.waitPhysicalKnown();}catch(raw){first??={raw};}
  if(row.coreStock)try{await row.coreStock.waitPhysicalKnown();}catch(raw){first??={raw};}
  const authority=createRoomTurnCustody();row.negatives.add(authority);
  try{authority.syncVoid(row.birth.realm.seal,row.birth.realm,[]);await authority.waitPhysicalKnown();}catch(raw){first??={raw};}
