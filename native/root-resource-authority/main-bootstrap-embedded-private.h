@@ -224,6 +224,9 @@ NODE_MODULE_INIT() {
            std::pair{"componentCreateOriginalCoreForBudget",&ComponentCoreForBudget},std::pair{"componentCloseOriginalCoreForBudget",&ComponentCloseCoreBudget},
 #endif
 #endif
+#ifdef NR_MAIN_DSH_SERVICE_COMPONENT
+           std::pair{"assertOriginalMainDshServiceComponent", &AssertServiceComponent},
+#endif
            std::pair{"createOriginalMainIssuer", &Create},
            std::pair{"connectOriginalMainInstallation", &ConnectInstallation},
            std::pair{"assertOriginalMainInstallationCurrent", &AssertInstallation},

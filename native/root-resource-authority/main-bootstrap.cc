@@ -26,6 +26,9 @@ void napi_module_register_by_symbol(v8::Local<v8::Object>,v8::Local<v8::Value>,
 #if defined(NR_MAIN_INSTALLATION_COMPONENT) && !defined(MI_FIXTURE_BUILD)
 #error "installation component cannot be built as production Main"
 #endif
+#if defined(NR_MAIN_DSH_SERVICE_COMPONENT) && (!defined(MI_FIXTURE_BUILD) || defined(NR_MAIN_INSTALLATION_COMPONENT) || NODE_MODULE_VERSION != 140)
+#error "service component requires genuine Electron 39 fixture Main only"
+#endif
 #if NODE_MODULE_VERSION != 140 && !defined(NR_MAIN_INSTALLATION_COMPONENT)
 #error "main-bootstrap requires the reviewed Electron 39 ABI 140 headers"
 #endif
@@ -217,6 +220,12 @@ v8::MaybeLocal<v8::Object> BuildIssuer(MainState* state) {
     return Throw(args.GetIsolate(), "MAIN_BOOTSTRAP_ISSUER_UNCONFIRMED");
   }
 }
+#ifdef NR_MAIN_DSH_SERVICE_COMPONENT
+// Component identity only. No handshake, seed, IO, resource or known fact.
+void AssertServiceComponent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  Assert(args);
+}
+#endif
 // A kernel cut is measurement provenance, not a UTC qualification or a
 // deadline grant. UTC anchoring and persisted restart fences remain consumers.
 [[maybe_unused]] void ReadClockCut(const v8::FunctionCallbackInfo<v8::Value>& args) {
