@@ -93,7 +93,10 @@ export interface OpenAIHarnessContext {
   readonly runtimeCapabilities: Readonly<ModelCapabilities>;
 }
 
+export type AdapterCredentialResolver = () => {apiKey:string;headers:Record<string,string|null>};
+
 export interface OpenAIAdapterInit {
+  readonly credentialResolver?: AdapterCredentialResolver;
   readonly apiKey: string;
   readonly resolvedHeaders?: Readonly<Record<string, string | null>>;
   readonly kimiCodingHeadersApplied: boolean;

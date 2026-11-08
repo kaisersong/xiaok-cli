@@ -15,6 +15,7 @@ import {
   buildOpenAIHarnessContext,
   resolveKimiHarnessFeatureFlags,
   type OpenAIAdapterInit,
+  type AdapterCredentialResolver,
 } from './providers/model-harness-profile.js';
 
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
@@ -82,7 +83,7 @@ export function buildOpenAIAdapterInit(
   };
 }
 
-export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAdapter {
+export function createAdapterFromBinding(binding: ResolvedModelBinding, credentialResolver?: AdapterCredentialResolver): ModelAdapter {
   // 只透传 contextLimit：reasoningEffort 是 OpenAI-compatible 的请求字段，
   // Claude 用 thinking.type、Gemini 用别的机制，透传过去没有接收方。
   const capabilityOverrides = {
@@ -104,11 +105,12 @@ export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAd
       binding.baseUrl,
       capabilityOverrides,
       catalogIdentity,
+      credentialResolver,
     );
   }
 
   if (binding.protocol === 'openai_legacy') {
-    return new OpenAIAdapter(buildOpenAIAdapterInit(binding));
+    return new OpenAIAdapter({...buildOpenAIAdapterInit(binding),credentialResolver});
   }
 
   if (binding.protocol === 'openai_responses') {
@@ -119,14 +121,15 @@ export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAd
       binding.headers,
       capabilityOverrides,
       catalogIdentity,
+      credentialResolver,
     );
   }
 
   throw new Error(`未知的模型协议: ${binding.protocol}`);
 }
 
-export function createAdapter(rawConfig: Config | LegacyConfig): ModelAdapter {
-  return createAdapterFromBinding(resolveRuntimeModelBinding(rawConfig));
+export function createAdapter(rawConfig: Config | LegacyConfig, credentialResolver?: AdapterCredentialResolver): ModelAdapter {
+  return createAdapterFromBinding(resolveRuntimeModelBinding(rawConfig,undefined,!credentialResolver),credentialResolver);
 }
 
 /**

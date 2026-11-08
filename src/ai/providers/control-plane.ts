@@ -40,7 +40,7 @@ export class MissingProviderApiKeyError extends Error {
   }
 }
 
-export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedModelId?: string): ResolvedModelBinding {
+export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedModelId?: string, requireApiKey = true): ResolvedModelBinding {
   const config = normalizeConfig(rawConfig);
   const { modelId, providerId, modelEntry, providerConfig } = resolveConfiguredModelBinding(config, requestedModelId);
   const providerProfile = getProviderProfile(providerId);
@@ -55,7 +55,7 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
     ? findCatalogModel(providerProfile, modelId, wireModel)
     : undefined;
 
-  if (!transport.apiKey && providerConfig.type !== 'custom') {
+  if (requireApiKey && !transport.apiKey && providerConfig.type !== 'custom') {
     const envHint = (providerProfile?.envPrefixes[0] ?? providerId.toUpperCase()).toUpperCase();
     throw new MissingProviderApiKeyError(providerId, envHint);
   }
