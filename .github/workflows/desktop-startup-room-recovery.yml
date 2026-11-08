@@ -10,6 +10,10 @@ on:
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
       - 'tests/native/protected-core-model-sdk.test.mjs'
       - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'tests/native/root-ledger-source-artifact.test.mjs'
+      - 'scripts/verification/build-root-ledger-source.mjs'
+      - 'src/runtime/verification/original-root-ledger-source-loader.ts'
+      - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
       - 'tests/native/fixtures/root-nmp-ledger-*'
       - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
       - 'tests/native/helpers/application-policy-observer.m'
@@ -41,6 +45,10 @@ on:
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
       - 'tests/native/protected-core-model-sdk.test.mjs'
       - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'tests/native/root-ledger-source-artifact.test.mjs'
+      - 'scripts/verification/build-root-ledger-source.mjs'
+      - 'src/runtime/verification/original-root-ledger-source-loader.ts'
+      - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
       - 'tests/native/fixtures/root-nmp-ledger-*'
       - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
       - 'tests/native/helpers/application-policy-observer.m'
@@ -229,6 +237,7 @@ jobs:
         if: runner.os == 'macOS'
         run: >-
           node --test --test-concurrency=1
+          tests/native/root-ledger-source-artifact.test.mjs
           tests/native/root-nmp-ledger-reader.test.mjs
           tests/native/root-nmp-ledger-main.test.mjs
 

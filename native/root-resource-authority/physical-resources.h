@@ -1,61 +1,6 @@
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
-static const char *nr_execution_classes[]={"room_discussion","room_project","kswarm_direct","workflow_root","dsh_draft","nested_subagent","admission_probe","live_preview","snapshot_prep","tool_worker","main_turn","goal_turn","material_turn","canvas_turn"};
-static nr_child *nr_any_source_key(napi_env env,napi_value value){
- for(int kind=NR_ROOM_DISCUSSION_KEY;kind<=NR_CANVAS_KEY;kind++){
-  nr_child *key=nr_source_key(env,value,kind);if(key)return key;
- }
- return NULL;
-}
-static napi_value import_physical_context(napi_env env,napi_callback_info info){
- napi_value args[8],parent=NULL,out=NULL,null_value;bool none=false;
- if(!arguments(env,info,7,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nr_child *key=nr_any_source_key(env,args[0]);if(!key)return fail(env,"ROOT_RESOURCE_SOURCE_KEY_REQUIRED");
- if(napi_get_reference_value(env,key->parent_ref,&parent)!=napi_ok||!parent)return fail(env,"ROOT_RESOURCE_SOURCE_KEY_REQUIRED");
- nr_session *s=main_session_member(env,info,parent);if(!s)return NULL;
- if(!main_session_current(env,s))return NULL;if(!s->fresh_owner)return fail(env,"ROOT_RESOURCE_ISSUER_RECONCILIATION_REQUIRED");
- if(napi_get_null(env,&null_value)!=napi_ok||napi_strict_equals(env,args[1],null_value,&none)!=napi_ok)return nr_error(env,s,"ROOT_RESOURCE_CONTEXT_UNCONFIRMED",0,0,0);
- nr_child *ancestor=NULL;
- if(!none){ancestor=nr_get_child(env,args[1],s,NR_RESERVATION);if(!ancestor)ancestor=nr_get_child(env,args[1],s,NR_CONTEXT);if(!ancestor)return fail(env,"ROOT_RESOURCE_CONTEXT_PARENT_REQUIRED");}
- if((key->kind<=NR_DSH_DRAFT_KEY||key->kind==NR_NESTED_KEY||key->kind==NR_TOOL_KEY)&&!ancestor)return fail(env,"ROOT_RESOURCE_CONTEXT_PARENT_REQUIRED");
- if(ancestor&&ancestor->kind==NR_RESERVATION){
-  nr_record row={0};int found=nr_read(s,ancestor->record.key,&row);
-  int good=found==1&&nr_binding(&row,&ancestor->record)&&row.outbox==1&&nr_active(row.state);nr_record_clear(&row);
-  if(!good)return fail(env,"ROOT_RESOURCE_CONTEXT_PARENT_REQUIRED");
- }
- char *values[5]={0},*q[5]={0},json[16384],hash[65];int good=1;
- for(int i=0;i<5&&good;i++){values[i]=nr_subject_string(env,args[i+2],256,0);good=values[i]!=NULL;if(good){q[i]=nr_json_string(values[i]);good=q[i]!=NULL;}}
- if(!good){out=fail(env,"ROOT_RESOURCE_CONTEXT_DATA_INVALID");goto done;}
- const char *root_id=ancestor?(ancestor->kind==NR_RESERVATION?ancestor->record.id:ancestor->record.claim):"";
- char root_json[520];if(root_id[0])snprintf(root_json,sizeof(root_json),"\"%s\"",root_id);else snprintf(root_json,sizeof(root_json),"null");
- int n=snprintf(json,sizeof(json),"{\"executionClass\":\"%s\",\"executionRef\":%s,\"hostId\":%s,\"nativeRootId\":%s,\"scope\":{\"principalId\":%s,\"profileId\":%s,\"workspaceId\":%s}}",nr_execution_classes[key->kind-4],q[4],q[3],root_json,q[2],q[0],q[1]);
- if(n<0||(size_t)n>=sizeof(json)||!nr_hash(json,hash)){out=nr_error(env,s,"ROOT_RESOURCE_CONTEXT_UNCONFIRMED",0,0,0);goto done;}
- nr_child *context=nr_new_child(env,parent,s,NR_CONTEXT,&out);
- if(!context){out=nr_error(env,s,"ROOT_RESOURCE_CONTEXT_UNCONFIRMED",0,0,0);goto done;}
- snprintf(context->record.key,sizeof(context->record.key),"context:%s",hash);context->record.metadata=strdup(json);context->source_kind=key->kind;
- if(ancestor)snprintf(context->record.claim,sizeof(context->record.claim),"%s",ancestor->kind==NR_RESERVATION?ancestor->record.id:ancestor->record.claim);
- if(!context->record.metadata||ancestor&&napi_create_reference(env,args[1],1,&context->source_ref)!=napi_ok||!main_session_current(env,s)){out=nr_error(env,s,"ROOT_RESOURCE_CONTEXT_UNCONFIRMED",0,0,0);goto done;}
- context->valid=1;
-done:
- for(int i=0;i<5;i++){free(values[i]);free(q[i]);}return out;
-}
-static int nr_physical_policy(nr_session *s,int kind,nr_cell *cells){
- sqlite3_stmt *stmt=NULL;int good=sqlite3_prepare_v2(s->db,"SELECT * FROM root_physical_policy WHERE kind=?",-1,&stmt,NULL)==SQLITE_OK&&sqlite3_bind_int(stmt,1,kind)==SQLITE_OK&&sqlite3_step(stmt)==SQLITE_ROW;
- for(int i=0;i<8&&good;i++)good=nr_from_column(cells+i,stmt,i);
- if(good)good=sqlite3_step(stmt)==SQLITE_DONE;if(stmt&&sqlite3_finalize(stmt)!=SQLITE_OK)good=0;
- good=good&&cells[0].type==SQLITE_INTEGER&&cells[0].integer==kind&&cells[3].type==SQLITE_INTEGER&&cells[3].integer==(kind==1?4:2)&&cells[4].type==SQLITE_INTEGER&&cells[4].integer==256;
- for(int i=5;i<8&&good;i++)good=cells[i].type==SQLITE_INTEGER&&cells[i].integer>=0&&cells[i].integer<NR_MAX_SAFE;
- return good;
-}
-static int nr_physical_row(nr_session *s,int kind,const char *key,nr_cell *cells){
- sqlite3_stmt *stmt=NULL;int result=-1;
- if(sqlite3_prepare_v2(s->db,"SELECT * FROM root_physical_resources WHERE resource_kind=? AND execution_key=?",-1,&stmt,NULL)==SQLITE_OK&&sqlite3_bind_int(stmt,1,kind)==SQLITE_OK&&sqlite3_bind_text(stmt,2,key,-1,SQLITE_TRANSIENT)==SQLITE_OK){
-  int step=sqlite3_step(stmt);if(step==SQLITE_DONE)result=0;
-  else if(step==SQLITE_ROW){int good=1;for(int i=0;i<14&&good;i++)good=nr_from_column(cells+i,stmt,i);if(good&&sqlite3_step(stmt)==SQLITE_DONE)result=1;}
- }
- if(stmt&&sqlite3_finalize(stmt)!=SQLITE_OK)result=-1;
- if(result==1){char digest[65];if(cells[4].type!=SQLITE_TEXT||cells[5].type!=SQLITE_TEXT||!nr_hash((const char*)cells[4].bytes,digest)||cells[5].length!=64||memcmp(digest,cells[5].bytes,64))result=-1;}
- return result;
-}
+#include "physical-history-data.h"
+#include "physical-context.h"
 static int nr_physical_project(napi_env env,napi_value out,const nr_cell *r){
  return text(env,out,"recordId",(const char*)r[0].bytes)&&text(env,out,"kind",r[1].integer==1?"model":"process")&&text(env,out,"executionClass",(const char*)r[2].bytes)&&text(env,out,"executionKey",(const char*)r[3].bytes)&&text(env,out,"metadataDigest",(const char*)r[5].bytes)&&number(env,out,"enqueueSeq",r[6].integer)&&text(env,out,"state",(const char*)r[7].bytes);
 }
@@ -77,13 +22,6 @@ static int nr_workflow_slot(nr_session *s,const char *root_id,nr_cell *slot){
  }
  if(stmt&&sqlite3_finalize(stmt)!=SQLITE_OK)found=-1;
  return found==1?nr_physical_id(s,id,slot):found;
-}
-static int nr_role(const nr_cell *row,const char *role){return row[11].type==SQLITE_TEXT&&!strcmp((const char*)row[11].bytes,role);}
-static int nr_state(const nr_cell *row,const char *state){return row[7].type==SQLITE_TEXT&&!strcmp((const char*)row[7].bytes,state);}
-static int nr_receipt(nr_cell *receipt,const nr_cell *row,const char *kind,const char *token){
- char json[1024],hash[65];
- snprintf(json,sizeof(json),"{\"claimToken\":\"%s\",\"recordId\":\"%s\",\"state\":\"%s\"}",token?token:"",(const char*)row[0].bytes,kind);
- return nr_hash(json,hash)&&nr_text(receipt,(const char*)row[0].bytes)&&nr_text(receipt+1,kind)&&nr_text(receipt+2,hash)&&nr_text(receipt+3,json);
 }
 static int nr_has_eligible(nr_session *s,int kind,const nr_cell *row){
  for(nr_eligible *e=s->eligible;e;e=e->next)if(e->physical_kind==kind&&e->seq==row[6].integer&&!strcmp(e->record_id,(const char*)row[0].bytes)&&!strcmp(e->digest,(const char*)row[5].bytes))return 1;

@@ -33,6 +33,36 @@
       ]
     },
     {
+      "target_name": "root_resource_ledger_source",
+      "conditions": [
+        [
+          "OS=='mac'",
+          {
+            "sources": [
+              "root_resource_authority.c"
+            ],
+            "defines": [
+              "NAPI_VERSION=8",
+              "NR_LEDGER_SOURCE_ADDON=1"
+            ],
+            "cflags": [
+              "-std=c11"
+            ],
+            "libraries": [
+              "-lsqlite3"
+            ],
+            "xcode_settings": {
+              "GCC_C_LANGUAGE_STANDARD": "c11",
+              "MACOSX_DEPLOYMENT_TARGET": "11.0"
+            }
+          },
+          {
+            "type": "none"
+          }
+        ]
+      ]
+    },
+    {
       "target_name": "root_resource_authority_fixture",
       "conditions": [
         [

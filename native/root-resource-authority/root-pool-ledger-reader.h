@@ -73,18 +73,23 @@ static int nr_ledger_body(nr_session *s,nr_ledger_bytes *b,const char *source_ki
  }
  return good&&nr_ledger_literal(b,"]}");
 }
+/* Preserve the 64-bit mutation counter. Older system SQLite is a typed
+ * unsupported runtime, never a 32-bit or empty-history fallback. */
+static int nr_ledger_changes(sqlite3 *db,sqlite3_int64 *out){
+ if(__builtin_available(macOS 12.3,*)){*out=sqlite3_total_changes64(db);return 1;}return 0;
+}
 static int nr_ledger_capture(napi_env env,nr_session *s,const char *kind,nr_ledger_bytes *bytes,const char **error){
  *error="ROOT_LEDGER_UNCONFIRMED";
  if(s->closed||s->unknown||s->birth_pid!=getpid()||s->ledger_reading||s->writing||s->installing||!s->db){*error="ROOT_LEDGER_SOURCE_BUSY";return 0;}
- int good=0,began=0;sqlite3_int64 before=0,after=0,changes=0;
+ int good=0,began=0;sqlite3_int64 before=0,after=0,changes=0,observed=0;
  s->ledger_reading=1;
  if(!sqlite3_get_autocommit(s->db)){*error="ROOT_LEDGER_SOURCE_BUSY";goto done;}
  if(!current(s)){s->unknown=1;goto done;}
  if(!nr_protected(s)&&floor_match(s,"ordinary_runtime_root_resource_reservation_writer_v8_protected_io","8dc149dce2d161efe6805547451be7284377b3157510cfd60f6717defd528c59","xiaok_root_resource_reservation_writer_v7",4)){*error="ROOT_LEDGER_PROTECTED_SOURCE_REQUIRED";goto done;}
  if(!floor_valid(s)){*error=floor_history_valid(s)?"ROOT_LEDGER_HISTORY_PROFILE_UNSUPPORTED":"ROOT_LEDGER_FLOOR_UNCONFIRMED";goto done;}
- changes=sqlite3_total_changes64(s->db);good=scalar(s->db,"PRAGMA data_version",&before);
+ if(!nr_ledger_changes(s->db,&changes)){*error="ROOT_LEDGER_RUNTIME_UNSUPPORTED";goto done;}good=scalar(s->db,"PRAGMA data_version",&before);
  if(good){began=execute(s,"BEGIN");good=began;}
- if(good)good=nr_pool_graph(env,s)&&current(s)&&nr_ledger_body(s,bytes,kind)&&nr_pool_graph(env,s)&&current(s)&&sqlite3_total_changes64(s->db)==changes;
+ if(good)good=nr_pool_graph(env,s)&&current(s)&&nr_ledger_body(s,bytes,kind)&&nr_pool_graph(env,s)&&current(s)&&nr_ledger_changes(s->db,&observed)&&observed==changes;
  if(good){good=execute(s,"COMMIT")&&sqlite3_get_autocommit(s->db);if(!good)s->unknown=1;}
  if(began&&!sqlite3_get_autocommit(s->db)&&!execute(s,"ROLLBACK"))s->unknown=1;
  if(good)good=scalar(s->db,"PRAGMA data_version",&after)&&before==after&&current(s)&&!s->closed&&!s->unknown;

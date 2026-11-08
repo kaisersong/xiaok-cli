@@ -78,6 +78,7 @@ static napi_value close_root_pool_ledger_source(napi_env env,napi_callback_info 
 }
 static napi_value capture_existing_root_pool_ledger(napi_env env,napi_callback_info info){
  napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
+ if(__builtin_available(macOS 12.3,*)){}else return fail(env,"ROOT_LEDGER_RUNTIME_UNSUPPORTED");
  for(nr_ledger_source *old=nr_ledger_sources;old;old=old->next)if(old->env==env)return fail(env,"ROOT_LEDGER_SOURCE_HELD");
  nr_ledger_source *r=calloc(1,sizeof(*r));if(!r)return fail(env,"ROOT_LEDGER_ALLOCATION_FAILED");
  r->env=env;r->probe=-1;r->view.directory=r->view.lock_fd=-1;r->view.birth_pid=getpid();r->view.owner_env=env;r->view.ledger_source=r;

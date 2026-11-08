@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {types} from 'node:util';
-import {loadOriginalMainResourceAuthority} from './original-main-native-loader.js';
+import {loadOriginalRootLedgerSource} from './original-root-ledger-source-loader.js';
 
 const descriptor=Object.getOwnPropertyDescriptor,own=Object.hasOwn,keys=Reflect.ownKeys;
 const parse=JSON.parse,freeze=Object.freeze,apply=Reflect.apply,isProxy=types.isProxy;
@@ -81,9 +81,10 @@ function method(api:unknown,name:string):Function{const fn=data(api,name);if(typ
  * Missing/legacy/busy/hot-journal remains a typed refusal, never fresh genesis. */
 export function captureExistingOriginalRootNmpLedger():OriginalRootNmpLedger{
  if(process.platform!=='darwin')throw Error('ROOT_RESOURCE_PLATFORM_UNAVAILABLE');
- const api=loadOriginalMainResourceAuthority();return decodeOriginalRootNmpLedger(apply(method(api,'captureExistingOriginalRootPoolLedger'),api,[]));
+ const api=loadOriginalRootLedgerSource();return decodeOriginalRootNmpLedger(apply(method(api,'captureExistingOriginalRootPoolLedger'),api,[]));
 }
 /** Negative source custody remains reachable without positive Source current. */
 export function closeExistingOriginalRootNmpLedgerSource():void{
- const api=loadOriginalMainResourceAuthority();const raw=apply(method(api,'closeOriginalRootPoolLedgerSource'),api,[]);if(raw!==undefined)invalid();
+ if(process.platform!=='darwin')throw Error('ROOT_RESOURCE_PLATFORM_UNAVAILABLE');
+ const api=loadOriginalRootLedgerSource();const raw=apply(method(api,'closeOriginalRootPoolLedgerSource'),api,[]);if(raw!==undefined)invalid();
 }

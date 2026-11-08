@@ -30,18 +30,7 @@ static char *nr_subject_string(napi_env env,napi_value value,size_t maximum_unit
  if(napi_get_value_string_utf8(env,value,out,bytes+1,&read)!=napi_ok||read!=bytes||memchr(out,0,bytes)){free(out);return NULL;}
  out[bytes]=0;return out;
 }
-static char *nr_json_string(const char *value){
- size_t length=strlen(value);if(length>1048576)return NULL;
- char *out=malloc(length*6+3);if(!out)return NULL;
- static const char hex[]="0123456789abcdef";char *p=out;*p++='"';
- for(size_t i=0;i<length;i++){
-  unsigned char c=(unsigned char)value[i];
-  if(c=='"'||c=='\\'){*p++='\\';*p++=(char)c;}
-  else if(c<32){*p++='\\';*p++='u';*p++='0';*p++='0';*p++=hex[c>>4];*p++=hex[c&15];}
-  else *p++=(char)c;
- }
- *p++='"';*p=0;return out;
-}
+#include "json-string-data.h"
 static napi_value import_room_subject(napi_env env,napi_callback_info info){
  napi_value args[12],parent=NULL,out=NULL;
  if(!arguments(env,info,11,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
