@@ -38,8 +38,8 @@ describe('production read/bash pre-cap observation collector', () => {
     const command = process.platform === 'win32'
       ? shellNodeFixture(f.cwd, "process.stdout.write('0'.repeat(5000)+'TAIL',()=>{process.exitCode=2;});")
       : "printf '%05000dTAIL' 0; exit 2";
-    const output = await bashTool.execute({ command, workdir: f.cwd, max_chars: 80 }, f.context);
-    expect(output).toContain('Error (exit 2)'); expect(output).not.toContain('TAIL');
+    const output = await bashTool.execute({ command, workdir: f.cwd, max_chars: 1024 }, f.context);
+    expect(output).toContain('Error (exit 2)'); expect(output).toContain('TAIL');
     expect(f.texts.join('')).toContain('TAIL');
     expect(f.finalize).toHaveBeenCalledWith({ executionState: 'terminal', outcome: 'error' });
   });

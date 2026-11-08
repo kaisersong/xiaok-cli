@@ -15,7 +15,7 @@ function fixture(){
   inspectExecution:vi.fn(),assertQuiescent:vi.fn((value:any,identity:any)=>{if(value!==receipt||JSON.stringify(identity)!==JSON.stringify(expected))throw Error('bad receipt');}),
  }};
  const persist=async(change:any)=>{ledger=advanceCompoundOperation(ledger,id,change);};
- const run=async()=>executeCompoundValidation({backend,preparedInput:await backend.prepareValidationInput(),record,actual:{command:'exit 2',workdir:'/fixture',timeoutMs:1000,maxChars:1000},assertCurrent:()=>{},persist});
+ const run=async(actualOverrides:Record<string,number>={})=>executeCompoundValidation({backend,preparedInput:await backend.prepareValidationInput(),record,actual:{command:'exit 2',workdir:'/fixture',timeoutMs:1000,maxChars:1024,...actualOverrides},assertCurrent:()=>{},persist});
  return{backend,run,read:()=>ledger.operations[0],expected};
 }
 it('durable identity precedes dispatch and only exact physical receipt permits terminal',async()=>{
@@ -27,4 +27,20 @@ it('lost physical receipt preserves the edit and installs the session unknown fa
 it('changed staging command or foreign reservation cannot reach dispatch',async()=>{
  const f=fixture();f.backend.prepareValidationInput.mockImplementation(async()=>({materializedInput:{} as any,command:{argv:['/bin/sh','-c','different'],cwdRelative:'.'},scopeDigest:'d'.repeat(64)}));await expect(f.run()).rejects.toThrow('command_changed');expect(f.backend.execution.dispatchExecution).not.toHaveBeenCalled();
  const g=fixture();g.backend.execution.reserveExecution.mockImplementation(async()=>({executionIdentity:'new',expected:{...g.expected,executionIdentity:'new',validationInvocationId:'foreign'}}));await expect(g.run()).rejects.toThrow('reservation_mismatch');expect(g.backend.execution.dispatchExecution).not.toHaveBeenCalled();
+});
+
+it('rejects invalid display budgets before reservation',async()=>{
+ const f=fixture();await expect(f.run({maxChars:1})).rejects.toThrow();expect(f.backend.execution.reserveExecution).not.toHaveBeenCalled();
+});
+it('output hard limit cannot be reported as success even if backend exits zero',async()=>{
+ const f=fixture();f.backend.execution.dispatchExecution.mockImplementation(async(_e:any,options:any)=>{
+  options.onStdout('x'.repeat(1024*1024+1));expect(options.signal.aborted).toBe(true);
+  return {termination:'terminal' as const,receipt:{} as any,exitCode:0,outputTruncated:false};
+ });f.backend.execution.assertQuiescent.mockImplementation(()=>{});
+ expect(await f.run()).toMatch(/^Error:/);expect(f.read().validation.status).toBe('failed');
+});
+it('backend outputTruncated does not settle success even with zero exit',async()=>{
+ const f=fixture();f.backend.execution.dispatchExecution.mockImplementation(async()=>({termination:'terminal' as const,receipt:{} as any,exitCode:0,outputTruncated:true}));
+ f.backend.execution.assertQuiescent.mockImplementation(()=>{});
+ expect(await f.run()).toContain('output_limit');expect(f.read().validation.status).toBe('failed');
 });

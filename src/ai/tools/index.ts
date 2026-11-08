@@ -1,3 +1,4 @@
+import {retainCommandResult,commandResultVerdict} from './command-result.js';
 import { captureDirectHookSlot, assertDirectHookReturn } from './direct-hook-promise-boundary.js';
 import { AcceptedHookCalls } from './accepted-hook-calls.js';
 import {assertNativeRegistryCheckpointCurrent} from '../../runtime/task-host/workflow-restriction-checkpoint.js';
@@ -12,7 +13,7 @@ import { measureToolResult, observationMetricsEnabled } from '../../runtime/trac
 import { isDeepStrictEqual } from 'node:util';
 import {resolveExecutionIdleMs} from '../../runtime/execution-health.js';
 import { runMonitoredTool } from '../../runtime/tool-execution-health.js';
-import type { Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../types.js';
+import type { Tool, ToolDefinition, ToolExecutionContext, ToolExecutionFact, ToolPermissionGrant } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import { isEmptyConfiguredHooksRunner, type HooksRunner } from '../../runtime/hooks-runner.js';
 import { formatErrorText } from '../../utils/ui.js';
@@ -870,6 +871,7 @@ export class ToolRegistry {
     context?.signal?.throwIfAborted();
     if (this.disposed) return stop('Error: tool registry is disposed', 'invalidated');
     const normalizeFailure = async (e: unknown): Promise<string> => {
+      if (name === 'bash' && context?.toolInvocationId) context.runtimeFactSink?.emit({invocationId:context.toolInvocationId,toolName:'bash',factKind:'command_result',exitCode:null});
       context?.signal?.throwIfAborted();
       if (isAbortError(e) || (e instanceof Error && e.message.startsWith('TOOL_IDLE_TIMEOUT'))) throw e;
       const errorMessage = formatErrorText(String(e));
@@ -918,6 +920,7 @@ export class ToolRegistry {
     try {
       if (this.tools.get(registeredName) !== tool) return stop(`Error: tool ${name} is no longer registered`, 'invalidated');
       let invocationContext = context;
+      let commandFact: ToolExecutionFact | undefined;
       const assertInvocationCurrent = () => {
         context?.signal?.throwIfAborted();
         context?.assertPermissionApproval?.();
@@ -949,7 +952,13 @@ export class ToolRegistry {
       // Scoped native wrappers re-enter this guard after their own journal await,
       // including auto/boolean approvals which do not carry a grant object.
       if (context) {
-        invocationContext = { ...context, assertPermissionApproval: assertInvocationCurrent };
+        invocationContext = { ...context, assertPermissionApproval: assertInvocationCurrent,
+          runtimeFactSink: {emit: fact => {
+            if (name === 'bash' && fact.toolName === 'bash' && fact.factKind === 'command_result' && fact.invocationId === context.toolInvocationId)
+              commandFact = retainCommandResult(commandFact, fact);
+            context.runtimeFactSink?.emit(fact);
+          }},
+        };
         if (Object.isFrozen(context)) Object.freeze(invocationContext);
       }
       freezeToolInput(input);
@@ -998,7 +1007,7 @@ export class ToolRegistry {
         toolName: tool.definition.name,
         input: cloneToolInput(input),
         result: observedResult,
-        ok: isSuccessfulToolResult(observedResult),
+        ok: commandResultVerdict(commandFact) ?? (name === 'bash' ? isSuccessfulModelToolResult(observedResult) : isSuccessfulToolResult(observedResult)),
       });
       context?.signal?.throwIfAborted();
 
@@ -1180,7 +1189,9 @@ export const TOOL_CANCELLED_PREFIX = '（已取消: ';
  * Widening that one has a much larger blast radius and no test reachability,
  * so it is tracked as follow-up work rather than folded in here.
  */
-export function isSuccessfulModelToolResult(result: string): boolean {
+export function isSuccessfulModelToolResult(result: string, commandFact?: ToolExecutionFact): boolean {
+  const verdict = commandResultVerdict(commandFact);
+  if (verdict !== undefined) return verdict;
   const normalized = result.trimStart();
   // Intentionally not /^Error\b/: `Errors found: 0` must stay a failure here,
   // because relaxing it is the one change that would open a fail-open path.
