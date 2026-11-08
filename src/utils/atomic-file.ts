@@ -17,6 +17,13 @@ const descriptor=Object.getOwnPropertyDescriptor,own=Object.hasOwn,define=Object
 const NativeAggregateError=AggregateError;
 const sourceIsProxy=types.isProxy;
 
+/** Classification never evaluates an error getter or replaces the original
+ * primitive/Proxy throw. Only an observed own data code can be an errno. */
+export function readOwnAtomicErrorCode(raw:unknown):string|undefined {
+  if(raw===null||typeof raw!=='object'||sourceIsProxy(raw))return undefined;
+  const row=descriptor(raw,'code');return row&&own(row,'value')&&typeof row.value==='string'?row.value:undefined;
+}
+
 export interface AtomicFileOperations {
   mkdirSync: typeof mkdirSync;
   openSync: typeof openSync;
@@ -165,8 +172,7 @@ function syncDirectory(
     directoryDescriptor = operations.openSync(directoryPath, 'r');
     operations.fsyncSync(directoryDescriptor);
   } catch (error) {
-    const row=context!==undefined&&error&&typeof error==='object'&&!sourceIsProxy(error)?descriptor(error,'code'):undefined;
-    const code = context===undefined?(error as NodeJS.ErrnoException).code:row&&own(row,'value')?row.value:undefined;
+    const code=readOwnAtomicErrorCode(error);
     if (required || !code || !UNSUPPORTED_DIRECTORY_FSYNC_CODES.has(code)) {
       bodyFailure={error};
     }

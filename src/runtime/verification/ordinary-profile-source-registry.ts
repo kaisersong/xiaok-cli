@@ -6,11 +6,11 @@ import {userInfo} from 'node:os';
 import {resolveProfileAccountHome} from './profile-account-home.js';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {acquireSaveLock} from '../../ai/runtime/session-store/mutation-lock.js';
-import {writeFileAtomicallySync,syncDirectoryTreeStrict} from '../../utils/atomic-file.js';
+import {writeFileAtomicallySync,syncDirectoryTreeStrict,readOwnAtomicErrorCode} from '../../utils/atomic-file.js';
 import {readInstalledCurrentProfile} from './migration-markers.js';
 import type {ProfileSourceDirectory} from './profile-source-descriptor.js';
 
-const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1'] as const;
+const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1'] as const;
 type OrdinarySQLiteFormat=typeof ordinarySqliteFormats[number];
 
 /** Ordinary host discovery only. No snapshot hash, completeness, quota grant,
@@ -38,7 +38,7 @@ function shortPath(path:string):string{return path.length<=160?path:`${path.slic
 function registryFull(path:string,size:bigint):never{fail(`identity: registry is full; limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); current usage ${size} bytes. Registry: ${path}. 先备份，再用编辑器打开该文件删除不再使用的项目条目。`);}
 function digest(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function decimal(value:unknown):value is string{return typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(value)&&value.length<=20&&BigInt(value)<=U64;}
-function syncOrdinaryRegistryTree(path:string):void{try{syncDirectoryTreeStrict(path);}catch(error){const code=(error as NodeJS.ErrnoException).code;if(!code||!UNSUPPORTED_DIRECTORY_SYNC.has(code))throw error;}}
+function syncOrdinaryRegistryTree(path:string):void{try{syncDirectoryTreeStrict(path);}catch(error){const code=readOwnAtomicErrorCode(error);if(!code||!UNSUPPORTED_DIRECTORY_SYNC.has(code))throw error;}}
 function shape(value:unknown,keys:string[]):asserts value is Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==keys.sort().join(','))fail('schema');}
 function directory(path:string):Readonly<ProfileSourceDirectory>{
  if(typeof path!=='string'||!isAbsolute(path)||path.includes('\0'))fail('identity');
@@ -50,8 +50,8 @@ function directory(path:string):Readonly<ProfileSourceDirectory>{
 function location(create:boolean){
  const account=userInfo();if(!Number.isSafeInteger(account.uid)||account.uid<0)fail('account');
  const selected=resolveProfileAccountHome(),home=directory(selected.home),base=selected.base,root=join(base,'profile-sources');
- if(create){for(const path of [base,root]){try{mkdirSync(path,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}directory(path);}}
- else{try{directory(root);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}}
+ if(create){for(const path of [base,root]){try{mkdirSync(path,{mode:0o700});}catch(error){if(readOwnAtomicErrorCode(error)!=='EEXIST')throw error;}directory(path);}}
+ else{try{directory(root);}catch(error){if(readOwnAtomicErrorCode(error)==='ENOENT')return undefined;throw error;}}
  const original=directory(root),assertCurrent=()=>{if(JSON.stringify(directory(root))!==JSON.stringify(original)||JSON.stringify(resolveProfileAccountHome())!==JSON.stringify(selected)||JSON.stringify(directory(selected.home))!==JSON.stringify(home))fail('identity');};
  return{uid:account.uid,root,path:join(root,'registry.json'),assertCurrent};
 }
@@ -72,7 +72,7 @@ type SourceStat=(path:string)=>{dev:bigint;ino:bigint}|undefined;
  * Sweep preserves device-only renumbering; registration keeps its stricter identity checks. */
 export function isStaleOrdinaryProfileSource(row:Readonly<OrdinaryProfileSource>,statFn:SourceStat=path=>lstatSync(path,{bigint:true}),preserveDeviceRenumbering=false):boolean{
  function changed(path:string,recorded:{device:string;inode:string}){
-  let stat:ReturnType<SourceStat>;try{stat=statFn(path);}catch(error){if(['ENOENT','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''))return true;throw error;}
+  let stat:ReturnType<SourceStat>;try{stat=statFn(path);}catch(error){if(['ENOENT','ENOTDIR'].includes(readOwnAtomicErrorCode(error)??''))return true;throw error;}
   return !stat||String(stat.ino)!==recorded.inode||String(stat.dev)!==recorded.device&&!(preserveDeviceRenumbering&&isRenumberedIdentity(recorded,{device:String(stat.dev),inode:String(stat.ino)}));
  }
  return changed(row.directory.canonicalPath,row.directory)||!!row.database&&changed(join(row.directory.canonicalPath,row.database.basename),row.database);
@@ -118,7 +118,7 @@ function parseExpandedOrdinaryProfileSources(raw:unknown,uid:number):Readonly<Or
  Object.freeze(raw.sources);return Object.freeze(raw) as unknown as Readonly<OrdinaryProfileSources>;
 }
 function read(path:string,uid:number):Readonly<OrdinaryProfileSources>|undefined{
- let fd:number;try{fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
+ let fd:number;try{fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);}catch(error){if(readOwnAtomicErrorCode(error)==='ENOENT')return undefined;throw error;}
  try{const before=fstatSync(fd,{bigint:true});if(!before.isFile()||before.nlink!==1n||before.uid!==BigInt(uid))fail('identity');if(before.size>BigInt(MAX_BYTES))registryFull(path,before.size);
   const bytes=Buffer.alloc(Number(before.size)+1);let length=0;for(;;){const n=readSync(fd,bytes,length,bytes.length-length,null);if(!n)break;length+=n;if(length===bytes.length)break;}
   const after=fstatSync(fd,{bigint:true}),current=lstatSync(path,{bigint:true});
@@ -151,7 +151,7 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   const histories=[...removed,...(prior?[prior]:[])].filter(row=>row.kind===observed.kind&&row.snapshotFormat===observed.snapshotFormat).flatMap(row=>row.componentHistory?[row.componentHistory]:[]);
   if(layout||(removed.length||rebound)&&histories.length){const observations=histories.flatMap(row=>row.observations).filter((row,index,all)=>all.findIndex(item=>item.layoutHash===row.layoutHash)===index);if(layout&&!observations.some(row=>row.layoutHash===layout.layoutHash))observations.push(layout);observations.sort((a,b)=>a.layoutHash.localeCompare(b.layoutHash));merged={...observed,componentHistory:{historyUnknown:true,components:[...new Set(observations.flatMap(row=>row.components))].sort(),observations}};}
   // Keep current/rebound history out of the sweep. Unknown IO failures are not proof of staleness.
-  sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row,undefined,true);}catch(error){if(typeof (error as NodeJS.ErrnoException)?.code==='string')return true;throw error;}});
+  sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row,undefined,true);}catch(error){if(typeof readOwnAtomicErrorCode(error)==='string')return true;throw error;}});
   // Unchanged observations preserve bytes and generation after the stale sweep.
   if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
