@@ -262,6 +262,8 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
+  emptyContent?: ReactNode;
+  conversationHeader?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -290,6 +292,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
+  emptyContent, conversationHeader,
   thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
@@ -299,6 +302,7 @@ export function ChatView({
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
+  const showEntry = Boolean(emptyContent) && messages.length === 0 && !streamingText && status === 'idle';
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIndexFrameRef = useRef<number | null>(null);
@@ -389,7 +393,7 @@ export function ChatView({
       const { scrollTop, scrollHeight, clientHeight } = el;
       const atBottom = scrollHeight - scrollTop - clientHeight < 50;
       isAtBottomRef.current = atBottom;
-      setShowScrollToBottom(!atBottom);
+      setShowScrollToBottom(!showEntry && !atBottom);
       scheduleActivePromptUpdate();
     };
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -400,10 +404,16 @@ export function ChatView({
         activeIndexFrameRef.current = null;
       }
     };
-  }, [scheduleActivePromptUpdate]);
+  }, [scheduleActivePromptUpdate, showEntry]);
 
   // Throttled auto-scroll: only when at bottom, max once per 100ms
   useEffect(() => {
+    if (showEntry) {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      isAtBottomRef.current = true;
+      setShowScrollToBottom(false);
+      return;
+    }
     if (!isAtBottomRef.current) return;
     const now = Date.now();
     if (now - lastScrollTimeRef.current < 100) return;
@@ -411,7 +421,7 @@ export function ChatView({
     const scroller = scrollRef.current;
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
     setShowScrollToBottom(false);
-  }, [messages, streamingText, status]);
+  }, [messages, streamingText, status, showEntry]);
 
   // Approvals can arrive after the last text chunk inside the stream throttle.
   // Follow them only for readers already following the latest output; keep
@@ -436,7 +446,8 @@ export function ChatView({
   }, [onToggleCanvas]);
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+      {!(messages.length === 0 && !streamingText && status === 'idle') && conversationHeader}
       <ConversationIndexRail
         entries={promptIndexEntries}
         activeId={activePromptId}
@@ -451,7 +462,7 @@ export function ChatView({
         className="flex-1 overflow-x-hidden overflow-y-auto"
         style={{ userSelect: 'text' }}
       >
-        <div className="mx-auto max-w-[800px] px-14 py-6">
+        {showEntry ? emptyContent : <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
             {messages.map((msg, index) => {
               const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
@@ -637,7 +648,7 @@ export function ChatView({
 
             <div />
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Scroll to bottom floating button */}

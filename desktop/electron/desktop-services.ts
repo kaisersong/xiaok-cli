@@ -1,3 +1,5 @@
+import type { MailConnectorService } from './mail-connector-service.js';
+import { createMailTools } from './mail-tools.js';
 import { isKimiCodingModel, isStrictKimiK3ProfileId } from '../../src/ai/providers/kimi-models.js';
 import { buildKSwarmReviewPrompt } from './kswarm-task-review-prompt.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
@@ -517,6 +519,7 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  mailConnectors?: MailConnectorService;
   /** Main owns this object identity; it is never supplied by renderer/tools. */
   harnessOptimizationUserActor?: HarnessUserContext;
   notifyConversationActivity?: (activity: import('../../src/runtime/conversation-activity/types.js').ConversationActivity,
@@ -1034,6 +1037,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const builtinDescriptions = new Map<Tool, ToolDescriptionMetadata>();
   const tools = buildToolList(undefined, undefined, [], builtinDescriptions);
   const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools, builtinDescriptions);
+  if (options.mailConnectors) for (const tool of createMailTools(options.mailConnectors)) registry.registerTool(tool);
   const staticGatewayNames = new Set(options.pluginProviderRuntime ? createAllHostGateways(options.pluginProviderRuntime).map(tool => tool.definition.name) : []);
   const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
   const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');

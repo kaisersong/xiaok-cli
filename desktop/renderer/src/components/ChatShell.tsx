@@ -252,8 +252,15 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell() {
-  const { taskId } = useParams<{ taskId: string }>();
+export function ChatShell({ threadId, emptyContent, conversationHeader, draftRequest, hideObservationControls }: {
+  threadId?: string;
+  emptyContent?: React.ReactNode;
+  conversationHeader?: React.ReactNode;
+  draftRequest?: { id: number; text: string };
+  hideObservationControls?: boolean;
+} = {}) {
+  const { taskId: routeTaskId } = useParams<{ taskId: string }>();
+  const taskId = threadId ?? routeTaskId;
   const renderScope = useMemo<DisplayScope>(() => ({ taskId, attachmentObservers: new Set<() => void>() }), [taskId]);
   const liveRenderScope = useRef<typeof renderScope | null>(renderScope);
   const admissionPending = useRef<typeof renderScope | null>(null);
@@ -380,6 +387,10 @@ export function ChatShell() {
   const initialPrompt = state?.initialPrompt;
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
+
+  useEffect(() => {
+    if (draftRequest) setPrompt(draftRequest.text);
+  }, [draftRequest]);
 
   const handleEvent = useCallback((rawEvent: { type: string }, source: DisplaySource) => {
     const event = rawEvent as DesktopTaskEvent;
@@ -1867,8 +1878,10 @@ export function ChatShell() {
       approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
-      <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
+      {!hideObservationControls && <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />}
       <ChatView
+        emptyContent={emptyContent}
+        conversationHeader={conversationHeader}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}

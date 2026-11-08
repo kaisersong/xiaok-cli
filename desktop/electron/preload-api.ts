@@ -1,3 +1,4 @@
+import type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../shared/mail-connectors-ipc-contract.js';
 import type { EnterpriseCliState, EnterpriseCliAction, EnterpriseCliProvider } from '../shared/enterprise-cli-ipc-contract.js';
 import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
@@ -324,6 +325,16 @@ export const PRELOAD_API_KEYS = [
   'setEmbeddingModel',
   'getEnterpriseCliConnectors',
   'controlEnterpriseCliConnector',
+  'getMailAccounts',
+  'connectMailAccount',
+  'disconnectMailAccount',
+  'setMailAccountAccess',
+  'testMailAccount',
+  'searchMailMessages',
+  'readMailMessage',
+  'getMailOAuthState',
+  'startMailOAuth',
+  'cancelMailOAuth',
   'getYzjCliAuthState',
   'controlYzjCliAuth',
   'getConnectorsConfig',
@@ -690,6 +701,16 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   setEmbeddingModel: 'desktop:setEmbeddingModel',
   getEnterpriseCliConnectors: 'desktop:getEnterpriseCliConnectors',
   controlEnterpriseCliConnector: 'desktop:controlEnterpriseCliConnector',
+  getMailAccounts: 'desktop:mail:list',
+  connectMailAccount: 'desktop:mail:connect',
+  disconnectMailAccount: 'desktop:mail:disconnect',
+  setMailAccountAccess: 'desktop:mail:access',
+  testMailAccount: 'desktop:mail:test',
+  searchMailMessages: 'desktop:mail:search',
+  readMailMessage: 'desktop:mail:read',
+  getMailOAuthState: 'desktop:mail:oauthState',
+  startMailOAuth: 'desktop:mail:oauthStart',
+  cancelMailOAuth: 'desktop:mail:oauthCancel',
   getYzjCliAuthState: 'desktop:getYzjCliAuthState',
   controlYzjCliAuth: 'desktop:controlYzjCliAuth',
   getConnectorsConfig: 'desktop:getConnectorsConfig',
@@ -1414,6 +1435,16 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   setEmbeddingModel(modelId: string): Promise<void>;
   getEnterpriseCliConnectors(): Promise<EnterpriseCliState[]>;
   controlEnterpriseCliConnector(provider: EnterpriseCliProvider, action: EnterpriseCliAction): Promise<EnterpriseCliState>;
+  getMailAccounts(): Promise<MailAccountDto[]>;
+  connectMailAccount(input: MailConnectInput): Promise<MailAccountDto>;
+  disconnectMailAccount(input: { id: string; expectedRevision: number }): Promise<{ ok: true }>;
+  setMailAccountAccess(input: { id: string; expectedRevision: number; allowSend: boolean; smtpHost?: string; smtpPort?: number }): Promise<MailAccountDto>;
+  testMailAccount(input: { id: string; expectedRevision: number }): Promise<MailAccountDto>;
+  searchMailMessages(input: MailSearchInput): Promise<MailSearchResult>;
+  readMailMessage(input: MailReadInput): Promise<MailReadResult>;
+  getMailOAuthState(): Promise<MailOAuthState>;
+  startMailOAuth(input: MailOAuthInput): Promise<MailOAuthState>;
+  cancelMailOAuth(operationId?: string): Promise<MailOAuthState>;
   getYzjCliAuthState(): Promise<YzjCliAuthState>;
   controlYzjCliAuth(action: YzjCliAuthAction): Promise<YzjCliAuthState>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
@@ -1982,6 +2013,16 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
     getEnterpriseCliConnectors: () => ipcRenderer.invoke('desktop:getEnterpriseCliConnectors') as Promise<EnterpriseCliState[]>,
     controlEnterpriseCliConnector: (provider, action) => ipcRenderer.invoke('desktop:controlEnterpriseCliConnector', provider, action) as Promise<EnterpriseCliState>,
+    getMailAccounts: () => ipcRenderer.invoke('desktop:mail:list') as Promise<MailAccountDto[]>,
+    connectMailAccount: (input) => ipcRenderer.invoke('desktop:mail:connect', input) as Promise<MailAccountDto>,
+    disconnectMailAccount: (input) => ipcRenderer.invoke('desktop:mail:disconnect', input) as Promise<{ ok: true }>,
+    setMailAccountAccess: (input) => ipcRenderer.invoke('desktop:mail:access', input) as Promise<MailAccountDto>,
+    testMailAccount: (input) => ipcRenderer.invoke('desktop:mail:test', input) as Promise<MailAccountDto>,
+    searchMailMessages: (input) => ipcRenderer.invoke('desktop:mail:search', input) as Promise<MailSearchResult>,
+    readMailMessage: (input) => ipcRenderer.invoke('desktop:mail:read', input) as Promise<MailReadResult>,
+    getMailOAuthState: () => ipcRenderer.invoke('desktop:mail:oauthState') as Promise<MailOAuthState>,
+    startMailOAuth: (input) => ipcRenderer.invoke('desktop:mail:oauthStart', input) as Promise<MailOAuthState>,
+    cancelMailOAuth: (operationId) => ipcRenderer.invoke('desktop:mail:oauthCancel', operationId) as Promise<MailOAuthState>,
     getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState') as Promise<YzjCliAuthState>,
     controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action) as Promise<YzjCliAuthState>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,

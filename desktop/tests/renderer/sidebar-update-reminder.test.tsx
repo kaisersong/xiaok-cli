@@ -126,8 +126,8 @@ describe('Sidebar update reminder', () => {
     });
 
     fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true } as Parameters<typeof screen.getByRole>[1]));
-    expect(await screen.findByRole('button', { name: '每日助理晨间建议 daily' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '每日助理晚间整理 daily' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '小K助理晨间建议 daily' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '小K助理晚间整理 daily' })).toBeInTheDocument();
     expect(screen.queryByText('Personal assistant morning briefing')).not.toBeInTheDocument();
   });
 
@@ -591,17 +591,17 @@ it('lists collaboration rooms in their own tab and shows a retry for read failur
   expect(screen.getByRole('tab', { name: '协作', exact: true } as Parameters<typeof screen.getByRole>[1])).toHaveAttribute('aria-selected', 'true');
 });
 
-it('keeps five primary destinations above instance tabs and navigates independently', async () => {
+it('keeps six primary destinations above instance tabs and navigates independently', async () => {
   renderSidebar({ checking: false, available: false, downloading: false, downloaded: false, progress: 0 });
   const nav = await screen.findByTestId('sidebar-main-navigation');
-  expect(Array.from(nav.querySelectorAll('button')).map(button => button.textContent)).toEqual(['新建任务', '自动化', '项目', '协作空间', '知识库']);
+  expect(Array.from(nav.querySelectorAll('button')).map(button => button.textContent)).toEqual(['新建任务', '小K助理', '自动化', '项目', '协作空间', '知识库']);
   expect(nav.compareDocumentPosition(screen.getByRole('tablist')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  for (const [label, path, tab] of [['自动化','/automations','定时'], ['项目','/projects','项目'], ['协作空间','/collaboration','协作'], ['知识库','/knowledge',null], ['新建任务','/','任务']] as const) {
+  for (const [label, path, tab] of [['小K助理','/assistant',null], ['自动化','/automations','定时'], ['项目','/projects','项目'], ['协作空间','/collaboration','协作'], ['知识库','/knowledge',null], ['新建任务','/','任务']] as const) {
     fireEvent.click(Array.from(nav.querySelectorAll('button')).find(button => button.textContent === label)!);
     expect(screen.getByTestId('sidebar-location')).toHaveTextContent(path);
     if (tab) expect(screen.getByRole('tab', { name: tab, exact: true } as Parameters<typeof screen.getByRole>[1])).toHaveAttribute('aria-selected', 'true');
   }
   fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true } as Parameters<typeof screen.getByRole>[1]));
   expect(screen.getByTestId('sidebar-location').textContent).toBe('/');
-  expect(nav.querySelectorAll('button')).toHaveLength(5);
+  expect(nav.querySelectorAll('button')).toHaveLength(6);
 });

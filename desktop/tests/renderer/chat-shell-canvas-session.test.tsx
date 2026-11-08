@@ -180,7 +180,7 @@ describe('ChatShell canvas is scoped per session', () => {
       {type:'task_terminal',status:'completed'},
     ],prompt:'work',materials:[]}});
     render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
-    await waitFor(()=>expect(mockRecoverTask).toHaveBeenCalledWith('done'));
+    await waitFor(()=>expect(mockRecoverTask).toHaveBeenCalledWith('done', 'thread-A'));
     await act(async()=>{});
     expect(screen.getByTestId('health-progress')).toBeEmptyDOMElement();
   });
