@@ -59,6 +59,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Compile original test graph and copy its assets
         run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Check original owner and readonly lifecycle files
         shell: bash
         run: |
