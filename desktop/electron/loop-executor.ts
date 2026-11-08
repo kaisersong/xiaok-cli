@@ -1,4 +1,5 @@
 import {createLoopDatabaseOwnerGroup} from './loop-database-owner.js';
+import {registerLoopDatabaseSourceObservation} from './loop-database-source-observation.js';
 import {readLoopCompletedRun} from './loop-completion-consumer.js';
 import {captureLoopRunContext,assertOrdinaryLoopOwner,type LoopRunContext} from './loop-run-context.js';
 import { join } from 'node:path';
@@ -302,22 +303,39 @@ export interface CreateDesktopLoopRuntimeOptions {
   kswarmHealthLogPaths?: string[];
 }
 
+// Unknown cleanup keeps the actual group/connection closures alive. Refuse any
+// later birth in this module rather than evicting an unconfirmed resource.
+const retainedLoopRuntimeConstructions = new Set<ReturnType<typeof createLoopDatabaseOwnerGroup>>();
+const retainLoopGroup = Set.prototype.add;
+const retainedLoopCount = Object.getOwnPropertyDescriptor(Set.prototype, 'size')!.get!;
+const loopLifecycleApply = Reflect.apply, LoopStartupError = Error;
+const ordinaryLoopDiscovery = process.platform !== 'win32';
+
 export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOptions): DesktopLoopRuntime {
+  if (loopLifecycleApply(retainedLoopCount, retainedLoopRuntimeConstructions, []) !== 0) throw new LoopStartupError('loop_runtime_cleanup_unconfirmed');
   const now = options.now ?? (() => Date.now());
   const staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
   const dbPath = options.loopDbPath ?? options.completionEvidenceDbPath ?? join(options.dataRoot, 'loop-evidence.sqlite');
   const completionEvidenceDbPath = options.completionEvidenceDbPath ?? dbPath;
   const databases=createLoopDatabaseOwnerGroup([dbPath,completionEvidenceDbPath]);
+  const observe = (index: 0|1, path: string) => {
+    if (ordinaryLoopDiscovery && path !== ':memory:') registerLoopDatabaseSourceObservation(databases.sources[index]!);
+  };
   try{
+  observe(0, dbPath); observe(1, completionEvidenceDbPath);
   const loopStore = new LoopStore(databases.sources[0]);
+  observe(0, dbPath);
   const evidenceStore = new CompletionEvidenceStore(databases.sources[1]);
+  observe(1, completionEvidenceDbPath);
   loopStore.ensureBuiltInLoops(now());
   assertRecoveredStaleRuns(loopStore.recoverStaleRuns(now(), staleAfterMs));
   const scanner = new ArtifactEvidenceRegressionScanner(databases.sources[1]);
+  observe(1, completionEvidenceDbPath);
   const kswarmHealthScanner = new KSwarmServiceHealthScanner(databases.sources[1], {
     probe: options.kswarmHealthProbe ?? defaultHealthyKSwarmHealthProbe,
     logPaths: options.kswarmHealthLogPaths,
   });
+  observe(1, completionEvidenceDbPath);
   const userLoopTemplateRunner = options.taskPort
     ? createUserLoopTemplateRunner({
       loopStore,
@@ -383,7 +401,11 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
       loopStore.close();databases.close();closed=true;
     },
   };
-  }catch(error){try{databases.close();}catch{/* Preserve the original construction failure. */}throw error;}
+  }catch(error){
+    try{databases.close();}
+    catch{loopLifecycleApply(retainLoopGroup, retainedLoopRuntimeConstructions, [databases]);}
+    throw error;
+  }
 }
 
 function assertRecoveredStaleRuns(result: ReturnType<LoopStore['recoverStaleRuns']>): void {

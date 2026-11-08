@@ -3,6 +3,7 @@ import {setProfileTestHome} from '../../../tests/support/profile-home-env.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import{mkdtempSync,mkdirSync,realpathSync,rmSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
 const state=vi.hoisted(()=>({home:''}));
+vi.unmock('../../electron/loop-database-source-observation.js');
 vi.mock('node:os',async load=>{const actual=await load<typeof import('node:os')>();return{...actual,userInfo:()=>({...actual.userInfo(),homedir:state.home})};});
 vi.mock('../../../src/runtime/verification/migration-markers.js',()=>({readInstalledCurrentProfile:()=>({kind:'ordinary'})}));
 import{readOrdinaryProfileSources}from'../../../src/runtime/verification/ordinary-profile-source-registry.js';

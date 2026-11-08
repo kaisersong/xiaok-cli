@@ -606,14 +606,15 @@ export class ArtifactEvidenceRegressionScanner {
   }
 
   private transaction<T>(fn: () => T): T {
-    this.db.exec('begin immediate');
+    const rollbackDatabase = this.db;
+    rollbackDatabase.exec('begin immediate');
     try {
       const result = fn();
       this.db.exec('commit');
       return result;
     } catch (error) {
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        rollbackDatabase.exec('rollback');
       } catch { /* ignore rollback errors */ }
       throw error;
     }
