@@ -646,21 +646,21 @@ NODE_MODULE_INIT() {
   auto data = v8::External::New(isolate, state);
   for (const auto& entry : {
 #ifdef NR_MAIN_INSTALLATION_COMPONENT
-           std::pair{"componentCreateOriginalCapsule",ComponentInstallationBirth},
-           std::pair{"componentReadOriginalCapsule",ComponentInstallationCapsule},
+           std::pair{"componentCreateOriginalCapsule",&ComponentInstallationBirth},
+           std::pair{"componentReadOriginalCapsule",&ComponentInstallationCapsule},
            #ifdef NR_ROOT_IO_COMPONENT
-           std::pair{"componentCreateOriginalCoreForBudget",ComponentCoreForBudget},std::pair{"componentCloseOriginalCoreForBudget",ComponentCloseCoreBudget},
+           std::pair{"componentCreateOriginalCoreForBudget",&ComponentCoreForBudget},std::pair{"componentCloseOriginalCoreForBudget",&ComponentCloseCoreBudget},
 #endif
 #endif
-           std::pair{"createOriginalMainIssuer", Create},
-           std::pair{"connectOriginalMainInstallation", ConnectInstallation},
-           std::pair{"assertOriginalMainInstallationCurrent", AssertInstallation},
-           std::pair{"closeOriginalMainInstallation", CloseInstallation},
-           std::pair{"readOriginalMainInstallationFate", ReadInstallationFate},
-           std::pair{"pingOriginalMainInstallation", PingInstallation},
-           std::pair{"assertOriginalMainIssuerCurrent", Assert},
-           std::pair{"readOriginalMainClockCut", ReadClockCut},
-           std::pair{"revokeOriginalMainIssuer", Revoke}}) {
+           std::pair{"createOriginalMainIssuer", &Create},
+           std::pair{"connectOriginalMainInstallation", &ConnectInstallation},
+           std::pair{"assertOriginalMainInstallationCurrent", &AssertInstallation},
+           std::pair{"closeOriginalMainInstallation", &CloseInstallation},
+           std::pair{"readOriginalMainInstallationFate", &ReadInstallationFate},
+           std::pair{"pingOriginalMainInstallation", &PingInstallation},
+           std::pair{"assertOriginalMainIssuerCurrent", &Assert},
+           std::pair{"readOriginalMainClockCut", &ReadClockCut},
+           std::pair{"revokeOriginalMainIssuer", &Revoke}}) {
     v8::Local<v8::Function> fn;
     if (!v8::Function::New(context, entry.second, data).ToLocal(&fn) ||
         !exports->CreateDataProperty(context, Text(isolate, entry.first), fn).FromMaybe(false))
