@@ -64,6 +64,8 @@ describe('getSlashCommands', () => {
     expect(commands).toContainEqual({ cmd: '/skills-reload', desc: '强制刷新 skill 目录（通常不需要，默认会自动热更新）' });
     expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: '连接嵌入式云之家 channel' });
     expect(commands).toContainEqual({ cmd: '/help', desc: '查看可用命令和 skills' });
+    expect(commands).toContainEqual({ cmd: '/version', desc: '查看版本与详细构建信息' });
+    expect(commands).toContainEqual({ cmd: '/statusline', desc: '打开状态栏菜单，勾选字段、排序和预览' });
 
     expect(commands.some((command) => command.cmd === '/commit')).toBe(false);
     expect(commands.some((command) => command.cmd === '/review')).toBe(false);
@@ -73,7 +75,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
-    expect(commands.length).toBe(13);
+    expect(commands.length).toBe(15);
   });
 
   it('should include skills in command list', () => {
@@ -89,7 +91,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(14); // 13 base + 1 skill
+    expect(commands.length).toBe(16); // 15 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -127,7 +129,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(16); // 13 base + 3 skills
+    expect(commands.length).toBe(18); // 15 base + 3 skills
   });
 
   it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
@@ -924,8 +926,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 13 base commands + 20 skills = 33 total
-      expect(commands.length).toBe(33);
+      // 15 base commands + 20 skills = 35 total
+      expect(commands.length).toBe(35);
     });
 
     it('should preserve command descriptions', () => {
