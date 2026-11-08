@@ -1,0 +1,101 @@
+diff --git a/.github/workflows/desktop-cross-platform.yml b/.github/workflows/desktop-cross-platform.yml
+index 201b94cf..cb4265d2 100644
+--- a/.github/workflows/desktop-cross-platform.yml
++++ b/.github/workflows/desktop-cross-platform.yml
+@@ -149,6 +149,9 @@ jobs:
+           tests/main/kimi-reasoning-admission.test.ts
+           tests/main/desktop-provider-stream-lifecycle.test.ts
+           tests/main/desktop-startup-task-recovery.test.ts
++          tests/main/desktop-tool-execution-policy.test.ts
++          tests/main/desktop-multi-agent-catalog-bridge.bdd.test.ts
++          tests/main/desktop-multi-agent-capabilities.bdd.test.ts
+           tests/main/desktop-protection-ordinary-read.test.ts
+           tests/main/desktop-protection-worker-compiled-entry.test.ts
+           tests/main/project-stream-reconnect-regression.test.ts
+diff --git a/.github/workflows/terminal-ui.yml b/.github/workflows/terminal-ui.yml
+index c7710852..81cc3042 100644
+--- a/.github/workflows/terminal-ui.yml
++++ b/.github/workflows/terminal-ui.yml
+@@ -4,11 +4,22 @@ on:
+     branches: [master]
+     paths:
+       - 'src/ui/**'
++      - 'src/build-info.ts'
++      - 'src/build-metadata.ts'
++      - 'src/utils/version-info.ts'
++      - 'src/commands/version.ts'
++      - 'src/commands/chat-statusline.ts'
++      - 'src/commands/registry.ts'
++      - 'src/main.ts'
++      - 'scripts/set-build-info.mjs'
++      - 'tests/commands/version.test.ts'
++      - 'tests/e2e/version-statusline.py'
++      - 'tests/package/build-info.test.mjs'
++      - 'package.json'
+       - 'src/commands/chat.ts'
+       - 'src/commands/chat-permission-mode.ts'
+       - 'tests/commands/chat-permission-mode.test.ts'
+       - 'tests/e2e/mode-persistence.py'
+-      - 'src/commands/registry.ts'
+       - 'src/ai/memory/layered-store.ts'
+       - 'src/ai/memory/segment.ts'
+       - 'tests/ai/memory/segment-*.test.ts'
+@@ -37,11 +48,22 @@ on:
+   pull_request:
+     paths:
+       - 'src/ui/**'
++      - 'src/build-info.ts'
++      - 'src/build-metadata.ts'
++      - 'src/utils/version-info.ts'
++      - 'src/commands/version.ts'
++      - 'src/commands/chat-statusline.ts'
++      - 'src/commands/registry.ts'
++      - 'src/main.ts'
++      - 'scripts/set-build-info.mjs'
++      - 'tests/commands/version.test.ts'
++      - 'tests/e2e/version-statusline.py'
++      - 'tests/package/build-info.test.mjs'
++      - 'package.json'
+       - 'src/commands/chat.ts'
+       - 'src/commands/chat-permission-mode.ts'
+       - 'tests/commands/chat-permission-mode.test.ts'
+       - 'tests/e2e/mode-persistence.py'
+-      - 'src/commands/registry.ts'
+       - 'src/ai/memory/layered-store.ts'
+       - 'src/ai/memory/segment.ts'
+       - 'tests/ai/memory/segment-*.test.ts'
+@@ -109,6 +131,7 @@ jobs:
+           node -e "const j=require('nodejieba');j.load();const o=j.cut('南京市长江大桥').join(' ');console.log(o);if(o!=='南京市 长江大桥'){console.error('nodejieba cut mismatch='+o);process.exit(1)}"
+       - run: npm run build:release
+       - run: npm run test:sandbox:build
++      - run: node --test tests/package/build-info.test.mjs
+       - name: Test image layout, questions and actual chat entry
+         run: >
+           npm run test:sandbox:run --
+@@ -137,6 +160,12 @@ jobs:
+           .test-dist/tests/commands/yzj-serve-shutdown.test.js
+           .test-dist/tests/utils/logger.test.js
+           .test-dist/tests/ui/ask-question.test.js
++          .test-dist/tests/ui/statusbar.test.js
++          .test-dist/tests/ui/statusbar-config.test.js
++          .test-dist/tests/ui/statusline-selector.test.js
++          .test-dist/tests/ui/statusline-preferences.test.js
++          .test-dist/tests/commands/version.test.js
++          .test-dist/tests/commands/registry.test.js
+           .test-dist/tests/ui/image-input.test.js
+           .test-dist/tests/ui/transcript-buffer.test.js
+           .test-dist/tests/ai/tools/ask-user-question.test.js
+@@ -155,6 +184,7 @@ jobs:
+           python tests/e2e/inline-image-scrollback.py
+           python tests/e2e/askuser-short-menu.py
+           python tests/e2e/question-transcript-spacing.py
++          python tests/e2e/version-statusline.py
+           python tests/e2e/thinking-draft-handoff.py
+           python tests/e2e/footer-return.py
+           node tests/e2e/ghostty-vt-footer.mjs
+@@ -174,4 +204,5 @@ jobs:
+             /tmp/xiaok-mode-selector-*/
+             /tmp/xiaok-mode-persistence-*/
+             /tmp/xiaok-question-spacing-*/
++            /tmp/xiaok-version-statusline-*/
+           retention-days: 7
