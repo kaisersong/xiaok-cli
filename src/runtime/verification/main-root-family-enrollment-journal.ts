@@ -12,6 +12,7 @@ interface Intent {owner_key: string; profile_id: string; marker_json: string; st
 export function createMainRootFamilyJournal(input: {
   root: string; database: Database; authorityId: string;
   current(): void; directory(path: string): void; read(path: string): string | undefined;
+  assertUnclaimed(principal: Readonly<MainRootFamilyPrincipal>): void;
   atomic(path: string, contents: string): void; sync(): void; exclusive<T>(work: () => T): T;
 }) {
   const {database: db, authorityId} = input;
@@ -41,7 +42,7 @@ export function createMainRootFamilyJournal(input: {
     prepareMainRootFamilyIntent(raw: MainRootFamilyEnrollmentRecord) {
       transaction(); const record = parseMainRootFamilyEnrollmentRecord(raw);
       if (record.review.authorityId !== authorityId || record.phase !== 'prepared') throw Error('main_root_enrollment_journal');
-      current(); const key = mainRootFamilyIntentKey(record), old = row(key);
+      current(); input.assertUnclaimed(record.review.principal); const key = mainRootFamilyIntentKey(record), old = row(key);
       if (readIntents(record.review.principal).some(prior => prior.requestId !== record.requestId && prior.phase !== 'cancelled')) throw Error('main_root_enrollment_conflict');
       if (old) { decode(old); if (old.marker_json !== json(record)) throw Error('main_root_enrollment_conflict'); return; }
       const usage = db.prepare('SELECT COUNT(*) n,COALESCE(SUM(charged_bytes),0) bytes,COUNT(DISTINCT profile_id) profiles FROM main.migration_publication_intents').get() as {n: number; bytes: number; profiles: number};
@@ -55,7 +56,7 @@ export function createMainRootFamilyJournal(input: {
     replaceMainRootFamilyIntent(before: MainRootFamilyEnrollmentRecord, after: MainRootFamilyEnrollmentRecord) {
       transaction(); const old = parseMainRootFamilyEnrollmentRecord(before), next = parseMainRootFamilyEnrollmentRecord(after);
       if (old.boot !== next.boot || old.requestId !== next.requestId || json(old.review) !== json(next.review)) throw Error('main_root_enrollment_conflict');
-      current(); stored(old);
+      current(); stored(old); input.assertUnclaimed(old.review.principal);
       if (db.prepare("UPDATE main.migration_publication_intents SET marker_json=?,published=0 WHERE owner_key=? AND marker_json=? AND state='pending'").run(json(next), mainRootFamilyIntentKey(old), json(old)).changes !== 1) throw Error('main_root_enrollment_conflict');
       current();
     },
