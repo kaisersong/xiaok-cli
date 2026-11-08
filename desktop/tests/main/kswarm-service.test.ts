@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,6 +54,10 @@ class FakeKSwarmChild extends EventEmitter {
     });
   }
 }
+
+beforeEach(() => {
+  for (const name of ['XIAOK_DESKTOP_PORT', 'INTENT_BROKER_PORT', 'KSWARM_PORT']) vi.stubEnv(name, undefined);
+});
 
 afterEach(() => {
   vi.useRealTimers();

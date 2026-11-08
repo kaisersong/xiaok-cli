@@ -1,3 +1,5 @@
+import type { DesktopServicePorts } from './desktop-service-discovery.js';
+
 /** Only sidecar-owned namespaces may use prefix matching. */
 export const SIDECAR_ENV_PREFIXES = ['KSWARM_', 'INTENT_BROKER_'] as const;
 
@@ -20,7 +22,7 @@ export const SIDECAR_ENV_NAMES = [
   // Agent SSH authentication and Node installation discovery.
   'SSH_AUTH_SOCK', 'NVM_DIR',
   // Desktop background Node command and application configuration location.
-  'XIAOK_NODE_CMD', 'XIAOK_CONFIG_DIR',
+  'XIAOK_NODE_CMD', 'XIAOK_CONFIG_DIR', 'XIAOK_DESKTOP_PORT',
   // Non-secret configuration read by the sidecars: endpoints, public OAuth IDs, timing and models.
   'PORT', 'BROKER_URL', 'BROKER_ROOT', 'RELAY_AUTH_URL', 'RELAY_GITHUB_CLIENT_ID', 'RELAY_GOOGLE_CLIENT_ID',
   'ENABLE_HUMAN_ESCALATION', 'PRUNE_THRESHOLD_MS', 'POLL_INTERVAL_MS', 'TASK_STALE_MS',
@@ -39,4 +41,14 @@ export function buildSidecarEnv(parent: NodeJS.ProcessEnv, platform = process.pl
   return Object.fromEntries(Object.entries(parent).filter(([name, value]) =>
     typeof value === 'string' && (names.has(normalize(name)) || prefixes.some(prefix => normalize(name).startsWith(prefix))),
   )) as Record<string, string>;
+}
+
+/** Child readers have a different PID/discovery file; pass selected ports as defaults.
+ * Explicit user configuration (including the broker alias) keeps its priority. */
+export function buildDesktopServiceEnv(parent: NodeJS.ProcessEnv, ports: DesktopServicePorts): NodeJS.ProcessEnv {
+  return {
+    ...parent,
+    XIAOK_DESKTOP_PORT: parent.XIAOK_DESKTOP_PORT ?? parent.INTENT_BROKER_PORT ?? String(ports.broker),
+    KSWARM_PORT: parent.KSWARM_PORT ?? String(ports.kswarm),
+  };
 }

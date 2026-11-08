@@ -1,7 +1,7 @@
 import { activeOwnerServicePorts } from './active-owner-service-ports.js';
 import { configuredDesktopServicePorts, writeDesktopServicePorts, prepareDesktopServicePorts, desktopServiceDiscoveryFile, readDesktopServicePorts } from './desktop-service-discovery.js';
 import {createNativeWorkflowReadPort,closeNativeWorkflowReadPort,assertNativeWorkflowReadPort,readNativeWorkflowRun,type NativeWorkflowReadPort} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
-import { buildSidecarEnv } from './sidecar-env.js';
+import { buildDesktopServiceEnv, buildSidecarEnv } from './sidecar-env.js';
 import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
@@ -767,6 +767,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     })().then(() => {
       const ports = readDesktopServicePorts(discoveryFile);
       BROKER_PORT = ports.broker; KSWARM_PORT = ports.kswarm;
+      Object.assign(process.env, buildDesktopServiceEnv(process.env, ports));
       KSWARM_REQUEST_BASE_URLS = [`http://127.0.0.1:${KSWARM_PORT}`, `http://localhost:${KSWARM_PORT}`];
       KSWARM_HEALTH_URLS = KSWARM_REQUEST_BASE_URLS.map(url => `${url}/health`);
       BROKER_HEALTH_URLS = [`http://127.0.0.1:${BROKER_PORT}/health`, `http://localhost:${BROKER_PORT}/health`];
@@ -1188,7 +1189,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     }
 
     const brokerEnv = buildIntentBrokerServiceEnv({
-      baseEnv: buildSidecarEnv(process.env),
+      baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
       cwd: brokerLaunch.cwd,
       port: BROKER_PORT,
       repoRoot: brokerLaunch.repoRoot,
@@ -1399,7 +1400,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
     const nodeRuntime = resolveBackgroundNodeRuntime({
       env: {
-        ...buildSidecarEnv(process.env),
+        ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
         KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
@@ -1743,10 +1744,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
       assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
       mkdirSync(brokerLaunch.cwd, { recursive: true });
-      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(process.env), cwd: brokerLaunch.cwd, port: BROKER_PORT,
+      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
       const brokerRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
-      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(process.env), KSWARM_PORT: String(KSWARM_PORT),
+      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken } });
       const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
       const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
