@@ -31,11 +31,13 @@ typedef struct mi_enrollment_file_fd {
 typedef struct mi_enrollment_file_consumer {
   /* metadata_root is borrowed from the original helper, never owned here. */
   int metadata_root, called, status, unknown, error_present, first_errno, entered;
+  int prepared, plan_attempted, planned, commit_attempted;
   const char *reason;
   mi_enrollment_file_fd file, accepted;
   mi_enrollment_projection projection;
   mi_enrollment_consume consume;
   unsigned char accepted_digest[32], physical_binding[32], record[MI_ENROLLMENT_CONSUME_BYTES];
+  unsigned char planned_record[MI_ENROLLMENT_CONSUME_BYTES];
   char name[96];
 } mi_enrollment_file_consumer;
 static MI_E_UNUSED void mi_enrollment_file_init(mi_enrollment_file_consumer *s) {
@@ -161,8 +163,8 @@ static MI_E_UNUSED int mi_e_file_open_existing(mi_enrollment_file_consumer *s) {
   s->status = MI_E_FILE_EXISTING;
   return 1;
 }
-static MI_E_UNUSED int mi_e_consume_loaded(mi_enrollment_file_consumer *s, int borrowed_root,
-                                           const unsigned char *projection, size_t bytes) {
+static MI_E_UNUSED int mi_e_prepare_projection(mi_enrollment_file_consumer *s, int borrowed_root,
+                                                const unsigned char *projection, size_t bytes) {
   if (borrowed_root < 0 || !mi_enrollment_decode_projection(
                                projection, bytes, MI_ENROLLMENT_CONSUMER_KIND, &s->projection))
     return mi_e_file_fail(s, "MI_CONSUME_PROJECTION_INVALID", EINVAL, 0);
@@ -184,23 +186,9 @@ static MI_E_UNUSED int mi_e_consume_loaded(mi_enrollment_file_consumer *s, int b
     s->name[base + 2 * i + 1] = hex[b & 15];
   }
   memcpy(s->name + base + 64, ".bin", 5);
-  struct stat prior;
-  errno = 0;
-  int observed = fstatat(borrowed_root, s->name, &prior, AT_SYMLINK_NOFOLLOW);
-  if (!observed)
-    return mi_e_file_open_existing(s);
-  if (errno != ENOENT)
-    return mi_e_file_fail(s, "MI_CONSUME_PROBE_UNKNOWN", errno, 1);
-#ifndef MI_ENROLLMENT_COMPONENT_BUILD
-  /* A restore cannot create new consumption, and a real same-inode v7->v8
-   * migration must be connected before production can burn its one-use claim. */
-  return mi_e_file_fail(
-      s, s->projection.mode == 1 ? "MI_MIGRATION_NOT_IMPLEMENTED" : "MI_CONSUME_RESTORE_MISSING",
-      EPERM, 0);
-#else
-  if (s->projection.mode != 1)
-    return mi_e_file_fail(s, "MI_CONSUME_RESTORE_MISSING", EPERM, 0);
-#endif
+  return 1;
+}
+static MI_E_UNUSED void mi_e_consume_bindings(mi_enrollment_file_consumer *s) {
   mi_enrollment_consume *c = &s->consume;
   memset(c, 0, sizeof(*c));
   c->kind = s->projection.kind;
@@ -214,11 +202,8 @@ static MI_E_UNUSED int mi_e_consume_loaded(mi_enrollment_file_consumer *s, int b
   memcpy(c->hashes[6], s->projection.hashes[MI_E_PUBLISHER_RELEASE], 32);
   /* This binding came from this same actual fixed accepted FD and bytes. */
   memcpy(c->hashes[7], s->physical_binding, 32);
-  if (SecRandomCopyBytes(kSecRandomDefault, 32, c->hashes[5]) != errSecSuccess ||
-      !mi_e_nonzero(c->hashes[5], 32))
-    return mi_e_file_fail(s, "MI_CONSUME_NONCE_UNKNOWN", EIO, 0);
-  if (!mi_enrollment_encode_consume(c, s->record))
-    return mi_e_file_fail(s, "MI_CONSUME_ENCODING_INVALID", EINVAL, 0);
+}
+static MI_E_UNUSED int mi_e_write_loaded(mi_enrollment_file_consumer *s, int borrowed_root) {
   s->entered = 1;
   errno = 0;
   s->file.fd =
@@ -251,6 +236,36 @@ static MI_E_UNUSED int mi_e_consume_loaded(mi_enrollment_file_consumer *s, int b
     s->status = MI_E_FILE_CREATED;
   return good && !s->unknown;
 }
+static MI_E_UNUSED int mi_e_consume_loaded(mi_enrollment_file_consumer *s, int borrowed_root,
+                                           const unsigned char *projection, size_t bytes) {
+  if (!mi_e_prepare_projection(s, borrowed_root, projection, bytes))
+    return 0;
+  struct stat prior;
+  errno = 0;
+  int observed = fstatat(borrowed_root, s->name, &prior, AT_SYMLINK_NOFOLLOW);
+  if (!observed)
+    return mi_e_file_open_existing(s);
+  if (errno != ENOENT)
+    return mi_e_file_fail(s, "MI_CONSUME_PROBE_UNKNOWN", errno, 1);
+#ifndef MI_ENROLLMENT_COMPONENT_BUILD
+  /* A restore cannot create new consumption, and a real same-inode v7->v8
+   * migration must be connected before production can burn its one-use claim. */
+  return mi_e_file_fail(
+      s, s->projection.mode == 1 ? "MI_MIGRATION_NOT_IMPLEMENTED" : "MI_CONSUME_RESTORE_MISSING",
+      EPERM, 0);
+#else
+  if (s->projection.mode != 1)
+    return mi_e_file_fail(s, "MI_CONSUME_RESTORE_MISSING", EPERM, 0);
+#endif
+  mi_e_consume_bindings(s);
+  mi_enrollment_consume *c = &s->consume;
+  if (SecRandomCopyBytes(kSecRandomDefault, 32, c->hashes[5]) != errSecSuccess ||
+      !mi_e_nonzero(c->hashes[5], 32))
+    return mi_e_file_fail(s, "MI_CONSUME_NONCE_UNKNOWN", EIO, 0);
+  if (!mi_enrollment_encode_consume(c, s->record))
+    return mi_e_file_fail(s, "MI_CONSUME_ENCODING_INVALID", EINVAL, 0);
+  return mi_e_write_loaded(s, borrowed_root);
+}
 static MI_E_UNUSED int mi_e_accepted_current(mi_enrollment_file_consumer *s) {
   struct stat held, named;
   errno = 0;
@@ -262,19 +277,8 @@ static MI_E_UNUSED int mi_e_accepted_current(mi_enrollment_file_consumer *s) {
     return mi_e_file_fail(s, "MI_ACCEPTED_IDENTITY_CHANGED", EINVAL, 1);
   return 1;
 }
-static MI_E_UNUSED int mi_e_read_accepted(mi_enrollment_file_consumer *s,
-                                          const unsigned char *expected, size_t bytes) {
-  errno = 0;
-  s->accepted.fd =
-      openat(s->metadata_root, "main-root-family.enrollment", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-  if (s->accepted.fd < 0)
-    return mi_e_file_fail(s, "MI_ACCEPTED_SOURCE_UNAVAILABLE", errno, 0);
-  errno = 0;
-  if (fstat(s->accepted.fd, &s->accepted.identity))
-    return mi_e_file_fail(s, "MI_ACCEPTED_STAT_UNKNOWN", errno, 1);
-  if (!mi_e_file_regular(&s->accepted.identity) ||
-      s->accepted.identity.st_size != MI_ENROLLMENT_ACCEPTED_BYTES)
-    return mi_e_file_fail(s, "MI_ACCEPTED_SOURCE_INVALID", EINVAL, 1);
+static MI_E_UNUSED int mi_e_accepted_bytes(mi_enrollment_file_consumer *s,
+                                         const unsigned char *expected, size_t bytes) {
   unsigned char actual[MI_ENROLLMENT_ACCEPTED_BYTES];
   size_t at = 0;
   while (at < sizeof(actual)) {
@@ -290,6 +294,23 @@ static MI_E_UNUSED int mi_e_read_accepted(mi_enrollment_file_consumer *s,
   if (bytes != sizeof(actual) || memcmp(actual, expected, sizeof(actual)))
     return mi_e_file_fail(s, "MI_ACCEPTED_SOURCE_CHANGED", EINVAL, 1);
   if (!mi_e_accepted_current(s))
+    return 0;
+  return 1;
+}
+static MI_E_UNUSED int mi_e_read_accepted(mi_enrollment_file_consumer *s,
+                                          const unsigned char *expected, size_t bytes) {
+  errno = 0;
+  s->accepted.fd =
+      openat(s->metadata_root, "main-root-family.enrollment", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (s->accepted.fd < 0)
+    return mi_e_file_fail(s, "MI_ACCEPTED_SOURCE_UNAVAILABLE", errno, 0);
+  errno = 0;
+  if (fstat(s->accepted.fd, &s->accepted.identity))
+    return mi_e_file_fail(s, "MI_ACCEPTED_STAT_UNKNOWN", errno, 1);
+  if (!mi_e_file_regular(&s->accepted.identity) ||
+      s->accepted.identity.st_size != MI_ENROLLMENT_ACCEPTED_BYTES)
+    return mi_e_file_fail(s, "MI_ACCEPTED_SOURCE_INVALID", EINVAL, 1);
+  if (!mi_e_accepted_bytes(s, expected, bytes))
     return 0;
   unsigned char facts[64];
   const struct stat *v = &s->accepted.identity;
@@ -331,5 +352,6 @@ static MI_E_UNUSED int mi_enrollment_consume_file(mi_enrollment_file_consumer *s
   }
   return good && !s->unknown;
 }
+#include "enrollment-consume-plan.h"
 #endif /* Darwin only: no filesystem stubs or platform permission fallback. */
 #endif

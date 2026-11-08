@@ -35,7 +35,9 @@ int main(int argc, char **argv) {
   mi_enrollment_projection p;
   vector(&p);
   p.kind = 1;
-  p.mode = !strcmp(argv[2], "migration") ? 1 : 2;
+  int planned = !strncmp(argv[2], "planned-", 8);
+  const char *mode = planned ? argv[2] + 8 : argv[2];
+  p.mode = !strcmp(mode, "migration") ? 1 : 2;
   if (p.mode == 2)
     p.source_schema = 4;
   unsigned char bytes[MI_ENROLLMENT_ACCEPTED_BYTES], core[32];
@@ -51,7 +53,15 @@ int main(int argc, char **argv) {
   memset(s.physical_binding, 0x7a, 32);
   /* Direct original private FSM rejection, not an assertion that its upstream
    * certificate/accepted-FD/Source preconditions have actually succeeded. */
-  int good = mi_e_consume_loaded(&s, root, bytes, sizeof(bytes));
+  int good;
+  if (planned) {
+    /* Only the actual production-compiled missing-migration gate is probed.
+     * No accepted FD/plan/Source precondition is claimed by this fixture. */
+    s.projection = p;
+    good = mi_e_commit_planned(&s);
+  } else {
+    good = mi_e_consume_loaded(&s, root, bytes, sizeof(bytes));
+  }
   int closed = mi_enrollment_file_close(&s);
   printf("{\"scope\":\"production-metadata-negative-only\",\"good\":%s,"
          "\"status\":%d,\"unknown\":%s,\"reason\":\"%s\",\"openatCalls\":%d,"
