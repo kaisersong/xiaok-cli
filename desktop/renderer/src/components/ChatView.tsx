@@ -278,6 +278,8 @@ interface ChatViewProps {
   emptyContent?: ReactNode;
   assistantContent?: ReactNode;
   assistantHasMessages?: boolean;
+  assistantFocusKey?: string;
+  onAssistantFocusHandled?:()=>void;
   conversationHeader?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
@@ -310,7 +312,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ uiPreviews = [],
-  emptyContent, conversationHeader, assistantContent, assistantHasMessages, historyContent,
+  emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantFocusKey, onAssistantFocusHandled, historyContent,
   thread, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
@@ -480,6 +482,16 @@ export function ChatView({ uiPreviews = [],
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
     setShowScrollToBottom(false);
   }, [messages, streamingText, status, showEntry]);
+
+  const handledAssistantFocus=useRef(new Set<string>());
+  useEffect(()=>{
+    if(!assistantFocusKey||handledAssistantFocus.current.has(assistantFocusKey))return;
+    const scroller=scrollRef.current,target=scroller?.querySelector<HTMLElement>('[data-assistant-focus-target]');
+    if(!scroller||!target)return;
+    handledAssistantFocus.current.add(assistantFocusKey);historyAnchorRef.current=null;isAtBottomRef.current=false;
+    scroller.scrollTo({top:Math.max(0,scroller.scrollTop+target.getBoundingClientRect().top-scroller.getBoundingClientRect().top-scroller.clientTop),behavior:'instant' as ScrollBehavior});
+    setShowScrollToBottom(true);onAssistantFocusHandled?.();
+  },[assistantFocusKey,assistantContent,assistantHasMessages,messages,status,onAssistantFocusHandled]);
 
   // Approvals can arrive after the last text chunk inside the stream throttle.
   // Follow them only for readers already following the latest output; keep

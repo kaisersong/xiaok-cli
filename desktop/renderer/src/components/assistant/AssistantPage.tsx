@@ -1,5 +1,5 @@
 import {AssistantSecureInputs} from '../security/AssistantSecureInputs';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssistantInbox } from '../../hooks/useAssistantInbox';
 import { AssistantBriefConversation,AssistantInboxPanel } from './AssistantBriefConversation';
 import type { AttentionItem,AttentionAction } from '../../../../shared/assistant-inbox-contract';
@@ -18,13 +18,14 @@ export function AssistantPage() {
   const data = useAssistantWorkspace();
   const inbox = useAssistantInbox(data.overview?.profile.status);
   const navigate = useNavigate();
+  const location = useLocation();
   const openItem = async (item:AttentionItem) => { if(!item.threadId||!item.taskId)return; await api.ensureAssistantWorkThread({id:item.threadId,title:item.title,taskId:item.taskId});navigate(`/t/${item.threadId}`); };
   const startItem = async (item:AttentionItem) => {const started=await inbox.start({id:item.id,expectedRevision:item.revision,requestId:crypto.randomUUID()});if(started?.taskId)await openItem(started);};
   const actItem = (item:AttentionItem,action:AttentionAction['action']) => {void inbox.act({id:item.id,expectedRevision:item.revision,action,...(action==='snooze'?{until:Date.now()+3600000}:{})});};
   const controls={busy:inbox.busy,onStart:(item:AttentionItem)=>{void startItem(item).catch(()=>inbox.read());},onOpen:(item:AttentionItem)=>{void openItem(item).catch(()=>inbox.read());},onAct:actItem};
   const inboxPanel=<AssistantInboxPanel state={inbox.state} controls={controls} onRefresh={()=>{void inbox.refresh();}} initializing={inbox.initializing} error={inbox.error}/>;
   const morningSuggestions=data.overview?.profile.status==='active'&&!data.errors.assistant?data.overview.suggestions.slice(0,3):[];
-  const assistantContent=<><AssistantSecureInputs/>{morningSuggestions.length>0&&<section data-testid="assistant-morning-suggestions" className="py-3"><h2 className="text-sm font-medium">{t.assistantInbox.morningSuggestionsTitle}</h2><ul className="mt-2 space-y-3">{morningSuggestions.map(s=><li key={s.id} className="flex items-start justify-between gap-3"><p className="text-sm leading-6">{s.title}</p><button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={()=>prepare(`请帮我核对并推进以下事项，先确认当前事实：\n${s.title}`)}>{t.assistant.workspace.prepare}</button></li>)}</ul></section>}<AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
+  const assistantContent=<><AssistantSecureInputs/>{morningSuggestions.length>0&&<section data-testid="assistant-morning-suggestions" data-assistant-focus-target className="py-3"><h2 className="text-sm font-medium">{t.assistantInbox.morningSuggestionsTitle}</h2><ul className="mt-2 space-y-3">{morningSuggestions.map(s=><li key={s.id} className="flex items-start justify-between gap-3"><p className="text-sm leading-6">{s.title}</p><button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={()=>prepare(`请帮我核对并推进以下事项，先确认当前事实：\n${s.title}`)}>{t.assistant.workspace.prepare}</button></li>)}</ul></section>}<AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
   const hasAssistantMessages=Boolean(morningSuggestions.length||inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
 
   const [ready, setReady] = useState(false);
@@ -57,6 +58,6 @@ export function AssistantPage() {
   </div>;
   return <div data-testid="assistant-page" className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]">
     {!ready ? <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--c-text-secondary)]"><p role={failed ? 'alert' : 'status'}>{failed ? labels.loadFailed : labels.loading}</p>{failed && <button type="button" className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2" onClick={() => void load()}><RefreshCw size={14}/>{t.assistant.refreshStatus}</button>}</div>
-      : <ChatShell threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} draftRequest={draftRequest} hideObservationControls />}
+      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningSuggestions.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} draftRequest={draftRequest} hideObservationControls />}
   </div>;
 }

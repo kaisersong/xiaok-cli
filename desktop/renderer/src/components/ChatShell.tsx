@@ -265,12 +265,14 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, draftRequest, hideObservationControls }: {
+export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls }: {
   threadId?: string;
   emptyContent?: React.ReactNode;
   conversationHeader?: React.ReactNode;
   assistantContent?: React.ReactNode;
   assistantHasMessages?: boolean;
+  assistantFocusKey?: string;
+  onAssistantFocusHandled?:()=>void;
   draftRequest?: { id: number; text: string };
   hideObservationControls?: boolean;
 } = {}) {
@@ -2081,6 +2083,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         conversationHeader={conversationHeader}
         assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
         assistantHasMessages={assistantHasMessages}
+        assistantFocusKey={assistantFocusKey}
+        onAssistantFocusHandled={onAssistantFocusHandled}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
