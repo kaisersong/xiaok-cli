@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 
-export function prepareRootNmpLedgerFixture({smallLimit=false}={}){
+export function prepareRootNmpLedgerFixture({smallLimit=false,rootIoConfiguration=null}={}){
  const repo=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
  const root=realpathSync(mkdtempSync(join(tmpdir(),'root-nmp-ledger-'))),domain=join(root,'domain');mkdirSync(domain,{mode:0o700});mkdirSync(join(root,'config'),{mode:0o700});
  const headers=process.env.XIAOK_NATIVE_NODE_HEADERS||resolve(dirname(process.execPath),'../include/node');
@@ -32,6 +32,7 @@ export function prepareRootNmpLedgerFixture({smallLimit=false}={}){
  }
  writeFileSync(facts,'static const char *nr_fixture_metadata[]={'+metadata.map(JSON.stringify).join(',')+'};\nstatic const char *nr_fixture_execution_keys[]={'+executionKeys.map(JSON.stringify).join(',')+'};\nstatic const int nr_fixture_priorities[]={0,0,0,0,0,0,0,0};\n#define NR_FIXTURE_FACT_COUNT 8\n');
  common.push('-DNR_FIXTURE_FACTS_HEADER='+JSON.stringify(facts));
+ if(rootIoConfiguration!==null)common.push('-DNR_ROOT_IO_COMPONENT=1','-DMI_CONFIGURATION_HEADER='+JSON.stringify(rootIoConfiguration));
  if(smallLimit)common.push('-DNR_FIXTURE_LEDGER_SMALL_LIMIT=1');
  const objects=[];
  for(const file of sources.filter(file=>file.endsWith('.c'))){const output=join(root,objects.length+'.o');build('/usr/bin/cc',[...common,'-std=c11','-c',join(native,file),'-o',output]);objects.push(output);}

@@ -103,10 +103,13 @@ static napi_value nr_ledger_failure(napi_env env,nr_session *s,const char *error
  napi_value message,exception;napi_create_string_utf8(env,error,NAPI_AUTO_LENGTH,&message);napi_create_error(env,NULL,message,&exception);
  number(env,exception,"schemaReferenceCloseCode",s->ledger_failure_code);napi_throw(env,exception);return NULL;
 }
-static napi_value nr_ledger_projection(napi_env env,nr_ledger_bytes *bytes){
- static const char domain[]="xiaok.original-root-nmp-ledger/v1";unsigned char length[8],digest[CC_SHA256_DIGEST_LENGTH];char hash[65];CC_SHA256_CTX ctx;
+static void nr_ledger_digest(const nr_ledger_bytes *bytes,unsigned char digest[CC_SHA256_DIGEST_LENGTH]){
+ static const char domain[]="xiaok.original-root-nmp-ledger/v1";unsigned char length[8];CC_SHA256_CTX ctx;
  for(int i=0;i<8;i++)length[7-i]=(unsigned char)((uint64_t)bytes->size>>(8*i));
  CC_SHA256_Init(&ctx);CC_SHA256_Update(&ctx,domain,sizeof(domain));CC_SHA256_Update(&ctx,length,sizeof(length));CC_SHA256_Update(&ctx,bytes->bytes,(CC_LONG)bytes->size);CC_SHA256_Final(digest,&ctx);
+}
+static napi_value nr_ledger_projection(napi_env env,nr_ledger_bytes *bytes){
+ unsigned char digest[CC_SHA256_DIGEST_LENGTH];char hash[65];nr_ledger_digest(bytes,digest);
  static const char digits[]="0123456789abcdef";for(size_t i=0;i<sizeof(digest);i++){hash[2*i]=digits[digest[i]>>4];hash[2*i+1]=digits[digest[i]&15];}hash[64]=0;
  napi_value out=object(env),json=NULL;int good=out&&napi_create_string_utf8(env,bytes->bytes,bytes->size,&json)==napi_ok&&text(env,out,"kind","original_root_nmp_ledger_capture_v1")&&own_data(env,out,"canonicalJson",json)&&text(env,out,"sha256",hash)&&napi_object_freeze(env,out)==napi_ok;
  nr_ledger_clear(bytes);return good?out:fail(env,"ROOT_LEDGER_PROJECTION_UNCONFIRMED");

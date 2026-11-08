@@ -30,10 +30,17 @@ static int nr_ledger_close_fd(nr_ledger_source *r,int *fd){
  for(int i=0;i<r->failed_count;i++)if(r->failed_fds[i]==*fd)return 0;
  if(close(*fd)){if(!r->first_errno)r->first_errno=errno;r->failed_fds[r->failed_count++]=*fd;r->unknown=1;return 0;}*fd=-1;return 1;
 }
-static int nr_ledger_source_release(nr_ledger_source *r){
+/* Keep every original file/issuer descriptor while closing only the actual
+ * read handles in preparation for a fixed Native custody transfer. */
+static int nr_ledger_source_close_readers(nr_ledger_source *r){
  nr_session *s=&r->view;int good=1;
  if(s->schema_reference){int rc=sqlite3_close(s->schema_reference);if(rc==SQLITE_OK)s->schema_reference=NULL;else{r->unknown=1;good=0;}}
  if(s->db){int rc=sqlite3_close(s->db);if(rc==SQLITE_OK)s->db=NULL;else{r->unknown=1;good=0;}}
+ return good;
+}
+static int nr_ledger_source_release(nr_ledger_source *r){
+ nr_session *s=&r->view;int good=1;
+ if(!nr_ledger_source_close_readers(r))good=0;
  /* Keep the issuer lock and ancestors while either actual SQLite handle is
   * still held. The independent probe is always attempted. */
  if(!nr_ledger_close_fd(r,&r->probe))good=0;

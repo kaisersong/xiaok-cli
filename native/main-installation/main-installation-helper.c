@@ -27,6 +27,7 @@
 #include <sys/acl.h>
 #endif
 #include "root-store-state.h"
+#include "enrollment-custody-channel.h"
 #define MAX_CHANNELS 8
 /* Installation certification is root-owned input, not caller authorization.
  * This Stage1 binary never installs itself or repairs an interrupted namespace. */
@@ -38,6 +39,7 @@ typedef struct connection {
 } connection;
 typedef struct state {
  int root,listener,used,unknown,child_exited,child_status,authority_sealed;
+ int enrollment_control,enrollment_control_close_entered;mi_custody_birth enrollment_birth;mi_custody_received enrollment_custody;
  mi_store_lease root_store,families[MI_AUTHORITY_MAX_LEASES];
  size_t family_count;
  int failed_close_fds[16],failed_close_count;
@@ -84,6 +86,7 @@ static int closure(state *s){
 #include "authority-family-io.h"
 #include "kswarm-child-delegation.h"
 #include "broker-child-delegation.h"
+#include "enrollment-custody-helper.h"
 static int open_namespace(state *s){return store_open_namespace(s,&s->root_store);}
 static int current(state *s){
  struct stat r,a,named_authority,db,lock,main;if(lstat(MI_FIXED_ROOT,&r)||!directory_identity(&r,&s->root_identity)||fstat(s->root_store.authority,&a)||!directory_identity(&a,&s->root_store.authority_identity)||fstatat(s->root,MI_AUTHORITY_BASENAME,&named_authority,AT_SYMLINK_NOFOLLOW)||!directory_identity(&named_authority,&s->root_store.authority_identity)||fstatat(s->root_store.authority,MI_DATABASE_BASENAME,&db,AT_SYMLINK_NOFOLLOW)||!identity(&db,&s->root_store.file_identity[MI_DATABASE])||fstatat(s->root_store.authority,"issuer.lock",&lock,AT_SYMLINK_NOFOLLOW)||!identity(&lock,&s->root_store.file_identity[MI_ISSUER_LOCK])||lstat(MI_MAIN_EXEC,&main)||!identity(&main,&s->main_identity)||main.st_size!=s->main_identity.st_size||main.st_mtimespec.tv_sec!=s->main_identity.st_mtimespec.tv_sec||main.st_mtimespec.tv_nsec!=s->main_identity.st_mtimespec.tv_nsec)goto stale;
@@ -185,6 +188,7 @@ static void serve(state *s){
  }
 }
 static int cleanup(state *s){
+ if(!mi_entry_close(s))s->unknown=1;
  int good=1;for(size_t i=0;i<s->family_count;i++)if(!authority_close(s,s->families+i))good=0;for(int i=0;i<MAX_CHANNELS;i++){if(!close_owned(&s->connections[i].fd))good=0;mi_zero(s->connections[i].key,32);}if(!close_owned(&s->listener))good=0;
  for(int i=1;i<=3;i++)if(!close_owned(s->root_store.files+i))good=0;
  if(!close_owned(&s->root_store.store.receipt_fd))good=0;
@@ -195,8 +199,13 @@ static int cleanup(state *s){
 }
 int main(int argc,char **argv){
  (void)argv;signal(SIGPIPE,SIG_IGN);signal(SIGCHLD,SIG_DFL);signal(SIGTERM,stop_signal);signal(SIGINT,stop_signal);if(argc!=1){fputs("MI_ARGUMENT_INVALID\n",stderr);return 64;}
- state *s=calloc(1,sizeof(*s));if(!s)return 70;s->root=s->listener=-1;store_lease_init(&s->root_store);for(size_t i=0;i<MI_AUTHORITY_MAX_LEASES;i++)store_lease_init(s->families+i);for(int i=0;i<MAX_CHANNELS;i++)s->connections[i].fd=-1;
+ state *s=calloc(1,sizeof(*s));if(!s)return 70;s->root=s->listener=s->enrollment_control=-1;mi_cu_init(&s->enrollment_custody);store_lease_init(&s->root_store);for(size_t i=0;i<MI_AUTHORITY_MAX_LEASES;i++)store_lease_init(s->families+i);for(int i=0;i<MAX_CHANNELS;i++)s->connections[i].fd=-1;
  if(!closure(s)){cleanup(s);free(s);fputs("MI_INSTALLATION_CLOSURE_UNCONFIRMED\n",stderr);return 77;}
+#ifdef MI_CUSTODY_TRANSPORT_COMPONENT
+ int component_result=mi_entry_component(s);if(!s->unknown)free(s);return component_result;
+#elif !defined(MI_FIXTURE_BUILD)
+ if(!mi_entry_receive(s)){cleanup(s);free(s);fputs("MI_ENROLLMENT_CUSTODY_UNCONFIRMED\n",stderr);return 78;}
+#endif
  if(!open_namespace(s)||!start_listener(s)||!launch(s)){
   int saved=errno;if(s->child>0){kill(s->child,SIGTERM);pid_t waited;do{waited=waitpid(s->child,&s->child_status,0);}while(waited<0&&errno==EINTR);s->child_exited=waited==s->child;if(!s->child_exited)s->unknown=1;printf("{\"event\":\"%s\",\"pid\":%ld,\"status\":%d}\n",s->child_exited?"reaped":"wait_failed",(long)s->child,s->child_status);}cleanup(s);free(s);fprintf(stderr,"MI_BIRTH_UNCONFIRMED:%d\n",saved);return 78;
  }

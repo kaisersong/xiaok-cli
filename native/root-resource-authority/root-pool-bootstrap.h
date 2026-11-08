@@ -1,5 +1,22 @@
 #include "root-pool-schema-validation.h"
 #include "root-pool-graph-validation.h"
+#include "root-pool-v7-validation.h"
+#include "root-pool-migration.h"
+#include "fixture-migration-physical-history.h"
+static int nr_pool_restore_protected_binding(nr_session *s){
+ if(!s->root_io)return 1;
+ enum nr_root_adoption_kind kind;
+ if(!nr_root_store_read_adoption_kind(s->root_io,&kind))return 0;
+ enum nr_root_bind_mode mode=NR_RECOVER_COMMITTED;
+ if(kind==NR_ROOT_ADOPTED_BINDING){
+  nr_original_pool_history history;nr_root_store_identity target;
+  if(!nr_root_store_claim_adopted(s->root_io,&s->io_claim)||
+     !nr_root_store_read_adoption(s->root_io,s->io_claim,&history,&target)||
+     !nr_io_identity_same(&s->io_identity,&target))return 0;
+  mode=NR_ADOPTION_COMMITTED;
+ }
+ return nr_pool_bind_protected(s,mode);
+}
 static napi_value bootstrap_original_main_pool(napi_env env,napi_callback_info info){
  napi_value args[2];if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
  nr_session *s=main_session_member(env,info,args[0]);if(!s)return NULL;
@@ -14,6 +31,7 @@ static napi_value bootstrap_original_main_pool(napi_env env,napi_callback_info i
   napi_value out=NULL;if(napi_create_string_utf8(env,"fresh",NAPI_AUTO_LENGTH,&out)!=napi_ok||!main_session_current(env,s))return nr_error(env,s,"ROOT_RESOURCE_BOOTSTRAP_UNCONFIRMED",0,0,1);s->bootstrap_status=1;return out;
  }
  if(!floor_valid(s)){
+  if(s->root_io&&floor_match(s,NR_PROFILE,NR_DIGEST,NR_GUARD,NR_SCHEMA_VERSION))return nr_pool_migrate_original_v7(env,s);
   if(floor_history_valid(s))return fail(env,"ROOT_RESOURCE_LEGACY_POOL_IDENTITY_UNCONFIRMED");
   return nr_error(env,s,"ROOT_RESOURCE_RESTORE_UNCONFIRMED",0,0,0);
  }
@@ -22,7 +40,7 @@ static napi_value bootstrap_original_main_pool(napi_env env,napi_callback_info i
  if(good){good=execute(s,"COMMIT")&&sqlite3_get_autocommit(s->db)==1;if(!good)s->unknown=1;}
  else if(began&&!execute(s,"ROLLBACK"))s->unknown=1;
  if(!good||s->unknown||s->closed||!current(s))return nr_error(env,s,"ROOT_RESOURCE_RESTORE_UNCONFIRMED",0,0,0);
- if(s->root_io&&!nr_pool_bind_protected(s,NR_RECOVER_COMMITTED))return nr_error(env,s,"ROOT_RESOURCE_INSTALLED_BINDING_UNCONFIRMED",0,0,1);
+ if(!nr_pool_restore_protected_binding(s))return nr_error(env,s,"ROOT_RESOURCE_INSTALLED_BINDING_UNCONFIRMED",0,0,1);
  /* No historical eligible list or opaque token is imported. Old capacity and
   * queue rows remain unchanged. Only new original enqueues become eligible. */
  s->fresh_owner=1;napi_value out=NULL;

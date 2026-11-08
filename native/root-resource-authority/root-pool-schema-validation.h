@@ -38,17 +38,22 @@ static int nr_pool_json_identities(nr_session *s,const char *json){
  while(good&&(step=sqlite3_step(q))==SQLITE_ROW)good=sqlite3_column_type(q,0)==SQLITE_TEXT&&nr_pool_identity_text(sqlite3_column_text(q,0),sqlite3_column_bytes(q,0));
  if(good)good=step==SQLITE_DONE;if(q&&sqlite3_finalize(q)!=SQLITE_OK)good=0;return good;
 }
-static int nr_pool_schema(nr_session *s){
+enum nr_pool_schema_kind {NR_POOL_ORDINARY_V7=7,NR_POOL_PROTECTED_V8=8};
+static int nr_pool_schema_for(nr_session *s,enum nr_pool_schema_kind kind){
+ if(kind!=NR_POOL_ORDINARY_V7&&kind!=NR_POOL_PROTECTED_V8)return 0;
+ int protected_schema=kind==NR_POOL_PROTECTED_V8;
+ if(protected_schema&&!nr_protected(s))return 0;
+ int table_count=protected_schema?10:9;
  /* Compare the exact original DDL including auto-indexes and every complete
   * full-cell guard. The reference is built by the same production generator. */
  nr_session expected={0};sqlite3_stmt *a=NULL,*b=NULL;
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
- expected.root_io=s->root_io;
+ expected.root_io=protected_schema?s->root_io:NULL;
 #endif
  if(s->schema_reference)return 0;
  int good=sqlite3_open_v2(":memory:",&s->schema_reference,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE,NULL)==SQLITE_OK;
  expected.db=s->schema_reference;
- if(good)good=execute(&expected,schema)&&(!nr_protected(s)||execute(&expected,schema_io_binding))&&nr_create_guards(&expected);
+ if(good)good=execute(&expected,schema)&&(!protected_schema||execute(&expected,schema_io_binding))&&nr_create_guards(&expected);
  const char *sql="SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name";
  if(good)good=sqlite3_prepare_v2(s->db,sql,-1,&a,NULL)==SQLITE_OK&&sqlite3_prepare_v2(expected.db,sql,-1,&b,NULL)==SQLITE_OK;
  while(good){int x=sqlite3_step(a),y=sqlite3_step(b);if(x==SQLITE_DONE&&y==SQLITE_DONE)break;
@@ -56,7 +61,7 @@ static int nr_pool_schema(nr_session *s){
   for(int i=0;i<4&&good;i++){nr_cell c={0};good=nr_from_column(&c,b,i)&&nr_column_equal(&c,a,i);nr_cell_clear(&c);}
  }
  if(a&&sqlite3_finalize(a)!=SQLITE_OK)good=0;if(b&&sqlite3_finalize(b)!=SQLITE_OK)good=0;
- for(int t=0;t<nr_table_count(s)&&good;t++){
+ for(int t=0;t<table_count&&good;t++){
   char query[256];const char *pragmas[]={"table_xinfo","foreign_key_list","index_list"};
   for(int i=0;i<3&&good;i++){snprintf(query,sizeof(query),"SELECT * FROM pragma_%s('%s')",pragmas[i],nr_tables[t]);good=nr_pool_same_query(s->db,expected.db,query);}
  }
@@ -70,6 +75,9 @@ static int nr_pool_schema(nr_session *s){
 #endif
  if(s->schema_reference){int rc=sqlite3_close(s->schema_reference);if(rc!=SQLITE_OK){if(!s->ledger_failure_code)s->ledger_failure_code=rc;good=0;s->unknown=1;}else s->schema_reference=NULL;}
  return good&&nr_pool_single_text(s->db,"PRAGMA integrity_check","ok")&&nr_pool_zero(s,"SELECT count(*) FROM pragma_foreign_key_check")&&nr_pool_zero(s,"SELECT count(*) FROM sqlite_temp_schema");
+}
+static int nr_pool_schema(nr_session *s){
+ return nr_pool_schema_for(s,nr_protected(s)?NR_POOL_PROTECTED_V8:NR_POOL_ORDINARY_V7);
 }
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
 static int nr_pool_protected_identity(nr_session *s){
@@ -92,7 +100,7 @@ static int nr_pool_protected_identity(nr_session *s){
 }
 static int nr_pool_bind_protected(nr_session *s,enum nr_root_bind_mode mode){
  if(!s->root_io)return 1;
- if(!nr_root_store_bind_bootstrap(s->root_io,mode,mode==NR_FRESH_COMMIT?s->io_claim:NULL,&s->io_identity)||
+ if(!nr_root_store_bind_bootstrap(s->root_io,mode,(mode==NR_FRESH_COMMIT||mode==NR_ADOPTION_COMMITTED)?s->io_claim:NULL,&s->io_identity)||
     !nr_root_store_read_identity(s->root_io,&s->io_identity)||s->io_identity.birth_state!=NR_BOUND){s->unknown=1;return 0;}
  return 1;
 }
