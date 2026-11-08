@@ -14,9 +14,14 @@ function denied():never{throw new NativeError('DSH_MAIN_NATIVE_AUTHORITY_REQUIRE
 export function createOriginalMainDshCoreAccessors(realms:WeakMap<object,State>,installedPools:WeakMap<object,InstalledPool>){
 /** Component provenance only. Null is original release/legacy absence; void
  * never proves a physical close or grants P4. No caller SDK or issuer input. */
-function assertOptionalOriginalMainDshServiceComponent(realm:unknown):void|null {
+function assertOptionalOriginalMainDshServiceComponent(realm:unknown):Promise<void>|null {
  const row=apply(get,realms,[realm]) as State|undefined;
  if(arguments.length!==1||!row)denied();row.local();return row.assertServiceComponent();
+}
+/** Fixed negative metadata join: original realm only, valid after revoke. */
+function joinOriginalMainDshServiceComponent(realm:unknown):Promise<void>{
+ const row=apply(get,realms,[realm]) as State|undefined;
+ if(arguments.length!==1||!row)denied();return row.joinServiceComponent();
 }
 /** Passive private lease: no caller path, issuer, Native API or verifier. */
 function prepareOriginalMainDshInstalledRootPool(realm:unknown,store:unknown):object {
@@ -136,5 +141,5 @@ function prepareOriginalMainDshKSwarmChild(lease:unknown):Promise<object>{
  if(arguments.length!==1||!row)return rejected(new NativeError('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED'));
  return row.prepareKSwarmChild();
 }
-return Object.freeze({assertOptionalOriginalMainDshServiceComponent,prepareOriginalMainDshKSwarmChild,readOriginalDshAdmissionReferences,readOriginalMainDshBootstrapAuthority,readOriginalMainDshClock,observeOriginalMainDshClockDate,readOriginalMainDshClockCut,prepareOriginalMainDshInstalledRootPool,readOriginalMainDshStartedCore,openOriginalMainDshInstalledRootPool,readOriginalMainDshAdmissionDatabase,closeOriginalMainDshInstalledRootPool,prepareOriginalMainDshCoreInfrastructure,startOriginalMainDshCoreInfrastructure,prepareOriginalMainDshBudgetWorker,readOriginalMainDshRootNmpLedger,assertOriginalMainDshCoreReady,prepareOriginalMainDshBudgetLifecycle,closeOriginalMainDshCoreInfrastructure,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap});
+return Object.freeze({joinOriginalMainDshServiceComponent,assertOptionalOriginalMainDshServiceComponent,prepareOriginalMainDshKSwarmChild,readOriginalDshAdmissionReferences,readOriginalMainDshBootstrapAuthority,readOriginalMainDshClock,observeOriginalMainDshClockDate,readOriginalMainDshClockCut,prepareOriginalMainDshInstalledRootPool,readOriginalMainDshStartedCore,openOriginalMainDshInstalledRootPool,readOriginalMainDshAdmissionDatabase,closeOriginalMainDshInstalledRootPool,prepareOriginalMainDshCoreInfrastructure,startOriginalMainDshCoreInfrastructure,prepareOriginalMainDshBudgetWorker,readOriginalMainDshRootNmpLedger,assertOriginalMainDshCoreReady,prepareOriginalMainDshBudgetLifecycle,closeOriginalMainDshCoreInfrastructure,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap});
 }
