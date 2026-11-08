@@ -1,6 +1,6 @@
-import { isKimiCodingModel } from './kimi-models.js';
+import { isKimiCodingRuntimeModel } from './kimi-models.js';
 import type { Config, LegacyConfig, ConfigInput, ConfigV2Input } from '../../types.js';
-import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
+import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId, ProviderModelVariant } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
 import {
   isOfficialKimiK3OpenAIEndpoint,
@@ -67,26 +67,23 @@ function buildFirstPartyConfig(
   }
 
   const wireModel = modelOverride?.model ?? profile.defaultModel.model;
-  // Kimi 之外，DeepSeek 的 legacy 迁移同样按实际 wire 查 catalog 变体继承能力：
-  // 默认模型换新后 profile.defaultModel 与钉死的 legacy wire 不同名，直接取默认
-  // 会把新默认的 image_in 泄露给纯文本 wire（评审 BLOCK #3）。Kimi 的
-  // endpoint/runtime 限制保持原样，不受影响。
-  const catalogVariant = providerId === 'kimi'
-    ? getProviderModelVariant(providerId, wireModel)
-    : providerId === 'deepseek'
-      ? getProviderModelVariant(providerId, wireModel)
-      : undefined;
+  // Legacy wires keep their own metadata when the recommended default changes.
+  const catalogVariant: Partial<ProviderModelVariant> | undefined = providerId === 'kimi' && wireModel === 'kimi-for-coding'
+    ? { model: wireModel, label: 'Kimi for Coding', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 262_144 } }
+    : providerId === 'openai' && wireModel === 'o3'
+      ? { model: wireModel, label: 'GPT-4o', capabilities: ['tools'] }
+      : getProviderModelVariant(providerId, wireModel);
   const capabilities = modelOverride?.capabilities
     ?? catalogVariant?.capabilities
     ?? profile.defaultModel.capabilities;
   const protocol = overrides.protocol ?? profile.protocol;
   const baseUrl = overrides.baseUrl ?? profile.baseUrl;
   const kimiK3RuntimeEligible = providerId === 'kimi'
-    && isKimiCodingModel(wireModel)
+    && isKimiCodingRuntimeModel(wireModel)
     && protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(baseUrl);
   const catalogRuntimeEligible = providerId !== 'kimi'
-    || !isKimiCodingModel(catalogVariant?.model)
+    || !isKimiCodingRuntimeModel(catalogVariant?.model)
     || kimiK3RuntimeEligible;
   const { runtimeOptions } = resolveModelRuntimeOptions({
     protocol,
@@ -147,7 +144,7 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
       ...buildFirstPartyConfig('openai', {
         apiKey: config.models.openai?.apiKey,
       }, {
-        model: config.models.openai?.model,
+        model: config.models.openai?.model ?? 'gpt-4o',
       }),
       defaultMode: config.defaultMode,
       devApp: config.devApp,
@@ -159,12 +156,13 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
   const detectedProvider = detectKnownProvider(customBaseUrl);
   if (detectedProvider) {
     const legacyModel = config.models.custom?.model
-      // 迁移时不要把用户悄悄换代。原先 pin 的裸 `kimi-k2.7` 在官方任何 endpoint
-      // 都不存在，`kimi-for-coding` 才是官方在售的 Kimi K2.7 Code。
-      ?? (detectedProvider === 'kimi' ? 'kimi-for-coding' : undefined);
+      // Preserve historical aliases/defaults when the recommended catalog changes.
+      ?? (detectedProvider === 'kimi' ? 'kimi-for-coding'
+        : detectedProvider === 'gemini' ? 'gemini-2.5-pro' : undefined);
     const known = buildFirstPartyConfig(detectedProvider, {
       apiKey: config.models.custom?.apiKey,
       baseUrl: customBaseUrl,
+      ...(detectedProvider === 'gemini' ? { protocol: 'openai_responses' as const } : {}),
     }, {
       model: legacyModel,
     });

@@ -1,3 +1,4 @@
+import { loadCurrentRecommendedModelIds } from '../../lib/model-recommendations';
 import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -669,6 +670,7 @@ function ModelsSection({ provider, accessToken, onChanged, p }: {
     setImporting(true)
     setActionError(null)
     try {
+      const recommendedIds = await loadCurrentRecommendedModelIds()
       const source = await ensureAvailableLoaded()
       const unconfigured = source.filter((am) => !am.configured)
       const byId = new Map<string, AvailableModel>()
@@ -693,7 +695,7 @@ function ModelsSection({ provider, accessToken, onChanged, p }: {
           throw e
         }
       }
-      const toEnable = created.filter((pm) => pm.model.toLowerCase().includes('gpt-4o-mini') && !embeddingIds.has(pm.model))
+      const toEnable = created.filter((pm) => recommendedIds.has(pm.model) && !embeddingIds.has(pm.model))
       if (toEnable.length > 0) {
         try {
           await patchProviderModel(accessToken, provider.id, toEnable[0].id, { show_in_picker: true, is_default: true })
@@ -901,7 +903,7 @@ function ModelsSection({ provider, accessToken, onChanged, p }: {
           visionBridgeHint: t.models.visionBridgeHint,
           addModelTitle: t.models.addModelTitle ?? 'Add Model',
           modelNameLabel: t.models.modelName ?? 'Model name',
-          modelNamePlaceholder: t.models.modelNamePlaceholder ?? 'e.g. gpt-4o',
+          modelNamePlaceholder: t.models.modelNamePlaceholder ?? 'e.g. gpt-5.5',
         }}
         onClose={() => setEditingModel(null)}
         onSave={handleSaveModelOptions}
@@ -943,7 +945,7 @@ function ModelsSection({ provider, accessToken, onChanged, p }: {
           visionBridgeHint: t.models.visionBridgeHint,
           addModelTitle: t.models.addModelTitle ?? 'Add Model',
           modelNameLabel: t.models.modelName ?? 'Model name',
-          modelNamePlaceholder: t.models.modelNamePlaceholder ?? 'e.g. gpt-4o',
+          modelNamePlaceholder: t.models.modelNamePlaceholder ?? 'e.g. gpt-5.5',
         }}
         onClose={() => setCreatingModel(false)}
         onSave={async () => {}}

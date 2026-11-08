@@ -286,13 +286,19 @@ function validateMessageBlockSchema(block: MessageBlock): void {
       assertExactOwnKeys(
         block,
         ['type', 'id', 'name', 'input'],
-        ['cache_control'],
+        ['cache_control', 'googleThoughtSignature'],
       );
       assertStringValue(readOwnDataValue(block, 'id'));
       assertStringValue(readOwnDataValue(block, 'name'));
       const input = readOwnDataValue(block, 'input');
       assertPlainRecord(input);
       validatePlainData(input);
+      const signature = readOptionalOwnDataValue(block, 'googleThoughtSignature');
+      if (signature !== undefined) {
+        assertExactOwnKeys(signature, ['model', 'signature']);
+        assertStringValue(readOwnDataValue(signature, 'model'));
+        assertStringValue(readOwnDataValue(signature, 'signature'));
+      }
       validateOptionalCacheControl(block);
       return;
     }
