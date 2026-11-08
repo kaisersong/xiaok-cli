@@ -37,13 +37,20 @@ afterAll(()=>{
  if(fixture.previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=fixture.previous;
  if(!held.length)rmSync(fixture.home,{recursive:true,force:true});
 });
+// Production runtime intentionally does not publish POSIX registry history on Windows.
+function observeOriginalSource(source:ReturnType<typeof createLoopDatabaseOwnerGroup>['sources'][number]){
+ if(process.platform==='win32'){
+  expect(()=>registerLoopDatabaseSourceObservation(source)).toThrow('profile_source_registry_account');
+  expect(()=>readOrdinaryProfileSources()).toThrow('profile_source_registry_account');
+ }else registerLoopDatabaseSourceObservation(source);
+}
 function ids(path:string){const db=new DatabaseSync(path,{readOnly:true});try{return db.prepare('SELECT id FROM completion_evidence ORDER BY id').all().map(row=>row.id);}finally{db.close();}}
 it('an existing original Loop writer must stop after its original source admission observes protected and stay stopped on ordinary restoration',()=>{
  const root=join(fixture.home,'data');mkdirSync(root,{mode:0o700});const path=join(root,'actual.sqlite'),group=createLoopDatabaseOwnerGroup([path]),source=group.sources[0],store=new CompletionEvidenceStore(source);
  const write=(id:string)=>store.insertEvidence({id,ownerKind:'task',ownerId:'owned',kind:'answer',summary:id,now:1});
  try{
-  registerLoopDatabaseSourceObservation(source);
-  expect(readOrdinaryProfileSources()?.sources.some(s=>s.directory.canonicalPath===root&&s.kind==='sqlite-db')).toBe(true);
+  observeOriginalSource(source);
+  if(process.platform!=='win32')expect(readOrdinaryProfileSources()?.sources.some(s=>s.directory.canonicalPath===root&&s.kind==='sqlite-db')).toBe(true);
   write('before');const before=ids(path);
   fixture.kind='protected';let admission:{raw:unknown}|undefined;try{openLoopDatabase(source);}catch(raw){admission={raw};}
   expect(admission?.raw).toBeInstanceOf(Error);expect(Object.getOwnPropertyDescriptor(admission!.raw as Error,'message')?.value).toBe('loop_ordinary_writer_retired');
@@ -62,7 +69,7 @@ it('prepare-to-run input evaluation must not admit a write after the same source
  const root=join(fixture.home,'argument-data');mkdirSync(root,{mode:0o700});const path=join(root,'actual.sqlite'),group=createLoopDatabaseOwnerGroup([path]),source=group.sources[0],store=new CompletionEvidenceStore(source);
  let getterCalls=0,admissionDenied=false,denied:{raw:unknown}|undefined;
  try{
-  registerLoopDatabaseSourceObservation(source);
+  observeOriginalSource(source);
   const input={id:'argument-cut',get ownerKind(){getterCalls++;fixture.kind='protected';try{const lease=openLoopDatabase(source);lease.close();}catch{admissionDenied=true;}return 'task' as const;},ownerId:'owned',kind:'answer' as const,summary:'cut during run argument construction',now:1};
   try{store.insertEvidence(input);}catch(raw){denied={raw};}
   const rows=ids(path);
@@ -83,7 +90,7 @@ function resource(kind:'loop'|'completion'|'artifact'|'health'){
  }else{
   const value=new KSwarmServiceHealthScanner(source,{probe:()=>{throw Error('fixture diagnostic unavailable');}});value.scan({now:1});store=value;write=()=>value.scan({now:3});table='evidence_anomalies';
  }
- registerLoopDatabaseSourceObservation(source);
+ observeOriginalSource(source);
  const rows=()=>{const db=new DatabaseSync(path,{readOnly:true});try{return db.prepare(`SELECT * FROM ${table} ORDER BY id`).all();}finally{db.close();}};
  return {root,path,source,group,store,write,rows,close(){store.close();group.close();}};
 }
@@ -97,7 +104,14 @@ it.each(['loop','completion','artifact','health'] as const)('actual %s public mu
 it('a real persisted directory fence retires the same public writer even if its own fixture record is moved away',()=>{
  const value=resource('completion');let record:string|undefined,moved:string|undefined;
  try{
-  value.write();const before=value.rows();createKnownDirectoryWriterFence(value.root,'sqlite-db').persist();
+  value.write();const before=value.rows();const fence=createKnownDirectoryWriterFence(value.root,'sqlite-db');
+  if(process.platform==='win32'){
+   expect(()=>fence.persist()).toThrow('known_writer_fence_platform');
+   value.write();const supportedRows=value.rows();expect(supportedRows.length).toBeGreaterThan(before.length);
+   fixture.kind='protected';expect(()=>value.write()).toThrow('loop_ordinary_writer_retired');
+   fixture.kind='ordinary';expect(()=>value.write()).toThrow('loop_ordinary_writer_retired');expect(value.rows()).toEqual(supportedRows);return;
+  }
+  fence.persist();
   const directory=join(fixture.home,'.xiaok','profile-sources','writer-fences');const names=readdirSync(directory).filter(name=>name.endsWith('.json'));expect(names.length).toBe(1);record=join(directory,names[0]!);moved=record+'.fixture-moved';
   let first:{raw:unknown}|undefined;try{value.write();}catch(raw){first={raw};}expect(first?.raw).toBeInstanceOf(Error);expect(value.rows()).toEqual(before);
   renameSync(record,moved);expect(()=>value.write()).toThrow('loop_ordinary_writer_retired');expect(value.rows()).toEqual(before);
