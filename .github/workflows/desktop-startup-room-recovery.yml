@@ -40,6 +40,17 @@ on:
       - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
       - 'native/protected-sqlite-facade/**'
+      - 'native/kswarm-authority-source/**'
+      - 'native/broker-authority-source/**'
+      - 'native/sidecar-source-runtime/**'
+      - 'tests/native/broker-*.test.mjs'
+      - 'tests/native/kswarm-*.test.mjs'
+      - 'tests/native/main-service-component-boundary.test.mjs'
+      - 'tests/native/fixtures/broker-*'
+      - 'tests/native/fixtures/kswarm-*'
+      - 'tests/native/helpers/broker-*'
+      - 'tests/native/helpers/kswarm-*'
+      - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   pull_request:
@@ -80,6 +91,17 @@ on:
       - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
       - 'native/protected-sqlite-facade/**'
+      - 'native/kswarm-authority-source/**'
+      - 'native/broker-authority-source/**'
+      - 'native/sidecar-source-runtime/**'
+      - 'tests/native/broker-*.test.mjs'
+      - 'tests/native/kswarm-*.test.mjs'
+      - 'tests/native/main-service-component-boundary.test.mjs'
+      - 'tests/native/fixtures/broker-*'
+      - 'tests/native/fixtures/kswarm-*'
+      - 'tests/native/helpers/broker-*'
+      - 'tests/native/helpers/kswarm-*'
+      - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   workflow_dispatch: {}
@@ -121,6 +143,10 @@ jobs:
       - name: Install the locked Electron runtime for real module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
+      - name: Prepare current client Node headers for Native components (macOS)
+        if: runner.os == 'macOS'
+        id: dsh_client_headers
+        uses: ./.github/actions/node-headers
       - name: Original client and independent KSwarm Node executable probes
         working-directory: desktop
         run: >-
@@ -188,13 +214,22 @@ jobs:
           tests/main/loop-owned-sql-population.test.ts
           tests/main/windows-source-absence-fixture.test.ts
           tests/main/loop-database-birth-custody.test.ts
+          tests/main/main-service-component-core.test.ts
+          tests/main/main-service-component-sources.test.ts
+          tests/main/main-core-source-order.test.ts
+          tests/main/main-dsh-service-sources.test.ts
+          tests/main/main-dsh-bootstrap-authority.test.ts
+          tests/main/main-core-split-boundaries.test.ts
+          tests/main/main-core-kswarm-port.test.ts
+          tests/main/main-source-kswarm-core-bridge.test.ts
+          tests/main/main-admission-database-selection.test.ts
 
       - name: Prepare pinned native candidate fixtures (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
+          git -C ../kswarm fetch --depth 1 origin e7d1f8b13c994174f683105d32a36385cdaf585f
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin a323d728ed979570dc81b2fad3be57715ce7e6eb
@@ -257,6 +292,20 @@ jobs:
           npm run build:main --prefix desktop
           node --test tests/native/root-ledger-source-desktop.test.mjs
 
+      - name: Fixed Native Source and CPP port boundaries (macOS)
+        if: runner.os == 'macOS'
+        env:
+          XIAOK_NATIVE_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+          XIAOK_BROKER_TEST_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+          XIAOK_MAIN_COMPONENT_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/broker-authority-child.test.mjs
+          tests/native/broker-authority-node.test.mjs
+          tests/native/broker-parent-port.test.mjs
+          tests/native/kswarm-authority-child.test.mjs
+          tests/native/main-service-component-boundary.test.mjs
+
       - name: Original MainRoot enrollment codecs and negative consumption (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -288,7 +337,7 @@ jobs:
         shell: bash
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
+          git -C ../kswarm fetch --depth 1 origin e7d1f8b13c994174f683105d32a36385cdaf585f
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin a323d728ed979570dc81b2fad3be57715ce7e6eb
