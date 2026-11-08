@@ -1,5 +1,6 @@
+import {createIntentDependencyFixtureLifetime} from '../../support/intent-dependency-fixture-lifetime.js';
 import '../../support/installed-controller-fixture.js';
-import {it,expect,vi} from 'vitest';
+import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 const installed=vi.hoisted(()=>({factory:undefined as any,route:undefined as any}));
 vi.mock('../../../src/runtime/verification/controller-client.js',async original=>({...await original<typeof import('../../../src/runtime/verification/controller-client.js')>(),createInstalledVerificationClient:()=>installed.factory()}));
 vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:(owner:any)=>installed.route(owner)}));
@@ -18,12 +19,14 @@ import {applicationBindingReviewBytes} from '../../../src/runtime/verification/a
 import {canonicalVerificationJson as json,hashVerificationTuple} from '../../../src/runtime/verification/protocol.js';
 const hash=(v:string|Buffer)=>createHash('sha256').update(v).digest('hex'),signal=()=>new AbortController().signal;
 async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOperationFixture>[1]={},large=false){
- const f=await verifiedOperationFixture('dispatch',large?{...options,controllerMetadataMinimumBytes:96*1024**2}:options),raw=structuredClone(intentApplicationCandidate()),recipe={kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes' as const}]},definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe}]};
+ const lifetime=createIntentDependencyFixtureLifetime();
+ try{
+ const f=await lifetime.captureFixture(verifiedOperationFixture('dispatch',large?{...options,controllerMetadataMinimumBytes:96*1024**2}:options,lifetime)),raw=structuredClone(intentApplicationCandidate()),recipe={kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes' as const}]},definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe}]};
  raw.contract.verification=definition;for(const stage of raw.contract.stages)stage.verification=definition;
  if(large){const sample=structuredClone(raw.contract.stages[0]);raw.contract.stages=[];for(let i=0;;i++){const stage={...structuredClone(sample),stageId:`s${i}`,order:i,label:'stage',deliverable:'result',templateId:'template',dependsOnStageIds:[],steps:[{...sample.steps[0],stepId:`p${i}`,key:'main',order:0,skillName:null,dependsOn:[]}]};raw.contract.stages.push(stage);if(Buffer.byteLength(json(raw.contract))>61000){raw.contract.stages.pop();break;}}}
  const contract=raw.contract,subjects=[...contract.stages.map((s:any)=>({...raw.subject,stageId:s.stageId})),{...raw.subject,stageId:null}],owners:any[]=[];
  for(const subject of subjects){const prepared:any=await f.composition.public.invoke('completion.prepare-owner',{enrollment:{...intentHostSubjectOwner(subject),intentContract:{subject,contract},invocations:[]},registration:goalVerificationRegistration(definition)},f.peer);const actual:any=await f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.peer);owners.push(actual.owner);if(large)await new Promise<void>(resolve=>setImmediate(resolve));}
- const receiver=await loopPublicationReceiver(f,{afterQuery}),bindings:any[]=[];
+ const receiver=await lifetime.captureReceiver(loopPublicationReceiver(f,{afterQuery})),bindings:any[]=[];
  const profile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?new InspectorSession():undefined;
  const post=(method:string)=>new Promise<any>((resolve,reject)=>profile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));
  if(profile){profile.connect();await post('Profiler.enable');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
@@ -42,8 +45,9 @@ async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOp
    if(large&&!profile){console.info('population-actual-publication '+(i+1)+'/'+contract.stages.length+' elapsedMs='+(Date.now()-started));await new Promise<void>(resolve=>setImmediate(resolve));}
    if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population.cpuprofile',JSON.stringify(result.profile));profile.disconnect();throw Error('explicit_profile_stopped_after_three_actual_publications');}}
   }
- }catch(error){if(profile){try{const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));profile.disconnect();}catch{/* Preserve the original entry failure if the profiler was already stopped. */}}await receiver.close();await f.close();throw error;}
- return {f,receiver,subjects,owners,bindings,contract,async close(){await receiver.close();await f.close();}};
+ }catch(error){if(profile){try{const result=await post('Profiler.stop');writeFileSync('/tmp/solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));profile.disconnect();}catch{/* Preserve the original entry failure if the profiler was already stopped. */}}throw error;}
+ return {f,receiver,subjects,owners,bindings,contract,fail(raw:unknown){lifetime.fail(raw);},close(){return lifetime.close();}};
+ }catch(raw){lifetime.fail(raw);await lifetime.close();throw raw;}
 }
 it('actual original Intent dependency observation derives empty first-stage and whole parent inventory from native receipts',async()=>{
  const f=await fixture();try{
@@ -117,9 +121,19 @@ for(const row of ['noncanonical','subject','mandatory','registration'] as const)
   await expect(f.receiver.publication.observeIntentDependencies({subject:f.subjects[0]},f.f.peer,signal())).rejects.toThrow();
  }finally{await f.close();}
 },row==="noncanonical"?40000:row==="subject"?40000:row==="mandatory"?40000:30000);
-for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const)
- it.each([row])('actual invocation-only append retains complete parent graph: %s',async mode=>{
- const f=await fixture();try{
+// Only infrastructure moves out of these five row-specific case budgets.
+for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const)describe('fresh invocation dependency fixture '+row,()=>{
+ let ready:Awaited<ReturnType<typeof fixture>>|undefined,running:Promise<void>|undefined;
+ beforeEach(async()=>{ready=undefined;running=undefined;ready=await fixture();},90_000);
+ afterEach(async()=>{
+  const owned=ready,work=running;ready=undefined;running=undefined;
+  try{await work;}catch(raw){owned?.fail(raw);}
+  await owned?.close();
+ },30_000);
+it.each([row])('actual invocation-only append retains complete parent graph: %s',mode=>{
+ const run=async()=>{
+ if(!ready)throw Error('intent_dependency_fixture_not_ready');
+ const f=ready;try{
   const parent=json(f.owners.at(-1)),sibling=json(f.owners[1]);
   if(mode==='missing-parent')f.f.database.prepare('DELETE FROM owner_enrollment_intent_contracts WHERE owner_key=?').run(parent);
   if(mode==='missing-sibling-edge')f.f.database.prepare('DELETE FROM verification_owner_dependencies WHERE parent_key=? AND child_key=?').run(parent,sibling);
@@ -128,8 +142,12 @@ for(const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','
   const invocation={sessionIdentity:f.contract.sessionId,compoundOperationId:'real-extra',validationInvocationId:'real-extra-validation'},proposal={enrollment:{...intentHostSubjectOwner(f.subjects[0]),invocations:[invocation]},registration:goalVerificationRegistration(f.contract.stages[0].verification)};
   const work=async()=>{const prepared:any=await f.f.composition.public.invoke('completion.prepare-owner',proposal,f.f.peer);return f.f.composition.public.invoke('completion.authorize-owner',{challengeId:prepared.challengeId},f.f.peer);};
   if(mode==='valid'){await work();expect(f.f.composition.privateHost.enrollment.resolveOwnerKey(f.f.peer,invocation)).toBe(json(f.owners[0]));}else await expect(work()).rejects.toThrow();
- }finally{await f.close();}
+ }catch(raw){f.fail(raw);throw raw;}finally{await f.close();}
+ };
+ const raw=run();running=raw;return raw;
 },row==="valid"?40000:row==="missing-parent"?40000:30000);
+
+});
 
 it('completion observation includes its own actual publication and every original dependency without publishing the parent implicitly',async()=>{
  const f=await fixture();try{
