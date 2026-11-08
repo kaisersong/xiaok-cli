@@ -179,11 +179,9 @@ static napi_value row(ps_statement *s) {
   return out;
 }
 static napi_value statement_read(napi_env e, napi_callback_info i, int mode) {
-#if defined(__APPLE__)
-  // Clang must see this direct guard before step; no post-write/int32 fallback.
-  if (!__builtin_available(macOS 12.3, *))
+  // Check before any step; the helper uses Clang's supported positive guard.
+  if (!ps_sqlite_api_available())
     return fail(e, "ERR_SQLITE_API_UNAVAILABLE", "protected SQLite API unavailable");
-#endif
   call c;
   if (!arguments(e, i, &c))
     return NULL;
