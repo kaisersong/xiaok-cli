@@ -2,6 +2,7 @@
 NAPI_MODULE_INIT(){
 #ifdef __APPLE__
  const napi_property_descriptor methods[]={
+  {"holdExistingOriginalRootPoolLedger",NULL,hold_existing_root_pool_ledger,NULL,NULL,NULL,napi_default,NULL},
   {"captureExistingOriginalRootPoolLedger",NULL,capture_existing_root_pool_ledger,NULL,NULL,NULL,napi_default,NULL},
   {"closeOriginalRootPoolLedgerSource",NULL,close_root_pool_ledger_source,NULL,NULL,NULL,napi_default,NULL},
  };
