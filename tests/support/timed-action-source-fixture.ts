@@ -1,0 +1,29 @@
+import {spawnSync} from 'node:child_process';
+import {appendFileSync} from 'node:fs';
+import {join,resolve} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {TimedActionStore} from '../../desktop/electron/timed-action-store.js';
+import {LoopStore} from '../../desktop/electron/loop-store.js';
+import {createLoopTimedCompletionHost} from '../../desktop/electron/loop-timed-completion.js';
+// Original legacy CREATE TABLE inputs from timed-action-store.test.ts, not a replacement migration.
+export const legacySQL=["\n      create table timed_actions (\n        id text primary key,\n        title text not null,\n        trigger_kind text not null,\n        trigger_json text not null,\n        executor_kind text not null,\n        executor_json text not null,\n        policy_json text not null,\n        status text not null,\n        source text not null,\n        created_by_task_id text,\n        next_due_at integer,\n        last_due_at integer,\n        run_count integer not null default 0,\n        consecutive_failures integer not null default 0,\n        locked_run_id text,\n        locked_at integer,\n        last_runtime_task_id text,\n        last_error text,\n        created_at integer not null,\n        updated_at integer not null\n      );\n\n      create table timed_action_runs (\n        run_id text primary key,\n        action_id text not null,\n        executor_kind text not null,\n        status text not null,\n        started_at integer not null,\n        finished_at integer,\n        runtime_task_id text,\n        error text,\n        decision_json text,\n        foreign key(action_id) references timed_actions(id)\n      );\n    ", "\n      create table if not exists timed_actions (\n        id text primary key,\n        title text not null,\n        description text not null default '',\n        trigger_kind text not null,\n        trigger_json text not null,\n        executor_kind text not null,\n        executor_json text not null,\n        policy_json text not null,\n        status text not null,\n        source text not null,\n        created_by_task_id text,\n        next_due_at integer,\n        last_due_at integer,\n        run_count integer not null default 0,\n        consecutive_failures integer not null default 0,\n        locked_run_id text,\n        locked_at integer,\n        last_runtime_task_id text,\n        last_error text,\n        created_at integer not null,\n        updated_at integer not null\n      );\n      create table if not exists timed_action_runs (\n        run_id text primary key,\n        action_id text not null,\n        executor_kind text not null,\n        status text not null,\n        started_at integer not null,\n        finished_at integer,\n        runtime_task_id text,\n        error text,\n        decision_json text,\n        foreign key(action_id) references timed_actions(id)\n      );\n    "] as const;
+export function compileTimedCustody(root:string){
+ const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o'),sqliteHelper=join(root,'sqlite'),directoryHelper=join(root,'directory');
+ function run(args:string[]){const result=spawnSync('clang',args,{encoding:'utf8',timeout:30000});if(process.env.XIAOK_TIMED_SOURCE_PID_LOG)appendFileSync(process.env.XIAOK_TIMED_SOURCE_PID_LOG,JSON.stringify({pid:result.pid,command:'clang',args,status:result.status,signal:result.signal})+'\n');if(result.error||result.status!==0)throw new Error(result.stderr||'compile_failed',{cause:result.error});}
+ run(['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object]);
+ run(['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);
+ run(['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);return {sqliteHelper,directoryHelper};
+}
+export async function populateTimedStore(path:string,legacy?:number){
+ if(legacy!==undefined){const db=new DatabaseSync(path);try{db.exec(legacySQL[legacy]!);}finally{db.close();}}
+ const store=new TimedActionStore(path);
+ try{
+  store.createAction({id:'dispatch',title:'Original',trigger:{kind:'once',at:1000},executor:{kind:'agent_task',prompt:'JSON \"raw\" 😀'},source:'user',now:0});
+  const [dispatch]=store.claimDueActions(1000,1);store.finishRunSuccess('dispatch',dispatch!.runId,1001,{runtimeTaskId:'original-host-task'});
+  store.acknowledgeScheduledDelivery(dispatch!.runId,1002,{taskId:'dispatch',runId:dispatch!.runId,runtimeTaskId:'original-host-task',completed:false,title:'Raw 😀'});
+  store.createAction({id:'loop',title:'OriginalLoop',trigger:{kind:'interval',intervalMinutes:5},executor:{kind:'loop',loopId:'original-loop'},source:'user',now:0});
+  const [claimed]=store.claimDueActions(300000,1);store.markRunRunning('loop',claimed!.runId,300000);
+  const loops=new LoopStore(path+'.loops.sqlite');let host:ReturnType<typeof createLoopTimedCompletionHost>|undefined;
+  try{loops.createUserLoopTemplate({loopId:'original-loop',title:'Original',kind:'task_completion',prompt:'Original',now:1});const run=loops.beginLoopRun('original-loop',{kind:'scheduled',timedActionId:'loop',timedActionRunId:claimed!.runId},300001,60000,{requestSource:'scheduler'});if(run.status!=='started')throw Error('begin');loops.finishLoopRunSuccess(run.run.id,[],300002,'Original');host=createLoopTimedCompletionHost({timedStore:store,loopStore:loops,captureAdmission:()=>()=>{},now:()=>3900000});const result=await host.finalize({actionId:'loop',timedRunId:claimed!.runId,mode:'stale',requestSource:'scheduler'});if(result.status!=='applied')throw Error('finalize');store.deleteAction('loop');}finally{try{await host?.close();}finally{loops.close();}}
+ }finally{store.close();}
+}

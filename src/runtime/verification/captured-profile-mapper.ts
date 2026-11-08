@@ -1,3 +1,4 @@
+import {iterateCapturedSQLiteTimedActionSources} from './captured-sqlite-timed-actions.js';
 import {capturedGoalTaskKey} from './captured-goal-task-key.js';
 import {CapturedProfileSlots} from './captured-profile-slots.js';
 import {createHash} from 'node:crypto';
@@ -12,10 +13,10 @@ import {iterateCapturedSQLiteArtifactWorkspaceSources} from './captured-sqlite-a
 import {iterateCapturedSQLiteKSwarmStateSources} from './captured-sqlite-kswarm.js';
 import {freezeCapturedData} from './captured-source-json.js';
 import {CapturedProfileRelations,profileRecord,profileKeys,type CapturedProfileRelation,type CapturedProfileGap} from './captured-profile-relations.js';
-type Family='file'|'session'|'goal'|'codex'|'loop'|'groups'|'artifact'|'kswarm'|'writer-lock';
+type Family='file'|'session'|'goal'|'codex'|'loop'|'groups'|'artifact'|'kswarm'|'writer-lock'|'timed';
 type Summary=Readonly<{sourceId:string;snapshotHash:string;family:Family}>;
 export type CapturedProfileEvent=Readonly<{kind:'capture-start';sources:readonly Summary[]}>|Readonly<{kind:'family-fact';family:Family;fact:unknown}>|CapturedProfileRelation|CapturedProfileGap|Readonly<{kind:'complete';enumerationComplete:true;sources:readonly Summary[];digest:string;relationCount:number;gapCount:number;occurrenceCount:number;verifiedInputSlots:number}>;
-const SQLITE_FAMILIES:Readonly<Record<string,Family>>=Object.freeze({'session-sqlite-v1':'session','goal-sqlite-v1':'goal','codex-native-sqlite-v1':'codex','codex-routes-sqlite-v1':'codex','loop-sqlite-v1':'loop','multi-agent-groups-sqlite-v1':'groups','artifact-workspace-sqlite-v1':'artifact','kswarm-state-sqlite-v1':'kswarm','writer-lock-sqlite-v1':'writer-lock'});
+const SQLITE_FAMILIES:Readonly<Record<string,Family>>=Object.freeze({'session-sqlite-v1':'session','goal-sqlite-v1':'goal','codex-native-sqlite-v1':'codex','codex-routes-sqlite-v1':'codex','loop-sqlite-v1':'loop','multi-agent-groups-sqlite-v1':'groups','artifact-workspace-sqlite-v1':'artifact','kswarm-state-sqlite-v1':'kswarm','writer-lock-sqlite-v1':'writer-lock','timed-actions-sqlite-v1':'timed'});
 function fail():never{throw Error('captured_profile_population');}
 function rows(value:unknown):readonly unknown[]{if(!Array.isArray(value))fail();return value;}
 function string(value:unknown):string{if(typeof value!=='string'||!value)fail();return value;}
@@ -29,7 +30,7 @@ export async function* iterateCapturedProfileDeclarations(owner:object,token:obj
  async function frame(event:CapturedProfileEvent){await check();if(event.kind==='capture-start')slots.start(event.sources);if(event.kind==='family-fact')slots.fact(event.family,event.fact);slots.note(event);const frozen=freezeCapturedData(event);const bytes=Buffer.from(JSON.stringify(frozen));hash.update(String(bytes.length)).update('\0').update(bytes);if(event.kind==='relation')relationCount++;if(event.kind==='gap')gapCount++;return frozen;}
  function completed(sourceId:unknown,snapshotHash:unknown,family:Family){const id=string(sourceId),entry=original.get(id);if(!entry||entry.family!==family||entry.snapshotHash!==snapshotHash||seen.has(id))fail();seen.add(id);}
  yield await frame({kind:'capture-start',sources:summaries});await check();
- for(const family of ['file','session','goal','codex','loop','groups','artifact','kswarm','writer-lock'] as const){
+ for(const family of ['file','session','goal','codex','loop','groups','artifact','kswarm','writer-lock','timed'] as const){
   const expected=summaries.filter(s=>s.family===family);if(!expected.length)continue;
   if(family==='file'){
    const facts=readCapturedFileSources(owner,token);profileKeys(facts,['kind','sources','aliases','observationSides','historicalPointers']);
@@ -49,12 +50,12 @@ export async function* iterateCapturedProfileDeclarations(owner:object,token:obj
   }else if(family==='writer-lock'){
    for(const s of expected){if(readProfileSqliteSchema(owner,token,s.sourceId).length)throw Error('captured_profile_writer_lock_schema');completed(s.sourceId,s.snapshotHash,family);yield await frame({kind:'family-fact',family,fact:{sourceId:s.sourceId,snapshotHash:s.snapshotHash,emptySchema:true}});await check();}
   }else{
-   const iterator:Generator<unknown,void,unknown>=family==='loop'?iterateCapturedSQLiteLoopSources(owner,token):family==='groups'?iterateCapturedSQLiteGroupsSources(owner,token):family==='artifact'?iterateCapturedSQLiteArtifactWorkspaceSources(owner,token):iterateCapturedSQLiteKSwarmStateSources(owner,token);
+   const iterator:Generator<unknown,void,unknown>=family==='loop'?iterateCapturedSQLiteLoopSources(owner,token):family==='groups'?iterateCapturedSQLiteGroupsSources(owner,token):family==='artifact'?iterateCapturedSQLiteArtifactWorkspaceSources(owner,token):family==='timed'?iterateCapturedSQLiteTimedActionSources(owner,token):family==='kswarm'?iterateCapturedSQLiteKSwarmStateSources(owner,token):fail();
    const started=new Set<string>(),ended=new Set<string>();let complete=false;
    try{for(const raw of iterator){const event=profileRecord(raw),kind=event.kind;if(complete)fail();if(kind==='complete'){for(const v of rows(event.sources)){const s=profileRecord(v);if(!ended.has(string(s.sourceId)))fail();completed(s.sourceId,s.snapshotHash,family);}if(ended.size!==expected.length)fail();complete=true;}else{const sourceId=string(event.sourceId),entry=original.get(sourceId);if(!entry||entry.family!==family)fail();if(kind==='source-start'){if(started.has(sourceId)||event.snapshotHash!==entry.snapshotHash)fail();started.add(sourceId);}else if(!started.has(sourceId)||ended.has(sourceId))fail();if(kind==='source-end')ended.add(sourceId);
     if(kind==='row'){const base=`${string(event.table)}[${string(event.rowid)}]`,at=(path:string)=>({sourceId,path:base+'.'+path});
      if(family==='groups'||family==='loop'){rows(event.references).forEach((v,i)=>{const r=profileRecord(v);relations.ref(string(r.namespace),r.id,at(`references[${i}]`),{scope:r});});if(family==='groups'){rows(event.unmapped).forEach((path)=>relations.gap('unmapped',at(string(path))));rows(event.observationDeclarations).forEach((v)=>{const declaration=profileRecord(v);profileKeys(declaration,['path','reference']);relations.complex(declaration.reference,at(string(declaration.path)));});}else rows(event.embeddedTasks).forEach((v,i)=>{const task=profileRecord(v);relations.task(task.declaration,sourceId,base+`.embeddedTasks[${i}].declaration`);relations.complex(task.completionObservation,at(`embeddedTasks[${i}].completionObservation`));});
-     }else{rows(event.references).forEach((v,i)=>{const r=profileRecord(v),cell=profileRecord(r.value);if(r.referenceState==='declared'&&cell.type==='text')relations.ref(string(r.domain),cell.value,at(`references[${i}]`),{scope:r});else relations.complex(r,at(`references[${i}]`));});if(family==='artifact'){const metadata=event.parsedMetadata;if(metadata!==null)relations.gap('unsupported-semantic',at('parsedMetadata'),metadata);}else if(profileRecord(event.record).state_json)relations.gap('unsupported-semantic',at('state_json'));}
+     }else{rows(event.references).forEach((v,i)=>{const r=profileRecord(v),cell=profileRecord(r.value);if(r.referenceState==='declared'&&cell.type==='text'){if(family==='timed'&&r.definition===true)relations.define(string(r.domain),cell.value,at(`references[${i}]`));else relations.ref(string(r.domain),cell.value,at(`references[${i}]`),{scope:r,...family==='timed'&&r.sameSource===true?{exactSource:sourceId}:{}});}else relations.complex(r,at(`references[${i}]`));});if(family==='timed'){const record=profileRecord(event.record);for(const name of ['trigger_json','executor_json','policy_json','decision_json','record_json','event_json'])if(record[name]&&profileRecord(record[name]).type!=='null')relations.complex(record[name],at(name));}else if(family==='artifact'){const metadata=event.parsedMetadata;if(metadata!==null)relations.gap('unsupported-semantic',at('parsedMetadata'),metadata);}else if(profileRecord(event.record).state_json)relations.gap('unsupported-semantic',at('state_json'));}
     }
    }yield await frame({kind:'family-fact',family,fact:raw});await check();for(const gap of relations.takeGaps()){yield await frame(gap);await check();}}
    if(!complete)fail();}finally{iterator.return();}
