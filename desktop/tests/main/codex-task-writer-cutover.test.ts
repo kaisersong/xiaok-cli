@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 const env = await vi.hoisted(async () => {
   const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-task-writer-account-'));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codex-task-writer-account-')));
   fs.chmodSync(home, 0o700); const config = path.join(home, '.xiaok'); fs.mkdirSync(config, { mode: 0o700 });
   const previous = process.env.XIAOK_CONFIG_DIR; process.env.XIAOK_CONFIG_DIR = config;
   return { home, config, previous, kind: 'ordinary' as 'ordinary' | 'protected' | 'unavailable' };
