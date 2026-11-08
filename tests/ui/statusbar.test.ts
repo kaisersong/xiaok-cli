@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { StatusBar } from '../../src/ui/statusbar.js';
 
 describe('StatusBar', () => {
@@ -7,8 +10,11 @@ describe('StatusBar', () => {
   let originalColumns: number | undefined;
   let stdoutOutput: string;
   let originalWrite: typeof process.stdout.write;
+  let configDir: string;
 
   beforeEach(() => {
+    configDir = mkdtempSync(join(tmpdir(), 'xiaok-statusbar-test-'));
+    vi.stubEnv('XIAOK_CONFIG_DIR', configDir);
     originalIsTTY = process.stdout.isTTY;
     originalColumns = process.stdout.columns;
 
@@ -30,6 +36,8 @@ describe('StatusBar', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(configDir, {recursive: true, force: true, maxRetries: 3});
     process.stdout.write = originalWrite;
     if (originalIsTTY !== undefined) {
       process.stdout.isTTY = originalIsTTY;
