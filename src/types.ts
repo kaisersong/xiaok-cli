@@ -37,7 +37,7 @@ export type StreamChunk =
       signature?: import('./ai/runtime/blocks.js').ReasoningSource;
       reasoningProvenance?: import('./ai/runtime/blocks.js').ReasoningBlockProvenance;
     }
-  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown>; googleThoughtSignature?: import('./ai/runtime/blocks.js').GoogleThoughtSignature }
   /** Transport activity only; buffered tool arguments are not executable yet. */
   | { type: 'tool_input_progress' }
   | { type: 'usage'; usage: UsageStats }

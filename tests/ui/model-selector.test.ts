@@ -100,7 +100,7 @@ describe('buildModelOptions', () => {
     } finally { harness.restore(); }
   });
 
-  it('does not offer effort for a model without declared effort constraints', async () => {
+  it.each([{ right: false, effort: 'high' }, { right: true, effort: 'max' }])('offers native K2.8 effort after selection %j', async ({ right, effort }) => {
     const harness = createTtyHarness(80, 24);
     const renderer = new ReplRenderer(process.stdout);
     const scrollRegion = new ScrollRegionManager(process.stdout);
@@ -109,10 +109,10 @@ describe('buildModelOptions', () => {
       scrollRegion.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'Kimi Coding' });
       renderer.setScrollRegion(scrollRegion);
       const pending = selectModel(configFixture, { renderer });
-      harness.send('\x1b[C');
+      if (right) harness.send('\x1b[C');
       harness.send('\r');
       await expect(pending).resolves.toEqual({
-        modelId: 'kimi-coding', provider: 'kimi', model: 'kimi-for-coding', label: 'Kimi Default',
+        modelId: 'kimi-coding', provider: 'kimi', model: 'kimi-for-coding', label: 'Kimi Default', reasoningEffort: effort,
       });
     } finally {
       harness.restore();
