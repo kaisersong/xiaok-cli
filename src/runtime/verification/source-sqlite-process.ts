@@ -1,7 +1,8 @@
+import {BROKER_ROOM_QUERIES,BROKER_ROOM_COLUMNS,type BrokerRoomQueryId} from './broker-room-source-schema.js';
 import {BUDGET_SOURCE_QUERIES,BUDGET_SOURCE_COLUMNS,type BudgetQueryId} from './budget-source-queries.js';
 import {TIMED_ACTION_QUERIES,TIMED_ACTION_COLUMNS,type TimedActionQueryId} from './timed-action-source-queries.js';
 import {KSWARM_STATE_QUERIES,KSWARM_STATE_COLUMNS,type KSwarmStateQueryId} from './kswarm-state-source-schema.js';
-export type LosslessSourceQueryId=ArtifactWorkspaceQueryId|KSwarmStateQueryId|TimedActionQueryId|BudgetQueryId;
+export type LosslessSourceQueryId=ArtifactWorkspaceQueryId|KSwarmStateQueryId|TimedActionQueryId|BudgetQueryId|BrokerRoomQueryId;
 import {metadataSessionRelationManifest,type MetadataSessionRelationId,type MetadataSessionRelationDefinition} from './metadata-session-relation-manifest.js';
 import {assertInstalledRootBrokerClient,type createInstalledRootBrokerClient} from './root-broker-client.js';
 import type {InstalledControllerLifetime} from './installed-controller-lifetime.js';
@@ -15,7 +16,7 @@ import {ARTIFACT_WORKSPACE_QUERIES,type ArtifactWorkspaceQueryId} from './artifa
 import {capturedSqliteEncoding,encodeCapturedSqliteCell,type CapturedSqliteCell} from './source-sqlite-cell.js';
 
 export interface SqliteCustodySource {
- readonly snapshotFormat:'session-sqlite-v1'|'loop-sqlite-v1'|'goal-sqlite-v1'|'writer-lock-sqlite-v1'|'codex-native-sqlite-v1'|'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'|'timed-actions-sqlite-v1'|'harness-budget-sqlite-v1';
+ readonly snapshotFormat:'session-sqlite-v1'|'loop-sqlite-v1'|'goal-sqlite-v1'|'writer-lock-sqlite-v1'|'codex-native-sqlite-v1'|'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'|'timed-actions-sqlite-v1'|'harness-budget-sqlite-v1'|'broker-room-sqlite-v1';
  readonly directory:Readonly<{canonicalPath:string;device:string;inode:string}>;
  readonly database:Readonly<{basename:string;device:string;inode:string}>;
  readonly sidecars:Readonly<{journal:string;wal:string;shm:string}>;
@@ -35,7 +36,7 @@ function decimal(value:string,positive=false){if(typeof value!=='string'||!/^(0|
 export async function startSqliteSourceCustody(input:{executable:string;uid:number;sources:readonly SqliteCustodySource[];signal:AbortSignal}){
  const {executable,uid,signal}=input;
  if(!Number.isSafeInteger(uid)||uid<1||input.sources.length<1||input.sources.length>32)throw Error('source_sqlite_arguments');
- const sources=input.sources.map(value=>{fields(value,['snapshotFormat','directory','database','sidecars']);if(!['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','writer-lock-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1'].includes(value.snapshotFormat))throw Error('source_sqlite_format');fields(value.directory,['canonicalPath','device','inode']);fields(value.database,['basename','device','inode']);fields(value.sidecars,['journal','wal','shm']);for(const part of [value.directory.device,value.database.device])decimal(part);for(const part of [value.directory.inode,value.database.inode])decimal(part,true);for(const part of Object.values(value.sidecars)){if(part!=='absent'){if(typeof part!=='string'||part.split(':').length!==2)throw Error('source_sqlite_identity');const [d,i]=part.split(':');decimal(d!);decimal(i!,true);}}if(typeof value.directory.canonicalPath!=='string'||typeof value.database.basename!=='string')throw Error('source_sqlite_identity');if(value.snapshotFormat==='writer-lock-sqlite-v1'&&!isWriterLockSourceName(value.directory.canonicalPath,value.database.basename))throw Error('source_sqlite_lock_namespace');return Object.freeze({snapshotFormat:value.snapshotFormat,directory:Object.freeze({...value.directory}),database:Object.freeze({...value.database}),sidecars:Object.freeze({...value.sidecars})}) as Readonly<SqliteCustodySource>;});
+ const sources=input.sources.map(value=>{fields(value,['snapshotFormat','directory','database','sidecars']);if(!['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','writer-lock-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1','broker-room-sqlite-v1'].includes(value.snapshotFormat))throw Error('source_sqlite_format');fields(value.directory,['canonicalPath','device','inode']);fields(value.database,['basename','device','inode']);fields(value.sidecars,['journal','wal','shm']);for(const part of [value.directory.device,value.database.device])decimal(part);for(const part of [value.directory.inode,value.database.inode])decimal(part,true);for(const part of Object.values(value.sidecars)){if(part!=='absent'){if(typeof part!=='string'||part.split(':').length!==2)throw Error('source_sqlite_identity');const [d,i]=part.split(':');decimal(d!);decimal(i!,true);}}if(typeof value.directory.canonicalPath!=='string'||typeof value.database.basename!=='string')throw Error('source_sqlite_identity');if(value.snapshotFormat==='writer-lock-sqlite-v1'&&!isWriterLockSourceName(value.directory.canonicalPath,value.database.basename))throw Error('source_sqlite_lock_namespace');return Object.freeze({snapshotFormat:value.snapshotFormat,directory:Object.freeze({...value.directory}),database:Object.freeze({...value.database}),sidecars:Object.freeze({...value.sidecars})}) as Readonly<SqliteCustodySource>;});
  const args=[String(uid),...sources.flatMap(s=>[s.directory.canonicalPath,s.directory.device,s.directory.inode,s.database.basename,s.database.device,s.database.inode,s.sidecars.journal,s.sidecars.wal,s.sidecars.shm])];
  if(args.reduce((bytes,value)=>bytes+Buffer.byteLength(value)+1,0)>192*1024)throw Error('source_sqlite_arguments');signal.throwIfAborted();
  const child:ChildProcessWithoutNullStreams=spawn(executable,args,{cwd:'/',env:{PATH:'/usr/bin:/bin',LC_ALL:'C'},stdio:'pipe'});
@@ -136,7 +137,7 @@ function assertSnapshotIntegrity(snapshot:ReturnType<typeof openSnapshot>):void{
 }
 export function assertSqliteSourceIntegrity(owner:object,token:object,index:number):void{
  const facts=readSqliteSourceCapture(owner,token);
- if(!Number.isSafeInteger(index)||index<0||!facts[index]||!['codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1'].includes(facts[index]!.source.snapshotFormat))throw Error('source_sqlite_query_format');
+ if(!Number.isSafeInteger(index)||index<0||!facts[index]||!['codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1','broker-room-sqlite-v1'].includes(facts[index]!.source.snapshotFormat))throw Error('source_sqlite_query_format');
  const snapshot=openSnapshot(owner,token,index);
  try{assertSnapshotIntegrity(snapshot);readSqliteSourceCapture(owner,token);}finally{snapshot.close();}
 }
@@ -144,11 +145,11 @@ export function assertSqliteSourceIntegrity(owner:object,token:object,index:numb
 /** Separate lossless ABI; existing number-based readers remain unchanged. */
 export function* readSqliteSourceLosslessRows(owner:object,token:object,index:number,queryId:LosslessSourceQueryId):Generator<Readonly<{rowid:string;record:Readonly<Record<string,CapturedSqliteCell>>}>,void,unknown>{
  if(typeof queryId!=='string')throw Error('source_sqlite_query');
- const isKSwarm=Object.hasOwn(KSWARM_STATE_QUERIES,queryId),isTimed=Object.hasOwn(TIMED_ACTION_QUERIES,queryId),isBudget=Object.hasOwn(BUDGET_SOURCE_QUERIES,queryId);
- if(!isKSwarm&&!isTimed&&!isBudget&&!Object.hasOwn(ARTIFACT_WORKSPACE_QUERIES,queryId))throw Error('source_sqlite_query');
- const facts=readSqliteSourceCapture(owner,token),format=isBudget?'harness-budget-sqlite-v1':isKSwarm?'kswarm-state-sqlite-v1':isTimed?'timed-actions-sqlite-v1':'artifact-workspace-sqlite-v1';
+ const isBroker=Object.hasOwn(BROKER_ROOM_QUERIES,queryId),isKSwarm=Object.hasOwn(KSWARM_STATE_QUERIES,queryId),isTimed=Object.hasOwn(TIMED_ACTION_QUERIES,queryId),isBudget=Object.hasOwn(BUDGET_SOURCE_QUERIES,queryId);
+ if(!isBroker&&!isKSwarm&&!isTimed&&!isBudget&&!Object.hasOwn(ARTIFACT_WORKSPACE_QUERIES,queryId))throw Error('source_sqlite_query');
+ const facts=readSqliteSourceCapture(owner,token),format=isBroker?'broker-room-sqlite-v1':isBudget?'harness-budget-sqlite-v1':isKSwarm?'kswarm-state-sqlite-v1':isTimed?'timed-actions-sqlite-v1':'artifact-workspace-sqlite-v1';
  if(!Number.isSafeInteger(index)||index<0||facts[index]?.source.snapshotFormat!==format)throw Error('source_sqlite_query_format');
- const query=isBudget?BUDGET_SOURCE_QUERIES[queryId as BudgetQueryId]:isKSwarm?KSWARM_STATE_QUERIES[queryId as KSwarmStateQueryId]:isTimed?TIMED_ACTION_QUERIES[queryId as TimedActionQueryId]:ARTIFACT_WORKSPACE_QUERIES[queryId as ArtifactWorkspaceQueryId],quote=(name:string)=>'"'+name.replaceAll('"','""')+'"',snapshot=openSnapshot(owner,token,index);
+ const query=isBroker?BROKER_ROOM_QUERIES[queryId as BrokerRoomQueryId]:isBudget?BUDGET_SOURCE_QUERIES[queryId as BudgetQueryId]:isKSwarm?KSWARM_STATE_QUERIES[queryId as KSwarmStateQueryId]:isTimed?TIMED_ACTION_QUERIES[queryId as TimedActionQueryId]:ARTIFACT_WORKSPACE_QUERIES[queryId as ArtifactWorkspaceQueryId],quote=(name:string)=>'"'+name.replaceAll('"','""')+'"',snapshot=openSnapshot(owner,token,index);
  try{
   const definition=snapshot.database.prepare('SELECT type,sql FROM sqlite_master WHERE name=?').get(query.table) as {type:string;sql:string}|undefined;
   if(!definition||definition.type!=='table'||typeof definition.sql!=='string'||!/^CREATE\s+TABLE\b/i.test(definition.sql)||/WITHOUT\s+ROWID/i.test(definition.sql))throw Error('source_sqlite_query_table');
@@ -156,6 +157,7 @@ export function* readSqliteSourceLosslessRows(owner:object,token:object,index:nu
   if(columns.length!==query.columns.length||columns.some((c,i)=>isTimed?!query.columns.includes(c.name as never)||c.hidden!==0:c.name!==query.columns[i]||c.hidden!==0)||isTimed&&new Set(columns.map(c=>c.name)).size!==columns.length)throw Error('source_sqlite_query_columns');
   if(isTimed){const expected=TIMED_ACTION_COLUMNS[query.table as keyof typeof TIMED_ACTION_COLUMNS];if(columns.some(c=>{const want=expected.find(w=>w.name===c.name),actual=c as unknown as Record<string,unknown>;return !want||Object.keys(actual).length!==Object.keys(want).length+1||Object.entries(want).some(([key,value])=>actual[key]!==value);}))throw Error('source_sqlite_query_columns');}
   if(isBudget){const expected=BUDGET_SOURCE_COLUMNS[queryId as BudgetQueryId].columns;if(columns.some((c,i)=>{const actual=c as unknown as Record<string,unknown>,want=expected[i]!;return Object.keys(actual).length!==Object.keys(want).length+1||Object.entries(want).some(([key,value])=>actual[key]!==value);}))throw Error('source_sqlite_query_columns');}
+  if(isBroker){const expected=BROKER_ROOM_COLUMNS[query.table]!;if(columns.some((c,i)=>{const actual=c as unknown as Record<string,unknown>,want=expected[i]!;return Object.keys(actual).length!==Object.keys(want).length||Object.entries(want).some(([key,value])=>actual[key]!==value);}))throw Error('source_sqlite_query_columns');}
   if(isKSwarm){const expected=KSWARM_STATE_COLUMNS[queryId as KSwarmStateQueryId];if(columns.some((c,i)=>{const actual=c as unknown as Record<string,unknown>,want=expected[i]!;return Object.keys(actual).length!==Object.keys(want).length||Object.entries(want).some(([key,value])=>actual[key]!==value);}))throw Error('source_sqlite_query_columns');}
   const encoding=capturedSqliteEncoding(snapshot.database.pragma('encoding',{simple:true}));
   const projection=query.columns.flatMap((name,i)=>[quote(name)+' AS v'+i,'typeof('+quote(name)+') AS t'+i,'CASE WHEN typeof('+quote(name)+")='text' THEN CAST("+quote(name)+' AS BLOB) END AS b'+i]);

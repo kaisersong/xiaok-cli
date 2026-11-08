@@ -10,7 +10,7 @@ import {writeFileAtomicallySync,syncDirectoryTreeStrict,readOwnAtomicErrorCode} 
 import {readInstalledCurrentProfile} from './migration-markers.js';
 import type {ProfileSourceDirectory} from './profile-source-descriptor.js';
 
-const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1'] as const;
+const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1','broker-room-sqlite-v1'] as const;
 type OrdinarySQLiteFormat=typeof ordinarySqliteFormats[number];
 
 /** Ordinary host discovery only. No snapshot hash, completeness, quota grant,
