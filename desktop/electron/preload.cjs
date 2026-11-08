@@ -352,6 +352,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   cancelCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:cancel',input),
   onCredentialInputsChanged:handler=>{const listener=()=>handler();ipcRenderer.on('desktop:credentialInput:changed',listener);return()=>ipcRenderer.removeListener('desktop:credentialInput:changed',listener);},
   getAssistantState: () => ipcRenderer.invoke('desktop:assistantInbox:state'),
+  testAssistantMessage: () => ipcRenderer.invoke('desktop:assistantInbox:testMessage'),
   ensureAssistantToday: () => ipcRenderer.invoke('desktop:assistantInbox:today'),
   refreshAssistantSources: () => ipcRenderer.invoke('desktop:assistantInbox:refresh'),
   actOnAssistantItem: input => ipcRenderer.invoke('desktop:assistantInbox:act', input),

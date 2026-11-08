@@ -259,6 +259,7 @@ export const PRELOAD_API_KEYS = [
   'submitCredentialInput',
   'cancelCredentialInput',
   'getAssistantState',
+  'testAssistantMessage',
   'ensureAssistantToday',
   'refreshAssistantSources',
   'actOnAssistantItem',
@@ -661,6 +662,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   submitCredentialInput: 'desktop:credentialInput:submit',
   cancelCredentialInput: 'desktop:credentialInput:cancel',
   getAssistantState: 'desktop:assistantInbox:state',
+  testAssistantMessage: 'desktop:assistantInbox:testMessage',
   ensureAssistantToday: 'desktop:assistantInbox:today',
   refreshAssistantSources: 'desktop:assistantInbox:refresh',
   actOnAssistantItem: 'desktop:assistantInbox:act',
@@ -1409,6 +1411,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   cancelCredentialInput(input:{id:string;expectedRevision:number}):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
   onCredentialInputsChanged(handler:()=>void):()=>void;
   getAssistantState(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  testAssistantMessage(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
   ensureAssistantToday(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
   refreshAssistantSources(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
   actOnAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionAction): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
@@ -1943,6 +1946,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     cancelCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:cancel',input) as ReturnType<DesktopApi['cancelCredentialInput']>,
     onCredentialInputsChanged(handler) {const listener=()=>handler();ipcRenderer.on('desktop:credentialInput:changed',listener);return ()=>ipcRenderer.off('desktop:credentialInput:changed',listener);},
     getAssistantState: () => ipcRenderer.invoke('desktop:assistantInbox:state') as ReturnType<DesktopApi['getAssistantState']>,
+    testAssistantMessage: () => ipcRenderer.invoke('desktop:assistantInbox:testMessage') as ReturnType<DesktopApi['testAssistantMessage']>,
     ensureAssistantToday: () => ipcRenderer.invoke('desktop:assistantInbox:today') as ReturnType<DesktopApi['ensureAssistantToday']>,
     refreshAssistantSources: () => ipcRenderer.invoke('desktop:assistantInbox:refresh') as ReturnType<DesktopApi['refreshAssistantSources']>,
     actOnAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:act', input) as ReturnType<DesktopApi['actOnAssistantItem']>,

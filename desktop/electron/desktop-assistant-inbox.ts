@@ -16,7 +16,7 @@ import { AssistantYzjClient } from './assistant-yzj-cli.js';
 import {createAssistantCalendarTools} from './assistant-calendar-tools.js';
 import { readAssistantSources,validateCurrentMailSources } from './assistant-source-reader.js';
 import { MAIL_SEND_SCHEMA } from '../shared/mail-connectors-ipc-contract.js';
-interface Dependencies {kim?:KimDecisionRuntime;credentialWaitingTasks?:()=>string[];dataRoot:string;crypto:MailSafeStorage;mail:MailConnectorService;llm:LoopLLMPort;profile():{active:boolean;timeZone:string};search(query:string,signal:AbortSignal):Promise<string>;launch(input:{prompt:string;threadId:string}):Promise<{taskId:string}>;canLaunch():void;changed():void;internal():Promise<Array<{id:string;title:string;summary:string}>>;facts():AttentionTaskFact[];reminders:{create(item:import('../shared/assistant-inbox-contract.js').AttentionItem,at:number):string;cancel(id:string):void}}
+interface Dependencies {kim?:KimDecisionRuntime;credentialWaitingTasks?:()=>string[];dataRoot:string;crypto:MailSafeStorage;mail:MailConnectorService;llm:LoopLLMPort;profile():{active:boolean;timeZone:string;locale?:'zh'|'en'};search(query:string,signal:AbortSignal):Promise<string>;launch(input:{prompt:string;threadId:string}):Promise<{taskId:string}>;canLaunch():void;changed():void;internal():Promise<Array<{id:string;title:string;summary:string}>>;facts():AttentionTaskFact[];reminders:{create(item:import('../shared/assistant-inbox-contract.js').AttentionItem,at:number):string;cancel(id:string):void}}
 export function createDesktopAssistantInbox(d:Dependencies){
  let lease:KimLease|undefined;let scanAccounts:string[]=[];
  const store=new AssistantInboxStore(join(d.dataRoot,'assistant-inbox.sqlite'));const cloud=new AssistantYzjClient();

@@ -1403,7 +1403,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,
     dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
-    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
+    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',locale:profile?.locale??'zh',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
     search:(query,signal)=>services.searchForAssistant(query,signal),
     launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
     canLaunch:()=>services.assertAssistantExecutor(),
@@ -1444,7 +1444,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     kbStore: knowledgeBaseStore,
     resolveProjectCwd: projectId => projectCwdById.get(projectId),
     assistantPublication: loopPublicationService,
-    listMorningSuggestions: () => assistantContextReader.listMorningSuggestions(),
+    readMorningConversation:()=>assistantContextReader.readMorningConversation(loopRuntime.loopStore.getAssistantProfile('default-personal-assistant')?.locale??'zh'),
   });
   const kswarmTeamService = createKSwarmTeamService({
     kswarmService,

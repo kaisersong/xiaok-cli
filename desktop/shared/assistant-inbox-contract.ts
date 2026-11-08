@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {ASSISTANT_CALENDAR_EVENT_SCHEMA} from './assistant-calendar-contract.js';
 import {KIM_JUDGMENT_SCHEMA} from './kim-decision-ipc-contract.js';
+export const ASSISTANT_MESSAGE_SCHEMA=z.object({id:z.string().min(1).max(256),kind:z.enum(['morning','test']),createdAt:z.number().finite().nonnegative(),title:z.string().min(1).max(200),text:z.string().min(1).max(10000)}).strict();
+export type AssistantMessage=z.infer<typeof ASSISTANT_MESSAGE_SCHEMA>;
 export const ASSISTANT_CHAT_THREAD = 'a0c11111-1111-4111-8111-111111111111';
 export const isAssistantThread = (id: unknown): id is string => typeof id === 'string' && (id === ASSISTANT_CHAT_THREAD || /^a0c22222-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id));
 export type AssistantSource = 'mail'|'yzj_message'|'yzj_calendar'|'ai_news'|'internal';
@@ -30,5 +32,5 @@ export type OutboxDraft=z.infer<typeof OUTBOX_DRAFT_SCHEMA>;
 export const OUTBOX_APPROVE_SCHEMA=z.object({id:z.string().uuid(),expectedRevision:z.number().int().positive(),text:z.string().min(1).max(30000),to:z.array(z.string().email()).min(1).max(20).optional(),subject:z.string().min(1).max(200).regex(/^[^\r\n]+$/).optional()}).strict();
 export type OutboxApproval=z.infer<typeof OUTBOX_APPROVE_SCHEMA>;
 export const OUTBOX_DECISION_SCHEMA=z.object({id:z.string().uuid(),expectedRevision:z.number().int().positive()}).strict();
-export const ASSISTANT_STATE_SCHEMA=ASSISTANT_INBOX_SNAPSHOT_SCHEMA.extend({outbox:z.array(OUTBOX_DRAFT_SCHEMA).max(100),active:z.boolean(),scanning:z.boolean()}).strict();
+export const ASSISTANT_STATE_SCHEMA=ASSISTANT_INBOX_SNAPSHOT_SCHEMA.extend({outbox:z.array(OUTBOX_DRAFT_SCHEMA).max(100),testMessages:z.array(ASSISTANT_MESSAGE_SCHEMA).max(50).default([]),active:z.boolean(),scanning:z.boolean()}).strict();
 export type AssistantState=z.infer<typeof ASSISTANT_STATE_SCHEMA>;

@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssistantInbox } from '../../hooks/useAssistantInbox';
 import { AssistantBriefConversation,AssistantInboxPanel } from './AssistantBriefConversation';
 import type { AttentionItem,AttentionAction } from '../../../../shared/assistant-inbox-contract';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ChevronDown, CircleDot, RefreshCw, Settings2, X } from 'lucide-react';
 import { api } from '../../api';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -24,9 +24,11 @@ export function AssistantPage() {
   const actItem = (item:AttentionItem,action:AttentionAction['action']) => {void inbox.act({id:item.id,expectedRevision:item.revision,action,...(action==='snooze'?{until:Date.now()+3600000}:{})});};
   const controls={busy:inbox.busy,onStart:(item:AttentionItem)=>{void startItem(item).catch(()=>inbox.read());},onOpen:(item:AttentionItem)=>{void openItem(item).catch(()=>inbox.read());},onAct:actItem};
   const inboxPanel=<AssistantInboxPanel state={inbox.state} controls={controls} onRefresh={()=>{void inbox.refresh();}} initializing={inbox.initializing} error={inbox.error}/>;
-  const morningSuggestions=data.overview?.profile.status==='active'&&!data.errors.assistant?data.overview.suggestions.slice(0,3):[];
-  const assistantContent=<><AssistantSecureInputs/>{morningSuggestions.length>0&&<section data-testid="assistant-morning-suggestions" data-assistant-focus-target className="py-3"><h2 className="text-sm font-medium">{t.assistantInbox.morningSuggestionsTitle}</h2><ul className="mt-2 space-y-3">{morningSuggestions.map(s=><li key={s.id} className="flex items-start justify-between gap-3"><p className="text-sm leading-6">{s.title}</p><button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={()=>prepare(`请帮我核对并推进以下事项，先确认当前事实：\n${s.title}`)}>{t.assistant.workspace.prepare}</button></li>)}</ul></section>}<AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
-  const hasAssistantMessages=Boolean(morningSuggestions.length||inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
+  const morningMessages=data.overview?.profile.status==='active'&&!data.errors.assistant?data.overview.morningMessages:undefined;
+  const testMessages=inbox.state?.testMessages;
+  const assistantMessages=useMemo(()=>[...(morningMessages??[]),...(testMessages??[])],[morningMessages,testMessages]);
+  const assistantContent=<><AssistantSecureInputs/><AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
+  const hasAssistantMessages=Boolean(assistantMessages.length||inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
 
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -54,10 +56,10 @@ export function AssistantPage() {
         {(inbox.initializing || inbox.state?.items.length) ? <p className="mt-0.5 truncate text-xs text-[var(--c-text-secondary)]">{inbox.initializing?t.assistantInbox.refreshing:t.assistantInbox.count(inbox.state?.items.length??0)}</p> : data.errors.assistant&&<p className="mt-0.5 truncate text-xs text-[var(--c-text-secondary)]">{t.assistant.unavailable}</p>}</div>
       <button type="button" aria-label={labels.expand} aria-expanded={expanded} onClick={() => setExpanded(value => !value)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><Settings2 size={14}/><ChevronDown size={12}/></button>
     </section>
-    {expanded && <div role="dialog" aria-label={labels.expand} className="absolute inset-x-5 top-full mx-auto max-h-[65vh] max-w-[1000px] overflow-y-auto rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-page)] shadow-xl"><div className="sticky top-0 z-10 flex justify-end bg-[var(--c-bg-page)] px-3 py-2"><button type="button" aria-label={labels.collapse} onClick={() => setExpanded(false)} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={16}/></button></div>{inboxPanel}<AssistantWorkspaceContent data={data} onPrepareSuggestion={prepare} iconOnly hideSuggestions /></div>}
+    {expanded && <div role="dialog" aria-label={labels.expand} className="absolute inset-x-5 top-full mx-auto max-h-[65vh] max-w-[1000px] overflow-y-auto rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-page)] shadow-xl"><div className="sticky top-0 z-10 flex justify-end bg-[var(--c-bg-page)] px-3 py-2"><button type="button" aria-label={labels.collapse} onClick={() => setExpanded(false)} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={16}/></button></div>{inboxPanel}<div className="px-5 py-3"><button type="button" disabled={inbox.busy} className="text-xs text-[var(--c-accent)] disabled:opacity-40" onClick={()=>{void inbox.testMessage().then(()=>setExpanded(false));}}>{t.assistantInbox.testMessage}</button></div><AssistantWorkspaceContent data={data} onPrepareSuggestion={prepare} iconOnly hideSuggestions /></div>}
   </div>;
   return <div data-testid="assistant-page" className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]">
     {!ready ? <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--c-text-secondary)]"><p role={failed ? 'alert' : 'status'}>{failed ? labels.loadFailed : labels.loading}</p>{failed && <button type="button" className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2" onClick={() => void load()}><RefreshCw size={14}/>{t.assistant.refreshStatus}</button>}</div>
-      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningSuggestions.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} draftRequest={draftRequest} hideObservationControls />}
+      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningMessages?.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} assistantMessages={assistantMessages} draftRequest={draftRequest} hideObservationControls />}
   </div>;
 }

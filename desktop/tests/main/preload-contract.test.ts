@@ -261,6 +261,7 @@ describe('preload API contract', () => {
       'submitCredentialInput',
       'cancelCredentialInput',
       'getAssistantState',
+      'testAssistantMessage',
   'ensureAssistantToday',
   'refreshAssistantSources',
   'actOnAssistantItem',

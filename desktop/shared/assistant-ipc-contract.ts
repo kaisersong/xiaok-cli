@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {ASSISTANT_MESSAGE_SCHEMA} from './assistant-inbox-contract.js';
 
 const text = z.string(), number = z.number().finite();
 const kind = z.enum(['memory', 'knowledge', 'follow_up']);
@@ -27,6 +28,7 @@ export const ASSISTANT_PROMOTION_SCHEMA = z.object({
 export const ASSISTANT_OVERVIEW_SCHEMA = z.object({
   profile: ASSISTANT_PROFILE_SCHEMA,
   suggestions: z.array(z.object({ id: text, title: text, summary: text }).strict()),
+  morningMessages: z.array(ASSISTANT_MESSAGE_SCHEMA).max(10).default([]),
   pendingCandidateCount: number, candidates: z.array(ASSISTANT_CANDIDATE_SCHEMA),
 }).strict();
 export const ASSISTANT_ACCEPT_RESULT_SCHEMA = z.union([ASSISTANT_CANDIDATE_SCHEMA, ASSISTANT_PROMOTION_SCHEMA]);
