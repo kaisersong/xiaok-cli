@@ -31,7 +31,7 @@
 /* Installation certification is root-owned input, not caller authorization.
  * This Stage1 binary never installs itself or repairs an interrupted namespace. */
 typedef struct connection {
- int fd,authenticated,closing,domain,ks_role;
+ int fd,authenticated,closing,domain,source_role;
  uint64_t next,deadline;
  size_t received,wanted,sent,reply_length;
  unsigned char key[32],input[MI_MAX_FRAME],reply[MI_MAX_FRAME];
@@ -54,7 +54,7 @@ typedef struct state {
 #ifdef __APPLE__
  struct proc_bsdinfo process;
 #endif
- } ks;
+ } ks,br;
  connection connections[MAX_CHANNELS];
 } state;
 static volatile sig_atomic_t stopping;
@@ -83,6 +83,7 @@ static int closure(state *s){
 #include "root-store-io.h"
 #include "authority-family-io.h"
 #include "kswarm-child-delegation.h"
+#include "broker-child-delegation.h"
 static int open_namespace(state *s){return store_open_namespace(s,&s->root_store);}
 static int current(state *s){
  struct stat r,a,named_authority,db,lock,main;if(lstat(MI_FIXED_ROOT,&r)||!directory_identity(&r,&s->root_identity)||fstat(s->root_store.authority,&a)||!directory_identity(&a,&s->root_store.authority_identity)||fstatat(s->root,MI_AUTHORITY_BASENAME,&named_authority,AT_SYMLINK_NOFOLLOW)||!directory_identity(&named_authority,&s->root_store.authority_identity)||fstatat(s->root_store.authority,MI_DATABASE_BASENAME,&db,AT_SYMLINK_NOFOLLOW)||!identity(&db,&s->root_store.file_identity[MI_DATABASE])||fstatat(s->root_store.authority,"issuer.lock",&lock,AT_SYMLINK_NOFOLLOW)||!identity(&lock,&s->root_store.file_identity[MI_ISSUER_LOCK])||lstat(MI_MAIN_EXEC,&main)||!identity(&main,&s->main_identity)||main.st_size!=s->main_identity.st_size||main.st_mtimespec.tv_sec!=s->main_identity.st_mtimespec.tv_sec||main.st_mtimespec.tv_nsec!=s->main_identity.st_mtimespec.tv_nsec)goto stale;
@@ -122,17 +123,23 @@ static int child_peer(state *s,int fd){
  return current(s);
 }
 static int close_file_lease(state *s){
- if(s->root_store.closed|| (s->ks.prepared&&!s->ks.retired))return 0;s->authority_sealed=1;s->root_store.closed=1;int good=1,first=0;
+ if(s->root_store.closed|| (s->ks.prepared&&!s->ks.retired)||(s->br.prepared&&!s->br.retired))return 0;s->authority_sealed=1;s->root_store.closed=1;int good=1,first=0;
  for(size_t i=0;i<s->family_count;i++)if(!authority_close(s,s->families+i)){if(good)first=errno?errno:EIO;good=0;}
  for(int i=1;i<=3;i++){int original=s->root_store.files[i];if(!close_owned(s->root_store.files+i)){if(good)first=errno;good=0;if(s->failed_close_count<16)s->failed_close_fds[s->failed_close_count++]=original;}}
  if(!close_owned(&s->root_store.store.receipt_fd)){if(good)first=errno;good=0;}
  if(!good){s->unknown=1;errno=first;}return good;
 }
-static int io(state *s,const mi_frame *f,const unsigned char *input,mi_frame *r,unsigned char *output){if(f->operation>=MI_KSWARM_PREPARE&&f->operation<=MI_KSWARM_RETIRE)return ks_control(s,f,input,r,output);if(f->operation>=MI_AUTHORITY_OPEN&&f->operation<=MI_AUTHORITY_RELEASE)return authority_io(s,f,input,r,output);return store_io(s,&s->root_store,f,input,r,output);}
+static int io(state *s,const mi_frame *f,const unsigned char *input,mi_frame *r,unsigned char *output){if(f->operation>=MI_BROKER_PREPARE&&f->operation<=MI_BROKER_RETIRE)return br_control(s,f,input,r,output);if(f->operation>=MI_KSWARM_PREPARE&&f->operation<=MI_KSWARM_RETIRE)return ks_control(s,f,input,r,output);if(f->operation>=MI_AUTHORITY_OPEN&&f->operation<=MI_AUTHORITY_RELEASE)return authority_io(s,f,input,r,output);return store_io(s,&s->root_store,f,input,r,output);}
 static int process_frame(state *s,connection *c){
  unsigned char payload[MI_MAX_PAYLOAD],output[MI_MAX_PAYLOAD];mi_frame f,r;memset(&f,0,sizeof(f));
  if(!c->authenticated){
-  if(c->received<MI_HEADER_BYTES)return 0;uint8_t domain=c->input[7];mi_birth *birth=c->ks_role?&s->ks.birth:&s->birth;int bit=1<<(domain-1);if(c->ks_role?(domain!=MI_KSWARM_IO||s->ks.used):(domain!=MI_ROOT_IO&&domain!=MI_DISPATCH)||(s->used&bit))return 0;
+  if(c->received<MI_HEADER_BYTES)return 0;uint8_t domain=c->input[7];mi_birth *birth=NULL;int bit=0;
+  switch(c->source_role){
+   case 0:if(domain!=MI_ROOT_IO&&domain!=MI_DISPATCH)return 0;bit=1<<(domain-1);if(s->used&bit)return 0;birth=&s->birth;break;
+   case 1:if(domain!=MI_KSWARM_IO||s->ks.used)return 0;birth=&s->ks.birth;break;
+   case 2:if(domain!=MI_BROKER_IO||s->br.used)return 0;birth=&s->br.birth;break;
+   default:return 0;
+  }
   unsigned char prekey[32];if(!mi_derive_key(birth,domain,prekey)||!mi_frame_decode(prekey,c->input,c->received,&f,payload,sizeof(payload))||f.operation!=MI_HELLO||f.status||f.slot||f.sequence||f.offset||f.amount||f.payload_length!=32||memcmp(f.nonce,birth->nonce,32)){mi_zero(prekey,32);return 0;}
   unsigned char reply[64];if(!mi_random(reply,32)){mi_zero(prekey,32);return 0;}memcpy(reply+32,s->release,32);r=f;r.operation|=MI_RESPONSE;r.payload_length=64;
   int good=mi_frame_encode(prekey,&r,reply,c->reply,sizeof(c->reply),&c->reply_length)&&mi_finalize_key(birth,domain,payload,reply,s->release,c->key);mi_zero(prekey,32);mi_zero(reply,64);mi_zero(payload,sizeof(payload));if(!good)return 0;
@@ -140,11 +147,11 @@ static int process_frame(state *s,connection *c){
 #ifdef MI_FIXTURE_BUILD
  fputs("MI_FIXTURE_HELLO_ACCEPTED\n",stderr);
 #endif
- c->authenticated=1;c->domain=domain;c->next=1;if(c->ks_role){s->ks.used=1;mi_zero(s->ks.birth.seed,32);}else{s->used|=bit;if(s->used==3)mi_zero(s->birth.seed,32);}return 1;
+ c->authenticated=1;c->domain=domain;c->next=1;if(c->source_role==1){s->ks.used=1;mi_zero(s->ks.birth.seed,32);}else if(c->source_role==2){s->br.used=1;mi_zero(s->br.birth.seed,32);}else{s->used|=bit;if(s->used==3)mi_zero(s->birth.seed,32);}return 1;
  }
- if(!mi_frame_decode(c->key,c->input,c->received,&f,payload,sizeof(payload))||f.domain!=c->domain||f.sequence!=c->next||f.sequence==UINT64_MAX||memcmp(f.nonce,c->ks_role?s->ks.birth.nonce:s->birth.nonce,32)||(f.operation!=MI_CLOSE&&f.operation!=MI_KSWARM_RETIRE&&f.operation!=MI_JOURNAL_CLOSE&&f.operation!=MI_AUTHORITY_RELEASE&&!(f.operation==MI_AUTHORITY_REQUEST&&f.payload_length>=52&&payload[32]==0&&payload[33]==MI_JOURNAL_CLOSE)&&!current(s)))return 0;
+ if(!mi_frame_decode(c->key,c->input,c->received,&f,payload,sizeof(payload))||f.domain!=c->domain||f.sequence!=c->next||f.sequence==UINT64_MAX||memcmp(f.nonce,c->source_role==2?s->br.birth.nonce:c->source_role==1?s->ks.birth.nonce:s->birth.nonce,32)||(f.operation!=MI_CLOSE&&f.operation!=MI_KSWARM_RETIRE&&f.operation!=MI_BROKER_RETIRE&&f.operation!=MI_JOURNAL_CLOSE&&f.operation!=MI_AUTHORITY_RELEASE&&!(f.operation==MI_AUTHORITY_REQUEST&&f.payload_length>=52&&payload[32]==0&&payload[33]==MI_JOURNAL_CLOSE)&&!current(s)))return 0;
  r=f;r.operation|=MI_RESPONSE;r.payload_length=0;r.amount=0;r.status=0;
- if(c->ks_role?!ks_io(s,&f,payload,&r,output):!io(s,&f,payload,&r,output))return 0;c->next++;
+ if(c->source_role==1?!ks_io(s,&f,payload,&r,output):c->source_role==2?!br_io(s,&f,payload,&r,output):!io(s,&f,payload,&r,output))return 0;c->next++;
  if(!mi_frame_encode(c->key,&r,output,c->reply,sizeof(c->reply),&c->reply_length))return 0;
  if(f.operation==MI_CLOSE)c->closing=1;
  if(r.status)s->unknown=1;
@@ -157,12 +164,12 @@ static void serve(state *s){
   if(s->child_exited)break;
   struct pollfd p[MAX_CHANNELS+1];p[0]=(struct pollfd){s->listener,POLLIN,0};for(int i=0;i<MAX_CHANNELS;i++){connection *c=s->connections+i;p[i+1]=(struct pollfd){c->fd,c->reply_length?POLLOUT:POLLIN,0};}
   int result=poll(p,MAX_CHANNELS+1,50);if(result<0){if(errno==EINTR)continue;s->unknown=1;break;}
-  if(p[0].revents&POLLIN){int fd=accept(s->listener,NULL,NULL);if(fd>=0){int flags=fcntl(fd,F_GETFL),yes=1;if(flags<0||fcntl(fd,F_SETFL,flags|O_NONBLOCK)||fcntl(fd,F_SETFD,FD_CLOEXEC)||setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&yes,sizeof(yes))||(!child_peer(s,fd)&&!ks_peer(s,fd))){
+  if(p[0].revents&POLLIN){int fd=accept(s->listener,NULL,NULL);if(fd>=0){int flags=fcntl(fd,F_GETFL),yes=1;int main_peer=child_peer(s,fd),ks_source=ks_peer(s,fd),br_source=br_peer(s,fd);int role=main_peer?0:ks_source?1:2;if(flags<0||fcntl(fd,F_SETFL,flags|O_NONBLOCK)||fcntl(fd,F_SETFD,FD_CLOEXEC)||setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&yes,sizeof(yes))||(main_peer+ks_source+br_source!=1)){
 #ifdef MI_FIXTURE_BUILD
  fputs("MI_FIXTURE_PEER_DENIED\n",stderr);
 #endif
  close(fd);
-}else{int placed=0;for(int i=0;i<MAX_CHANNELS;i++)if(s->connections[i].fd<0){connection *c=s->connections+i;memset(c,0,sizeof(*c));c->fd=fd;c->ks_role=ks_peer(s,fd);c->wanted=MI_HEADER_BYTES;c->deadline=mi_now_ms()+MI_FRAME_TIMEOUT_MS;placed=1;break;}if(!placed)close(fd);}}}
+}else{int placed=0;for(int i=0;i<MAX_CHANNELS;i++)if(s->connections[i].fd<0){connection *c=s->connections+i;memset(c,0,sizeof(*c));c->fd=fd;c->source_role=role;c->wanted=MI_HEADER_BYTES;c->deadline=mi_now_ms()+MI_FRAME_TIMEOUT_MS;placed=1;break;}if(!placed)close(fd);}}}
   for(int i=0;i<MAX_CHANNELS;i++){
    connection *c=s->connections+i;if(c->fd<0)continue;short re=p[i+1].revents;
    if(c->deadline&&mi_now_ms()>=c->deadline){if(c->authenticated)s->unknown=1;drop(s,c);continue;}

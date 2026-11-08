@@ -19,6 +19,7 @@
 #include <CommonCrypto/CommonDigest.h>
 #include "installed-budget-worker-io.h"
 #include "../kswarm-authority-source/kswarm-child-launch.h"
+#include "../broker-authority-source/broker-child-launch.h"
 #include "root-store-io-codec.h"
 #include "root-store-io-dispatch.h"
 #include "installed-main-core-private.h"
@@ -170,6 +171,7 @@ int nm_kswarm_child_cancel_unlaunched(nm_kswarm_child_birth *candidate){
 
 #include "../kswarm-authority-source/kswarm-client-private.h"
 #include "../kswarm-authority-source/kswarm-child-client-private.h"
+#include "../broker-authority-source/broker-birth-private.h"
 
 int nm_installed_prepare_core_admission_store(nm_installed_client *client,nr_root_store_io **out){
  NM_CLIENT_GUARD(client,0);

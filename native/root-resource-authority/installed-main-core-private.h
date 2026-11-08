@@ -9,7 +9,7 @@ struct nm_installed_client {
  struct nm_installed_client *next;nm_installed_fate fate;
  int seed_fd,seed_close_attempted;
  pid_t creator_pid;
- int close_requested,core_budget_attempted,core_admission_attempted,core_kswarm_attempted,ks_role;
+ int close_requested,core_budget_attempted,core_admission_attempted,core_kswarm_attempted,core_broker_attempted,ks_role;
  unsigned char ks_pool[32];
  pthread_mutex_t io_mutex;int mutex_ready,queue_failed;
  unsigned authority_holds,worker_holds; /* reserve before each family/Worker SDK */
@@ -38,6 +38,7 @@ static _Thread_local nm_installed_client *worker_client;
 static int root_store_held(nr_root_store_io *io){return io&&!io->released;}
 static _Thread_local nm_installed_client *clients;
 static void ks_forget_client(nm_installed_client *);
+static void br_forget_client(nm_installed_client *);
 static int member(nm_installed_client *p){if(p&&worker_client==p)return 1;for(nm_installed_client *r=clients;r;r=r->next)if(r==p)return 1;return 0;}
 static void error_first(nm_installed_client *p,int code){if(!p->fate.error_present){p->fate.error_present=1;p->fate.error_code=code;}}
 static void unknown(nm_installed_client *p,int code){p->fate.unknown=1;error_first(p,code);}
@@ -126,9 +127,9 @@ static int channel_peer(nm_installed_client *p,nm_channel *c){
 static int exchange(nm_installed_client *p,int i,int operation){
  if(!original_member(p))return 0;
  nm_channel *c=p->channels+i;if(c->fd<0||!c->key_valid||c->close_attempted||c->next_sequence==UINT64_MAX||!channel_peer(p,c)){unknown(p,EOVERFLOW);return 0;}
- mi_frame request={0},reply={0};request.domain=(uint8_t)(p->ks_role?MI_KSWARM_IO:i+1);request.operation=(uint16_t)operation;request.sequence=c->next_sequence;memcpy(request.nonce,p->birth.nonce,32);
+ mi_frame request={0},reply={0};request.domain=(uint8_t)(p->ks_role==2?MI_BROKER_IO:p->ks_role?MI_KSWARM_IO:i+1);request.operation=(uint16_t)operation;request.sequence=c->next_sequence;memcpy(request.nonce,p->birth.nonce,32);
  unsigned char payload[MI_MAX_PAYLOAD];uint64_t deadline=mi_now_ms()+MI_FRAME_TIMEOUT_MS;
- int good=mi_wire_send(c->fd,c->key,&request,NULL,deadline)&&mi_wire_receive(c->fd,c->key,&reply,payload,sizeof(payload),deadline)&&response_matches(p,&reply,p->ks_role?MI_KSWARM_IO:i+1,operation,c->next_sequence);mi_zero(payload,sizeof(payload));
+ int good=mi_wire_send(c->fd,c->key,&request,NULL,deadline)&&mi_wire_receive(c->fd,c->key,&reply,payload,sizeof(payload),deadline)&&response_matches(p,&reply,p->ks_role==2?MI_BROKER_IO:p->ks_role?MI_KSWARM_IO:i+1,operation,c->next_sequence);mi_zero(payload,sizeof(payload));
  if(!good){c->unknown=1;unknown(p,errno);return 0;}c->next_sequence++;return 1;
 }
 int nm_installed_connect(nm_installed_client *p){
@@ -196,6 +197,6 @@ void nm_installed_release(nm_installed_client *p){
  /* Unknown is held for this process; no absent handle/timeout becomes known. */
  if(!p->fate.closed||p->fate.unknown)return;
  nm_installed_client **at=&clients;while(*at&&*at!=p)at=&(*at)->next;if(*at)*at=p->next;
- ks_forget_client(p);client_leave(&nm_guard);pthread_mutex_destroy(&p->io_mutex);mi_zero(p,sizeof(*p));free(p);
+ ks_forget_client(p);br_forget_client(p);client_leave(&nm_guard);pthread_mutex_destroy(&p->io_mutex);mi_zero(p,sizeof(*p));free(p);
 }
 

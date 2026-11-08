@@ -71,10 +71,10 @@ static int store_alive(nr_root_store_io *io,int negative){
 static int authority_exchange(nr_root_store_io *io,uint16_t op,const unsigned char *body,uint32_t size,unsigned char *output,size_t capacity,mi_frame *reply){
  nm_installed_client *p=io->client;nm_channel *c=p->channels;
  if(!store_alive(io,op==MI_AUTHORITY_RELEASE)||c->next_sequence==UINT64_MAX)return store_failed(io,EPERM);
- mi_frame request={0};request.domain=p->ks_role?MI_KSWARM_IO:MI_ROOT_IO;request.operation=op;request.sequence=c->next_sequence;request.payload_length=size;memcpy(request.nonce,p->birth.nonce,32);
+ mi_frame request={0};request.domain=p->ks_role==2?MI_BROKER_IO:p->ks_role?MI_KSWARM_IO:MI_ROOT_IO;request.operation=op;request.sequence=c->next_sequence;request.payload_length=size;memcpy(request.nonce,p->birth.nonce,32);
  uint64_t deadline=mi_now_ms()+MI_FRAME_TIMEOUT_MS;
  if(!mi_wire_send(c->fd,c->key,&request,body,deadline)||!mi_wire_receive(c->fd,c->key,reply,output,capacity,deadline)||
-    reply->domain!=(p->ks_role?MI_KSWARM_IO:MI_ROOT_IO)||reply->operation!=(op|MI_RESPONSE)||reply->sequence!=request.sequence||reply->slot||reply->offset||reply->amount||reply->status||memcmp(reply->nonce,p->birth.nonce,32))return store_failed(io,EPROTO);
+    reply->domain!=(p->ks_role==2?MI_BROKER_IO:p->ks_role?MI_KSWARM_IO:MI_ROOT_IO)||reply->operation!=(op|MI_RESPONSE)||reply->sequence!=request.sequence||reply->slot||reply->offset||reply->amount||reply->status||memcmp(reply->nonce,p->birth.nonce,32))return store_failed(io,EPROTO);
  c->next_sequence++;return 1;
 }
 static int authority_result(nr_root_store_io *io,const unsigned char *bytes,uint32_t length,mi_frame *reply,unsigned char *output,size_t capacity){
