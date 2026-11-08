@@ -6,6 +6,7 @@ import {syncDirectoryTreeStrict,readOwnAtomicErrorCode} from '../../utils/atomic
 import {canonicalVerificationJson,VERIFICATION_BUDGET} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';
 import {migrationOwnerFileName,migrationProfileDirectoryName,parseMigrationMarker,type MigrationMarker} from './migration-markers.js';
+import {createMainRootActivationClaimJournal} from './main-root-activation-claim.js';
 import {createMainRootFamilyJournal} from './main-root-family-enrollment-journal.js';
 import {createMigrationJournalSyncIo} from './migration-journal-sync-io.js';
 const journalSdk=Object.freeze({randomUUID,chmodSync,closeSync,fchmodSync,fstatSync,fsyncSync,lstatSync,mkdirSync,openSync,readFileSync,renameSync,unlinkSync,writeFileSync});
@@ -116,7 +117,8 @@ export function createMigrationMarkerJournal(input:{root:string;database:Databas
    return effective;
   }finally{busy=false;}
  }
- const mainRootFamily=createMainRootFamilyJournal({root,database:db,authorityId,current,directory,read,atomic,sync(){syncDirectoryTreeStrict(root,{sourceContext:sourceIo.context});},exclusive<T>(work:()=>T):T{if(busy)throw Error('migration_publisher_reentrant');busy=true;try{return work();}finally{busy=false;}}});
- const methods={...mainRootFamily,closeMainRootFamily:sourceIo.close,assertMainRootFamilyPhysicalKnown:sourceIo.assertKnown,publishPending(marker:Extract<MigrationMarker,{state:'pending'}>,token:object){return publish(marker,token,'pending');},publishMigrated(marker:Extract<MigrationMarker,{state:'migrated'}>,token:object){return publish(marker,token,'migrated');}};
+ const activationClaims=createMainRootActivationClaimJournal({database:db,authorityId,current});
+ const mainRootFamily=createMainRootFamilyJournal({root,database:db,authorityId,current,directory,read,atomic,assertUnclaimed:activationClaims.assertMainRootFamilyUnclaimed,sync(){syncDirectoryTreeStrict(root,{sourceContext:sourceIo.context});},exclusive<T>(work:()=>T):T{if(busy)throw Error('migration_publisher_reentrant');busy=true;try{return work();}finally{busy=false;}}});
+ const methods={...mainRootFamily,...activationClaims,closeMainRootFamily:sourceIo.close,assertMainRootFamilyPhysicalKnown:sourceIo.assertKnown,publishPending(marker:Extract<MigrationMarker,{state:'pending'}>,token:object){return publish(marker,token,'pending');},publishMigrated(marker:Extract<MigrationMarker,{state:'migrated'}>,token:object){return publish(marker,token,'migrated');}};
  Object.assign(api,methods);return Object.freeze(api) as typeof methods;
 }

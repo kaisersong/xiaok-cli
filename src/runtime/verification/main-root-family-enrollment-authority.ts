@@ -84,10 +84,15 @@ export function createMainRootFamilyEnrollmentAuthority(input: {
     return record;
   }
   function view(record: Readonly<Record>) {
+    const claims = publication.readMainRootActivationClaims(record.review.principal);
+    const claim = claims.find(item => item.pendingOperationId === record.review.operationId);
+    if (claims.length && !claim) throw Error('main_root_activation_conflict');
     const cancelled = record.phase === 'cancelled';
     return Object.freeze({operationId: record.review.operationId, profileId: record.review.profileId,
       phase: cancelled ? 'cancelled' : 'pending', consent: record.phase === 'prepared' ? 'required' : record.phase,
-      pendingOnly: true, activation: 'unavailable', blockers: Object.freeze(['activation_evidence_required']),
+      pendingOnly: true, activation: claim ? 'claim-recorded' : 'unavailable',
+      ...(claim ? {activationOperationId: claim.operationId} : {}),
+      blockers: Object.freeze([claim ? 'activation_completion_required' : 'activation_evidence_required']),
       physicalCompletion: 'not-attested'});
   }
   function replace(before: Readonly<Record>, phase: Record['phase'], approval?: Record['approval']) {
