@@ -5,7 +5,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const destination = join(root, 'desktop', 'dist', 'main', 'desktop', 'electron');
 mkdirSync(destination, { recursive: true });
 copyFileSync(join(root, 'desktop', 'electron', 'harness-optimization-store-worker.mjs'), join(destination, 'harness-optimization-store-worker.mjs'));
-for(const name of ['harness-dsh-budget-data.mjs','harness-dsh-budget-ledger.mjs','harness-dsh-work-escrow.mjs','harness-dsh-source-read-budget.mjs','harness-dsh-budget-conservative.mjs','harness-dsh-account-revision.mjs','harness-dsh-account-epoch.mjs','harness-dsh-draft-usage.mjs'])copyFileSync(join(root,'desktop','electron',name),join(destination,name));
+for(const name of ['harness-dsh-budget-data.mjs','harness-dsh-budget-ledger.mjs','harness-dsh-work-escrow.mjs','harness-dsh-source-read-budget.mjs','harness-dsh-budget-conservative.mjs','harness-dsh-account-revision.mjs','harness-dsh-account-epoch.mjs','harness-dsh-draft-usage.mjs','harness-dsh-worker-initialize.mjs'])copyFileSync(join(root,'desktop','electron',name),join(destination,name));
 const binary = join(root, 'native', 'harness-optimization-owner-lock', 'build', 'Release', 'harness_owner_lock.node');
 const target = join(destination, 'harness_owner_lock.node');
 if (existsSync(binary)) copyFileSync(binary, target);

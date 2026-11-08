@@ -57,7 +57,11 @@ it.each(['getter','proxy'])('preserves the actual observer %s failure without co
 
 it.each(['protected','unavailable'])('fences the actual ordinary lifecycle before witness/DB IO when %s',async route=>{
  const {HarnessOptimizationLifecycle}=await import('../../../desktop/electron/harness-optimization-lifecycle.js'),directory=join(faults.home,'never-created');faults.route=route;
- const lifecycle=new HarnessOptimizationLifecycle({root:directory,identity:'original',held:()=>true,release(){throw Error('unexpected release');}});await expect(lifecycle.prepare()).rejects.toThrow('ordinary_source_route');const {existsSync}=await import('node:fs');expect(existsSync(directory)).toBe(false);expect(faults.calls).toBe(0);
+ const lifecycle=new HarnessOptimizationLifecycle({root:directory,identity:'original',held:()=>true,release(){throw Error('unexpected release');}});
+ const first=await lifecycle.prepare().then(()=>{throw Error('expected route rejection');},raw=>raw);
+ expect(first).toBeInstanceOf(Error);expect(first.message).toBe('budget_source_writer_retired');expect(first.cause).toBeInstanceOf(Error);expect(first.cause.message).toBe('ordinary_source_route');
+ faults.route='ordinary';await expect(lifecycle.prepare()).rejects.toBe(first);
+ const {existsSync}=await import('node:fs');expect(existsSync(directory)).toBe(false);expect(faults.calls).toBe(0);
 });
 it('denies foreign data Proxy before any constructor or metadata trap',async()=>{
  const api=await load();let traps=0;const input=new Proxy({},{get(){traps++;throw Error('getter');},getOwnPropertyDescriptor(){traps++;throw Error('descriptor');}});expect(()=>new api.HarnessOptimizationStore(input,()=>{})).toThrow('budget_source_path');expect(faults.calls).toBe(0);expect(traps).toBe(0);
