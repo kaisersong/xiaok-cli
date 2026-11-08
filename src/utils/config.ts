@@ -1,4 +1,4 @@
-import {ProtectedJsonFile} from './protected-json.js';
+import {ProtectedJsonFile,protectedJsonDigest} from './protected-json.js';
 import {readProtectedJsonVersioned,readProtectedJsonVersionedSync,saveProtectedJson,updateProtectedJson,updateProtectedAutomationSync} from './protected-json-async.js';
 import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, existsSync, chmodSync, statSync, lstatSync } from 'fs';
 import { join } from 'path';
@@ -19,6 +19,8 @@ export function getConfigPath(): string {
 /** config.json 里有模型 API Key，只允许当前用户读写。只处理文件本身，不动整个配置目录。 */
 const CONFIG_FILE_MODE = 0o600;
 const credentialConfigVersions=new WeakMap<Config,string>();
+const credentialConfigFiles=new WeakMap<Config,string>();
+function rememberConfig(config:Config,digest:string):void{credentialConfigVersions.set(config,digest);credentialConfigFiles.set(config,getConfigPath());}
 
 export class ConfigPermissionError extends Error {
   constructor(path: string, cause?: unknown) {
@@ -65,7 +67,7 @@ function cloneDefaultConfig(): Config {
 }
 
 export async function loadConfig(): Promise<Config> {
-  const path=getConfigPath();tightenBestEffort(path);tightenBestEffort(path+'.bak');const raw=await readProtectedJsonVersioned(path);const result=normalizeLoadedConfig(raw.value);if(!credentialConfigVersions.has(result))credentialConfigVersions.set(result,raw.digest);return result;
+  const path=getConfigPath();tightenBestEffort(path);tightenBestEffort(path+'.bak');const raw=await readProtectedJsonVersioned(path);const result=normalizeLoadedConfig(raw.value);if(!credentialConfigVersions.has(result))rememberConfig(result,raw.digest);return result;
 }
 
 /** Shared normalized read for synchronous Store construction and async callers. */
@@ -76,7 +78,7 @@ export function loadConfigSync(): Config {
   tightenBestEffort(path + '.bak');
   if (!existsSync(path)) return cloneDefaultConfig();
 
-  const raw=readProtectedJsonVersionedSync(path);const result=normalizeLoadedConfig(raw.value);if(!credentialConfigVersions.has(result))credentialConfigVersions.set(result,raw.digest);return result;
+  const raw=readProtectedJsonVersionedSync(path);const result=normalizeLoadedConfig(raw.value);if(!credentialConfigVersions.has(result))rememberConfig(result,raw.digest);return result;
 }
 
 function normalizeLoadedConfig(parsed:Record<string,unknown>|undefined):Config {
@@ -85,28 +87,32 @@ function normalizeLoadedConfig(parsed:Record<string,unknown>|undefined):Config {
   const obj = parsed as Record<string, unknown>;
   if (obj.schemaVersion !== 1 && obj.schemaVersion !== 2) {
     backupAndRemove(path);
-    const fallback=cloneDefaultConfig();credentialConfigVersions.set(fallback,'missing');return fallback;
+    const fallback=cloneDefaultConfig();rememberConfig(fallback,'missing');return fallback;
   }
 
   if (obj.schemaVersion === 1 && obj.defaultModel !== undefined && !isValidLegacyProvider(obj.defaultModel)) {
     backupAndRemove(path);
-    const fallback=cloneDefaultConfig();credentialConfigVersions.set(fallback,'missing');return fallback;
+    const fallback=cloneDefaultConfig();rememberConfig(fallback,'missing');return fallback;
   }
 
   return normalizeConfig(obj as unknown as LegacyConfig | Config);
 }
 
 export async function saveConfig(config: Config): Promise<void> {
-  const path=getConfigPath();if(existsSync(path))tightenOrThrow(path);const saved=await saveProtectedJson(path,config,credentialConfigVersions.get(config));if(JSON.stringify(config)===JSON.stringify(saved.value))credentialConfigVersions.set(config,saved.digest);tightenOrThrow(path);
+  const expected=credentialConfigFiles.get(config)===getConfigPath()?credentialConfigVersions.get(config):protectedJsonDigest(getConfigPath());
+  if(credentialConfigFiles.get(config)!==getConfigPath())new ProtectedJsonFile(getConfigPath()).assertCompleteCredentials(config);
+  const path=getConfigPath();if(existsSync(path))tightenOrThrow(path);const saved=await saveProtectedJson(path,config,expected);if(JSON.stringify(config)===JSON.stringify(saved.value))rememberConfig(config,saved.digest);tightenOrThrow(path);
 }
 
 function saveConfigSync(config: Config): void {
+  const expected=credentialConfigFiles.get(config)===getConfigPath()?credentialConfigVersions.get(config):protectedJsonDigest(getConfigPath());
+  if(credentialConfigFiles.get(config)!==getConfigPath())new ProtectedJsonFile(getConfigPath()).assertCompleteCredentials(config);
   mkdirSync(getConfigDir(), { recursive: true });
   const path = getConfigPath();
   // 老文件可能是 644：先收紧再写入，收紧失败就中止，避免新 Key 写进别人可读的文件。
   if (existsSync(path)) tightenOrThrow(path);
   // mode 只在新建文件时生效；写完再确认一次。
-  const saved=new ProtectedJsonFile(path).save(config,credentialConfigVersions.get(config));credentialConfigVersions.set(config,saved.digest);
+  const saved=new ProtectedJsonFile(path).save(config,expected);rememberConfig(config,saved.digest);
   tightenOrThrow(path);
 }
 

@@ -410,7 +410,11 @@ function drainLeadingRawThinkSegments(
 }
 
 export class OpenAIAdapter implements ModelAdapter {
-  client: OpenAI;
+  private clientInstance?: OpenAI;
+  private createClient!: () => OpenAI;
+  get client(): OpenAI { return this.clientInstance ??= this.createClient(); }
+  set client(value: OpenAI) { this.clientInstance = value; }
+  private readonly credentialResolver?: OpenAIAdapterInit['credentialResolver'];
   private readonly apiKey: string;
   private readonly resolvedHeaders?: Readonly<Record<string, string | null>>;
   private readonly kimiCodingHeadersApplied: boolean;
@@ -435,21 +439,26 @@ export class OpenAIAdapter implements ModelAdapter {
       throw new Error('KIMI_K3_PROFILE_CAPABILITY_REQUIRED');
     }
     this.apiKey = init.apiKey;
+    this.credentialResolver = init.credentialResolver;
     this.resolvedHeaders = init.resolvedHeaders;
     this.kimiCodingHeadersApplied = init.kimiCodingHeadersApplied;
     this.onUsageDiagnostic = init.onUsageDiagnostic ?? recordUsageDiagnostic;
     this.harnessContext = init.harnessContext;
     this.experimentalToolOrder = experimentalToolOrder;
     ownedHarnessProfiles.set(this, init.harnessContext.profile.id);
-    this.client = new OpenAI({
-      apiKey: init.apiKey,
+    this.createClient = () => {
+      const credentials = init.credentialResolver?.();
+      return new OpenAI({
+      apiKey: credentials?.apiKey ?? init.apiKey,
       baseURL: init.harnessContext.identity.canonicalBaseUrl,
       maxRetries: strictKimiK3 ? 0 : MAX_RETRIES,
-      defaultHeaders: init.resolvedHeaders,
+      defaultHeaders: credentials?.headers ?? init.resolvedHeaders,
       ...(strictKimiK3
         ? { fetch: createStrictKimiNoRedirectFetch() }
         : {}),
     });
+    };
+    if (!init.credentialResolver) this.client = this.createClient();
   }
 
   getModelName(): string {
@@ -510,6 +519,7 @@ export class OpenAIAdapter implements ModelAdapter {
         };
     const clone = new OpenAIAdapter({
       apiKey: this.apiKey,
+      credentialResolver: this.credentialResolver,
       resolvedHeaders: this.resolvedHeaders,
       kimiCodingHeadersApplied: this.kimiCodingHeadersApplied,
       onUsageDiagnostic: this.onUsageDiagnostic,
@@ -535,6 +545,8 @@ export class OpenAIAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    options?.signal?.throwIfAborted();
+    this.credentialResolver?.();
     const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
     if (disclosure !== undefined) {
       assertProviderDisclosureActive(disclosure);

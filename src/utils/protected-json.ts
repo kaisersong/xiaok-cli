@@ -40,6 +40,49 @@ export class ProtectedJsonFile {
   }
   private raw(file=this.file){this.check(file);return existsSync(file)?parse(readFileSync(file,'utf8')):undefined;}
   private needsMigration(raw:Record<string,unknown>){return entries(raw).some(e=>Boolean(e.value));}
+  /** A read-only, credential-free view. Resolution stays bound to this file revision. */
+  readPublic() {
+    this.check(this.file);this.check(this.file+'.bak');let digest=protectedJsonDigest(this.file),backupDigest=protectedJsonDigest(this.file+'.bak'),raw=this.raw();
+    if(protectedJsonDigest(this.file)!==digest||protectedJsonDigest(this.file+'.bak')!==backupDigest)throw Error('credential_config_changed');
+    const refs=this.refs(raw??{}),plaintext=entries(raw??{}),value=raw?structuredClone(raw):undefined;
+    const paths=[...refs.map(r=>r.path),...plaintext.filter(r=>Boolean(r.value)).map(r=>r.path)];
+    if(value){delete value[META];for(const path of paths)setAt(value,path,undefined);}
+    const current=()=>{this.check(this.file);if(protectedJsonDigest(this.file)!==digest||protectedJsonDigest(this.file+'.bak')!==backupDigest)throw Error('credential_config_changed');};
+    return {value,get digest(){return digest;},credentialPaths:paths,resolve:(path:string[]):unknown=>{
+      current();
+      if(!paths.some(p=>JSON.stringify(p)===JSON.stringify(path)))return undefined;
+      const backup=this.raw(this.file+'.bak');
+      if(plaintext.some(e=>Boolean(e.value))||(backup&&this.needsMigration(backup))){
+        // Own migration is serialized and version checked; never use a legacy
+        // plaintext credential until its protected replacement is committed.
+        this.lock(()=>{
+          current();const source=this.raw()!,backup=this.raw(this.file+'.bak');
+          const next=this.seal(this.hydrate(source),source);
+          const nextBackup=backup?this.seal(this.hydrate(backup),backup):undefined;
+          if(nextBackup&&this.needsMigration(backup!))this.atomic(this.file+'.bak',nextBackup);
+          this.atomic(this.file,next);raw=next;digest=protectedJsonDigest(this.file);backupDigest=protectedJsonDigest(this.file+'.bak');
+        });
+        plaintext.splice(0);
+      }
+      const bound=this.refs(raw??{}).find(r=>JSON.stringify(r.path)===JSON.stringify(path));
+      const result=bound?this.reveal(bound):getAt(raw,path);current();return result;
+    }};
+  }
+  assertCompleteCredentials(input:unknown):void {
+    const raw=this.raw();for(const ref of this.refs(raw??{}))if(typeof getAt(input,ref.path)!=='string'||!getAt(input,ref.path))throw Error('credential_snapshot_incomplete');
+    for(const field of entries(raw??{}))if(field.value&&(typeof getAt(input,field.path)!=='string'||!getAt(input,field.path)))throw Error('credential_snapshot_incomplete');
+  }
+  /** CLI-only semantic edit: no provider or credential fields are accepted. */
+  updateModelSelection(models:Record<string,unknown>,provider:string,model:string,expectedHash:string,initial:Record<string,unknown>={schemaVersion:2,providers:{}}):void {
+    const selection={models,defaultProvider:provider,defaultModelId:model};
+    if(entries(initial).some(e=>Boolean(e.value)))throw Error('credential_reserved_input');
+    if(entries(selection).length)throw Error('credential_reserved_input');
+    if(typeof provider!=='string'||typeof model!=='string'||!models||typeof models!=='object'||Array.isArray(models))throw Error('credential_invalid_input');
+    for(const entry of Object.values(models)){
+      if(!object(entry)||Object.keys(entry).some(k=>!['provider','model','label','capabilities','runtimeOptions'].includes(k)))throw Error('credential_reserved_input');
+    }
+    this.lock(()=>{if(protectedJsonDigest(this.file)!==expectedHash)throw Error('credential_config_changed');const raw=this.raw()??structuredClone(initial),backup=this.raw(this.file+'.bak');if(raw.schemaVersion!==2||this.needsMigration(raw)||(backup&&this.needsMigration(backup)))throw Error('credential_migration_required');this.refs(raw);this.atomic(this.file,{...raw,...selection});});
+  }
   read():Record<string,unknown>|undefined{const raw=this.raw(),backup=this.raw(this.file+'.bak');if(!raw){if(backup&&this.needsMigration(backup))this.lock(()=>{const bak=this.raw(this.file+'.bak')!;this.atomic(this.file+'.bak',this.seal(this.hydrate(bak),bak));});return;}if(!this.needsMigration(raw)&&(!backup||!this.needsMigration(backup)))return this.hydrate(raw);return this.lock(()=>{const current=this.raw()!,bak=this.raw(this.file+'.bak');const next=this.seal(this.hydrate(current),current);const nextBak=bak?this.seal(this.hydrate(bak),bak):undefined;if(nextBak&&this.needsMigration(bak!))this.atomic(this.file+'.bak',nextBak);this.atomic(this.file,next);return this.hydrate(next);});}
   save(input:unknown,expectedHash?:string,commit?:()=>void):{digest:string;backupDigest:string}{if(!object(input)||Object.prototype.hasOwnProperty.call(input,META))throw Error('credential_reserved_input');this.check(this.file);return this.lock(()=>{if(expectedHash!==undefined&&protectedJsonDigest(this.file)!==expectedHash)throw Error('credential_config_changed');const current=this.raw(),bak=this.raw(this.file+'.bak');const next=this.seal(input,current);if(bak&&this.needsMigration(bak))this.atomic(this.file+'.bak',this.seal(this.hydrate(bak),bak));return {digest:this.atomic(this.file,next,commit),backupDigest:protectedJsonDigest(this.file+'.bak')};});}
   update(update:(value:Record<string,unknown>)=>unknown){return this.lock(()=>{const raw=this.raw()??{},next=update(this.hydrate(raw));if(!object(next)||Object.prototype.hasOwnProperty.call(next,META))throw Error('credential_reserved_input');this.atomic(this.file,this.seal(next,raw));return next;});}
