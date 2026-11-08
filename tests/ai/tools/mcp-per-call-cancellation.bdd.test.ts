@@ -190,8 +190,14 @@ describe('MCP cancellation R1: generic builder and CUA production multi-step wra
     const tools = buildMcpRuntimeTools({ name: 'cancel', command: 'fixture' }, { listTools: async () => [schema], callTool, dispose() {} }, [schema]);
     const a = new AbortController(); const b = new AbortController();
     await tools[0]!.execute({}, mcpTestContext(a.signal, { taskId: 'private-task' }));
-    a.abort(new Error('old turn')); await tools[0]!.execute({}, mcpTestContext(b.signal));
-    expect(callTool.mock.calls).toEqual([['probe', {}, { signal: a.signal }], ['probe', {}, { signal: b.signal }]]);
+    a.abort(new Error('old turn')); const second = mcpTestContext(b.signal); await tools[0]!.execute({}, second);
+    // 740fc31d forwards the in-process executionContext (activity follow-up); still only per-call data.
+    expect(callTool.mock.calls.map(([name, input]) => [name, input])).toEqual([['probe', {}], ['probe', {}]]);
+    const [firstOptions, secondOptions] = callTool.mock.calls.map(call => call[2] as { signal?: AbortSignal; executionContext?: { signal?: AbortSignal } });
+    for (const options of [firstOptions, secondOptions]) expect(Object.keys(options!).sort()).toEqual(['executionContext', 'signal']);
+    expect(firstOptions!.signal).toBe(a.signal); expect(firstOptions!.executionContext?.signal).toBe(a.signal);
+    expect(secondOptions!.signal).toBe(b.signal); expect(secondOptions!.executionContext).toBe(second);
+    expect(secondOptions!.executionContext).not.toBe(firstOptions!.executionContext);
   });
 
   it.each(['list_windows', 'click', 'capture_after_lookup', 'capture_after_result'] as const)('M5 stops at the actual CUA %s barrier with no later backend action', async (stage) => {

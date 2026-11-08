@@ -1,0 +1,260 @@
+[
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_blue.png",
+    "sha256": "0fa98e3d79426410121addb0ec35ab4916379b886b82991ec5124e3734ed0581",
+    "size": 29153,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_endpage.png",
+    "sha256": "ae7b72a46e0fd581ce59cb1ad7e9ae01ded01e951ba22764b22ab8c2267a020f",
+    "size": 80207,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_homepage.png",
+    "sha256": "a62175e6c5359beae5f06dd91ab22e6710f09e1c1185425dc149d3dfd2ffc5a2",
+    "size": 494178,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_thanks.png",
+    "sha256": "8d71018305eb90760ac57de5fd130519f7312e330edba76b473fba52b7bacdc1",
+    "size": 24433,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/assets/cloudhub_white.png",
+    "sha256": "3f198bb6fc609eb91db00922304b96ca4f383ed72ad6b12167cdf056dc590708",
+    "size": 19278,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/reference.md",
+    "sha256": "eea008bb695e26bcc3758172ff9ca01c44a2410c073eecb7b3b4866e57085943",
+    "size": 32963,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/cloudhub/starter.html",
+    "sha256": "a1b38a481eb1f15dcc9c5b36457caf4095dc0ce9ad50892b41861c9ff8fd3892",
+    "size": 25882,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/fantasy-rainbow/reference.md",
+    "sha256": "a5b3082479338e471228e30d3c4d59d750402bc4771327fb1404211f1226fd53",
+    "size": 16311,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/fantasy-rainbow/starter.html",
+    "sha256": "9d0439791033fe6447bfbc5453fe3ed8ad90fb35e0e010124b7038c6ed21e4ac",
+    "size": 86073,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/homepage.png",
+    "sha256": "4924cb25328198c3240f350f954468a405e26274c2d3c7019c7548d918cecde2",
+    "size": 150373,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee-blue.png",
+    "sha256": "824084d654a9e4a004c99ace41f4a158af8e96982408491e89dd9beb3943c997",
+    "size": 8562,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee-thanks.png",
+    "sha256": "66912481aab85bbaab6ba3e8292c41c0ecc3413c8943f67a955b05eeaf7e63c3",
+    "size": 60850,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee-white.png",
+    "sha256": "87a2accd4145624c6341362fd71ab12f25938415cbd3304184b5401663a9a44c",
+    "size": 6194,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_ColorWhitedynamic.gif",
+    "sha256": "644ad57f690015a87d6fc9fff97547aca9ad376b67484dcdcae30fbd358608e5",
+    "size": 1525470,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_ColorWhitedynamic.gif.zip",
+    "sha256": "87548e41fb64cc44836c52b30897d212839c853a757dd984a8851245eecca9dd",
+    "size": 1086641,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_Colordynamic.gif",
+    "sha256": "cf5bf5a540bc5f51d3276a1b0ca786960980225c1d6357bae363434504483bfd",
+    "size": 1525470,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_catalogue.png",
+    "sha256": "37e5dfdd7de5952ec9ae661a6c69fd1c137e817baee86c1d5ba5a92da3444176",
+    "size": 161489,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_chapter.png",
+    "sha256": "048a1d61892023051e0f7f890229041cfb6a93298a91262f8a7ec2e0842d8e28",
+    "size": 105333,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/assets/kingdee_endpage.png",
+    "sha256": "e82d81aa70a106d758839f811663fd1b1410e6c3ad960a1613c0e1624e8c83c2",
+    "size": 78096,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/reference.md",
+    "sha256": "9bd1705f17670847d07d4ca880a64293c3ed584d294f1c51db26728027dac953",
+    "size": 27890,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/kingdee/starter.html",
+    "sha256": "6a2914fee26e3c8fe6fb08ca5b0b619c147761419e61a6e3661c33b6a7030933",
+    "size": 26927,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/molten-flow/cover.webp",
+    "sha256": "b655f22d8bddedc6bbfd591b00366d4f387e130adaf745d431d00cf2ef8b2ba3",
+    "size": 23974,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/molten-flow/effect.frag",
+    "sha256": "afa9a4e03c907c8168056fd79fad47147f0f1c7d7683d0099458fdd243b74230",
+    "size": 2629,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/molten-flow/reference.md",
+    "sha256": "e83ddf14625ef5a326b08ebb30a057e554c18131acdc9149a758fc12d61ac7fe",
+    "size": 5201,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/molten-flow/starter.html",
+    "sha256": "932244ccacb5d329bd36260f13078fd5661871370676ae0cf030cfa15d388732",
+    "size": 52706,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/shader-hero/LICENSE",
+    "sha256": "eeaaa26f5c65cb6dfebf1c098ac2375fdcdb497cebf105b0542f229482b106f4",
+    "size": 1076,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/shader-hero/reference.md",
+    "sha256": "f0e48ce8dc17bc5b0ded7105e289255d767f122d049c552cd518c8afceaaa9e3",
+    "size": 5324,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/shader-hero/starter.html",
+    "sha256": "ccacf75e9c7e954084cb00d191b53408a6deb10faeb252878f7c09eb9f35a140",
+    "size": 79073,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/stellar-vortex/cover.webp",
+    "sha256": "d2c53fd5883a17d9c95d00d3cda862e6c9e2dedc2a1335bdea9706d3eb949c1a",
+    "size": 134588,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/stellar-vortex/effect.frag",
+    "sha256": "25dd354a80767bf01fb7520a42e81f305ccb8ce808aa31572f5d90bfb6723d97",
+    "size": 3427,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/stellar-vortex/reference.md",
+    "sha256": "863c064f08dd04eaca7a5721cd75457b2e67dbce4c5d80896c5732c0374d0e13",
+    "size": 5556,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/themes/stellar-vortex/starter.html",
+    "sha256": "3021590594b87b5646dfa5a6cf80ad6bdc066a286b18ff5ae6516cf4a05e1709",
+    "size": 200999,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/vendor-manifest.json",
+    "sha256": "7fb502cbb11bb2e4d0d59623195efaa58d95ee9a51592e8dff44881670b63e57",
+    "size": 26720,
+    "mode": "100644"
+  },
+  {
+    "path": "registry-v2.json",
+    "sha256": "e4403f09426a73a1717a2eaf097e7aa13252926737a8145b8ed248a2aab7b061",
+    "size": 5498,
+    "mode": "100644"
+  },
+  {
+    "path": "registry.json",
+    "sha256": "3b033df6bad54d41358212fb3c7c1a41b5c46d66f24dc46429b4e5bfb704b01e",
+    "size": 6282,
+    "mode": "100644"
+  },
+  {
+    "path": "runtime-lock.json",
+    "sha256": "141600239882d83babad037d3dfadb3425b20e6997231eea410eff0266cbd410",
+    "size": 6978,
+    "mode": "100644"
+  },
+  {
+    "path": "scripts/update-registry-v2.mjs",
+    "sha256": "880e28dc5c7b43df889005f464d1075ababca57070d47c3cb2698bc304e9c259",
+    "size": 11452,
+    "mode": "100644"
+  },
+  {
+    "path": "scripts/vendor-manifest.py",
+    "sha256": "eaa3501cc2d98c1ec7012518a61e8889f3a7c618227802cf166f751b3ebe276c",
+    "size": 1376,
+    "mode": "100644"
+  },
+  {
+    "path": "scripts/vendor-runtimes.mjs",
+    "sha256": "b24bf8fdbb535a8d96be8b0a0b12104656b93df06130e738347a4380ac7de3a1",
+    "size": 20182,
+    "mode": "100644"
+  },
+  {
+    "path": "scripts/vendor.sh",
+    "sha256": "03b2199a7d307ee1094ceacda90f6ec1e58c0dd8bd970e2f37f1d1d479294db3",
+    "size": 7873,
+    "mode": "100755"
+  },
+  {
+    "path": "tests/mcp-events.test.mjs",
+    "sha256": "580eef2fd20d4133589dfd877d6ffee9f5b20e874f0bd720e9bbaf93d69005eb",
+    "size": 4730,
+    "mode": "100644"
+  },
+  {
+    "path": "tests/registry-integrity.test.mjs",
+    "sha256": "4500e1e73c7f210820abe41c974846b794c4c1aa4811a71d151c2f1727e8d2d4",
+    "size": 6259,
+    "mode": "100644"
+  },
+  {
+    "path": "tests/sync-smoke.mjs",
+    "sha256": "f9f3c47dc1c4c3c67150320dbff9d32343a9686f9fe4e621dc2ed9d08512d8df",
+    "size": 2118,
+    "mode": "100644"
+  }
+]

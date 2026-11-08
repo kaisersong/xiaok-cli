@@ -7,7 +7,8 @@ import { en } from '../../renderer/src/locales/en'
 it.each([zh, en])('uses localized repetition failure text for live and replay errors', locale => {
   const label = locale.chatShell.modelTextRepetition
   expect(typeof label).toBe('string')
-  expect(label.length).toBeGreaterThan(30)
+  expect(label.length).toBeGreaterThan(0)
+  if (locale === zh) expect(label).toBe('检测到重复输出，已停止')
   expect(sanitizeUserFacingErrorMessage('MODEL_TEXT_REPETITION_DETECTED', 'fallback', { modelTextRepetition: label })).toBe(label)
   expect(sanitizeUserFacingErrorMessage(new Error('MODEL_TEXT_REPETITION_DETECTED'), 'fallback', { modelTextRepetition: label })).toBe(label)
 })

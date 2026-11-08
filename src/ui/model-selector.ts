@@ -1,3 +1,4 @@
+import { normalizeEnhancedKeys } from './keyboard-protocol.js';
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import type { Config } from '../types.js';
@@ -188,7 +189,7 @@ export async function selectModel(
     };
 
     const onData = (data: Buffer) => {
-      const key = data.toString('utf8');
+      const key = normalizeEnhancedKeys(data).toString('utf8');
 
       if (key === '\x03' || key === '\x1b') {
         done(null);
