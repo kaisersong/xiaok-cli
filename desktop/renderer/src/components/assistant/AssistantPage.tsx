@@ -1,9 +1,9 @@
 import {AssistantSecureInputs} from '../security/AssistantSecureInputs';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAssistantInbox } from '../../hooks/useAssistantInbox';
 import { AssistantBriefConversation,AssistantInboxPanel } from './AssistantBriefConversation';
 import type { AttentionItem,AttentionAction } from '../../../../shared/assistant-inbox-contract';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ChevronDown, CircleDot, RefreshCw, Settings2, X } from 'lucide-react';
 import { api } from '../../api';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -18,13 +18,17 @@ export function AssistantPage() {
   const data = useAssistantWorkspace();
   const inbox = useAssistantInbox(data.overview?.profile.status);
   const navigate = useNavigate();
+  const location = useLocation();
   const openItem = async (item:AttentionItem) => { if(!item.threadId||!item.taskId)return; await api.ensureAssistantWorkThread({id:item.threadId,title:item.title,taskId:item.taskId});navigate(`/t/${item.threadId}`); };
   const startItem = async (item:AttentionItem) => {const started=await inbox.start({id:item.id,expectedRevision:item.revision,requestId:crypto.randomUUID()});if(started?.taskId)await openItem(started);};
   const actItem = (item:AttentionItem,action:AttentionAction['action']) => {void inbox.act({id:item.id,expectedRevision:item.revision,action,...(action==='snooze'?{until:Date.now()+3600000}:{})});};
   const controls={busy:inbox.busy,onStart:(item:AttentionItem)=>{void startItem(item).catch(()=>inbox.read());},onOpen:(item:AttentionItem)=>{void openItem(item).catch(()=>inbox.read());},onAct:actItem};
   const inboxPanel=<AssistantInboxPanel state={inbox.state} controls={controls} onRefresh={()=>{void inbox.refresh();}} initializing={inbox.initializing} error={inbox.error}/>;
+  const morningMessages=data.overview?.profile.status==='active'&&!data.errors.assistant?data.overview.morningMessages:undefined;
+  const testMessages=inbox.state?.testMessages;
+  const assistantMessages=useMemo(()=>[...(morningMessages??[]),...(testMessages??[])],[morningMessages,testMessages]);
   const assistantContent=<><AssistantSecureInputs/><AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
-  const hasAssistantMessages=Boolean(inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
+  const hasAssistantMessages=Boolean(assistantMessages.length||inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
 
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -52,10 +56,10 @@ export function AssistantPage() {
         {(inbox.initializing || inbox.state?.items.length) ? <p className="mt-0.5 truncate text-xs text-[var(--c-text-secondary)]">{inbox.initializing?t.assistantInbox.refreshing:t.assistantInbox.count(inbox.state?.items.length??0)}</p> : data.errors.assistant&&<p className="mt-0.5 truncate text-xs text-[var(--c-text-secondary)]">{t.assistant.unavailable}</p>}</div>
       <button type="button" aria-label={labels.expand} aria-expanded={expanded} onClick={() => setExpanded(value => !value)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><Settings2 size={14}/><ChevronDown size={12}/></button>
     </section>
-    {expanded && <div role="dialog" aria-label={labels.expand} className="absolute inset-x-5 top-full mx-auto max-h-[65vh] max-w-[1000px] overflow-y-auto rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-page)] shadow-xl"><div className="sticky top-0 z-10 flex justify-end bg-[var(--c-bg-page)] px-3 py-2"><button type="button" aria-label={labels.collapse} onClick={() => setExpanded(false)} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={16}/></button></div>{inboxPanel}<AssistantWorkspaceContent data={data} onPrepareSuggestion={prepare} iconOnly hideSuggestions /></div>}
+    {expanded && <div role="dialog" aria-label={labels.expand} className="absolute inset-x-5 top-full mx-auto max-h-[65vh] max-w-[1000px] overflow-y-auto rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-page)] shadow-xl"><div className="sticky top-0 z-10 flex justify-end bg-[var(--c-bg-page)] px-3 py-2"><button type="button" aria-label={labels.collapse} onClick={() => setExpanded(false)} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={16}/></button></div>{inboxPanel}<div className="px-5 py-3"><button type="button" disabled={inbox.busy} className="text-xs text-[var(--c-accent)] disabled:opacity-40" onClick={()=>{void inbox.testMessage().then(()=>setExpanded(false));}}>{t.assistantInbox.testMessage}</button></div><AssistantWorkspaceContent data={data} onPrepareSuggestion={prepare} iconOnly hideSuggestions /></div>}
   </div>;
   return <div data-testid="assistant-page" className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]">
     {!ready ? <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--c-text-secondary)]"><p role={failed ? 'alert' : 'status'}>{failed ? labels.loadFailed : labels.loading}</p>{failed && <button type="button" className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2" onClick={() => void load()}><RefreshCw size={14}/>{t.assistant.refreshStatus}</button>}</div>
-      : <ChatShell threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} draftRequest={draftRequest} hideObservationControls />}
+      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningMessages?.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} assistantMessages={assistantMessages} draftRequest={draftRequest} hideObservationControls />}
   </div>;
 }

@@ -7,6 +7,7 @@ import type { AssistantOutboxService } from './assistant-outbox-service.js';
 export function registerAssistantInboxIpc(ipc:IpcHandleRegistrar,service:AssistantInboxService,outbox:AssistantOutboxService,authorize:(event:unknown)=>boolean){
  const registrar:IpcHandleRegistrar={handle(channel,listener){ipc.handle(channel,(event,...args)=>{if(!authorize(event))throw Error('assistant_user_only');return listener(event,...args);});}};
  const base={registrar,payloadMode:'tuple' as const,sourceFile:'desktop/electron/assistant-inbox-ipc.ts',rolloutRound:20 as const};
+ registerIpcHandler({...base,channel:'desktop:assistantInbox:testMessage',input:z.tuple([]),output:ASSISTANT_STATE_SCHEMA,riskTags:['fs-write-userData'],handler:async()=>service.testMessage('user')});
  registerIpcHandler({...base,channel:'desktop:assistantInbox:state',input:z.tuple([]),output:ASSISTANT_STATE_SCHEMA,riskTags:['fs-read'],handler:async()=>service.state()});
  registerIpcHandler({...base,channel:'desktop:assistantInbox:today',input:z.tuple([]),output:ASSISTANT_STATE_SCHEMA,riskTags:['network','fs-write-userData'],handler:async()=>service.ensureToday('user')});
  registerIpcHandler({...base,channel:'desktop:assistantInbox:refresh',input:z.tuple([]),output:ASSISTANT_STATE_SCHEMA,riskTags:['network','fs-write-userData'],handler:async()=>{await service.refresh('user');return service.state();}});

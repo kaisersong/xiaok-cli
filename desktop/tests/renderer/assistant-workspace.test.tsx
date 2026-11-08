@@ -5,10 +5,11 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { AssistantWorkspaceContent } from '../../renderer/src/components/assistant/AssistantWorkspaceContent';
 import { useAssistantWorkspace } from '../../renderer/src/hooks/useAssistantWorkspace';
 function AssistantPage() { return <AssistantWorkspaceContent data={useAssistantWorkspace()} onPrepareSuggestion={text => window.dispatchEvent(new CustomEvent('assistant-test-draft', { detail: text }))} />; }
-const h = vi.hoisted(() => ({ overview: vi.fn(), schedules: vi.fn(), history: vi.fn(), automation: vi.fn(), activate: vi.fn(), unsubscribe: vi.fn(), due: undefined as undefined | (() => void) }));
+const h = vi.hoisted(() => ({ overview: vi.fn(), schedules: vi.fn(), history: vi.fn(), automation: vi.fn(), activate: vi.fn(), unsubscribe: vi.fn(), changed: undefined as undefined | (() => void), stopAssistant:vi.fn(), due: undefined as undefined | (() => void) }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => ({
   getAssistantOverview: h.overview, getScheduledTasks: h.schedules,
   getAutomationRunHistory: h.history, getAutomationOverviewSnapshot: h.automation,
+  onAssistantInboxChanged:(handler:()=>void)=>{h.changed=handler;return h.stopAssistant;},
   activateAssistant: h.activate, onScheduledTaskDue: (handler: () => void) => { h.due = handler; return h.unsubscribe; },
 }) }));
 const profile = { id: 'default-personal-assistant', status: 'active', locale: 'zh', timeZone: 'Asia/Shanghai', eveningTime: '22:30', morningTime: '08:30', workdays: [1,2,3,4,5], quietHours: { start: '23:00', end: '08:00' }, dataScopes: ['tasks'], createdAt: 1, updatedAt: 1 };
@@ -21,7 +22,7 @@ beforeEach(() => {
   localStorage.clear(); localStorage.setItem('xiaok:locale', 'zh');
   h.overview.mockReset().mockResolvedValue(overview); h.schedules.mockReset().mockResolvedValue([schedule]);
   h.history.mockReset().mockResolvedValue([{ id: 'run1', automationKind: 'agent_task', actionId: 'ai-daily', title: '原有 AI 动态', status: 'success', startedAt: 100 }]);
-  h.automation.mockReset().mockResolvedValue(automation); h.activate.mockReset(); h.unsubscribe.mockReset(); h.due = undefined;
+  h.automation.mockReset().mockResolvedValue(automation); h.activate.mockReset(); h.unsubscribe.mockReset(); h.due = undefined; h.changed=undefined;h.stopAssistant.mockReset();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 it('renders real suggestions and existing schedules without creating or activating work', async () => {
@@ -104,3 +105,5 @@ it('keeps the top focused when there are no suggestions, hiding repeated copy, s
  expect(screen.getByText('晚间 22:30 整理，早上 08:30 给出建议')).toBeVisible();
  expect(screen.getByRole('button',{name:'暂停小K助理'})).toBeVisible();
 });
+
+it('refreshes completed morning suggestions from the assistant event and cleans its listener',async()=>{const view=page();await screen.findByText('跟进发布评审');h.overview.mockResolvedValue({...overview,suggestions:[{id:'morning-new',title:'晨间运行的新建议',summary:'safe'}]});act(()=>h.changed?.());await screen.findByText('晨间运行的新建议');const calls=h.overview.mock.calls.length;view.unmount();expect(h.stopAssistant).toHaveBeenCalledTimes(1);act(()=>h.changed?.());expect(h.overview).toHaveBeenCalledTimes(calls);});

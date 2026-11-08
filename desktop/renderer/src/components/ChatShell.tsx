@@ -1,3 +1,5 @@
+import type {AssistantMessage} from '../../../shared/assistant-inbox-contract';
+import {mergeAssistantMessages} from '../lib/assistant-message-timeline';
 import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
 import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
 import {pendingTaskQuestion} from '../lib/pending-task-question';
@@ -265,12 +267,15 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, draftRequest, hideObservationControls }: {
+export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls }: {
   threadId?: string;
   emptyContent?: React.ReactNode;
   conversationHeader?: React.ReactNode;
   assistantContent?: React.ReactNode;
   assistantHasMessages?: boolean;
+  assistantMessages?:AssistantMessage[];
+  assistantFocusKey?: string;
+  onAssistantFocusHandled?:()=>void;
   draftRequest?: { id: number; text: string };
   hideObservationControls?: boolean;
 } = {}) {
@@ -309,6 +314,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const olderHistoryRef = useRef<{ remaining: string[]; loading: boolean }>({ remaining: [], loading: false });
   const [olderHistory, setOlderHistory] = useState({ remaining: 0, loading: false, error: '' });
+  const assistantTimeline=useMemo(()=>taskId===ASSISTANT_CHAT_THREAD&&assistantMessages?mergeAssistantMessages(messages,assistantMessages):messages,[taskId,messages,assistantMessages]);
   const [streamingText, setStreamingText] = useState('');
   const [uiPreviews, setUiPreviews] = useState<Array<{ toolUseId: string; sourceTaskId: string; title: string; content: string }>>([]);
   const clearUiPreviews = useCallback(() => {
@@ -1020,7 +1026,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean, historicalOnly = false): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; createdAt?:number; materials?: DisplayFileRef[] }, addPromptAsUser: boolean, historicalOnly = false): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
@@ -1039,6 +1045,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
         content: formatUserMessageContent(display.displayPrompt, snapshot.materials, t.chatShell.attachmentLabel),
+        createdAt:snapshot.createdAt,
       });
     }
 
@@ -1392,7 +1399,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
               if (recoveredFromTaskId) allMessages.push({ id: `history-recovery-${tid}`, role: 'assistant', content: t.chatShell.historyRecovered(recoveredFromTaskId) });
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
-              const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
+              const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt || taskId===ASSISTANT_CHAT_THREAD));
               const { msgs: replayMsgs, result: replayResult, events: replayEvents, toolStepsMsgId: replayToolStepsMsgId } = replaySnapshot(
                 { ...snapshot, taskId: snapshot.taskId || tid },
                 addPrompt,
@@ -1650,6 +1657,14 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       const release = retainObserver(source, api.subscribeTask(newTaskId, event => handleEvent(event, source)));
       if (!current()) { release(); return false; }
       promoteSource(source, release, false);
+      if(taskId===ASSISTANT_CHAT_THREAD){
+        // Main's task creation time is the shared live/replay timeline anchor.
+        // Metadata failure leaves an un-timed pending turn; never invent now().
+        void api.recoverTask(newTaskId).then(({snapshot})=>{
+          if(liveRenderScope.current!==renderScope||snapshot?.taskId!==newTaskId||!Number.isFinite(snapshot.createdAt))return;
+          setMessages(previous=>previous.map(message=>message.id===userMsg.id?{...message,createdAt:snapshot.createdAt}:message));
+        }).catch(()=>{});
+      }
     } catch (e) {
       if (!current()) return false;
       const displayMessage = sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
@@ -2081,11 +2096,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         conversationHeader={conversationHeader}
         assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
         assistantHasMessages={assistantHasMessages}
+        assistantFocusKey={assistantFocusKey}
+        onAssistantFocusHandled={onAssistantFocusHandled}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         thread={thread}
-        messages={messages}
+        messages={assistantTimeline}
         historyContent={olderHistory.remaining > 0 ? <div className="space-y-2 text-center">
           <button type="button" disabled={olderHistory.loading} onClick={() => void loadOlderHistory()}
             className="cursor-pointer rounded-lg px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] disabled:cursor-wait disabled:opacity-60">

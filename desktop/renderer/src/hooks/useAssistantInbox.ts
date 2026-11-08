@@ -9,6 +9,7 @@ export function useAssistantInbox(profileStatus?:string){
  useEffect(()=>{const owner=life.current,api=getDesktopApi();if(!api?.ensureAssistantToday||profileStatus==='paused'||profileStatus==='needs_consent')return;setInitializing(true);void api.ensureAssistantToday().then(()=>{if(owner.active&&life.current===owner)read();}).catch(()=>{if(owner.active&&life.current===owner)setError('failed');}).finally(()=>{if(owner.active&&life.current===owner)setInitializing(false);});},[profileStatus,read]);
  const mutate=useCallback(async<T,>(run:()=>Promise<T>):Promise<T|undefined>=>{const owner=life.current;if(!owner.active||owner.mutation)return;owner.mutation=true;setBusy(true);setError(null);try{return await run();}catch(e){if(owner.active&&life.current===owner){const text=e instanceof Error?e.message:'';setError(text.match(/\b(?:assistant|mail)_[a-z_]+\b/)?.[0]??'failed');}return;}finally{owner.mutation=false;if(owner.active&&life.current===owner){setBusy(false);read();}}},[read]);
  return {state,error,busy,initializing,clearError:()=>setError(null),read,
+ testMessage:()=>mutate(()=>getDesktopApi()!.testAssistantMessage()),
  refresh:()=>mutate(()=>getDesktopApi()!.refreshAssistantSources()),
  start:(input:AttentionStart)=>mutate<AttentionItem>(()=>getDesktopApi()!.startAssistantItem(input)),
  act:(input:AttentionAction)=>mutate(()=>getDesktopApi()!.actOnAssistantItem(input)),

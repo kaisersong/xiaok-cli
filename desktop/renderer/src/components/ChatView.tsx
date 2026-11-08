@@ -1,3 +1,4 @@
+import type {AssistantMessage} from '../../../shared/assistant-inbox-contract';
 import { A2uiInlineCard } from './a2ui/A2uiInlineCard';
 import { inlineUiKey, isInlineUiArtifact, separateInlineUiOutputs } from '../lib/inline-ui';
 import type {InterruptedTask} from '../lib/interrupted-task';
@@ -190,8 +191,10 @@ export interface ComputerUseActionData {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card' | 'ui_card';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card' | 'ui_card' | 'assistant_message';
   content: string;
+  createdAt?:number;
+  assistantMessage?:AssistantMessage;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
@@ -278,6 +281,8 @@ interface ChatViewProps {
   emptyContent?: ReactNode;
   assistantContent?: ReactNode;
   assistantHasMessages?: boolean;
+  assistantFocusKey?: string;
+  onAssistantFocusHandled?:()=>void;
   conversationHeader?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
@@ -310,7 +315,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ uiPreviews = [],
-  emptyContent, conversationHeader, assistantContent, assistantHasMessages, historyContent,
+  emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantFocusKey, onAssistantFocusHandled, historyContent,
   thread, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
@@ -320,9 +325,11 @@ export function ChatView({ uiPreviews = [],
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
+  const tailStart=messages.findLastIndex(m=>m.role!=='assistant_message')+1;
+  const trailingAssistantMessages=messages.slice(tailStart);
   const bodyMessages = useMemo(() => {
     const seen = new Set(messages.flatMap(message => message.uiCard?.artifact ? [inlineUiKey(message.uiCard.artifact)] : []));
-    return messages.flatMap(message => {
+    return messages.slice(0,tailStart).flatMap(message => {
       const fallback: ChatMessage[] = [];
       if (message.role === 'result_card') for (const artifact of message.result?.artifacts ?? []) {
         const key = inlineUiKey(artifact);
@@ -332,7 +339,7 @@ export function ChatView({ uiPreviews = [],
       }
       return [...fallback, message];
     });
-  }, [messages]);
+  }, [messages,tailStart]);
   const displayedUiKeys = new Set(bodyMessages.flatMap(message => message.uiCard?.artifact ? [inlineUiKey(message.uiCard.artifact)] : []));
   const standaloneInlineArtifacts = (result?.artifacts ?? []).filter(artifact => {
     const key = inlineUiKey(artifact);
@@ -481,6 +488,16 @@ export function ChatView({ uiPreviews = [],
     setShowScrollToBottom(false);
   }, [messages, streamingText, status, showEntry]);
 
+  const handledAssistantFocus=useRef(new Set<string>());
+  useEffect(()=>{
+    if(!assistantFocusKey||handledAssistantFocus.current.has(assistantFocusKey))return;
+    const scroller=scrollRef.current,targets=scroller?.querySelectorAll<HTMLElement>('[data-assistant-focus-target]'),target=targets?.[targets.length-1];
+    if(!scroller||!target)return;
+    handledAssistantFocus.current.add(assistantFocusKey);historyAnchorRef.current=null;isAtBottomRef.current=false;
+    scroller.scrollTo({top:Math.max(0,scroller.scrollTop+target.getBoundingClientRect().top-scroller.getBoundingClientRect().top-scroller.clientTop),behavior:'instant' as ScrollBehavior});
+    setShowScrollToBottom(true);onAssistantFocusHandled?.();
+  },[assistantFocusKey,assistantContent,assistantHasMessages,messages,status,onAssistantFocusHandled]);
+
   // Approvals can arrive after the last text chunk inside the stream throttle.
   // Follow them only for readers already following the latest output; keep
   // their draft/focus and a deliberately scrolled-back position unchanged.
@@ -553,7 +570,7 @@ export function ChatView({ uiPreviews = [],
                       <SaveToKbButton text={msg.content} />
                     </div>
                   </>
-                ) : msg.role === 'ui_card' ? (
+                ) : msg.role === 'assistant_message' && msg.assistantMessage ? (<AssistantMessageBubble message={msg.assistantMessage}/>) : msg.role === 'ui_card' ? (
                   <A2uiInlineCard artifact={msg.uiCard?.artifact} preview={status === 'running' ? uiPreviews.find(preview =>
                     preview.toolUseId === msg.uiCard?.previewToolUseId && (preview.sourceTaskId ?? thread.currentTaskId) === msg.uiCard?.sourceTaskId) : undefined} />
                 ) : msg.role === 'progress' ? (
@@ -718,6 +735,7 @@ export function ChatView({ uiPreviews = [],
               </div>
             )}
 
+            {trailingAssistantMessages.map(message=>message.assistantMessage?<AssistantMessageBubble key={message.id} message={message.assistantMessage}/>:null)}
             <div />
           </div>
         </div>}
@@ -1042,3 +1060,5 @@ function ResultCard({
     </div>
   );
 }
+
+function AssistantMessageBubble({message}:{message:AssistantMessage}){return <article data-testid="assistant-proactive-message" data-message-id={message.id} data-assistant-focus-target={message.kind==='morning'?true:undefined} className="max-w-[663px] text-sm leading-relaxed text-[var(--c-text-primary)]"><div className="mb-2 flex items-center gap-3 text-xs text-[var(--c-text-tertiary)]"><span>{message.title}</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleString()}</time></div><div className="whitespace-pre-wrap break-words select-text">{message.text}</div></article>;}

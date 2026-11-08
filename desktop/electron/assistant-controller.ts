@@ -1,3 +1,4 @@
+import type {AssistantMessage} from '../shared/assistant-inbox-contract.js';
 import {captureLoopProducerValue} from './loop-scan-publication-body.js';
 import {publicationFields,publicationIdentity} from './loop-publication-attempt.js';
 import {canonicalVerificationJson as canonicalJson} from '../../src/runtime/verification/protocol.js';
@@ -36,6 +37,7 @@ export interface AssistantStatusService {
 
 export interface AssistantOverview {
   profile: AssistantProfile;
+  morningMessages: AssistantMessage[];
   suggestions: Array<{ id: string; title: string; summary: string }>;
   pendingCandidateCount: number;
   candidates: AssistantCandidate[];
@@ -49,6 +51,7 @@ export interface AssistantControllerOptions {
   kbStore: Pick<KbStore, 'getCollection' | 'getSource' | 'addSource' | 'ensureAssistantSource'>;
   resolveProjectCwd?: (projectId: string) => string | undefined;
   listMorningSuggestions?: () => Array<{ id: string; title: string; summary: string }> | Promise<Array<{ id: string; title: string; summary: string }>>;
+  readMorningConversation?:()=>Promise<{messages:AssistantMessage[];suggestions:Array<{id:string;title:string;summary:string}>;current():boolean}>;
   assistantPublication?: {acceptAssistantCandidate(input:{candidateId:string;collectionId?:string;requestSource:'user'}):Promise<AssistantCandidate>;recoverAssistantCandidate(input:{candidateId:string;requestSource:'scheduler'}):Promise<AssistantCandidate>};
   now?: () => number;
 }
@@ -74,9 +77,14 @@ export class AssistantController {
     const { profile } = this.options.assistantService.bootstrap();
     const candidates = this.options.candidates.listAssistantCandidates();
     const pending = candidates.filter(candidate => candidate.status === 'pending');
+    const conversation=profile.status==='active'&&this.options.readMorningConversation?await this.options.readMorningConversation():undefined;
+    const suggestions=conversation?conversation.suggestions:(await this.options.listMorningSuggestions?.()??[]);
+    const currentProfile=this.options.assistantService.bootstrap().profile;
+    const admitted=currentProfile.status==='active'&&JSON.stringify(currentProfile)===JSON.stringify(profile)&&(!conversation||conversation.current());
     return {
-      profile,
-      suggestions: (await this.options.listMorningSuggestions?.() ?? []).slice(0, 3),
+      profile:currentProfile,
+      morningMessages:admitted?(conversation?.messages??[]):[],
+      suggestions: !conversation||admitted?suggestions.slice(0,3):[],
       pendingCandidateCount: pending.length,
       candidates,
     };
