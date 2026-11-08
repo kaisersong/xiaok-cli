@@ -11,7 +11,7 @@ mkdirSync(join(output,'app'),{recursive:true,mode:0o700});mkdirSync(join(output,
 // Copy the exact executing Node and native SQLite ABI together. The final package
 // inventory freezes all bytes; this builder neither signs nor installs anything.
 copyFileSync(process.execPath,join(output,'bin/node'));
-const verificationEntries={'source-lock-cleanup':'source-lock-cleanup-entry.ts',controller:'controller-entry.ts',receiver:'receiver-entry.ts',deployment:'deployment-command-entry.ts','root-broker':'root-broker-entry.ts','controller-transport':'controller-transport-entry.ts','receiver-clock-transport':'receiver-clock-transport-entry.ts'};
+const verificationEntries={'root-nmp-custody':'root-nmp-custody-entry.ts','source-lock-cleanup':'source-lock-cleanup-entry.ts',controller:'controller-entry.ts',receiver:'receiver-entry.ts',deployment:'deployment-command-entry.ts','root-broker':'root-broker-entry.ts','controller-transport':'controller-transport-entry.ts','receiver-clock-transport':'receiver-clock-transport-entry.ts'};
 const entries={...Object.fromEntries(Object.entries(verificationEntries).map(([name,source])=>[name,join('src/runtime/verification',source)])),egress:'src/runtime/sol-pi/egress-entry.ts',participant:'src/runtime/sol-pi/participant-entry.ts'};
 for(const [name,source] of Object.entries(entries))await build({entryPoints:[join(root,source)],bundle:true,platform:'node',target:'node24',format:'cjs',outfile:join(output,'app',name+'.cjs'),external:['better-sqlite3'],define:{'import.meta.url':'__xiaokModuleUrl'},banner:{js:"const __xiaokModuleUrl = require('node:url').pathToFileURL(__filename).href;"},logLevel:'silent'});
 const packages=['better-sqlite3'];

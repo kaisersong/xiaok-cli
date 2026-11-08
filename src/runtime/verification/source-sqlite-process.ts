@@ -16,7 +16,7 @@ import {ARTIFACT_WORKSPACE_QUERIES,type ArtifactWorkspaceQueryId} from './artifa
 import {capturedSqliteEncoding,encodeCapturedSqliteCell,type CapturedSqliteCell} from './source-sqlite-cell.js';
 
 export interface SqliteCustodySource {
- readonly snapshotFormat:'session-sqlite-v1'|'loop-sqlite-v1'|'goal-sqlite-v1'|'writer-lock-sqlite-v1'|'codex-native-sqlite-v1'|'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'|'timed-actions-sqlite-v1'|'harness-budget-sqlite-v1'|'broker-room-sqlite-v1';
+ readonly snapshotFormat:'session-sqlite-v1'|'loop-sqlite-v1'|'goal-sqlite-v1'|'writer-lock-sqlite-v1'|'codex-native-sqlite-v1'|'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'|'timed-actions-sqlite-v1'|'harness-budget-sqlite-v1'|'broker-room-sqlite-v1'|'root-nmp-ledger-v1';
  readonly directory:Readonly<{canonicalPath:string;device:string;inode:string}>;
  readonly database:Readonly<{basename:string;device:string;inode:string}>;
  readonly sidecars:Readonly<{journal:string;wal:string;shm:string}>;

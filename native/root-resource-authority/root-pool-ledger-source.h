@@ -8,6 +8,7 @@ typedef struct nr_ledger_source {
  struct stat facts[NR_LEDGER_ANCESTORS];char names[PATH_MAX];size_t offsets[NR_LEDGER_ANCESTORS];
 } nr_ledger_source;
 static _Thread_local nr_ledger_source *nr_ledger_sources;
+static void nr_ledger_hold_source_disposed(nr_ledger_source *r);
 static int nr_ledger_sidecars(nr_session *s){
  const char *names[]={"root-resource-v1.sqlite-journal","root-resource-v1.sqlite-wal","root-resource-v1.sqlite-shm"};struct stat st;
  for(size_t i=0;i<sizeof(names)/sizeof(*names);i++){if(!fstatat(s->directory,names[i],&st,AT_SYMLINK_NOFOLLOW)||errno!=ENOENT)return 0;}return 1;
@@ -43,11 +44,11 @@ static int nr_ledger_source_release(nr_ledger_source *r){
  if(good)s->closed=1;return good;
 }
 static void nr_ledger_source_remove(nr_ledger_source *r){nr_ledger_source **p=&nr_ledger_sources;while(*p&&*p!=r)p=&(*p)->next;if(*p)*p=r->next;}
-static void nr_ledger_source_cleanup(void *raw){nr_ledger_source *r=raw;if(nr_ledger_source_release(r)){nr_ledger_source_remove(r);free(r);}}
+static void nr_ledger_source_cleanup(void *raw){nr_ledger_source *r=raw;if(nr_ledger_source_release(r)){nr_ledger_hold_source_disposed(r);nr_ledger_source_remove(r);free(r);}}
 static int nr_ledger_source_done(napi_env env,nr_ledger_source *r){
  int good=nr_ledger_source_release(r);
  if(r->unknown||r->view.unknown)return 0;
- if(good&&napi_remove_env_cleanup_hook(env,nr_ledger_source_cleanup,r)==napi_ok){nr_ledger_source_remove(r);free(r);return 1;}
+ if(good&&napi_remove_env_cleanup_hook(env,nr_ledger_source_cleanup,r)==napi_ok){nr_ledger_hold_source_disposed(r);nr_ledger_source_remove(r);free(r);return 1;}
  r->unknown=1;return 0;
 }
 static int nr_ledger_existing_path(nr_session *s){
@@ -76,25 +77,32 @@ static napi_value close_root_pool_ledger_source(napi_env env,napi_callback_info 
  for(nr_ledger_source *r=nr_ledger_sources,*next;r;r=next){next=r->next;if(r->env==env&&!nr_ledger_source_done(env,r))good=0;}
  if(!good)return fail(env,"ROOT_LEDGER_CLOSE_UNCONFIRMED");napi_value out;napi_get_undefined(env,&out);return out;
 }
-static napi_value capture_existing_root_pool_ledger(napi_env env,napi_callback_info info){
- napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- if(__builtin_available(macOS 12.3,*)){}else return fail(env,"ROOT_LEDGER_RUNTIME_UNSUPPORTED");
- for(nr_ledger_source *old=nr_ledger_sources;old;old=old->next)if(old->env==env)return fail(env,"ROOT_LEDGER_SOURCE_HELD");
- nr_ledger_source *r=calloc(1,sizeof(*r));if(!r)return fail(env,"ROOT_LEDGER_ALLOCATION_FAILED");
+static int nr_ledger_existing_open(napi_env env,nr_ledger_source **slot,const char **error){
+ *slot=NULL;
+ if(__builtin_available(macOS 12.3,*)){}else {*error="ROOT_LEDGER_RUNTIME_UNSUPPORTED";return 0;}
+ for(nr_ledger_source *old=nr_ledger_sources;old;old=old->next)if(old->env==env){*error="ROOT_LEDGER_SOURCE_HELD";return 0;}
+ nr_ledger_source *r=calloc(1,sizeof(*r));if(!r){*error="ROOT_LEDGER_ALLOCATION_FAILED";return 0;}
  r->env=env;r->probe=-1;r->view.directory=r->view.lock_fd=-1;r->view.birth_pid=getpid();r->view.owner_env=env;r->view.ledger_source=r;
  for(int i=0;i<NR_LEDGER_ANCESTORS;i++)r->fds[i]=-1;
  /* Strong row and cleanup exist before the first OS/SQLite SDK operation. */
- if(napi_add_env_cleanup_hook(env,nr_ledger_source_cleanup,r)!=napi_ok){free(r);return fail(env,"ROOT_LEDGER_CUSTODY_UNAVAILABLE");}r->next=nr_ledger_sources;nr_ledger_sources=r;
- nr_session *s=&r->view;const char *error="ROOT_LEDGER_SOURCE_UNCONFIRMED";nr_ledger_bytes bytes={0};
+ if(napi_add_env_cleanup_hook(env,nr_ledger_source_cleanup,r)!=napi_ok){free(r);*error="ROOT_LEDGER_CUSTODY_UNAVAILABLE";return 0;}r->next=nr_ledger_sources;nr_ledger_sources=r;*slot=r;
+ nr_session *s=&r->view;*error="ROOT_LEDGER_SOURCE_UNCONFIRMED";
  int good=nr_ledger_existing_path(s)&&nr_ledger_existing_directories(r);
- if(!good&&errno==ENOENT)error="ROOT_LEDGER_SOURCE_MISSING";
- if(good){s->lock_fd=openat(s->directory,"issuer.lock",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);good=s->lock_fd>=0&&regular(s->lock_fd,&s->lock_identity);if(!good&&errno==ENOENT)error="ROOT_LEDGER_SOURCE_MISSING";}
- if(good&&flock(s->lock_fd,LOCK_EX|LOCK_NB)){good=0;error=(errno==EWOULDBLOCK||errno==EAGAIN)?"ROOT_LEDGER_ISSUER_BUSY":"ROOT_LEDGER_SOURCE_UNCONFIRMED";}
- if(good){r->probe=openat(s->directory,"root-resource-v1.sqlite",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);good=r->probe>=0&&regular(r->probe,&s->database_identity);if(!good&&errno==ENOENT)error="ROOT_LEDGER_SOURCE_MISSING";}
- if(good&&!nr_ledger_sidecars(s)){good=0;error="ROOT_LEDGER_RECOVERY_REQUIRED";}
+ if(!good&&errno==ENOENT)*error="ROOT_LEDGER_SOURCE_MISSING";
+ if(good){s->lock_fd=openat(s->directory,"issuer.lock",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);good=s->lock_fd>=0&&regular(s->lock_fd,&s->lock_identity);if(!good&&errno==ENOENT)*error="ROOT_LEDGER_SOURCE_MISSING";}
+ if(good&&flock(s->lock_fd,LOCK_EX|LOCK_NB)){good=0;*error=(errno==EWOULDBLOCK||errno==EAGAIN)?"ROOT_LEDGER_ISSUER_BUSY":"ROOT_LEDGER_SOURCE_UNCONFIRMED";}
+ if(good){r->probe=openat(s->directory,"root-resource-v1.sqlite",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);good=r->probe>=0&&regular(r->probe,&s->database_identity);if(!good&&errno==ENOENT)*error="ROOT_LEDGER_SOURCE_MISSING";}
+ if(good&&!nr_ledger_sidecars(s)){good=0;*error="ROOT_LEDGER_RECOVERY_REQUIRED";}
  char path[PATH_MAX];if(good)good=snprintf(path,sizeof(path),"%s/root-resource-v1.sqlite",s->path)<(int)sizeof(path);
  if(good)good=sqlite3_open_v2(path,&s->db,SQLITE_OPEN_READONLY|SQLITE_OPEN_NOFOLLOW,NULL)==SQLITE_OK&&
   sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)==SQLITE_OK&&sqlite3_db_config(s->db,SQLITE_DBCONFIG_TRUSTED_SCHEMA,0,NULL)==SQLITE_OK&&current(s);
+ return good;
+}
+static napi_value capture_existing_root_pool_ledger(napi_env env,napi_callback_info info){
+ napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
+ nr_ledger_source *r=NULL;const char *error="ROOT_LEDGER_SOURCE_UNCONFIRMED";
+ int good=nr_ledger_existing_open(env,&r,&error);if(!r)return fail(env,error);
+ nr_session *s=&r->view;nr_ledger_bytes bytes={0};
  if(good)good=nr_ledger_capture(env,s,"existing-ordinary-readonly",&bytes,&error);
  if(!nr_ledger_source_done(env,r)){
   const char *primary=good?"ROOT_LEDGER_CLOSE_UNCONFIRMED":error;nr_ledger_clear(&bytes);
@@ -103,3 +111,5 @@ static napi_value capture_existing_root_pool_ledger(napi_env env,napi_callback_i
  }
  if(!good){nr_ledger_clear(&bytes);return fail(env,error);}return nr_ledger_projection(env,&bytes);
 }
+
+#include "root-pool-ledger-hold.h"
