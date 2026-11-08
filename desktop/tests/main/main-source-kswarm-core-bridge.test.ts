@@ -7,6 +7,8 @@ const fixtureRoot=join(tmpdir(),'xiaok-source-bridge-fixture');
 const f=vi.hoisted(()=>({events:[] as string[],scope:{profileId:'profile',workspaceId:'workspace'},user:{} as object,realm:{seal(){f.events.push('realm-seal');}},core:{} as object,runtime:{} as object,qualified:true,coreFault:false,corePromise:Promise.resolve({}) as Promise<object>,coreCalls:[] as object[],onLocal:undefined as (()=>void)|undefined}));
 vi.mock('../../electron/root-resource-production-qualification.js',()=>({ORIGINAL_PRODUCTION_ROOT_RESOURCE_QUALIFIED:false,readOriginalProductionRootResourceQualification:()=>({qualified:f.qualified})}));
 vi.mock('../../electron/main-dsh-bootstrap-authority.js',()=>({createMainDshBootstrapAuthority:()=>f.realm,
+ async joinOriginalMainDshServiceComponent(){},
+ assertOptionalOriginalMainDshServiceComponent:()=>null,
  prepareOriginalMainDshCoreInfrastructure(realm:object){expect(realm).toBe(f.realm);f.events.push('core-prepare');return f.core;},
  async startOriginalMainDshCoreInfrastructure(core:object){expect(core).toBe(f.core);f.events.push('core-start');if(f.coreFault)throw undefined;},
  async closeOriginalMainDshCoreInfrastructure(core:object){expect(core).toBe(f.core);f.events.push('core-close');},
