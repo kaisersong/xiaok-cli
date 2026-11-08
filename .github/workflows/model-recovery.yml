@@ -17,6 +17,10 @@ on:
       - 'tests/e2e/kimi-error-recovery*'
       - 'scripts/diagnose-kimi-wire.mjs'
       - 'tests/scripts/kimi-wire-diagnostic.test.mjs'
+      - 'tests/e2e/provider-errors*'
+      - 'tests/ai/adapters/openai-provider-errors.test.ts'
+      - 'src/commands/chat-model-recovery.ts'
+      - 'src/commands/chat.ts'
       - '.github/workflows/model-recovery.yml'
   pull_request:
     paths:
@@ -34,6 +38,10 @@ on:
       - 'tests/e2e/kimi-error-recovery*'
       - 'scripts/diagnose-kimi-wire.mjs'
       - 'tests/scripts/kimi-wire-diagnostic.test.mjs'
+      - 'tests/e2e/provider-errors*'
+      - 'tests/ai/adapters/openai-provider-errors.test.ts'
+      - 'src/commands/chat-model-recovery.ts'
+      - 'src/commands/chat.ts'
       - '.github/workflows/model-recovery.yml'
   workflow_dispatch: {}
 permissions:
@@ -61,6 +69,11 @@ jobs:
         run: >
           npm run test:sandbox:run --
           .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ai/adapters/openai-provider-errors.test.js
+          .test-dist/tests/ai/runtime/model-failure.test.js
+          .test-dist/tests/ai/runtime/model-failure-runtime.test.js
+          .test-dist/tests/ai/runtime/runtime-facade.test.js
+          .test-dist/tests/ai/runtime/model-stream-integration.test.js
           .test-dist/tests/ai/providers/registry.test.js
           .test-dist/tests/ai/providers/control-plane.test.js
           .test-dist/tests/ai/providers/normalize.test.js
@@ -83,3 +96,17 @@ jobs:
           .test-dist/tests/ai/runtime/provider-conversation-authorization.test.js
           .test-dist/tests/ai/runtime/kimi-rollback-policy.test.js
           .test-dist/tests/ai/runtime/session-store.test.js
+      - name: Build CLI for provider error TTY regression
+        if: runner.os != 'Windows'
+        run: npm run build
+      - name: Install tmux for provider error TTY regression
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux for provider error TTY regression
+        if: runner.os == 'macOS'
+        run: brew list tmux >/dev/null 2>&1 || brew install tmux
+      - name: Verify quota and rate messages in a real CLI terminal
+        if: runner.os != 'Windows'
+        run: |
+          python3 tests/e2e/provider-errors.py --cli-entry dist/index.js
+          python3 tests/e2e/kimi-error-recovery.py --cli-entry dist/index.js

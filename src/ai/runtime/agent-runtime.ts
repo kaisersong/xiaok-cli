@@ -1,4 +1,6 @@
 import {retainCommandResult} from '../tools/command-result.js';
+import { getModelFailure } from './model-failure.js';
+import { normalizeRuntimeError } from './runtime-errors.js';
 import {ModelStreamPhysicalOwner,type ModelStreamPhysicalRun} from './model-stream-physical-owner.js';
 import {prepareCompoundRootIntentStageView} from '../../runtime/sol-pi/compound-provider-admission.js';
 import { assertDelegatedObservationOwner } from '../../runtime/sol-pi/delegated-session-owner.js';
@@ -665,7 +667,10 @@ export class AgentRuntime {
         this.session.appendUserToolResults(toolResults);
       }
       this.session.repairIncompleteToolCalls();
-      onEvent({ type: 'run_failed', runId: run.runId, error: normalized });
+      // Keep the thrown Error identity for owners; public events must not retain its raw payload/cause.
+      const shape = getModelFailure(normalized) ? normalizeRuntimeError(normalized) : undefined;
+      const publicError = shape ? Object.assign(new Error(shape.message), { code: shape.code, retryable: shape.retryable }) : normalized;
+      onEvent({ type: 'run_failed', runId: run.runId, error: publicError });
       throw normalized;
     } finally {
       try { await this.observationOwner?.publishCurrentHistory?.({ strictPrivateProtocol: strictK3Run }); }

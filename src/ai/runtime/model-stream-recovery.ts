@@ -1,33 +1,14 @@
+import { associateModelFailure, formatModelFailure, formatModelRecoveryExhaustion, markModelReadFailure, type ModelFailureDiagnostic } from './model-failure.js';
 import type {ModelStreamPhysicalRun} from './model-stream-physical-owner.js';
 import type { StreamChunk } from '../../types.js';
 import { ModelTextRepetitionGuard } from './model-text-repetition.js';
 
 export interface ModelRecoveryPolicy { windowMs: number; idleMs: number; initialDelayMs: number; maxDelayMs: number }
-export interface ModelRecoveryNotice { attempt: number; delayMs: number; remainingMs: number }
+export interface ModelRecoveryNotice { attempt: number; delayMs: number; remainingMs: number; failure?: ModelFailureDiagnostic }
 export function resolveModelRecoveryPolicy(env: NodeJS.ProcessEnv = process.env): ModelRecoveryPolicy {
   const number = (raw: string | undefined, fallback: number) => raw?.trim() && Number.isFinite(Number(raw)) && Number(raw) >= 0 ? Number(raw) : fallback;
   return { windowMs: number(env.XIAOK_MODEL_RECOVERY_WINDOW_MS, 30 * 60_000),
     idleMs: number(env.XIAOK_TURN_TIMEOUT_MS, 4 * 60_000), initialDelayMs: 2000, maxDelayMs: 30_000 };
-}
-function recoverable(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const seen = new Set<object>();
-  let current: unknown = error;
-  let transient = false;
-  while (current && typeof current === 'object' && !seen.has(current)) {
-    seen.add(current);
-    const e = current as { status?: number; code?: string; name?: string; message?: string; cause?: unknown; retryable?: boolean };
-    // A permanent cause always wins over a wrapper's generic network wording.
-    if (e.status && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) return false;
-    if (e.name === 'AbortError') return false;
-    if (e.retryable === false) return false;
-    transient ||= e.retryable === true || e.status === 408 || e.status === 429 || (e.status !== undefined && e.status >= 500)
-      || e.name === 'TimeoutError'
-      || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|UND_ERR/i.test(e.code ?? '')
-      || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|terminated|socket hang up|fetch failed|network|premature close|connection reset|timed?\s*out/i.test(e.message ?? '');
-    current = e.cause;
-  }
-  return transient;
 }
 function wait<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs: number, onTimeout: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -54,9 +35,15 @@ export async function* recoverModelStream(input: {
 }): AsyncIterable<StreamChunk> {
   const policy = input.policy ?? resolveModelRecoveryPolicy();
   let recoveryStarted: number | undefined, attempt = 0;
-  const exhausted = () => Object.assign(new Error('模型连接持续不可用，自动恢复窗口已耗尽；已完成的工作保留，可稍后继续。'), {
-    code: 'MODEL_RECOVERY_EXHAUSTED', retryable: false,
-  });
+  let lastFailure: ModelFailureDiagnostic | undefined;
+  const exhausted = () => {
+    const error = Object.assign(new Error(formatModelRecoveryExhaustion(lastFailure)), {
+      code: 'MODEL_RECOVERY_EXHAUSTED', retryable: false,
+    });
+    // Safe DTO only. Never attach the provider Error or raw cause.
+    if (lastFailure) associateModelFailure(error, { ...lastFailure, retryable: false });
+    return error;
+  };
   while (true) {
     input.signal.throwIfAborted();
     const remaining = recoveryStarted === undefined ? Infinity : policy.windowMs - (Date.now() - recoveryStarted);
@@ -84,13 +71,18 @@ export async function* recoverModelStream(input: {
       }
     } catch (error) {
       if (input.signal.aborted) throw error;
-      if (!recoverable(error) || policy.windowMs === 0 || input.shouldRetry?.(error) === false) throw error;
+      lastFailure = markModelReadFailure(error);
+      const failureError = error instanceof Error ? error : new Error(formatModelFailure(lastFailure));
+      associateModelFailure(failureError, lastFailure);
+      if (!lastFailure.retryable || policy.windowMs === 0 || input.shouldRetry?.(failureError) === false) throw failureError;
       recoveryStarted ??= Date.now();
       const remainingMs = policy.windowMs - (Date.now() - recoveryStarted);
       if (remainingMs <= 0) throw exhausted();
-      const delayMs = Math.min(policy.initialDelayMs * 2 ** Math.min(attempt++, 10), policy.maxDelayMs, remainingMs);
+      const providerDelay = lastFailure.retryAfterMs ?? 0;
+      if (lastFailure.retryAfterTooLong || providerDelay >= remainingMs) throw exhausted();
+      const delayMs = Math.min(Math.max(providerDelay, Math.min(policy.initialDelayMs * 2 ** Math.min(attempt++, 10), policy.maxDelayMs)), remainingMs);
       owned.abort();
-      await input.onRetry?.({ attempt, delayMs, remainingMs });
+      await input.onRetry?.({ attempt, delayMs, remainingMs, failure: lastFailure });
       let timer: ReturnType<typeof setTimeout> | undefined;
       try { await wait(new Promise<void>(resolve => { timer = setTimeout(resolve, delayMs); }), input.signal, Infinity, () => {}); }
       finally { clearTimeout(timer); }
