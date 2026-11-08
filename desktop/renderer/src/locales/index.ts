@@ -1948,6 +1948,20 @@ export interface LocaleStrings {
     connectorRefreshData: string;
     connectorStatusDecryptFailed: string;
     connectorLoadFailed: string;
+    enterpriseCli: {
+      organization: string;
+      onDemand: string;
+      failedRead: string;
+      install: string;
+      setup: string;
+      cancel: string;
+      identityType: string;
+      botIdentity: string;
+      userIdentity: string;
+      version: (version: string) => string;
+      providers: Record<'dingtalk' | 'feishu' | 'wecom', { title: string; description: string }>;
+      phases: Record<'notInstalled' | 'installing' | 'ready' | 'checking' | 'needsSetup' | 'opening' | 'waiting' | 'connected' | 'signedOut' | 'failed' | 'timedOut' | 'cancelling' | 'stopPending' | 'cancelled' | 'unsupported', string>;
+    };
     appConnectorsDesc: string;
     yzjCliAuth: {
       account: string;

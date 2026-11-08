@@ -1,3 +1,4 @@
+import type { EnterpriseCliState, EnterpriseCliAction, EnterpriseCliProvider } from '../shared/enterprise-cli-ipc-contract.js';
 import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
@@ -321,6 +322,8 @@ export const PRELOAD_API_KEYS = [
   'getEmbeddingModels',
   'downloadEmbeddingModel',
   'setEmbeddingModel',
+  'getEnterpriseCliConnectors',
+  'controlEnterpriseCliConnector',
   'getYzjCliAuthState',
   'controlYzjCliAuth',
   'getConnectorsConfig',
@@ -685,6 +688,8 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getEmbeddingModels: 'desktop:getEmbeddingModels',
   downloadEmbeddingModel: 'desktop:downloadEmbeddingModel',
   setEmbeddingModel: 'desktop:setEmbeddingModel',
+  getEnterpriseCliConnectors: 'desktop:getEnterpriseCliConnectors',
+  controlEnterpriseCliConnector: 'desktop:controlEnterpriseCliConnector',
   getYzjCliAuthState: 'desktop:getYzjCliAuthState',
   controlYzjCliAuth: 'desktop:controlYzjCliAuth',
   getConnectorsConfig: 'desktop:getConnectorsConfig',
@@ -1407,6 +1412,8 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getEmbeddingModels(): Promise<EmbeddingModelIpcEntry[]>;
   downloadEmbeddingModel(modelId: string): Promise<void>;
   setEmbeddingModel(modelId: string): Promise<void>;
+  getEnterpriseCliConnectors(): Promise<EnterpriseCliState[]>;
+  controlEnterpriseCliConnector(provider: EnterpriseCliProvider, action: EnterpriseCliAction): Promise<EnterpriseCliState>;
   getYzjCliAuthState(): Promise<YzjCliAuthState>;
   controlYzjCliAuth(action: YzjCliAuthAction): Promise<YzjCliAuthState>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
@@ -1973,6 +1980,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,
     downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
+    getEnterpriseCliConnectors: () => ipcRenderer.invoke('desktop:getEnterpriseCliConnectors') as Promise<EnterpriseCliState[]>,
+    controlEnterpriseCliConnector: (provider, action) => ipcRenderer.invoke('desktop:controlEnterpriseCliConnector', provider, action) as Promise<EnterpriseCliState>,
     getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState') as Promise<YzjCliAuthState>,
     controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action) as Promise<YzjCliAuthState>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,

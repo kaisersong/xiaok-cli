@@ -2029,6 +2029,49 @@ export const en: LocaleStrings = {
     connectorRefreshData: "Refresh connector configuration",
     connectorStatusDecryptFailed: "Key decryption failed",
     connectorLoadFailed: "Unable to load connector config.",
+    enterpriseCli: {
+      organization: "Organization",
+      onDemand: "The following official CLIs download only when you click Install. They are not bundled with xiaok.",
+      failedRead: "Unable to read connector status. Reopen this page or retry.",
+      install: "Download and install",
+      setup: "Set up app in browser",
+      cancel: "Cancel",
+      identityType: "Identity type",
+      botIdentity: "Bot",
+      userIdentity: "Personal account",
+      version: (version: string) => `CLI ${version}`,
+      providers: {
+        "dingtalk": {
+                "title": "DingTalk",
+                "description": "Connect your DingTalk account for messages, calendars, and contacts. Your organization may need to enable CLI access."
+        },
+        "feishu": {
+                "title": "Feishu",
+                "description": "Set up an app in the browser on first use, then scan to authorize messages, calendars, and contacts."
+        },
+        "wecom": {
+                "title": "WeCom",
+                "description": "The official CLI connects as a WeCom bot. Scan in your browser to configure access for messages, documents, calendars, and more."
+        }
+},
+      phases: {
+        "notInstalled": "Not installed",
+        "installing": "Downloading and installing…",
+        "ready": "CLI installed",
+        "checking": "Checking connection…",
+        "needsSetup": "Set up a Feishu app first",
+        "opening": "Getting authorization link…",
+        "waiting": "Waiting for QR authorization in your browser…",
+        "connected": "Connected",
+        "signedOut": "Not connected",
+        "failed": "Operation failed. Check your network and retry",
+        "timedOut": "Timed out. Try again",
+        "cancelling": "Stopping…",
+        "stopPending": "Stop is unconfirmed. Try cancelling again",
+        "cancelled": "Cancelled",
+        "unsupported": "This platform or architecture is not supported"
+},
+    },
     appConnectorsDesc: "Connect your work accounts to use messages, calendars, contacts, and other work data in xiaok.",
     yzjCliAuth: {
       account: "Account",

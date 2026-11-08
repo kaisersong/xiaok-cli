@@ -2013,6 +2013,49 @@ export const zh: LocaleStrings = {
     connectorRefreshData: "刷新连接器配置",
     connectorStatusDecryptFailed: "密钥无法解密",
     connectorLoadFailed: "无法加载连接器配置。",
+    enterpriseCli: {
+      organization: "组织",
+      onDemand: "以下官方 CLI 仅在点击后下载安装，不随 xiaok 默认打包。",
+      failedRead: "暂时无法读取连接器状态，请重新打开此页面或重试。",
+      install: "下载安装",
+      setup: "浏览器配置应用",
+      cancel: "取消",
+      identityType: "身份类型",
+      botIdentity: "机器人",
+      userIdentity: "个人账号",
+      version: (version: string) => `CLI ${version}`,
+      providers: {
+        "dingtalk": {
+                "title": "钉钉",
+                "description": "连接钉钉账号，使用消息、日程和通讯录等能力。组织可能需要先由管理员开通 CLI 访问。"
+        },
+        "feishu": {
+                "title": "飞书",
+                "description": "首次使用需在浏览器配置应用，再扫码授权消息、日程和通讯录。"
+        },
+        "wecom": {
+                "title": "企业微信",
+                "description": "官方 CLI 通过企业微信机器人身份接入。在浏览器扫码配置后，可使用消息、文档、日程等能力。"
+        }
+},
+      phases: {
+        "notInstalled": "未安装",
+        "installing": "正在下载安装…",
+        "ready": "CLI 已安装",
+        "checking": "正在检查连接…",
+        "needsSetup": "请先配置飞书应用",
+        "opening": "正在获取授权链接…",
+        "waiting": "等待浏览器扫码授权…",
+        "connected": "已连接",
+        "signedOut": "尚未连接",
+        "failed": "操作失败，请检查网络后重试",
+        "timedOut": "等待超时，请重试",
+        "cancelling": "正在停止…",
+        "stopPending": "尚未确认停止，请重试取消",
+        "cancelled": "已取消",
+        "unsupported": "当前系统或架构暂不支持"
+},
+    },
     appConnectorsDesc: "连接工作平台账号，在 xiaok 中使用消息、日程、通讯录等工作数据。",
     yzjCliAuth: {
       account: "当前账号",

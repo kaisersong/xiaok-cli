@@ -321,6 +321,7 @@ Project.`);
     expect(skills.some((skill) => skill.name === 'plan')).toBe(true);
     expect(skills.some((skill) => skill.name === 'skill-creator')).toBe(true);
     expect(skills.find(skill => skill.name === 'yzj-cli')).toMatchObject({ source: 'builtin' });
+    for (const name of ['dingtalk-cli','feishu-cli','wecom-cli']) expect(skills.find(skill => skill.name === name)).toMatchObject({ source: 'builtin' });
   });
 
   it('reloads newly installed skills through a persistent catalog', async () => {
