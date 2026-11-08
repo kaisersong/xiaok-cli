@@ -1,9 +1,10 @@
 // @vitest-environment node
 // Instrumented SDK sequencing only; this does not qualify Native/Main/OS.
 import {beforeEach, expect, it, vi} from 'vitest';
-const f=vi.hoisted(()=>({events:[] as string[],realm:{} as object,groups:{} as object,lease:{} as object,session:{} as object,source:{} as object,fixture:false,openFault:false}));
+const f=vi.hoisted(()=>({events:[] as string[],realm:{} as object,groups:{} as object,lease:{} as object,session:{} as object,source:{} as object,fixture:false,startedCore:false,coreFault:false,openFault:false}));
 vi.mock('../../electron/root-resource-production-qualification.js',()=>({ORIGINAL_PRODUCTION_ROOT_RESOURCE_QUALIFIED:false,readOriginalProductionRootResourceQualification:()=>({qualified:true})}));
 vi.mock('../../electron/main-dsh-bootstrap-authority.js',()=>({
+ readOriginalMainDshStartedCore(realm:object,store:object){expect(realm).toBe(f.realm);expect(store).toBe(f.groups);if(f.coreFault)throw undefined;return f.startedCore?f.lease:null;},
  prepareOriginalMainDshInstalledRootPool(realm:object,store:object){expect(realm).toBe(f.realm);expect(store).toBe(f.groups);f.events.push('prepare-lease');return f.lease;},
  openOriginalMainDshInstalledRootPool(lease:object){expect(lease).toBe(f.lease);f.events.push('installed-open');if(f.openFault)throw undefined;return f.session;},
  closeOriginalMainDshInstalledRootPool(lease:object){expect(lease).toBe(f.lease);f.events.push('close-lease');},
@@ -26,7 +27,7 @@ vi.mock('../../electron/main-dsh-budget-authority-source.js',async importOrigina
 vi.mock('../../electron/harness-optimization-service.js',async importOriginal=>({...await importOriginal<object>(),readOriginalDshBudgetRuntimeBinding:()=>({assertLocal(){}})}));
 vi.mock('../../electron/main-dsh-physical-composition.js',()=>({cacheOriginalMainDshPhysicalComposition(){}}));
 let api:typeof import('../../electron/main-room-root-admission.js');
-beforeEach(async()=>{vi.resetModules();f.events.length=0;f.realm={};f.groups={};f.lease={};f.session={};f.source={};f.fixture=false;f.openFault=false;api=await import('../../electron/main-room-root-admission.js');});
+beforeEach(async()=>{vi.resetModules();f.events.length=0;f.realm={};f.groups={};f.lease={};f.session={};f.source={};f.fixture=false;f.startedCore=false;f.coreFault=false;f.openFault=false;api=await import('../../electron/main-room-root-admission.js');});
 async function bind(){const owner=api.createOriginalMainRootAdmissionOwner({roomSource:f.source,host:{},store:{}});await api.bindOriginalMainDshPhysicalPort(owner,f.realm,f.groups,{},{});return owner;}
 it('actual Owner selects installed lease before open and bootstrap before keys, with zero default-VFS open',async()=>{
  const owner=await bind();
@@ -45,4 +46,23 @@ it('actual Owner retains the passive lease when installed open throws undefined,
 it('actual Owner preserves the original fixture API and never creates an installed lease',async()=>{
  f.fixture=true;const owner=await bind();await owner.drain();
  expect(f.events).toContain('legacy-open');expect(f.events).toContain('legacy-close');expect(f.events).not.toContain('prepare-lease');
+});
+
+it('fixture Owner borrows an already-started genuine Core instead of opening a legacy Root pool',async()=>{
+ f.fixture=true;f.startedCore=true;const owner=await bind();
+ expect(f.events).toContain('installed-open');expect(f.events).toContain('read-bootstrap');
+ expect(f.events).not.toContain('legacy-open');expect(f.events).not.toContain('bootstrap');
+ await owner.drain();expect(f.events).not.toContain('legacy-close');
+});
+it('genuine Core failure is not a null/legacy fallback and preserves an undefined first error',async()=>{
+ f.fixture=true;f.startedCore=true;f.coreFault=true;
+ await expect(bind()).rejects.toBeUndefined();expect(f.events).not.toContain('legacy-open');
+});
+
+it('a Core appearing after a legacy boot cannot relabel or reuse the other Root pool',async()=>{
+ f.fixture=true;const owner=api.createOriginalMainRootAdmissionOwner({roomSource:f.source,host:{},store:{}});
+ await owner.room.claimNext();f.startedCore=true;
+ await expect(api.bindOriginalMainDshPhysicalPort(owner,f.realm,f.groups,{},{})).rejects.toThrow('ROOT_RESOURCE_CORE_BINDING_AFTER_BOOT');
+ expect(f.events.filter(x=>x==='legacy-open')).toHaveLength(1);expect(f.events).not.toContain('installed-open');
+ await owner.drain();
 });

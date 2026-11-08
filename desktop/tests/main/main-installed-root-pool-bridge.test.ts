@@ -152,3 +152,29 @@ it('a foreign Core candidate is rejected without reflecting its properties',asyn
  await expect(api.startOriginalMainDshCoreInfrastructure(fake)).rejects.toBeDefined();
  await expect(api.closeOriginalMainDshCoreInfrastructure(fake)).rejects.toBeDefined();expect(hits).toBe(0);
 });
+
+it('passive started-Core lookup preserves exact realm/store membership, pending and revoke',async()=>{
+ const lookup=(api as unknown as {readOriginalMainDshStartedCore:(realm:unknown,store:unknown)=>object|null}).readOriginalMainDshStartedCore;
+ expect(lookup).toBeTypeOf('function');
+ const {realm,core}=coreSetup();realm.bindStore(facts.store);
+ let traps=0;const hostile=new Proxy({},{get(){traps++;throw Error('trap');},getPrototypeOf(){traps++;throw Error('trap');}});
+ expect(()=>lookup(hostile,hostile)).toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');expect(traps).toBe(0);
+ expect(()=>lookup(realm,{})).toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');
+ expect(()=>lookup(realm,facts.store)).toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');
+ await api.startOriginalMainDshCoreInfrastructure(core);
+ expect(lookup(realm,facts.store)).toBe(core);
+ realm.seal();expect(()=>lookup(realm,facts.store)).toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');
+ await api.closeOriginalMainDshCoreInfrastructure(core);
+});
+it('passive Core absence is null only for a genuine legacy realm',()=>{
+ const lookup=(api as unknown as {readOriginalMainDshStartedCore:(realm:unknown,store:unknown)=>object|null}).readOriginalMainDshStartedCore;
+ expect(lookup).toBeTypeOf('function');const realm=api.createMainDshBootstrapAuthority();realm.bindStore(facts.store);
+ expect(lookup(realm,facts.store)).toBeNull();
+});
+
+it('started-Core lookup never downgrades a closing Core to legacy absence',async()=>{
+ const lookup=(api as unknown as {readOriginalMainDshStartedCore:(realm:unknown,store:unknown)=>object|null}).readOriginalMainDshStartedCore;
+ expect(lookup).toBeTypeOf('function');const {realm,core}=coreSetup();realm.bindStore(facts.store);
+ await api.startOriginalMainDshCoreInfrastructure(core);const closing=api.closeOriginalMainDshCoreInfrastructure(core);
+ expect(()=>lookup(realm,facts.store)).toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');await closing;
+});

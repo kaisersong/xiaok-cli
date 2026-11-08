@@ -1,6 +1,6 @@
 import {readOptionalOriginalWorkflowVmProcessContext,readOptionalOriginalWorkflowVmProcessSourceRequest} from './workflow-script-worker.js';
 import {loadOriginalMainResourceAuthority} from '../../src/runtime/verification/original-main-native-loader.js';
-import {prepareOriginalMainDshInstalledRootPool,openOriginalMainDshInstalledRootPool,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap} from './main-dsh-bootstrap-authority.js';
+import {prepareOriginalMainDshInstalledRootPool,openOriginalMainDshInstalledRootPool,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap,readOriginalMainDshStartedCore} from './main-dsh-bootstrap-authority.js';
 import {installOriginalMainSdkBridge} from '../../src/runtime/verification/original-main-sdk-bridge.js';
 import {types} from 'node:util';
 import {readOriginalGenericModelSdkPhysicalReceipt} from '../../src/ai/runtime/original-model-sdk-attempt.js';
@@ -247,6 +247,7 @@ function createOwner(options:{roomSource:object;host:object;store:object}):Origi
     let api:Api|undefined,issuer:object|undefined,key:object|undefined;
     let installedLease:object|undefined,installedTuple:{realm:object;store:object}|undefined;
     let issuerConsumer:Function|undefined;
+    let selectedCore:object|null=null;
     let compositionProfile:OriginalMainPhysicalCompositionView['profile']|undefined;
     const sourceKeys=create(null) as Record<string,object>;
     const methods=create(null) as Api;
@@ -261,7 +262,10 @@ function createOwner(options:{roomSource:object;host:object;store:object}):Origi
         if(realm!==undefined||store!==undefined){
             if(!realm||!store)throw denied();
             if(installedTuple){if(installedTuple.realm!==realm||installedTuple.store!==store)throw denied();}
-            else installedTuple={realm,store};
+            const candidate=readOriginalMainDshStartedCore(realm,store);
+            if(boot&&candidate!==selectedCore)throw Error('ROOT_RESOURCE_CORE_BINDING_AFTER_BOOT');
+            if(!boot)selectedCore=candidate;
+            if(!installedTuple)installedTuple={realm,store};
         }
         if(boot)return boot;
         boot=custody.root(async()=>{
@@ -278,10 +282,10 @@ function createOwner(options:{roomSource:object;host:object;store:object}):Origi
             else if(readOriginalProductionRootResourceQualification().qualified)compositionProfile='installed_production';
             else throw Error('ROOM_ROOT_P4_UNAVAILABLE');
             local();
-            if(compositionProfile==='installed_production'){
+            if(compositionProfile==='installed_production'||selectedCore!==null){
                 if(!installedTuple)throw Error('ROOM_ROOT_INSTALLED_ORIGINAL_AUTHORITY_REQUIRED');
                 installedLease=await custody.sdk<object>(prepareOriginalMainDshInstalledRootPool,undefined,[installedTuple.realm,installedTuple.store],{
-                    accept:value=>!!value&&typeof value==='object'&&!isProxy(value),consumer:returnOriginalMainDshInstalledRootPool,
+                    accept:value=>selectedCore!==null?value===selectedCore:!!value&&typeof value==='object'&&!isProxy(value),consumer:returnOriginalMainDshInstalledRootPool,
                 });
                 local();issuerConsumer=returnOriginalMainDshInstalledRootPool;
                 issuer=await custody.sdk<object>(openOriginalMainDshInstalledRootPool,undefined,[installedLease],{

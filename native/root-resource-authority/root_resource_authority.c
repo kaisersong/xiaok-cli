@@ -445,6 +445,7 @@ static napi_value close_session(napi_env env,napi_callback_info info){
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
 #include "model-sdk-bridge.h"
 #include "root-pool-bootstrap.h"
+#include "fixture-physical-snapshot.h"
 #if defined(MI_FIXTURE_BUILD) && defined(NR_ROOT_IO_COMPONENT)
 static napi_value component_bootstrap_installed_root_store(napi_env env,napi_callback_info info){
  napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
@@ -582,6 +583,9 @@ NAPI_MODULE_INIT(){
   {"takeOriginalMaterialTurnSourceKey",NULL,take_material_turn_source_key,NULL,NULL,NULL,napi_default,addon},
   {"takeOriginalCanvasTurnSourceKey",NULL,take_canvas_turn_source_key,NULL,NULL,NULL,napi_default,addon},
   {"importOriginalPhysicalContext",NULL,import_physical_context,NULL,NULL,NULL,napi_default,addon},
+#ifdef NR_HAS_FIXTURE_FACTS
+  {"fixtureReadPhysicalSnapshot",NULL,fixture_physical_snapshot,NULL,NULL,NULL,napi_default,addon},
+#endif
   {"enqueueOriginalModel",NULL,enqueue_original_model,NULL,NULL,NULL,napi_default,addon},
   {"claimOriginalModel",NULL,claim_original_model,NULL,NULL,NULL,napi_default,addon},
   {"settleOriginalModel",NULL,settle_original_model,NULL,NULL,NULL,napi_default,addon},

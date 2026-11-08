@@ -40,9 +40,9 @@ export interface MainDshBootstrapAuthority {
  seal():void;
 }
 export interface MainDshKernelClockCut {readonly kind:'main_kernel_clock_cut_v1';readonly domainId:string;readonly continuousLowerNs:string;readonly continuousUpperNs:string;readonly wallMs:number}
-interface State {readAdmission():OriginalAdmissionDatabaseBundle|null;prepareInstalled(core?:boolean):object;observeClock(fact:GithubProviderDateFact):void;clockView():MainDshClockView;clock():Readonly<MainDshKernelClockCut>|null;authority:MainDshBootstrapAuthority;store?:object;current():void;local():void;references(proof:object,purpose:string):DshOriginalReferences}
+interface State {startedCore():object|null;readAdmission():OriginalAdmissionDatabaseBundle|null;prepareInstalled(core?:boolean):object;observeClock(fact:GithubProviderDateFact):void;clockView():MainDshClockView;clock():Readonly<MainDshKernelClockCut>|null;authority:MainDshBootstrapAuthority;store?:object;current():void;local():void;references(proof:object,purpose:string):DshOriginalReferences}
 const realms=new NativeWeakMap<object,State>();let singleton:MainDshBootstrapAuthority|undefined,birthAttempted=false,birthFailure:unknown;
-interface InstalledPool {open():Promise<object>;close():Promise<void>;startCore():Promise<void>;returnOwner():Promise<void>;readBootstrap(session:unknown):Promise<'fresh'|'restored'>;prepareBudgetWorker(prepared:unknown):Promise<object>;readAdmission():OriginalAdmissionDatabaseBundle|null}
+interface InstalledPool {assertReadyForOwner():void;open():Promise<object>;close():Promise<void>;startCore():Promise<void>;returnOwner():Promise<void>;readBootstrap(session:unknown):Promise<'fresh'|'restored'>;prepareBudgetWorker(prepared:unknown):Promise<object>;readAdmission():OriginalAdmissionDatabaseBundle|null}
 const installedPools=new NativeWeakMap<object,InstalledPool>();
 const NativePromise=Promise,nativeThen=Promise.prototype.then;
 const originalProtectedLifecyclePrepare=HarnessOptimizationLifecycle.prototype.prepareProtectedStorage;
@@ -52,6 +52,13 @@ export function prepareOriginalMainDshInstalledRootPool(realm:unknown,store:unkn
  const row=apply(get,realms,[realm]) as State|undefined;
  if(arguments.length!==2||!row||!store||row.store!==store)denied();
  row.local();return row.prepareInstalled();
+}
+/** Passive exact Core identity. A prepared/pending/retiring Core is never
+ * legacy absence. This cannot prepare a lease, open Native IO or mint a role. */
+export function readOriginalMainDshStartedCore(realm:unknown,store:unknown):object|null {
+ const row=apply(get,realms,[realm]) as State|undefined;
+ if(arguments.length!==2||!row||!store||row.store!==store)denied();
+ row.local();const core=row.startedCore();row.local();return core;
 }
 export function openOriginalMainDshInstalledRootPool(lease:unknown):Promise<object> {
  const row=apply(get,installedPools,[lease]) as InstalledPool|undefined;
@@ -216,6 +223,7 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
     if(view.businessSealed)denied();return view.bootstrap;
    };
    const state:InstalledPool={
+    assertReadyForOwner(){progress();if(!installedCore||!coreReady||ownerReturning)denied();},
     readAdmission(){progress();if(!installedCore)return null;if(!coreReady||!admissionBundle)denied();return admissionBundle;},
     prepareBudgetWorker(prepared){
      if(!installedCore||!coreStarting||closing||ownerReturning)return rejected(new NativeError('DSH_MAIN_CORE_NOT_STARTED'));
@@ -368,7 +376,12 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
    const assertCurrent=()=>{current();const fresh=clock();if(!fresh||fresh.domainId!==captured.nativeDomain||BigInt(fresh.continuousLowerNs)<nowLower||BigInt(fresh.continuousUpperNs)-nowUpper>1000000000n){clockLost=true;denied();}assertLocal();};
    return freeze({projection:freeze({state:'verified' as const,domainId:'operational-server-time-v1:'+cut.domainId,qualificationEpoch:captured.epoch,nowMs}),assertCurrent,assertLocal});
   };
+  const startedCore=():object|null=>{
+   local();if(!installedCore)return null;if(!installedLease)denied();
+   const pool=apply(get,installedPools,[installedLease]) as InstalledPool|undefined;
+   if(!pool)denied();pool.assertReadyForOwner();return installedLease;
+  };
   const readAdmission=():OriginalAdmissionDatabaseBundle|null=>{local();if(!installedLease||!installedCore)return null;const pool=apply(get,installedPools,[installedLease]) as InstalledPool|undefined;if(!pool)denied();return pool.readAdmission();};
-  apply(set,realms,[authority,{authority,current,local,references,clock,observeClock,clockView,prepareInstalled,readAdmission}]);current();singleton=authority;return authority;
+  apply(set,realms,[authority,{authority,current,local,references,clock,observeClock,clockView,prepareInstalled,readAdmission,startedCore}]);current();singleton=authority;return authority;
  }catch(error){birthFailure=error;throw error;}
 }
