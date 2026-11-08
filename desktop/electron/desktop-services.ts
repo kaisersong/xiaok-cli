@@ -1,4 +1,4 @@
-import { isKimiCodingModel, isStrictKimiK3ProfileId } from '../../src/ai/providers/kimi-models.js';
+import { isKimiCodingRuntimeModel, isStrictKimiK3ProfileId } from '../../src/ai/providers/kimi-models.js';
 import { buildKSwarmReviewPrompt } from './kswarm-task-review-prompt.js';
 import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
 import type { MaterialAccessImportInput } from './material-access-ipc-contract.js';
@@ -5362,7 +5362,7 @@ function findApplicableCatalogModel(
 
   if (
     providerId === 'kimi'
-    && isKimiCodingModel(catalogModel.model)
+    && isKimiCodingRuntimeModel(catalogModel.model)
   ) {
     const provider = config.providers[providerId];
     if (
@@ -5391,7 +5391,7 @@ function resolveDesktopModelRuntimeMetadata(
   const transport = resolveProviderTransport(config, model.provider);
   const catalogModel = findApplicableCatalogModel(config, model.provider, modelId, model.model);
   const acceptsConfiguredRuntimeOptions = model.provider !== 'kimi' || (
-    isKimiCodingModel(model.model)
+    isKimiCodingRuntimeModel(model.model)
     && provider.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );
@@ -6738,7 +6738,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         reply += chunk.delta;
         await ctx.emitRuntimeEvent({ type: 'assistant_delta', sessionId: ctx.sessionId, turnId: ctx.turnId, intentId: ctx.intentId, stepId: ctx.stepId, delta: chunk.delta });
       } else if (chunk.type === 'tool_use') {
-        assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
+        assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input,
+          ...(chunk.googleThoughtSignature ? { googleThoughtSignature: { ...chunk.googleThoughtSignature } } : {}),
+        });
       } else if (chunk.type === 'thinking') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
         if (
