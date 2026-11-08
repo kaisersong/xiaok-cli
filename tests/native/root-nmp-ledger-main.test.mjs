@@ -15,7 +15,7 @@ test('actual protected Core reads complete same-pool N/M/P/gang/intent ledgers f
  {skip:process.platform!=='darwin',timeout:90000},async()=>{
  const dependencyRepo=process.env.XIAOK_ROOT_NMP_VALIDATION_DEPENDENCIES||repo;
  const {buildMainProtectedSqliteFixture}=await import(pathToFileURL(join(dependencyRepo,'tests/native/helpers/main-protected-sqlite-fixture.mjs')).href);
- const frozen=JSON.parse(readFileSync(process.env.XIAOK_ROOT_NMP_FROZEN_MANIFEST,'utf8'));
+ const frozen=process.env.XIAOK_ROOT_NMP_FROZEN_MANIFEST?JSON.parse(readFileSync(process.env.XIAOK_ROOT_NMP_FROZEN_MANIFEST,'utf8')):{files:['desktop/electron/main-dsh-bootstrap-authority.ts','src/runtime/verification/original-root-nmp-ledger.ts'].map(path=>({path,sha256:hash(join(repo,path))}))};
  const sources=Object.fromEntries(frozen.files.map(r=>[join(repo,r.path),r.sha256]));
  for(const directory of ['native/root-resource-authority','native/main-installation'])for(const name of readdirSync(join(repo,directory))){const file=join(repo,directory,name);if(/\.(?:c|cc|h|mjs|json)$/.test(name)&&lstatSync(file).isFile())sources[file]=hash(file);}
  for(const name of ['tests/native/fixtures/root-nmp-ledger-main.cjs','tests/native/fixtures/root-nmp-ledger-main-entry.ts','tests/native/fixtures/protected-nmp-sql-fragment.cjs','tests/native/helpers/main-installed-fixture.mjs','tests/native/helpers/electron-executable.mjs'])sources[join(repo,name)]=hash(join(repo,name));
@@ -31,7 +31,14 @@ test('actual protected Core reads complete same-pool N/M/P/gang/intent ledgers f
  const compiled=spawnSync(process.execPath,argv,{cwd:repo,encoding:'utf8'});writeFileSync(join(root,'ledger-native-build.json'),JSON.stringify({pid:compiled.pid,argv,status:compiled.status,signal:compiled.signal,stderr:compiled.stderr},null,2));assert.equal(compiled.status,0,compiled.stderr);
  const facade=buildMainProtectedSqliteFixture(dependencyRepo,prepared.builds[1].args[1],join(root,'protected_sqlite.node'),prepared.configuration,{electronExecutable:prepared.executable});
  Object.assign(sources,facade.sources);
- const policy=process.env.XIAOK_ROOT_NMP_POLICY_OBSERVER;assert.ok(policy);sources[policy]=hash(policy);
+ const policy=process.env.XIAOK_ROOT_NMP_POLICY_OBSERVER||join(root,'application-policy-observer');
+ if(!process.env.XIAOK_ROOT_NMP_POLICY_OBSERVER){
+  const source=join(repo,'tests/native/helpers/application-policy-observer.m');sources[source]=hash(source);
+  const args=['-fobjc-arc',source,'-framework','AppKit','-o',policy],built=spawnSync('/usr/bin/clang',args,{encoding:'utf8',timeout:15000});
+  writeFileSync(join(root,'policy-observer-build.json'),JSON.stringify({pid:built.pid,command:'/usr/bin/clang',args,status:built.status,signal:built.signal,stderr:built.stderr},null,2));
+  assert.equal(built.error,undefined);assert.equal(built.status,0,built.stderr);assert.equal(built.signal,null);
+ }
+ sources[policy]=hash(policy);
  const receiptFile=join(dirname(dirname(dirname(dirname(prepared.executable)))),'receipt.json'),receipt=JSON.parse(readFileSync(receiptFile,'utf8'));
  assert.equal(receipt.bundleIdentifier.startsWith('org.xiaok.native-test.cache.c'),true);
  const artifacts=Object.fromEntries([prepared.helper,prepared.standalone,prepared.embedded,prepared.entry,prepared.configuration,bundle,finite,receiptFile].map(file=>[file,hash(file)]));Object.assign(artifacts,facade.artifacts);

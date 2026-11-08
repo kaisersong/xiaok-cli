@@ -9,6 +9,16 @@ on:
       - 'tests/runtime/task-host/**'
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
       - 'tests/native/protected-core-model-sdk.test.mjs'
+      - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'tests/native/fixtures/root-nmp-ledger-*'
+      - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
+      - 'tests/native/helpers/application-policy-observer.m'
+      - 'tests/native/helpers/protected-nmp-sql-assets.mjs'
+      - 'tests/native/helpers/electron-executable.mjs'
+      - 'tests/native/fixtures/protected-nmp-sql-fragment.cjs'
+      - 'tests/native/helpers/main-protected-sqlite-fixture.mjs'
+      - 'src/runtime/verification/original-main-native-loader.ts'
+      - 'src/runtime/verification/original-root-nmp-ledger.ts'
       - 'tests/native/fixtures/protected-core-model-sdk.cjs'
       - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
       - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
@@ -30,6 +40,16 @@ on:
       - 'tests/runtime/task-host/**'
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
       - 'tests/native/protected-core-model-sdk.test.mjs'
+      - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'tests/native/fixtures/root-nmp-ledger-*'
+      - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
+      - 'tests/native/helpers/application-policy-observer.m'
+      - 'tests/native/helpers/protected-nmp-sql-assets.mjs'
+      - 'tests/native/helpers/electron-executable.mjs'
+      - 'tests/native/fixtures/protected-nmp-sql-fragment.cjs'
+      - 'tests/native/helpers/main-protected-sqlite-fixture.mjs'
+      - 'src/runtime/verification/original-main-native-loader.ts'
+      - 'src/runtime/verification/original-root-nmp-ledger.ts'
       - 'tests/native/fixtures/protected-core-model-sdk.cjs'
       - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
       - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
@@ -204,6 +224,13 @@ jobs:
       - name: Genuine Main protected Core model SDK fresh and restored (macOS)
         if: runner.os == 'macOS'
         run: node --test tests/native/protected-core-model-sdk.test.mjs
+
+      - name: Complete original RootNMP ledger and genuine Core cold restart (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/root-nmp-ledger-reader.test.mjs
+          tests/native/root-nmp-ledger-main.test.mjs
 
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
