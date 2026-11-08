@@ -61,3 +61,21 @@ it('does not expose a capture-owned byte buffer to a later global copy intercept
   expect(snapshot.readBytes()).toEqual(expected);
  }finally{Object.defineProperty(Buffer,'from',descriptor);await f.close();}
 },120000);
+
+// Replacing the parser invalidates the original runtime admission before private decoding.
+it('preserves the original runtime rejection before a later global parser can decode private payload data',async()=>{
+ const f=await verifiedOperationFixture(),descriptor=Object.getOwnPropertyDescriptor(JSON,'parse');
+ if(!descriptor||typeof descriptor.value!=='function'){await f.close();throw Error('snapshot_control_parser_descriptor');}
+ try{
+  const staged=f.operations.stageVerifiedPayload(f.owner),expected=f.composition.privateHost.payloads.read(staged.payloadId,f.owner),body=expected.toString('utf8');
+  let intercepted=0;
+  try{
+   Object.defineProperty(JSON,'parse',{...descriptor,value:(...args:unknown[])=>{
+    if(args[0]===body){intercepted++;throw Error('caller_payload_parser');}
+    return Reflect.apply(descriptor.value,JSON,args);
+   }});
+   expect(()=>f.composition.privateHost.payloads.capture(staged.payloadId,f.owner)).toThrow('verification_not_current');
+  }finally{Object.defineProperty(JSON,'parse',descriptor);}
+  expect(intercepted).toBe(0);
+ }finally{Object.defineProperty(JSON,'parse',descriptor);await f.close();}
+},120000);
