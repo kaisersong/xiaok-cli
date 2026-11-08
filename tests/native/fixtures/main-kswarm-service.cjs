@@ -25,7 +25,10 @@ module.exports=function runMainService(options){
   const attempt=async(label,fn)=>{try{await fn();facts.phases.push(label);}catch(raw){first??={raw};secondaries.push({label,raw});facts[label+'Failure']=describe(raw);}};
   try{
    assert.equal(facts.actualMain,true);api=await import(pathToFileURL(options.bundle).href);
-   const dataRoot=path.join(options.root,'desktop'),workspaceRoot=path.join(options.root,'workspace');fs.mkdirSync(workspaceRoot,{mode:0o700});
+   const dataRoot=path.join(options.root,'desktop'),workspaceRoot=path.join(options.root,'workspace');
+   try{fs.mkdirSync(workspaceRoot,{mode:0o700});}catch(raw){const d=raw&&typeof raw==='object'&&!require('node:util').types.isProxy(raw)?Object.getOwnPropertyDescriptor(raw,'code'):undefined;if(!d||!Object.hasOwn(d,'value')||d.value!=='EEXIST')throw raw;}
+   const workspaceStat=fs.lstatSync(workspaceRoot),canonicalWorkspaceRoot=fs.realpathSync(options.root);
+   if(workspaceStat.isSymbolicLink()||!workspaceStat.isDirectory()||workspaceStat.uid!==process.getuid()||(workspaceStat.mode&0o7777)!==0o700||canonicalWorkspaceRoot!==path.resolve(options.root)||fs.realpathSync(workspaceRoot)!==path.join(canonicalWorkspaceRoot,'workspace')||fs.readdirSync(workspaceRoot).length!==0)throw Error('MAIN_SERVICE_FIXTURE_PRIVATE_WORKSPACE_REQUIRED');
    const scope=api.resolveDesktopServiceScope({dataRoot,workspaceRoot});
    const windowOwner=new api.DesktopApplicationWindowOwner({current:()=>null,async bootstrap(){throw Error('fixture must not open a view');},async createView(){throw Error('fixture must not open a view');}});
    user=api.createMainDshControlSource({windowOwner,scope:{profileId:scope.profileId,workspaceId:scope.workspaceId},isTrustedUrl:()=>false});
