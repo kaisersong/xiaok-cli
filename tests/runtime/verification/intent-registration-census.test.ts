@@ -1,6 +1,11 @@
 import {createRegistrationCensusDatabase} from '../../../src/runtime/verification/registration-census-database.js';
 import {types} from 'node:util';
-import {afterEach,expect,it} from 'vitest';
+import {intentApplicationCandidate} from '../../support/intent-application-fixture.js';
+import {intentHostSubjectOwner} from '../../../src/runtime/verification/intent-host-subject.js';
+import {parseIntentContractEnrollment} from '../../../src/runtime/verification/intent-contract-enrollment.js';
+import {afterEach,expect,it,vi} from 'vitest';
+import * as intentSqlParsing from '../../../src/runtime/verification/intent-sql-parsing-context.js';
+import * as nativeConstruction from '../../../src/runtime/verification/native-sqlite-construction-intrinsics.js';
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -98,4 +103,47 @@ it('keeps the exported registration fence current across rollback and a new tran
  f.database.exec('ROLLBACK;BEGIN IMMEDIATE');
  try{expect(f.database.prepare('SELECT total_changes() AS n').get()).toEqual(before);expect(fence).toThrow('application_registration_changed');}
  finally{f.database.exec('ROLLBACK');}
+});
+
+// Characterize the real authority fence before extending the private collector.
+// Contract membership includes the parent and every sibling without graph edges.
+it.each(['parent','current-stage','sibling-stage'] as const)('intent census includes complete contract membership: %s',member=>{
+ const f=fixture(),candidate=intentApplicationCandidate(),binding=parseIntentContractEnrollment({subject:candidate.subject,contract:candidate.contract});
+ const root={...intentHostSubjectOwner(binding.subject),profileId:f.owner.profileId};
+ f.database.prepare('INSERT INTO owner_enrollment_intent_contracts VALUES(?,?,?,?)').run('root-logical',json(root),json(binding),'{}');
+ const stageId=member==='parent'?null:member==='current-stage'?binding.subject.stageId:binding.contract.stages.find(stage=>stage.stageId!==binding.subject.stageId)!.stageId;
+ const related={...intentHostSubjectOwner({...binding.subject,stageId}),profileId:f.owner.profileId};
+ f.database.exec('DROP TABLE main.verification_application_history;CREATE TABLE main.verification_application_history(owner_key TEXT,binding_json TEXT,future_text TEXT)');
+ f.database.prepare('INSERT INTO verification_application_history VALUES(?,?,?)').run(json(related),'{}','original');
+ const fence=f.authority.captureRegistrationReadFence(root);expect(fence()).toBeUndefined();
+ f.database.prepare('UPDATE verification_application_history SET future_text=? WHERE owner_key=?').run('changed',json(related));
+ expect(fence).toThrow('application_registration_changed');
+});
+it('intent census without a root receipt remains root-only and detects subsequent root data',()=>{
+ const f=fixture(),candidate=intentApplicationCandidate(),root={...intentHostSubjectOwner(candidate.subject),profileId:f.owner.profileId};
+ const sibling={...intentHostSubjectOwner({...candidate.subject,stageId:null}),profileId:f.owner.profileId};
+ f.database.exec('DROP TABLE main.verification_application_history;CREATE TABLE main.verification_application_history(owner_key TEXT,binding_json TEXT,future_text TEXT)');
+ const fence=f.authority.captureRegistrationReadFence(root);
+ f.database.prepare('INSERT INTO verification_application_history VALUES(?,?,?)').run(json(sibling),'{}','unrelated');
+ expect(fence()).toBeUndefined();
+ f.database.prepare('INSERT INTO verification_application_history VALUES(?,?,?)').run(json(root),'{}','root changed');
+ expect(fence).toThrow('application_registration_changed');
+});
+it('intent census preserves the original strict contract parser failure',()=>{
+ const f=fixture(),candidate=intentApplicationCandidate(),root={...intentHostSubjectOwner(candidate.subject),profileId:f.owner.profileId};
+ f.database.prepare('INSERT INTO owner_enrollment_intent_contracts VALUES(?,?,?,?)').run('root-logical',json(root),'{','{}');
+ expect(()=>f.authority.captureRegistrationReadFence(root)).toThrow(SyntaxError);
+});
+
+it('intent parser barrier checks full native construction again before the next SQL',()=>{
+ const f=fixture(),candidate=intentApplicationCandidate(),binding=parseIntentContractEnrollment({subject:candidate.subject,contract:candidate.contract}),root={...intentHostSubjectOwner(binding.subject),profileId:f.owner.profileId};
+ f.database.prepare('INSERT INTO owner_enrollment_intent_contracts VALUES(?,?,?,?)').run('root-logical',json(root),json(binding),'{}');
+ const originalRead=intentSqlParsing.readIntentSqlContract,originalGuard=nativeConstruction.assertNativeSqliteColumnConstruction,define=Object.defineProperty,prior=Object.getOwnPropertyDescriptor(Object.prototype,'column');
+ let parsed=false,guardsAfterParser=0,error:unknown;
+ const guard=vi.spyOn(nativeConstruction,'assertNativeSqliteColumnConstruction').mockImplementation(()=>{if(parsed)guardsAfterParser++;return originalGuard();});
+ const read=vi.spyOn(intentSqlParsing,'readIntentSqlContract').mockImplementation((db,raw)=>{const result=originalRead(db,raw);parsed=true;define(Object.prototype,'column',{value:'hostile-column',configurable:true});return result;});
+ try{try{f.authority.captureRegistrationReadFence(root);}catch(value){error=value;}}
+ finally{if(prior)define(Object.prototype,'column',prior);else delete (Object.prototype as {column?:unknown}).column;read.mockRestore();guard.mockRestore();}
+ expect(parsed).toBe(true);expect(guardsAfterParser).toBe(1);expect(error).toBeInstanceOf(Error);expect((error as Error).message).toBe('application_registration_changed');
+ expect(f.authority.captureRegistrationReadFence(root)()).toBeUndefined();
 });
