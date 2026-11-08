@@ -184,6 +184,7 @@ v8::MaybeLocal<v8::Object> BuildIssuer(MainState* state) {
 // Borrow callbacks independently check producer membership before dereference.
 #include "main-bootstrap-installation-private.h"
 #include "../kswarm-authority-source/kswarm-parent-port-private.h"
+#include "../broker-authority-source/broker-parent-port-private.h"
 [[maybe_unused]] void Create(const v8::FunctionCallbackInfo<v8::Value>& args) {
   auto* state = State(args);
   auto* isolate = args.GetIsolate();

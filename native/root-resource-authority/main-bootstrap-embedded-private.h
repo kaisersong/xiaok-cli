@@ -233,6 +233,9 @@ NODE_MODULE_INIT() {
            std::pair{"prepareOriginalKSwarmChild", &CreateOriginalKSwarmPort},
            std::pair{"assertOriginalKSwarmChildPort", &AssertOriginalKSwarmPort},
            std::pair{"assertOriginalKSwarmChildTerminal", &AssertOriginalKSwarmPortTerminal},
+           std::pair{"prepareOriginalBrokerChild", &CreateOriginalBrokerPort},
+           std::pair{"assertOriginalBrokerChildPort", &AssertOriginalBrokerPort},
+           std::pair{"assertOriginalBrokerChildTerminal", &AssertOriginalBrokerPortTerminal},
            std::pair{"assertOriginalMainIssuerCurrent", &Assert},
            std::pair{"readOriginalMainClockCut", &ReadClockCut},
            std::pair{"revokeOriginalMainIssuer", &Revoke}}) {
