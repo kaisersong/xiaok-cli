@@ -1,4 +1,4 @@
-import {types} from 'node:util';
+import {types,transferableAbortController} from 'node:util';
 import {createIntrinsicSet} from './intrinsic-async-collection.js';
 const keys=Reflect.ownKeys,descriptor=Object.getOwnPropertyDescriptor,own=Object.hasOwn,prototype=Object.getPrototypeOf;
 const isProxy=types.isProxy,isPromise=types.isPromise,isError=types.isNativeError,isArray=Array.isArray;
@@ -17,6 +17,19 @@ function captureIntrinsic(value:object):void {
 }
 captureIntrinsic(NativePromise);
 const originalStack=descriptor(new Error(),'stack'),stackGet=originalStack?.get,stackSet=originalStack?.set;
+// Take the genuine Node brand from its internal AbortController, rather than
+// a replaceable DOMException global (including a renderer/jsdom implementation).
+// No signal is transferred, so this creates no MessagePort or timer.
+const domNameGet=(()=>{
+ const controller=transferableAbortController();controller.abort();
+ return descriptor(prototype(controller.signal.reason),'name')?.get;
+})();
+function hasOriginalDomBrand(value:object):boolean {
+ if(typeof domNameGet!=='function')return false;
+ // The captured Node getter checks its private WeakMap, without reading any
+ // user slot. An invalid receiver is an expected brand miss, not an SDK result.
+ try{intrinsicApply(domNameGet,value,[]);return true;}catch{return false;}
+}
 /** Inventory original SDK failure/outcome data without formatting it. V8's
  * diagnostic stack getter may execute name/message getters: inspect only its
  * descriptor, never its formatted value.
@@ -46,7 +59,8 @@ export function retainSourceErrorTails(error:unknown,retain:(raw:unknown,kind:'p
     if(value===null||typeof value!=='object'&&typeof value!=='function'||seen.has(value))return;
     seen.add(value);if(isProxy(value)){hold(value);return;}
     if(++count>100000||depth>128){hold(value);return;}
-    const nativeError=isError(value),promise=isPromise(value),array=isArray(value),proto=prototype(value);
+    const promise=isPromise(value),array=isArray(value),proto=prototype(value);
+    const nativeError=isError(value)||(!promise&&!array&&typeof value==='object'&&proto!==objectPrototype&&proto!==null&&hasOriginalDomBrand(value));
     if(promise)hold(value,'promise');
     else if(typeof value==='function'||!nativeError&&(array?proto!==arrayPrototype&&proto!==null:proto!==objectPrototype&&proto!==null))hold(value);
     const names=keys(value);
