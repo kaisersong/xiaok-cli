@@ -37,6 +37,7 @@ async function run(){
   for await(const line of input){
    if(line.length>128)throw Error('ROOT_NMP_CUSTODY_PROTOCOL');
    if(line==='CLOSE'){await cleanup();await send({state:'closed'});return;}
+   if(line==='TRANSFER'){const transfer=method(holder,'prepareOriginalRootPoolAdoptionTransfer'),raw=await stock.sdk(transfer,holder,[]);if(raw!==undefined)throw Error('ROOT_NMP_CUSTODY_TRANSFER_RESULT');await send({state:'transferred'});continue;}
    if(line==='CHECK'){const raw=await stock.sdk(check!,holder,[]);if(raw!==undefined)throw Error('ROOT_NMP_CUSTODY_CHECK_RESULT');await send({state:'current'});continue;}
    const parts=/^PAGE (0|[1-9][0-9]*) ([1-9][0-9]*)$/.exec(line);if(!parts)throw Error('ROOT_NMP_CUSTODY_PROTOCOL');
    const offset=Number(parts[1]),length=Number(parts[2]);if(!bytes||!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||length>256*1024||offset>bytes.length||length>bytes.length-offset)throw Error('ROOT_NMP_CUSTODY_RANGE');
